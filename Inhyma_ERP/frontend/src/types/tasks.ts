@@ -325,6 +325,8 @@ export interface TaskSummary {
   attachment_count?: number;
   voice_note_count?: number;
   depends_on_task_ids?: string[];
+  recurring_schedule_id?: string | null;
+  recurrence_period?: string | null;
 }
 
 export interface TaskDetail {
@@ -364,6 +366,8 @@ export interface TaskDetail {
   reactions?: TaskReactionSummary[];
   child_tasks?: TaskSummary[];
   progress_percent?: number;
+  recurring_schedule_id?: string | null;
+  recurrence_period?: string | null;
 }
 
 export interface TaskEscalateCandidate {
@@ -433,4 +437,151 @@ export function isTaskOverdue(dueDate?: string | null, status?: TaskStatus): boo
   due.setHours(23, 59, 59, 999);
   return due < new Date();
 }
+
+export type RecurrenceFrequency = "MONTHLY" | "QUARTERLY" | "YEARLY";
+export type RecurringScheduleStatus = "ACTIVE" | "PAUSED" | "ARCHIVED";
+
+export interface RecurrenceConfigMonthly {
+  month_mode?: "EVERY_MONTH" | "SPECIFIC_MONTHS";
+  months?: number[];
+  day_of_month?: number;
+  day?: number;
+  day_type?: "SPECIFIC_DAY" | "LAST_DAY" | "LAST_WORKING_DAY";
+}
+
+export interface QuarterScheduleDetail {
+  month?: number;
+  day_type?: "SPECIFIC_DAY" | "LAST_DAY" | "LAST_WORKING_DAY";
+  day?: number;
+  day_of_month?: number;
+}
+
+export interface RecurrenceConfigQuarterly {
+  quarters?: Array<"Q1" | "Q2" | "Q3" | "Q4">;
+  quarter_dates?: Record<string, QuarterScheduleDetail>;
+  quarter_schedules?: Record<string, QuarterScheduleDetail>;
+}
+
+export interface RecurrenceConfigYearly {
+  year_type?: "CALENDAR" | "FINANCIAL";
+  financial_year_start_month?: number;
+  fy_start_month?: number;
+  due_month?: number;
+  month?: number;
+  due_day?: number;
+  day?: number;
+  day_type?: "SPECIFIC_DAY" | "LAST_DAY" | "LAST_WORKING_DAY";
+}
+
+export type RecurrenceConfig = RecurrenceConfigMonthly & RecurrenceConfigQuarterly & RecurrenceConfigYearly & Record<string, any>;
+
+export interface TaskRecurringSchedule {
+  id: string;
+  title: string;
+  description?: string | null;
+  department?: string | null;
+  assignee_id: string;
+  manager_id: string;
+  priority: TaskPriority;
+  issue_type: string;
+  frequency: RecurrenceFrequency;
+  recurrence_config: RecurrenceConfig;
+  reminder_lead_days: number;
+  escalation_timing_type: "BEFORE_DUE_DATE" | "ON_DUE_DATE" | "AFTER_DUE_DATE" | string;
+  escalation_offset_days: number;
+  escalation_repeat_interval_days: number;
+  hold_until?: string | null;
+  hold_reason?: string | null;
+  status: RecurringScheduleStatus;
+  effective_start_date: string;
+  effective_end_date?: string | null;
+  last_generated_period?: string | null;
+  last_generated_at?: string | null;
+  next_due_date?: string | null;
+  next_period?: string | null;
+  created_by?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TaskRecurringScheduleCreateInput {
+  title: string;
+  description?: string | null;
+  department?: string | null;
+  assignee_id: string;
+  manager_id: string;
+  priority?: TaskPriority;
+  issue_type?: string;
+  frequency: RecurrenceFrequency;
+  recurrence_config: RecurrenceConfig;
+  reminder_lead_days?: number;
+  escalation_timing_type?: string;
+  escalation_offset_days?: number;
+  escalation_repeat_interval_days?: number;
+  hold_until?: string | null;
+  hold_reason?: string | null;
+  effective_start_date: string;
+  effective_end_date?: string | null;
+}
+
+export interface TaskRecurringScheduleUpdateInput {
+  title?: string;
+  description?: string | null;
+  department?: string | null;
+  assignee_id?: string;
+  manager_id?: string;
+  priority?: TaskPriority;
+  issue_type?: string;
+  frequency?: RecurrenceFrequency;
+  recurrence_config?: RecurrenceConfig;
+  reminder_lead_days?: number;
+  escalation_timing_type?: string;
+  escalation_offset_days?: number;
+  escalation_repeat_interval_days?: number;
+  hold_until?: string | null;
+  hold_reason?: string | null;
+  status?: RecurringScheduleStatus;
+  effective_start_date?: string;
+  effective_end_date?: string | null;
+  update_pending_instances?: boolean;
+}
+
+export interface RecurrencePreviewRequest {
+  frequency: RecurrenceFrequency;
+  recurrence_config: RecurrenceConfig;
+  start_date?: string;
+  as_of_date?: string;
+  effective_end_date?: string;
+  count?: number;
+  reminder_lead_days?: number;
+  escalation_timing_type?: string;
+  escalation_offset_days?: number;
+  escalation_repeat_interval_days?: number;
+  hold_until?: string | null;
+}
+
+export interface RecurrencePreviewResponse {
+  frequency?: string;
+  next_period?: string;
+  next_due_date?: string;
+  formatted_due_date?: string;
+  reminder_date?: string;
+  formatted_reminder_date?: string;
+  escalation_date?: string;
+  formatted_escalation_date?: string;
+  repeat_escalation_interval?: string;
+  hold_active?: boolean;
+  explanation?: string;
+  occurrences?: Array<{
+    period: string;
+    due_date: string;
+    formatted_due_date: string;
+  }>;
+  next_occurrence?: {
+    period: string;
+    due_date: string;
+    formatted_due_date: string;
+  } | null;
+}
+
 

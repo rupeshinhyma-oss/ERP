@@ -25,7 +25,7 @@ from app.database.session import get_db_session
 from app.rbac.repository import RoleRepository
 from app.users.repository import UserRepository
 
-_bearer_scheme = HTTPBearer(auto_error=True, description="Access token issued by POST /auth/login")
+_bearer_scheme = HTTPBearer(auto_error=False, description="Access token issued by POST /auth/login")
 
 
 def get_auth_service(
@@ -43,7 +43,7 @@ def get_auth_service(
     )
 
 
-from app.core.exceptions import ForbiddenException
+from app.core.exceptions import ForbiddenException, UnauthorizedException
 
 _ALLOWED_PATHS_WHEN_MUST_CHANGE_PASSWORD = {
     "/api/v1/auth/change-password",
@@ -55,7 +55,7 @@ _ALLOWED_PATHS_WHEN_MUST_CHANGE_PASSWORD = {
 
 async def get_current_user(
     request: Request,
-    credentials: HTTPAuthorizationCredentials = Depends(_bearer_scheme),
+    credentials: HTTPAuthorizationCredentials | None = Depends(_bearer_scheme),
     auth_service: AuthService = Depends(get_auth_service),
 ) -> CurrentUser:
     """
@@ -64,6 +64,8 @@ async def get_current_user(
     This is the single dependency every protected route should depend on
     (directly, or transitively via ``require_permission()``).
     """
+    if not credentials or not credentials.credentials:
+        raise UnauthorizedException("Authentication is required.")
     user = await auth_service.verify_access_token(credentials.credentials)
     return user
 

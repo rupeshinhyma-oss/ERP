@@ -463,6 +463,21 @@ Manage complete vendor team directory:
 - [ ] In Add Product modal, type an existing Product Code. Verify bold red warning appears directly beneath: `⚠️ Product Code "[Code]" already exists (used by "[Name]")!` and clicking Save blocks submission.
 - [ ] Edit an existing product without changing its name or code. Verify no duplicate warning appears and product saves successfully.
 - [ ] Import an Excel/CSV file containing duplicate product names or codes; verify batch rejection with clear duplicate collision error.
+- [ ] **Cross-ERP Sync (`Organization = Inhyma`):**
+  - Create a new product in Yinglima with `Organization` containing `Inhyma`.
+  - Verify that the product is immediately created in Inhyma ERP's Product Master with status `ACTIVE`.
+  - Confirm missing Category, SubCategory, Brand, or UOM are auto-provisioned in Inhyma without breaking foreign keys.
+- [ ] **Cross-ERP Update Sync:**
+  - Update product attributes in Yinglima (e.g. `product_name`, `length_cm`, `weight`).
+  - Verify that changes are reflected in Inhyma Product Master.
+- [ ] **One-Way Deactivation Cascade:**
+  - Deactivate the product in Yinglima (`POST /masters/products/{id}/deactivate`).
+  - Verify that the product status in Inhyma automatically changes to `inactive` (`is_active=False`).
+  - Reactivate the product in Yinglima. Verify Inhyma product updates to `active`.
+- [ ] **Strict One-Way Non-Reversal Validation:**
+  - Deactivate the product directly in Inhyma ERP.
+  - Verify that the Yinglima product remains unaffected and stays `active`.
+  - Create or edit a product directly in Inhyma ERP. Verify no event or record is pushed to Yinglima.
 
 ---
 

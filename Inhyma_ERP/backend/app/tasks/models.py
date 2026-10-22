@@ -96,6 +96,22 @@ class TaskAssignmentRole(str, Enum):
     REVIEWER = "REVIEWER"
 
 
+class RecurrenceFrequency(str, Enum):
+    """Frequency intervals for recurring task schedules."""
+
+    MONTHLY = "MONTHLY"
+    QUARTERLY = "QUARTERLY"
+    YEARLY = "YEARLY"
+
+
+class RecurringScheduleStatus(str, Enum):
+    """Lifecycle status of a recurring task schedule."""
+
+    ACTIVE = "ACTIVE"
+    PAUSED = "PAUSED"
+    ARCHIVED = "ARCHIVED"
+
+
 class Task(Base, UUIDPrimaryKeyMixin, TimestampMixin, VersionMixin, SoftDeleteMixin):
     """Main Task entity."""
 
@@ -129,6 +145,10 @@ class Task(Base, UUIDPrimaryKeyMixin, TimestampMixin, VersionMixin, SoftDeleteMi
     sprint_id: Mapped[uuid.UUID | None] = mapped_column(
         GUID(), ForeignKey("task_sprints.id", ondelete="SET NULL"), nullable=True, index=True
     )
+    recurring_schedule_id: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(), ForeignKey("task_recurring_schedules.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    recurrence_period: Mapped[str | None] = mapped_column(String(50), nullable=True, index=True)
     approval_status: Mapped[str] = mapped_column(String(20), default="NONE", nullable=False, index=True)
     approver_id: Mapped[uuid.UUID | None] = mapped_column(
         GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
@@ -147,6 +167,7 @@ class Task(Base, UUIDPrimaryKeyMixin, TimestampMixin, VersionMixin, SoftDeleteMi
     parent_task: Mapped["Task | None"] = relationship("Task", remote_side="Task.id", foreign_keys=[parent_task_id], back_populates="child_tasks", lazy="selectin")
     child_tasks: Mapped[list["Task"]] = relationship("Task", foreign_keys=[parent_task_id], back_populates="parent_task", lazy="selectin", overlaps="parent_task")
     sprint: Mapped["TaskSprint | None"] = relationship("TaskSprint", foreign_keys=[sprint_id], back_populates="tasks", lazy="selectin")
+    recurring_schedule: Mapped["TaskRecurringSchedule | None"] = relationship("TaskRecurringSchedule", foreign_keys=[recurring_schedule_id], back_populates="tasks", lazy="selectin")
     approver: Mapped["User | None"] = relationship("User", foreign_keys=[approver_id], lazy="selectin")
 
     assignees: Mapped[list["TaskAssignee"]] = relationship(
@@ -811,4 +832,61 @@ class TaskMention(Base, UUIDPrimaryKeyMixin):
 
     def __repr__(self) -> str:
         return f"<TaskMention task_id={self.task_id} mentioned={self.mentioned_user_id}>"
+
+
+class TaskRecurringSchedule(Base, UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin):
+    """Configuration entity for recurring task schedules."""
+
+    __tablename__ = "task_recurring_schedules"
+
+    title: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    department: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
+
+    assignee_id: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    manager_id: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    deleted_by: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+
+    priority: Mapped[TaskPriority] = mapped_column(
+        SAEnum(TaskPriority, name="task_priority", native_enum=False, length=20),
+        default=TaskPriority.MEDIUM,
+        nullable=False,
+    )
+    issue_type: Mapped[str] = mapped_column(String(20), default="TASK", nullable=False)
+
+    frequency: Mapped[str] = mapped_column(String(20), default="MONTHLY", nullable=False, index=True)
+    recurrence_config: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+
+    reminder_lead_days: Mapped[int] = mapped_column(Integer, default=3, nullable=False)
+    escalation_timing_type: Mapped[str] = mapped_column(String(30), default="ON_DUE_DATE", nullable=False)
+    escalation_offset_days: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    escalation_repeat_interval_days: Mapped[int] = mapped_column(Integer, default=7, nullable=False)
+
+    hold_until_rule: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    status: Mapped[str] = mapped_column(String(20), default="ACTIVE", nullable=False, index=True)
+
+    effective_start_date: Mapped[date] = mapped_column(Date, nullable=False, default=date.today)
+    effective_end_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+
+    next_run_date: Mapped[date | None] = mapped_column(Date, nullable=True, index=True)
+    last_generated_period: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    last_generated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    assignee: Mapped["User | None"] = relationship("User", foreign_keys=[assignee_id], lazy="selectin")
+    manager: Mapped["User | None"] = relationship("User", foreign_keys=[manager_id], lazy="selectin")
+    creator: Mapped["User | None"] = relationship("User", foreign_keys=[created_by], lazy="selectin")
+    tasks: Mapped[list["Task"]] = relationship("Task", back_populates="recurring_schedule", lazy="selectin")
+
+    def __repr__(self) -> str:
+        return f"<TaskRecurringSchedule id={self.id} title={self.title!r} freq={self.frequency} status={self.status}>"
+
 

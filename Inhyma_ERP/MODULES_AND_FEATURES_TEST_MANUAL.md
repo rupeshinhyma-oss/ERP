@@ -62,6 +62,8 @@
 51. [SUPPLIERS: Mandatory Calling Number Validation & Contact Phone Rules](#51-suppliers-mandatory-calling-number-validation--contact-phone-rules)
 52. [HRMS: HRMS All-Employee Attendance Calendar & Payroll Excel Export QA Verification](#52-hrms-hrms-all-employee-attendance-calendar--payroll-excel-export-qa-verification)
 53. [GLOBAL UI STANDARD: Universal Filter Toggle Button & Collapsible Panel Specification](#53-global-ui-standard-universal-filter-toggle-button--collapsible-panel-specification)
+54. [GLOBAL UI STANDARD: Universal Page Header, 35px Action Button Standard, and Filter-Above-KPI Hierarchy Across All Modules](#54-global-ui-standard-universal-page-header-35px-action-button-standard-and-filter-above-kpi-hierarchy-across-all-modules)
+55. [PAYMENTS: Customer & Supplier Payments Engine, Cash Flow, and Technician Payment Handover](#55-payments-customer--supplier-payments-engine-cash-flow-and-technician-payment-handover)
 
 ---
 
@@ -952,6 +954,7 @@ Manage complete vendor team directory:
 
 - **Route:** `/audit`
 - **Purpose:** Immutable compliance trail capturing all entity mutations across the ERP.
+- **Header Presentation:** Minimalist, uncluttered corporate header (`.page-header`) with redundant subtitle description removed. Action controls wrapped in `.page-header-actions` conforming strictly to the global 35px height, 6px radius standard.
 - **Table Columns:** Timestamp (UTC & Local), Actor (User Name & ID), Action Type (`CREATE`, `UPDATE`, `DELETE`, `LOGIN`, `PASSWORD_RESET`, `BULK_ACTION`), Target Entity (`Supplier`, `Product`, `Inquiry`, `User`), Entity ID, IP Address, HTTP Status Code.
 - **JSON Delta Viewer Modal:** Click row opens side-by-side before-and-after JSON diff highlighting altered fields.
 - **Filters:** Action type dropdown, Entity type, User picker, Date range.
@@ -962,6 +965,7 @@ Manage complete vendor team directory:
 
 - **Route:** `/trash`
 - **Purpose:** Universal soft-delete registry allowing one-click data restoration.
+- **Header Presentation:** Clean, high-density header with redundant explanatory subtitle removed. Action buttons (`Restore Selected`, `Empty Trash`) encapsulated in `.page-header-actions` adhering to the universal 35px height, 6px border-radius, and 10px button gap standards.
 - **Table Columns:** Checkbox, Entity Type (e.g. `Supplier`, `Buyer`, `Product`, `Inquiry`), Record Name / Title, Deleted At Timestamp, Deleted By User, Actions.
 - **Header Actions:** Module Filter dropdown (`ALL`, `Suppliers`, `Buyers`, `Products`, etc.), Search query.
 - **Row Actions:**
@@ -1743,9 +1747,9 @@ Checklist to execute:
    - `Under Process` — Work in progress, machine inspection, or part replacement underway.
    - `Completed` — Service signed off and resolved by client.
    - `Cancelled` — Ticket cancelled or customer rescheduled.
-6. **Filter Toolbar:**
-   - Real-time search bar querying Ticket Number, Customer Name, Machine Model, Serial No, or City.
-   - City / Region filter dropdown.
+6. **Filter Toolbar & Sub-Toolbar:**
+   - Single unified sub-toolbar search bar (`placeholder="Search..."`) querying Customer Name, Machine Model, Serial No, Contact Person, Phone, or City, with 1-click serial badge deep-filtering on table rows.
+   - Collapsible filter panel positioned above data tabs with:
    - Call Type filter dropdown (`Installation`, `Preventive Maintenance`, `Breakdown Service`, `Warranty Inspection`).
    - Service Mode filter dropdown (`On-Site`, `Remote Support`, `Workshop Repair`).
    - Priority filter dropdown (`Low`, `Medium`, `High`, `Critical`).
@@ -1779,6 +1783,9 @@ Checklist to execute:
 - [ ] Verify status transitions update ticket state and log the action in the audit trail.
 - [ ] Verify soft-deleting a technical task moves it to Trash (`/trash`) with restore capability.
 - [ ] Verify multi-select checkboxes allow bulk deletion of technical service tasks.
+- [ ] Verify the table sub-toolbar renders a single unified search input (`placeholder="Search..."`) that filters across serial number, company, model, and task description.
+- [ ] Verify clicking a serial number badge on any row filters the table and populates the unified search input.
+- [ ] Verify the table body empty state displays a clean illustration without any redundant '+ Add New Task' button (using the primary '+ ADD NEW' button in the page header).
 
 ---
 
@@ -2526,4 +2533,126 @@ Checklist to execute:
 - [ ] Verify clicking 'Reset Filters' clears inputs and restores all grid records.
 
 ---
-*End of Master Features & Testing Specification Manual. Maintained for Inhyma Solutions Enterprise ERP. Last updated: October 2026 (Universal Filter Button UI Standardization Across All Modules, Session-Scoped Tokens, Masters Module Interactive Status Toggle Switch, Dual-Method Activate/Deactivate Routing, Extended Company Profile Intelligence, Cascading Geographic Resolution, Autocomplete & Autofill Suppression, Wheel Lockout, Typeahead Company Extraction, Stock Adjustment Client Name Autocomplete, Leads Inquiries Management Module, Typable Cascading Address Comboboxes, Follow Ups Module, HRMS Full Suite, Local & Import Purchase Modules, Proforma Invoices Commercial Terms, Database Workflow Rules Engine, HRMS All-Employee Attendance Calendar, Authoritative Payroll Excel Export Engine, and CRM Phase 1 Foundation).*
+
+## 54. GLOBAL UI STANDARD: Universal Page Header, 35px Action Button Standard, and Filter-Above-KPI Hierarchy Across All Modules
+
+### 1. Architectural Motivation & Visual Alignment
+To establish a cohesive, enterprise-grade user interface across the Inhyma ERP platform, all module pages must adhere to consistent geometry, button sizing, vertical flow hierarchy, and uncluttered headers:
+- **Geometry & Spacing:** Global `.page` padding standardized to `12px 20px`, and `.page-header` bottom margin standardized to `16px`. This maximizes usable vertical viewport real estate while providing consistent breathing room.
+- **Action Button Sizing:** Action buttons residing in `.page-header-actions` must strictly render at a uniform height of `35px`, a border radius of `6px`, semi-bold typography (`font-weight: 600`, `font-size: 13px`), and a uniform gap of `10px`.
+- **Popover Isolation:** Dropdown action popovers (such as `+ Action` menus containing item links) inside `.page-header-actions` must have their internal menu buttons exempted from the 35px height rule so menu items render naturally without clipping or vertical distortion.
+- **Filter-Above-KPI Layout Hierarchy:** In any module featuring high-level KPI cards and collapsible filter panels, the filter panel must be positioned vertically *above* the KPI cards. This aligns with natural operator workflow: operators configure filter criteria first (date ranges, warehouse, technician, status), and the summary KPI metrics immediately update in real-time below the filters.
+- **Minimalist Header Presentation:** Subtitle descriptive text paragraphs (e.g., redundant explanations of what a screen does) are eliminated from primary headers (such as `/trash` and `/audit`) to achieve clean, high-density presentation.
+
+### 2. Design Tokens & CSS Rule Specification
+1. **Global Page Spacing (`src/index.css` & `src/styles/style.css`):**
+   ```css
+   .page {
+     padding: 12px 20px;
+   }
+   .page-header {
+     margin-bottom: 16px;
+   }
+   ```
+2. **Standardized Header Action Buttons:**
+   ```css
+   .page-header-actions {
+     display: flex;
+     align-items: center;
+     gap: 10px;
+   }
+   .page-header-actions > button,
+   .page-header-actions > .btn,
+   .page-header-actions > div > button:first-child {
+     height: 35px !important;
+     border-radius: 6px !important;
+     font-size: 13px !important;
+     font-weight: 600 !important;
+     display: inline-flex;
+     align-items: center;
+     justify-content: center;
+     padding: 0 14px !important;
+     transition: all 0.15s ease-in-out;
+   }
+   ```
+3. **Dropdown Menu & Popover Exemption Rule:**
+   ```css
+   .page-header-actions div[style*="absolute"] button {
+     height: auto !important;
+     justify-content: flex-start !important;
+     padding: 8px 12px !important;
+     font-size: 13px !important;
+     font-weight: 400 !important;
+   }
+   ```
+
+### 3. Filter-Above-KPI Modules Verified
+The following modules strictly implement the Filter-Above-KPI structure:
+- **Payments Module (`PaymentsPage.tsx`):** Filter panel -> Financial KPI Cards (`TOTAL PAYMENT`, `PAID`, `DUE`) -> Pending/Completed Tabs -> Data Grid.
+- **Sale Process (`sales/SaleProcessList.tsx`):** Filter panel -> Pipeline Summary Metric Cards -> Tabs -> Orders Grid.
+- **Price List (`PriceListPage.tsx`):** Filter panel -> Currency & Pricing Metrics -> Price Table.
+- **Import Purchase (`ImportPurchasePage.tsx`):** Filter panel -> Consignment Pipeline Metric Cards -> Tabs -> Consignment Grid.
+- **Product Stock (`ProductStockPage.tsx`):** Filter panel -> Valuation & Reorder Metric Cards -> Warehouse Stock Table.
+- **Discount Payments (`sales/DiscountPaymentsPage.tsx`):** Filter panel -> Discount Summary Cards -> Discount Approvals Grid.
+- **Technical Tasks (`technicalTasks/TechnicalTasksPage.tsx`):** Filter panel -> Ticket Volume KPI Cards -> Status Tabs -> Service Tickets Grid.
+
+### 4. QA Verification Test Cases
+- [ ] Verify navigating to `/trash` renders the title without any explanatory subtitle paragraphs, and the `Empty Trash` button conforms to 35px height.
+- [ ] Verify navigating to `/audit` renders the title cleanly without subtitle text, and action buttons adhere to 35px height.
+- [ ] Verify navigating to `/payments`, `/sales/process`, `/price-list`, `/import-purchases`, and `/product-stock` renders the filter panel *above* the KPI summary cards.
+- [ ] Verify opening a dropdown action menu inside `.page-header-actions` displays menu items with natural height and left alignment, without 35px stretching.
+- [ ] Verify clicking filter inputs or toggling filter drawers does not cause horizontal or vertical jitter on the KPI cards or table header.
+
+---
+
+## 55. PAYMENTS: Customer & Supplier Payments Engine, Cash Flow, and Technician Payment Handover
+
+### 1. Module Overview & Routing
+- **Route:** `/payments`
+- **Navigation Placement:** Direct Topbar navigation access under Tasks (`/payments`).
+- **Core Functionality:** Dedicated field service and commercial collections interface enabling finance managers to track real-time payments collected by field technicians, pending balances, and overdue accounts.
+
+### 2. High-Impact Financial KPI Summary Cards
+Positioned directly underneath the collapsible filter panel, these three metric cards provide instantaneous cash flow visibility:
+1. **TOTAL PAYMENT:** Cumulative monetary amount of all billable tickets within current filter scope.
+2. **PAID:** Total payment collected and verified from customers.
+3. **DUE:** Outstanding balance remaining across pending and overdue service calls.
+
+### 3. Filter & Search Controls
+- **Funnel Filter Toggle:** Standard `#556987` button (8×14px padding, badge-less, default collapsed).
+- **Available Filters:**
+  - Date Range (`date_from`, `date_to`)
+  - Technician Picker (`task_allotted_to`)
+  - Payment Status (`pending`, `completed`)
+  - Service Type & Call Type
+  - City & Third-Party City
+  - Priority (`low`, `medium`, `high`, `urgent`)
+  - Global Text Search (Customer name, ticket ID, phone)
+- **Live Reactivity:** Adjusting any filter recalculates KPI metrics and refetches matching records from `GET /api/v1/technical-tasks/payment-summary` and `GET /api/v1/technical-tasks`.
+
+### 4. Technician Payment Collection Modal
+- **Trigger:** Clicking `Record Payment` or the collection icon on any pending ticket row.
+- **Fields:**
+  - **Payment Amount** (*Required*): Pre-filled with outstanding balance, allows partial or full payment entry.
+  - **Payment Mode** (*Required*): Dropdown (`Cash`, `UPI`, `NEFT/RTGS`, `Cheque`).
+  - **Reference / Transaction ID**: Bank transaction number, UTR number, or cheque number.
+  - **Payment Date** (*Required*): Date and timestamp of collection.
+  - **Payment Screenshot / Receipt Upload**: Uploads proof image (JPG, PNG) or PDF voucher via `POST /api/v1/technical-tasks/upload-screenshot`.
+- **Atomic Submission:** Submits to `POST /api/v1/technical-tasks/{id}/record-payment`, automatically logs an immutable call log entry in the audit trail, updates payment collection status to `completed`, and moves the ticket from the Pending tab to the Completed tab.
+
+### 5. Zero-Synthetic Data Policy Compliance
+- Fully sanitized production database: all 18 mock QA generation scripts purged.
+- Preserves authentic corporate users (User A, User B, User C, User D) and actual customer organizations.
+- Ensures all financial KPIs reflect authentic business transactions.
+
+### 6. QA Verification Test Cases
+- [ ] Verify navigating to `/payments` renders the 3 KPI summary cards (`TOTAL PAYMENT`, `PAID`, `DUE`) with formatted INR currency (`₹`).
+- [ ] Verify clicking the Funnel filter button expands the filter drawer directly above the KPI cards.
+- [ ] Verify selecting a date range or technician updates the KPI cards and table without page reload.
+- [ ] Verify switching between 'Pending' and 'Completed' tabs filters records appropriately.
+- [ ] Verify clicking 'Record Payment' opens the payment modal with the due amount pre-populated.
+- [ ] Verify entering valid payment details and uploading a screenshot records the transaction and moves the record to Completed.
+- [ ] Verify attempting to record payment without required fields triggers validation messages.
+
+---
+*End of Master Features & Testing Specification Manual. Maintained for Inhyma Solutions Enterprise ERP. Last updated: October 2026 (Universal Page Header Geometry & Spacing Standardization, Global 35px Header Action Button & Isolated Popover Standard, Universal Filter-Above-KPI Placement Hierarchy Across All Modules, Minimalist Header Cleanups on Trash and Audit modules, Dedicated Payments Module, Universal Filter Button UI Standardization, Session-Scoped Tokens, Masters Module Interactive Status Toggle Switch, Dual-Method Activate/Deactivate Routing, Extended Company Profile Intelligence, Cascading Geographic Resolution, Autocomplete & Autofill Suppression, Wheel Lockout, Typeahead Company Extraction, Stock Adjustment Client Name Autocomplete, Leads Inquiries Management Module, Typable Cascading Address Comboboxes, Follow Ups Module, HRMS Full Suite, Local & Import Purchase Modules, Proforma Invoices Commercial Terms, Database Workflow Rules Engine, HRMS All-Employee Attendance Calendar, Authoritative Payroll Excel Export Engine, and CRM Phase 1 Foundation).*

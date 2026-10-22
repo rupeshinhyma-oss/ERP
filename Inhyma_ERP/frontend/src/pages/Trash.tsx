@@ -260,34 +260,33 @@ export function TrashPage() {
         <div className="page-header">
           <div>
             <h1 style={{ color: "#1e293b", fontWeight: 700, fontSize: "20px", margin: 0 }}>Trash</h1>
-            <p style={{ color: "#64748b", fontSize: "13.5px", margin: "4px 0 0 0" }}>
-              View and manage soft-deleted items across all modules. Permanently delete or restore records to the database.
-            </p>
           </div>
-          {items.length > 0 && (
-            <button
-              type="button"
-              className="btn btn-danger"
-              onClick={handleEmptyTrash}
-              disabled={isRowActionPending("empty-trash")}
-              style={{
-                background: "#dc2626",
-                color: "#ffffff",
-                border: "none",
-                borderRadius: "6px",
-                padding: "8px 16px",
-                fontWeight: 600,
-                fontSize: "13.5px",
-                cursor: isRowActionPending("empty-trash") ? "default" : "pointer",
-                opacity: isRowActionPending("empty-trash") ? 0.7 : 1,
-                display: "flex",
-                alignItems: "center",
-                gap: "6px",
-              }}
-            >
-              {isRowActionPending("empty-trash") ? "Emptying…" : "🗑️ Empty Trash"}
-            </button>
-          )}
+          <div className="page-header-actions">
+            {items.length > 0 && (
+              <button
+                type="button"
+                className="btn btn-danger"
+                onClick={handleEmptyTrash}
+                disabled={isRowActionPending("empty-trash")}
+                style={{
+                  background: "#dc2626",
+                  color: "#ffffff",
+                  border: "none",
+                  borderRadius: "6px",
+                  padding: "8px 16px",
+                  fontWeight: 600,
+                  fontSize: "13px",
+                  cursor: isRowActionPending("empty-trash") ? "default" : "pointer",
+                  opacity: isRowActionPending("empty-trash") ? 0.7 : 1,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "6px",
+                }}
+              >
+                {isRowActionPending("empty-trash") ? "Emptying…" : "🗑️ Empty Trash"}
+              </button>
+            )}
+          </div>
         </div>
 
         <Banner error={error} />

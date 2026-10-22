@@ -118,4 +118,42 @@ describe("DatePicker Component", () => {
     fireEvent.mouseDown(screen.getByTestId("outside"));
     expect(screen.queryByTestId("datepicker-dropdown")).toBeNull();
   });
+
+  it("disables future days and next month navigation when maxDate is set", () => {
+    const handleChange = vi.fn();
+    render(
+      <DatePicker
+        value="21-09-2026"
+        maxDate="21-09-2026"
+        onChange={handleChange}
+        ariaLabel="Ordered Date"
+      />
+    );
+
+    const input = screen.getByLabelText("Ordered Date");
+    fireEvent.click(input);
+
+    // Day 21 is allowed
+    const day21Btn = screen.getByRole("button", { name: "21" }) as HTMLButtonElement;
+    expect(day21Btn.disabled).toBe(false);
+
+    // Day 22 is disabled
+    const day22Btn = screen.getByRole("button", { name: "22" }) as HTMLButtonElement;
+    expect(day22Btn.disabled).toBe(true);
+    fireEvent.click(day22Btn);
+    expect(handleChange).not.toHaveBeenCalled();
+
+    // Next Month button is disabled
+    const nextBtn = screen.getByRole("button", { name: /next month/i }) as HTMLButtonElement;
+    expect(nextBtn.disabled).toBe(true);
+    fireEvent.click(nextBtn);
+    // Month should stay SEPTEMBER 2026
+    expect(screen.getByText(/SEPTEMBER 2026/i)).toBeTruthy();
+
+    // Day 20 is allowed and selectable
+    const day20Btn = screen.getByRole("button", { name: "20" }) as HTMLButtonElement;
+    expect(day20Btn.disabled).toBe(false);
+    fireEvent.click(day20Btn);
+    expect(handleChange).toHaveBeenCalledWith("20-09-2026");
+  });
 });

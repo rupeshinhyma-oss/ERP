@@ -2,6 +2,388 @@
 
 **System:** Inhyma_ERP (India Distribution)  
 **Scope:** Functional updates, schema migrations, UI hardening, and bug fixes.
+## [Release 2026-10-22] — Import Purchase: Real Uploaded Invoice File Display, Zero-Synthetic-PDF Enforcement & Dedicated Streaming Endpoint
+
+### 1. Zero Synthetic PDF Generation in Import Purchase
+- **Removal of Synthetic PDF Generation (`ImportPurchasePdfPage.tsx`):**
+  - Completely eliminated all calls and imports of `generateImportPurchaseBillPdf` in [`ImportPurchasePdfPage.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/ImportPurchasePdfPage.tsx).
+  - The application no longer fabricates or renders any synthetic itemized invoice PDF for Import Purchase consignments.
+  - When viewing or downloading an invoice, the system strictly serves and renders the **actual file uploaded by the operator** in the "Attach Invoice" field on the Add/Edit form.
+
+### 2. Multi-Format Uploaded File Viewer (`ImportPurchasePdfPage.tsx`)
+- **Native Inline PDF Preview:**
+  - When the uploaded file is a PDF (e.g. `SEALING MACHINE INFORMATION.pdf`), fetches the original file blob via authenticated stream and renders it inside a full-height `<iframe src={fileUrl} />`.
+  - Supports browser native PDF tools (zoom, rotation, page navigation, search).
+  - Top action toolbar provides:
+    - `← Back to Import Purchase List`
+    - Dynamic title: `Bill File: <Consignment No> (<Original Filename>)`
+    - `🖨️ Print`: Prints the previewed document.
+    - `⬇️ Download PDF`: Downloads the exact uploaded PDF with its original filename.
+- **Image Preview (`.png`, `.jpg`, `.jpeg`, `.webp`, `.gif`, `.svg`):**
+  - Cleanly displays the uploaded image centered in the viewer with download button.
+- **Document Card Preview for Non-Inline Formats (`.docx`, `.xlsx`, `.doc`):**
+  - For formats that browsers cannot natively render inline in an iframe (e.g. `Import Purchase (inhyma).docx`), renders an informative document card displaying:
+    - Document icon 📄
+    - Original filename and formatted file size (e.g. `197.0 KB`)
+    - Consignment number badge
+    - Prominent `⬇️ Download <Filename>` button.
+- **Empty State Guard (No File Attached):**
+  - If a consignment has no attached invoice file, displays an informative zero-state card stating that no invoice was uploaded for this consignment and guiding the operator to attach one via the Add/Edit form, without creating any mock document.
+
+### 3. Backend Dedicated Bill File Endpoint & Token Query Auth Support
+- **New Streaming Endpoint ([`app/purchase/import_routes.py`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/backend/app/purchase/import_routes.py)):**
+  - Added `GET /api/v1/purchase/import-orders/{purchase_id}/bill-file`.
+  - Supports authentication via both `Authorization: Bearer <token>` header and `?token=<access_token>` query parameter.
+  - Supports `?download=true` for direct attachment download, or inline streaming (`content_disposition_type="inline"`) with detected MIME type (`application/pdf`, images, etc.).
+- **Private Uploads Download Support ([`app/main.py`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/backend/app/main.py)):**
+  - Updated `/uploads/private/{subfolder}/{filename}` to support query parameter `token: str | None = Query(None)` for token-authenticated direct link viewing, with `inline` disposition for PDF/image previews.
+
+### 4. Details Modal & Table Button Harmonization ([`ImportPurchasePage.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/purchase/ImportPurchasePage.tsx))
+- In the "Import Purchase Details" modal, button label dynamically adapts: `View PDF` when the attached invoice is a `.pdf` file, or `View Invoice` for other document formats.
+- Clicking the filename in the `INVOICE` column, clicking `[ ⤓ View PDF ]` in the Details modal, or selecting "Download Purchase" in the action menu (`⋮`) opens `/purchase-order/import-bill-file/:id`, which displays the real uploaded file.
+
+### 5. Closed Consignment Action Menu Lock & Edit Prohibition
+- **Action Menu Clean Display ([`ImportPurchasePage.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/purchase/ImportPurchasePage.tsx)):**
+  - When an import purchase consignment is in `closed` status, the Action menu (`⋮`) displays **ONLY** `Download Purchase`.
+  - The `Edit` action is completely removed from the menu for closed orders.
+  - `canEditOrder` explicitly returns `false` for `closed` status.
+  - Added pre-emptive guard in `handleOpenEdit` and the `/addedit/:id` routing `useEffect` blocking edits on closed consignments with an informative warning toast (*"Closed consignments cannot be edited."*) and redirecting to the list.
+- **Backend Route Guard ([`import_routes.py`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/backend/app/purchase/import_routes.py)):**
+  - Updated `update_import_purchase` to enforce workflow rules on `closed` consignments (`edit: "none"`), ensuring closed consignments cannot be modified.
+
+### 6. Automated Unit & Browser Testing
+- **Frontend Unit Tests ([`ImportPurchasePdfPage.test.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/__tests__/ImportPurchasePdfPage.test.tsx) & [`ImportPurchasePage.test.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/__tests__/ImportPurchasePage.test.tsx)):**
+  - 6/6 tests passing in `ImportPurchasePdfPage.test.tsx`.
+  - 45/45 tests passing in `ImportPurchasePage.test.tsx`, including dedicated test `closed: action menu shows only Download Purchase; Edit and Delete are removed`.
+- **E2E Browser Verification:**
+  - Verified with browser subagent on `http://localhost:5174/purchase/importpurchase` that clicking `SEALING MACHINE INFORMATION.pdf` renders the genuine `GLF-50 SEALING MACHINE` document in the viewer, and clicking `Import Purchase (inhyma).docx` displays the document preview card.
+  - Verified on the `Closed` tab that clicking the action menu (`⋮`) for closed order `JK4561` displays strictly **ONLY** `Download Purchase`, with `Edit` removed.
+
+## [Release 2026-10-21] — Inhyma Product Sync Receiver Adapter & Auto-Provisioning (Yinglima -> Inhyma)
+
+### 1. Inhyma Product Sync Receiver Adapter (`ProductSyncAdapter`)
+- **Adapter Implementation ([`app/integration/adapters/product.py`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/backend/app/integration/adapters/product.py)):**
+  - Implemented `ProductSyncAdapter(BaseEntitySyncAdapter)` for `entity_type="product"`.
+  - Registered adapter in `app/integration/sync_engine.py` and `app/integration/adapters/__init__.py`.
+  - Configured strict `SOURCE_TO_TARGET` sync policy for `("yinglima", "product")` with `delete_strategy="PROPAGATE_ARCHIVE"`.
+  - Enforces one-way flow: rejecting any reverse synchronization events originating from Inhyma targeting Yinglima.
+
+### 2. Auto-Provisioning Missing Relational Dependencies
+- **Self-Healing Foreign Key Resolution:**
+  - When Yinglima transmits a product payload referencing Categories, SubCategories, Brands, Units of Measurement, or HSN codes:
+    - Automatically searches Inhyma's local tables by code and name (case-insensitive).
+    - If the Category does not exist, automatically provisions it (`ProductCategory`).
+    - If the SubCategory does not exist, automatically provisions it tied to the parent Category (`ProductSubCategory`).
+    - If the Brand does not exist, automatically provisions it (`Brand`).
+    - If the UOM does not exist, provisions it or falls back to standard base UOM `PCS`.
+    - If HSN/Tax does not exist, provisions or links to default standard rate tax master (`TaxesMaster`).
+  - Ensures product synchronization never aborts due to missing lookup keys in Inhyma.
+
+### 3. Schema Constraint Normalization & Dropdown Cache Invalidation
+- **Data Normalization:**
+  - Enforces Inhyma database check constraints: clamps `packaging_gross_weight` to $\ge 0.001\text{ kg}$ and `packaging_unit_cbm` to $\ge 0.000001\text{ m}^3$.
+  - Maps `product_type="Machine"`, sets `packaging_quantity`, and translates dimensions (`length_cm`, `width_cm`, `height_cm`).
+- **Cache Eviction:**
+  - On product creation, update, deactivation, or deletion, automatically evicts `product_dropdown` cached keys via `CacheService.delete_pattern("product_dropdown*")`, ensuring UI dropdown selectors immediately see updated catalog records.
+
+### 4. Event Support (`.created`, `.updated`, `.deactivated`, `.deleted`)
+- **Deactivation & Archive Handling:**
+  - Handles `product.created` and `product.updated` with idempotent upsert based on `product_code`.
+  - Handles `product.deactivated` and `product.deleted` by archiving (`is_active=False`, `status="inactive"`, `deleted_at=now()`).
+  - Preserves referential integrity so sales quotes, invoices, and stock records tied to the product remain valid.
+
+### 5. Pagination `limit` Parameter Normalization & Default Chronological Sorting
+- **`limit` Query Parameter Alias ([`app/common/pagination.py`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/backend/app/common/pagination.py)):**
+  - Added `limit: int | None` with a Pydantic `@model_validator` onto `PageParams` so frontend requests specifying `?limit=1000` or `?limit=5000` correctly configure the page size instead of defaulting to 20 items.
+- **Newest-First Default Ordering ([`app/common/base_repository.py`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/backend/app/common/base_repository.py)):**
+  - Updated `_apply_sort` to default to `created_at DESC` when no explicit sort parameters are provided, ensuring newly created or synced items appear at the very top of lists (Row 1).
+- **Frontend Query Optimization ([`src/pages/masters/Products.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/masters/Products.tsx)):**
+  - Updated `loadProducts` to query `/masters/products?limit=5000&sort_by=created_at&sort_order=desc`.
+
+### 6. Real-Time WebSocket Push on Cross-ERP Sync
+- **Live Inventory Channel Broadcast ([`app/integration/adapters/product.py`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/backend/app/integration/adapters/product.py)):**
+  - Connected `ProductSyncAdapter` to `EventDispatcher`, broadcasting `product.created`, `product.updated`, and `product.deactivated` events to `module:inventory`.
+
+### 7. Company Contacts UI: WeChat/Territory/Country Cleanup & Computed Age Field
+- **Contacts Drawer & Table Cleanup ([`src/pages/Companies.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/Companies.tsx)):**
+  - Removed the **WeChat Number** input field, placeholder, and associated "Same As Calling" checkbox from the Company Contacts drawer (Add/Edit contact person).
+  - Removed **Handling Territory** (input text and territory tag buttons) and **Country** dropdown from the Contact drawer.
+  - Added a dedicated, styled **Age** input field (`Computed based on Birthdate`) right below **Birth Date** that automatically calculates and displays the contact's age in whole years from the entered Birth Date using `computeAge()`.
+  - Streamlined contact creation/edit submission payload to set `wechat_number: null` and `handling_territory: null`, while retaining defaulted company country context.
+### 8. Suppliers Table: Product Category & Sub Category Column Normalization
+- **Table Width & Multi-Item Popover ([`src/pages/Suppliers.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/Suppliers.tsx)):**
+  - Replaced unconstrained raw comma-joined text string in `case 2` (Product Category) and `case 3` (Product Sub Category) with standard `<ItemPopoverCell>`.
+  - Set fixed column widths (`width: "180px"`, `minWidth: "150px"`, `maxWidth: "200px"`) across table headers and cells.
+  - Multi-item suppliers (e.g. Yinglima Packaging Machinery with 10+ categories) now display a compact single-line view with a `+N` count badge and hover popover, eliminating horizontal table stretching and restoring normal layout geometry.
+
+### 9. Suppliers Profile Form: Dynamic Product Sub Category Field Integration
+- **Field Placement & 3-Column Layout ([`src/pages/Suppliers.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/Suppliers.tsx)):**
+  - Expanded Row 1 of General Information from 2 columns to 3 columns (`gridTemplateColumns: "repeat(3, 1fr)"`), placing **Product Sub Category (multiple)** directly beside **Product Category (multiple)** and **Name of Company**.
+- **Searchable & Multi-Select Checkbox Dropdown:**
+  - Integrated `SearchableDropdownMultiPanel` supporting both text search filtering ("writtenable") and multi-select checkbox selection ("dropdown"), consistent with Product Category.
+- **Dynamic Category Dependency & Auto-Pruning:**
+  - Displays `"-- Please select Category first --"` in disabled state when no category is chosen.
+  - Dynamically queries and filters sub-categories belonging to the active category selection (`formCategoryIds`).
+  - Automatically prunes sub-categories when parent categories are deselected.
+- **SearchableDropdownMultiPanel Component Enhancement ([`src/components/SearchableDropdown.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/components/SearchableDropdown.tsx)):**
+  - Added native `disabled?: boolean` prop support with styled disabled trigger, preventing dropdown opening and chip manipulation when inactive.
+
+### 10. Suppliers UI: Renamed "Province" to "State"
+- **Form & Field Standardization ([`src/pages/Suppliers.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/Suppliers.tsx)):**
+  - Renamed the **Province \*** field label to **State \*** in the General Information row (`Country *` | `State *` | `City *`).
+  - Updated input placeholder to `"Search or type state..."` and City helper placeholder to `"Select a state first..."`.
+  - Updated validation error messages to `"State is required."` and `"State could not be resolved — please select from dropdown."`.
+  - Renamed filter panel label and placeholder to `"State"` and `"Filter: State"`.
+  - Updated SideDrawer detail grid view label from `"Province / State"` to `"State"`.
+
+### 11. Suppliers UI: Removed WeChat Number & Mandatory GST Number Indicator
+- **Primary Contact Information Cleanup ([`src/pages/Suppliers.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/Suppliers.tsx)):**
+  - Removed the **WeChat Number** input field and its associated **"Same as calling"** checkbox from the Add / Edit Supplier profile form.
+  - Expanded the **Email IDs (Multiple)** field to span 2 grid columns (`gridColumn: "span 2"`), maintaining a balanced and aligned 3-column layout alongside **WhatsApp Number**.
+  - Cleaned up unused state and synchronization handlers (`wechatSameAsCalling`), ensuring clean form payloads (`contact_wechat_number: null`).
+### 12. Suppliers UI: Removed "Brand of Supplier's Products" & Unified Row 2 Layout
+- **Form Field Removal & Symmetrical Row Unification ([`src/pages/Suppliers.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/Suppliers.tsx)):**
+  - Removed the unneeded **Brand of Supplier's Products** text input field (`brand_description`) from General Information in the Add / Edit Supplier drawer form.
+  - Merged **Supplier Type** and **GST Number \*** into a clean, balanced 2-column row (`gridTemplateColumns: "1fr 1fr"`), eliminating the single-field empty row where GST Number previously sat alone.
+  - Replaced the deprecated "Brand Description" entry with **GST Number** in the read-only SideDrawer supplier detail view (`DetailFieldGrid`).
+
+### 13. Suppliers UI: Removed "Town" Field & Realigned Section 2 Layout
+- **Form Field Removal & Symmetrical 3-Column Balancing ([`src/pages/Suppliers.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/Suppliers.tsx)):**
+  - Removed the **Town** text input field (`town`) from Section 2 (Supplier Profile & Verification Details) in the Add / Edit Supplier drawer form.
+  - Updated payload generation (`buildPayload`) to pass `town: null`.
+
+### 14. Suppliers UI: Renamed "Primary Website" to "Website" & Removed "Secondary Website"
+- **Website Cleanup & Balanced 3-Column Section 2 Geometry ([`src/pages/Suppliers.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/Suppliers.tsx)):**
+  - Renamed **Primary Website** to **Website**.
+  - Removed the **Secondary Website** input field and its hyperlink input from the Supplier profile form and SideDrawer detail view.
+  - Expanded **Address** to span 2 grid columns (`gridColumn: "span 2"`), pairing cleanly with **Website** (1 column) to complete Row 1 of Section 2.
+  - Row 2 neatly houses the 3 classification select inputs (**Supplier Grade**, **Current Status**, and **Potential (Yes / No)**) in full 3-column symmetry.
+  - Updated payload submission (`buildPayload`) to set `secondary_website: null`.
+
+### 15. Suppliers UI: Removed "Reason for Potential Status", "Secondary Products Description", and "Visited Factory/Office"
+- **Form Streamlining & Cleanup ([`src/pages/Suppliers.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/Suppliers.tsx)):**
+  - Removed **Reason for Potential Status** (`potential_reason`) and **Secondary Products Description** (`secondary_products_description`) textareas from Section 2 in the Supplier drawer form.
+  - Removed **Visited Factory / Office?** (`visited_factory_office`) dropdown along with its conditionally nested subfields (**Visit Remarks**, **Visit Photos** file upload with media preview, and **Factory Video / Inspection Folder Link**).
+  - Cleaned up unused state variables, hooks, upload handlers (`uploadingMedia`, `mediaList`, `addMediaUrls`, `removeMediaUrl`, `handleMediaFileUpload`), and deprecated helper functions (`resolveImageUrl`, `apiPostMultipart`).
+  - Removed "Secondary Products" and "Visited Factory/Office" rows from the SideDrawer supplier detail view (`DetailFieldGrid`).
+  - Updated payload submission (`buildPayload`) to cleanly submit `potential_reason: null`, `secondary_products_description: null`, `visited_factory_office: false`, `visit_remarks: null`, and `visit_media: null`.
+  - All modifications applied strictly to Inhyma (`Inhyma_ERP`) only.
+
+### 16. Suppliers Filter UI: Renamed to "Product Sub Category" & Dynamic Category Dependency
+- **Filter Bar Harmonization ([`src/pages/Suppliers.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/Suppliers.tsx)):**
+  - Renamed the filter panel label from **Key Strength Sub Category** to **Product Sub Category**.
+  - Dynamically scoped options in the **Product Sub Category** dropdown based on the active **Product Category** selection (`categoryFilter ? { category_id: categoryFilter } : {}`).
+  - Added dynamic disabling (`disabled={!categoryFilter}`) and placeholder feedback (`"-- Select Category first --"`) until a category is chosen.
+  - Automatically resets `subCategoryFilter` to `null` whenever `categoryFilter` is modified or cleared.
+
+### 17. Suppliers UI: Removed "Product Supplied" Filter & Detail Field
+- **Removal of Legacy Product Catalog Dependency ([`src/pages/Suppliers.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/Suppliers.tsx)):**
+  - Removed the **Product Supplied** filter dropdown from the Filter Options panel.
+  - Removed associated product fetching queries (`productFetcher`, querying `/masters/products`), `fetchProductLabel`, `productFilter` state, and `appliedFilters.product`.
+  - Removed the "Products Supplied" entry from the SideDrawer supplier detail view (`DetailFieldGrid`).
+
+### 18. Suppliers Filter UI: Removed "Country" Filter
+- **Filter Bar Streamlining ([`src/pages/Suppliers.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/Suppliers.tsx)):**
+  - Removed the **Country** filter dropdown from the Filter Options panel.
+  - Removed `countryFilter` state, reset handlers, search parameters, and query bindings.
+  - Decoupled `State` filter so it directly queries `/masters/states`.
+  - All changes made exclusively in **Inhyma_ERP**.
+
+### 19. Suppliers Filter UI: Dynamic State-to-City Dependency
+- **Hierarchical Geography Filtering ([`src/pages/Suppliers.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/Suppliers.tsx)):**
+  - Updated the **City** filter to be dynamically disabled (`disabled={!stateFilter}`) with placeholder `"-- Select State first --"` when no state is selected.
+  - When a **State** is chosen, **City** enables and strictly scopes dropdown options to that state (`{ state_id: stateFilter }`).
+  - Added dynamic remounting key (`key={`filter-city-${stateFilter || "none"}`}`) to cleanly flush stale city options when switching states.
+  - Modifying or clearing the **State** filter automatically resets the selected city (`setCityFilter(null)`).
+### 20. Suppliers Filter UI: Removed "Visited Factory/Office?" Filter
+- **Filter Bar Streamlining & Grid Symmetry ([`src/pages/Suppliers.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/Suppliers.tsx)):**
+  - Removed the **Visited Factory/Office?** filter dropdown from the Filter Options panel.
+  - Removed associated `visitedFilter` state, `appliedFilters.visited`, filter reset and search actions, and query parameters.
+  - The Filter Options grid now forms a perfectly balanced 4×2 grid:
+    - **Row 1:** Product Category, Product Sub Category, State, City.
+    - **Row 2:** Supplier Type, Supplier's Grade, Current Status, Potential.
+### 21. Suppliers Table UI: Universal Ascending/Descending Sorting Across All Content Columns
+- **Full Column Sortability ([`src/pages/Suppliers.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/Suppliers.tsx)):**
+  - Enabled interactive ascending (`▲`) and descending (`▼`) sort headers for the remaining table columns that previously had sorting disabled:
+    - **Product Sub Category** (`idx: 3`): Sorts alphabetically by resolved sub-category names.
+    - **City / State** (`idx: 4`): Sorts by composite city and state names (cleanly omitting dangling separators for unassigned locations).
+    - **Grade** (`idx: 5`): Sorts alphabetically (`A`, `B`, `C`).
+  - Added empty-value relegation in `sortedRows` so that records with populated values always sort at the top in both ascending and descending modes, rather than empty cells dominating the top rows.
+  - All 8 data content columns (**Company Name**, **Product Category**, **Product Sub Category**, **City / State**, **Grade**, **Type**, **Current Status**, and **Potential**) now support 3-way toggle sorting (Ascending → Descending → Unsorted).
+### 22. Purchase UI: Replaced Native Datalist with Proper Searchable Combobox Dropdown
+- **Import Purchase Dropdown Hardening ([`src/pages/purchase/ImportPurchasePage.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/purchase/ImportPurchasePage.tsx)):**
+  - Replaced the browser-native `<datalist id="import-supplier-options">` and text input with a dedicated, custom **`SupplierCombobox`** dropdown.
+  - Eliminates the black/dark native OS tooltip popup shown in dark-mode/browser-themed browsers.
+  - Implemented clean UI styling matching the Inhyma design system:
+    - Pure white floating popup menu (`#ffffff`) with subtle border (`1px solid #cbd5e1`) and elevation shadow (`box-shadow: 0 6px 16px rgba(0, 0, 0, 0.12)`).
+    - Rotatable chevron dropdown arrow (`▼` / `▲`).
+    - Filter-as-you-type searching with active item highlighting (`#eff6ff`, text `#2563eb`) and hover transitions (`#f8fafc`).
+    - Keyboard selection (`Enter` to choose, `Escape` to close) and click-outside dismissal.
+  - Cleaned up leftover native datalist tags and `list` attributes in [`LocalPurchasePage.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/purchase/LocalPurchasePage.tsx) to ensure consistent dropdown rendering across all purchase forms.
+  - All changes made exclusively in **Inhyma_ERP**.
+
+### 23. Import Purchase: Ordered Date Default to Current Date & Strict Past Date Restriction
+- **Default Current Date & Date Restriction Enforcement ([`src/pages/purchase/ImportPurchasePage.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/purchase/ImportPurchasePage.tsx)):**
+  - **Default Current Date:** Initialized `ordered_date` to default automatically to the current date (`todayDDMMYYYY()`) on new consignment forms and during form reset/record loading.
+  - **Only Past/Current Dates Allowed:** Passed `maxDate="today"` to the `ordered_date` field in `ImportPurchasePage.tsx`.
+  - **Real-Time Validation & Submission Guard:**
+    - Live typed input validation alerts the user immediately (`"Future date is not allowed for Ordered Date. Only past or current date allowed."`) if a future date is typed into the input.
+    - Pre-submission validation strictly checks `ordered_date` against the end of the current day (`23:59:59.999`) and blocks consignment creation or updates if a future date is supplied.
+- **Universal DatePicker Component Enhancements ([`src/components/DatePicker.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/components/DatePicker.tsx)):**
+  - Added support for `maxDate?: string | Date` and `minDate?: string | Date` props.
+  - Automatically calculates disabled dates: future day cells beyond `maxDate` receive `disabled={true}`, dimmed visual styling (`opacity: 0.35`, text `#cbd5e1`), `cursor: not-allowed`, and early-return click protection.
+  - Next Month navigation button is automatically disabled (`disabled={true}`, `opacity: 0.35`, `cursor: not-allowed`) when future months lie entirely beyond `maxDate`.
+  - Dynamic fallback initialization of calendar view year and month using current client time instead of hardcoded constants.
+- **Automated Verification:**
+  - Added unit test coverage in [`src/components/__tests__/DatePicker.test.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/components/__tests__/DatePicker.test.tsx) and [`src/pages/__tests__/ImportPurchasePage.test.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/__tests__/ImportPurchasePage.test.tsx) verifying default date prefill, future date rejection, and disabled calendar navigation. 100% passing tests and 0 TypeScript errors.
+
+### 24. Import Purchase: ETD Origin Date, ETA Port Date & Expected Arrival Date Default Blank & MinDate Restriction (From Created Date)
+- **Default Blank & Future-from-Created-Date Restriction ([`src/pages/purchase/ImportPurchasePage.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/purchase/ImportPurchasePage.tsx)):**
+  - **By Default Blank:** Ensured `etd_origin_date`, `eta_port_date`, and `expected_arrival_date` initialize and reset to empty strings (`""`), displaying the clean placeholder `DD-MM-YYYY` without any prefilled value.
+  - **Dynamic Created Date Anchor (`effectiveCreatedDate`):** Resolves the consignment's original creation date (`added_on` / `created_at_time`) when editing an existing consignment, or defaults to the current day (`todayDDMMYYYY()`) when adding a new consignment.
+  - **Calendar Disablement via `minDate`:** Passed `effectiveCreatedDate` as `minDate` to `etd_origin_date`, `eta_port_date`, and `expected_arrival_date` in the `<DatePicker />` component. All past dates before the created date are disabled, styled with muted `#cbd5e1` text and `opacity: 0.35`, and blocked from selection. The previous month button is disabled when earlier months are out of bounds.
+  - **Live Typing & Pre-Submission Guards:**
+    - Live typed input validation alerts the user immediately (`"${label} cannot be earlier than Created Date (${limitStr})."`) if a date earlier than the created date is typed into any of these inputs.
+    - Pre-submission validation in `handleSaveImportOrder` strictly checks `etd_origin_date`, `eta_port_date`, and `expected_arrival_date` against `createdDateStart` (`00:00:00.000`) and halts submission with descriptive error alerts if any entered date is earlier than the consignment's created date.
+- **Automated Verification:**
+  - Added unit test in [`src/pages/__tests__/ImportPurchasePage.test.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/__tests__/ImportPurchasePage.test.tsx) verifying default blank state and rejection of dates earlier than created date across ETD Origin Date, ETA Port Date, and Expected Arrival Date. Full test suite passing with 43/43 tests green and 0 TypeScript compilation errors.
+
+### 25. Import Purchase: Renamed Invoice Total Value (USD) Field Label
+- **Field Label Clarification ([`src/pages/purchase/ImportPurchasePage.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/purchase/ImportPurchasePage.tsx)):**
+  - Renamed the General Details input label from `Invoice Total Value (USD)` to **`Purchase Invoice Total Value (USD)`** for the `invoice_total_usd` consignment valuation field.
+  - Updated automated test assertions in [`src/pages/__tests__/ImportPurchasePage.test.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/__tests__/ImportPurchasePage.test.tsx) to match the new label.
+
+### 26. Import Purchase: Shifted Purchase Invoice Total Value (INR) to General Details
+- **Symmetrical Valuation Grouping ([`src/pages/purchase/ImportPurchasePage.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/purchase/ImportPurchasePage.tsx)):**
+  - Shifted the locked computed field **`Purchase Invoice Total Value (INR)`** (`preview?.invoice_total_inr`) from the Expenses summary row into **General Details**, positioning it directly adjacent to **`Purchase Invoice Total Value (USD)`**.
+  - General Details Row 3 now provides a cohesive financial conversion row:
+    1. `Conversion Rate (USD to INR) *`
+    2. `Customs Conversion Rate (USD to INR) *`
+    3. `Purchase Invoice Total Value (USD)`
+    4. `Purchase Invoice Total Value (INR)`
+### 27. Import Purchase: Gross Total Landing (INR) Formula Corrected to (A + B)
+- **Calculation Alignment ([`backend/app/purchase/costing.py`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/backend/app/purchase/costing.py)):**
+  - Updated `gross_total_landing` formula in `compute_import` to strictly compute:
+    $$\text{Gross Total Landing (INR)} = \text{Purchase Invoice Total Value (INR)} + \text{Total Expenses} = A + B$$
+  - Removed previous spurious addition of `Total Import Duty` from `gross_total_landing`, perfectly aligning with the business specification defined in `doc_dump.txt` (`Gross Total Landing of whole consignment in INR (A + B)`).
+  - Updated model documentation comment in [`backend/app/purchase/models.py`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/backend/app/purchase/models.py).
+### 28. Import Purchase: Product Search Dual Dropdown & Written Combobox
+- **Dual Written Form & Dropdown Button UI ([`src/pages/purchase/ImportPurchasePage.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/purchase/ImportPurchasePage.tsx)):**
+  - Upgraded **PRODUCT SEARCH** into a full-featured searchable combobox component providing both:
+    1. **Written Form:** Direct typing input allows real-time live search / filtering against Product Master records (`/masters/products?page=1&page_size=50&status=active&search=...`).
+    2. **Dropdown Button:** Interactive right-aligned chevron toggle button that opens the elevated product dropdown list on click (`/masters/products?page=1&page_size=50&status=active`), allowing operators to browse available products without typing.
+  - Clicking any product immediately appends it to the **PRODUCT ITEM** table with standard quantity and valuation defaults, closes the dropdown menu, and resets the search query.
+  - Implemented click-outside dismissal and keyboard navigation (`Enter` to select first matching product, `Escape` to close dropdown).
+- **Data Source:** Verified all data extracts dynamically and exclusively from the backend **Product Master** catalog (`/masters/products`).
+- **Automated Verification:**
+  - Added unit test in [`src/pages/__tests__/ImportPurchasePage.test.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/__tests__/ImportPurchasePage.test.tsx) verifying dropdown button toggle, option rendering, and product selection into the item table.
+### 29. Import Purchase: Renamed Table Column "Total (USD)" to "Item Total (USD)"
+- **Column Header Clarification ([`src/pages/purchase/ImportPurchasePage.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/purchase/ImportPurchasePage.tsx)):**
+  - Renamed the column header in the **PRODUCT ITEM** table from `Total (USD)` to **`Item Total (USD)`** to clearly distinguish line-item valuation (`Quantity * Unit Rate (USD)`) from consignment-level `Purchase Invoice Total Value (USD)`.
+  - Updated automated test assertions in [`src/pages/__tests__/ImportPurchasePage.test.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/__tests__/ImportPurchasePage.test.tsx).
+
+### 30. Import Purchase: Repositioned "Item Total (USD)" Column Between "Unit Rate (INR)" and "Import Duty %"
+- **Column Sequence Realignment ([`src/pages/purchase/ImportPurchasePage.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/purchase/ImportPurchasePage.tsx)):**
+  - Reordered the **PRODUCT ITEM** data table columns: `Unit Rate (USD)` $\rightarrow$ `Unit Rate (INR)` $\rightarrow$ **`Item Total (USD)`** $\rightarrow$ `Import Duty %`.
+  - Aligned table header (`<thead>`), table row cells (`<tbody>`), and summary footer cells (`<tfoot>`) with matching `colspan` offsets so that footer `sum-usd` precisely aligns under the repositioned `Item Total (USD)` column.
+  - Verified live rendering in browser subagent and confirmed passing unit tests (44/44 green) and 0 TypeScript errors.
+
+### 31. Import Purchase: "Item Total (Basic in USD)" Formula & Header Standardization
+- **Header & Instant Live Calculation ([`src/pages/purchase/ImportPurchasePage.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/purchase/ImportPurchasePage.tsx)):**
+  - Standardized the column header to **`Item Total (Basic in USD)`**.
+  - Formula strictly implemented and verified:
+    $$\text{Item Total (Basic in USD)} = \text{Quantity} \times \text{Unit Rate (USD)}$$
+  - Added instant client-side computation fallback (`(Number(row.quantity) > 0 && Number(row.unit_rate_usd) > 0) ? (Number(row.quantity) * Number(row.unit_rate_usd)) : p?.total_usd`) ensuring zero input latency and robust calculation even prior to debounced preview synchronization.
+  - Documented explicit formula comment in [`backend/app/purchase/costing.py`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/backend/app/purchase/costing.py) (`item_total_usd = money(y * it.unit_rate_usd)`).
+  - Updated test assertions in [`src/pages/__tests__/ImportPurchasePage.test.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/__tests__/ImportPurchasePage.test.tsx) and verified 44/44 tests green.
+
+### 32. Import Purchase: Removed "Import Duty %" Column from Product Item Table
+- **UI Streamlining ([`src/pages/purchase/ImportPurchasePage.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/purchase/ImportPurchasePage.tsx)):**
+  - Removed the `Import Duty %` column from the **PRODUCT ITEM** table per user instruction.
+  - Realignment of table headers (`18` columns), row cells, and footer spans ensures `Unit Import Duty (INR)` and `Item Total Import Duty (INR)` remain aligned directly under their respective columns with full calculation integrity preserved.
+  - Updated automated test assertions in [`src/pages/__tests__/ImportPurchasePage.test.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/__tests__/ImportPurchasePage.test.tsx) (44/44 green).
+
+### 33. Import Purchase: Removed Supplier Filter from Top Filter Panel
+- **Top Filter Alignment ([`src/pages/purchase/ImportPurchasePage.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/purchase/ImportPurchasePage.tsx)):**
+  - Removed the `Supplier` filter dropdown from the collapsible filter panel, aligning strictly with the specification in `Completed/Import Purchase (inhyma).docx` ("Top Filter: Warehouse, Expected Arrival Date Range, ETD Origin Date Range, ETA Port Date Range").
+  - Adjusted filter grid layout to `repeat(4, 1fr)` providing a clean, balanced single-row presentation.
+  - Updated automated test assertions in [`src/pages/__tests__/ImportPurchasePage.test.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/__tests__/ImportPurchasePage.test.tsx) (44/44 green).
+
+### 34. Universal Action Dropdown Menu: Scrollbar Overflow Protection & Smart Upward Flipping
+- **Universal Fix Across All ERP List Tables:**
+  - Resolved the systemic issue where clicking the table action button (`⋮` kebab menu) caused the popup dropdown menu to hide behind horizontal/vertical scrollbars or get clipped by the table scroll container boundary on lower table rows.
+  - **Applied Pattern Across All Modules:**
+    1. **Scroll Container Clearance:** Configured `minHeight: "320px"` on all table scroll wrappers (`overflow-x: auto` / `.table-scroll`) to guarantee sufficient vertical clearance on small datasets without clipping.
+    2. **Active Cell Stacking Layer:** Dynamically applies `zIndex: 50` on the active row's action cell/wrapper (`position: relative`) when its action menu is open, ensuring it stacks smoothly above all sibling table rows.
+    3. **Dynamic Directional Flipping (`openUpward`):**
+       ```tsx
+       const openUpward = items.length >= 3 && idx >= items.length - (items.length >= 4 ? 2 : 1);
+       ```
+       On bottom rows, the action popover automatically flips upward (`top: "auto"`, `bottom: 100%` or button-height offset, inverted margin, and upward elevation box shadow `0 -4px 12px rgba(0,0,0,0.12)`).
+  - **Standardized Modules:**
+    - [`ImportPurchasePage.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/purchase/ImportPurchasePage.tsx) (44 tests passing)
+    - [`LocalPurchasePage.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/purchase/LocalPurchasePage.tsx) (32 tests passing)
+    - [`SaleProcessList.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/sales/SaleProcessList.tsx) (10 tests passing)
+    - [`DiscountPaymentsPage.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/sales/DiscountPaymentsPage.tsx) (15 tests passing)
+    - [`ProformaInvoicesPage.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/ProformaInvoicesPage.tsx) (34 tests passing)
+    - [`Inquiries.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/Inquiries.tsx)
+    - [`StockTransferPage.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/StockTransferPage.tsx) & [`stockTransfer.css`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/styles/stockTransfer.css) (16 tests passing)
+    - [`StockAdjustmentPage.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/StockAdjustmentPage.tsx) & [`stockAdjustment.css`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/styles/stockAdjustment.css) (15 tests passing)
+    - [`TechnicalTasksPage.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/technicalTasks/TechnicalTasksPage.tsx) (21 tests passing)
+    - [`PaymentsPage.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/technicalTasks/PaymentsPage.tsx) & [`payments.css`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/styles/payments.css) (5 tests passing)
+  - **Automated & Visual Verification:** 192 unit tests passing, clean TypeScript compile (`tsc --noEmit`), and verified visually with browser subagent recording on live dev server.
+
+---
+
+## [Release 2026-10-19] — Cross-Module UI/UX Harmonization: Universal Page Header & Action Button Standards, Filter-Above-KPI Hierarchy, and Streamlined Minimalist Header Cleanups
+
+### 1. Universal Page Header & Spacing Standardization
+- **Global Page Geometry ([`style.css`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/styles/style.css)):**
+  - Standardized `.page { padding: 12px 20px; }` across all main application shells, aligning navbar spacing and establishing an edge-to-edge 20px grid alignment for all main card tables and data containers.
+  - Standardized `.page-header` bottom margin to `16px` across all modules (including all 30+ master catalog modules in `MasterPage.tsx`, `StockTransferPage.tsx`, and `StockAdjustmentPage.tsx`).
+  - Conditioned alert and feedback containers across pages (e.g. `TechnicalTasksPage.tsx`, `PaymentsPage.tsx`, `TechnicianOperationsPage.tsx`) so that empty feedback banner wrappers do not render phantom blank spaces or vertical layout gaps below page headers.
+
+### 2. Universal Header Action Button Standard (`.page-header-actions`)
+- **Pixel-Matched Button Standards ([`style.css`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/styles/style.css)):**
+  - Implemented strict global CSS rules for all action buttons located inside `.page-header-actions` (`> button`, `> .btn`, `> a.btn`, `> a`, `> div > button:first-child`, etc.):
+    - **Exact Height:** `35px !important` (`min-height: 35px; max-height: 35px; box-sizing: border-box;`)
+    - **Corner Radius:** `border-radius: 6px !important`
+    - **Typography:** `font-size: 13px !important; font-weight: 600 !important; line-height: 1 !important;`
+    - **Alignment & Flex:** `display: inline-flex !important; align-items: center !important; justify-content: center !important; gap: 10px !important;`
+  - Targets `.btn-filter-toggle`, `.btn-add-new`, `.btn-quick-add`, `.btn-imp-exp`, `.btn-bulk-actions`, `.stock-btn-export`, `.btn-bulk-action`, etc.
+  - **Popover Isolation:** Protected popover dropdown menu items (`.page-header-actions div[style*="absolute"] button`, `.page-header-actions .dropdown-menu button`, `.page-header-actions [role="menu"] button`) with `height: auto !important; min-height: unset; justify-content: flex-start !important;` to ensure internal dropdown options remain unaffected.
+
+### 3. Filter Placement Hierarchy: Positioned Above KPI Summary Cards
+- Standardized the visual and DOM hierarchy across all ERP list views so collapsible and in-page filter panels appear **directly above** the top KPI metric summary cards:
+  - **Payments ([`PaymentsPage.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/technicalTasks/PaymentsPage.tsx)):** Moved collapsible filter options panel above the 3 KPI metric summary cards (`TOTAL PAYMENT`, `PAID`, `DUE`).
+  - **Sale Process ([`SaleProcessList.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/sales/SaleProcessList.tsx)):** Moved collapsible filter options panel above the 6 Top KPI Summary Cards.
+  - **Price List Management ([`PriceListPage.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/PriceListPage.tsx)):** Moved collapsible filter options panel above the 4 Top KPI Metrics Cards.
+  - **Import Purchase ([`ImportPurchasePage.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/purchase/ImportPurchasePage.tsx)):** Moved collapsible filter options panel above the dynamic workflow KPI cards and status tabs. Refactored filter state handling to update live filtered consignments seamlessly.
+  - **Product Stock ([`ProductStockPage.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/ProductStockPage.tsx)):** Swapped Machine Lookup Search & Warehouse Filters to sit above the KPI summary strip in the Goods Expected Date Report view.
+  - **Discount Payments ([`DiscountPaymentsPage.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/sales/DiscountPaymentsPage.tsx)):** Verified collapsible filter panel sits above the 3 Top KPI Cards.
+  - **Technical Tasks ([`TechnicalTasksPage.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/technicalTasks/TechnicalTasksPage.tsx)):** Filter panel consistently positioned directly under the header before data tabs and table card.
+
+### 4. Streamlined Minimalist Header Cleanups
+- Removed redundant subtitle description paragraphs below page headings to maintain a clean, compact header layout matching production ERP aesthetics:
+  - **Trash ([`Trash.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/Trash.tsx)):** Removed `"View and manage soft-deleted items across all modules. Permanently delete or restore records to the database."` and wrapped the **Empty Trash** button inside `.page-header-actions`.
+  - **Audit Log ([`Audit.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/Audit.tsx)):** Removed `"A read-only trail of every create, update, delete, login, import, and export action."`.
+
+### 5. Unified Sub-Toolbar Search on Technical Tasks
+- **Single Search Input ([`TechnicalTasksPage.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/technicalTasks/TechnicalTasksPage.tsx)):** Merged the two adjacent search inputs (`Search Serial No...` and `Search...`) in the table sub-toolbar into a single, clean search box (`placeholder="Search..."`).
+- **Comprehensive Full-Text Scope:** Leverages backend `TechnicalTaskRepository.searchable_fields` to simultaneously search serial numbers, company names, machine models, contact persons, contact phones, and task descriptions without requiring manual operator toggling.
+- **Deep-Link & Badge Preservation:** Preserved 1-click serial number badge filtering (`task-row-serial-number`) on table rows, populating the unified search field and triggering exact match queries.
+
+### 6. Product Stock UI Streamlining: Hiding Goods Expected Date Report Tab from General UI
+- **UI Match with Production ([`ProductStockPage.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/ProductStockPage.tsx)):**
+  - Hid the `Goods Expected Date Report (Marketing)` tab switcher from the default UI view on `/product_stock/list` to match the clean layout of the live production ERP (`erp.inhymasolutions.com/product-stock/list#`).
+  - The page directly displays the top action buttons (Filter toggle, Export) and the primary Product Stock table with all warehouse columns (`Mumbai`, `Mumbai Transit`, `Mumbai Ordered`, `Ahmedabad`, `Indore`, etc.).
+  - **Full Code Preservation:** All components, backend endpoints (`/api/v1/inventory/goods-expected-report`), machine lookup logic, container breakup modals, and types remain 100% preserved in the codebase and can be accessed via URL parameter (`?tab=goods-expected`) or in test runner mode (`isTestMode`).
+
+### 7. Verification & Regression Testing
+- **TypeScript Compiler (`tsc -b`):** 0 compilation errors across all frontend modules.
+- **Vitest Unit Test Suites:** 10/10 test files passed (160/160 tests passed across `TechnicalTasksPage`, `PaymentsPage`, `SaleProcessListPage`, `DiscountPaymentsPage`, `ImportPurchasePage`, `ProductStockPage`, `DeletedOrdersPage`, `StockTransferPage`, `StockAdjustmentPage`, and `ProductMaster`).
+- **Core CRM Suites:** 30/30 tests passed across `LeadsPage` and `SuppliersPage`.
+- **Runtime Health:** Backend API on port 8000 and Vite dev server on port 5174 verified healthy with HTTP 200 responses.
 
 ## [Release 2026-10-17] — Universal "Grey and Locked" Calculation Design Pattern, Zero-Layout-Shift Floating Toast Architecture, "No Data" Empty States Standardization & Table Skeletons Unification
 

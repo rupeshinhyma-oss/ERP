@@ -97,6 +97,7 @@ def build_success_response(
     request_id: str = "",
     message: str = "Success",
     meta: dict[str, Any] | None = None,
+    status_code: int | None = None,
 ) -> dict[str, Any]:
     """
     Build a plain-dict success envelope.

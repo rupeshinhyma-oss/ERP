@@ -412,10 +412,10 @@ export function DeletedOrdersPage({ defaultFilterOpen = false }: { defaultFilter
         <Breadcrumb trail={["Reports", "Deleted Orders"]} />
 
         {/* Top Header */}
-        <div className="deleted-orders-header">
+        <div className="page-header deleted-orders-header">
           <h1 className="deleted-orders-title">Deleted Orders</h1>
 
-          <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+          <div className="page-header-actions" style={{ display: "flex", gap: "10px", alignItems: "center" }}>
             <button
               type="button"
               className="btn btn-filter-toggle"
@@ -557,17 +557,17 @@ export function DeletedOrdersPage({ defaultFilterOpen = false }: { defaultFilter
             </div>
 
             {/* Filter Actions */}
-            <div className="deleted-orders-filter-actions">
+            <div className="deleted-orders-filter-actions" style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "16px" }}>
               <button
                 type="button"
-                className="deleted-orders-btn-reset"
+                className="btn-filter-reset"
                 onClick={handleResetFilters}
               >
                 Reset
               </button>
               <button
                 type="button"
-                className="deleted-orders-btn-search"
+                className="btn-filter-search"
                 onClick={handleApplyFilters}
               >
                 Search

@@ -392,7 +392,11 @@ describe("LeadsPage", () => {
     // Filter by State = Gujarat
     fireEvent.change(stateSelect, { target: { value: "Gujarat" } });
 
-    // Table now filters reactively based on data
+    // Click Search to apply filters
+    const searchBtn = document.getElementById("btn-filter-search")!;
+    fireEvent.click(searchBtn);
+
+    // Table now filters based on applied filter
     await waitFor(() => {
       expect(screen.getByText("Apex Valves & Automation")).toBeTruthy();
     });

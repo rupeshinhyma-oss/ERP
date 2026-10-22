@@ -267,7 +267,7 @@ describe("TechnicalTasksPage", () => {
     });
   });
 
-  it("renders system empty state with Add New Task button when database has no tasks", async () => {
+  it("renders system empty state when database has no tasks and opens Add modal via header + ADD NEW button", async () => {
     vi.spyOn(technicalTasksApi, "fetchTechnicalTasks").mockResolvedValue({
       data: [],
       meta: { total: 0, page: 1, page_size: 50, total_pages: 1 } as any,
@@ -281,11 +281,11 @@ describe("TechnicalTasksPage", () => {
 
     await waitFor(() => {
       expect(screen.getByText("No technical tasks in the system yet")).toBeTruthy();
-      expect(screen.getByRole("button", { name: /\+ Add New Task/i })).toBeTruthy();
+      expect(screen.queryByRole("button", { name: /\+ Add New Task/i })).toBeNull();
     });
 
-    // Clicking "+ Add New Task" opens the Add modal
-    fireEvent.click(screen.getByRole("button", { name: /\+ Add New Task/i }));
+    // Header "+ ADD NEW" button opens the Add modal
+    fireEvent.click(screen.getByRole("button", { name: /\+ ADD NEW/i }));
 
     await waitFor(() => {
       expect(screen.getByRole("heading", { name: "Add Technical Task" })).toBeTruthy();
@@ -454,6 +454,7 @@ describe("TechnicalTasksPage", () => {
     fireEvent.change(screen.getByLabelText("Created to"), { target: { value: "2026-10-15" } });
     expect(screen.getByText("Third-Party Site City")).toBeTruthy();
     expect(screen.getByText("Payment Collected")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Search" }));
 
     await waitFor(() => {
       const last = spy.mock.calls[spy.mock.calls.length - 1][0] as Record<string, unknown>;

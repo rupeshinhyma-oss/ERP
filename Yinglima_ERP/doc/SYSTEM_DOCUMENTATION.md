@@ -406,6 +406,16 @@ The RBAC engine secures every endpoint via `require_permission(code)` dependenci
   - **Instant Visual Duplicate Warning for Product Code**: When an entered Product Code matches an existing code, an immediate warning displays directly beneath: `⚠️ Product Code "<code>" already exists (used by "<name>")!`.
   - **Strict Form Submission Blocker**: The `validateForm` and `toPayload` handlers enforce hard validation stops if duplicate name or code warnings are active, highlighting fields in red and blocking save.
   - **Bulk Import Dual Deduplication**: In-file duplicate checking (`seen_names` and `seen_codes`) prevents multiple spreadsheet rows from having identical names or codes, while database collision detection blocks imports of any product whose name or code already exists in the system.
+- **Cross-ERP One-Way Synchronization to Inhyma ERP (`sync_inhyma.py`)**:
+  - **Organization Trigger:** When creating or editing a product with `Organization = Inhyma` (supports both single `organization_id` and multi-organization array `organization_ids`), the product is automatically synchronized to Inhyma ERP's Product Master.
+  - **Strict One-Way Direction:** Sync flows strictly from Yinglima to Inhyma ($Yinglima \rightarrow Inhyma$). Product creations, edits, or deactivations occurring natively in Inhyma are never pushed back to Yinglima.
+  - **One-Way Deactivation Cascade:** Deactivating a product in Yinglima (`POST /masters/products/{id}/deactivate`) automatically dispatches a deactivation event to Inhyma, marking the corresponding product inactive in Inhyma. Deactivating a product in Inhyma does NOT alter the product status in Yinglima.
+  - **Resilient Multi-Tier Fallback Architecture:**
+    - Synchronous direct HTTP delivery to Inhyma peer endpoint `/api/v1/integration/events` using mutual service credentials (`PEER_SERVICE_CREDENTIALS`).
+    - Durable persistence in `integration_outbox_events` and `integration_outbox_deliveries`.
+    - Asynchronous queue job (`enqueue_dispatch`) with exponential backoff retries ensures eventual consistency if Inhyma is sleeping or temporarily unreachable.
+    - Non-blocking design: external network failures never abort the local Yinglima transaction.
+  - **Natural Key Resolution:** Transmits natural entity codes and names (`category_code`, `sub_category_code`, `brand_code`, `uom_code`, `hsn_code`), allowing Inhyma's receiver adapter to auto-provision any missing master dependencies on the fly.
 
 ### 8.6. Supplier Directory & Tokenized Public Portal
 - **Endpoints:** `GET /suppliers`, `POST /suppliers`, `PATCH /suppliers/{id}`, `POST /suppliers/{id}/contacts`, `POST /suppliers/import`, `GET /suppliers/export`.

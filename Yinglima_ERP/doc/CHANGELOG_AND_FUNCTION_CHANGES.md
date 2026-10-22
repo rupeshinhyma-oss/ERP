@@ -353,6 +353,39 @@
 - **Product Fetcher Composite Label Sanitization ([`Inquiries.tsx`](file:///d:/Om%20work1/ERP/Yinglima_ERP/frontend/src/pages/Inquiries.tsx)):**
   - Updated `productFetcher` in both Quick Inquiry drawer and Inquiry edit modal to detect and extract code from composite labels containing parentheses `(CODE)` or dashes (`CODE — Name`), ensuring typed/pasted composite product strings match their respective product code or name immediately.
 
+## [Release 2026-10-21] — Automated One-Way Product Master Cross-ERP Synchronization (Yinglima -> Inhyma)
+
+### 1. Automated One-Way Product Master Sync (`Organization = Inhyma`)
+- **Business Rule & Trigger ([`app/masters/products/sync_inhyma.py`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Yinglima_ERP/backend/app/masters/products/sync_inhyma.py)):**
+  - Implemented automatic cross-ERP synchronization to Inhyma's Product Master whenever a product is created or edited in Yinglima with `Organization = Inhyma` (supports both single `organization_id` and multi-organization array `organization_ids`).
+  - **Strict One-Way Policy:** Data sync is strictly unidirectional ($Yinglima \rightarrow Inhyma$). Products created, edited, or deleted in Inhyma are never synced back to Yinglima.
+  - Detects Inhyma through known instance UUID (`85c12bcb-10a1-4b1f-92ed-6ca72ac1b3b5`), slug matching, and `master_companies` name/code matching (`is_inhyma_organization`).
+  - Automatically syncs updates if a product was previously synchronized to Inhyma, even if the organization field is preserved or updated.
+
+### 2. Deactivation & Soft-Delete Cascade
+- **One-Way Status Synchronization:**
+  - When a product is deactivated in Yinglima (`POST /masters/products/{id}/deactivate`), the deactivation event is automatically dispatched to Inhyma, marking the corresponding Inhyma product as inactive (`is_active=False`, `status="inactive"`).
+  - When a product is deleted/soft-deleted in Yinglima (`DELETE /masters/products/{id}`), Inhyma cascades the archival without hard-deleting relational history.
+  - **No Vice-Versa:** Deactivation or deletion in Inhyma's Product Master does NOT alter or deactivate the product in Yinglima.
+
+### 3. Multi-Tier Resilience & Transactional Fallbacks
+- **Non-Blocking Architecture:**
+  - Sync failures or network timeouts in communicating with Inhyma never fail or roll back the local Yinglima product creation or update transaction.
+- **Immediate Direct HTTP Delivery + Durable Outbox Queue Fallback:**
+  - Upon committing the product locally, Yinglima publishes an integration outbox event (`aggregate_type="product"`) and triggers an immediate direct HTTP POST to Inhyma's `/api/v1/integration/events` endpoint using mutual peer service credentials.
+  - If Inhyma is unreachable, sleeping, or experiencing latency, the delivery is automatically queued in `integration_outbox_deliveries` and retried with exponential backoff by the async queue worker.
+
+### 4. Classification Natural Key Translation & Inhyma Dimension Harmonization
+- **Natural Key Resolution:**
+  - Assembles product payloads with natural business keys (`category_name`, `category_code`, `sub_category_name`, `sub_category_code`, `brand_name`, `brand_code`, `uom_code`, `hsn_code`) rather than local database foreign key UUIDs.
+  - Automatically translates packaging dimensions (`length_cm`, `width_cm`, `height_cm`, `packaging_unit_cbm`) and enforces positive gross weight constraints required by Inhyma's database.
+
+### 5. Type Safety & Diagnostic Hardening
+- Resolved linter and static type analysis warnings:
+  - Corrected model import to `HsnCode` from `app.masters.hsn.models`.
+  - Type-narrowed dimensions (`raw_len`, `raw_width`, `raw_height`) with explicit `is not None` guards before converting to `float`, preventing `float | None` type mismatch warnings.
+  - Cleaned up string conversions in `organization_ids` iteration to prevent redundant `str()` call warnings on string elements.
+
 ---
 
 ## [Release 2026-10-14] — Seed First-Install Guards, Inbound Email DB Deduplication & Handover Account Protection

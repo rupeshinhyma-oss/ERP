@@ -116,8 +116,9 @@ function SupplierCombobox({ value, onChange, options, error }: SupplierComboboxP
           ref={inputRef}
           id="local-supplier-input"
           aria-label="Supplier"
-          role="combobox"
           list="local-supplier-options"
+          role="combobox"
+          autoComplete="off"
           type="text"
           placeholder="Select"
           value={isOpen ? search : value}
@@ -263,8 +264,8 @@ function SupplierCombobox({ value, onChange, options, error }: SupplierComboboxP
       )}
 
       <datalist id="local-supplier-options">
-        {options.map((name) => (
-          <option key={name} value={name} />
+        {options.map((n) => (
+          <option key={n} value={n} />
         ))}
       </datalist>
     </div>
@@ -442,6 +443,12 @@ export function LocalPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean
   const [filterWarehouse, setFilterWarehouse] = useState("");
   const [filterStatus, setFilterStatus] = useState("");
   const [filterDate, setFilterDate] = useState("");
+  const [appliedFilters, setAppliedFilters] = useState({
+    supplier: "",
+    warehouse: "",
+    status: "",
+    date: "",
+  });
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [bulkMenuOpen, setBulkMenuOpen] = useState(false);
 
@@ -453,6 +460,22 @@ export function LocalPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean
     setFilterDate("");
     setSearchTerm("");
     setCurrentPage(1);
+    setAppliedFilters({
+      supplier: "",
+      warehouse: "",
+      status: "",
+      date: "",
+    });
+  };
+
+  const handleSearchFilters = () => {
+    setCurrentPage(1);
+    setAppliedFilters({
+      supplier: filterSupplier,
+      warehouse: filterWarehouse,
+      status: filterStatus,
+      date: filterDate,
+    });
   };
 
   const handleBulkConfirm = async () => {
@@ -610,16 +633,16 @@ export function LocalPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean
   // Filtering and Sorting for List View
   const filteredOrders = useMemo(() => {
     return orders.filter((o) => {
-      if (filterSupplier && !o.supplier_name.toLowerCase().includes(filterSupplier.toLowerCase())) {
+      if (appliedFilters.supplier && !o.supplier_name.toLowerCase().includes(appliedFilters.supplier.toLowerCase())) {
         return false;
       }
-      if (filterWarehouse && !o.warehouse.toLowerCase().includes(filterWarehouse.toLowerCase())) {
+      if (appliedFilters.warehouse && !o.warehouse.toLowerCase().includes(appliedFilters.warehouse.toLowerCase())) {
         return false;
       }
-      if (filterStatus && o.status !== filterStatus) {
+      if (appliedFilters.status && o.status !== appliedFilters.status) {
         return false;
       }
-      if (filterDate && !o.added_on.includes(filterDate) && !o.invoice_date.includes(filterDate)) {
+      if (appliedFilters.date && !o.added_on.includes(appliedFilters.date) && !o.invoice_date.includes(appliedFilters.date)) {
         return false;
       }
       if (!searchTerm.trim()) return true;
@@ -634,7 +657,7 @@ export function LocalPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean
         o.added_on.toLowerCase().includes(q)
       );
     });
-  }, [orders, searchTerm, filterSupplier, filterWarehouse, filterStatus, filterDate]);
+  }, [orders, searchTerm, appliedFilters]);
 
   const sortedOrders = useMemo(() => {
     return [...filteredOrders].sort((a, b) => {
@@ -1972,10 +1995,7 @@ export function LocalPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean
                   type="text"
                   placeholder="Filter by supplier..."
                   value={filterSupplier}
-                  onChange={(e) => {
-                    setFilterSupplier(e.target.value);
-                    setCurrentPage(1);
-                  }}
+                  onChange={(e) => setFilterSupplier(e.target.value)}
                   style={{
                     width: "100%",
                     height: "38px",
@@ -1998,10 +2018,7 @@ export function LocalPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean
                   type="text"
                   placeholder="Filter by warehouse..."
                   value={filterWarehouse}
-                  onChange={(e) => {
-                    setFilterWarehouse(e.target.value);
-                    setCurrentPage(1);
-                  }}
+                  onChange={(e) => setFilterWarehouse(e.target.value)}
                   style={{
                     width: "100%",
                     height: "38px",
@@ -2022,10 +2039,7 @@ export function LocalPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean
                 </label>
                 <select
                   value={filterStatus}
-                  onChange={(e) => {
-                    setFilterStatus(e.target.value);
-                    setCurrentPage(1);
-                  }}
+                  onChange={(e) => setFilterStatus(e.target.value)}
                   style={{
                     width: "100%",
                     height: "38px",
@@ -2055,10 +2069,7 @@ export function LocalPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean
                   type="text"
                   placeholder="DD-MM-YYYY"
                   value={filterDate}
-                  onChange={(e) => {
-                    setFilterDate(e.target.value);
-                    setCurrentPage(1);
-                  }}
+                  onChange={(e) => setFilterDate(e.target.value)}
                   style={{
                     width: "100%",
                     height: "38px",
@@ -2074,22 +2085,20 @@ export function LocalPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean
               </div>
             </div>
 
-            <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "16px" }}>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "18px" }}>
               <button
                 type="button"
+                className="btn-filter-reset"
                 onClick={handleResetFilters}
-                style={{
-                  background: "#64748b",
-                  color: "#ffffff",
-                  border: "none",
-                  borderRadius: "6px",
-                  padding: "8px 24px",
-                  fontSize: "13px",
-                  fontWeight: 600,
-                  cursor: "pointer",
-                }}
               >
                 Reset
+              </button>
+              <button
+                type="button"
+                className="btn-filter-search"
+                onClick={handleSearchFilters}
+              >
+                Search
               </button>
             </div>
           </div>
@@ -2193,7 +2202,7 @@ export function LocalPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean
           </div>
 
           {/* Table */}
-          <div style={{ overflowX: "auto" }}>
+          <div style={{ overflowX: "auto", minHeight: "320px" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", textAlign: "left" }}>
               <thead>
                 <tr style={{ borderBottom: "1px solid #cbd5e1", background: "#f8fafc" }}>
@@ -2432,7 +2441,12 @@ export function LocalPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean
                           {order.status}
                         </span>
                       </td>
-                      <td style={{ padding: "10px 14px", textAlign: "center", position: "relative" }}>
+                      <td style={{
+                        padding: "10px 14px",
+                        textAlign: "center",
+                        position: "relative",
+                        zIndex: activeMenuId === order.id ? 50 : 1,
+                      }}>
                         <button
                           type="button"
                           aria-label="Order actions"
@@ -2473,19 +2487,22 @@ export function LocalPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean
                           ⋮
                         </button>
 
-                        {activeMenuId === order.id && (
+                        {activeMenuId === order.id && (() => {
+                          const openUpward = paginatedOrders.length >= 3 && idx >= paginatedOrders.length - (paginatedOrders.length >= 4 ? 2 : 1);
+                          return (
                           <div
                             data-action-menu-container
                             data-testid={`action-menu-${order.id}`}
                             style={{
                               position: "absolute",
                               right: "14px",
-                              top: "36px",
+                              top: openUpward ? "auto" : "36px",
+                              bottom: openUpward ? "36px" : "auto",
                               background: "#ffffff",
                               border: "1px solid #cbd5e1",
                               borderRadius: "4px",
-                              boxShadow: "0 4px 14px rgba(0,0,0,0.12)",
-                              zIndex: 40,
+                              boxShadow: openUpward ? "0 -4px 14px rgba(0,0,0,0.12)" : "0 4px 14px rgba(0,0,0,0.12)",
+                              zIndex: 100,
                               minWidth: "155px",
                               textAlign: "left",
                               overflow: "hidden",
@@ -2804,7 +2821,8 @@ export function LocalPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean
                               </>
                             )}
                           </div>
-                        )}
+                          );
+                        })()}
                       </td>
                     </tr>
                   ))

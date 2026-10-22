@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import Generic, TypeVar
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from app.core.config import settings
 
@@ -38,16 +38,25 @@ class PageParams(BaseModel):
         le=settings.MAX_PAGE_SIZE,
         description=f"Number of items per page (max {settings.MAX_PAGE_SIZE}).",
     )
+    limit: int | None = Field(
+        default=None,
+        ge=1,
+        le=settings.MAX_PAGE_SIZE,
+        description="Optional alias for page_size.",
+    )
+
+    @model_validator(mode="after")
+    def _normalize_limit_and_page_size(self) -> PageParams:
+        if self.limit is not None:
+            self.page_size = self.limit
+        else:
+            self.limit = self.page_size
+        return self
 
     @property
     def offset(self) -> int:
         """Compute the SQL OFFSET for this page."""
         return (self.page - 1) * self.page_size
-
-    @property
-    def limit(self) -> int:
-        """Compute the SQL LIMIT for this page."""
-        return self.page_size
 
 
 class PageMeta(BaseModel):

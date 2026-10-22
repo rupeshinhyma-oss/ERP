@@ -522,7 +522,74 @@ class SaleService:
         created = await self.repo.create(order)
         if created.status in ("sales_confirmed", "confirmed", "acc_confirmed") or created.invoice_no:
             await self._transition_company_to_existing(created.company_name or created.buyer_name)
+        await self._sync_discount_payment(created)
         return created
+
+    async def _sync_discount_payment(self, order: SaleOrder) -> None:
+        """Spec (Completed/Sales & PI Process.docx L98, Discount.docx):
+        Cash Amount or Under Invoice Value is shown in PI as 'Discount'.
+        Automatically maintain a record in discount_payments for tracking and receipt monitoring.
+        """
+        disc = float(order.discount or 0.0)
+        if disc <= 0:
+            return
+        try:
+            from app.sales.models import DiscountPayment
+            stmt = select(DiscountPayment).where(
+                DiscountPayment.order_ref == order.order_no,
+                DiscountPayment.deleted_at.is_(None),
+            ).limit(1)
+            res = await self.session.execute(stmt)
+            existing = res.scalar_one_or_none()
+
+            tot = float(order.total_amount or order.amount_inc_gst or 0.0)
+            disc_pct = (disc / (tot + disc) * 100.0) if (tot + disc) > 0 else 0.0
+            order_date_str = (
+                order.order_date.strftime("%d-%m-%Y")
+                if isinstance(order.order_date, date)
+                else str(order.order_date or date.today().strftime("%d-%m-%Y"))
+            )
+
+            if existing:
+                existing.discount_amount = disc
+                existing.due_discount = max(0.0, disc - float(existing.paid_discount or 0.0))
+                existing.total_order_amount = tot
+                existing.net_payable = tot
+                existing.customer_name = order.company_name or order.buyer_name or ""
+                existing.sales_person = order.sales_person
+                existing.warehouse = order.warehouse
+                if getattr(order, "gatepass_no", None):
+                    existing.gatepass_id = str(order.gatepass_no)
+                await self.session.flush()
+            else:
+                p_no = f"DP-{order.order_no}"
+                dp = DiscountPayment(
+                    payment_no=p_no,
+                    payment_date=order_date_str,
+                    order_ref=order.order_no,
+                    customer_name=order.company_name or order.buyer_name or "",
+                    sales_person=order.sales_person,
+                    warehouse=order.warehouse or "Mumbai",
+                    contact_person_name=order.contact_person_name,
+                    contact_person_mobile=order.contact_person_mobile,
+                    total_order_amount=tot,
+                    discount_percent=round(disc_pct, 2),
+                    discount_amount=disc,
+                    paid_discount=0.0,
+                    due_discount=disc,
+                    net_payable=tot,
+                    status="pending",
+                    settled=False,
+                    gatepass_id=str(getattr(order, "gatepass_no", None) or ""),
+                    gatepass_date=str(getattr(order, "gatepass_date", "") or ""),
+                    remarks=f"Automatic discount record from Sale Order {order.order_no}",
+                    created_by=order.sales_person or "Sales System",
+                )
+                self.session.add(dp)
+                await self.session.flush()
+        except Exception:
+            # Tolerant if discount payment synchronization fails
+            pass
 
     async def _transition_company_to_existing(self, company_name: str | None) -> None:
         """Spec: When an invoice or confirmed sales order is generated for a client, backend must automatically flip current_status from new to existing."""
@@ -687,6 +754,7 @@ class SaleService:
         updated = await self.repo.update(order)
         if updated.invoice_no or updated.status in ("sales_confirmed", "confirmed", "acc_confirmed"):
             await self._transition_company_to_existing(updated.company_name or updated.buyer_name)
+        await self._sync_discount_payment(updated)
         return updated
 
     async def update_status(
@@ -763,6 +831,7 @@ class SaleService:
         updated = await self.repo.update(order)
         if target in ("sales_confirmed", "confirmed", "acc_confirmed") or updated.invoice_no:
             await self._transition_company_to_existing(updated.company_name or updated.buyer_name)
+        await self._sync_discount_payment(updated)
         return updated
 
     async def delete_order(self, order_id: uuid.UUID, current_user: CurrentUser) -> None:

@@ -36,7 +36,7 @@ const PROFORMA_OPTION_GROUPS = [
 ] as const;
 
 type StatusTab = { key: string; label: string; cardLabel: string; badge: string; actionLabel?: string; actionColor?: string };
-type CatalogProduct = { product_name: string; hsn: string; rate: number; gst_percent: number; min_price: number };
+type CatalogProduct = { product_name: string; hsn: string; rate: number; gst_percent: number; min_price: number; available_stock?: number };
 
 const todayDDMMYYYY = () => new Date().toLocaleDateString("en-GB").split("/").join("-");
 
@@ -61,28 +61,45 @@ function emptyFormState(defaults: Record<string, string>, salesPerson: string) {
     shipping_address: "",
     product_search: "",
     additional_charges_enabled: true,
+    third_party_invoice_file: "",
     terms_and_conditions: defaults.terms_and_conditions || "",
     remarks: "",
   };
 }
 type FormState = ReturnType<typeof emptyFormState>;
 
-/** The two always-visible additional-charge rows (spec: Transport and Packing & Forwarding). */
+/** The two always-visible additional-charge rows (spec: Transport HSN 996511 and Packing & Forwarding HSN 996713). */
 function emptyChargeRows(): any[] {
-  return [1, 2].map((n) => ({
-    id: `charge-${n}-${Date.now()}`,
-    is_additional_charge: true,
-    charge_type: "",
-    product_name: "",
-    hsn: "",
-    quantity: "",
-    unit_price: "",
-    unit_discount: "",
-    taxable_amount: 0,
-    gst_percent: "",
-    gst_amount: 0,
-    total: 0,
-  }));
+  return [
+    {
+      id: `charge-1-${Date.now()}`,
+      is_additional_charge: true,
+      charge_type: "Transport Charges",
+      product_name: "Transport Charges",
+      hsn: "996511",
+      quantity: 1,
+      unit_price: "",
+      unit_discount: 0,
+      taxable_amount: 0,
+      gst_percent: 18,
+      gst_amount: 0,
+      total: 0,
+    },
+    {
+      id: `charge-2-${Date.now()}`,
+      is_additional_charge: true,
+      charge_type: "Packing & Forwarding",
+      product_name: "Packing & Forwarding",
+      hsn: "996713",
+      quantity: 1,
+      unit_price: "",
+      unit_discount: 0,
+      taxable_amount: 0,
+      gst_percent: 18,
+      gst_amount: 0,
+      total: 0,
+    },
+  ];
 }
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
@@ -230,7 +247,11 @@ export function ProformaInvoicesPage({
 
   const [items, setItems] = useState<ProformaInvoice[]>([]);
   const [tabCounts, setTabCounts] = useState<ProformaTabCounts>({});
-  const [activeTab, setActiveTab] = useState<string>("all");
+  const [activeTab, setActiveTabState] = useState<string>(() => sessionStorage.getItem("proforma_active_tab") || "all");
+  const setActiveTab = (tab: string) => {
+    sessionStorage.setItem("proforma_active_tab", tab);
+    setActiveTabState(tab);
+  };
 
   // Option lists: fixed choices from option_lists, others from their master tables
   const { options: optionGroups } = useOptions(PROFORMA_OPTION_GROUPS);
@@ -612,7 +633,7 @@ export function ProformaInvoicesPage({
     });
   };
 
-  const handleAddProductItem = (prod?: { product_name: string; hsn?: string; rate?: number; gst_percent?: number; min_price?: number }) => {
+  const handleAddProductItem = (prod?: { product_name: string; hsn?: string; rate?: number; gst_percent?: number; min_price?: number; available_stock?: number }) => {
     const base = {
       id: "prod-" + Date.now() + Math.random().toString(36).substring(2, 5),
       is_additional_charge: false,
@@ -624,6 +645,7 @@ export function ProformaInvoicesPage({
       unit_discount: 0,
       gst_percent: prod?.gst_percent ?? 0,
       min_price: prod?.min_price,
+      available_stock: prod?.available_stock,
     };
     setFormLineItems((prev) => [{ ...base, ...priceLine(base) }, ...prev]);
   };
@@ -666,8 +688,9 @@ export function ProformaInvoicesPage({
             product_name: p.product_name,
             hsn: p.hsn_number || "",
             rate: Number(p.standard_price) || 0,
-            min_price: Number(p.standard_price) || 0,
+            min_price: Number(p.minimum_price || p.min_price || p.standard_price) || 0,
             gst_percent: Number(p.gst_percent) || 0,
+            available_stock: p.current_stock !== undefined ? Number(p.current_stock) : undefined,
           }))
         );
       })
@@ -695,6 +718,10 @@ export function ProformaInvoicesPage({
     setErrorMessage(null);
     setFormErrors({});
     setEditingId(p.id);
+    if (p.status) {
+      sessionStorage.setItem("proforma_active_tab", p.status);
+      setActiveTabState(p.status);
+    }
     setFormState({
       ...emptyFormState({}, ""),
       proforma_date: p.proforma_date,
@@ -1080,8 +1107,30 @@ export function ProformaInvoicesPage({
                     placeholder="Select Lead Source"
                   />
                 </div>
-
-                <div />
+                {formState.third_party_delivery === "Yes" ? (
+                  <div>
+                    <label style={{ fontSize: "12px", fontWeight: 600, color: "#1e293b", marginBottom: "6px", display: "block" }}>
+                      Third Party Invoice (Optional)
+                    </label>
+                    <input
+                      type="file"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) {
+                          setFormState((prev) => ({ ...prev, third_party_invoice_file: file.name }));
+                        }
+                      }}
+                      style={{ fontSize: "12px", width: "100%" }}
+                    />
+                    {formState.third_party_invoice_file && (
+                      <span style={{ fontSize: "11px", color: "#0284c7", marginTop: "2px", display: "block" }}>
+                        Attached: {formState.third_party_invoice_file}
+                      </span>
+                    )}
+                  </div>
+                ) : (
+                  <div />
+                )}
 
                 {/* Row 3: hidden when the transport is Self Pick-up (spec) */}
                 {!selfPickup && (
@@ -1326,6 +1375,11 @@ export function ProformaInvoicesPage({
                             onChange={(e) => handleUpdateLineItem(idx, "quantity", e.target.value)}
                             style={{ width: "100%", height: "32px", border: "1px solid #cbd5e1", borderRadius: "3px", padding: "0 6px", fontSize: "12.5px" }}
                           />
+                          {!row.is_additional_charge && row.available_stock !== undefined && (
+                            <div style={{ fontSize: "11px", color: Number(row.available_stock) > 0 ? "#0284c7" : "#ef4444", marginTop: "2px", fontWeight: 500 }}>
+                              Stock: {row.available_stock}
+                            </div>
+                          )}
                         </td>
                         <td style={{ padding: "6px 8px", borderBottom: "1px solid #e2e8f0" }}>
                           <input
@@ -1667,14 +1721,6 @@ export function ProformaInvoicesPage({
                 </svg>
                 Filter Options
               </div>
-              <button
-                type="button"
-                className="btn btn-small"
-                style={{ background: "#f1f5f9", color: "#475569", border: "1px solid #cbd5e1", borderRadius: "6px", cursor: "pointer", fontWeight: 600, fontSize: "12.5px" }}
-                onClick={handleResetFilter}
-              >
-                Reset Filters
-              </button>
             </div>
 
             {/* Top Row: 3 columns */}
@@ -1697,10 +1743,7 @@ export function ProformaInvoicesPage({
                   id="filter-proforma-date-range"
                   value={filterDateRange}
                   onChange={(val) => setFilterDateRange(val)}
-                  onApply={(val) => {
-                    setFilterDateRange(val);
-                    setAppliedDateRange(val);
-                  }}
+                  onApply={(val) => setFilterDateRange(val)}
                   placeholder=""
                 />
               </div>
@@ -1716,10 +1759,7 @@ export function ProformaInvoicesPage({
                   id="filter-exp-date-range"
                   value={filterExpDateRange}
                   onChange={(val) => setFilterExpDateRange(val)}
-                  onApply={(val) => {
-                    setFilterExpDateRange(val);
-                    setAppliedExpDateRange(val);
-                  }}
+                  onApply={(val) => setFilterExpDateRange(val)}
                   placeholder=""
                 />
               </div>
@@ -1837,38 +1877,15 @@ export function ProformaInvoicesPage({
               >
                 <button
                   type="button"
+                  className="btn-filter-reset"
                   onClick={handleResetFilter}
-                  style={{
-                    backgroundColor: "#5c6b84",
-                    color: "#ffffff",
-                    border: "none",
-                    borderRadius: "4px",
-                    padding: "8px 22px",
-                    fontSize: "13.5px",
-                    fontWeight: 500,
-                    cursor: "pointer",
-                    height: "38px",
-                    transition: "all 0.15s ease",
-                  }}
                 >
                   Reset
                 </button>
                 <button
                   type="button"
+                  className="btn-filter-search"
                   onClick={handleSearchFilter}
-                  style={{
-                    backgroundColor: "#ffa800",
-                    color: "#ffffff",
-                    border: "none",
-                    borderRadius: "4px",
-                    padding: "8px 22px",
-                    fontSize: "13.5px",
-                    fontWeight: 600,
-                    cursor: "pointer",
-                    height: "38px",
-                    boxShadow: "0 1px 2px rgba(0,0,0,0.1)",
-                    transition: "all 0.15s ease",
-                  }}
                 >
                   Search
                 </button>
@@ -1881,7 +1898,6 @@ export function ProformaInvoicesPage({
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "12px", marginBottom: "16px" }}>
           {STATUS_TABS.map((card) => {
             const c = tabCounts[card.key] || { count: 0, amount: 0 };
-            const isActive = activeTab === card.key;
             return (
               <div
                 key={card.key}
@@ -1889,10 +1905,10 @@ export function ProformaInvoicesPage({
                 style={{
                   margin: 0,
                   cursor: "pointer",
-                  border: isActive ? "2px solid #0061f2" : "1px solid #e2e8f0",
-                  backgroundColor: isActive ? "#f8fafc" : "#ffffff",
+                  border: "1px solid #e2e8f0",
+                  backgroundColor: "#ffffff",
                   padding: "12px 14px",
-                  boxShadow: isActive ? "0 4px 6px -1px rgba(0,97,242,0.1)" : "0 1px 3px rgba(0,0,0,0.04)",
+                  boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
                   transition: "all 0.15s ease",
                 }}
                 onClick={() => {
@@ -1900,7 +1916,7 @@ export function ProformaInvoicesPage({
                   setCurrentPage(1);
                 }}
               >
-                <div style={{ fontSize: "11px", fontWeight: 700, color: isActive ? "#0061f2" : "#64748b", letterSpacing: "0.03em", marginBottom: "6px" }}>
+                <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748b", letterSpacing: "0.03em", marginBottom: "6px" }}>
                   {card.cardLabel}
                 </div>
                 <div style={{ fontSize: "17px", fontWeight: 700, color: "#0f172a" }}>
@@ -2000,7 +2016,7 @@ export function ProformaInvoicesPage({
           </div>
 
           {/* Table Container */}
-          <div className="table-scroll" style={{ maxHeight: "calc(100vh - 220px)", overflowY: "auto", overflowX: "auto", border: "none", borderRadius: 0, boxShadow: "none" }}>
+          <div className="table-scroll" style={{ maxHeight: "calc(100vh - 220px)", minHeight: "320px", overflowY: "auto", overflowX: "auto", border: "none", borderRadius: 0, boxShadow: "none" }}>
             <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: "13px", textAlign: "left", minWidth: "1150px" }}>
               <thead>
                 <tr>
@@ -2115,7 +2131,7 @@ export function ProformaInvoicesPage({
                         )}
                         {p.remark && <div style={{ fontSize: "11px", color: "#dc2626", marginTop: "2px" }}>{p.remark}</div>}
                       </td>
-                      <td style={{ textAlign: "center", position: "relative", padding: "8px 10px", borderBottom: "1px solid #e2e8f0", height: "38px" }}>
+                      <td style={{ textAlign: "center", position: "relative", zIndex: openActionId === p.id ? 50 : 1, padding: "8px 10px", borderBottom: "1px solid #e2e8f0", height: "38px" }}>
                         <button
                           type="button"
                           onClick={(e) => {
@@ -2135,17 +2151,20 @@ export function ProformaInvoicesPage({
                         >
                           ⋮
                         </button>
-                        {openActionId === p.id && (
+                        {openActionId === p.id && (() => {
+                          const openUpward = paginatedItems.length >= 3 && idx >= paginatedItems.length - (paginatedItems.length >= 4 ? 2 : 1);
+                          return (
                           <div
                             onClick={(e) => e.stopPropagation()}
                             style={{
                               position: "absolute",
                               right: "10px",
-                              top: "34px",
+                              top: openUpward ? "auto" : "34px",
+                              bottom: openUpward ? "34px" : "auto",
                               background: "#ffffff",
                               border: "1px solid #cbd5e1",
                               borderRadius: "6px",
-                              boxShadow: "0 4px 12px rgba(0,0,0,0.12)",
+                              boxShadow: openUpward ? "0 -4px 12px rgba(0,0,0,0.12)" : "0 4px 12px rgba(0,0,0,0.12)",
                               zIndex: 100,
                               minWidth: "140px",
                               textAlign: "left",
@@ -2227,7 +2246,8 @@ export function ProformaInvoicesPage({
                             })}
                             {canDelete(p) && <ActionMenuItem label="🗑️ Delete" color="#dc2626" onClick={() => void handleDeleteProforma(p)} />}
                           </div>
-                        )}
+                          );
+                        })()}
                       </td>
                     </tr>
                   ))

@@ -368,6 +368,8 @@ class BaseRepository(Generic[ModelT]):
     def _apply_sort(self, stmt: Select, sort: Any) -> Select:
         """Apply ``?sort_by=&sort_order=``, validated against ``sortable_fields``."""
         if not sort.is_active:
+            if hasattr(self.model, "created_at"):
+                return stmt.order_by(self.model.created_at.desc())
             return stmt
         if sort.sort_by not in self.sortable_fields:
             raise BadRequestException(

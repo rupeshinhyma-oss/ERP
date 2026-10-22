@@ -93,6 +93,15 @@ export function PaymentsPage() {
   const [filterDateFrom, setFilterDateFrom] = useState("");
   const [filterDateTo, setFilterDateTo] = useState("");
 
+  const [appliedFilters, setAppliedFilters] = useState({
+    city: "",
+    taskType: "",
+    priority: "",
+    technician: "",
+    dateFrom: "",
+    dateTo: "",
+  });
+
   // Modals & Action Menus
   const [openActionMenuId, setOpenActionMenuId] = useState<string | null>(null);
   const [recordPaymentTask, setRecordPaymentTask] = useState<TechnicalTask | null>(null);
@@ -162,12 +171,12 @@ export function PaymentsPage() {
       if (searchQuery.trim()) {
         params.search = searchQuery.trim();
       }
-      if (filterCity.trim()) params.city = filterCity.trim();
-      if (filterTaskType.trim()) params.task_type = filterTaskType.trim();
-      if (filterPriority.trim()) params.priority = filterPriority.trim();
-      if (filterTechnician.trim()) params.task_allotted_to = filterTechnician.trim();
-      if (filterDateFrom) params.date_from = filterDateFrom;
-      if (filterDateTo) params.date_to = filterDateTo;
+      if (appliedFilters.city.trim()) params.city = appliedFilters.city.trim();
+      if (appliedFilters.taskType.trim()) params.task_type = appliedFilters.taskType.trim();
+      if (appliedFilters.priority.trim()) params.priority = appliedFilters.priority.trim();
+      if (appliedFilters.technician.trim()) params.task_allotted_to = appliedFilters.technician.trim();
+      if (appliedFilters.dateFrom) params.date_from = appliedFilters.dateFrom;
+      if (appliedFilters.dateTo) params.date_to = appliedFilters.dateTo;
 
       const res = await fetchTechnicalTasks(params);
       const items = res.data || [];
@@ -186,12 +195,7 @@ export function PaymentsPage() {
     page,
     pageSize,
     searchQuery,
-    filterCity,
-    filterTaskType,
-    filterPriority,
-    filterTechnician,
-    filterDateFrom,
-    filterDateTo,
+    appliedFilters,
   ]);
 
   useEffect(() => {
@@ -404,6 +408,28 @@ export function PaymentsPage() {
     setFilterTechnician("");
     setFilterDateFrom("");
     setFilterDateTo("");
+    setPage(1);
+    setAppliedFilters({
+      city: "",
+      taskType: "",
+      priority: "",
+      technician: "",
+      dateFrom: "",
+      dateTo: "",
+    });
+  };
+
+  // Search / Apply Filters
+  const handleSearchFilters = () => {
+    setPage(1);
+    setAppliedFilters({
+      city: filterCity,
+      taskType: filterTaskType,
+      priority: filterPriority,
+      technician: filterTechnician,
+      dateFrom: filterDateFrom,
+      dateTo: filterDateTo,
+    });
   };
 
   // Total pages
@@ -421,231 +447,411 @@ export function PaymentsPage() {
   return (
     <AppShell activeKey="payments">
       <ErrorBoundary title="Payments Module Error">
-        <div className="page-payments">
+        <main className="page page-payments">
           {banner && (
-            <Banner
-              error={banner.type === "error" ? banner.message : undefined}
-              success={banner.type === "success" ? banner.message : undefined}
-            />
+            <div style={{ marginBottom: "16px" }}>
+              <Banner
+                error={banner.type === "error" ? banner.message : undefined}
+                success={banner.type === "success" ? banner.message : undefined}
+              />
+            </div>
           )}
 
           {/* Top Header */}
-          <div className="payments-header">
-            <h1 className="payments-title">Payments</h1>
-            <div className="payments-header-actions">
+          <div
+            className="page-header"
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              marginBottom: "16px",
+              flexWrap: "wrap",
+              gap: "10px",
+            }}
+          >
+            <div>
+              <h1 style={{ margin: 0, fontSize: "20px", fontWeight: 700, color: "#1e293b" }}>Payments</h1>
+            </div>
+
+            <div className="page-header-actions" style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+              {/* Filter Toggle Button */}
               <button
                 type="button"
-                className={`btn-payment-filter ${filterOpen ? "active" : ""}`}
+                className="btn btn-filter-toggle"
+                style={{
+                  background: "#556987",
+                  color: "#ffffff",
+                  padding: "8px 14px",
+                  borderRadius: "6px",
+                  border: "none",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  cursor: "pointer",
+                  boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
+                }}
                 onClick={() => setFilterOpen((prev) => !prev)}
-                title="Filter records"
+                title="Toggle Filter Options"
               >
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
                 </svg>
               </button>
 
+              {/* + ADD NEW */}
               <button
                 type="button"
-                className="btn-payment-add"
+                className="btn btn-add-new"
+                style={{
+                  height: "36px",
+                  padding: "0 18px",
+                  background: "#0061f2",
+                  color: "#ffffff",
+                  fontWeight: 600,
+                  fontSize: "13px",
+                  borderRadius: "6px",
+                  border: "none",
+                  cursor: "pointer",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  boxShadow: "0 1px 2px rgba(0, 97, 242, 0.2)",
+                  whiteSpace: "nowrap",
+                }}
                 onClick={() => setAddNewOpen(true)}
               >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                  <line x1="12" y1="5" x2="12" y2="19" />
-                  <line x1="5" y1="12" x2="19" y2="12" />
-                </svg>
                 + ADD NEW
               </button>
 
+              {/* DELETE */}
               <button
                 type="button"
-                className="btn-payment-delete"
+                className="btn btn-delete"
+                style={{
+                  height: "36px",
+                  padding: "0 16px",
+                  background: selectedIds.size > 0 ? "#dc2626" : "#cbd5e1",
+                  color: "#ffffff",
+                  fontWeight: 600,
+                  fontSize: "13px",
+                  border: "none",
+                  borderRadius: "6px",
+                  cursor: selectedIds.size > 0 ? "pointer" : "not-allowed",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  transition: "background 0.15s ease",
+                  whiteSpace: "nowrap",
+                }}
+                disabled={selectedIds.size === 0}
                 onClick={() => {
-                  if (selectedIds.size === 0) {
-                    setBanner({ type: "info", message: "Please select one or more items to delete." });
-                    return;
-                  }
-                  setDeleteConfirmOpen(true);
+                  if (selectedIds.size > 0) setDeleteConfirmOpen(true);
                 }}
               >
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <polyline points="3 6 5 6 21 6" />
                   <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
                 </svg>
-                DELETE
+                DELETE {selectedIds.size > 0 ? `(${selectedIds.size})` : ""}
               </button>
-            </div>
-          </div>
-
-          {/* 3 KPI Summary Cards */}
-          <div className="payment-kpi-container">
-            <div className="payment-kpi-card">
-              <div className="payment-kpi-label">TOTAL PAYMENT</div>
-              <div className="payment-kpi-value total">
-                ₹ {formatCurrency(summary.total_payment)}
-              </div>
-            </div>
-            <div className="payment-kpi-card">
-              <div className="payment-kpi-label">PAID</div>
-              <div className="payment-kpi-value paid">
-                ₹ {formatCurrency(summary.paid)}
-              </div>
-            </div>
-            <div className="payment-kpi-card">
-              <div className="payment-kpi-label">DUE</div>
-              <div className="payment-kpi-value due">
-                ₹ {formatCurrency(summary.due)}
-              </div>
-            </div>
-          </div>
-
-          {/* Tabs: Pending (count) | Completed (count) */}
-          <div className="payments-tabs-nav">
-            <button
-              type="button"
-              className={`payments-tab-item ${activeTab === "pending" ? "active" : ""}`}
-              onClick={() => handleTabChange("pending")}
-            >
-              Pending ({summary.pending_count})
-            </button>
-            <button
-              type="button"
-              className={`payments-tab-item ${activeTab === "completed" ? "active" : ""}`}
-              onClick={() => handleTabChange("completed")}
-            >
-              Completed ({summary.completed_count})
-            </button>
-          </div>
-
-          {/* Subbar: Items/Page & Search */}
-          <div className="payments-subbar">
-            <div>
-              <select
-                className="payments-page-size-select"
-                value={pageSize}
-                onChange={(e) => {
-                  setPageSize(Number(e.target.value));
-                  setPage(1);
-                }}
-              >
-                <option value={10}>10 Items/Page</option>
-                <option value={25}>25 Items/Page</option>
-                <option value={50}>50 Items/Page</option>
-                <option value={100}>100 Items/Page</option>
-              </select>
-            </div>
-
-            <div className="payments-search-wrapper">
-              <span className="payments-search-icon">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <circle cx="11" cy="11" r="8" />
-                  <line x1="21" y1="21" x2="16.65" y2="16.65" />
-                </svg>
-              </span>
-              <input
-                type="text"
-                placeholder="Search..."
-                value={searchQuery}
-                onChange={(e) => {
-                  setSearchQuery(e.target.value);
-                  setPage(1);
-                }}
-              />
             </div>
           </div>
 
           {/* Collapsible Filter Panel */}
           {filterOpen && (
-            <div className="payments-filter-panel">
-              <div className="payments-filter-grid">
-                <div className="payments-filter-item">
-                  <label>City</label>
+            <div
+              id="payments-filter-card"
+              className="card"
+              style={{
+                background: "#ffffff",
+                borderRadius: "10px",
+                border: "1px solid #cbd5e1",
+                padding: "20px",
+                marginBottom: "16px",
+                boxShadow: "0 4px 6px -1px rgba(0, 0, 0, 0.05)",
+              }}
+            >
+              <div style={{ fontWeight: 600, fontSize: "14px", color: "#0f172a", display: "flex", alignItems: "center", gap: "6px", marginBottom: "14px" }}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
+                </svg>
+                Filter Options
+              </div>
+
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", columnGap: "20px", rowGap: "14px" }}>
+                <div>
+                  <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px" }}>City</label>
                   <input
                     type="text"
-                    placeholder="Filter by city..."
+                    placeholder="All / Select or type city..."
                     value={filterCity}
                     onChange={(e) => setFilterCity(e.target.value)}
+                    style={{ width: "100%", height: "36px", padding: "0 10px", border: "1px solid #cbd5e1", borderRadius: "6px", fontSize: "13px", outline: "none", boxSizing: "border-box" }}
                   />
                 </div>
-                <div className="payments-filter-item">
-                  <label>Task Type</label>
+                <div>
+                  <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px" }}>Task Type</label>
                   <select
                     value={filterTaskType}
                     onChange={(e) => setFilterTaskType(e.target.value)}
+                    style={{ width: "100%", height: "36px", padding: "0 10px", border: "1px solid #cbd5e1", borderRadius: "6px", fontSize: "13px", outline: "none", boxSizing: "border-box", background: "#ffffff", color: "#334155" }}
                   >
-                    <option value="">All Types</option>
+                    <option value="">All</option>
                     <option value="Physical Visit">Physical Visit</option>
                     <option value="Telecall">Telecall</option>
                     <option value="Online Support">Online Support</option>
                     <option value="Installation">Installation</option>
                   </select>
                 </div>
-                <div className="payments-filter-item">
-                  <label>Priority</label>
+                <div>
+                  <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px" }}>Priority</label>
                   <select
                     value={filterPriority}
                     onChange={(e) => setFilterPriority(e.target.value)}
+                    style={{ width: "100%", height: "36px", padding: "0 10px", border: "1px solid #cbd5e1", borderRadius: "6px", fontSize: "13px", outline: "none", boxSizing: "border-box", background: "#ffffff", color: "#334155" }}
                   >
-                    <option value="">All Priorities</option>
+                    <option value="">All</option>
                     <option value="A">Priority A</option>
                     <option value="B">Priority B</option>
                     <option value="C">Priority C</option>
                   </select>
                 </div>
-                <div className="payments-filter-item">
-                  <label>Technician</label>
+                <div>
+                  <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px" }}>Task Allotted To</label>
                   <input
                     type="text"
-                    placeholder="Allotted to..."
+                    placeholder="All / Allotted to..."
                     value={filterTechnician}
                     onChange={(e) => setFilterTechnician(e.target.value)}
+                    style={{ width: "100%", height: "36px", padding: "0 10px", border: "1px solid #cbd5e1", borderRadius: "6px", fontSize: "13px", outline: "none", boxSizing: "border-box" }}
                   />
                 </div>
-                <div className="payments-filter-item">
-                  <label>From Date</label>
-                  <input
-                    type="date"
-                    value={filterDateFrom}
-                    onChange={(e) => setFilterDateFrom(e.target.value)}
-                  />
+                <div style={{ gridColumn: "span 2" }}>
+                  <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px" }}>Task Create Date Range</label>
+                  <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                    <input
+                      type="date"
+                      value={filterDateFrom}
+                      onChange={(e) => setFilterDateFrom(e.target.value)}
+                      style={{ flex: 1, height: "36px", padding: "0 10px", border: "1px solid #cbd5e1", borderRadius: "6px", fontSize: "13px", outline: "none", boxSizing: "border-box" }}
+                    />
+                    <span style={{ color: "#94a3b8", fontSize: "13px", fontWeight: 500 }}>to</span>
+                    <input
+                      type="date"
+                      value={filterDateTo}
+                      onChange={(e) => setFilterDateTo(e.target.value)}
+                      style={{ flex: 1, height: "36px", padding: "0 10px", border: "1px solid #cbd5e1", borderRadius: "6px", fontSize: "13px", outline: "none", boxSizing: "border-box" }}
+                    />
+                  </div>
                 </div>
-                <div className="payments-filter-item">
-                  <label>To Date</label>
-                  <input
-                    type="date"
-                    value={filterDateTo}
-                    onChange={(e) => setFilterDateTo(e.target.value)}
-                  />
-                </div>
-                <div>
-                  <button
-                    type="button"
-                    className="btn-filter-reset"
-                    onClick={handleResetFilters}
-                  >
-                    Reset
-                  </button>
-                </div>
+              </div>
+
+              {/* Bottom-right Reset and Search buttons matching Companies exactly */}
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "18px" }}>
+                <button
+                  type="button"
+                  className="btn-filter-reset"
+                  onClick={handleResetFilters}
+                >
+                  Reset
+                </button>
+                <button
+                  type="button"
+                  className="btn-filter-search"
+                  onClick={handleSearchFilters}
+                >
+                  Search
+                </button>
               </div>
             </div>
           )}
 
-          {/* Data Table */}
-          <div className="payments-table-card">
-            <div className="payments-table-responsive">
-              <table className="payments-table">
+          {/* 3 KPI Summary Cards */}
+          <div
+            className="card"
+            style={{
+              background: "#ffffff",
+              borderRadius: "10px",
+              border: "1px solid #cbd5e1",
+              padding: "18px 24px",
+              marginBottom: "16px",
+              boxShadow: "0 1px 3px rgba(0, 0, 0, 0.04)",
+            }}
+          >
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "24px" }}>
+              <div>
+                <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: "4px" }}>
+                  TOTAL PAYMENT
+                </div>
+                <div style={{ fontSize: "24px", fontWeight: 700, color: "#0f172a" }}>
+                  ₹ {formatCurrency(summary.total_payment)}
+                </div>
+              </div>
+              <div>
+                <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: "4px" }}>
+                  PAID
+                </div>
+                <div style={{ fontSize: "24px", fontWeight: 700, color: "#16a34a" }}>
+                  ₹ {formatCurrency(summary.paid)}
+                </div>
+              </div>
+              <div>
+                <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: "4px" }}>
+                  DUE
+                </div>
+                <div style={{ fontSize: "24px", fontWeight: 700, color: "#0f172a" }}>
+                  ₹ {formatCurrency(summary.due)}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Unified Main Data Card (Tabs + Toolbar + Table + Pagination) */}
+          <div
+            className="card"
+            style={{
+              background: "#ffffff",
+              borderRadius: "10px",
+              border: "1px solid #cbd5e1",
+              boxShadow: "0 4px 6px -1px rgba(0, 0, 0, 0.05)",
+              overflow: "hidden",
+            }}
+          >
+            {/* Tabs inside Card */}
+            <div
+              style={{
+                display: "flex",
+                gap: "20px",
+                borderBottom: "1px solid #e2e8f0",
+                padding: "6px 16px 0",
+                background: "#ffffff",
+                overflowX: "auto",
+              }}
+            >
+              <button
+                type="button"
+                style={{
+                  background: "none",
+                  border: "none",
+                  borderBottom: activeTab === "pending" ? "2.5px solid #0061f2" : "2.5px solid transparent",
+                  color: activeTab === "pending" ? "#0061f2" : "#64748b",
+                  fontWeight: 700,
+                  fontSize: "13.5px",
+                  paddingBottom: "8px",
+                  cursor: "pointer",
+                  whiteSpace: "nowrap",
+                }}
+                onClick={() => handleTabChange("pending")}
+              >
+                Pending ({summary.pending_count})
+              </button>
+              <button
+                type="button"
+                style={{
+                  background: "none",
+                  border: "none",
+                  borderBottom: activeTab === "completed" ? "2.5px solid #0061f2" : "2.5px solid transparent",
+                  color: activeTab === "completed" ? "#0061f2" : "#64748b",
+                  fontWeight: 700,
+                  fontSize: "13.5px",
+                  paddingBottom: "8px",
+                  cursor: "pointer",
+                  whiteSpace: "nowrap",
+                }}
+                onClick={() => handleTabChange("completed")}
+              >
+                Completed ({summary.completed_count})
+              </button>
+            </div>
+
+            {/* Sub-toolbar inside Card */}
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                padding: "10px 16px",
+                gap: "10px",
+                flexWrap: "wrap",
+                borderBottom: "1px solid #f1f5f9",
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <select
+                  value={pageSize}
+                  onChange={(e) => {
+                    setPageSize(Number(e.target.value));
+                    setPage(1);
+                  }}
+                  style={{
+                    padding: "6px 12px",
+                    borderRadius: "6px",
+                    border: "1px solid #cbd5e1",
+                    fontSize: "13px",
+                    background: "#ffffff",
+                    outline: "none",
+                    cursor: "pointer",
+                  }}
+                >
+                  <option value={10}>10</option>
+                  <option value={25}>25</option>
+                  <option value={50}>50</option>
+                  <option value={100}>100</option>
+                </select>
+                <span style={{ fontSize: "13px", color: "#64748b", fontWeight: 500 }}>Items/Page</span>
+              </div>
+
+              <div style={{ position: "relative", display: "inline-flex", alignItems: "center" }}>
+                <input
+                  type="text"
+                  placeholder="Search..."
+                  value={searchQuery}
+                  onChange={(e) => {
+                    setSearchQuery(e.target.value);
+                    setPage(1);
+                  }}
+                  style={{
+                    width: "260px",
+                    padding: "8px 36px 8px 14px",
+                    borderRadius: "6px",
+                    border: "1px solid #cbd5e1",
+                    fontSize: "13px",
+                    outline: "none",
+                    boxSizing: "border-box",
+                  }}
+                />
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="#94a3b8"
+                  strokeWidth="2"
+                  style={{ position: "absolute", right: "12px", pointerEvents: "none" }}
+                >
+                  <circle cx="11" cy="11" r="8" />
+                  <line x1="21" y1="21" x2="16.65" y2="16.65" />
+                </svg>
+              </div>
+            </div>
+
+            {/* Table with responsive horizontal scroll */}
+            <div style={{ width: "100%", overflowX: "auto", minHeight: "320px" }}>
+              <table className="payments-table" style={{ width: "100%", borderCollapse: "collapse" }}>
                 <thead>
                   <tr>
-                    <th style={{ width: 36 }}>
+                    <th style={{ width: 40, textAlign: "center" }}>
                       <input
                         type="checkbox"
                         checked={allCurrentSelected}
                         onChange={toggleSelectAll}
+                        style={{ cursor: "pointer", width: 16, height: 16 }}
                       />
                     </th>
                     <th>Company Name</th>
                     <th>Task Type</th>
                     <th>City</th>
-                    <th>Priority</th>
+                    <th style={{ textAlign: "center" }}>Priority</th>
                     <th>Machine & Model</th>
                     <th>Contact Person</th>
                     <th>Task Date & Task By</th>
@@ -654,7 +860,7 @@ export function PaymentsPage() {
                     <th>Total Amount</th>
                     <th>Paid/Due</th>
                     <th>Task Status</th>
-                    <th style={{ width: 44, textAlign: "center" }}>Action</th>
+                    <th style={{ width: 50, textAlign: "center" }}>Action</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -662,12 +868,37 @@ export function PaymentsPage() {
                     <TechnicalPaymentsSkeletonRows count={pageSize > 10 ? 8 : pageSize} />
                   ) : tasks.length === 0 ? (
                     <tr>
-                      <td colSpan={14} style={{ textAlign: "center", padding: "48px 14px", color: "#64748b", fontSize: "14px" }}>
-                        No Data
+                      <td colSpan={14} style={{ textAlign: "center", padding: "60px 20px" }}>
+                        <div
+                          style={{
+                            width: "48px",
+                            height: "48px",
+                            margin: "0 auto 12px",
+                            borderRadius: "50%",
+                            background: "#f1f5f9",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            color: "#94a3b8",
+                          }}
+                        >
+                          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <rect x="2" y="5" width="20" height="14" rx="2" />
+                            <line x1="2" y1="10" x2="22" y2="10" />
+                          </svg>
+                        </div>
+                        <div style={{ fontSize: "15px", fontWeight: 600, color: "#1e293b", marginBottom: "4px" }}>
+                          No payment records found
+                        </div>
+                        <div style={{ fontSize: "13px", color: "#64748b" }}>
+                          {searchQuery || Object.values(appliedFilters).some(Boolean)
+                            ? "Try clearing or adjusting your search / filter criteria."
+                            : `No ${activeTab} payments available.`}
+                        </div>
                       </td>
                     </tr>
                   ) : (
-                    tasks.map((task) => {
+                    tasks.map((task, idx) => {
                       const isSelected = selectedIds.has(task.id);
                       const serviceCharge = Number(task.service_charge || 0);
                       const paidAmount = Number(task.collected_amount || 0);
@@ -691,11 +922,12 @@ export function PaymentsPage() {
 
                       return (
                         <tr key={task.id} className={isSelected ? "selected" : ""}>
-                          <td>
+                          <td style={{ textAlign: "center" }}>
                             <input
                               type="checkbox"
                               checked={isSelected}
                               onChange={() => toggleSelectRow(task.id)}
+                              style={{ cursor: "pointer", width: 15, height: 15 }}
                             />
                           </td>
                           <td>
@@ -716,7 +948,7 @@ export function PaymentsPage() {
                             </span>
                           </td>
                           <td>{task.city || "-"}</td>
-                          <td style={{ fontWeight: 600 }}>{task.priority || "A"}</td>
+                          <td style={{ textAlign: "center", fontWeight: 600 }}>{task.priority || "A"}</td>
                           <td style={{ maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis" }} title={task.machine_model}>
                             {task.machine_model || "Service Charges"}
                           </td>
@@ -760,7 +992,7 @@ export function PaymentsPage() {
                             </span>
                           </td>
                           <td style={{ textAlign: "center" }}>
-                            <div className="payment-action-menu-wrapper">
+                            <div className="payment-action-menu-wrapper" style={{ zIndex: openActionMenuId === task.id ? 50 : 1 }}>
                               <button
                                 type="button"
                                 className="btn-payment-action"
@@ -772,8 +1004,10 @@ export function PaymentsPage() {
                                 &#8942;
                               </button>
 
-                              {openActionMenuId === task.id && (
-                                <div className="payment-action-dropdown">
+                              {openActionMenuId === task.id && (() => {
+                                const openUpward = tasks.length >= 3 && idx >= tasks.length - (tasks.length >= 4 ? 2 : 1);
+                                return (
+                                <div className={`payment-action-dropdown ${openUpward ? "open-upward" : ""}`}>
                                   <button
                                     type="button"
                                     onClick={() => openRecordPayment(task)}
@@ -801,7 +1035,8 @@ export function PaymentsPage() {
                                     View Details
                                   </button>
                                 </div>
-                              )}
+                                );
+                              })()}
                             </div>
                           </td>
                         </tr>
@@ -812,8 +1047,33 @@ export function PaymentsPage() {
               </table>
             </div>
 
-            {/* Pagination Controls */}
-            <div className="pagination" style={{ padding: "8px 16px 16px" }}>
+            {/* Pagination Controls inside Card matching Companies */}
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                padding: "12px 16px",
+                borderTop: "1px solid #e2e8f0",
+                background: "#ffffff",
+                flexWrap: "wrap",
+                gap: "10px",
+              }}
+            >
+              <div style={{ fontSize: "13px", color: "#64748b" }}>
+                Showing{" "}
+                <strong style={{ color: "#1e293b" }}>
+                  {totalRecords === 0 ? 0 : (page - 1) * pageSize + 1}
+                </strong>
+                {" "}–{" "}
+                <strong style={{ color: "#1e293b" }}>
+                  {Math.min(page * pageSize, totalRecords)}
+                </strong>
+                {" "}of{" "}
+                <strong style={{ color: "#1e293b" }}>{totalRecords}</strong>
+                {" "}total (Page {page} of {Math.max(1, Math.ceil(totalRecords / pageSize))})
+              </div>
+
               <Pagination
                 pagination={paginationMeta}
                 pageSize={pageSize}
@@ -1238,7 +1498,7 @@ export function PaymentsPage() {
               </div>
             </Modal>
           )}
-        </div>
+        </main>
       </ErrorBoundary>
     </AppShell>
   );

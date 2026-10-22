@@ -237,6 +237,7 @@ export function LeavePage() {
   const [approvals, setApprovals] = useState<LeaveRequest[]>([]);
 
   // Loading & Calculation State
+  const [loading, setLoading] = useState<boolean>(false);
   const [loadingBalances, setLoadingBalances] = useState<boolean>(false);
   const [loadingRequests, setLoadingRequests] = useState<boolean>(false);
   const [calculatingDays, setCalculatingDays] = useState<boolean>(false);
@@ -1095,7 +1096,7 @@ export function LeavePage() {
               <h1 style={{ margin: 0 }}>Leave</h1>
             </div>
 
-            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <div className="page-header-actions" style={{ display: "flex", alignItems: "center", gap: 10 }}>
               <select
                 className="form-control"
                 style={{ width: 115, fontWeight: 600 }}

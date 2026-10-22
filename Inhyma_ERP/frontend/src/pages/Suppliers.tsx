@@ -32,31 +32,11 @@ import { EmailTagInput, PhoneGroupField, SelectField, TextAreaField, TextField, 
 import { useLookup } from "@/lib/lookups";
 import { useLiveModule } from "@/lib/live/useLive";
 
-function resolveImageUrl(url: string | null | undefined): string {
-  if (!url) return "";
-  let clean = url.trim();
-  if ((clean.startsWith('"') && clean.endsWith('"')) || (clean.startsWith("'") && clean.endsWith("'"))) {
-    clean = clean.slice(1, -1).trim();
-  }
-  if (!clean) return "";
-  if (clean.toLowerCase().startsWith("/static/uploads/")) {
-    clean = "/static/uploads/" + clean.slice("/static/uploads/".length);
-  } else if (clean.toLowerCase().startsWith("/uploads/")) {
-    clean = "/uploads/" + clean.slice("/uploads/".length);
-  }
-  if (clean.startsWith("data:") || clean.startsWith("http://") || clean.startsWith("https://")) {
-    return encodeURI(clean);
-  }
-  const fullUrl = `${API_ORIGIN}${clean.startsWith("/") ? "" : "/"}${clean}`;
-  return encodeURI(fullUrl);
-}
 import {
-  API_ORIGIN,
   apiDelete,
   apiGet,
   apiPatch,
   apiPost,
-  apiPostMultipart,
   downloadExport,
   toQueryString,
 } from "@/lib/api";
@@ -68,7 +48,6 @@ import type {
   ImportHeader,
   ImportSummary,
   PaginationMeta,
-  Product,
   Supplier,
   SupplierContact,
 } from "@/types";
@@ -120,10 +99,10 @@ export interface SupplierTableColumn {
 export const SUPPLIER_TABLE_COLUMNS: SupplierTableColumn[] = [
   { idx: 0, key: "checkbox", label: "Checkbox", sortable: false, align: "center", width: "45px" },
   { idx: 1, key: "company_name", label: "Company Name", sortable: true, align: "left", minWidth: "220px" },
-  { idx: 2, key: "product_category", label: "Product Category", sortable: true, align: "left", minWidth: "150px" },
-  { idx: 3, key: "product_sub_category", label: "Product Sub Category", sortable: false, align: "left", minWidth: "160px" },
-  { idx: 4, key: "city_state", label: "City / State", sortable: false, align: "left", minWidth: "140px" },
-  { idx: 5, key: "grade", label: "Grade", sortable: false, align: "left", minWidth: "80px" },
+  { idx: 2, key: "product_category", label: "Product Category", sortable: true, align: "left", width: "180px", minWidth: "150px" },
+  { idx: 3, key: "product_sub_category", label: "Product Sub Category", sortable: true, align: "left", width: "180px", minWidth: "150px" },
+  { idx: 4, key: "city_state", label: "City / State", sortable: true, align: "left", minWidth: "140px" },
+  { idx: 5, key: "grade", label: "Grade", sortable: true, align: "left", minWidth: "80px" },
   { idx: 6, key: "type", label: "Type", sortable: true, align: "left", minWidth: "100px" },
   { idx: 7, key: "current_status", label: "Current Status", sortable: true, align: "left", minWidth: "120px" },
   { idx: 8, key: "potential", label: "Potential", sortable: true, align: "left", minWidth: "100px" },
@@ -392,29 +371,58 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
   const [filterOpen, setFilterOpen] = useState(false);
   const [categoryFilter, setCategoryFilter] = useState<string | null>(null);
   const [subCategoryFilter, setSubCategoryFilter] = useState<string | null>(null);
-  const [productFilter, setProductFilter] = useState<string | null>(null);
-  const [countryFilter, setCountryFilter] = useState<string | null>(null);
   const [stateFilter, setStateFilter] = useState<string | null>(null);
   const [cityFilter, setCityFilter] = useState<string | null>(null);
   const [supplierTypeFilter, setSupplierTypeFilter] = useState("");
   const [gradeFilter, setGradeFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [potentialFilter, setPotentialFilter] = useState("");
-  const [visitedFilter, setVisitedFilter] = useState("");
+
+  const [appliedFilters, setAppliedFilters] = useState({
+    category: null as string | null,
+    subCategory: null as string | null,
+    state: null as string | null,
+    city: null as string | null,
+    supplierType: "",
+    grade: "",
+    status: "",
+    potential: "",
+  });
 
   const handleResetFilters = () => {
     setCategoryFilter(null);
     setSubCategoryFilter(null);
-    setProductFilter(null);
-    setCountryFilter(null);
     setStateFilter(null);
     setCityFilter(null);
     setSupplierTypeFilter("");
     setGradeFilter("");
     setStatusFilter("");
     setPotentialFilter("");
-    setVisitedFilter("");
     setCurrentPage(1);
+    setAppliedFilters({
+      category: null,
+      subCategory: null,
+      state: null,
+      city: null,
+      supplierType: "",
+      grade: "",
+      status: "",
+      potential: "",
+    });
+  };
+
+  const handleSearchFilters = () => {
+    setCurrentPage(1);
+    setAppliedFilters({
+      category: categoryFilter,
+      subCategory: subCategoryFilter,
+      state: stateFilter,
+      city: cityFilter,
+      supplierType: supplierTypeFilter,
+      grade: gradeFilter,
+      status: statusFilter,
+      potential: potentialFilter,
+    });
   };
 
   const [importSummary, setImportSummary] = useState<ImportSummary | null>(null);
@@ -527,13 +535,11 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
   const [formStateCustomText, setFormStateCustomText] = useState("");
   const [formCityCustomText, setFormCityCustomText] = useState("");
   const [whatsappSameAsCalling, setWhatsappSameAsCalling] = useState(false);
-  const [wechatSameAsCalling, setWechatSameAsCalling] = useState(false);
   const [callingNumberError, setCallingNumberError] = useState<string | null>(null);
   const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
   const [defaultChinaId, setDefaultChinaId] = useState<string | null>(null);
   const [formCountryPhoneCode, setFormCountryPhoneCode] = useState<string>("+86");
   const [saving, setSaving] = useState(false);
-  const [uploadingMedia, setUploadingMedia] = useState(false);
   const existingSuppliers = useLookup<Supplier>("/suppliers", 500);
 
   async function resolveCountryPhoneCode(countryId: string | null): Promise<string> {
@@ -585,49 +591,6 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
       }
     }, 60);
   }
-
-  const mediaList = useMemo(() => {
-    return form.visit_media_input
-      .split(",")
-      .map((u) => u.trim())
-      .filter(Boolean);
-  }, [form.visit_media_input]);
-
-  const addMediaUrls = (newUrls: string[]) => {
-    const combined = [...mediaList, ...newUrls];
-    const unique = Array.from(new Set(combined));
-    setField("visit_media_input", unique.join(", "));
-  };
-
-  const removeMediaUrl = (urlToRemove: string) => {
-    const filtered = mediaList.filter((u) => u !== urlToRemove);
-    setField("visit_media_input", filtered.join(", "));
-  };
-
-  const handleMediaFileUpload = async (files: FileList | null) => {
-    if (!files || files.length === 0) return;
-    setUploadingMedia(true);
-    const uploadedUrls: string[] = [];
-
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i];
-      try {
-        const formData = new FormData();
-        formData.append("file", file);
-        const res = await apiPostMultipart<{ url: string }>("/suppliers/upload-media", formData);
-        if (res.data?.url) {
-          uploadedUrls.push(res.data.url);
-        }
-      } catch (err) {
-        console.warn("Failed to upload media to Supabase storage:", err);
-      }
-    }
-
-    if (uploadedUrls.length > 0) {
-      addMediaUrls(uploadedUrls);
-    }
-    setUploadingMedia(false);
-  };
 
   const fetchChinaId = useCallback(async (): Promise<string | null> => {
     try {
@@ -880,26 +843,7 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
   );
 
 
-  const productFetcher = useCallback(
-    async (term: string, signal: AbortSignal): Promise<DropdownOption[]> => {
-      const { data } = await apiGet<Product[]>(
-        "/masters/products" +
-        toQueryString({
-          search: term,
-          page: 1,
-          page_size: 20,
-          sort_order: "asc",
-          status: "active",
-        }),
-        { signal }
-      );
-      return data.map((d) => ({
-        value: d.id,
-        label: `${d.product_code} — ${d.product_name}`,
-      }));
-    },
-    []
-  );
+
 
   const fetchNameLabel = useCallback(
     (apiBase: string) => async (id: string) => {
@@ -913,10 +857,68 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
     []
   );
 
-  const fetchProductLabel = useCallback(async (id: string) => {
-    const { data } = await apiGet<Product>(`/masters/products/${id}`);
-    return `${data.product_code} — ${data.product_name}`;
-  }, []);
+  const subCategoryCategoryMapRef = useRef<Record<string, string>>({});
+
+  const fetchSubCategoryLabel = useCallback(
+    async (id: string) => {
+      try {
+        const { data } = await apiGet<{ id: string; name?: string; category_id?: string }>(
+          `/masters/product-sub-categories/${id}`
+        );
+        if (data?.category_id) {
+          subCategoryCategoryMapRef.current[id] = data.category_id;
+        }
+        return data?.name || "";
+      } catch {
+        return "";
+      }
+    },
+    []
+  );
+
+  const subCategoryFetcher = useCallback(
+    async (term: string, signal: AbortSignal): Promise<DropdownOption[]> => {
+      if (formCategoryIds.length === 0) return [];
+
+      const queryParams: Record<string, string | number> = {
+        page: 1,
+        page_size: 500,
+        sort_order: "asc",
+        status: "active",
+      };
+      if (term.trim()) {
+        queryParams.search = term.trim();
+      }
+      if (formCategoryIds.length === 1) {
+        queryParams.category_id = formCategoryIds[0];
+      }
+
+      try {
+        const { data } = await apiGet<{ id: string; name: string; category_id?: string }[]>(
+          "/masters/product-sub-categories" + toQueryString(queryParams),
+          { signal }
+        );
+
+        if (!data || !Array.isArray(data)) return [];
+
+        const catSet = new Set(formCategoryIds);
+        const filtered = data.filter((sc) => !sc.category_id || catSet.has(sc.category_id));
+
+        filtered.forEach((sc) => {
+          if (sc.category_id) {
+            subCategoryCategoryMapRef.current[sc.id] = sc.category_id;
+          }
+        });
+
+        return filtered.map((sc) => ({ value: sc.id, label: sc.name }));
+      } catch {
+        return [];
+      }
+    },
+    [formCategoryIds]
+  );
+
+
 
   const [sortColIndex, setSortColIndex] = useState<number | null>(null);
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
@@ -957,10 +959,15 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
           valA = (a.sub_category_ids || []).map((id) => resolver.get("subCategories", id) || "").filter(Boolean).join(", ") || (a as any).sub_category_name || "";
           valB = (b.sub_category_ids || []).map((id) => resolver.get("subCategories", id) || "").filter(Boolean).join(", ") || (b as any).sub_category_name || "";
           break;
-        case 4:
-          valA = `${resolver.get("cities", a.city_id) || (a as any).city_name || a.town || ""}, ${resolver.get("states", a.state_id) || (a as any).state_name || ""}`;
-          valB = `${resolver.get("cities", b.city_id) || (b as any).city_name || b.town || ""}, ${resolver.get("states", b.state_id) || (b as any).state_name || ""}`;
+        case 4: {
+          const cityA = resolver.get("cities", a.city_id) || (a as any).city_name || a.town || "";
+          const stateA = resolver.get("states", a.state_id) || (a as any).state_name || "";
+          valA = [cityA, stateA].filter(Boolean).join(", ");
+          const cityB = resolver.get("cities", b.city_id) || (b as any).city_name || b.town || "";
+          const stateB = resolver.get("states", b.state_id) || (b as any).state_name || "";
+          valB = [cityB, stateB].filter(Boolean).join(", ");
           break;
+        }
         case 5:
           valA = a.supplier_grade || "";
           valB = b.supplier_grade || "";
@@ -982,6 +989,8 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
       }
       const strA = String(valA).trim().toLowerCase();
       const strB = String(valB).trim().toLowerCase();
+      if (!strA && strB) return 1;
+      if (strA && !strB) return -1;
       return sortDirection === "asc"
         ? strA.localeCompare(strB, undefined, { numeric: true, sensitivity: "base" })
         : strB.localeCompare(strA, undefined, { numeric: true, sensitivity: "base" });
@@ -1010,17 +1019,14 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
         sort_order: "asc",
         search: effectiveSearch,
         is_active: statusTab === "active" ? "true" : "false",
-        country_id: countryFilter || "",
-        state_id: stateFilter || "",
-        city_id: cityFilter || "",
-        supplier_type: supplierTypeFilter,
-        supplier_grade: gradeFilter,
-        current_status: statusFilter,
-        potential: potentialFilter,
-        visited_factory_office: visitedFilter,
-        category_id: categoryFilter || "",
-        sub_category_id: subCategoryFilter || "",
-        product_id: productFilter || "",
+        state_id: appliedFilters.state || "",
+        city_id: appliedFilters.city || "",
+        supplier_type: appliedFilters.supplierType,
+        supplier_grade: appliedFilters.grade,
+        current_status: appliedFilters.status,
+        potential: appliedFilters.potential,
+        category_id: appliedFilters.category || "",
+        sub_category_id: appliedFilters.subCategory || "",
       };
       try {
         const { data, meta } = await apiGet<Supplier[]>("/suppliers" + toQueryString(params));
@@ -1070,17 +1076,7 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
     currentPage,
     pageSize,
     effectiveSearch,
-    countryFilter,
-    stateFilter,
-    cityFilter,
-    supplierTypeFilter,
-    gradeFilter,
-    statusFilter,
-    potentialFilter,
-    visitedFilter,
-    categoryFilter,
-    subCategoryFilter,
-    productFilter,
+    appliedFilters,
     reloadCounter,
     resolver,
   ]);
@@ -1121,15 +1117,12 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
     Boolean(effectiveSearch) ||
     Boolean(categoryFilter) ||
     Boolean(subCategoryFilter) ||
-    Boolean(productFilter) ||
-    Boolean(countryFilter) ||
     Boolean(stateFilter) ||
     Boolean(cityFilter) ||
     Boolean(supplierTypeFilter) ||
     Boolean(gradeFilter) ||
     Boolean(statusFilter) ||
-    Boolean(potentialFilter) ||
-    Boolean(visitedFilter);
+    Boolean(potentialFilter);
 
   useLiveList<Supplier>({
     moduleName: "suppliers",
@@ -1209,7 +1202,6 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
     setAlertPopup(null);
     setContactFormOpen(false);
     setWhatsappSameAsCalling(false);
-    setWechatSameAsCalling(false);
     setCallingNumberError(null);
     setValidationErrors({});
     setFormStateCustomText("");
@@ -1255,9 +1247,6 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
       setContacts(supplier.contacts || []);
       if (supplier.contact_calling_number && supplier.contact_whatsapp_number === supplier.contact_calling_number) {
         setWhatsappSameAsCalling(true);
-      }
-      if (supplier.contact_calling_number && supplier.contact_wechat_number === supplier.contact_calling_number) {
-        setWechatSameAsCalling(true);
       }
       if (supplier.country_id) {
         resolveCountryPhoneCode(supplier.country_id).then(setFormCountryPhoneCode);
@@ -1305,15 +1294,6 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
 
   function buildPayload() {
     const emails = form.emails || [];
-    const isVisited = form.visited_factory_office === "true";
-    const visitPhotos = isVisited
-      ? form.visit_media_input
-        .split(",")
-        .map((v) => v.trim())
-        .filter(Boolean)
-      : [];
-    const visitVideo = isVisited && form.visit_video_url ? form.visit_video_url.trim() : "";
-    const visitMedia = visitVideo ? [...visitPhotos, visitVideo] : visitPhotos;
 
     return {
       company_name: form.company_name.trim(),
@@ -1329,23 +1309,23 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
       contact_designation: form.contact_designation.trim() || null,
       contact_calling_number: normalizePhoneValue(form.contact_calling_number),
       contact_whatsapp_number: normalizePhoneValue(form.contact_whatsapp_number),
-      contact_wechat_number: normalizePhoneValue(form.contact_wechat_number),
+      contact_wechat_number: null,
       emails,
       tax_id_number: form.tax_id_number.trim().toUpperCase(),
       address: form.address.trim() || null,
-      town: form.town.trim() || null,
+      town: null,
       primary_website: form.primary_website.trim() || null,
-      secondary_website: form.secondary_website.trim() || null,
+      secondary_website: null,
       sub_category_ids: formSubCategoryIds,
       product_ids: formProductIds,
       supplier_grade: form.supplier_grade || null,
       current_status: form.current_status || null,
       potential: form.potential || null,
-      potential_reason: form.potential_reason.trim() || null,
-      secondary_products_description: form.secondary_products_description.trim() || null,
-      visited_factory_office: isVisited,
-      visit_remarks: isVisited ? form.visit_remarks.trim() || null : null,
-      visit_media: visitMedia.length ? visitMedia : null,
+      potential_reason: null,
+      secondary_products_description: null,
+      visited_factory_office: false,
+      visit_remarks: null,
+      visit_media: null,
       overall_remarks: form.overall_remarks.trim() || null,
       is_active: form.is_active === "true",
     };
@@ -1481,9 +1461,9 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
       const { stateId, cityId } = await resolveCustomGeography(formCountryId);
       const geoErrors: Record<string, string> = {};
       if (!stateId && !formStateCustomText.trim()) {
-        geoErrors["field-province"] = "Province is required.";
+        geoErrors["field-province"] = "State is required.";
       } else if (formStateCustomText.trim() && !stateId) {
-        geoErrors["field-province"] = "Province could not be resolved — please select from dropdown.";
+        geoErrors["field-province"] = "State could not be resolved — please select from dropdown.";
       }
       if (!cityId && !formCityCustomText.trim()) {
         geoErrors["field-city"] = "City is required.";
@@ -1967,12 +1947,12 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
                 <li>Avoid Special Characters (Like @ # $ % ^ & * ( ) ) In Text Fields.</li>
                 <li>Maximum Allowed File Size: <strong>8 MB</strong>.</li>
                 <li>Only <strong>.Csv</strong>, <strong>.Xls</strong>, And <strong>.Xlsx</strong> Files Are Accepted.</li>
-                <li>Mandatory Columns: <strong>Company Name</strong>, <strong>Country</strong>, <strong>Province / State</strong>, And <strong>City</strong>.</li>
+                <li>Mandatory Columns: <strong>Company Name</strong>, <strong>Country</strong>, <strong>State</strong>, And <strong>City</strong>.</li>
                 <li><strong>Company Name</strong> Must Be Unique.</li>
-                <li><strong>Country, Province / State, City, Product Category, Key Strength Sub Category, And Supplier Type</strong> Must Already Exist In The System.</li>
-                <li><strong>Key Strength Sub Category</strong> Must Belong To The Selected <strong>Product Category</strong>.</li>
-                <li><strong>Calling Number</strong>, <strong>WhatsApp Number</strong>, And <strong>WeChat Number</strong> Must Include Country Code (Maximum 15 Digits Total).</li>
-                <li>Multiple <strong>Emails</strong>, <strong>Product Categories</strong>, And <strong>Key Strength Sub Categories</strong> Can Be Separated By Comma (,).</li>
+                <li><strong>Country, State, City, Product Category, Product Sub Category, And Supplier Type</strong> Must Already Exist In The System.</li>
+                <li><strong>Product Sub Category</strong> Must Belong To The Selected <strong>Product Category</strong>.</li>
+                <li><strong>Calling Number</strong>, And <strong>WhatsApp Number</strong> Must Include Country Code (Maximum 15 Digits Total).</li>
+                <li>Multiple <strong>Emails</strong>, <strong>Product Categories</strong>, And <strong>Product Sub Categories</strong> Can Be Separated By Comma (,).</li>
                 <li><strong>Visited Factory/Office</strong> Must Be <em>Yes</em> Or <em>No</em>; If <em>Yes</em>, <strong>Visit Remarks</strong> Can Be Provided.</li>
                 <li><strong>Current Status</strong> Must Be <em>Existing</em> Or <em>New</em>; <strong>Potential</strong> Must Be <em>Yes</em> Or <em>No</em>; <strong>Supplier Grade</strong> Must Be <em>A</em>, <em>B</em>, Or <em>C</em>.</li>
                 <li>No Blank Rows, Merged Cells, Or Excel Formulas Allowed.</li>
@@ -2161,8 +2141,8 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
                   <h3 style={{ fontSize: "16px", fontWeight: 700, margin: "0 0 16px 0", color: "#0f172a" }}>
                     1. General Information
                   </h3>
-                  {/* Row 1: Company Name + Category (2 columns) */}
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "18px", marginBottom: "18px" }}>
+                  {/* Row 1: Company Name + Category + Sub Category (3 columns) */}
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "18px", marginBottom: "18px" }}>
                     <div className="field" style={{ position: "relative" }}>
                       <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px", display: "block" }}>
                         Name of Company <span style={{ color: "#ef4444" }}>*</span>
@@ -2238,15 +2218,45 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
                       <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px", display: "block" }}>Product Category (multiple)</label>
                       <SearchableDropdownMultiPanel
                         values={formCategoryIds}
-                        onChange={setFormCategoryIds}
+                        onChange={(newCatIds) => {
+                          setFormCategoryIds(newCatIds);
+                          if (newCatIds.length === 0) {
+                            setFormSubCategoryIds([]);
+                          } else {
+                            const newCatSet = new Set(newCatIds);
+                            setFormSubCategoryIds((prev) =>
+                              prev.filter((subId) => {
+                                const parentCatId = subCategoryCategoryMapRef.current[subId];
+                                return !parentCatId || newCatSet.has(parentCatId);
+                              })
+                            );
+                          }
+                        }}
                         placeholder="-- Select Categories --"
                         fetchOptions={searchFetcher("/masters/product-categories")}
                         fetchLabelForValue={fetchNameLabel("/masters/product-categories")}
                       />
                     </div>
+                    <div className="field">
+                      <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px", display: "block" }}>
+                        Product Sub Category (multiple)
+                      </label>
+                      <SearchableDropdownMultiPanel
+                        values={formSubCategoryIds}
+                        onChange={setFormSubCategoryIds}
+                        disabled={formCategoryIds.length === 0}
+                        placeholder={
+                          formCategoryIds.length === 0
+                            ? "-- Please select Category first --"
+                            : "-- Select Sub-Categories --"
+                        }
+                        fetchOptions={subCategoryFetcher}
+                        fetchLabelForValue={fetchSubCategoryLabel}
+                      />
+                    </div>
                   </div>
 
-                  {/* Row 2: Supplier Type + Brand of Supplier's Products (2 columns) */}
+                  {/* Row 2: Supplier Type + GST Number (2 columns) */}
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "18px", marginBottom: "18px" }}>
                     <div className="field">
                       <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px", display: "block" }}>Supplier Type</label>
@@ -2260,13 +2270,13 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
                         fetchLabelForValue={async (val) => val}
                       />
                     </div>
-                    <TextField id="brand_description" label="Brand of Supplier's Products" placeholder="Description..." value={form.brand_description} onChange={(v) => setField("brand_description", v)} />
-                  </div>
-                  {/* GST Number is mandatory and must be unique (Add Supplier spec) */}
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "18px", marginBottom: "18px" }}>
                     <TextField
                       id="tax_id_number"
-                      label="GST Number"
+                      label={
+                        <>
+                          GST Number <span style={{ color: "#ef4444" }}>*</span>
+                        </>
+                      }
                       required
                       maxLength={100}
                       placeholder="e.g. 27ABCDE1234F1Z5"
@@ -2302,7 +2312,6 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
                             ...prev,
                             contact_calling_number: replacePhonePrefix(prev.contact_calling_number, newCode),
                             contact_whatsapp_number: replacePhonePrefix(prev.contact_whatsapp_number, newCode),
-                            contact_wechat_number: replacePhonePrefix(prev.contact_wechat_number, newCode),
                           }));
                         }}
                         placeholder="Search country..."
@@ -2317,7 +2326,7 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
                     </div>
                     <div className="field">
                       <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px", display: "block" }}>
-                        Province <span style={{ color: "#ef4444" }}>*</span>
+                        State <span style={{ color: "#ef4444" }}>*</span>
                       </label>
                       <SearchableDropdown
                         key={`field-province-${formCountryId || ""}`}
@@ -2339,7 +2348,7 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
                           setFormCityCustomText("");
                           setValidationErrors((prev) => ({ ...prev, "field-province": "", "field-city": "" }));
                         }}
-                        placeholder="Search or type province..."
+                        placeholder="Search or type state..."
                         fetchOptions={searchFetcher("/masters/states", (): Record<string, string> =>
                           formCountryId ? { country_id: formCountryId } : {}
                         )}
@@ -2366,7 +2375,7 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
                           setFormCityCustomText(v ? label : "");
                           setValidationErrors((prev) => ({ ...prev, "field-city": "" }));
                         }}
-                        placeholder={formStateId ? "Search city from Master..." : "Select a province first..."}
+                        placeholder={formStateId ? "Search city from Master..." : "Select a state first..."}
                         fetchOptions={
                           !formStateId
                             ? async () => []
@@ -2455,9 +2464,6 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
                           const wErr = validatePhoneNumber(val, "WhatsApp number");
                           setValidationErrors((prev) => ({ ...prev, "field-whatsapp-number": wErr || "" }));
                         }
-                        if (wechatSameAsCalling) {
-                          setField("contact_wechat_number", val);
-                        }
                       }}
                       placeholder="13800000000"
                     />
@@ -2504,52 +2510,15 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
                       placeholder="13800000000"
                     />
 
-                    <PhoneGroupField
-                      id="field-wechat-number"
-                      defaultPrefix={formCountryPhoneCode}
-                      label={
-                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                          <span style={{ fontSize: "12px", fontWeight: 600, color: "#475569" }}>WeChat Number</span>
-                          <label style={{ fontSize: "11px", color: "#64748b", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "4px", fontWeight: 500 }}>
-                            <input
-                              type="checkbox"
-                              checked={wechatSameAsCalling}
-                              onChange={(e) => {
-                                const checked = e.target.checked;
-                                setWechatSameAsCalling(checked);
-                                if (checked) setField("contact_wechat_number", form.contact_calling_number);
-                              }}
-                            />
-                            Same as calling
-                          </label>
-                        </div>
-                      }
-                      value={form.contact_wechat_number}
-                      hasError={Boolean(validationErrors["field-wechat-number"])}
-                      hint={
-                        validationErrors["field-wechat-number"] ? (
-                          <span>
-                            <span>⚠️</span> {validationErrors["field-wechat-number"]}
-                          </span>
-                        ) : undefined
-                      }
-                      onChange={(val) => {
-                        setWechatSameAsCalling(false);
-                        setField("contact_wechat_number", val);
-                        if (validationErrors["field-wechat-number"]) {
-                          setValidationErrors((prev) => ({ ...prev, "field-wechat-number": "" }));
-                        }
-                      }}
-                      placeholder="13800000000"
-                    />
-
-                    <EmailTagInput
-                      id="emails"
-                      label="Email IDs (Multiple)"
-                      emails={form.emails}
-                      onChange={(newEmails) => setForm((prev) => ({ ...prev, emails: newEmails }))}
-                      placeholder="Type email address and press Enter..."
-                    />
+                    <div style={{ gridColumn: "span 2" }}>
+                      <EmailTagInput
+                        id="emails"
+                        label="Email IDs (Multiple)"
+                        emails={form.emails}
+                        onChange={(newEmails) => setForm((prev) => ({ ...prev, emails: newEmails }))}
+                        placeholder="Type email address and press Enter..."
+                      />
+                    </div>
                   </div>
                 </div>
 
@@ -2560,10 +2529,10 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
                       2. Supplier Profile &amp; Verification Details
                     </h3>
                     <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "18px", marginBottom: "18px" }}>
-                      <TextField id="address" label="Address" maxLength={500} value={form.address} onChange={(v) => setField("address", v)} />
-                      <TextField id="town" label="Town" maxLength={150} value={form.town} onChange={(v) => setField("town", v)} />
-                      <WebsiteField id="primary_website" label="Primary Website" placeholder="https://..." value={form.primary_website} onChange={(v) => setField("primary_website", v)} />
-                      <WebsiteField id="secondary_website" label="Secondary Website" placeholder="https://..." value={form.secondary_website} onChange={(v) => setField("secondary_website", v)} />
+                      <div style={{ gridColumn: "span 2" }}>
+                        <TextField id="address" label="Address" maxLength={500} value={form.address} onChange={(v) => setField("address", v)} />
+                      </div>
+                      <WebsiteField id="primary_website" label="Website" placeholder="https://..." value={form.primary_website} onChange={(v) => setField("primary_website", v)} />
                       <SelectField id="supplier_grade" label="Supplier Grade" value={form.supplier_grade} onChange={(v) => setField("supplier_grade", v)}>
                         <option value="">Select Grade</option>
                         <option value="A">Grade A</option>
@@ -2581,145 +2550,6 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
                         <option value="No">No</option>
                       </SelectField>
                     </div>
-
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "18px", marginBottom: "18px" }}>
-                      <TextAreaField
-                        id="potential_reason"
-                        label="Reason for Potential Status"
-                        placeholder="Explain why..."
-                        rows={2}
-                        value={form.potential_reason}
-                        onChange={(v) => setField("potential_reason", v)}
-                      />
-                      <TextAreaField
-                        id="secondary_products_description"
-                        label="Secondary Products Description"
-                        placeholder="Secondary products..."
-                        rows={2}
-                        value={form.secondary_products_description}
-                        onChange={(v) => setField("secondary_products_description", v)}
-                      />
-                    </div>
-
-                    <div style={{ marginBottom: "18px" }}>
-                      <SelectField id="visited_factory_office" label="Visited Factory / Office?" value={String(form.visited_factory_office).toLowerCase() === "true" ? "true" : "false"} onChange={(v) => setField("visited_factory_office", v)}>
-                        <option value="false">No</option>
-                        <option value="true">Yes</option>
-                      </SelectField>
-                    </div>
-
-                    {String(form.visited_factory_office).toLowerCase() === "true" && (
-                      <div style={{ background: "#f8fafc", padding: "16px", borderRadius: "8px", border: "1px solid #e2e8f0", marginBottom: "18px" }}>
-                        <div style={{ marginBottom: "16px" }}>
-                          <TextField
-                            id="visit_remarks"
-                            label="Visit Remarks / Summary"
-                            placeholder="Key observations from factory/office visit..."
-                            value={form.visit_remarks}
-                            onChange={(v) => setField("visit_remarks", v)}
-                          />
-                        </div>
-
-                        <div style={{ marginBottom: "16px" }}>
-                          <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "6px", display: "block" }}>
-                            Visit Photos (Factory / Office)
-                          </label>
-                          <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "10px" }}>
-                            <label
-                              className="btn btn-small"
-                              style={{
-                                background: "#0061f2",
-                                color: "#ffffff",
-                                border: "none",
-                                borderRadius: "6px",
-                                padding: "7px 14px",
-                                fontWeight: 600,
-                                fontSize: "12.5px",
-                                cursor: uploadingMedia ? "not-allowed" : "pointer",
-                                display: "inline-flex",
-                                alignItems: "center",
-                                gap: "6px",
-                              }}
-                            >
-                              📁 {uploadingMedia ? "Uploading..." : "Select Photos"}
-                              <input
-                                type="file"
-                                multiple
-                                accept="image/*"
-                                onChange={(e) => void handleMediaFileUpload(e.target.files)}
-                                disabled={uploadingMedia}
-                                style={{ display: "none" }}
-                              />
-                            </label>
-                            {uploadingMedia && (
-                              <span style={{ fontSize: "12px", color: "#64748b" }}>
-                                Uploading photos, please wait...
-                              </span>
-                            )}
-                          </div>
-
-                          {mediaList.length > 0 && (
-                            <div style={{ display: "flex", gap: "12px", flexWrap: "wrap", marginBottom: "8px" }}>
-                              {mediaList.map((url, idx) => (
-                                <div
-                                  key={idx}
-                                  style={{
-                                    position: "relative",
-                                    width: "100px",
-                                    height: "80px",
-                                    borderRadius: "6px",
-                                    overflow: "hidden",
-                                    border: "1px solid #cbd5e1",
-                                    background: "#ffffff",
-                                  }}
-                                >
-                                  <img
-                                    src={resolveImageUrl(url)}
-                                    alt={`Visit photo ${idx + 1}`}
-                                    style={{ width: "100%", height: "100%", objectFit: "cover" }}
-                                  />
-                                  <button
-                                    type="button"
-                                    onClick={() => removeMediaUrl(url)}
-                                    title="Remove photo"
-                                    style={{
-                                      position: "absolute",
-                                      top: "4px",
-                                      right: "4px",
-                                      width: "22px",
-                                      height: "22px",
-                                      borderRadius: "50%",
-                                      background: "rgba(239, 68, 68, 0.9)",
-                                      color: "#ffffff",
-                                      border: "none",
-                                      cursor: "pointer",
-                                      fontSize: "12px",
-                                      fontWeight: 700,
-                                      display: "flex",
-                                      alignItems: "center",
-                                      justifyContent: "center",
-                                      boxShadow: "0 1px 3px rgba(0,0,0,0.2)",
-                                    }}
-                                  >
-                                    ✕
-                                  </button>
-                                </div>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-
-                        <div>
-                          <TextField
-                            id="visit_video_url"
-                            label="Factory Video / Inspection Folder Link (Optional)"
-                            placeholder="https://... (e.g. OneDrive, SharePoint, Google Drive, or Video URL)"
-                            value={form.visit_video_url}
-                            onChange={(v) => setField("visit_video_url", v)}
-                          />
-                        </div>
-                      </div>
-                    )}
 
                     <div style={{ marginBottom: "16px" }}>
                       <TextAreaField id="overall_remarks" label="Overall Remarks / Key Strengths" rows={2} value={form.overall_remarks} onChange={(v) => setField("overall_remarks", v)} />
@@ -3469,14 +3299,6 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
                   </svg>
                   Filter Options
                 </div>
-                <button
-                  type="button"
-                  className="btn btn-small"
-                  style={{ background: "#f1f5f9", color: "#475569", border: "1px solid #cbd5e1", borderRadius: "6px", cursor: "pointer", fontWeight: 600 }}
-                  onClick={handleResetFilters}
-                >
-                  Reset Filters
-                </button>
               </div>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: "14px" }}>
                 <div>
@@ -3486,6 +3308,7 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
                     onChange={(v) => {
                       setCurrentPage(1);
                       setCategoryFilter(v);
+                      setSubCategoryFilter(null);
                     }}
                     placeholder="Filter: Product Category"
                     fetchOptions={searchFetcher("/masters/product-categories")}
@@ -3493,48 +3316,29 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
                   />
                 </div>
                 <div>
-                  <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px", display: "block" }}>Key Strength Sub Category</label>
+                  <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px", display: "block" }}>Product Sub Category</label>
                   <SearchableDropdown
+                    key={`filter-sub-cat-${categoryFilter || "none"}`}
                     value={subCategoryFilter}
                     onChange={(v) => {
                       setCurrentPage(1);
                       setSubCategoryFilter(v);
                     }}
-                    placeholder="Filter: Sub Category"
-                    fetchOptions={searchFetcher("/masters/product-sub-categories")}
+                    disabled={!categoryFilter}
+                    placeholder={
+                      categoryFilter
+                        ? "Filter: Sub Category"
+                        : "-- Select Category first --"
+                    }
+                    fetchOptions={searchFetcher("/masters/product-sub-categories", (): Record<string, string> =>
+                      categoryFilter ? { category_id: categoryFilter } : {}
+                    )}
                     fetchLabelForValue={fetchNameLabel("/masters/product-sub-categories")}
                   />
                 </div>
+
                 <div>
-                  <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px", display: "block" }}>Product Supplied</label>
-                  <SearchableDropdown
-                    value={productFilter}
-                    onChange={(v) => {
-                      setCurrentPage(1);
-                      setProductFilter(v);
-                    }}
-                    placeholder="Filter: Product"
-                    fetchOptions={productFetcher}
-                    fetchLabelForValue={fetchProductLabel}
-                  />
-                </div>
-                <div>
-                  <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px", display: "block" }}>Country</label>
-                  <SearchableDropdown
-                    value={countryFilter}
-                    onChange={(v) => {
-                      setCountryFilter(v);
-                      setStateFilter(null);
-                      setCityFilter(null);
-                      setCurrentPage(1);
-                    }}
-                    placeholder="Filter: Country"
-                    fetchOptions={searchFetcher("/masters/countries")}
-                    fetchLabelForValue={fetchNameLabel("/masters/countries")}
-                  />
-                </div>
-                <div>
-                  <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px", display: "block" }}>Province / State</label>
+                  <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px", display: "block" }}>State</label>
                   <SearchableDropdown
                     value={stateFilter}
                     onChange={(v) => {
@@ -3542,27 +3346,29 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
                       setCityFilter(null);
                       setCurrentPage(1);
                     }}
-                    placeholder="Filter: Province"
-                    fetchOptions={searchFetcher("/masters/states", (): Record<string, string> =>
-                      countryFilter ? { country_id: countryFilter } : {}
-                    )}
+                    placeholder="Filter: State"
+                    fetchOptions={searchFetcher("/masters/states")}
                     fetchLabelForValue={fetchNameLabel("/masters/states")}
                   />
                 </div>
                 <div>
                   <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px", display: "block" }}>City</label>
                   <SearchableDropdown
+                    key={`filter-city-${stateFilter || "none"}`}
                     value={cityFilter}
                     onChange={(v) => {
                       setCityFilter(v);
                       setCurrentPage(1);
                     }}
-                    placeholder="Filter: City"
-                    fetchOptions={searchFetcher("/masters/cities", (): Record<string, string> => {
-                      if (stateFilter) return { state_id: stateFilter };
-                      if (countryFilter) return { country_id: countryFilter };
-                      return {};
-                    })}
+                    disabled={!stateFilter}
+                    placeholder={
+                      stateFilter
+                        ? "Filter: City"
+                        : "-- Select State first --"
+                    }
+                    fetchOptions={searchFetcher("/masters/cities", (): Record<string, string> =>
+                      stateFilter ? { state_id: stateFilter } : {}
+                    )}
                     fetchLabelForValue={fetchNameLabel("/masters/cities")}
                   />
                 </div>
@@ -3631,21 +3437,23 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
                     <option value="no">No</option>
                   </select>
                 </div>
-                <div>
-                  <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px", display: "block" }}>Visited Factory/Office?</label>
-                  <select
-                    value={visitedFilter}
-                    onChange={(e) => {
-                      setCurrentPage(1);
-                      setVisitedFilter(e.target.value);
-                    }}
-                    style={{ width: "100%", padding: "8px 10px", borderRadius: "6px", border: "1px solid #cbd5e1" }}
-                  >
-                    <option value="">Visited Factory/Office: All</option>
-                    <option value="true">Yes</option>
-                    <option value="false">No</option>
-                  </select>
-                </div>
+              </div>
+
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "18px" }}>
+                <button
+                  type="button"
+                  className="btn-filter-reset"
+                  onClick={handleResetFilters}
+                >
+                  Reset
+                </button>
+                <button
+                  type="button"
+                  className="btn-filter-search"
+                  onClick={handleSearchFilters}
+                >
+                  Search
+                </button>
               </div>
             </div>
           )}
@@ -3790,6 +3598,7 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
                             textAlign: colDef.align || "left",
                             width: colDef.width,
                             minWidth: colDef.minWidth,
+                            maxWidth: (idx === 2 || idx === 3) ? "200px" : undefined,
                             ...getFreezeStyle(idx, true),
                           }}
                         >
@@ -3905,16 +3714,28 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
                                 </td>
                               );
                             case 2: {
-                              const catNames = (s.category_ids || [])
+                              const ids = s.category_ids || [];
+                              const hasUnresolved = ids.some((id) => !resolver.get("categories", id));
+                              if (hasUnresolved && ids.length > 0) {
+                                void resolver.resolve("categories", ids).then(() => setNamesVersion((n) => n + 1));
+                              }
+                              const catNames = ids
                                 .map((id) => resolver.get("categories", id) || "")
                                 .filter(Boolean);
                               if (catNames.length === 0 && (s as any).category_name) {
                                 catNames.push((s as any).category_name);
                               }
                               return (
-                                <td key="cell-2" style={getFreezeStyle(2, false)}>
+                                <td key="cell-2" style={{ width: "180px", minWidth: "150px", maxWidth: "200px", ...getFreezeStyle(2, false) }}>
                                   {catNames.length > 0 ? (
-                                    <span>{catNames.join(", ")}</span>
+                                    <ItemPopoverCell
+                                      items={catNames}
+                                      icon="🏷️"
+                                      itemIcon="🏷️"
+                                      title="📍 Product Categories"
+                                      badgeIcon="📍"
+                                      maxWidth="130px"
+                                    />
                                   ) : (
                                     <span style={{ color: "#64748b" }}>-</span>
                                   )}
@@ -3922,16 +3743,28 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
                               );
                             }
                             case 3: {
-                              const subCatNames = (s.sub_category_ids || [])
+                              const ids = s.sub_category_ids || [];
+                              const hasUnresolved = ids.some((id) => !resolver.get("subCategories", id));
+                              if (hasUnresolved && ids.length > 0) {
+                                void resolver.resolve("subCategories", ids).then(() => setNamesVersion((n) => n + 1));
+                              }
+                              const subCatNames = ids
                                 .map((id) => resolver.get("subCategories", id) || "")
                                 .filter(Boolean);
                               if (subCatNames.length === 0 && (s as any).sub_category_name) {
                                 subCatNames.push((s as any).sub_category_name);
                               }
                               return (
-                                <td key="cell-3" style={getFreezeStyle(3, false)}>
+                                <td key="cell-3" style={{ width: "180px", minWidth: "150px", maxWidth: "200px", ...getFreezeStyle(3, false) }}>
                                   {subCatNames.length > 0 ? (
-                                    <span>{subCatNames.join(", ")}</span>
+                                    <ItemPopoverCell
+                                      items={subCatNames}
+                                      icon="🏷️"
+                                      itemIcon="🏷️"
+                                      title="📍 Product Sub Categories"
+                                      badgeIcon="📍"
+                                      maxWidth="130px"
+                                    />
                                   ) : (
                                     <span style={{ color: "#64748b" }}>-</span>
                                   )}
@@ -4139,14 +3972,12 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
               fields={[
                 { label: "Company Name", value: drawerSupplier.company_name, fullWidth: true },
                 { label: "Supplier Type", value: drawerSupplier.supplier_type || "—" },
-                { label: "Brand Description", value: drawerSupplier.brand_description || "—" },
+                { label: "GST Number", value: drawerSupplier.tax_id_number || "—" },
                 { label: "Country", value: resolver.get("countries", drawerSupplier.country_id) || "—" },
-                { label: "Province / State", value: resolver.get("states", drawerSupplier.state_id) || "—" },
+                { label: "State", value: resolver.get("states", drawerSupplier.state_id) || "—" },
                 { label: "City", value: resolver.get("cities", drawerSupplier.city_id) || "—" },
                 { label: "Product Categories", value: chipList(drawerSupplier.category_ids, "categories"), fullWidth: true },
                 { label: "Sub-Categories", value: chipList(drawerSupplier.sub_category_ids, "subCategories"), fullWidth: true },
-                { label: "Products Supplied", value: chipList(drawerSupplier.product_ids, "products"), fullWidth: true },
-                { label: "Secondary Products", value: drawerSupplier.secondary_products_description || "—", fullWidth: true },
                 { label: "Address", value: drawerSupplier.address || "—", fullWidth: true },
               ]}
             />
@@ -4166,8 +3997,7 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
                   { label: "WhatsApp Number", value: drawerSupplier.contact_whatsapp_number || "—" },
                   { label: "WeChat Number", value: drawerSupplier.contact_wechat_number || "—" },
                   { label: "Email Addresses", value: drawerSupplier.emails && drawerSupplier.emails.length ? drawerSupplier.emails.join(", ") : "—", fullWidth: true },
-                  { label: "Primary Website", value: drawerSupplier.primary_website || "—" },
-                  { label: "Secondary Website", value: drawerSupplier.secondary_website || "—" },
+                  { label: "Website", value: drawerSupplier.primary_website || "—" },
                 ]}
               />
             </div>
@@ -4177,7 +4007,6 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
                 { label: "Supplier Grade", value: drawerSupplier.supplier_grade || "—" },
                 { label: "Current Status", value: <StatusPill value={drawerSupplier.current_status} /> },
                 { label: "Potential", value: drawerSupplier.potential || "—" },
-                { label: "Visited Factory/Office", value: drawerSupplier.visited_factory_office ? "Yes" : "No" },
                 { label: "Overall Remarks", value: drawerSupplier.overall_remarks || "—", fullWidth: true },
               ]}
             />

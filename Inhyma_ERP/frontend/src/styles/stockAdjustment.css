@@ -424,6 +424,10 @@
   color: #0f172a;
 }
 
+.adjustment-action-cell {
+  position: relative;
+}
+
 .adjustment-action-menu {
   position: absolute;
   right: 12px;
@@ -437,6 +441,11 @@
   padding: 4px 0;
   text-align: left;
   animation: filterSlideDown 0.12s ease-out;
+}
+
+.adjustment-action-menu.open-upward {
+  top: auto;
+  bottom: calc(100% + 2px);
 }
 
 .adjustment-action-item {

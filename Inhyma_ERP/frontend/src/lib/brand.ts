@@ -187,37 +187,70 @@ export function resolveImageUrl(url: string | null | undefined): string {
   return encodeURI(fullUrl);
 }
 
-export async function resolveBrandInfo(): Promise<{ name: string; logoUrl: string | null }> {
+const ORG_PROFILE_CACHE_KEY = "erp_org_full_profile";
+
+export function getCachedOrganizationProfile(): Organization | null {
   try {
-    const { data } = await apiGet<{ company_name?: string; logo_url?: string; logo_data?: string }>("/organizations/public");
+    const raw = sessionStorage.getItem(ORG_PROFILE_CACHE_KEY) || localStorage.getItem(ORG_PROFILE_CACHE_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+export function setCachedOrganizationProfile(profile: Organization | null): void {
+  try {
+    if (profile) {
+      const s = JSON.stringify(profile);
+      sessionStorage.setItem(ORG_PROFILE_CACHE_KEY, s);
+      localStorage.setItem(ORG_PROFILE_CACHE_KEY, s);
+    } else {
+      sessionStorage.removeItem(ORG_PROFILE_CACHE_KEY);
+      localStorage.removeItem(ORG_PROFILE_CACHE_KEY);
+    }
+  } catch {
+    // Ignore storage quota limits
+  }
+}
+
+export async function fetchOrganizationProfile(): Promise<Organization | null> {
+  try {
+    const { data } = await apiGet<Organization>("/organizations");
     if (data) {
-      if (data.company_name) {
-        setBrandName(data.company_name);
-      }
-      const logo = data.logo_url || data.logo_data || null;
-      setBrandLogo(logo);
-      return {
-        name: data.company_name?.trim() || getCachedBrandName(),
-        logoUrl: logo,
-      };
+      setCachedOrganizationProfile(data);
+      if (data.company_name) setBrandName(data.company_name);
+      const logo = data.logo_data || data.logo_url || null;
+      if (logo) setBrandLogo(logo);
+      return data;
     }
   } catch {
     try {
-      const { data } = await apiGet<Organization>("/organizations");
+      const { data } = await apiGet<Organization>("/organizations/public");
       if (data) {
-        if (data.company_name) {
-          setBrandName(data.company_name);
-        }
+        setCachedOrganizationProfile(data);
+        if (data.company_name) setBrandName(data.company_name);
         const logo = data.logo_data || data.logo_url || null;
-        setBrandLogo(logo);
-        return {
-          name: data.company_name?.trim() || getCachedBrandName(),
-          logoUrl: logo,
-        };
+        if (logo) setBrandLogo(logo);
+        return data;
       }
     } catch {
-      // Non-blocking fallback to cached
+      // Non-blocking fallback to cached profile
     }
+  }
+  return getCachedOrganizationProfile();
+}
+
+export async function resolveBrandInfo(): Promise<{ name: string; logoUrl: string | null }> {
+  try {
+    const profile = await fetchOrganizationProfile();
+    if (profile) {
+      return {
+        name: profile.company_name?.trim() || getCachedBrandName(),
+        logoUrl: profile.logo_data || profile.logo_url || getCachedBrandLogo(),
+      };
+    }
+  } catch {
+    // Non-blocking fallback to cached
   }
 
   return {

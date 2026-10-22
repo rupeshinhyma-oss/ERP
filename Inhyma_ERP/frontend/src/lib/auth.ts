@@ -129,7 +129,8 @@ export const Auth = {
     // View <-> Read compatibility alias
     if (code.endsWith(".view")) {
       const readAlias = code.replace(/\.view$/, ".read");
-      if (perms.includes(readAlias)) return true;
+      const manageAlias = code.replace(/\.view$/, ".manage");
+      if (perms.includes(readAlias) || perms.includes(manageAlias)) return true;
     }
     if (code.endsWith(".read")) {
       const viewAlias = code.replace(/\.read$/, ".view");

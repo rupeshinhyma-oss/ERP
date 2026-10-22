@@ -67,6 +67,7 @@ import { Reporting } from "./pages/Reporting";
 import { SettingsHub } from "./pages/SettingsHub";
 import { Forbidden } from "./pages/Forbidden";
 import { initGlobalAutocompleteBlocker } from "./lib/autocompleteBlocker";
+import { NetworkStatusNotifier } from "./components/NetworkStatusNotifier";
 
 import { Auth } from "./lib/auth";
 
@@ -118,6 +119,7 @@ export function App() {
 
   return (
     <GlobalSessionProvider>
+      <NetworkStatusNotifier />
       <ErrorBoundary title="Page failed to render.">
         <Routes>
           <Route path="/login" element={<Login />} />

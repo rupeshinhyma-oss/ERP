@@ -10,6 +10,7 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 from sqlalchemy import func, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit.constants import AuditAction
@@ -40,6 +41,7 @@ from app.tasks.models import (
     TaskMention,
     TaskPriority,
     TaskReaction,
+    TaskRecurringSchedule,
     TaskSavedFilter,
     TaskSprint,
     TaskStatus,
@@ -48,6 +50,11 @@ from app.tasks.models import (
     TaskSubtaskComment,
     TaskTemplate,
     TaskVoiceNote,
+)
+from app.tasks.recurring_calculator import (
+    calculate_next_occurrence,
+    calculate_preview_details,
+    calculate_upcoming_occurrences,
 )
 from app.tasks.repository import TaskRepository
 from app.tasks.schemas import (
@@ -65,6 +72,9 @@ from app.tasks.schemas import (
     TaskLabelCreate,
     TaskLabelRead,
     TaskReactionSummary,
+    TaskRecurringScheduleCreate,
+    TaskRecurringScheduleRead,
+    TaskRecurringScheduleUpdate,
     TaskSavedFilterCreate,
     TaskSavedFilterRead,
     TaskSavedFilterUpdate,
@@ -81,6 +91,8 @@ from app.tasks.schemas import (
     UserMiniRead,
     UserWorkloadSummary,
     WorkloadDashboardResponse,
+    RecurrencePreviewRequest,
+    RecurrencePreviewResponse,
 )
 from app.users.models import User
 
@@ -233,6 +245,8 @@ class TaskService:
             attachment_count=len(attachments),
             voice_note_count=len(voice_notes),
             depends_on_task_ids=depends_on_ids,
+            recurring_schedule_id=getattr(task, "recurring_schedule_id", None),
+            recurrence_period=getattr(task, "recurrence_period", None),
         )
 
     async def _broadcast_task_event(
@@ -640,6 +654,17 @@ class TaskService:
             if task.status == TaskStatus.ON_HOLD and payload.status not in (None, TaskStatus.ON_HOLD):
                 status_changed_from_hold = True
             task.status = payload.status
+
+        if status_changed_to_done:
+            from app.crm.follow_up_task_sync import sync_task_completion_to_follow_up
+            notes = getattr(payload, "completion_notes", None) or payload.approval_notes
+            await sync_task_completion_to_follow_up(
+                session=self.repository.session,
+                task_id=task.id,
+                actor_id=current_user.id,
+                actor_username=current_user.username,
+                completion_notes=notes,
+            )
 
         task.version += 1
         await self.repository.session.commit()
@@ -1882,6 +1907,14 @@ class TaskService:
             task.approval_status = "APPROVED"
             task.approved_at = datetime.now(timezone.utc)
             action_str = "Approved"
+            from app.crm.follow_up_task_sync import sync_task_completion_to_follow_up
+            await sync_task_completion_to_follow_up(
+                session=self.repository.session,
+                task_id=task.id,
+                actor_id=current_user.id,
+                actor_username=current_user.username,
+                completion_notes=payload.notes,
+            )
         else:
             task.status = TaskStatus.IN_PROGRESS
             task.approval_status = "REJECTED"
@@ -2019,6 +2052,16 @@ class TaskService:
             value=payload.value,
             actor_id=current_user.id,
         )
+        if payload.action == "STATUS" and payload.value == "DONE":
+            from app.crm.follow_up_task_sync import sync_task_completion_to_follow_up
+            for tid in payload.task_ids:
+                if tid not in failed_ids:
+                    await sync_task_completion_to_follow_up(
+                        session=self.repository.session,
+                        task_id=tid,
+                        actor_id=current_user.id,
+                        actor_username=current_user.username,
+                    )
         await self.repository.session.commit()
 
         await self.audit_service.record(
@@ -2209,3 +2252,610 @@ class TaskService:
             allocs = [CapacityDayAllocation(date=a["date"], task_ids=a["task_ids"], task_count=a["task_count"]) for a in d["allocations"]]
             users.append(UserCapacitySummary(user_id=d["user_id"], user_name=d["user_name"], allocations=allocs))
         return CapacityViewResponse(users=users, start_date=start_date, end_date=end_date)
+
+    # ==========================================
+    # Recurring Task Schedules Service Methods
+    # ==========================================
+
+    async def preview_recurrence(self, payload: RecurrencePreviewRequest) -> dict[str, Any]:
+        """Preview upcoming occurrences and timeline for a recurrence configuration."""
+        start_d = payload.start_date or date.today()
+        freq_str = payload.frequency.value if hasattr(payload.frequency, "value") else str(payload.frequency)
+        occurrences = calculate_upcoming_occurrences(
+            frequency=freq_str,
+            config=payload.recurrence_config,
+            start_date=start_d,
+            count=payload.count or 5,
+            effective_end_date=payload.effective_end_date,
+        )
+        nxt = calculate_next_occurrence(
+            frequency=freq_str,
+            config=payload.recurrence_config,
+            after_date=start_d,
+            effective_start_date=start_d,
+            effective_end_date=payload.effective_end_date,
+        )
+        next_occ = None
+        if nxt:
+            due, p_key = nxt
+            next_occ = {
+                "period": p_key,
+                "due_date": due.isoformat(),
+                "formatted_due_date": due.strftime("%d %b %Y"),
+            }
+
+        timeline = calculate_preview_details(
+            frequency=freq_str,
+            config=payload.recurrence_config,
+            start_date=start_d,
+            reminder_lead_days=payload.reminder_lead_days if payload.reminder_lead_days is not None else 3,
+            escalation_timing_type=payload.escalation_timing_type or "ON_DUE_DATE",
+            escalation_offset_days=payload.escalation_offset_days if payload.escalation_offset_days is not None else 0,
+            escalation_repeat_interval_days=payload.escalation_repeat_interval_days if payload.escalation_repeat_interval_days is not None else 7,
+            hold_until=payload.hold_until,
+            effective_end_date=payload.effective_end_date,
+        )
+
+        res = {
+            "occurrences": occurrences,
+            "next_occurrence": next_occ,
+            **timeline,
+        }
+        return res
+
+    async def create_recurring_schedule(
+        self, payload: TaskRecurringScheduleCreate, current_user: Any
+    ) -> TaskRecurringScheduleRead:
+        """Create a recurring task schedule."""
+        freq_str = payload.frequency.value if hasattr(payload.frequency, "value") else str(payload.frequency)
+        nxt = calculate_next_occurrence(
+            frequency=freq_str,
+            config=payload.recurrence_config,
+            after_date=payload.effective_start_date,
+            effective_start_date=payload.effective_start_date,
+            effective_end_date=payload.effective_end_date,
+        )
+        next_due = nxt[0] if nxt else None
+
+        schedule = TaskRecurringSchedule(
+            title=payload.title,
+            description=payload.description,
+            department=payload.department,
+            assignee_id=payload.assignee_id,
+            manager_id=payload.manager_id,
+            created_by=current_user.id,
+            priority=payload.priority,
+            issue_type=payload.issue_type,
+            frequency=freq_str,
+            recurrence_config=payload.recurrence_config,
+            reminder_lead_days=payload.reminder_lead_days,
+            escalation_timing_type=payload.escalation_timing_type,
+            escalation_offset_days=payload.escalation_offset_days,
+            escalation_repeat_interval_days=payload.escalation_repeat_interval_days,
+            hold_until_rule=payload.hold_until_rule,
+            status="ACTIVE",
+            effective_start_date=payload.effective_start_date,
+            effective_end_date=payload.effective_end_date,
+            next_run_date=next_due,
+        )
+        created = await self.repository.create_recurring_schedule(schedule)
+        await self.audit_service.record(
+            action=AuditAction.CREATE,
+            module="tasks",
+            user_id=current_user.id,
+            username_snapshot=getattr(current_user, "username", "system"),
+            entity_type="TaskRecurringSchedule",
+            entity_id=str(created.id),
+            new_values={"title": created.title, "frequency": created.frequency},
+        )
+        return TaskRecurringScheduleRead.model_validate(created)
+
+    async def get_recurring_schedule(self, schedule_id: uuid.UUID) -> TaskRecurringScheduleRead:
+        schedule = await self.repository.get_recurring_schedule(schedule_id)
+        if not schedule:
+            raise NotFoundException(f"Recurring task schedule {schedule_id} not found.")
+        return TaskRecurringScheduleRead.model_validate(schedule)
+
+    async def list_recurring_schedules(
+        self,
+        department: str | None = None,
+        status: str | None = None,
+        frequency: str | None = None,
+    ) -> list[TaskRecurringScheduleRead]:
+        schedules = await self.repository.list_recurring_schedules(
+            department=department, status=status, frequency=frequency
+        )
+        return [TaskRecurringScheduleRead.model_validate(s) for s in schedules]
+
+    async def update_recurring_schedule(
+        self,
+        schedule_id: uuid.UUID,
+        payload: TaskRecurringScheduleUpdate,
+        current_user: Any,
+    ) -> TaskRecurringScheduleRead:
+        schedule = await self.repository.get_recurring_schedule(schedule_id)
+        if not schedule:
+            raise NotFoundException(f"Recurring task schedule {schedule_id} not found.")
+
+        new_freq = payload.frequency.value if payload.frequency and hasattr(payload.frequency, "value") else (str(payload.frequency) if payload.frequency else schedule.frequency)
+        new_config = payload.recurrence_config if payload.recurrence_config is not None else schedule.recurrence_config
+        new_start = payload.effective_start_date or schedule.effective_start_date
+        new_end = payload.effective_end_date if payload.effective_end_date is not None else schedule.effective_end_date
+
+        nxt = calculate_next_occurrence(
+            frequency=new_freq,
+            config=new_config,
+            after_date=date.today(),
+            effective_start_date=new_start,
+            effective_end_date=new_end,
+        )
+        schedule.next_run_date = nxt[0] if nxt else None
+
+        if payload.title is not None:
+            schedule.title = payload.title
+        if payload.description is not None:
+            schedule.description = payload.description
+        if payload.department is not None:
+            schedule.department = payload.department
+        if payload.assignee_id is not None:
+            schedule.assignee_id = payload.assignee_id
+        if payload.manager_id is not None:
+            schedule.manager_id = payload.manager_id
+        if payload.priority is not None:
+            schedule.priority = payload.priority
+        if payload.issue_type is not None:
+            schedule.issue_type = payload.issue_type
+        if payload.frequency is not None:
+            schedule.frequency = new_freq
+        if payload.recurrence_config is not None:
+            schedule.recurrence_config = new_config
+        if payload.reminder_lead_days is not None:
+            schedule.reminder_lead_days = payload.reminder_lead_days
+        if payload.escalation_timing_type is not None:
+            schedule.escalation_timing_type = payload.escalation_timing_type
+        if payload.escalation_offset_days is not None:
+            schedule.escalation_offset_days = payload.escalation_offset_days
+        if payload.escalation_repeat_interval_days is not None:
+            schedule.escalation_repeat_interval_days = payload.escalation_repeat_interval_days
+        if payload.hold_until_rule is not None:
+            schedule.hold_until_rule = payload.hold_until_rule
+        if payload.status is not None:
+            schedule.status = payload.status.value if hasattr(payload.status, "value") else str(payload.status)
+        if payload.effective_start_date is not None:
+            schedule.effective_start_date = payload.effective_start_date
+        if payload.effective_end_date is not None:
+            schedule.effective_end_date = payload.effective_end_date
+
+        # If explicitly opted to update pending instances:
+        if payload.update_pending_instances:
+            pending_instances = await self.repository.list_recurring_instances(
+                schedule_id=schedule.id, history_only=False
+            )
+            for t in pending_instances:
+                t.title = f"{schedule.title} [{t.recurrence_period}]" if t.recurrence_period else schedule.title
+                t.priority = schedule.priority
+                t.approver_id = schedule.manager_id
+
+        await self.repository.session.commit()
+        await self.repository.session.refresh(schedule, ["assignee", "manager", "creator"])
+        await self.audit_service.record(
+            action=AuditAction.UPDATE,
+            module="tasks",
+            user_id=current_user.id,
+            username_snapshot=getattr(current_user, "username", "system"),
+            entity_type="TaskRecurringSchedule",
+            entity_id=str(schedule.id),
+            new_values={"title": schedule.title, "status": schedule.status},
+        )
+        return TaskRecurringScheduleRead.model_validate(schedule)
+
+    async def pause_recurring_schedule(
+        self, schedule_id: uuid.UUID, current_user: Any
+    ) -> TaskRecurringScheduleRead:
+        schedule = await self.repository.get_recurring_schedule(schedule_id)
+        if not schedule:
+            raise NotFoundException(f"Recurring task schedule {schedule_id} not found.")
+        if schedule.status == "ARCHIVED":
+            raise ValidationException("Cannot pause an archived recurring schedule. Please restore the schedule first.")
+        if schedule.status == "PAUSED":
+            return TaskRecurringScheduleRead.model_validate(schedule)
+
+        schedule.status = "PAUSED"
+        schedule.next_run_date = None
+        await self.repository.session.commit()
+        await self.repository.session.refresh(schedule, ["assignee", "manager", "creator"])
+        await self.audit_service.record(
+            action=AuditAction.UPDATE,
+            module="tasks",
+            user_id=current_user.id,
+            username_snapshot=getattr(current_user, "username", "system"),
+            entity_type="TaskRecurringSchedule",
+            entity_id=str(schedule.id),
+            new_values={"status": "PAUSED"},
+        )
+        return TaskRecurringScheduleRead.model_validate(schedule)
+
+    async def resume_recurring_schedule(
+        self, schedule_id: uuid.UUID, current_user: Any
+    ) -> TaskRecurringScheduleRead:
+        schedule = await self.repository.get_recurring_schedule(schedule_id)
+        if not schedule:
+            raise NotFoundException(f"Recurring task schedule {schedule_id} not found.")
+        if schedule.status == "ARCHIVED":
+            raise ValidationException("Cannot resume an archived recurring schedule directly. Please unarchive / restore the schedule first.")
+        if schedule.status == "ACTIVE":
+            return TaskRecurringScheduleRead.model_validate(schedule)
+
+        schedule.status = "ACTIVE"
+        nxt = calculate_next_occurrence(
+            frequency=schedule.frequency,
+            config=schedule.recurrence_config,
+            after_date=date.today(),
+            effective_start_date=schedule.effective_start_date,
+            effective_end_date=schedule.effective_end_date,
+        )
+        schedule.next_run_date = nxt[0] if nxt else None
+        await self.repository.session.commit()
+        await self.repository.session.refresh(schedule, ["assignee", "manager", "creator"])
+        await self.audit_service.record(
+            action=AuditAction.UPDATE,
+            module="tasks",
+            user_id=current_user.id,
+            username_snapshot=getattr(current_user, "username", "system"),
+            entity_type="TaskRecurringSchedule",
+            entity_id=str(schedule.id),
+            new_values={"status": "ACTIVE"},
+        )
+        return TaskRecurringScheduleRead.model_validate(schedule)
+
+    async def archive_recurring_schedule(
+        self, schedule_id: uuid.UUID, current_user: Any
+    ) -> TaskRecurringScheduleRead:
+        schedule = await self.repository.get_recurring_schedule(schedule_id)
+        if not schedule:
+            raise NotFoundException(f"Recurring task schedule {schedule_id} not found.")
+        if schedule.status == "ARCHIVED":
+            return TaskRecurringScheduleRead.model_validate(schedule)
+
+        cfg = dict(schedule.recurrence_config or {})
+        cfg["_pre_archive_status"] = schedule.status
+        schedule.recurrence_config = cfg
+        schedule.status = "ARCHIVED"
+        schedule.next_run_date = None
+
+        await self.repository.session.commit()
+        await self.repository.session.refresh(schedule, ["assignee", "manager", "creator"])
+        await self.audit_service.record(
+            action=AuditAction.UPDATE,
+            module="tasks",
+            user_id=current_user.id,
+            username_snapshot=getattr(current_user, "username", "system"),
+            entity_type="TaskRecurringSchedule",
+            entity_id=str(schedule.id),
+            new_values={"status": "ARCHIVED"},
+        )
+        return TaskRecurringScheduleRead.model_validate(schedule)
+
+    async def unarchive_recurring_schedule(
+        self, schedule_id: uuid.UUID, current_user: Any
+    ) -> TaskRecurringScheduleRead:
+        schedule = await self.repository.get_recurring_schedule(schedule_id)
+        if not schedule:
+            raise NotFoundException(f"Recurring task schedule {schedule_id} not found.")
+        if schedule.status != "ARCHIVED":
+            return TaskRecurringScheduleRead.model_validate(schedule)
+
+        if schedule.effective_end_date and schedule.effective_end_date < date.today():
+            raise ValidationException(
+                f"Cannot restore schedule '{schedule.title}' because its effective end date ({schedule.effective_end_date}) has already passed. Please update the schedule end date first."
+            )
+
+        cfg = dict(schedule.recurrence_config or {})
+        target_status = cfg.get("_pre_archive_status", "ACTIVE")
+        if target_status not in ("ACTIVE", "PAUSED"):
+            target_status = "ACTIVE"
+
+        schedule.status = target_status
+        if schedule.status == "ACTIVE":
+            nxt = calculate_next_occurrence(
+                frequency=schedule.frequency,
+                config=schedule.recurrence_config,
+                after_date=date.today(),
+                effective_start_date=schedule.effective_start_date,
+                effective_end_date=schedule.effective_end_date,
+            )
+            schedule.next_run_date = nxt[0] if nxt else None
+        else:
+            schedule.next_run_date = None
+
+        await self.repository.session.commit()
+        await self.repository.session.refresh(schedule, ["assignee", "manager", "creator"])
+        await self.audit_service.record(
+            action=AuditAction.UPDATE,
+            module="tasks",
+            user_id=current_user.id,
+            username_snapshot=getattr(current_user, "username", "system"),
+            entity_type="TaskRecurringSchedule",
+            entity_id=str(schedule.id),
+            new_values={"status": schedule.status},
+        )
+        return TaskRecurringScheduleRead.model_validate(schedule)
+
+    async def delete_recurring_schedule(
+        self, schedule_id: uuid.UUID, current_user: Any
+    ) -> None:
+        schedule = await self.repository.get_recurring_schedule(schedule_id)
+        if not schedule:
+            raise NotFoundException(f"Recurring task schedule {schedule_id} not found.")
+        schedule.deleted_at = datetime.now(timezone.utc)
+        schedule.deleted_by = current_user.id
+        await self.repository.session.commit()
+        await self.audit_service.record(
+            action=AuditAction.DELETE,
+            module="tasks",
+            user_id=current_user.id,
+            username_snapshot=getattr(current_user, "username", "system"),
+            entity_type="TaskRecurringSchedule",
+            entity_id=str(schedule.id),
+        )
+
+    async def generate_recurring_tasks(
+        self, as_of_date: date | None = None, schedule_id: uuid.UUID | None = None
+    ) -> list[Task]:
+        """
+        Idempotent generation of Task instances for all active recurring schedules.
+        Checks existing instances so repeated runs never create duplicate tasks.
+        """
+        ref_date = as_of_date or date.today()
+        schedules: list[TaskRecurringSchedule] = []
+
+        if schedule_id:
+            sch = await self.repository.get_recurring_schedule(schedule_id)
+            if sch and sch.status == "ACTIVE":
+                schedules.append(sch)
+        else:
+            schedules = await self.repository.get_active_recurring_schedules()
+
+        generated_tasks: list[Task] = []
+
+        for sch in schedules:
+            current_sch_id = sch.id
+            if sch.effective_end_date and ref_date > sch.effective_end_date:
+                continue
+            if ref_date < sch.effective_start_date:
+                continue
+
+            # Calculate the current or upcoming eligible occurrence
+            nxt = calculate_next_occurrence(
+                frequency=sch.frequency,
+                config=sch.recurrence_config,
+                after_date=ref_date,
+                effective_start_date=sch.effective_start_date,
+                effective_end_date=sch.effective_end_date,
+            )
+            if not nxt:
+                continue
+
+            due_date, period_key = nxt
+
+            # IDEMPOTENCY CHECK:
+            existing = await self.repository.get_recurring_task_instance(sch.id, period_key)
+            if existing:
+                continue
+
+            # Create Task instance
+            desc_lines = [
+                sch.description or "",
+                "",
+                "--- Recurring Task Metadata ---",
+                f"• Frequency: {sch.frequency}",
+                f"• Period: {period_key}",
+                f"• Originating Schedule ID: {sch.id}",
+            ]
+            if sch.department:
+                desc_lines.append(f"• Department: {sch.department}")
+
+            task = Task(
+                title=f"{sch.title} [{period_key}]",
+                description="\n".join(desc_lines).strip(),
+                priority=sch.priority,
+                status=TaskStatus.TODO,
+                issue_type=sch.issue_type,
+                start_date=ref_date,
+                due_date=due_date,
+                created_by=sch.created_by,
+                recurring_schedule_id=sch.id,
+                recurrence_period=period_key,
+                approver_id=sch.manager_id,
+                approval_status=ApprovalStatus.PENDING_APPROVAL if sch.manager_id else ApprovalStatus.NOT_REQUIRED,
+            )
+            try:
+                self.repository.session.add(task)
+                await self.repository.session.flush()
+
+                # Assignees
+                if sch.assignee_id:
+                    assignee_rec = TaskAssignee(
+                        task_id=task.id,
+                        user_id=sch.assignee_id,
+                        assignment_role="ASSIGNEE",
+                    )
+                    self.repository.session.add(assignee_rec)
+
+                if sch.manager_id and sch.manager_id != sch.assignee_id:
+                    manager_rec = TaskAssignee(
+                        task_id=task.id,
+                        user_id=sch.manager_id,
+                        assignment_role="REVIEWER",
+                    )
+                    self.repository.session.add(manager_rec)
+
+                # Update schedule state
+                sch.last_generated_period = period_key
+                sch.last_generated_at = datetime.now(timezone.utc)
+                # Advance next_run_date past this due date
+                subsequent = calculate_next_occurrence(
+                    frequency=sch.frequency,
+                    config=sch.recurrence_config,
+                    after_date=due_date + timedelta(days=1),
+                    effective_start_date=sch.effective_start_date,
+                    effective_end_date=sch.effective_end_date,
+                )
+                sch.next_run_date = subsequent[0] if subsequent else None
+
+                await self.repository.session.commit()
+                await self.repository.session.refresh(task)
+            except Exception as exc:
+                if (
+                    isinstance(exc, IntegrityError)
+                    or "integrity" in type(exc).__name__.lower()
+                    or "unique" in str(exc).lower()
+                    or "violation" in str(exc).lower()
+                ):
+                    await self.repository.session.rollback()
+                    logger.info(
+                        "Concurrent generation collision for schedule %s and period %s. Safely skipping.",
+                        current_sch_id,
+                        period_key,
+                    )
+                    continue
+                raise
+
+            # Notify assignee
+            if sch.assignee_id:
+                await self.notification_service.notify_user(
+                    user_id=sch.assignee_id,
+                    type="task_assigned",
+                    title="New Recurring Task Generated",
+                    message=f"Recurring task '{task.title}' for period {period_key} was generated.",
+                    link=f"/tasks?id={task.id}",
+                )
+
+            await self._broadcast_task_event("TASK_CREATED", task, actor_id=sch.created_by)
+            generated_tasks.append(task)
+
+        return generated_tasks
+
+    async def list_recurring_instances(
+        self, schedule_id: uuid.UUID | None = None, history_only: bool = False
+    ) -> list[TaskSummaryRead]:
+        instances = await self.repository.list_recurring_instances(
+            schedule_id=schedule_id, history_only=history_only
+        )
+        return [TaskSummaryRead.model_validate(t) for t in instances]
+
+    async def check_recurring_reminders_and_escalations(
+        self, as_of_date: date | None = None
+    ) -> dict[str, int]:
+        """
+        Check pending recurring task instances for reminder lead days and escalations.
+        Only acts on pending instances (status != DONE, not deleted, not on valid hold).
+        """
+        today = as_of_date or date.today()
+        reminders_sent = 0
+        escalations_triggered = 0
+
+        pending_tasks = await self.repository.list_recurring_instances(history_only=False, limit=500)
+
+        for task in pending_tasks:
+            if not task.recurring_schedule_id or not task.due_date:
+                continue
+            if task.status == TaskStatus.DONE or getattr(task, "is_deleted", False):
+                continue
+            if task.status == TaskStatus.ON_HOLD and task.hold_until and task.hold_until > today:
+                continue
+
+            sch = task.recurring_schedule
+            if not sch:
+                sch = await self.repository.get_recurring_schedule(task.recurring_schedule_id)
+            if not sch or sch.status in ("PAUSED", "ARCHIVED"):
+                continue
+
+            # 1. Reminder Check
+            if sch.reminder_lead_days is not None and sch.reminder_lead_days >= 0 and sch.assignee_id:
+                reminder_trigger_date = task.due_date - timedelta(days=sch.reminder_lead_days)
+                if reminder_trigger_date <= today <= task.due_date:
+                    from app.notifications.models import Notification
+                    notif_stmt = select(Notification).where(
+                        Notification.user_id == sch.assignee_id,
+                        Notification.type == "task_deadline_warning",
+                        Notification.link == f"/tasks?id={task.id}",
+                    )
+                    existing_notif = (await self.repository.session.execute(notif_stmt)).scalar_one_or_none()
+                    if not existing_notif:
+                        await self.notification_service.notify_user(
+                            user_id=sch.assignee_id,
+                            type="task_deadline_warning",
+                            title=f"Reminder: {task.title}",
+                            message=f"Recurring task '{task.title}' ({task.recurrence_period}) is due on {task.due_date}.",
+                            link=f"/tasks?id={task.id}",
+                        )
+                        reminders_sent += 1
+
+            # 2. Escalation Check
+            if sch.manager_id and sch.assignee_id:
+                esc_timing = sch.escalation_timing_type or "ON_DUE_DATE"
+                offset = sch.escalation_offset_days or 0
+                if esc_timing == "BEFORE_DUE_DATE":
+                    esc_trigger = task.due_date - timedelta(days=offset)
+                elif esc_timing == "AFTER_DUE_DATE":
+                    esc_trigger = task.due_date + timedelta(days=offset)
+                else:  # ON_DUE_DATE
+                    esc_trigger = task.due_date
+
+                if today >= esc_trigger:
+                    existing_esc = [e for e in task.escalations if e.to_user == sch.manager_id]
+                    should_escalate = False
+                    reason = ""
+
+                    if not existing_esc:
+                        should_escalate = True
+                        reason = f"Automated escalation: Recurring task '{task.title}' ({task.recurrence_period}) is incomplete past escalation trigger date ({esc_trigger})."
+                    else:
+                        repeat_interval = sch.escalation_repeat_interval_days
+                        if repeat_interval and repeat_interval > 0:
+                            def _esc_date(e: TaskEscalation) -> date:
+                                if e.created_at:
+                                    return e.created_at.date() if isinstance(e.created_at, datetime) else e.created_at
+                                return esc_trigger
+
+                            latest_esc = max(existing_esc, key=_esc_date)
+                            latest_date = _esc_date(latest_esc)
+                            if today >= latest_date + timedelta(days=repeat_interval) and latest_date < today:
+                                should_escalate = True
+                                reason = f"Automated repeat escalation: Recurring task '{task.title}' ({task.recurrence_period}) remains incomplete (repeat interval: {repeat_interval} days)."
+
+                    if should_escalate:
+                        simulated_created_at = (
+                            datetime.combine(today, datetime.min.time(), tzinfo=timezone.utc)
+                            if as_of_date
+                            else datetime.now(timezone.utc)
+                        )
+                        esc = TaskEscalation(
+                            task_id=task.id,
+                            from_user=sch.assignee_id,
+                            to_user=sch.manager_id,
+                            reason=reason,
+                            escalation_type="ORGANIZATION_USER",
+                            due_date=today + timedelta(days=3),
+                            created_at=simulated_created_at,
+                        )
+                        self.repository.session.add(esc)
+                        await self.repository.session.commit()
+                        task.escalations.append(esc)
+
+                        await self.notification_service.notify_user(
+                            user_id=sch.manager_id,
+                            type="task_escalated",
+                            title="Recurring Task Escalated",
+                            message=f"Recurring task '{task.title}' for {task.recurrence_period} was escalated to you.",
+                            link=f"/tasks?id={task.id}",
+                        )
+                        escalations_triggered += 1
+
+        return {
+            "reminders_sent": reminders_sent,
+            "escalations_triggered": escalations_triggered,
+        }
+
+

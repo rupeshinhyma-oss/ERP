@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback, useRef } from "react";
 import type {
   TaskSummary,
   TaskStatus,
@@ -97,7 +97,13 @@ export const KanbanPage: React.FC = () => {
   }, [fetchTasks]);
 
   // Live WebSocket updates
+  const fetchTasksRef = useRef(fetchTasks);
   useEffect(() => {
+    fetchTasksRef.current = fetchTasks;
+  }, [fetchTasks]);
+
+  useEffect(() => {
+    liveClient.subscribe("module:tasks");
     liveClient.subscribe("tasks");
     if (profile?.id) {
       liveClient.subscribe(`user:${profile.id}`);
@@ -105,14 +111,20 @@ export const KanbanPage: React.FC = () => {
     const unsub = liveClient.onEvent((event) => {
       if (
         event.entity === "task" ||
-        event.event_type.startsWith("TASK_") ||
-        (profile?.id && event.user_id === profile.id)
+        event.event_type?.startsWith("TASK_")
       ) {
-        fetchTasks();
+        fetchTasksRef.current();
       }
     });
-    return () => unsub();
-  }, [profile?.id, fetchTasks]);
+    return () => {
+      unsub();
+      liveClient.unsubscribe("module:tasks");
+      liveClient.unsubscribe("tasks");
+      if (profile?.id) {
+        liveClient.unsubscribe(`user:${profile.id}`);
+      }
+    };
+  }, [profile?.id]);
 
   // Drag and Drop handlers
   const handleDragStart = (e: React.DragEvent, id: string) => {

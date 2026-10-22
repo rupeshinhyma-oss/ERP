@@ -100,7 +100,7 @@ class ImportPurchase(Base, UUIDPrimaryKeyMixin, TimestampMixin, VersionMixin, So
     misc_remarks: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     total_expenses: Mapped[float] = _money()                # (B)
-    gross_total_landing: Mapped[float] = _money()           # A + B + total import duty
+    gross_total_landing: Mapped[float] = _money()           # A + B
     loading_percent_vb: Mapped[float] = _money()            # (C) = B x 100 / A
     loading_amount_per_cbm: Mapped[float] = _money()        # (I) = B / H
 

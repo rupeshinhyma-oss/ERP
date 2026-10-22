@@ -2889,7 +2889,7 @@ function ItemsView({
                         </td>
                       </tr>
                     ) : (
-                      filteredQuotations.map((quote) => {
+                      filteredQuotations.map((quote, idx) => {
                         const currSymbol = quote.currency === "USD" ? "$" : quote.currency === "INR" ? "₹" : quote.currency === "EUR" ? "€" : "¥";
                         const usdAmount = quote.currency === "USD"
                           ? Number(quote.total_cost).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
@@ -2955,7 +2955,7 @@ function ItemsView({
                                 {statusLabel(quote.status)}
                               </span>
                             </td>
-                            <td style={{ ...tdStyle, textAlign: "right", position: "relative" }}>
+                            <td style={{ ...tdStyle, textAlign: "right", position: "relative", zIndex: isActionOpen ? 50 : 1 }}>
                               <button
                                 type="button"
                                 onClick={() => setActiveActionMenuId(isActionOpen ? null : quote.id)}
@@ -2973,7 +2973,9 @@ function ItemsView({
                               </button>
 
                               {/* Click-away backdrop to close menu when clicking anywhere */}
-                              {isActionOpen && (
+                              {isActionOpen && (() => {
+                                const openUpward = filteredQuotations.length >= 3 && idx >= filteredQuotations.length - (filteredQuotations.length >= 4 ? 2 : 1);
+                                return (
                                 <>
                                   <div
                                     style={{
@@ -2991,10 +2993,13 @@ function ItemsView({
                                     style={{
                                       position: "absolute",
                                       right: "0px",
-                                      top: "34px",
+                                      top: openUpward ? "auto" : "34px",
+                                      bottom: openUpward ? "34px" : "auto",
                                       background: "#ffffff",
                                       borderRadius: "10px",
-                                      boxShadow: "0 10px 30px -5px rgba(0, 0, 0, 0.18), 0 0 0 1px rgba(0, 0, 0, 0.06)",
+                                      boxShadow: openUpward
+                                        ? "0 -10px 30px -5px rgba(0, 0, 0, 0.18), 0 0 0 1px rgba(0, 0, 0, 0.06)"
+                                        : "0 10px 30px -5px rgba(0, 0, 0, 0.18), 0 0 0 1px rgba(0, 0, 0, 0.06)",
                                       zIndex: 999,
                                       width: "155px",
                                       display: "flex",
@@ -3166,7 +3171,8 @@ function ItemsView({
                                     </button>
                                   </div>
                                 </>
-                              )}
+                                );
+                              })()}
                             </td>
                           </tr>
                         );

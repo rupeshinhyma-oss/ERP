@@ -134,7 +134,7 @@ def compute_import(
     items: list[ImportItemIn],
 ) -> ImportResult:
     """Implements the Import Purchase spec: A = Z x W, B = sum(expenses), C = B x 100 / A, I = B / H, and the
-    per-item L, E, O, F, M, G, N and difference. Gross total landing = A + B + total import duty."""
+    per-item L, E, O, F, M, G, N and difference. Gross total landing = A + B."""
     z, p = conversion_rate, customs_conversion_rate
     a = z * invoice_total_usd                                  # (A)
     b = sum(expenses)                                          # (B)
@@ -155,7 +155,8 @@ def compute_import(
             ImportItemOut(
                 product_name=it.product_name, product_code=it.product_code, uom=it.uom, quantity=y,
                 pkg_unit_cbm=it.pkg_unit_cbm, pkg_qty=it.pkg_qty, item_total_cbm=money(l, 4),
-                unit_rate_usd=money(it.unit_rate_usd), unit_rate_inr=money(e), item_total_usd=money(y * it.unit_rate_usd),
+                unit_rate_usd=money(it.unit_rate_usd), unit_rate_inr=money(e),
+                item_total_usd=money(y * it.unit_rate_usd),  # Item Total (Basic in USD) = Quantity (Y) * Unit Rate (USD)
                 duty_percent=it.duty_percent, unit_import_duty=money(o), item_total_duty=money(o * y),
                 exp_per_unit_vb=money(f), exp_per_unit_cb=money(m), unit_landing_vb=money(g), unit_landing_cb=money(n),
                 landing_diff=money(n - g),
@@ -164,7 +165,7 @@ def compute_import(
     return ImportResult(
         invoice_total_inr=money(a),
         total_expenses=money(b),
-        gross_total_landing=money(a + b + total_import_duty),
+        gross_total_landing=money(a + b),
         loading_percent_vb=money(c, 4),
         loading_amount_per_cbm=money(i_per_cbm),
         items=lines,

@@ -49,7 +49,7 @@ def test_import_purchase_formulas_match_the_spec():
     assert res.total_expenses == 10000.0
     assert res.loading_percent_vb == 12.5
     assert res.loading_amount_per_cbm == 500.0
-    assert res.gross_total_landing == 96000.0          # A + B + total import duty
+    assert res.gross_total_landing == 90000.0          # A + B (80000 + 10000)
 
     sealer, spare = res.items
     # L = 10 x 0.5 / 1 = 5 ; E = 60 x 80 = 4800 ; O = 60 x 82 x 10% = 492 ; F = 4800 x 12.5% = 600

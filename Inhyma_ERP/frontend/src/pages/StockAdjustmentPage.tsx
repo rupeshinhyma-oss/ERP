@@ -956,38 +956,18 @@ export function StockAdjustmentPage({
               </div>
             </div>
 
-            <div className="adjustment-filter-actions" style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "16px" }}>
+            <div className="adjustment-filter-actions" style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "18px" }}>
               <button
                 type="button"
-                className="adjustment-btn-reset"
+                className="btn-filter-reset"
                 onClick={handleResetFilters}
-                style={{
-                  background: "#5c6f84",
-                  color: "#ffffff",
-                  border: "none",
-                  borderRadius: "5px",
-                  padding: "8px 24px",
-                  fontWeight: 600,
-                  fontSize: "13.5px",
-                  cursor: "pointer",
-                }}
               >
                 Reset
               </button>
               <button
                 type="button"
-                className="adjustment-btn-search"
+                className="btn-filter-search"
                 onClick={handleApplyFilters}
-                style={{
-                  background: "#f59e0b",
-                  color: "#1e293b",
-                  border: "none",
-                  borderRadius: "5px",
-                  padding: "8px 24px",
-                  fontWeight: 600,
-                  fontSize: "13.5px",
-                  cursor: "pointer",
-                }}
               >
                 Search
               </button>
@@ -1050,7 +1030,7 @@ export function StockAdjustmentPage({
           </div>
 
           {/* Table Container */}
-          <div className="table-scroll" style={{ maxHeight: "calc(100vh - 220px)", overflowY: "auto", overflowX: "auto", border: "none", borderRadius: 0, boxShadow: "none" }}>
+          <div className="table-scroll" style={{ maxHeight: "calc(100vh - 220px)", minHeight: "320px", overflowY: "auto", overflowX: "auto", border: "none", borderRadius: 0, boxShadow: "none" }}>
             <table className="adjustment-table" style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0 }}>
               <thead>
                 <tr>
@@ -1090,7 +1070,7 @@ export function StockAdjustmentPage({
                     </td>
                   </tr>
                 ) : (
-                  paginatedItems.map((item) => (
+                  paginatedItems.map((item, idx) => (
                     <tr
                       key={item.id}
                       style={{ cursor: "pointer" }}
@@ -1129,7 +1109,7 @@ export function StockAdjustmentPage({
                         {formatIndianCurrency(item.total_amount)}
                       </td>
                       <td>{item.created_by}</td>
-                      <td className="adjustment-action-cell" onClick={(e) => e.stopPropagation()}>
+                      <td className="adjustment-action-cell" style={{ position: "relative", zIndex: openActionMenuId === item.id ? 50 : 1 }} onClick={(e) => e.stopPropagation()}>
                         <button
                           type="button"
                           className={`adjustment-action-btn ${openActionMenuId === item.id ? "active" : ""}`}
@@ -1144,8 +1124,14 @@ export function StockAdjustmentPage({
                           ⋮
                         </button>
 
-                        {openActionMenuId === item.id && (
-                          <div className="adjustment-action-menu" data-testid={`action-menu-${item.id}`}>
+                        {openActionMenuId === item.id && (() => {
+                          const openUpward = paginatedItems.length >= 3 && idx >= paginatedItems.length - (paginatedItems.length >= 4 ? 2 : 1);
+                          return (
+                          <div
+                            className={`adjustment-action-menu ${openUpward ? "open-upward" : ""}`}
+                            data-testid={`action-menu-${item.id}`}
+                            style={openUpward ? { top: "auto", bottom: "calc(100% + 2px)", boxShadow: "0 -10px 15px -3px rgba(0, 0, 0, 0.1), 0 -4px 6px -2px rgba(0, 0, 0, 0.05)" } : undefined}
+                          >
                             <button
                               type="button"
                               className="adjustment-action-item"
@@ -1178,7 +1164,8 @@ export function StockAdjustmentPage({
                               <span>Download</span>
                             </button>
                           </div>
-                        )}
+                          );
+                        })()}
                       </td>
                     </tr>
                   ))

@@ -31,6 +31,11 @@ from app.events.dispatcher import EventDispatcher
 from app.masters.products.dependencies import get_product_service
 from app.masters.products.schemas import ImportSummaryRead, ProductCreate, ProductRead, ProductUpdate
 from app.masters.products.service import ProductService
+from app.masters.products.sync_inhyma import (
+    is_inhyma_organization,
+    sync_product_to_inhyma,
+    was_product_synced_to_inhyma,
+)
 from app.rbac.dependencies import require_permission
 
 router = APIRouter(prefix="/masters/products", tags=["Masters - Products"])
@@ -127,6 +132,13 @@ async def create_product(
         user_id=current_user.id,
         changes=payload.model_dump(mode="json"),
     )
+    # Sync to Inhyma Product Master if Organization = Inhyma
+    if await is_inhyma_organization(
+        db, product=product, organization_ids=payload.organization_ids, organization_id=payload.organization_id
+    ):
+        await sync_product_to_inhyma(
+            db, product, event_type="product.created", actor_id=current_user.id
+        )
     return build_success_response(data=data, request_id=request.state.request_id, message="Resource created successfully.")
 
 
@@ -289,6 +301,15 @@ async def update_product(
         user_id=current_user.id,
         changes=payload.model_dump(exclude_none=True, mode="json"),
     )
+    # Sync update to Inhyma if Inhyma org selected or already mapped
+    if await is_inhyma_organization(
+        db, product=product, organization_ids=getattr(payload, "organization_ids", None), organization_id=getattr(payload, "organization_id", None)
+    ) or await was_product_synced_to_inhyma(db, product.id):
+        is_inactive = (payload.status == "inactive")
+        evt_type = "product.deactivated" if is_inactive else "product.updated"
+        await sync_product_to_inhyma(
+            db, product, event_type=evt_type, actor_id=current_user.id, is_active=(not is_inactive)
+        )
     return build_success_response(data=data, request_id=request.state.request_id)
 
 
@@ -321,6 +342,10 @@ async def activate_product(
         user_id=current_user.id,
         changes={"is_active": True},
     )
+    if await is_inhyma_organization(db, product=product) or await was_product_synced_to_inhyma(db, product.id):
+        await sync_product_to_inhyma(
+            db, product, event_type="product.updated", actor_id=current_user.id, is_active=True
+        )
     return build_success_response(data=data, request_id=request.state.request_id)
 
 
@@ -353,6 +378,11 @@ async def deactivate_product(
         user_id=current_user.id,
         changes={"is_active": False},
     )
+    # Automatic deactivation in Inhyma
+    if await is_inhyma_organization(db, product=product) or await was_product_synced_to_inhyma(db, product.id):
+        await sync_product_to_inhyma(
+            db, product, event_type="product.deactivated", actor_id=current_user.id, is_active=False
+        )
     return build_success_response(data=data, request_id=request.state.request_id)
 
 
@@ -367,6 +397,14 @@ async def delete_product(
     dispatcher: EventDispatcher = Depends(get_event_dispatcher),
 ) -> dict:
     """Soft-delete a product."""
+    if await was_product_synced_to_inhyma(db, product_id):
+        try:
+            prod_for_deact = await service.get_by_id_or_raise(product_id)
+            await sync_product_to_inhyma(
+                db, prod_for_deact, event_type="product.deactivated", actor_id=current_user.id, is_active=False
+            )
+        except Exception:
+            pass
     await service.delete(product_id)
     await _record_action(
         audit_service=audit_service,

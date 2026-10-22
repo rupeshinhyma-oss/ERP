@@ -65,6 +65,9 @@ import { SiteVisitPage } from "@/pages/hrms/SiteVisitPage";
 import { PayrollPage } from "@/pages/hrms/PayrollPage";
 import { SetupPage } from "@/pages/hrms/SetupPage";
 import { AssetPage } from "@/pages/hrms/AssetPage";
+import { PipelineSetupPage } from "@/pages/crm/PipelineSetupPage";
+import { SalespersonDistributionPage } from "@/pages/crm/SalespersonDistributionPage";
+import { CrmLeadsPage } from "@/pages/crm/CrmLeadsPage";
 
 import { CountriesPage } from "@/pages/masters/Countries";
 import { StatesPage } from "@/pages/masters/States";
@@ -349,6 +352,18 @@ export function App() {
           <Route path="/warranty" element={<Navigate to="/technician-operations?tab=warranty" replace />} />
           <Route path="/marketing-task/list" element={<Navigate to="/tasks" replace />} />
           <Route path="/marketing-tasks" element={<Navigate to="/tasks" replace />} />
+
+          {/* CRM routes */}
+          <Route path="/crm/leads" element={<HrmsRouteGuard permission="crm.leads.view"><CrmLeadsPage /></HrmsRouteGuard>} />
+          <Route path="/crm/lead-database" element={<Navigate to="/crm/leads" replace />} />
+          <Route path="/crm/pipelines" element={<HrmsRouteGuard permission="crm.pipelines.manage"><PipelineSetupPage /></HrmsRouteGuard>} />
+          <Route path="/crm/pipeline" element={<Navigate to="/crm/pipelines" replace />} />
+          <Route path="/crm/distribution" element={<HrmsRouteGuard permission="crm.distribution.view"><SalespersonDistributionPage /></HrmsRouteGuard>} />
+          <Route path="/crm/salespeople" element={<Navigate to="/crm/distribution" replace />} />
+          <Route path="/crm/import" element={<Navigate to="/crm/leads?import=open" replace />} />
+          <Route path="/crm/reports" element={<Navigate to="/crm/leads" replace />} />
+          <Route path="/crm/analytics" element={<Navigate to="/crm/leads" replace />} />
+          <Route path="/crm" element={<Navigate to="/crm/leads" replace />} />
 
           {/* HRMS routes */}
           <Route path="/hrms" element={<HrmsRouteGuard permission="hrms.attendance"><AttendancePage /></HrmsRouteGuard>} />

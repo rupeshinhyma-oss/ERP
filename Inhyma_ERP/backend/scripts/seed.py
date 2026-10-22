@@ -41,6 +41,8 @@ import asyncio
 import os
 from datetime import datetime, timezone
 
+from sqlalchemy import select
+
 from app.auth.security import hash_password
 from app.core.config import settings
 from app.core.logging import configure_logging, get_logger
@@ -65,6 +67,12 @@ BOOTSTRAP_PERMISSIONS: list[tuple[str, str, str, str, str, str]] = [
     ("hrms.update", "hrms", "hrms", "update", "ALL", "Edit HRMS records, leave types, holidays, and policies."),
     ("hrms.approve", "hrms", "hrms", "approve", "ALL", "Approve or reject leave requests and attendance regularizations."),
     ("hrms.manage", "hrms", "hrms", "manage", "ALL", "Full administrative control over HRMS setup, leave types, adjustments, and approvals."),
+    # CRM Module
+    ("crm.pipelines.view", "crm", "crm-pipelines", "view", "ALL", "View CRM pipelines and stage configuration"),
+    ("crm.pipelines.manage", "crm", "crm-pipelines", "manage", "ALL", "Create, update, reorder and manage CRM pipelines and stages"),
+    ("crm.leads.import", "crm", "crm-leads", "import", "ALL", "Import CRM leads via CSV files"),
+    ("crm.leads.view", "crm", "crm-leads", "view", "ALL", "View CRM leads and import batches"),
+    ("crm.leads.manage", "crm", "crm-leads", "manage", "ALL", "Full administrative control over CRM leads"),
     # Employee was merged into User (Organization/Employee/IAM upgrade,
     # merge phase) -- there is no separate employee.* permission family
     # anymore. Managing "the employee directory" now means managing users
@@ -370,6 +378,14 @@ BOOTSTRAP_PERMISSIONS: list[tuple[str, str, str, str, str, str]] = [
     ("saleorder.accounts", "saleorder", "sales-process", "accounts", "ALL", "Confirm a sale order at the accounts stage (invoice)."),
     ("saleorder.warehouse", "saleorder", "sales-process", "warehouse", "ALL", "Create gatepass, dispatch and attach LR (warehouse)."),
     ("saleorder.delete", "saleorder", "sales-process", "delete", "ALL", "Delete a pending sale order."),
+    # CRM & Lead Management
+    ("crm.pipelines.view", "crm", "crm-pipelines", "view", "ALL", "View CRM pipelines and stage configuration."),
+    ("crm.pipelines.manage", "crm", "crm-pipelines", "manage", "ALL", "Create, update, reorder and manage CRM pipelines and stages."),
+    ("crm.distribution.view", "crm", "crm-distribution", "view", "ALL", "View CRM salesperson distribution and territory assignments."),
+    ("crm.distribution.manage", "crm", "crm-distribution", "manage", "ALL", "Configure salesperson lead assignment eligibility, territories, and priorities."),
+    ("crm.leads.import", "crm", "crm-leads", "import", "ALL", "Import CRM leads via CSV files."),
+    ("crm.leads.view", "crm", "crm-leads", "view", "ALL", "View CRM leads and import batches."),
+    ("crm.leads.manage", "crm", "crm-leads", "manage", "ALL", "Full administrative control over CRM leads."),
 ]
 
 SUPER_ADMIN_ROLE_NAME = "super_admin"
@@ -494,9 +510,23 @@ async def seed() -> None:
                     session.add(RolePermission(role_id=user_role.id, permission_id=permission.id))
             await session.flush()
 
+        # Idempotent top-up for Sales Manager role: ensure crm.distribution.view and crm.leads.import are granted
+        sales_mgr_role = await role_repo.get_by_name("Sales Manager", include_deleted=False)
+        if sales_mgr_role is not None:
+            for top_up_code in ("crm.distribution.view", "crm.leads.import"):
+                perm = await permission_repo.get_by_code(top_up_code)
+                if perm:
+                    existing_grant_stmt = select(RolePermission).where(
+                        RolePermission.role_id == sales_mgr_role.id,
+                        RolePermission.permission_id == perm.id,
+                    )
+                    if (await session.execute(existing_grant_stmt)).scalar_one_or_none() is None:
+                        session.add(RolePermission(role_id=sales_mgr_role.id, permission_id=perm.id))
+                        logger.info("Granted %s to Sales Manager role.", top_up_code)
+            await session.flush()
+
         # --- 3. Bootstrap admin user ----------------------------------------------------
         from app.rbac.models import UserRole, RoleAssignmentType, RoleAssignmentStatus
-        from sqlalchemy import select
 
         admin = await user_repo.get_by_username(settings.BOOTSTRAP_ADMIN_USERNAME)
         if admin is None:
