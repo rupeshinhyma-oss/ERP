@@ -25,7 +25,6 @@ import { ItemPopoverCell } from "@/components/ItemPopoverCell";
 import { ImpExpDropdown, BulkActionsDropdown, ImportSummaryPanel, downloadSampleCsv, parseFile, WizardModal, type SheetRow } from "@/components/ImportWizard";
 import { DateRangePicker } from "@/components/DateRangePicker";
 import {
-  SearchableDropdown,
   type DropdownOption,
 } from "@/components/SearchableDropdown";
 import { autoTitleCase } from "@/components/fields";
@@ -2352,7 +2351,6 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
   const [contactCountryId, setContactCountryId] = useState<string | null>(null);
   const [contactPhoneCode, setContactPhoneCode] = useState<string>("");
   const [contactSameCallingWhatsapp, setContactSameCallingWhatsapp] = useState(false);
-  const [contactSameCallingWechat, setContactSameCallingWechat] = useState(false);
   const [drawerError, setDrawerError] = useState<unknown>(null);
   const [contactSubmitting, setContactSubmitting] = useState(false);
 
@@ -2588,52 +2586,8 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
     }
   }, [formStateId]);
 
-  const searchFetcher = useCallback(
-    (apiBase: string, extraParams?: () => Record<string, string>) =>
-      async (term: string, signal: AbortSignal): Promise<DropdownOption[]> => {
-        const extra = extraParams ? extraParams() : {};
-        const cacheKey = `${apiBase}:${JSON.stringify(extra)}`;
-
-        if (!term.trim() && geoDropdownCache.current[cacheKey]) {
-          return geoDropdownCache.current[cacheKey];
-        }
-
-        const { data } = await apiGet<{ id: string; name: string }[]>(
-          apiBase +
-          toQueryString({
-            search: term,
-            page: 1,
-            page_size: 250,
-            sort_order: "asc",
-            status: "active",
-            ...extra,
-          }),
-          { signal }
-        );
-        const mapped = data.map((d) => ({ value: d.id, label: d.name }));
-        if (!term.trim()) {
-          geoDropdownCache.current[cacheKey] = mapped;
-        }
-        return mapped;
-      },
-    []
-  );
-
   // companyNameFetcher removed
   const tableRef = useRef<HTMLTableElement>(null);
-
-
-  const fetchNameLabel = useCallback(
-    (apiBase: string) => async (id: string) => {
-      try {
-        const { data } = await apiGet<{ name?: string; product_name?: string }>(`${apiBase}/${id}`);
-        return data?.name || data?.product_name || "";
-      } catch {
-        return "";
-      }
-    },
-    []
-  );
 
   const [sortColIndex, setSortColIndex] = useState<number | null>(null);
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
@@ -3095,7 +3049,6 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
     setContactCountryId(contact?.country_id || formCountryId || defaultIndiaId || null);
     // Spec: Whatsapp Number is "by default - same as calling" for a new contact (an existing one keeps its own).
     setContactSameCallingWhatsapp(!contact);
-    setContactSameCallingWechat(false);
     setContactFormOpen(true);
   }
 
@@ -3114,11 +3067,10 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
       salutation: contactForm.salutation || null,
       person_name: contactForm.person_name.trim(),
       designation: contactForm.designation.trim() || null,
-      handling_territory: contactForm.handling_territory.trim() || null,
+      handling_territory: null,
       country_id: contactCountryId || null,
       calling_number: contactForm.calling_number.trim() || null,
       whatsapp_number: contactForm.whatsapp_number.trim() || null,
-      wechat_number: contactForm.wechat_number.trim() || null,
       email: contactForm.email.trim() || null,
       birth_date: contactForm.birth_date || null,
       anniversary_date: contactForm.anniversary_date || null,
@@ -4707,7 +4659,7 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
                       Company Contacts
                     </h3>
                     <div style={{ fontSize: "13px", color: "#64748b", marginTop: "3px" }}>
-                      Manage contact persons, territory assignments, numbers, WeChat, and email addresses.
+                      Manage contact persons, territory assignments, numbers, and email addresses.
                     </div>
                   </div>
                   <button
@@ -4903,7 +4855,6 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
                               setContactForm((f) => {
                                 const updated = { ...f, calling_number: v };
                                 if (contactSameCallingWhatsapp) updated.whatsapp_number = v;
-                                if (contactSameCallingWechat) updated.wechat_number = v;
                                 return updated;
                               });
                             }}
@@ -4947,46 +4898,6 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
                             placeholder={contactPhoneCode ? `${contactPhoneCode} 13800...` : "With country code..."}
                             value={contactForm.whatsapp_number}
                             onChange={(e) => setContactForm((f) => ({ ...f, whatsapp_number: e.target.value }))}
-                            style={{
-                              width: "100%",
-                              padding: "9px 12px",
-                              fontSize: "13.5px",
-                              borderRadius: "6px",
-                              border: "1px solid #cbd5e1",
-                              outline: "none",
-                              color: "#0f172a",
-                            }}
-                          />
-                        </div>
-
-                        {/* WeChat Number */}
-                        <div className="field">
-                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px" }}>
-                            <label style={{ fontSize: "12.5px", fontWeight: 600, color: "#475569", margin: 0 }}>WeChat Number</label>
-                            <label style={{ fontSize: "11.5px", color: "#0061f2", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "4px", fontWeight: 600 }}>
-                              <input
-                                type="checkbox"
-                                checked={contactSameCallingWechat}
-                                onChange={(e) => {
-                                  const checked = e.target.checked;
-                                  setContactSameCallingWechat(checked);
-                                  if (checked) {
-                                    setContactForm((f) => ({ ...f, wechat_number: f.calling_number }));
-                                  }
-                                }}
-                              />
-                              Same As Calling
-                            </label>
-                          </div>
-                          <input
-                            type="text"
-                            autoComplete="new-password"
-                            readOnly
-                            onFocus={(e) => e.target.removeAttribute("readonly")}
-                            maxLength={50}
-                            placeholder={contactPhoneCode ? `${contactPhoneCode} / ID` : "WeChat ID or Phone..."}
-                            value={contactForm.wechat_number}
-                            onChange={(e) => setContactForm((f) => ({ ...f, wechat_number: e.target.value }))}
                             style={{
                               width: "100%",
                               padding: "9px 12px",
@@ -5045,11 +4956,41 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
                               color: "#0f172a",
                             }}
                           />
-                          {computeAge(contactForm.birth_date) !== null && (
-                            <div style={{ fontSize: "12px", color: "#166534", marginTop: "4px", fontWeight: 600 }}>
-                              Calculated Age: {computeAge(contactForm.birth_date)} years old
-                            </div>
-                          )}
+                        </div>
+
+                        {/* Age: computed based on Birthdate */}
+                        <div className="field">
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px" }}>
+                            <label style={{ fontSize: "12.5px", fontWeight: 600, color: "#475569", margin: 0 }}>
+                              Age
+                            </label>
+                            <span style={{ fontSize: "11px", fontWeight: 600, color: "#0061f2", background: "#eff6ff", padding: "1px 7px", borderRadius: "4px" }}>
+                              Computed based on Birthdate
+                            </span>
+                          </div>
+                          <input
+                            type="text"
+                            readOnly
+                            disabled
+                            placeholder="Select Birth Date above to calculate age..."
+                            value={
+                              computeAge(contactForm.birth_date) !== null
+                                ? `${computeAge(contactForm.birth_date)} Years`
+                                : ""
+                            }
+                            style={{
+                              width: "100%",
+                              padding: "9px 12px",
+                              fontSize: "13.5px",
+                              borderRadius: "6px",
+                              border: "1px solid #cbd5e1",
+                              outline: "none",
+                              background: "#f8fafc",
+                              color: computeAge(contactForm.birth_date) !== null ? "#0f172a" : "#94a3b8",
+                              fontWeight: computeAge(contactForm.birth_date) !== null ? 700 : 500,
+                              cursor: "default",
+                            }}
+                          />
                         </div>
 
                         {/* Anniversary Date */}
@@ -5096,68 +5037,6 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
                             <option value="no">No</option>
                             <option value="yes">Yes</option>
                           </select>
-                        </div>
-
-                        {/* Handling Territory */}
-                        <div className="field">
-                          <label style={{ fontSize: "12.5px", fontWeight: 600, color: "#475569", marginBottom: "6px", display: "block" }}>
-                            Handling Territory
-                          </label>
-                          <input
-                            type="text"
-                            autoComplete="new-password"
-                            readOnly
-                            onFocus={(e) => e.target.removeAttribute("readonly")}
-                            maxLength={150}
-                            placeholder="e.g. local, Export India, Export Africa..."
-                            value={contactForm.handling_territory}
-                            onChange={(e) => setContactForm((f) => ({ ...f, handling_territory: e.target.value }))}
-                            style={{
-                              width: "100%",
-                              padding: "9px 12px",
-                              fontSize: "13.5px",
-                              borderRadius: "6px",
-                              border: "1px solid #cbd5e1",
-                              outline: "none",
-                              color: "#0f172a",
-                            }}
-                          />
-                          <div style={{ display: "flex", gap: "6px", marginTop: "6px", flexWrap: "wrap" }}>
-                            {["local", "Export India", "Export Africa", "Export Global"].map((t) => (
-                              <button
-                                key={t}
-                                type="button"
-                                onClick={() => setContactForm((f) => ({ ...f, handling_territory: t }))}
-                                style={{
-                                  padding: "3px 10px",
-                                  fontSize: "11.5px",
-                                  fontWeight: 600,
-                                  background: contactForm.handling_territory === t ? "#e0e7ff" : "#f8fafc",
-                                  color: contactForm.handling_territory === t ? "#4338ca" : "#475569",
-                                  border: "1px solid",
-                                  borderColor: contactForm.handling_territory === t ? "#c7d2fe" : "#cbd5e1",
-                                  borderRadius: "4px",
-                                  cursor: "pointer",
-                                }}
-                              >
-                                {t}
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-
-                        {/* Country (Default China) */}
-                        <div className="field">
-                          <label style={{ fontSize: "12.5px", fontWeight: 600, color: "#475569", marginBottom: "6px", display: "block" }}>
-                            Country <span style={{ color: "#ef4444" }}>*</span>
-                          </label>
-                          <SearchableDropdown
-                            value={contactCountryId}
-                            onChange={setContactCountryId}
-                            placeholder="Search country..."
-                            fetchOptions={searchFetcher("/masters/countries")}
-                            fetchLabelForValue={fetchNameLabel("/masters/countries")}
-                          />
                         </div>
                       </form>
 
@@ -5220,16 +5099,15 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
                       <tr style={{ background: "#f8fafc", borderBottom: "1px solid #e2e8f0" }}>
                         <th style={{ padding: "12px 14px", textAlign: "left", fontSize: "12px", fontWeight: 700, color: "#475569", textTransform: "uppercase" }}>NAME / DESIGNATION</th>
                         <th style={{ padding: "12px 14px", textAlign: "left", fontSize: "12px", fontWeight: 700, color: "#475569", textTransform: "uppercase" }}>CALLING / WHATSAPP</th>
-                        <th style={{ padding: "12px 14px", textAlign: "left", fontSize: "12px", fontWeight: 700, color: "#475569", textTransform: "uppercase" }}>WECHAT / EMAIL</th>
+                        <th style={{ padding: "12px 14px", textAlign: "left", fontSize: "12px", fontWeight: 700, color: "#475569", textTransform: "uppercase" }}>EMAIL</th>
                         <th style={{ padding: "12px 14px", textAlign: "left", fontSize: "12px", fontWeight: 700, color: "#475569", textTransform: "uppercase" }}>BIRTH DATE / AGE</th>
-                        <th style={{ padding: "12px 14px", textAlign: "left", fontSize: "12px", fontWeight: 700, color: "#475569", textTransform: "uppercase" }}>HANDLING TERRITORY</th>
                         <th style={{ padding: "12px 14px", textAlign: "center", fontSize: "12px", fontWeight: 700, color: "#475569", textTransform: "uppercase", width: "140px" }}>ACTION</th>
                       </tr>
                     </thead>
                     <tbody>
                       {contacts.length === 0 ? (
                         <tr>
-                          <td colSpan={6} style={{ padding: "24px", textAlign: "center", color: "#94a3b8", fontSize: "13.5px" }}>
+                          <td colSpan={5} style={{ padding: "24px", textAlign: "center", color: "#94a3b8", fontSize: "13.5px" }}>
                             No contact persons added yet. Click "+ Add New" above to add contacts.
                           </td>
                         </tr>
@@ -5269,19 +5147,14 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
                               </div>
                             </td>
 
-                            {/* WECHAT / EMAIL */}
+                            {/* EMAIL */}
                             <td style={{ padding: "12px 14px", verticalAlign: "top" }}>
                               <div style={{ display: "flex", flexDirection: "column", gap: "4px", fontSize: "13px" }}>
-                                {c.wechat_number ? (
-                                  <span style={{ color: "#334155", fontWeight: 500, display: "inline-flex", alignItems: "center", gap: "5px" }}>
-                                    💬 {c.wechat_number}
-                                  </span>
-                                ) : <span style={{ color: "#cbd5e1" }}>—</span>}
                                 {c.email ? (
                                   <a href={`mailto:${c.email}`} style={{ color: "#0061f2", textDecoration: "none", fontWeight: 500, display: "inline-flex", alignItems: "center", gap: "5px" }}>
                                     ✉️ {c.email}
                                   </a>
-                                ) : null}
+                                ) : <span style={{ color: "#cbd5e1" }}>—</span>}
                               </div>
                             </td>
 
@@ -5301,13 +5174,6 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
                               ) : (
                                 <span style={{ color: "#cbd5e1" }}>—</span>
                               )}
-                            </td>
-
-                            {/* HANDLING TERRITORY */}
-                            <td style={{ padding: "12px 14px", verticalAlign: "top" }}>
-                              <span style={{ fontSize: "13px", color: "#334155", fontWeight: 500 }}>
-                                {c.handling_territory || "—"}
-                              </span>
                             </td>
 
                             {/* ACTION */}

@@ -9,6 +9,8 @@ export interface DatePickerProps {
   disabled?: boolean;
   style?: React.CSSProperties;
   inputStyle?: React.CSSProperties;
+  maxDate?: string | Date;
+  minDate?: string | Date;
 }
 
 const MONTH_NAMES = [
@@ -77,17 +79,51 @@ export function DatePicker({
   disabled = false,
   style,
   inputStyle,
+  maxDate,
+  minDate,
 }: DatePickerProps) {
   const [isOpen, setIsOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
   const parsedDate = useMemo(() => parseDDMMYYYY(value), [value]);
 
+  const maxDateObj = useMemo(() => {
+    if (!maxDate) return null;
+    if (maxDate === "today") {
+      const t = new Date();
+      t.setHours(23, 59, 59, 999);
+      return t;
+    }
+    const d = maxDate instanceof Date ? new Date(maxDate) : parseDDMMYYYY(maxDate);
+    if (d && !isNaN(d.getTime())) {
+      d.setHours(23, 59, 59, 999);
+      return d;
+    }
+    return null;
+  }, [maxDate]);
+
+  const minDateObj = useMemo(() => {
+    if (!minDate) return null;
+    if (minDate === "today") {
+      const t = new Date();
+      t.setHours(0, 0, 0, 0);
+      return t;
+    }
+    const d = minDate instanceof Date ? new Date(minDate) : parseDDMMYYYY(minDate);
+    if (d && !isNaN(d.getTime())) {
+      d.setHours(0, 0, 0, 0);
+      return d;
+    }
+    return null;
+  }, [minDate]);
+
   const [viewYear, setViewYear] = useState<number>(() => {
-    return parsedDate ? parsedDate.getFullYear() : 2026;
+    if (parsedDate) return parsedDate.getFullYear();
+    return new Date().getFullYear();
   });
   const [viewMonth, setViewMonth] = useState<number>(() => {
-    return parsedDate ? parsedDate.getMonth() : 8; // September
+    if (parsedDate) return parsedDate.getMonth();
+    return new Date().getMonth();
   });
 
   // When value updates from outside, update viewed month/year if open or changed
@@ -113,8 +149,15 @@ export function DatePicker({
     };
   }, [isOpen]);
 
+  const isPrevMonthDisabled = useMemo(() => {
+    if (!minDateObj) return false;
+    const lastOfPrevMonth = new Date(viewYear, viewMonth, 0, 23, 59, 59, 999);
+    return lastOfPrevMonth < minDateObj;
+  }, [minDateObj, viewYear, viewMonth]);
+
   const handlePrevMonth = (e: React.MouseEvent) => {
     e.stopPropagation();
+    if (isPrevMonthDisabled) return;
     if (viewMonth === 0) {
       setViewMonth(11);
       setViewYear((y) => y - 1);
@@ -123,8 +166,15 @@ export function DatePicker({
     }
   };
 
+  const isNextMonthDisabled = useMemo(() => {
+    if (!maxDateObj) return false;
+    const firstOfNextMonth = new Date(viewYear, viewMonth + 1, 1);
+    return firstOfNextMonth > maxDateObj;
+  }, [maxDateObj, viewYear, viewMonth]);
+
   const handleNextMonth = (e: React.MouseEvent) => {
     e.stopPropagation();
+    if (isNextMonthDisabled) return;
     if (viewMonth === 11) {
       setViewMonth(0);
       setViewYear((y) => y + 1);
@@ -133,7 +183,8 @@ export function DatePicker({
     }
   };
 
-  const handleSelectDay = (day: number, monthOffset: number = 0) => {
+  const handleSelectDay = (day: number, monthOffset: number = 0, isCellDisabled = false) => {
+    if (isCellDisabled) return;
     let targetYear = viewYear;
     let targetMonth = viewMonth + monthOffset;
     if (targetMonth < 0) {
@@ -144,6 +195,8 @@ export function DatePicker({
       targetYear += 1;
     }
     const newDate = new Date(targetYear, targetMonth, day);
+    if (maxDateObj && newDate > maxDateObj) return;
+    if (minDateObj && newDate < minDateObj) return;
     onChange(formatDDMMYYYY(newDate));
     setIsOpen(false);
   };
@@ -159,15 +212,27 @@ export function DatePicker({
       isCurrentMonth: boolean;
       monthOffset: number;
       isSelected: boolean;
+      isDisabled: boolean;
     }[] = [];
 
+    const isDateDisabled = (y: number, m: number, d: number) => {
+      const target = new Date(y, m, d);
+      if (maxDateObj && target > maxDateObj) return true;
+      if (minDateObj && target < minDateObj) return true;
+      return false;
+    };
+
     // Prev month padding
+    const prevYear = viewMonth === 0 ? viewYear - 1 : viewYear;
+    const prevMonth = viewMonth === 0 ? 11 : viewMonth - 1;
     for (let i = firstDayIndex - 1; i >= 0; i--) {
+      const d = daysInPrevMonth - i;
       cells.push({
-        day: daysInPrevMonth - i,
+        day: d,
         isCurrentMonth: false,
         monthOffset: -1,
         isSelected: false,
+        isDisabled: isDateDisabled(prevYear, prevMonth, d),
       });
     }
 
@@ -183,10 +248,13 @@ export function DatePicker({
         isCurrentMonth: true,
         monthOffset: 0,
         isSelected,
+        isDisabled: isDateDisabled(viewYear, viewMonth, d),
       });
     }
 
     // Next month padding to fill grid
+    const nextYear = viewMonth === 11 ? viewYear + 1 : viewYear;
+    const nextMonth = viewMonth === 11 ? 0 : viewMonth + 1;
     const remaining = (7 - (cells.length % 7)) % 7;
     for (let d = 1; d <= remaining; d++) {
       cells.push({
@@ -194,11 +262,12 @@ export function DatePicker({
         isCurrentMonth: false,
         monthOffset: 1,
         isSelected: false,
+        isDisabled: isDateDisabled(nextYear, nextMonth, d),
       });
     }
 
     return cells;
-  }, [viewYear, viewMonth, parsedDate]);
+  }, [viewYear, viewMonth, parsedDate, maxDateObj, minDateObj]);
 
   return (
     <div
@@ -269,8 +338,9 @@ export function DatePicker({
               type="button"
               aria-label="Previous Month"
               onClick={handlePrevMonth}
+              disabled={isPrevMonthDisabled}
               style={{
-                background: "#f1f5f9",
+                background: isPrevMonthDisabled ? "#f8fafc" : "#f1f5f9",
                 border: "1px solid #e2e8f0",
                 borderRadius: "50%",
                 width: "26px",
@@ -278,14 +348,19 @@ export function DatePicker({
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
-                cursor: "pointer",
-                color: "#475569",
+                cursor: isPrevMonthDisabled ? "not-allowed" : "pointer",
+                color: isPrevMonthDisabled ? "#94a3b8" : "#475569",
+                opacity: isPrevMonthDisabled ? 0.35 : 1,
                 fontSize: "13px",
                 fontWeight: "bold",
                 lineHeight: 1,
               }}
-              onMouseEnter={(e) => (e.currentTarget.style.background = "#e2e8f0")}
-              onMouseLeave={(e) => (e.currentTarget.style.background = "#f1f5f9")}
+              onMouseEnter={(e) => {
+                if (!isPrevMonthDisabled) e.currentTarget.style.background = "#e2e8f0";
+              }}
+              onMouseLeave={(e) => {
+                if (!isPrevMonthDisabled) e.currentTarget.style.background = "#f1f5f9";
+              }}
             >
               ‹
             </button>
@@ -306,8 +381,9 @@ export function DatePicker({
               type="button"
               aria-label="Next Month"
               onClick={handleNextMonth}
+              disabled={isNextMonthDisabled}
               style={{
-                background: "#f1f5f9",
+                background: isNextMonthDisabled ? "#f8fafc" : "#f1f5f9",
                 border: "1px solid #e2e8f0",
                 borderRadius: "50%",
                 width: "26px",
@@ -315,14 +391,19 @@ export function DatePicker({
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
-                cursor: "pointer",
-                color: "#475569",
+                cursor: isNextMonthDisabled ? "not-allowed" : "pointer",
+                color: isNextMonthDisabled ? "#94a3b8" : "#475569",
+                opacity: isNextMonthDisabled ? 0.35 : 1,
                 fontSize: "13px",
                 fontWeight: "bold",
                 lineHeight: 1,
               }}
-              onMouseEnter={(e) => (e.currentTarget.style.background = "#e2e8f0")}
-              onMouseLeave={(e) => (e.currentTarget.style.background = "#f1f5f9")}
+              onMouseEnter={(e) => {
+                if (!isNextMonthDisabled) e.currentTarget.style.background = "#e2e8f0";
+              }}
+              onMouseLeave={(e) => {
+                if (!isNextMonthDisabled) e.currentTarget.style.background = "#f1f5f9";
+              }}
             >
               ›
             </button>
@@ -364,13 +445,15 @@ export function DatePicker({
             }}
           >
             {calendarCells.map((cell, idx) => {
-              const { day, isCurrentMonth, monthOffset, isSelected } = cell;
+              const { day, isCurrentMonth, monthOffset, isSelected, isDisabled } = cell;
 
               let bg = "transparent";
               let textColor = isCurrentMonth ? "#334155" : "#cbd5e1";
               let fontWeight = 400;
 
-              if (isSelected) {
+              if (isDisabled) {
+                textColor = "#cbd5e1";
+              } else if (isSelected) {
                 bg = "#0061f2";
                 textColor = "#ffffff";
                 fontWeight = 700;
@@ -380,7 +463,8 @@ export function DatePicker({
                 <button
                   key={idx}
                   type="button"
-                  onClick={() => handleSelectDay(day, monthOffset)}
+                  disabled={isDisabled}
+                  onClick={() => handleSelectDay(day, monthOffset, isDisabled)}
                   style={{
                     background: bg,
                     color: textColor,
@@ -393,16 +477,17 @@ export function DatePicker({
                     alignItems: "center",
                     justifyContent: "center",
                     fontSize: "12px",
-                    cursor: "pointer",
+                    cursor: isDisabled ? "not-allowed" : "pointer",
+                    opacity: isDisabled ? 0.35 : 1,
                     transition: "background 0.1s ease",
                   }}
                   onMouseEnter={(e) => {
-                    if (!isSelected) {
+                    if (!isSelected && !isDisabled) {
                       e.currentTarget.style.background = "#f1f5f9";
                     }
                   }}
                   onMouseLeave={(e) => {
-                    if (!isSelected) {
+                    if (!isSelected && !isDisabled) {
                       e.currentTarget.style.background = "transparent";
                     }
                   }}

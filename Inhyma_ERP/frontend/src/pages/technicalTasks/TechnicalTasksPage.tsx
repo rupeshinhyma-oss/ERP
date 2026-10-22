@@ -2266,7 +2266,7 @@ function TechnicalTasksPageContent() {
           </div>
 
           {/* TABLE CONTAINER */}
-          <div className="table-scroll" style={{ maxHeight: "calc(100vh - 220px)", overflowY: "auto", overflowX: "auto" }}>
+          <div className="table-scroll" style={{ maxHeight: "calc(100vh - 220px)", minHeight: "320px", overflowY: "auto", overflowX: "auto" }}>
             <table ref={tableRef} style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0 }}>
               <thead>
                 <tr>
@@ -2782,7 +2782,7 @@ function TechnicalTasksPageContent() {
                               );
                             case 17:
                               return (
-                                <td key="cell-17" style={{ textAlign: "center", ...getFreezeStyle(17, false) }}>
+                                <td key="cell-17" style={{ textAlign: "center", ...getFreezeStyle(17, false), zIndex: openActionMenuId === task.id ? 50 : 1 }}>
                                   <div style={{ position: "relative", display: "inline-block" }}>
                                     <button
                                       type="button"
@@ -2806,25 +2806,29 @@ function TechnicalTasksPageContent() {
                                       ⋮
                                     </button>
 
-                                    {openActionMenuId === task.id && (
-                                      <div
-                                        onClick={(e) => e.stopPropagation()}
-                                        style={{
-                                          position: "absolute",
-                                          right: 0,
-                                          top: "100%",
-                                          marginTop: "4px",
-                                          background: "#ffffff",
-                                          border: "1px solid #cbd5e1",
-                                          borderRadius: "6px",
-                                          boxShadow: "0 8px 24px rgba(0,0,0,0.15)",
-                                          zIndex: 100,
-                                          minWidth: "150px",
-                                          display: "flex",
-                                          flexDirection: "column",
-                                          overflow: "hidden",
-                                        }}
-                                      >
+                                    {openActionMenuId === task.id && (() => {
+                                      const openUpward = tasks.length >= 3 && index >= tasks.length - (tasks.length >= 4 ? 2 : 1);
+                                      return (
+                                        <div
+                                          onClick={(e) => e.stopPropagation()}
+                                          style={{
+                                            position: "absolute",
+                                            right: 0,
+                                            top: openUpward ? "auto" : "100%",
+                                            bottom: openUpward ? "100%" : "auto",
+                                            marginTop: openUpward ? 0 : "4px",
+                                            marginBottom: openUpward ? "4px" : 0,
+                                            background: "#ffffff",
+                                            border: "1px solid #cbd5e1",
+                                            borderRadius: "6px",
+                                            boxShadow: openUpward ? "0 -8px 24px rgba(0,0,0,0.15)" : "0 8px 24px rgba(0,0,0,0.15)",
+                                            zIndex: 100,
+                                            minWidth: "150px",
+                                            display: "flex",
+                                            flexDirection: "column",
+                                            overflow: "hidden",
+                                          }}
+                                        >
                                         <button
                                           type="button"
                                           onClick={() => {
@@ -3077,8 +3081,9 @@ function TechnicalTasksPageContent() {
                                             <span>Delete</span>
                                           </button>
                                         </>)}
-                                      </div>
-                                    )}
+                                        </div>
+                                      );
+                                    })()}
                                   </div>
                                 </td>
                               );

@@ -763,7 +763,7 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
   const loadProducts = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await apiGet<Product[]>("/masters/products?limit=1000");
+      const res = await apiGet<Product[]>("/masters/products?limit=5000&sort_by=created_at&sort_order=desc");
       if (res?.data && Array.isArray(res.data)) {
         if (isTestMode) {
           const apiList = res.data;

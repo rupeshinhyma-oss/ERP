@@ -391,6 +391,14 @@ A user may be assigned any number of Roles simultaneously (`POST /users/{id}/rol
     $$\text{CBM} = \frac{L \times W \times H}{1,000,000}$$
 - **Strict Zero-Stock Deletion Lock:**
   - Product deletion is strictly blocked via `_check_zero_stock_or_raise` if any physical or virtual warehouse holds non-zero stock.
+- **Cross-ERP One-Way Synchronization Receiver Adapter (`ProductSyncAdapter`)**:
+  - Implemented in `app/integration/adapters/product.py` and registered in `app/integration/sync_engine.py`.
+  - Configured with `SOURCE_TO_TARGET` policy for `("yinglima", "product")` with `delete_strategy="PROPAGATE_ARCHIVE"`.
+  - Ingests cross-ERP events dispatched from Yinglima (`product.created`, `product.updated`, `product.deactivated`, `product.deleted`) via `POST /api/v1/integration/events`.
+  - **Self-Healing Foreign Key Auto-Provisioning:** If incoming product payloads contain referenced Categories, Sub-Categories, Brands, UOMs, or Taxes not yet present in Inhyma, the adapter provisions them automatically on the fly so sync never aborts.
+  - **Schema Normalization:** Clamps packaging gross weight ($\ge 0.001\text{ kg}$) and CBM ($\ge 0.000001\text{ m}^3$) to satisfy Inhyma database check constraints.
+  - **Cache Invalidation:** Automatically invalidates `product_dropdown*` Redis/in-memory cache keys upon product upsert or deactivation.
+  - **Strict Directionality Guard:** Enforces one-way sync ($Yinglima \rightarrow Inhyma$); any events originating in Inhyma attempting to push to Yinglima are rejected.
 
 ### 8.6. Supplier Directory & Tokenized Public Portal
 - **Endpoints:** `GET /suppliers`, `POST /suppliers`, `PATCH /suppliers/{id}`, `POST /suppliers/{id}/contacts`, `POST /suppliers/import`, `GET /suppliers/export`.
@@ -400,6 +408,7 @@ A user may be assigned any number of Roles simultaneously (`POST /users/{id}/rol
   - Updates enforce `_validate_calling_not_blanked`, preventing operators from wiping or blanking out the contact telephone number.
   - Frontend enforces this in both the quick add drawer and full edit view with required asterisk indicators (`*`) and client-side pre-submission validation.
 - **Dynamic Geography & Phone Dialing Code Sync:** When changing Country in the Supplier Profile (e.g., China &rarr; India), Province and City dropdowns reset automatically, and the country dialing code prefixes on Calling Number, WhatsApp Number, and WeChat Number auto-update dynamically (e.g., `+86 7304240120` &rarr; `+91 7304240120`).
+- **All-Column 3-State Sort Headers:** Every data content column (**Company Name**, **Product Category**, **Product Sub Category**, **City / State**, **Grade**, **Type**, **Current Status**, and **Potential**) supports interactive 3-state sorting (Ascending `▲` $\rightarrow$ Descending `▼` $\rightarrow$ Reset Unsorted). Empty-cell relegation ensures populated records always appear at the top in both ascending and descending modes.
 
 ### 8.7. Buyer & Client Management
 - **Endpoints:** `GET /buyers`, `POST /buyers`, `PATCH /buyers/{id}`, `POST /buyers/{id}/contacts`, `POST /buyers/{id}/addresses`.
@@ -883,13 +892,49 @@ A user may be assigned any number of Roles simultaneously (`POST /users/{id}/rol
   - `PATCH /api/v1/purchase/import-orders/{id}/status`: Move consignment through workflow (`pending` -> `confirmed` -> `received` -> `closed`).
   - `DELETE /api/v1/purchase/import-orders/{id}`: Soft-delete consignment.
 - **Dual Landing Valuation Matrix & "Grey and Locked" UX Standard:**
-  - **Computed Landing Cards:** Summary boxes for `Total Expenses`, `Invoice Total Value (INR)`, `Gross Total Landing (INR)`, `% Loading Expense (Value Based)`, and `Loading Amount per CBM` use the `.calc-locked` class (`#e9ecef` background, `#cbd5e1` border, `#475569` text, `cursor: not-allowed`, with 🔒 lock indicator icons).
-  - **Customs Matrix Computed Columns:** Volumetric CBM, customs duties, unit landing rate (VB), unit landing rate (CB), and differential diff columns are styled with `.calc-locked`.
+  - **Computed Landing Cards:** Summary boxes for `Total Expenses`, `Purchase Invoice Total Value (INR)`, `Gross Total Landing (INR)`, `% Loading Expense (Value Based)`, and `Loading Amount per CBM` use the `.calc-locked` class (`#e9ecef` background, `#cbd5e1` border, `#475569` text, `cursor: not-allowed`, with 🔒 lock indicator icons).
+  - **Core Financial Summary Formulas:**
+    - $\text{Purchase Invoice Total Value (INR)} (A) = \text{Conversion Rate (USD to INR)} \times \text{Purchase Invoice Total Value (USD)}$
+    - $\text{Total Expenses} (B) = \text{Freight} + \text{Insurance} + \text{Stamp Duty} + \text{Shipping Line Charges} + \text{CFS Charges} + \text{Clearing \& Transport} + \text{Offloading} + \text{Miscellaneous}$
+    - $\text{Gross Total Landing (INR)} = A + B = \text{Purchase Invoice Total Value (INR)} + \text{Total Expenses}$
+    - $\% \text{ Loading Expense (Value Based)} (C) = \frac{B \times 100}{A}$
+    - $\text{Loading Amount per CBM} (I) = \frac{B}{\text{Total CBM } (H)}$
+  - **Customs Matrix Computed Columns:** Volumetric CBM, line-item USD valuation (**Item Total (Basic in USD)** = `Quantity * Unit Rate (USD)`), customs duties, unit landing rate (VB), unit landing rate (CB), and differential diff columns are styled with `.calc-locked`.
   - Calculates landing rates on both **Value Basis (VB)** (allocated proportionally by line-item USD valuation) and **CBM Volume Basis (CB)** (allocated proportionally by volumetric cubic meters).
   - Calculates differential $\text{Diff (CB - VB)} = \text{Unit Landing (CB)} - \text{Unit Landing (VB)}$ to reveal volume penalties on bulky cargo.
-- **Multi-Date Range Filtering & In-Transit Restraints:**
-  - Supports filtering across **Expected Arrival**, **ETD Origin**, and **ETA Port** with presets and custom date pickers.
+- **Top Filter Panel & In-Transit Restraints:**
+  - Provides top panel filtering across **Warehouse**, **Expected Arrival Date Range**, **ETD Origin Date Range**, and **ETA Port Date Range** with presets and custom date pickers.
   - During `pending` status, consignments can only be allocated to transit holding warehouses (e.g. `Mumbai Ordered`), preventing false stock availability before physical port receipt.
+- **Supplier Selection Combobox UI Standard:**
+  - Replaced the native browser `<datalist>` popup with a custom styled floating Combobox matching Inhyma ERP design standards: pure white elevated card (`#ffffff`), subtle border (`1px solid #cbd5e1`), elevation shadow (`0 6px 16px rgba(0, 0, 0, 0.12)`), animated rotatable chevron arrow, active item highlighting (`#eff6ff`, text `#2563eb`), keyboard selection, and click-outside dismissal.
+- **Product Search Dual Combobox (Written Search & Dropdown Button):**
+  - Upgraded **PRODUCT SEARCH** into a dual-mode combobox extracting products directly from the **Product Master** (`/masters/products`). Operators can either type to filter matching catalog products live or click the dropdown chevron button to browse active catalog items, with 1-click selection appending to the consignment's **PRODUCT ITEM** table.
+- **Date Form Logic & Business Rules:**
+  - **Ordered Date (`ordered_date`):**
+    - Defaults automatically to the current date (`todayDDMMYYYY()`).
+    - Strictly permits only past or current dates (`maxDate="today"`). Future days are disabled in the calendar grid, next-month navigation is blocked when out of range, live typing displays an immediate warning, and form submission is halted if a future date is provided.
+  - **ETD Origin Date (`etd_origin_date`), ETA Port Date (`eta_port_date`), and Expected Arrival Date (`expected_arrival_date`):**
+    - All three date fields initialize and reset to blank (`""`), displaying the clean placeholder `DD-MM-YYYY`.
+    - Strictly permit only dates on or after the consignment's Created Date (`minDate=effectiveCreatedDate`).
+    - **Dynamic Created Date Anchor:** Resolves to the consignment's original creation timestamp (`added_on` / `created_at_time`) when editing an existing record, or defaults to the current day (`todayDDMMYYYY()`) when adding a new consignment.
+    - Dates prior to the Created Date are disabled in the calendar grid with dimmed styling (`opacity: 0.35`, `#cbd5e1`). Previous month navigation is blocked when earlier months are out of range.
+    - Live typing validation flags any date earlier than Created Date with an immediate alert, and pre-submission validation blocks creation or updates if an invalid date is entered.
+- **Uploaded Invoice File Viewer & Zero-Synthetic-PDF Policy:**
+  - **No Synthetic Document Generation:** The system strictly serves and renders the **actual file uploaded by the operator** in the "Attach Invoice" field on the Add/Edit form. It never dynamically constructs, fabricates, or renders synthetic invoice PDFs.
+  - **Dedicated Streaming Endpoint (`GET /api/v1/purchase/import-orders/{purchase_id}/bill-file`):** Authenticated via standard `Authorization: Bearer <token>` header or `?token=<access_token>` query parameter. Streams the original uploaded file with `content_disposition_type="inline"` (or `attachment` when `download=true`) and proper MIME detection (`application/pdf`, image types, etc.).
+  - **Multi-Format Frontend Viewer ([`ImportPurchasePdfPage.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/ImportPurchasePdfPage.tsx)):**
+    - **PDF Documents:** Renders inside a full-height `<iframe src={blobUrl} />` with browser native tools, print trigger (`🖨️ Print`), and `⬇️ Download PDF`.
+    - **Images:** Renders centered preview with `⬇️ Download File`.
+    - **Word Documents & Spreadsheets (`.docx`, `.xlsx`):** Renders a dedicated document preview card showing the file icon, name, consignment number, file size, and a direct `⬇️ Download <Filename>` button.
+    - **Zero State (No Invoice Attached):** Informative message explaining that no invoice was uploaded for the consignment and guiding the operator to attach one via the Add/Edit form.
+  - **Direct Access Points:**
+    - Clicking the filename in the `INVOICE` column of the Import Purchase table.
+    - Clicking `[ ⤓ View PDF ]` / `[ ⤓ View Invoice ]` in the "Import Purchase Details" modal.
+    - Selecting "Download Purchase" in the table action menu (`⋮`).
+- **Closed Consignment Immutability & Action Menu Scope:**
+  - When an import purchase consignment reaches `closed` status, the row action menu (`⋮`) strictly displays **ONLY** `Download Purchase`.
+  - The `Edit`, `Confirm`, and `Delete` options are completely removed.
+  - Client-side routing to `/purchase-order/import-purchase/addedit/:id` for closed orders is blocked with a warning toast, and backend endpoint `PUT /purchase/import-orders/{purchase_id}` enforces `edit: "none"` on `closed` status.
 
 ### 8.23. Sales: Proforma Invoices (PI) & Extended Commercial Terms
 - **Files:** `backend/app/sales/routes.py`, `backend/app/sales/models.py`, `backend/app/sales/schemas.py`, `backend/app/sales/proforma_service.py`, `frontend/src/pages/ProformaInvoicesPage.tsx`, `frontend/src/lib/proformaInvoicePdf.ts`.
@@ -1002,6 +1047,15 @@ A user may be assigned any number of Roles simultaneously (`POST /users/{id}/rol
 - **Table Skeleton Row Loaders Architecture:**
   - Reusable modular skeleton rows (e.g., `ProductSkeletonRows`, `CompanySkeletonRows`, `SupplierSkeletonRows`, `StockAdjustmentSkeletonRows`, `StockTransferSkeletonRows`) are rendered during table loading states.
   - Ensures zero layout shift, preserving column widths and header geometry until live records arrive from the backend.
+- **Universal Table Action Dropdown (`⋮` Actions Menu) Geometry & Overflow Protection:**
+  - **Problem Statement:** Data tables wrapped in horizontal scroll containers (`overflow-x: auto` / `.table-scroll`) create an overflow clipping context. Absolutely-positioned action dropdown menus (`top: 100%` or `top: 36px`) on bottom rows or in tables with few rows extend past the container bounds, getting cut off by scrollbars or clipped at the table bottom.
+  - **Standardized Prevention Pattern:**
+    1. **Container Min-Height:** Table scroll wrappers specify `minHeight: "320px"`, ensuring short tables (1–2 rows) provide ample clearance below rows without clipping.
+    2. **Active Cell Stacking (`zIndex: 50`):** The action cell or trigger wrapper applies `zIndex: activeMenuId === row.id ? 50 : 1` with `position: relative`, ensuring opened popovers stack smoothly above sibling rows.
+    3. **Dynamic Directional Flipping (`openUpward`):** Automatically computes row position:
+       `const openUpward = items.length >= 3 && idx >= items.length - (items.length >= 4 ? 2 : 1);`
+       When `openUpward` is true, the menu cleanly flips upward (`top: "auto"`, `bottom: ...`), adjusts margins, and inverts box shadows (`0 -4px 12px rgba(0,0,0,0.12)`), keeping all actions fully visible and unobstructed.
+    4. **Applied Modules:** Import Purchase, Local Purchase, Sale Process List, Discount Payments, Proforma Invoices, Inquiries, Stock Transfer, Stock Adjustment, Technical Tasks, and Payments.
 
 ---
 

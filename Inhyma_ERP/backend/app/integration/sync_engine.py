@@ -28,6 +28,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.logging import get_logger
 from app.integration.adapters.base import BaseEntitySyncAdapter
 from app.integration.adapters.buyer import BuyerSyncAdapter
+from app.integration.adapters.product import ProductSyncAdapter
 from app.integration.consumer_models import ProcessedIntegrationEvent
 from app.integration.sync_models import SyncedEntityMapping
 
@@ -127,6 +128,19 @@ class GenericSyncEngine:
 
         # Register default adapters
         self.register_adapter(BuyerSyncAdapter())
+        self.register_adapter(ProductSyncAdapter())
+
+        # Yinglima -> Inhyma product sync policy (strict one-way source-to-target)
+        self.set_policy(
+            "yinglima",
+            "product",
+            SyncPolicyConfig(
+                ownership_strategy="SOURCE_AUTHORITATIVE",
+                direction="SOURCE_TO_TARGET",
+                delete_strategy="PROPAGATE_ARCHIVE",
+                conflict_strategy="SOURCE_WINS",
+            ),
+        )
 
     def register_adapter(self, adapter: BaseEntitySyncAdapter) -> None:
         """Register a domain entity adapter."""
@@ -262,7 +276,7 @@ class GenericSyncEngine:
         )
 
         # Step 6: Action Determination
-        is_delete = event_type.endswith((".deleted", ".archived", ".delete", ".archive"))
+        is_delete = event_type.endswith((".deleted", ".archived", ".delete", ".archive", ".deactivated", ".deactivate"))
         is_update = event_type.endswith((".updated", ".update")) or (mapping is not None and not is_delete)
         is_create = not is_delete and not is_update and mapping is None
 
@@ -365,6 +379,13 @@ class GenericSyncEngine:
                 local_id = mapping.local_entity_id
                 local_ver = mapping.local_version
                 action_name = "DELETED"
+            else:
+                existing_natural = await adapter.find_existing_by_natural_key(session, payload)
+                if existing_natural is not None:
+                    existing_id, _ = existing_natural
+                    await adapter.apply_delete(session, existing_id, policy.delete_strategy)
+                    local_id = existing_id
+                    action_name = "DELETED"
         elif is_update and mapping is not None:
             if policy.ownership_strategy in ("TARGET_AUTHORITATIVE", "TARGET_OWNED"):
                 logger.info("TARGET_AUTHORITATIVE policy ignores source update.")

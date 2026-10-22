@@ -836,7 +836,7 @@ export function PaymentsPage() {
             </div>
 
             {/* Table with responsive horizontal scroll */}
-            <div style={{ width: "100%", overflowX: "auto" }}>
+            <div style={{ width: "100%", overflowX: "auto", minHeight: "320px" }}>
               <table className="payments-table" style={{ width: "100%", borderCollapse: "collapse" }}>
                 <thead>
                   <tr>
@@ -898,7 +898,7 @@ export function PaymentsPage() {
                       </td>
                     </tr>
                   ) : (
-                    tasks.map((task) => {
+                    tasks.map((task, idx) => {
                       const isSelected = selectedIds.has(task.id);
                       const serviceCharge = Number(task.service_charge || 0);
                       const paidAmount = Number(task.collected_amount || 0);
@@ -992,7 +992,7 @@ export function PaymentsPage() {
                             </span>
                           </td>
                           <td style={{ textAlign: "center" }}>
-                            <div className="payment-action-menu-wrapper">
+                            <div className="payment-action-menu-wrapper" style={{ zIndex: openActionMenuId === task.id ? 50 : 1 }}>
                               <button
                                 type="button"
                                 className="btn-payment-action"
@@ -1004,8 +1004,10 @@ export function PaymentsPage() {
                                 &#8942;
                               </button>
 
-                              {openActionMenuId === task.id && (
-                                <div className="payment-action-dropdown">
+                              {openActionMenuId === task.id && (() => {
+                                const openUpward = tasks.length >= 3 && idx >= tasks.length - (tasks.length >= 4 ? 2 : 1);
+                                return (
+                                <div className={`payment-action-dropdown ${openUpward ? "open-upward" : ""}`}>
                                   <button
                                     type="button"
                                     onClick={() => openRecordPayment(task)}
@@ -1033,7 +1035,8 @@ export function PaymentsPage() {
                                     View Details
                                   </button>
                                 </div>
-                              )}
+                                );
+                              })()}
                             </div>
                           </td>
                         </tr>

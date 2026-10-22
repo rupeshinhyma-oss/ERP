@@ -116,8 +116,9 @@ function SupplierCombobox({ value, onChange, options, error }: SupplierComboboxP
           ref={inputRef}
           id="local-supplier-input"
           aria-label="Supplier"
-          role="combobox"
           list="local-supplier-options"
+          role="combobox"
+          autoComplete="off"
           type="text"
           placeholder="Select"
           value={isOpen ? search : value}
@@ -263,8 +264,8 @@ function SupplierCombobox({ value, onChange, options, error }: SupplierComboboxP
       )}
 
       <datalist id="local-supplier-options">
-        {options.map((name) => (
-          <option key={name} value={name} />
+        {options.map((n) => (
+          <option key={n} value={n} />
         ))}
       </datalist>
     </div>
@@ -2201,7 +2202,7 @@ export function LocalPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean
           </div>
 
           {/* Table */}
-          <div style={{ overflowX: "auto" }}>
+          <div style={{ overflowX: "auto", minHeight: "320px" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", textAlign: "left" }}>
               <thead>
                 <tr style={{ borderBottom: "1px solid #cbd5e1", background: "#f8fafc" }}>
@@ -2440,7 +2441,12 @@ export function LocalPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean
                           {order.status}
                         </span>
                       </td>
-                      <td style={{ padding: "10px 14px", textAlign: "center", position: "relative" }}>
+                      <td style={{
+                        padding: "10px 14px",
+                        textAlign: "center",
+                        position: "relative",
+                        zIndex: activeMenuId === order.id ? 50 : 1,
+                      }}>
                         <button
                           type="button"
                           aria-label="Order actions"
@@ -2481,19 +2487,22 @@ export function LocalPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean
                           ⋮
                         </button>
 
-                        {activeMenuId === order.id && (
+                        {activeMenuId === order.id && (() => {
+                          const openUpward = paginatedOrders.length >= 3 && idx >= paginatedOrders.length - (paginatedOrders.length >= 4 ? 2 : 1);
+                          return (
                           <div
                             data-action-menu-container
                             data-testid={`action-menu-${order.id}`}
                             style={{
                               position: "absolute",
                               right: "14px",
-                              top: "36px",
+                              top: openUpward ? "auto" : "36px",
+                              bottom: openUpward ? "36px" : "auto",
                               background: "#ffffff",
                               border: "1px solid #cbd5e1",
                               borderRadius: "4px",
-                              boxShadow: "0 4px 14px rgba(0,0,0,0.12)",
-                              zIndex: 40,
+                              boxShadow: openUpward ? "0 -4px 14px rgba(0,0,0,0.12)" : "0 4px 14px rgba(0,0,0,0.12)",
+                              zIndex: 100,
                               minWidth: "155px",
                               textAlign: "left",
                               overflow: "hidden",
@@ -2812,7 +2821,8 @@ export function LocalPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean
                               </>
                             )}
                           </div>
-                        )}
+                          );
+                        })()}
                       </td>
                     </tr>
                   ))

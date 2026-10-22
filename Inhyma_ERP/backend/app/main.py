@@ -17,16 +17,16 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.api.v1.router import api_router
-from app.auth.dependencies import get_current_user
-from app.auth.service import CurrentUser
+from app.auth.dependencies import get_auth_service, get_current_user
+from app.auth.service import AuthService, CurrentUser
 from app.cache.dependency import get_cleanup_worker
-from app.common.storage import sanitize_filename
+from app.common.storage import guess_content_type, sanitize_filename
 from app.core.config import settings
 from app.core.dns_resilience import install_dns_resilience
 from app.core.exception_handlers import register_exception_handlers
@@ -324,8 +324,21 @@ def create_application() -> FastAPI:
     async def download_private_file(
         subfolder: str,
         filename: str,
-        _current_user: CurrentUser = Depends(get_current_user),
+        request: Request,
+        token: str | None = Query(None),
+        auth_service: AuthService = Depends(get_auth_service),
     ):
+        raw_token = token
+        auth_header = request.headers.get("Authorization")
+        if auth_header and auth_header.startswith("Bearer "):
+            raw_token = auth_header[7:].strip()
+        if not raw_token:
+            raise HTTPException(status_code=401, detail="Authentication credentials were not provided.")
+        try:
+            await auth_service.verify_access_token(raw_token)
+        except Exception as exc:
+            raise HTTPException(status_code=401, detail="Invalid or expired access token.") from exc
+
         clean_sub = sanitize_filename(subfolder)
         clean_file = sanitize_filename(filename)
         target = (uploads_dir / "private" / clean_sub / clean_file).resolve()
@@ -334,7 +347,13 @@ def create_application() -> FastAPI:
             raise HTTPException(status_code=400, detail="Invalid path traversal.")
         if not target.is_file():
             raise HTTPException(status_code=404, detail="Private file not found.")
-        return FileResponse(target)
+
+        ext = target.suffix.lower().lstrip(".")
+        media_type = guess_content_type(target.name)
+        if ext == "pdf":
+            media_type = "application/pdf"
+
+        return FileResponse(target, media_type=media_type, content_disposition_type="inline")
 
     # Public static uploads for product images, supplier media, branding logos, and expense receipts
     (uploads_dir / "expenses").mkdir(parents=True, exist_ok=True)

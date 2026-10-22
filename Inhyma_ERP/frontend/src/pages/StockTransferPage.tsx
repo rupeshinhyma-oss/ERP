@@ -1245,7 +1245,7 @@ export function StockTransferPage({
           </div>
 
           {/* Table Container */}
-          <div className="table-scroll transfer-table-wrap" style={{ maxHeight: "calc(100vh - 220px)", overflowY: "auto", overflowX: "auto" }}>
+          <div className="table-scroll transfer-table-wrap" style={{ maxHeight: "calc(100vh - 220px)", minHeight: "320px", overflowY: "auto", overflowX: "auto" }}>
             <table ref={tableRef} className="transfer-table" style={{ borderCollapse: "separate", borderSpacing: 0, width: "100%" }}>
               <thead>
                 <tr>
@@ -1373,7 +1373,7 @@ export function StockTransferPage({
                     </td>
                   </tr>
                 ) : (
-                  paginatedItems.map((item) => (
+                  paginatedItems.map((item, rowIdx) => (
                     <tr
                       key={item.id}
                       style={{ cursor: "pointer", transition: "background-color 0.15s ease" }}
@@ -1524,7 +1524,7 @@ export function StockTransferPage({
                               <td
                                 key="cell-8"
                                 className="transfer-action-cell"
-                                style={{ width: "70px", minWidth: "70px", textAlign: "center", ...getFreezeStyle(8, false) }}
+                                style={{ width: "70px", minWidth: "70px", textAlign: "center", position: "relative", zIndex: openActionMenuId === item.id ? 50 : undefined, ...getFreezeStyle(8, false) }}
                                 onClick={(e) => e.stopPropagation()}
                               >
                                 <button
@@ -1541,8 +1541,14 @@ export function StockTransferPage({
                                   ⋮
                                 </button>
 
-                                {openActionMenuId === item.id && (
-                                  <div className="transfer-action-menu" data-testid="action-popup-menu">
+                                {openActionMenuId === item.id && (() => {
+                                  const openUpward = paginatedItems.length >= 3 && rowIdx >= paginatedItems.length - (paginatedItems.length >= 4 ? 2 : 1);
+                                  return (
+                                  <div
+                                    className={`transfer-action-menu ${openUpward ? "open-upward" : ""}`}
+                                    data-testid="action-popup-menu"
+                                    style={openUpward ? { top: "auto", bottom: "40px", boxShadow: "0 -10px 15px -3px rgba(0, 0, 0, 0.1), 0 -4px 6px -2px rgba(0, 0, 0, 0.05)" } : undefined}
+                                  >
                                     <button
                                       type="button"
                                       className="transfer-action-item"
@@ -1597,7 +1603,8 @@ export function StockTransferPage({
                                       <span>Download</span>
                                     </button>
                                   </div>
-                                )}
+                                  );
+                                })()}
                               </td>
                             );
                           default:
