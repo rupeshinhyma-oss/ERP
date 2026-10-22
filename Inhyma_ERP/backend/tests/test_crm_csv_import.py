@@ -44,6 +44,7 @@ ADMIN_ID = uuid.UUID("ea2b5763-5a4d-4f21-8bff-adc3e6cb8235")
 SALES_MANAGER_ID = uuid.UUID("70b70538-2188-4a7a-8aab-b34c7243db05")
 JOHN_ID = uuid.UUID("0c0d89b7-5105-4dc6-945b-301a049f4502")
 OPS_EMPLOYEE_ID = uuid.UUID("b04e86e1-6f74-4c51-a247-2440adaf38df")
+VIEWER_ID = uuid.UUID("f47ac10b-58cc-4372-a567-0e02b2c3d479")
 
 
 @pytest.fixture
@@ -74,6 +75,24 @@ def unauthorized_headers() -> dict[str, str]:
 
 
 @pytest.fixture
+def view_only_headers() -> dict[str, str]:
+    token = create_access_token(
+        VIEWER_ID,
+        permissions=["crm.leads.view"],
+    ).token
+    return {"Authorization": f"Bearer {token}"}
+
+
+@pytest.fixture
+def salesperson_headers() -> dict[str, str]:
+    token = create_access_token(
+        JOHN_ID,
+        permissions=["crm.leads.view", "crm.leads.manage", "crm.pipelines.view"],
+    ).token
+    return {"Authorization": f"Bearer {token}"}
+
+
+@pytest.fixture
 async def setup_test_pipeline():
     """Create a clean active pipeline with initial open stage for testing."""
     session_factory = get_sessionmaker()
@@ -87,6 +106,7 @@ async def setup_test_pipeline():
             (SALES_MANAGER_ID, "manager_csv_import"),
             (JOHN_ID, "john_csv_import"),
             (OPS_EMPLOYEE_ID, "ops_csv_import"),
+            (VIEWER_ID, "viewer_csv_import"),
         ]:
             u = await session.get(User, uid)
             if not u:
@@ -179,6 +199,92 @@ async def test_unauthenticated_and_unauthorized_import(
     # Unauthorized batches list
     res_batches = await client.get("/api/v1/crm/import/batches", headers=unauthorized_headers)
     assert res_batches.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_lead_view_only_user_rejected_on_all_import_endpoints(
+    client: AsyncClient,
+    view_only_headers: dict[str, str],
+    setup_test_pipeline: dict,
+):
+    """
+    BUG-CRM-006: Verify that having crm.leads.view alone does NOT authorize any
+    CRM import endpoint. All endpoints must return HTTP 403 Forbidden.
+    """
+    pipe_id = str(setup_test_pipeline["pipeline_id"])
+    csv_bytes = b"Name,Number,Campaign\nAlice,9876543210,Inbound\n"
+
+    # 1. GET /crm/import/template
+    res_template = await client.get("/api/v1/crm/import/template", headers=view_only_headers)
+    assert res_template.status_code == 403
+
+    # 2. POST /crm/import/preview
+    res_preview = await client.post(
+        "/api/v1/crm/import/preview",
+        files={"file": ("leads.csv", csv_bytes, "text/csv")},
+        data={"pipeline_id": pipe_id},
+        headers=view_only_headers,
+    )
+    assert res_preview.status_code == 403
+
+    # 3. POST /crm/import/confirm
+    res_confirm = await client.post(
+        "/api/v1/crm/import/confirm",
+        files={"file": ("leads.csv", csv_bytes, "text/csv")},
+        data={"pipeline_id": pipe_id},
+        headers=view_only_headers,
+    )
+    assert res_confirm.status_code == 403
+
+    # 4. GET /crm/import/batches
+    res_batches = await client.get("/api/v1/crm/import/batches", headers=view_only_headers)
+    assert res_batches.status_code == 403
+
+    # 5. GET /crm/import/batches/{batch_id}
+    res_batch_detail = await client.get(f"/api/v1/crm/import/batches/{uuid.uuid4()}", headers=view_only_headers)
+    assert res_batch_detail.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_salesperson_without_import_permission_cannot_bypass_restrictions(
+    client: AsyncClient,
+    salesperson_headers: dict[str, str],
+    setup_test_pipeline: dict,
+):
+    """
+    BUG-CRM-006: Salespersons without crm.leads.import cannot bypass restrictions
+    by invoking import endpoints directly, while their normal lead-view access remains intact.
+    """
+    pipe_id = str(setup_test_pipeline["pipeline_id"])
+    csv_bytes = b"Name,Number,Campaign\nBob,9876543211,Inbound\n"
+
+    # All import endpoints return 403
+    res_template = await client.get("/api/v1/crm/import/template", headers=salesperson_headers)
+    assert res_template.status_code == 403
+
+    res_preview = await client.post(
+        "/api/v1/crm/import/preview",
+        files={"file": ("leads.csv", csv_bytes, "text/csv")},
+        data={"pipeline_id": pipe_id},
+        headers=salesperson_headers,
+    )
+    assert res_preview.status_code == 403
+
+    res_confirm = await client.post(
+        "/api/v1/crm/import/confirm",
+        files={"file": ("leads.csv", csv_bytes, "text/csv")},
+        data={"pipeline_id": pipe_id},
+        headers=salesperson_headers,
+    )
+    assert res_confirm.status_code == 403
+
+    res_batches = await client.get("/api/v1/crm/import/batches", headers=salesperson_headers)
+    assert res_batches.status_code == 403
+
+    # But normal lead viewing remains functional and authorized (HTTP 200)
+    res_leads = await client.get("/api/v1/crm/leads", headers=salesperson_headers)
+    assert res_leads.status_code == 200
+
 
 
 @pytest.mark.asyncio

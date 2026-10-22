@@ -227,9 +227,16 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     from app.core.backup_service import backup_service
     await backup_service.start()
 
+    # Start the automated periodic recurring task background worker (generation, reminders, escalations)
+    from app.tasks.recurring_worker import recurring_task_worker
+    await recurring_task_worker.start()
+
     yield
 
     logger.info("Application shutting down.")
+
+    # Stop the recurring task background worker
+    await recurring_task_worker.stop()
 
     # Stop the daily backup worker
     await backup_service.stop()

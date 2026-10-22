@@ -14,6 +14,8 @@ from app.tasks.models import (
     ApprovalStatus,
     DependencyType,
     IssueType,
+    RecurrenceFrequency,
+    RecurringScheduleStatus,
     SprintStatus,
     TaskAssignmentRole,
     TaskPriority,
@@ -559,6 +561,7 @@ class TaskUpdate(BaseModel):
     approval_status: ApprovalStatus | None = None
     approver_id: uuid.UUID | None = None
     approval_notes: str | None = None
+    completion_notes: str | None = None
 
     @model_validator(mode="after")
     def validate_dates(self) -> TaskUpdate:
@@ -585,6 +588,8 @@ class TaskSummaryRead(BaseModel):
     parent_task_title: str | None = None
     sprint_id: uuid.UUID | None = None
     sprint_name: str | None = None
+    recurring_schedule_id: uuid.UUID | None = None
+    recurrence_period: str | None = None
     approval_status: ApprovalStatus = ApprovalStatus.NOT_REQUIRED
     start_date: date | None = None
     due_date: date | None = None
@@ -621,6 +626,8 @@ class TaskRead(BaseModel):
     parent_task_title: str | None = None
     sprint_id: uuid.UUID | None = None
     sprint: TaskSprintRead | None = None
+    recurring_schedule_id: uuid.UUID | None = None
+    recurrence_period: str | None = None
     approval_status: ApprovalStatus = ApprovalStatus.NOT_REQUIRED
     approver_id: uuid.UUID | None = None
     approver: UserMiniRead | None = None
@@ -663,4 +670,114 @@ class TaskTimelineItemRead(BaseModel):
     event_type: str
     description: str
     details: dict[str, Any] | None = None
+
+
+# --- Recurring Tasks Schemas ---
+class TaskRecurringScheduleCreate(BaseModel):
+    title: str = Field(..., max_length=255)
+    description: str | None = None
+    department: str | None = None
+    assignee_id: uuid.UUID | None = None
+    manager_id: uuid.UUID | None = None
+    priority: TaskPriority = TaskPriority.MEDIUM
+    issue_type: str = "TASK"
+    frequency: RecurrenceFrequency = RecurrenceFrequency.MONTHLY
+    recurrence_config: dict[str, Any]
+    reminder_lead_days: int = 3
+    escalation_timing_type: str = "ON_DUE_DATE"
+    escalation_offset_days: int = 0
+    escalation_repeat_interval_days: int = 7
+    hold_until_rule: str | None = None
+    effective_start_date: date = Field(default_factory=date.today)
+    effective_end_date: date | None = None
+
+
+class TaskRecurringScheduleUpdate(BaseModel):
+    title: str | None = None
+    description: str | None = None
+    department: str | None = None
+    assignee_id: uuid.UUID | None = None
+    manager_id: uuid.UUID | None = None
+    priority: TaskPriority | None = None
+    issue_type: str | None = None
+    frequency: RecurrenceFrequency | None = None
+    recurrence_config: dict[str, Any] | None = None
+    reminder_lead_days: int | None = None
+    escalation_timing_type: str | None = None
+    escalation_offset_days: int | None = None
+    escalation_repeat_interval_days: int | None = None
+    hold_until_rule: str | None = None
+    status: RecurringScheduleStatus | None = None
+    effective_start_date: date | None = None
+    effective_end_date: date | None = None
+    update_pending_instances: bool = False
+
+
+class TaskRecurringScheduleRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    title: str
+    description: str | None = None
+    department: str | None = None
+    assignee_id: uuid.UUID | None = None
+    manager_id: uuid.UUID | None = None
+    created_by: uuid.UUID | None = None
+    priority: TaskPriority
+    issue_type: str
+    frequency: str
+    recurrence_config: dict[str, Any]
+    reminder_lead_days: int
+    escalation_timing_type: str
+    escalation_offset_days: int
+    escalation_repeat_interval_days: int
+    hold_until_rule: str | None = None
+    status: str
+    effective_start_date: date
+    effective_end_date: date | None = None
+    next_run_date: date | None = None
+    last_generated_period: str | None = None
+    last_generated_at: datetime | None = None
+    created_at: datetime
+    updated_at: datetime
+    assignee: UserMiniRead | None = None
+    manager: UserMiniRead | None = None
+    creator: UserMiniRead | None = None
+
+
+class RecurrencePreviewRequest(BaseModel):
+    frequency: RecurrenceFrequency
+    recurrence_config: dict[str, Any]
+    start_date: date | None = None
+    effective_end_date: date | None = None
+    count: int = 5
+    reminder_lead_days: int | None = 3
+    escalation_timing_type: str | None = "ON_DUE_DATE"
+    escalation_offset_days: int | None = 0
+    escalation_repeat_interval_days: int | None = 7
+    hold_until: date | None = None
+
+
+class RecurrencePreviewItem(BaseModel):
+    period: str
+    due_date: str
+    formatted_due_date: str
+
+
+class RecurrencePreviewResponse(BaseModel):
+    occurrences: list[RecurrencePreviewItem] = []
+    next_occurrence: RecurrencePreviewItem | None = None
+    frequency: str | None = None
+    next_period: str | None = None
+    next_due_date: str | None = None
+    formatted_due_date: str | None = None
+    reminder_date: str | None = None
+    formatted_reminder_date: str | None = None
+    escalation_date: str | None = None
+    formatted_escalation_date: str | None = None
+    repeat_escalation_interval: str | None = None
+    hold_active: bool = False
+    explanation: str | None = None
+
+
 

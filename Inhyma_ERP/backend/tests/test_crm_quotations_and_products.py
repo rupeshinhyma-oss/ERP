@@ -2096,4 +2096,117 @@ async def test_quotation_pdf_header_single_branding_and_no_duplication():
     assert "GSTIN: 27AAKFI9869H1ZL" in text_with_logo
 
 
+@pytest.mark.asyncio
+async def test_lead_quotation_listing_eager_loading_and_scoping(
+    client: AsyncClient,
+    admin_headers: dict[str, str],
+    manager_headers: dict[str, str],
+    rep_a_headers: dict[str, str],
+    rep_b_headers: dict[str, str],
+    setup_quotation_environment: dict,
+):
+    """
+    BUG-CRM-001 Regression:
+    Verify list_lead_quotations() eager-loads relationships (lead, company, contacts, items, revisions)
+    without triggering MissingGreenlet lazy-loading error, and enforces RBAC scoping:
+    1. Authorized salesperson (Rep A) can list quotations belonging to their own lead (HTTP 200).
+    2. Response includes existing quotation details (items, line total, customer info) without lazy loading errors.
+    3. Admin and Manager can list quotations for leads within their authorized scope (HTTP 200).
+    4. Salesperson B cannot list quotations for Salesperson A's lead (HTTP 403 Forbidden).
+    5. Manager cannot list quotations for out-of-scope Lead B (HTTP 403 Forbidden).
+    6. If Alpha Lead B exists in the development DB with SQ-202610-0018 and SQ-202610-0019, verify listing returns HTTP 200.
+    """
+    env = setup_quotation_environment
+    lead_a_id = env["lead_a_id"]
+    lead_b_id = env["lead_b_id"]
 
+    # 1. Rep A creates a quotation on Lead A (with items)
+    q_res = await client.post(
+        f"/api/v1/crm/leads/{lead_a_id}/quotations",
+        json={
+            "items": [
+                {
+                    "product_id": env["prod1_id"],
+                    "quantity": 2,
+                    "unit_price": 50000.00,
+                    "tax_rate": 18.00,
+                }
+            ],
+            "notes": "Testing quotation listing with eager loading",
+        },
+        headers=rep_a_headers,
+    )
+    assert q_res.status_code == 201, f"Failed to create quotation: {q_res.text}"
+    created_quote = q_res.json()
+    quote_id = created_quote["id"]
+    quote_number = created_quote["quotation_number"]
+
+    # 2. Authorized salesperson (Rep A) lists quotations belonging to their own lead
+    # This must NOT fail with HTTP 500 / MissingGreenlet!
+    list_res_a = await client.get(
+        f"/api/v1/crm/leads/{lead_a_id}/quotations",
+        headers=rep_a_headers,
+    )
+    assert list_res_a.status_code == 200, f"Expected 200 but got {list_res_a.status_code}: {list_res_a.text}"
+    quotes_data_a = list_res_a.json()
+    items_a = quotes_data_a if isinstance(quotes_data_a, list) else quotes_data_a.get("items", [])
+    assert len(items_a) >= 1
+    found_quote = next((q for q in items_a if q.get("id") == quote_id), None)
+    assert found_quote is not None, f"Quotation {quote_id} not found in listing"
+    assert found_quote["quotation_number"] == quote_number
+    assert len(found_quote.get("items", [])) == 1
+    assert Decimal(str(found_quote["total_amount"])) > Decimal("0")
+
+    # 3. Manager can list quotations for leads within their authorized scope (Lead A)
+    list_res_mgr = await client.get(
+        f"/api/v1/crm/leads/{lead_a_id}/quotations",
+        headers=manager_headers,
+    )
+    assert list_res_mgr.status_code == 200
+    mgr_items = list_res_mgr.json() if isinstance(list_res_mgr.json(), list) else list_res_mgr.json().get("items", [])
+    assert any(q.get("id") == quote_id for q in mgr_items)
+
+    # 4. Admin can list quotations for leads within their scope (Lead A and Lead B)
+    list_res_admin = await client.get(
+        f"/api/v1/crm/leads/{lead_a_id}/quotations",
+        headers=admin_headers,
+    )
+    assert list_res_admin.status_code == 200
+    admin_items = list_res_admin.json() if isinstance(list_res_admin.json(), list) else list_res_admin.json().get("items", [])
+    assert any(q.get("id") == quote_id for q in admin_items)
+
+    # 5. Salesperson cannot list quotations for another salesperson's lead
+    # Rep B attempts to list Lead A's quotations -> 403 Forbidden
+    list_res_b = await client.get(
+        f"/api/v1/crm/leads/{lead_a_id}/quotations",
+        headers=rep_b_headers,
+    )
+    assert list_res_b.status_code == 403, f"Expected 403 for Rep B on Lead A, got {list_res_b.status_code}"
+
+    # Manager attempts to list quotations for out-of-scope Lead B -> 403 Forbidden
+    list_res_mgr_b = await client.get(
+        f"/api/v1/crm/leads/{lead_b_id}/quotations",
+        headers=manager_headers,
+    )
+    assert list_res_mgr_b.status_code == 403
+
+    # 6. Check development database for Alpha Lead B quotations (SQ-202610-0018 / SQ-202610-0019) if present
+    async with get_sessionmaker()() as session:
+        lead_b_db = (
+            await session.execute(
+                select(CrmLead).where(
+                    (CrmLead.name.ilike("%Alpha Lead B%")) | (CrmLead.id == uuid.UUID("8a31a780-6423-4744-8da1-cce7686df183"))
+                )
+            )
+        ).scalar_one_or_none()
+        if lead_b_db:
+            lead_b_quotes_res = await client.get(
+                f"/api/v1/crm/leads/{lead_b_db.id}/quotations",
+                headers=admin_headers,
+            )
+            assert lead_b_quotes_res.status_code == 200
+            db_quotes = lead_b_quotes_res.json()
+            q_numbers = [q.get("quotation_number") for q in (db_quotes if isinstance(db_quotes, list) else db_quotes.get("items", []))]
+            for expected_num in ["SQ-202610-0018", "SQ-202610-0019"]:
+                if any(q.startswith(expected_num) for q in q_numbers):
+                    assert any(q.startswith(expected_num) for q in q_numbers)

@@ -24,6 +24,7 @@ import { isTaskOverdue } from "@/types/tasks";
 import { CreateTaskModal } from "./CreateTaskModal";
 import { EscalateTaskModal } from "./EscalateTaskModal";
 import { TaskDrawer } from "./TaskDrawer";
+import { RecurringTasksTab } from "./RecurringTasksTab";
 
 export type TabKey =
   | "my"
@@ -32,7 +33,8 @@ export type TabKey =
   | "backlog"
   | "kanban"
   | "calendar"
-  | "gantt";
+  | "gantt"
+  | "recurring";
 
 export type ScopeViewKey = "my" | "department" | "organization";
 
@@ -152,7 +154,12 @@ export const TasksPage: React.FC = () => {
       ? "SELECTED_DEPT"
       : "OWN"
   );
-  const [departmentFilter, setDepartmentFilter] = useState<string>("");
+  const [departmentFilter, setDepartmentFilter] = useState<string>(() => {
+    if (initialScopeView === "department") {
+      return (profile as any)?.department || (profile as any)?.position_name || (isSuperAdmin ? "Management" : "");
+    }
+    return "";
+  });
   const [collapsedDepts, setCollapsedDepts] = useState<Set<string>>(new Set());
 
   // Kanban Drag-and-Drop state
@@ -218,6 +225,10 @@ export const TasksPage: React.FC = () => {
 
   // Users for filter dropdowns
   const [availableUsers, setAvailableUsers] = useState<AvailableUser[]>([]);
+  const availableUsersRef = React.useRef(availableUsers);
+  useEffect(() => {
+    availableUsersRef.current = availableUsers;
+  }, [availableUsers]);
 
   // Calendar specific state
   const [calendarDate, setCalendarDate] = useState(() => new Date());
@@ -316,18 +327,20 @@ export const TasksPage: React.FC = () => {
     return Array.from(depts).sort();
   }, [availableUsers]);
 
-  // Default department filter on initial load (only initialize once, never overwrite user selection)
+  // Default department filter on initial load (only initialize when in department view, never overwrite user selection)
   const hasInitializedDept = React.useRef(false);
   useEffect(() => {
-    if (!hasInitializedDept.current && departmentsList.length > 0) {
+    if (!hasInitializedDept.current && departmentsList.length > 0 && (scopeView === "department" || activeTab === "department")) {
       hasInitializedDept.current = true;
-      if (userDepartment && departmentsList.includes(userDepartment)) {
-        setDepartmentFilter(userDepartment);
-      } else if (departmentsList.length > 0) {
-        setDepartmentFilter(departmentsList[0]);
+      if (!departmentFilter) {
+        if (userDepartment && departmentsList.includes(userDepartment)) {
+          setDepartmentFilter(userDepartment);
+        } else if (departmentsList.length > 0) {
+          setDepartmentFilter(departmentsList[0]);
+        }
       }
     }
-  }, [userDepartment, departmentsList]);
+  }, [userDepartment, departmentsList, scopeView, activeTab, departmentFilter]);
 
   // Sync tab with URL and enforce permission gating
   useEffect(() => {
@@ -346,6 +359,7 @@ export const TasksPage: React.FC = () => {
           "kanban",
           "calendar",
           "gantt",
+          "recurring",
         ].includes(t)
       ) {
         setActiveTab(t);
@@ -467,9 +481,11 @@ export const TasksPage: React.FC = () => {
   }, []);
 
   // Fetch tasks according to current tab, scopeView & filters
-  const fetchTasks = useCallback(async () => {
+  const fetchTasks = useCallback(async (silent = false) => {
     try {
-      setLoading(true);
+      if (!silent) {
+        setLoading(true);
+      }
       setError(null);
 
       // Determine backend view mode
@@ -530,7 +546,7 @@ export const TasksPage: React.FC = () => {
       // Department filter
       if (departmentFilter) {
         filteredItems = filteredItems.filter((t) => {
-          const taskDept = getTaskDepartment(t, availableUsers);
+          const taskDept = getTaskDepartment(t, availableUsersRef.current);
           return taskDept.toLowerCase() === departmentFilter.toLowerCase();
         });
       }
@@ -552,7 +568,9 @@ export const TasksPage: React.FC = () => {
       console.error("Failed to fetch tasks", err);
       setError(err);
     } finally {
-      setLoading(false);
+      if (!silent) {
+        setLoading(false);
+      }
     }
   }, [
     activeTab,
@@ -565,7 +583,6 @@ export const TasksPage: React.FC = () => {
     assigneeFilter,
     dueDateFilter,
     departmentFilter,
-    availableUsers,
     profile?.id,
     quickFilter,
     todayStr,
@@ -588,10 +605,14 @@ export const TasksPage: React.FC = () => {
   const handleComplete = async (e: React.MouseEvent, taskId: string) => {
     e.stopPropagation();
     try {
+      setTasks((prev) =>
+        prev.map((t) => (t.id === taskId ? { ...t, status: "DONE" as TaskStatus } : t))
+      );
       await tasksApi.updateTask(taskId, { status: "DONE" });
-      fetchTasks();
+      void fetchTasks(true);
     } catch (err: any) {
       alert(err?.response?.data?.detail || "Failed to complete task");
+      void fetchTasks(true);
     }
   };
 
@@ -666,12 +687,18 @@ export const TasksPage: React.FC = () => {
   };
 
 
+  const fetchTasksRef = React.useRef(fetchTasks);
+  useEffect(() => {
+    fetchTasksRef.current = fetchTasks;
+  }, [fetchTasks]);
+
   useEffect(() => {
     fetchTasks();
   }, [fetchTasks]);
 
-  // WebSocket Live Updates
+  // WebSocket Live Updates - only triggers for task entity events, never on generic user activity
   useEffect(() => {
+    liveClient.subscribe("module:tasks");
     liveClient.subscribe("tasks");
     if (profile?.id) {
       liveClient.subscribe(`user:${profile.id}`);
@@ -680,15 +707,22 @@ export const TasksPage: React.FC = () => {
     const unsub = liveClient.onEvent((event) => {
       if (
         event.entity === "task" ||
-        event.event_type?.startsWith("TASK_") ||
-        (profile?.id && event.user_id === profile.id)
+        event.event_type?.startsWith("TASK_")
       ) {
-        fetchTasks();
+        // Silent background update keeps scroll position, filters, and prevents list reload / flickering
+        void fetchTasksRef.current(true);
       }
     });
 
-    return () => unsub();
-  }, [profile?.id, fetchTasks]);
+    return () => {
+      unsub();
+      liveClient.unsubscribe("module:tasks");
+      liveClient.unsubscribe("tasks");
+      if (profile?.id) {
+        liveClient.unsubscribe(`user:${profile.id}`);
+      }
+    };
+  }, [profile?.id]);
 
   const handleDeleteTask = async (e: React.MouseEvent, t: TaskSummary) => {
     e.stopPropagation();
@@ -715,7 +749,7 @@ export const TasksPage: React.FC = () => {
     );
     try {
       await tasksApi.updateTask(taskId, { status: newStatus });
-      fetchTasks();
+      void fetchTasks(true);
     } catch (err: any) {
       setTasks(previousTasks);
       alert(err?.response?.data?.detail || "Failed to update status");
@@ -1715,9 +1749,10 @@ export const TasksPage: React.FC = () => {
         {/* Main Card Container */}
         <div className="card" style={{ background: "#ffffff", borderRadius: "8px", border: "1px solid #e2e8f0", boxShadow: "0 1px 3px rgba(0,0,0,0.05)" }}>
           {/* Filter Bar */}
-          <div
-            className="toolbar"
-            style={{
+          {activeTab !== "recurring" && (
+            <div
+              className="toolbar"
+              style={{
               padding: "16px",
               borderBottom: "1px solid #e2e8f0",
               display: "flex",
@@ -1900,6 +1935,7 @@ export const TasksPage: React.FC = () => {
               </button>
             )}
           </div>
+          )}
 
           {/* Navigation Tabs Bar */}
           <div
@@ -2048,12 +2084,31 @@ export const TasksPage: React.FC = () => {
             >
               📈 Gantt
             </button>
+
+            <button
+              type="button"
+              onClick={() => handleTabChange("recurring")}
+              style={{
+                padding: "10px 16px",
+                fontWeight: 600,
+                fontSize: "13.5px",
+                background: "none",
+                border: "none",
+                borderBottom: activeTab === "recurring" ? "2px solid #2563eb" : "2px solid transparent",
+                marginBottom: "-2px",
+                cursor: "pointer",
+                color: activeTab === "recurring" ? "#2563eb" : "#64748b",
+                whiteSpace: "nowrap",
+              }}
+            >
+              🔄 Recurring Tasks
+            </button>
           </div>
 
           {/* TAB CONTENT: Table Views (My Tasks, Department List, Organization, Backlog) */}
           {isTableActive ? (
             <div>
-              {loading ? (
+              {loading && tasks.length === 0 ? (
                 <TasksTableSkeletonRows count={pageSize > 10 ? 8 : pageSize} />
               ) : scopeView === "organization" ? (
                 /* Organization View: Grouped by Department with Collapsible Accordions */
@@ -2820,6 +2875,14 @@ export const TasksPage: React.FC = () => {
               availableUsers={availableUsers}
               colorByDepartment={scopeView === "organization"}
             />
+          ) : activeTab === "recurring" ? (
+            <div style={{ padding: "16px" }}>
+              <RecurringTasksTab
+                onSelectTask={(id) => setSelectedTaskId(id)}
+                availableUsers={availableUsers}
+                canManageTasks={hasPermission("task.create") || hasPermission("task.manage") || isSuperAdmin}
+              />
+            </div>
           ) : null}
         </div>
 

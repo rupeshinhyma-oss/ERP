@@ -25,7 +25,7 @@ from app.core.logging import get_logger
 from app.core.responses import build_success_response
 from app.crm.dependencies import get_crm_import_service
 from app.crm.import_service import CrmImportService
-from app.rbac.dependencies import require_any_permission
+from app.rbac.dependencies import require_permission
 
 router = APIRouter(prefix="/crm/import", tags=["CRM Lead Import"])
 logger = get_logger(__name__)
@@ -63,9 +63,7 @@ async def _record_import_audit(
 
 @router.get("/template", summary="Download sample CSV import template")
 async def download_template(
-    _current_user: CurrentUser = Depends(
-        require_any_permission("crm.leads.import", "crm.leads.manage", "crm.leads.view")
-    ),
+    _current_user: CurrentUser = Depends(require_permission("crm.leads.import")),
 ) -> Response:
     """Provide a standard CSV template for CRM lead imports."""
     csv_content = CrmImportService.generate_csv_template()
@@ -85,9 +83,7 @@ async def preview_lead_import(
     pipeline_id: uuid.UUID = Form(..., description="Target CRM pipeline UUID"),
     file: UploadFile = File(..., description="Uploaded CSV file"),
     service: CrmImportService = Depends(get_crm_import_service),
-    current_user: CurrentUser = Depends(
-        require_any_permission("crm.leads.import", "crm.leads.manage", "crm.leads.view")
-    ),
+    current_user: CurrentUser = Depends(require_permission("crm.leads.import")),
 ) -> dict:
     """
     Validate uploaded CSV rows against destination pipeline, check existing CRM contacts,
@@ -119,9 +115,7 @@ async def confirm_lead_import(
     target_salesperson_id: uuid.UUID | None = Form(default=None, description="Target salesperson UUID for single_salesperson mode"),
     service: CrmImportService = Depends(get_crm_import_service),
     audit_service: AuditService = Depends(get_audit_service),
-    current_user: CurrentUser = Depends(
-        require_any_permission("crm.leads.import", "crm.leads.manage", "crm.leads.view")
-    ),
+    current_user: CurrentUser = Depends(require_permission("crm.leads.import")),
 ) -> dict:
     """
     Execute transactional CRM lead import:
@@ -201,9 +195,7 @@ async def list_import_batches(
     limit: int = Query(default=50, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
     service: CrmImportService = Depends(get_crm_import_service),
-    current_user: CurrentUser = Depends(
-        require_any_permission("crm.leads.import", "crm.leads.manage", "crm.leads.view")
-    ),
+    current_user: CurrentUser = Depends(require_permission("crm.leads.import")),
 ) -> dict:
     """Retrieve history of CRM lead import batches within actor's permission scope."""
     batches = await service.list_batches(
@@ -222,9 +214,7 @@ async def get_import_batch(
     request: Request,
     batch_id: uuid.UUID,
     service: CrmImportService = Depends(get_crm_import_service),
-    current_user: CurrentUser = Depends(
-        require_any_permission("crm.leads.import", "crm.leads.manage", "crm.leads.view")
-    ),
+    current_user: CurrentUser = Depends(require_permission("crm.leads.import")),
 ) -> dict:
     """Retrieve details and row error summary for an individual lead import batch."""
     batch = await service.get_batch_by_id(batch_id, actor=current_user)

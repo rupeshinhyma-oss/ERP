@@ -24,6 +24,7 @@ from app.crm.schemas import (
     CrmActivityCreate,
     CrmFollowUpCreate,
     CrmFollowUpStatusUpdate,
+    CrmFollowUpUpdate,
     CrmLeadCreate,
     CrmLeadReassignRequest,
     CrmLeadStageTransitionRequest,
@@ -493,6 +494,86 @@ async def update_follow_up_status(
     )
 
 
+@router.patch(
+    "/crm/follow-ups/{follow_up_id}",
+    summary="Update a scheduled follow-up's date, notes, or assigned salesperson",
+)
+@router.put(
+    "/crm/follow-ups/{follow_up_id}",
+    summary="Update a scheduled follow-up's date, notes, or assigned salesperson",
+)
+async def update_follow_up(
+    request: Request,
+    follow_up_id: uuid.UUID,
+    payload: CrmFollowUpUpdate,
+    service: CrmLeadService = Depends(get_crm_lead_service),
+    audit_service: AuditService = Depends(get_audit_service),
+    current_user: CurrentUser = Depends(
+        require_any_permission("crm.leads.view", "crm.leads.manage")
+    ),
+) -> dict:
+    """
+    Update follow-up scheduling, notes, or assignment.
+    Automatically updates the linked Workforce Task in backend/app/tasks.
+    """
+    follow_up = await service.update_follow_up(
+        follow_up_id=follow_up_id,
+        data=payload,
+        actor=current_user,
+    )
+
+    await audit_service.record(
+        action=AuditAction.UPDATE,
+        module="crm",
+        user_id=current_user.id,
+        username_snapshot=current_user.username,
+        entity_type="CrmFollowUp",
+        entity_id=str(follow_up_id),
+        new_values=payload.model_dump(mode="json"),
+        ip_address=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+        request_id=getattr(request.state, "request_id", "-"),
+        http_method=request.method,
+        endpoint=request.url.path,
+        response_status=status.HTTP_200_OK,
+        description=f"Updated follow-up {follow_up_id}",
+    )
+    request.state.audit_logged = True
+
+    return build_success_response(
+        data=follow_up.model_dump(),
+        message="Follow-up updated successfully.",
+        request_id=getattr(request.state, "request_id", "-"),
+    )
+
+
+@router.post(
+    "/crm/follow-ups/{follow_up_id}/sync-task",
+    summary="Retry or manually synchronize a follow-up to its workforce task",
+)
+async def sync_follow_up_task(
+    request: Request,
+    follow_up_id: uuid.UUID,
+    service: CrmLeadService = Depends(get_crm_lead_service),
+    current_user: CurrentUser = Depends(
+        require_any_permission("crm.leads.view", "crm.leads.manage")
+    ),
+) -> dict:
+    """
+    Ensure the follow-up has an active corresponding Task in backend/app/tasks.
+    Idempotent: prevents duplicate task creation.
+    """
+    follow_up = await service.sync_missing_follow_up_task(
+        follow_up_id=follow_up_id,
+        actor=current_user,
+    )
+    return build_success_response(
+        data=follow_up.model_dump(),
+        message="Workforce task synchronized successfully.",
+        request_id=getattr(request.state, "request_id", "-"),
+    )
+
+
 @router.get(
     "/crm/follow-ups",
     summary="Query follow-ups with date filtering and team scoping",
@@ -702,50 +783,6 @@ async def get_team_oversight(
     )
     return build_success_response(
         data=oversight.model_dump(),
-        request_id=getattr(request.state, "request_id", "-"),
-    )
-
-
-# -----------------------------------------------------------------------------
-# CRM Reports & Analytics Endpoints
-# -----------------------------------------------------------------------------
-
-
-@router.get(
-    "/crm/reports/analytics",
-    summary="Get comprehensive CRM reports and analytics metrics",
-)
-@router.get(
-    "/crm/analytics",
-    summary="Get comprehensive CRM reports and analytics metrics (alias)",
-)
-async def get_crm_analytics(
-    request: Request,
-    start_date: str | None = Query(default=None, description="Start date (YYYY-MM-DD) in Asia/Kolkata"),
-    end_date: str | None = Query(default=None, description="End date (YYYY-MM-DD) in Asia/Kolkata"),
-    pipeline_id: uuid.UUID | None = Query(default=None, description="Optional pipeline filter"),
-    salesperson_id: uuid.UUID | None = Query(default=None, description="Optional salesperson filter (scoped)"),
-    service: CrmLeadService = Depends(get_crm_lead_service),
-    current_user: CurrentUser = Depends(
-        require_any_permission("crm.leads.view", "crm.leads.manage")
-    ),
-) -> dict:
-    """
-    Retrieve comprehensive CRM performance and analytics metrics.
-    Enforces strict role-based data isolation:
-    - Admin: Company-wide metrics with optional salesperson/pipeline filters
-    - Manager: Restricted to authorized departmental/team scope
-    - Salesperson: Strictly personal metrics (forced self-assignment, external rep queries rejected)
-    """
-    analytics = await service.get_crm_analytics(
-        actor=current_user,
-        start_date=start_date,
-        end_date=end_date,
-        pipeline_id=pipeline_id,
-        salesperson_id=salesperson_id,
-    )
-    return build_success_response(
-        data=analytics.model_dump(),
         request_id=getattr(request.state, "request_id", "-"),
     )
 

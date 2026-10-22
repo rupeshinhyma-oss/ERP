@@ -33,6 +33,7 @@ from app.tasks.models import (
     TaskMention,
     TaskPriority,
     TaskReaction,
+    TaskRecurringSchedule,
     TaskSavedFilter,
     TaskSprint,
     TaskStatus,
@@ -1252,3 +1253,114 @@ class TaskRepository(BaseRepository[Task]):
             })
 
         return result
+
+    # --- Recurring Task Schedules ---
+    async def create_recurring_schedule(self, schedule: TaskRecurringSchedule) -> TaskRecurringSchedule:
+        self.session.add(schedule)
+        await self.session.commit()
+        await self.session.refresh(schedule, ["assignee", "manager", "creator"])
+        return schedule
+
+    async def get_recurring_schedule(self, schedule_id: uuid.UUID) -> TaskRecurringSchedule | None:
+        stmt = (
+            select(TaskRecurringSchedule)
+            .where(
+                TaskRecurringSchedule.id == schedule_id,
+                TaskRecurringSchedule.deleted_at.is_(None),
+            )
+            .options(
+                selectinload(TaskRecurringSchedule.assignee),
+                selectinload(TaskRecurringSchedule.manager),
+                selectinload(TaskRecurringSchedule.creator),
+            )
+        )
+        res = await self.session.execute(stmt)
+        return res.scalar_one_or_none()
+
+    async def list_recurring_schedules(
+        self,
+        department: str | None = None,
+        status: str | None = None,
+        frequency: str | None = None,
+    ) -> list[TaskRecurringSchedule]:
+        stmt = (
+            select(TaskRecurringSchedule)
+            .where(TaskRecurringSchedule.deleted_at.is_(None))
+            .options(
+                selectinload(TaskRecurringSchedule.assignee),
+                selectinload(TaskRecurringSchedule.manager),
+                selectinload(TaskRecurringSchedule.creator),
+            )
+            .order_by(TaskRecurringSchedule.created_at.desc())
+        )
+        if department:
+            stmt = stmt.where(func.lower(TaskRecurringSchedule.department) == department.lower())
+        if status:
+            stmt = stmt.where(TaskRecurringSchedule.status == status)
+        if frequency:
+            stmt = stmt.where(TaskRecurringSchedule.frequency == frequency.upper())
+
+        res = await self.session.execute(stmt)
+        return list(res.scalars().all())
+
+    async def get_active_recurring_schedules(self) -> list[TaskRecurringSchedule]:
+        stmt = (
+            select(TaskRecurringSchedule)
+            .where(
+                TaskRecurringSchedule.deleted_at.is_(None),
+                TaskRecurringSchedule.status == "ACTIVE",
+            )
+            .options(
+                selectinload(TaskRecurringSchedule.assignee),
+                selectinload(TaskRecurringSchedule.manager),
+                selectinload(TaskRecurringSchedule.creator),
+            )
+        )
+        res = await self.session.execute(stmt)
+        return list(res.scalars().all())
+
+    async def get_recurring_task_instance(
+        self, schedule_id: uuid.UUID, period: str
+    ) -> Task | None:
+        stmt = (
+            select(Task)
+            .where(
+                Task.recurring_schedule_id == schedule_id,
+                Task.recurrence_period == period,
+                Task.deleted_at.is_(None),
+            )
+        )
+        res = await self.session.execute(stmt)
+        return res.scalar_one_or_none()
+
+    async def list_recurring_instances(
+        self,
+        schedule_id: uuid.UUID | None = None,
+        history_only: bool = False,
+        limit: int = 100,
+    ) -> list[Task]:
+        stmt = (
+            select(Task)
+            .where(
+                Task.recurring_schedule_id.is_not(None),
+                Task.deleted_at.is_(None),
+            )
+            .options(
+                selectinload(Task.assignees).selectinload(TaskAssignee.user),
+                selectinload(Task.approver),
+                selectinload(Task.creator),
+                selectinload(Task.escalations),
+            )
+            .order_by(Task.due_date.desc(), Task.created_at.desc())
+            .limit(limit)
+        )
+        if schedule_id:
+            stmt = stmt.where(Task.recurring_schedule_id == schedule_id)
+        if history_only:
+            stmt = stmt.where(Task.status == TaskStatus.DONE)
+        else:
+            stmt = stmt.where(Task.status != TaskStatus.DONE)
+
+        res = await self.session.execute(stmt)
+        return list(res.scalars().all())
+

@@ -117,6 +117,7 @@ const MOCK_SAVED_QUOTATION: CrmSalesQuotationRead = {
 
 describe("CRM Phase 7 — Quotation Form Cleanup, Lead Products Tab, Save & PDF Workflow", () => {
   let shouldFailProductSearch = false;
+  let shouldFailQuotationFetch = false;
   let customQuotations: CrmSalesQuotationRead[] = [];
   let customLeadProducts: CrmLeadProductItem[] = [];
 
@@ -125,6 +126,7 @@ describe("CRM Phase 7 — Quotation Form Cleanup, Lead Products Tab, Save & PDF 
     window.URL.createObjectURL = vi.fn().mockReturnValue("blob:mock-pdf");
     window.URL.revokeObjectURL = vi.fn();
     shouldFailProductSearch = false;
+    shouldFailQuotationFetch = false;
     customQuotations = [];
     customLeadProducts = [];
 
@@ -181,6 +183,9 @@ describe("CRM Phase 7 — Quotation Form Cleanup, Lead Products Tab, Save & PDF 
         return Promise.resolve({ data: { items: customLeadProducts, total: customLeadProducts.length } });
       }
       if (url.match(/\/crm\/leads\/[^/]+\/quotations/)) {
+        if (shouldFailQuotationFetch) {
+          return Promise.reject(new Error("Database MissingGreenlet: lazy loading error"));
+        }
         return Promise.resolve({ data: { items: customQuotations, total: customQuotations.length } });
       }
       if (url.includes("/crm/quotations/")) {
@@ -459,7 +464,7 @@ describe("CRM Phase 7 — Quotation Form Cleanup, Lead Products Tab, Save & PDF 
           ],
         })
       );
-      expect(mockToast).toHaveBeenCalledWith("Quotation saved successfully. PDF downloaded.", "success");
+      expect(mockToast).toHaveBeenCalledWith(expect.stringContaining("saved successfully"), "success");
     });
   });
 
@@ -613,6 +618,18 @@ describe("CRM Phase 7 — Quotation Form Cleanup, Lead Products Tab, Save & PDF 
         "_blank",
         expect.any(String)
       );
+      // Verify Gmail subject and professional body
+      const emailCall = openSpy.mock.calls.find((c: any[]) => typeof c[0] === "string" && c[0].includes("mail.google.com"));
+      expect(emailCall).toBeDefined();
+      const emailUrl = new URL(emailCall![0] as string);
+      expect(emailUrl.searchParams.get("su")).toBe("Quotation QT-202610-0001 (v1) — Inhyma Solutions LLP");
+      const emailBody = emailUrl.searchParams.get("body") || "";
+      expect(emailBody).toContain("Dear Acme Packaging Ltd,");
+      expect(emailBody).toContain("Please find attached our quotation QT-202610-0001 (v1), amounting to INR 16,520.00.");
+      expect(emailBody).toContain("Regards,\nInhyma Solutions LLP");
+      expect(emailBody).not.toContain("The official quotation PDF has been downloaded to your device");
+      expect(emailBody).not.toContain("Please review and let us know if you have any questions");
+
       expect(postSpy).toHaveBeenCalledWith(
         "/api/v1/crm/quotations/quote-1/share-activity",
         expect.objectContaining({
@@ -623,11 +640,13 @@ describe("CRM Phase 7 — Quotation Form Cleanup, Lead Products Tab, Save & PDF 
       );
     });
 
-    // 2. Click WhatsApp button (Fallback path: browser does not support file sharing)
+    // 2. Click WhatsApp button (no PDF download side effect)
     const waBtn = screen.getByTestId("wa-quote-btn-quote-1");
     fireEvent.click(waBtn);
 
     await waitFor(() => {
+      // Must NOT invoke PDF download on WhatsApp click
+      expect(downloadSpy).toHaveBeenCalledTimes(1); // Only 1 from email, not called on WhatsApp
       expect(openSpy).toHaveBeenCalledWith(
         expect.stringContaining("wa.me"),
         "_blank",
@@ -640,19 +659,18 @@ describe("CRM Phase 7 — Quotation Form Cleanup, Lead Products Tab, Save & PDF 
       const textParam = urlObj.searchParams.get("text") || "";
 
       expect(textParam).toContain("Dear Acme Packaging Ltd,");
-      expect(textParam).toContain("Please find the quotation details below.");
-      expect(textParam).toContain("Quotation No: QT-202610-0001");
-      expect(textParam).toContain("Amount: INR 16,520.00");
-      expect(textParam).toContain("Please review and let us know if you have any questions.");
+      expect(textParam).toContain("Please find our quotation QT-202610-0001 (v1) for INR 16,520.00.");
       expect(textParam).toContain("Regards,\nInhyma Solutions LLP");
+      expect(textParam).not.toContain("Please review and let us know if you have any questions");
+      expect(textParam).not.toContain("Quotation No:");
 
       // Verify NO internal dumps or line-item lists
       expect(textParam).not.toContain("Ink Cup Set");
       expect(textParam).not.toContain("lead-1");
       expect(textParam).not.toContain("Q3 Inbound");
 
-      // Toast must instruct attachment
-      expect(mockToast).toHaveBeenCalledWith("Quotation PDF downloaded. Attach it in WhatsApp before sending.", "info");
+      // Toast confirms WhatsApp chat opened
+      expect(mockToast).toHaveBeenCalledWith("WhatsApp chat opened with quotation details.", "info");
 
       expect(postSpy).toHaveBeenCalledWith(
         "/api/v1/crm/quotations/quote-1/share-activity",
@@ -660,7 +678,7 @@ describe("CRM Phase 7 — Quotation Form Cleanup, Lead Products Tab, Save & PDF 
           channel: "whatsapp",
           outcome: "opened",
           version: 1,
-          details: "WhatsApp chat opened; PDF downloaded for manual attachment",
+          details: "WhatsApp chat opened with quotation details",
         })
       );
     });
@@ -693,14 +711,11 @@ describe("CRM Phase 7 — Quotation Form Cleanup, Lead Products Tab, Save & PDF 
     expect(normalizeWhatsAppPhone(undefined)).toBeNull();
   });
 
-  it("WHATSAPP FIX: opens WhatsApp directly via wa.me URL without native navigator.share, downloads PDF, and instructs attachment", async () => {
+  it("WHATSAPP FIX: opens WhatsApp directly via wa.me URL without native navigator.share, does NOT download PDF, and has concise copy", async () => {
     window.URL.createObjectURL = vi.fn().mockReturnValue("blob:mock-pdf");
     window.URL.revokeObjectURL = vi.fn();
     customQuotations = [MOCK_SAVED_QUOTATION];
-    vi.spyOn(apiModule, "apiDownloadBlob").mockResolvedValue({
-      blob: new Blob(["dummy-pdf-content"], { type: "application/pdf" }),
-      filename: "Quotation-QT-202610-0001-v1.pdf",
-    });
+    const downloadSpy = vi.spyOn(apiModule, "apiDownloadBlob");
     const postSpy = vi.spyOn(apiModule, "apiPost").mockResolvedValue({ data: { success: true } });
     const openSpy = vi.spyOn(window, "open").mockReturnValue({} as any);
 
@@ -734,6 +749,8 @@ describe("CRM Phase 7 — Quotation Form Cleanup, Lead Products Tab, Save & PDF 
     fireEvent.click(screen.getByTestId("wa-quote-btn-quote-1"));
 
     await waitFor(() => {
+      // Must NOT call apiDownloadBlob or download PDF
+      expect(downloadSpy).not.toHaveBeenCalled();
       // Must NOT invoke navigator.share or canShare
       expect(mockShare).not.toHaveBeenCalled();
       // Must directly open wa.me
@@ -744,7 +761,7 @@ describe("CRM Phase 7 — Quotation Form Cleanup, Lead Products Tab, Save & PDF 
       );
       // Validates toast notification
       expect(mockToast).toHaveBeenCalledWith(
-        "Quotation PDF downloaded. Attach it in WhatsApp before sending.",
+        "WhatsApp chat opened with quotation details.",
         "info"
       );
       // Validates activity logging
@@ -754,7 +771,7 @@ describe("CRM Phase 7 — Quotation Form Cleanup, Lead Products Tab, Save & PDF 
           channel: "whatsapp",
           outcome: "opened",
           recipient: "+919876543210",
-          details: "WhatsApp chat opened; PDF downloaded for manual attachment",
+          details: "WhatsApp chat opened with quotation details",
         })
       );
     });
@@ -796,12 +813,11 @@ describe("CRM Phase 7 — Quotation Form Cleanup, Lead Products Tab, Save & PDF 
     });
   });
 
-  it("WHATSAPP FIX: handles PDF generation failure without opening WhatsApp and logs failed activity", async () => {
-    window.URL.createObjectURL = vi.fn().mockReturnValue("blob:mock-pdf");
+  it("WHATSAPP FIX: clicking WhatsApp does not call PDF download endpoint and records opened status, never sent/delivered", async () => {
+    const downloadSpy = vi.spyOn(apiModule, "apiDownloadBlob");
     customQuotations = [MOCK_SAVED_QUOTATION];
-    vi.spyOn(apiModule, "apiDownloadBlob").mockRejectedValue(new Error("PDF engine error"));
     const postSpy = vi.spyOn(apiModule, "apiPost").mockResolvedValue({ data: { success: true } });
-    const openSpy = vi.spyOn(window, "open");
+    const openSpy = vi.spyOn(window, "open").mockReturnValue({} as any);
 
     render(
       <BrowserRouter>
@@ -818,15 +834,27 @@ describe("CRM Phase 7 — Quotation Form Cleanup, Lead Products Tab, Save & PDF 
     fireEvent.click(screen.getByTestId("wa-quote-btn-quote-1"));
 
     await waitFor(() => {
-      expect(mockToast).toHaveBeenCalledWith("PDF engine error", "error");
-      expect(openSpy).not.toHaveBeenCalled();
+      expect(downloadSpy).not.toHaveBeenCalled();
+      expect(openSpy).toHaveBeenCalledWith(
+        expect.stringContaining("https://wa.me/919876543210?text="),
+        "_blank",
+        "noopener,noreferrer"
+      );
       expect(postSpy).toHaveBeenCalledWith(
         "/api/v1/crm/quotations/quote-1/share-activity",
         expect.objectContaining({
           channel: "whatsapp",
-          outcome: "failed",
-          details: "PDF engine error",
+          outcome: "opened",
         })
+      );
+      // Ensure sent or delivered is NEVER recorded
+      expect(postSpy).not.toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ outcome: "sent" })
+      );
+      expect(postSpy).not.toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ outcome: "delivered" })
       );
     });
   });
@@ -850,121 +878,182 @@ describe("CRM Phase 7 — Quotation Form Cleanup, Lead Products Tab, Save & PDF 
     });
   });
 
-  it("SAVE DRAFT PDF: automatically downloads quotation PDF after saving draft and shows success toast", async () => {
-    window.URL.createObjectURL = vi.fn().mockReturnValue("blob:saved-quotation-pdf");
-    window.URL.revokeObjectURL = vi.fn();
+  describe("CRM Quotation Creation & PDF Download Scoping (Issue Resolution)", () => {
+    it("Clicking '+ New Quotation' opens the quotation form and does NOT trigger PDF download", async () => {
+      customQuotations = [MOCK_SAVED_QUOTATION];
+      const downloadSpy = vi.spyOn(apiModule, "apiDownloadBlob");
 
-    const postSpy = vi.spyOn(apiModule, "apiPost").mockResolvedValue({
-      data: {
-        id: "quote-auto-pdf",
-        quotation_number: "SQ-202610-0088",
-        version: 1,
-        total_amount: 16520,
-      },
-    } as any);
-
-    const downloadSpy = vi.spyOn(apiModule, "apiDownloadBlob").mockResolvedValue({
-      blob: new Blob(["%PDF-1.4 mock content"], { type: "application/pdf" }),
-      filename: "SQ-202610-0088_v1.pdf",
-    });
-
-    await openQuotationModal();
-
-    // Select a product
-    const searchInput = screen.getByPlaceholderText(/Search Product Master by product name or code/i);
-    fireEvent.change(searchInput, { target: { value: "DAR-01849" } });
-    await waitFor(() => expect(screen.getByText("+ Select")).toBeTruthy());
-    fireEvent.click(screen.getByText("+ Select"));
-
-    // Enter price and tax rate
-    fireEvent.change(screen.getByPlaceholderText("Enter price *"), { target: { value: "14000" } });
-    fireEvent.change(screen.getByDisplayValue("-- Tax * --"), { target: { value: "18" } });
-
-    // Click Save Draft Quotation
-    const saveBtn = screen.getByRole("button", { name: /Save Draft Quotation/i });
-    fireEvent.click(saveBtn);
-
-    // 1. Verify quotation saved via apiPost
-    await waitFor(() => {
-      expect(postSpy).toHaveBeenCalled();
-    });
-
-    // 2. Verify PDF automatically generated and downloaded using the saved quotation ID and version
-    await waitFor(() => {
-      expect(downloadSpy).toHaveBeenCalledWith(
-        expect.stringContaining("/api/v1/crm/quotations/quote-auto-pdf/pdf?version=1")
+      render(
+        <BrowserRouter>
+          <CrmLeadsPage />
+        </BrowserRouter>
       );
-      expect(mockToast).toHaveBeenCalledWith(
-        "Quotation saved successfully. PDF downloaded.",
-        "success"
-      );
+
+      await waitFor(() => expect(screen.getAllByText("Acme Packaging Ltd").length).toBeGreaterThanOrEqual(1));
+      fireEvent.click(screen.getAllByRole("button", { name: /^History & Details$/i })[0]);
+      await waitFor(() => expect(screen.getByText(/Quotations \(1\)/i)).toBeTruthy());
+      fireEvent.click(screen.getByText(/Quotations \(1\)/i));
+
+      // Button "+ New Quotation" is visible
+      const newQuoteBtn = await screen.findByTestId("crm-new-quotation-btn");
+      expect(newQuoteBtn).toBeTruthy();
+
+      // Click "+ New Quotation"
+      fireEvent.click(newQuoteBtn);
+
+      // Form opens
+      await screen.findByRole("heading", { name: "Create Quotation" });
+      expect(screen.getByPlaceholderText(/Search Product Master by product name or code/i)).toBeTruthy();
+
+      // Verify PDF download was NEVER called
+      expect(downloadSpy).not.toHaveBeenCalled();
     });
-  });
 
-  it("SAVE DRAFT PDF: shows retry action when PDF generation fails without deleting or re-saving the quotation", async () => {
-    window.URL.createObjectURL = vi.fn().mockReturnValue("blob:retry-pdf");
-    window.URL.revokeObjectURL = vi.fn();
+    it("Clicking '+ Create First Quotation' opens the same quotation form and does NOT trigger PDF download", async () => {
+      customQuotations = []; // Empty state
+      const downloadSpy = vi.spyOn(apiModule, "apiDownloadBlob");
 
-    const postSpy = vi.spyOn(apiModule, "apiPost").mockResolvedValue({
-      data: {
-        id: "quote-retry-123",
-        quotation_number: "SQ-202610-0099",
-        version: 1,
-        total_amount: 16520,
-      },
-    } as any);
+      render(
+        <BrowserRouter>
+          <CrmLeadsPage />
+        </BrowserRouter>
+      );
 
-    // Initial PDF generation fails
-    const downloadSpy = vi.spyOn(apiModule, "apiDownloadBlob")
-      .mockRejectedValueOnce(new Error("PDF generation timeout"))
-      .mockResolvedValueOnce({
-        blob: new Blob(["%PDF-1.4 retried content"], { type: "application/pdf" }),
-        filename: "SQ-202610-0099_v1.pdf",
+      await waitFor(() => expect(screen.getAllByText("Acme Packaging Ltd").length).toBeGreaterThanOrEqual(1));
+      fireEvent.click(screen.getAllByRole("button", { name: /^History & Details$/i })[0]);
+      await waitFor(() => expect(screen.getByText(/Quotations \(0\)/i)).toBeTruthy());
+      fireEvent.click(screen.getByText(/Quotations \(0\)/i));
+
+      // Empty state displays "+ Create First Quotation"
+      const createFirstBtn = await screen.findByTestId("crm-create-first-quotation-btn");
+      expect(createFirstBtn).toBeTruthy();
+
+      // Click "+ Create First Quotation"
+      fireEvent.click(createFirstBtn);
+
+      // Same form opens
+      await screen.findByRole("heading", { name: "Create Quotation" });
+      expect(screen.getByPlaceholderText(/Search Product Master by product name or code/i)).toBeTruthy();
+
+      // Verify PDF download was NEVER called
+      expect(downloadSpy).not.toHaveBeenCalled();
+    });
+
+    it("Saving a draft persists quotation and displays it in Quotations tab WITHOUT automatic PDF download", async () => {
+      const postSpy = vi.spyOn(apiModule, "apiPost").mockResolvedValue({
+        data: {
+          id: "quote-no-auto-pdf",
+          quotation_number: "SQ-202610-0088",
+          version: 1,
+          total_amount: 16520,
+        },
+      } as any);
+      const downloadSpy = vi.spyOn(apiModule, "apiDownloadBlob");
+
+      await openQuotationModal();
+
+      // Select a product
+      const searchInput = screen.getByPlaceholderText(/Search Product Master by product name or code/i);
+      fireEvent.change(searchInput, { target: { value: "DAR-01849" } });
+      await waitFor(() => expect(screen.getByText("+ Select")).toBeTruthy());
+      fireEvent.click(screen.getByText("+ Select"));
+
+      // Enter price and tax rate
+      fireEvent.change(screen.getByPlaceholderText("Enter price *"), { target: { value: "14000" } });
+      fireEvent.change(screen.getByDisplayValue("-- Tax * --"), { target: { value: "18" } });
+
+      // Click Save Draft Quotation
+      const saveBtn = screen.getByRole("button", { name: /Save Draft Quotation/i });
+      fireEvent.click(saveBtn);
+
+      // 1. Verify quotation saved via apiPost
+      await waitFor(() => {
+        expect(postSpy).toHaveBeenCalledWith(
+          expect.stringContaining("/crm/leads/lead-1/quotations"),
+          expect.anything()
+        );
       });
 
-    await openQuotationModal();
+      // 2. Verify modal closed
+      await waitFor(() => {
+        expect(screen.queryByRole("heading", { name: "Create Quotation" })).toBeNull();
+      });
 
-    // Select product, price, and tax
-    const searchInput = screen.getByPlaceholderText(/Search Product Master by product name or code/i);
-    fireEvent.change(searchInput, { target: { value: "DAR-01849" } });
-    await waitFor(() => expect(screen.getByText("+ Select")).toBeTruthy());
-    fireEvent.click(screen.getByText("+ Select"));
+      // 3. Verify success toast shown
+      expect(mockToast).toHaveBeenCalledWith(expect.stringContaining("saved successfully"), "success");
 
-    fireEvent.change(screen.getByPlaceholderText("Enter price *"), { target: { value: "14000" } });
-    fireEvent.change(screen.getByDisplayValue("-- Tax * --"), { target: { value: "18" } });
-
-    // Click Save Draft Quotation
-    fireEvent.click(screen.getByRole("button", { name: /Save Draft Quotation/i }));
-
-    // Verify quotation was saved
-    await waitFor(() => {
-      expect(postSpy).toHaveBeenCalledTimes(1);
+      // 4. Verify PDF download was NOT called automatically
+      expect(downloadSpy).not.toHaveBeenCalled();
     });
 
-    // Verify warning toast & retry banner appeared
-    await waitFor(() => {
-      expect(mockToast).toHaveBeenCalledWith(
-        "Quotation saved, but PDF generation failed.",
-        "warning"
+    it("Clicking Download PDF on a saved quotation explicitly downloads the saved quotation PDF", async () => {
+      window.URL.createObjectURL = vi.fn().mockReturnValue("blob:download-saved-pdf");
+      window.URL.revokeObjectURL = vi.fn();
+      customQuotations = [MOCK_SAVED_QUOTATION];
+      const downloadSpy = vi.spyOn(apiModule, "apiDownloadBlob").mockResolvedValue({
+        blob: new Blob(["dummy-pdf"], { type: "application/pdf" }),
+        filename: "Quotation-QT-202610-0001-v1.pdf",
+      });
+
+      render(
+        <BrowserRouter>
+          <CrmLeadsPage />
+        </BrowserRouter>
       );
-      expect(screen.getByTestId("pdf-retry-banner")).toBeTruthy();
-      expect(screen.getByTestId("retry-pdf-download-btn")).toBeTruthy();
+
+      // Open lead drawer & Quotations tab
+      await waitFor(() => expect(screen.getAllByText("Acme Packaging Ltd").length).toBeGreaterThanOrEqual(1));
+      fireEvent.click(screen.getAllByRole("button", { name: /^History & Details$/i })[0]);
+      await waitFor(() => expect(screen.getByText(/Quotations \(1\)/i)).toBeTruthy());
+      fireEvent.click(screen.getByText(/Quotations \(1\)/i));
+
+      // Saved quotation card appears with explicit Download PDF button
+      const downloadBtn = await screen.findByTestId("download-quote-pdf-quote-1");
+      expect(downloadBtn).toBeTruthy();
+      expect(downloadBtn.textContent).toContain("Download PDF");
+
+      // Explicitly click Download PDF
+      fireEvent.click(downloadBtn);
+
+      await waitFor(() => {
+        expect(downloadSpy).toHaveBeenCalledWith(expect.stringContaining("/crm/quotations/quote-1/pdf"));
+        expect(mockToast).toHaveBeenCalledWith(expect.stringContaining("downloaded successfully"), "success");
+      });
     });
 
-    // Click Retry PDF Download
-    const retryBtn = screen.getByTestId("retry-pdf-download-btn");
-    fireEvent.click(retryBtn);
+    it("A salesperson cannot open or download another salesperson's quotation (unauthorized / forbidden)", async () => {
+      // When API returns 403 Forbidden for an out-of-scope quotation access
+      const downloadSpy = vi.spyOn(apiModule, "apiDownloadBlob").mockRejectedValue({
+        response: { status: 403, data: { detail: "Access denied to out-of-scope lead quotation" } },
+        message: "Access denied to out-of-scope lead quotation",
+      });
 
-    // Verify second call to PDF endpoint with the exact same ID and version
-    await waitFor(() => {
-      expect(downloadSpy).toHaveBeenCalledTimes(2);
-      expect(downloadSpy).toHaveBeenLastCalledWith(
-        expect.stringContaining("/api/v1/crm/quotations/quote-retry-123/pdf?version=1")
+      customQuotations = [
+        {
+          ...MOCK_SAVED_QUOTATION,
+          id: "quote-other-rep",
+          quotation_number: "SQ-OTHER-001",
+        },
+      ];
+
+      render(
+        <BrowserRouter>
+          <CrmLeadsPage />
+        </BrowserRouter>
       );
-      // Ensure NO duplicate quotation creation was made on retry
-      expect(postSpy).toHaveBeenCalledTimes(1);
-      // Banner is dismissed on success
-      expect(screen.queryByTestId("pdf-retry-banner")).toBeNull();
+
+      await waitFor(() => expect(screen.getAllByText("Acme Packaging Ltd").length).toBeGreaterThanOrEqual(1));
+      fireEvent.click(screen.getAllByRole("button", { name: /^History & Details$/i })[0]);
+      await waitFor(() => expect(screen.getByText(/Quotations \(1\)/i)).toBeTruthy());
+      fireEvent.click(screen.getByText(/Quotations \(1\)/i));
+
+      const downloadBtn = await screen.findByTestId("download-quote-pdf-quote-other-rep");
+      fireEvent.click(downloadBtn);
+
+      await waitFor(() => {
+        expect(downloadSpy).toHaveBeenCalledWith(expect.stringContaining("/crm/quotations/quote-other-rep/pdf"));
+        expect(mockToast).toHaveBeenCalledWith(expect.stringContaining("Access denied"), "error");
+      });
     });
   });
 
@@ -1011,8 +1100,10 @@ describe("CRM Phase 7 — Quotation Form Cleanup, Lead Products Tab, Save & PDF 
       await waitFor(() => {
         expect(downloadSpy).toHaveBeenCalledWith(expect.stringContaining("/crm/quotations/quote-1/pdf"));
         expect(window.location.href).toContain("mailto:procurement%40acme.com");
-        expect(window.location.href).toContain(encodeURIComponent("QT-202610-0001"));
-        expect(window.location.href).toContain(encodeURIComponent("INR 16,520.00"));
+        expect(window.location.href).toContain(encodeURIComponent("Quotation QT-202610-0001 (v1) — Inhyma Solutions LLP"));
+        expect(window.location.href).toContain(encodeURIComponent("Please find attached our quotation QT-202610-0001 (v1), amounting to INR 16,520.00."));
+        expect(window.location.href).not.toContain(encodeURIComponent("The official quotation PDF has been downloaded to your device"));
+        expect(window.location.href).not.toContain(encodeURIComponent("Please review and let us know if you have any questions"));
         expect(mockToast).toHaveBeenCalledWith(
           expect.stringContaining("Quotation PDF downloaded. Email composer opened for procurement@acme.com — please attach the downloaded PDF before sending."),
           "info"
@@ -1024,6 +1115,15 @@ describe("CRM Phase 7 — Quotation Form Cleanup, Lead Products Tab, Save & PDF 
             outcome: "opened",
             details: "Default desktop email client opened; PDF downloaded for manual attachment",
           })
+        );
+        // Ensure sent or delivered is NEVER recorded
+        expect(postSpy).not.toHaveBeenCalledWith(
+          expect.anything(),
+          expect.objectContaining({ outcome: "sent" })
+        );
+        expect(postSpy).not.toHaveBeenCalledWith(
+          expect.anything(),
+          expect.objectContaining({ outcome: "delivered" })
         );
       });
 
@@ -1054,6 +1154,41 @@ describe("CRM Phase 7 — Quotation Form Cleanup, Lead Products Tab, Save & PDF 
       await waitFor(() => {
         expect(screen.queryByTestId("choose-gmail-btn")).toBeNull();
         expect(downloadSpy).not.toHaveBeenCalled();
+      });
+    });
+
+    it("displays an error state and allows retry when quotation request fails rather than showing 'No Quotations Created Yet'", async () => {
+      shouldFailQuotationFetch = true;
+      render(
+        <BrowserRouter>
+          <CrmLeadsPage />
+        </BrowserRouter>
+      );
+
+      // Open drawer & Quotations tab
+      await waitFor(() => expect(screen.getAllByText("Acme Packaging Ltd").length).toBeGreaterThanOrEqual(1));
+      fireEvent.click(screen.getAllByRole("button", { name: /^History & Details$/i })[0]);
+      await waitFor(() => expect(screen.getByText(/Quotations \(0\)/i)).toBeTruthy());
+      fireEvent.click(screen.getByText(/Quotations \(0\)/i));
+
+      // Verify error state is shown and NOT 'No Quotations Created Yet'
+      await waitFor(() => {
+        expect(screen.getByTestId("crm-quotations-error-container")).toBeTruthy();
+        expect(screen.getByText("Failed to Load Quotations")).toBeTruthy();
+        expect(screen.getByText(/Database MissingGreenlet/i)).toBeTruthy();
+        expect(screen.queryByText("No Quotations Created Yet")).toBeNull();
+      });
+
+      // Recover and click Retry
+      shouldFailQuotationFetch = false;
+      customQuotations = [MOCK_SAVED_QUOTATION];
+      const retryBtn = screen.getByTestId("crm-quotations-retry-btn");
+      fireEvent.click(retryBtn);
+
+      // Verify quotations now load
+      await waitFor(() => {
+        expect(screen.queryByTestId("crm-quotations-error-container")).toBeNull();
+        expect(screen.getByText("QT-202610-0001")).toBeTruthy();
       });
     });
   });

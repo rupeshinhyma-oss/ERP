@@ -41,6 +41,8 @@ import asyncio
 import os
 from datetime import datetime, timezone
 
+from sqlalchemy import select
+
 from app.auth.security import hash_password
 from app.core.config import settings
 from app.core.logging import configure_logging, get_logger
@@ -508,9 +510,23 @@ async def seed() -> None:
                     session.add(RolePermission(role_id=user_role.id, permission_id=permission.id))
             await session.flush()
 
+        # Idempotent top-up for Sales Manager role: ensure crm.distribution.view and crm.leads.import are granted
+        sales_mgr_role = await role_repo.get_by_name("Sales Manager", include_deleted=False)
+        if sales_mgr_role is not None:
+            for top_up_code in ("crm.distribution.view", "crm.leads.import"):
+                perm = await permission_repo.get_by_code(top_up_code)
+                if perm:
+                    existing_grant_stmt = select(RolePermission).where(
+                        RolePermission.role_id == sales_mgr_role.id,
+                        RolePermission.permission_id == perm.id,
+                    )
+                    if (await session.execute(existing_grant_stmt)).scalar_one_or_none() is None:
+                        session.add(RolePermission(role_id=sales_mgr_role.id, permission_id=perm.id))
+                        logger.info("Granted %s to Sales Manager role.", top_up_code)
+            await session.flush()
+
         # --- 3. Bootstrap admin user ----------------------------------------------------
         from app.rbac.models import UserRole, RoleAssignmentType, RoleAssignmentStatus
-        from sqlalchemy import select
 
         admin = await user_repo.get_by_username(settings.BOOTSTRAP_ADMIN_USERNAME)
         if admin is None:

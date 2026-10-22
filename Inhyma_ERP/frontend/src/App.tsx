@@ -68,7 +68,6 @@ import { AssetPage } from "@/pages/hrms/AssetPage";
 import { PipelineSetupPage } from "@/pages/crm/PipelineSetupPage";
 import { SalespersonDistributionPage } from "@/pages/crm/SalespersonDistributionPage";
 import { CrmLeadsPage } from "@/pages/crm/CrmLeadsPage";
-import { CrmReportsPage } from "@/pages/crm/CrmReportsPage";
 
 import { CountriesPage } from "@/pages/masters/Countries";
 import { StatesPage } from "@/pages/masters/States";
@@ -362,8 +361,8 @@ export function App() {
           <Route path="/crm/distribution" element={<HrmsRouteGuard permission="crm.distribution.view"><SalespersonDistributionPage /></HrmsRouteGuard>} />
           <Route path="/crm/salespeople" element={<Navigate to="/crm/distribution" replace />} />
           <Route path="/crm/import" element={<Navigate to="/crm/leads?import=open" replace />} />
-          <Route path="/crm/reports" element={<HrmsRouteGuard permission="crm.leads.view"><CrmReportsPage /></HrmsRouteGuard>} />
-          <Route path="/crm/analytics" element={<Navigate to="/crm/reports" replace />} />
+          <Route path="/crm/reports" element={<Navigate to="/crm/leads" replace />} />
+          <Route path="/crm/analytics" element={<Navigate to="/crm/leads" replace />} />
           <Route path="/crm" element={<Navigate to="/crm/leads" replace />} />
 
           {/* HRMS routes */}

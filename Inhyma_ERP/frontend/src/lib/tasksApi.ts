@@ -28,12 +28,18 @@ import type {
   TaskSprint,
   TaskStatus,
   TaskSubtask,
+  TaskSummary,
   TaskSubtaskAttachment,
   TaskSubtaskComment,
   TaskTemplate,
   TaskTimelineItem,
   TaskVoiceNote,
   WorkloadDashboardResponse,
+  TaskRecurringSchedule,
+  TaskRecurringScheduleCreateInput,
+  TaskRecurringScheduleUpdateInput,
+  RecurrencePreviewRequest,
+  RecurrencePreviewResponse,
 } from "@/types/tasks";
 
 export interface TaskQueryParams {
@@ -579,6 +585,111 @@ export async function fetchCapacityView(
   return res.data || { start_date: startDate, end_date: endDate, users: [] };
 }
 
+export async function fetchRecurringSchedules(params?: {
+  status?: string;
+  department?: string;
+  search?: string;
+}): Promise<TaskRecurringSchedule[]> {
+  const query = new URLSearchParams();
+  if (params?.status) query.append("status", params.status);
+  if (params?.department) query.append("department", params.department);
+  if (params?.search) query.append("search", params.search);
+  const qStr = query.toString();
+  const res = await apiGet<TaskRecurringSchedule[]>(`/tasks/recurring/schedules${qStr ? `?${qStr}` : ""}`);
+  return res.data || [];
+}
+
+export async function getRecurringSchedule(scheduleId: string): Promise<TaskRecurringSchedule> {
+  const res = await apiGet<TaskRecurringSchedule>(`/tasks/recurring/schedules/${scheduleId}`);
+  return res.data!;
+}
+
+export async function createRecurringSchedule(
+  input: TaskRecurringScheduleCreateInput
+): Promise<TaskRecurringSchedule> {
+  const res = await apiPost<TaskRecurringSchedule>("/tasks/recurring/schedules", input);
+  return res.data!;
+}
+
+export async function updateRecurringSchedule(
+  scheduleId: string,
+  input: TaskRecurringScheduleUpdateInput
+): Promise<TaskRecurringSchedule> {
+  const res = await apiPatch<TaskRecurringSchedule>(`/tasks/recurring/schedules/${scheduleId}`, input);
+  return res.data!;
+}
+
+export async function deleteRecurringSchedule(scheduleId: string): Promise<{ deleted: boolean }> {
+  const res = await apiDelete<{ deleted: boolean }>(`/tasks/recurring/schedules/${scheduleId}`);
+  return res.data || { deleted: true };
+}
+
+export async function pauseRecurringSchedule(scheduleId: string): Promise<TaskRecurringSchedule> {
+  const res = await apiPost<TaskRecurringSchedule>(`/tasks/recurring/schedules/${scheduleId}/pause`, {});
+  return res.data!;
+}
+
+export async function resumeRecurringSchedule(scheduleId: string): Promise<TaskRecurringSchedule> {
+  const res = await apiPost<TaskRecurringSchedule>(`/tasks/recurring/schedules/${scheduleId}/resume`, {});
+  return res.data!;
+}
+
+export async function archiveRecurringSchedule(scheduleId: string): Promise<TaskRecurringSchedule> {
+  const res = await apiPost<TaskRecurringSchedule>(`/tasks/recurring/schedules/${scheduleId}/archive`, {});
+  return res.data!;
+}
+
+export async function unarchiveRecurringSchedule(scheduleId: string): Promise<TaskRecurringSchedule> {
+  const res = await apiPost<TaskRecurringSchedule>(`/tasks/recurring/schedules/${scheduleId}/unarchive`, {});
+  return res.data!;
+}
+
+export const restoreRecurringSchedule = unarchiveRecurringSchedule;
+
+export async function previewRecurrence(
+  payload: RecurrencePreviewRequest
+): Promise<RecurrencePreviewResponse> {
+  const res = await apiPost<RecurrencePreviewResponse>("/tasks/recurring/preview", payload);
+  return res.data!;
+}
+
+export async function generateRecurringTasks(scheduleId?: string): Promise<{
+  as_of_date: string;
+  generated_count: number;
+  generated_task_ids: string[];
+}> {
+  const query = scheduleId ? `?schedule_id=${scheduleId}` : "";
+  const res = await apiPost<{
+    as_of_date: string;
+    generated_count: number;
+    generated_task_ids: string[];
+  }>(`/tasks/recurring/generate${query}`, {});
+  return res.data!;
+}
+
+export async function fetchRecurringInstances(params?: {
+  schedule_id?: string;
+  history_only?: boolean;
+}): Promise<TaskSummary[]> {
+  const query = new URLSearchParams();
+  if (params?.schedule_id) query.append("schedule_id", params.schedule_id);
+  if (params?.history_only !== undefined) query.append("history_only", String(params.history_only));
+  const qStr = query.toString();
+  const res = await apiGet<TaskSummary[]>(`/tasks/recurring/instances${qStr ? `?${qStr}` : ""}`);
+  return res.data || [];
+}
+
+export async function checkRecurringReminders(): Promise<{
+  reminders_checked: number;
+  escalations_triggered: number;
+}> {
+  const res = await apiPost<{ reminders_checked: number; escalations_triggered: number }>(
+    "/tasks/recurring/check-reminders",
+    {}
+  );
+  return res.data!;
+}
+
 export const tasksApi = {
   getTasks: fetchTasks,
   getMyTasks: (params?: TaskQueryParams) => fetchTasks({ ...params, view: "my" }),
@@ -631,6 +742,21 @@ export const tasksApi = {
   actionTaskApproval,
   fetchWorkloadDashboard,
   fetchCapacityView,
+  fetchRecurringSchedules,
+  getRecurringSchedule,
+  createRecurringSchedule,
+  updateRecurringSchedule,
+  deleteRecurringSchedule,
+  pauseRecurringSchedule,
+  resumeRecurringSchedule,
+  archiveRecurringSchedule,
+  unarchiveRecurringSchedule,
+  restoreRecurringSchedule,
+  previewRecurrence,
+  generateRecurringTasks,
+  fetchRecurringInstances,
+  checkRecurringReminders,
 };
+
 
 

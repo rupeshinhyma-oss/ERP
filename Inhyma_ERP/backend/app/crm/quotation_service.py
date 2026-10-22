@@ -839,6 +839,8 @@ class CrmQuotationService:
         stmt = (
             select(CrmSalesQuotation)
             .options(
+                selectinload(CrmSalesQuotation.lead).selectinload(CrmLead.company).selectinload(Company.contacts),
+                selectinload(CrmSalesQuotation.company).selectinload(Company.contacts),
                 selectinload(CrmSalesQuotation.items),
                 selectinload(CrmSalesQuotation.revisions),
             )

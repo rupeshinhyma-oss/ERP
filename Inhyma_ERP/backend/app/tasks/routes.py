@@ -29,7 +29,8 @@ from app.tasks.models import (
 )
 from app.tasks.repository import TaskRepository
 from app.tasks.schemas import (
-    CapacityViewResponse,
+    RecurrencePreviewRequest,
+    RecurrencePreviewResponse,
     TaskApprovalActionRequest,
     TaskAssignRequest,
     TaskAttachmentCreateInput,
@@ -52,6 +53,9 @@ from app.tasks.schemas import (
     TaskListResponse,
     TaskReactionToggle,
     TaskRead,
+    TaskRecurringScheduleCreate,
+    TaskRecurringScheduleRead,
+    TaskRecurringScheduleUpdate,
     TaskSavedFilterCreate,
     TaskSavedFilterRead,
     TaskSavedFilterUpdate,
@@ -163,7 +167,7 @@ async def list_tasks(
     return build_success_response(data=data, request_id=getattr(request.state, "request_id", "-"))
 
 
-@router.post("", summary="Create a new task")
+@router.post("", summary="Create a new task", status_code=201)
 async def create_task(
     payload: TaskCreate,
     request: Request,
@@ -173,7 +177,7 @@ async def create_task(
     task = await service.create_task(payload, current_user)
     serialized = TaskRead.model_validate(task).model_dump()
     return build_success_response(
-        data=serialized, status_code=201, request_id=getattr(request.state, "request_id", "-")
+        data=serialized, request_id=getattr(request.state, "request_id", "-")
     )
 
 
@@ -407,6 +411,161 @@ async def remove_dependency(
 ) -> dict:
     await service.remove_dependency(dependency_id, current_user)
     return build_success_response(data={"deleted": True}, request_id=getattr(request.state, "request_id", "-"))
+
+
+# --- Recurring Tasks Schedules & Automation ---
+@router.post("/recurring/preview", summary="Calculate next occurrence preview for recurrence configuration")
+async def preview_recurrence_config(
+    payload: RecurrencePreviewRequest,
+    request: Request,
+    current_user: CurrentUser = Depends(require_permission("task.view")),
+    service: TaskService = Depends(get_task_service),
+) -> dict:
+    res = await service.preview_recurrence(payload)
+    return build_success_response(data=res, request_id=getattr(request.state, "request_id", "-"))
+
+
+@router.get("/recurring/schedules", summary="List recurring task schedules")
+async def list_recurring_schedules(
+    request: Request,
+    department: str | None = None,
+    status: str | None = None,
+    frequency: str | None = None,
+    current_user: CurrentUser = Depends(require_permission("task.view")),
+    service: TaskService = Depends(get_task_service),
+) -> dict:
+    schedules = await service.list_recurring_schedules(department=department, status=status, frequency=frequency)
+    return build_success_response(data=[s.model_dump() for s in schedules], request_id=getattr(request.state, "request_id", "-"))
+
+
+@router.post("/recurring/schedules", summary="Create a recurring task schedule", status_code=201)
+async def create_recurring_schedule(
+    payload: TaskRecurringScheduleCreate,
+    request: Request,
+    current_user: CurrentUser = Depends(require_any_permission("task.create", "task.manage")),
+    service: TaskService = Depends(get_task_service),
+) -> dict:
+    schedule = await service.create_recurring_schedule(payload, current_user)
+    # Check if first task can be generated immediately
+    await service.generate_recurring_tasks(as_of_date=date.today(), schedule_id=schedule.id)
+    return build_success_response(data=schedule.model_dump(), status_code=201, request_id=getattr(request.state, "request_id", "-"))
+
+
+@router.get("/recurring/schedules/{schedule_id}", summary="Get recurring schedule by ID")
+async def get_recurring_schedule(
+    schedule_id: uuid.UUID,
+    request: Request,
+    current_user: CurrentUser = Depends(require_permission("task.view")),
+    service: TaskService = Depends(get_task_service),
+) -> dict:
+    schedule = await service.get_recurring_schedule(schedule_id)
+    return build_success_response(data=schedule.model_dump(), request_id=getattr(request.state, "request_id", "-"))
+
+
+@router.patch("/recurring/schedules/{schedule_id}", summary="Update recurring schedule")
+async def update_recurring_schedule(
+    schedule_id: uuid.UUID,
+    payload: TaskRecurringScheduleUpdate,
+    request: Request,
+    current_user: CurrentUser = Depends(require_any_permission("task.create", "task.manage")),
+    service: TaskService = Depends(get_task_service),
+) -> dict:
+    schedule = await service.update_recurring_schedule(schedule_id, payload, current_user)
+    return build_success_response(data=schedule.model_dump(), request_id=getattr(request.state, "request_id", "-"))
+
+
+@router.delete("/recurring/schedules/{schedule_id}", summary="Soft-delete recurring schedule")
+async def delete_recurring_schedule(
+    schedule_id: uuid.UUID,
+    request: Request,
+    current_user: CurrentUser = Depends(require_any_permission("task.create", "task.manage")),
+    service: TaskService = Depends(get_task_service),
+) -> dict:
+    await service.delete_recurring_schedule(schedule_id, current_user)
+    return build_success_response(data={"deleted": True}, request_id=getattr(request.state, "request_id", "-"))
+
+
+@router.post("/recurring/schedules/{schedule_id}/pause", summary="Pause recurring schedule")
+async def pause_recurring_schedule(
+    schedule_id: uuid.UUID,
+    request: Request,
+    current_user: CurrentUser = Depends(require_any_permission("task.create", "task.manage")),
+    service: TaskService = Depends(get_task_service),
+) -> dict:
+    schedule = await service.pause_recurring_schedule(schedule_id, current_user)
+    return build_success_response(data=schedule.model_dump(), request_id=getattr(request.state, "request_id", "-"))
+
+
+@router.post("/recurring/schedules/{schedule_id}/resume", summary="Resume recurring schedule")
+async def resume_recurring_schedule(
+    schedule_id: uuid.UUID,
+    request: Request,
+    current_user: CurrentUser = Depends(require_any_permission("task.create", "task.manage")),
+    service: TaskService = Depends(get_task_service),
+) -> dict:
+    schedule = await service.resume_recurring_schedule(schedule_id, current_user)
+    return build_success_response(data=schedule.model_dump(), request_id=getattr(request.state, "request_id", "-"))
+
+
+@router.post("/recurring/schedules/{schedule_id}/archive", summary="Archive recurring schedule")
+async def archive_recurring_schedule(
+    schedule_id: uuid.UUID,
+    request: Request,
+    current_user: CurrentUser = Depends(require_any_permission("task.create", "task.manage")),
+    service: TaskService = Depends(get_task_service),
+) -> dict:
+    schedule = await service.archive_recurring_schedule(schedule_id, current_user)
+    return build_success_response(data=schedule.model_dump(), request_id=getattr(request.state, "request_id", "-"))
+
+
+@router.post("/recurring/schedules/{schedule_id}/unarchive", summary="Unarchive/restore recurring schedule")
+@router.post("/recurring/schedules/{schedule_id}/restore", summary="Restore recurring schedule (alias)")
+async def unarchive_recurring_schedule(
+    schedule_id: uuid.UUID,
+    request: Request,
+    current_user: CurrentUser = Depends(require_any_permission("task.create", "task.manage")),
+    service: TaskService = Depends(get_task_service),
+) -> dict:
+    schedule = await service.unarchive_recurring_schedule(schedule_id, current_user)
+    return build_success_response(data=schedule.model_dump(), request_id=getattr(request.state, "request_id", "-"))
+
+
+@router.post("/recurring/generate", summary="Idempotently generate recurring task instances")
+async def trigger_generate_recurring_tasks(
+    request: Request,
+    as_of_date: date | None = None,
+    schedule_id: uuid.UUID | None = None,
+    current_user: CurrentUser = Depends(require_any_permission("task.create", "task.manage")),
+    service: TaskService = Depends(get_task_service),
+) -> dict:
+    tasks = await service.generate_recurring_tasks(as_of_date=as_of_date, schedule_id=schedule_id)
+    return build_success_response(
+        data={"generated_count": len(tasks), "task_ids": [str(t.id) for t in tasks]},
+        request_id=getattr(request.state, "request_id", "-"),
+    )
+
+
+@router.get("/recurring/instances", summary="List generated recurring task instances (Upcoming or History)")
+async def list_recurring_task_instances(
+    request: Request,
+    schedule_id: uuid.UUID | None = None,
+    history_only: bool = False,
+    current_user: CurrentUser = Depends(require_permission("task.view")),
+    service: TaskService = Depends(get_task_service),
+) -> dict:
+    instances = await service.list_recurring_instances(schedule_id=schedule_id, history_only=history_only)
+    return build_success_response(data=[i.model_dump() for i in instances], request_id=getattr(request.state, "request_id", "-"))
+
+
+@router.post("/recurring/check-reminders", summary="Check and process reminders and escalations for recurring tasks")
+async def check_recurring_reminders(
+    request: Request,
+    as_of_date: date | None = None,
+    current_user: CurrentUser = Depends(require_any_permission("task.create", "task.manage")),
+    service: TaskService = Depends(get_task_service),
+) -> dict:
+    stats = await service.check_recurring_reminders_and_escalations(as_of_date=as_of_date)
+    return build_success_response(data=stats, request_id=getattr(request.state, "request_id", "-"))
 
 
 @router.get("/{id}", summary="Get task by ID with assignees, subtasks, comments, escalations")

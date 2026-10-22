@@ -712,6 +712,25 @@ class CrmFollowUpCreate(BaseModel):
         return t
 
 
+class CrmFollowUpUpdate(BaseModel):
+    """Payload to update a scheduled CRM follow-up commitment."""
+
+    due_at: datetime | None = None
+    follow_up_type: str | None = Field(default=None, max_length=50)
+    notes: str | None = None
+    assigned_to: uuid.UUID | None = None
+
+    @field_validator("follow_up_type")
+    @classmethod
+    def _validate_follow_up_type(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        t = v.strip().lower()
+        if t not in VALID_FOLLOW_UP_TYPES:
+            raise ValueError(f"follow_up_type must be one of: {', '.join(sorted(VALID_FOLLOW_UP_TYPES))}")
+        return t
+
+
 class CrmFollowUpStatusUpdate(BaseModel):
     """Payload to complete or cancel a scheduled follow-up."""
 
@@ -750,6 +769,7 @@ class CrmFollowUpRead(BaseModel):
     completed_at: datetime | None = None
     created_by: uuid.UUID | None = None
     creator_name: str | None = None
+    task_id: uuid.UUID | None = None
     created_at: datetime
     updated_at: datetime | None = None
     is_overdue: bool = False
@@ -850,107 +870,6 @@ class CrmTeamOversightResponse(BaseModel):
     total_due_today_follow_ups: int
     total_month_won: int
     total_month_lost: int
-
-
-# -----------------------------------------------------------------------------
-# CRM Reports & Analytics Schemas
-# -----------------------------------------------------------------------------
-
-
-class CrmAnalyticsOverview(BaseModel):
-    """Consolidated KPI overview for CRM analytics."""
-
-    total_leads_in_range: int
-    total_active_leads: int
-    total_all_time_leads: int
-    won_count: int
-    lost_count: int
-    closed_count: int
-    conversion_rate: float | None = None
-    win_rate_on_new: float | None = None
-    assigned_count: int
-    unassigned_count: int
-    total_follow_ups: int
-    overdue_follow_ups: int
-    total_activities: int
-
-
-class CrmPipelineDistributionItem(BaseModel):
-    """Pipeline distribution with stage counts and outcomes."""
-
-    pipeline_id: uuid.UUID
-    pipeline_name: str
-    lead_count: int
-    won_count: int
-    lost_count: int
-    active_count: int
-    stages: list[CrmStageCountItem] = []
-
-
-class CrmCampaignPerformanceItem(BaseModel):
-    """Campaign attribution metrics and conversion performance."""
-
-    campaign: str
-    total_leads: int
-    won_leads: int
-    lost_leads: int
-    active_leads: int
-    conversion_rate: float | None = None
-
-
-class CrmSourceDistributionItem(BaseModel):
-    """Lead volume and wins by source type."""
-
-    source_type: str
-    total_leads: int
-    won_leads: int
-    conversion_rate: float | None = None
-
-
-class CrmRepPerformanceItem(BaseModel):
-    """Sales representative performance and workload metrics."""
-
-    salesperson_id: uuid.UUID
-    salesperson_name: str
-    salesperson_email: str | None = None
-    assigned_leads: int
-    active_leads: int
-    new_leads_in_range: int
-    won_count: int
-    lost_count: int
-    conversion_rate: float | None = None
-    total_follow_ups: int
-    overdue_follow_ups: int
-    activities_count: int
-    max_capacity: int | None = None
-
-
-class CrmTimeTrendItem(BaseModel):
-    """Daily or periodic lead volume and conversion trend point."""
-
-    date: str
-    new_leads: int
-    won_leads: int
-    lost_leads: int
-    activities_count: int
-
-
-class CrmAnalyticsResponse(BaseModel):
-    """Complete response payload for CRM Reports & Analytics."""
-
-    start_date: str
-    end_date: str
-    timezone: str = "Asia/Kolkata"
-    role_type: str
-    scope_type: str
-    pipeline_id: uuid.UUID | None = None
-    salesperson_id: uuid.UUID | None = None
-    overview: CrmAnalyticsOverview
-    pipelines: list[CrmPipelineDistributionItem] = []
-    campaigns: list[CrmCampaignPerformanceItem] = []
-    sources: list[CrmSourceDistributionItem] = []
-    reps: list[CrmRepPerformanceItem] = []
-    trends: list[CrmTimeTrendItem] = []
 
 
 # -----------------------------------------------------------------------------

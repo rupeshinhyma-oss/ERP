@@ -127,12 +127,17 @@ async def setup_crm_creation_env():
                 u.manager_id = MANAGER_ID if u_id == REP_A_ID else None
                 session.add(u)
 
-        # Department manager role for MANAGER_ID
+        # Manager role for MANAGER_ID: reuse existing active "Sales Manager" or "department_manager" role,
+        # or create a uniquely named test role if none exists.
         role_mgr = (await session.execute(
-            select(Role).where(Role.name == "department_manager", Role.deleted_at.is_(None))
-        )).scalar_one_or_none()
+            select(Role).where(Role.name.in_(["Sales Manager", "department_manager"]), Role.deleted_at.is_(None))
+        )).scalars().first()
         if not role_mgr:
-            role_mgr = Role(id=uuid.uuid4(), name="department_manager", description="Department Manager")
+            role_mgr = Role(
+                id=uuid.uuid4(),
+                name=f"test_sales_manager_{uuid.uuid4().hex[:8]}",
+                description="Test Sales Manager",
+            )
             session.add(role_mgr)
             await session.flush()
 

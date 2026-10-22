@@ -287,6 +287,59 @@ describe("CrmLeadsPage", () => {
           },
         });
       }
+      if (url.includes("/activities")) {
+        return Promise.resolve({
+          data: {
+            items: [
+              {
+                id: "act-1",
+                lead_id: "lead-1",
+                activity_type: "call",
+                subject: "Discovery Call Completed",
+                description: "Discussed Q3 CRM requirements with CEO",
+                outcome: "Interested",
+                activity_at: "2026-10-14T11:00:00Z",
+                created_at: "2026-10-14T11:00:00Z",
+                performer_name: "John Doe",
+                is_system_event: false,
+              },
+              {
+                id: "act-2",
+                lead_id: "lead-1",
+                activity_type: "stage_change",
+                subject: "Pipeline Stage Changed: Qualified",
+                description: "Lead met qualification criteria",
+                outcome: "Qualified",
+                activity_at: "2026-10-13T14:00:00Z",
+                created_at: "2026-10-13T14:00:00Z",
+                performer_name: "System",
+                is_system_event: true,
+              },
+            ],
+            total: 2,
+            page: 1,
+            page_size: 20,
+            total_pages: 1,
+          },
+        });
+      }
+      if (url.includes("/stage-history")) {
+        return Promise.resolve({
+          data: [
+            {
+              id: "st-1",
+              lead_id: "lead-1",
+              from_stage_id: "stage-1",
+              from_stage_name: "New Prospect",
+              to_stage_id: "stage-2",
+              to_stage_name: "Qualified",
+              created_at: "2026-10-13T14:00:00Z",
+              transitioner_name: "John Doe",
+              reason: "Met qualification criteria",
+            },
+          ],
+        });
+      }
       if (url.includes("/crm/leads")) {
         return Promise.resolve({
           data: {
@@ -371,7 +424,13 @@ describe("CrmLeadsPage", () => {
     fireEvent.click(detailButtons[0]);
 
     await waitFor(() => {
-      expect(screen.getByText("Assignment History Timeline")).toBeTruthy();
+      expect(screen.getByRole("button", { name: /^History$/i })).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /^History$/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/Ownership Assignment History/i)).toBeTruthy();
       expect(screen.getByText("Assigned to John Doe")).toBeTruthy();
     });
   });
@@ -594,13 +653,13 @@ describe("CrmLeadsPage", () => {
     fireEvent.click(screen.getByText("+ Log Activity"));
 
     // Fill form
-    const subjectInput = screen.getByPlaceholderText(/Discovery call with procurement manager/i);
+    const subjectInput = screen.getByLabelText(/Subject \/ Summary/i);
     fireEvent.change(subjectInput, { target: { value: "Introductory Demo" } });
 
-    const outcomeInput = screen.getByPlaceholderText(/Interested, Scheduled demo/i);
+    const outcomeInput = screen.getByLabelText(/Outcome \/ Result/i);
     fireEvent.change(outcomeInput, { target: { value: "Qualified" } });
 
-    const descInput = screen.getByPlaceholderText(/Details of the interaction/i);
+    const descInput = screen.getByLabelText(/Details \/ Notes/i);
     fireEvent.change(descInput, { target: { value: "Client interested in enterprise tier" } });
 
     // Submit
@@ -694,23 +753,23 @@ describe("CrmLeadsPage", () => {
     fireEvent.click(detailButtons[0]);
 
     await waitFor(() => {
-      expect(screen.getByText("Follow-ups")).toBeTruthy();
+      expect(screen.getByRole("button", { name: /^Follow-ups/i })).toBeTruthy();
     });
 
     // Switch to Follow-ups tab
-    fireEvent.click(screen.getByText("Follow-ups"));
+    fireEvent.click(screen.getByRole("button", { name: /^Follow-ups/i }));
 
     await waitFor(() => {
-      expect(screen.getByText("Active Pending Follow-Ups")).toBeTruthy();
+      expect(screen.getByRole("heading", { name: /^Active Pending Follow-Ups/i })).toBeTruthy();
       expect(screen.getAllByText("Send proposal and schedule deep-dive").length).toBeGreaterThanOrEqual(1);
     });
 
     // Click "Mark Completed"
-    const markCompletedBtn = screen.getByRole("button", { name: /^Mark Completed$/i });
+    const markCompletedBtn = screen.getByRole("button", { name: /Mark Completed/i });
     fireEvent.click(markCompletedBtn);
 
     // Type completion note in the inline input
-    const completionInput = screen.getByPlaceholderText(/Enter completion notes/i);
+    const completionInput = screen.getByPlaceholderText(/Enter completion.*notes/i);
     fireEvent.change(completionInput, { target: { value: "Proposal sent via email" } });
 
     // Click "Confirm Complete"
@@ -808,28 +867,34 @@ describe("CrmLeadsPage", () => {
     const detailButtons = screen.getAllByRole("button", { name: /^History & Details$/i });
     fireEvent.click(detailButtons[0]);
 
-    // In All Timeline, events of different types should be visible
+    // Switch to Activities tab
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /^Activities/i })).toBeTruthy();
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^Activities/i }));
+
+    // In All filter, both manual notes and system events should be visible
     await waitFor(() => {
       expect(screen.getByText("Discovery Call Completed")).toBeTruthy();
       expect(screen.getByText("Pipeline Stage Changed: Qualified")).toBeTruthy();
-      expect(screen.getByText("Lead Ownership: Round_robin")).toBeTruthy();
     });
 
-    // Switch to "Activities & Calls"
-    fireEvent.click(screen.getByText("Activities & Calls"));
+    // Switch to Notes filter
+    const notesFilterBtn = screen.getByRole("button", { name: /^Notes/i });
+    fireEvent.click(notesFilterBtn);
 
     await waitFor(() => {
       expect(screen.getByText("Discovery Call Completed")).toBeTruthy();
-      // Stage change event should not be in Activities & Calls tab
+      // Stage change system event should not be in Notes filter
       expect(screen.queryByText("Pipeline Stage Changed: Qualified")).toBeNull();
     });
 
-    // Switch to "Assignment History Timeline"
-    fireEvent.click(screen.getByText("Assignment History Timeline"));
+    // Switch to History tab
+    fireEvent.click(screen.getByRole("button", { name: /^History$/i }));
 
     await waitFor(() => {
-      expect(screen.getAllByText("Assignment History Timeline").length).toBeGreaterThanOrEqual(1);
-      expect(screen.getAllByText("Assigned to John Doe").length).toBeGreaterThanOrEqual(1);
+      expect(screen.getByText(/Ownership Assignment History/i)).toBeTruthy();
+      expect(screen.getByText("Assigned to John Doe")).toBeTruthy();
     });
   });
 
@@ -892,16 +957,16 @@ describe("CrmLeadsPage", () => {
     fireEvent.click(detailButtons[0]);
 
     await waitFor(() => {
-      expect(screen.getByText("Follow-ups")).toBeTruthy();
+      expect(screen.getByRole("button", { name: /^Follow-ups/i })).toBeTruthy();
     });
 
-    fireEvent.click(screen.getByText("Follow-ups"));
+    fireEvent.click(screen.getByRole("button", { name: /^Follow-ups/i }));
 
     await waitFor(() => {
       expect(screen.getAllByText("Send proposal and schedule deep-dive").length).toBeGreaterThanOrEqual(1);
     });
 
-    const cancelBtn = screen.getByRole("button", { name: /^Cancel$/i });
+    const cancelBtn = screen.getByRole("button", { name: /Cancel Follow-Up/i });
     fireEvent.click(cancelBtn);
 
     await waitFor(() => {
@@ -934,7 +999,7 @@ describe("CrmLeadsPage", () => {
 
     fireEvent.click(screen.getByText("+ Log Activity"));
 
-    const subjectInput = screen.getByPlaceholderText(/Discovery call with procurement manager/i);
+    const subjectInput = screen.getByLabelText(/Subject \/ Summary/i);
     fireEvent.change(subjectInput, { target: { value: "Follow-up discussion" } });
 
     const submitBtn = screen.getByRole("button", { name: /^Save Activity$/i });
@@ -1039,23 +1104,23 @@ describe("CrmLeadsPage", () => {
 
       // Switch to Follow-ups tab in drawer
       await waitFor(() => {
-        expect(screen.getByText("Follow-ups")).toBeTruthy();
+        expect(screen.getByRole("button", { name: /^Follow-ups/i })).toBeTruthy();
       });
-      fireEvent.click(screen.getByText("Follow-ups"));
+      fireEvent.click(screen.getByRole("button", { name: /^Follow-ups/i }));
 
       await waitFor(() => {
-        expect(screen.getByRole("button", { name: /^Mark Completed$/i })).toBeTruthy();
+        expect(screen.getByRole("button", { name: /Mark Completed/i })).toBeTruthy();
       });
 
       // Click Mark Completed to open inline completion form
-      fireEvent.click(screen.getByRole("button", { name: /^Mark Completed$/i }));
+      fireEvent.click(screen.getByRole("button", { name: /Mark Completed/i }));
 
       await waitFor(() => {
-        expect(screen.getByPlaceholderText(/Enter completion notes/i)).toBeTruthy();
+        expect(screen.getByPlaceholderText(/Enter completion.*notes/i)).toBeTruthy();
         expect(screen.getByRole("button", { name: /^Confirm Complete$/i })).toBeTruthy();
       });
 
-      const notesInput = screen.getByPlaceholderText(/Enter completion notes/i);
+      const notesInput = screen.getByPlaceholderText(/Enter completion.*notes/i);
       fireEvent.change(notesInput, { target: { value: "Connected with prospect and scheduled demo" } });
 
       fireEvent.click(screen.getByRole("button", { name: /^Confirm Complete$/i }));

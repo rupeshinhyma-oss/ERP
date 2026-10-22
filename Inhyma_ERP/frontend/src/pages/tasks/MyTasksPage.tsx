@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback, useRef } from "react";
 import type { TaskSummary, TaskStatus, TaskPriority, TaskDetail } from "@/types/tasks";
 import { isTaskOverdue } from "@/types/tasks";
 import { tasksApi } from "@/lib/tasksApi";
@@ -85,8 +85,14 @@ export const MyTasksPage: React.FC = () => {
     fetchTasks();
   }, [fetchTasks]);
 
+  const fetchTasksRef = useRef(fetchTasks);
+  useEffect(() => {
+    fetchTasksRef.current = fetchTasks;
+  }, [fetchTasks]);
+
   // Live updates via WebSocket
   useEffect(() => {
+    liveClient.subscribe("module:tasks");
     liveClient.subscribe("tasks");
     if (profile?.id) {
       liveClient.subscribe(`user:${profile.id}`);
@@ -94,14 +100,20 @@ export const MyTasksPage: React.FC = () => {
     const unsub = liveClient.onEvent((event) => {
       if (
         event.entity === "task" ||
-        event.event_type.startsWith("TASK_") ||
-        (profile?.id && event.user_id === profile.id)
+        event.event_type?.startsWith("TASK_")
       ) {
-        fetchTasks();
+        fetchTasksRef.current();
       }
     });
-    return () => unsub();
-  }, [profile?.id, fetchTasks]);
+    return () => {
+      unsub();
+      liveClient.unsubscribe("module:tasks");
+      liveClient.unsubscribe("tasks");
+      if (profile?.id) {
+        liveClient.unsubscribe(`user:${profile.id}`);
+      }
+    };
+  }, [profile?.id]);
 
   const handleQuickToggleDone = async (e: React.MouseEvent, task: TaskSummary) => {
     e.stopPropagation();

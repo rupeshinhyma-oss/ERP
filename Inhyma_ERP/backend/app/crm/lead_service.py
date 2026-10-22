@@ -44,34 +44,33 @@ from app.crm.schemas import (
     CrmActivityCreate,
     CrmActivityPaginationResponse,
     CrmActivityRead,
-    CrmAnalyticsOverview,
-    CrmAnalyticsResponse,
     CrmAssignmentHistoryItem,
     CrmAssignmentHistoryPaginationResponse,
-    CrmCampaignPerformanceItem,
     CrmDailyWorkSummary,
     CrmFollowUpCreate,
     CrmFollowUpPaginationResponse,
     CrmFollowUpRead,
     CrmFollowUpStatusUpdate,
     CrmFollowUpSummary,
+    CrmFollowUpUpdate,
     CrmLeadCreate,
     CrmLeadListItem,
     CrmLeadPaginationResponse,
     CrmLeadStageTransitionRequest,
     CrmLeadUpdate,
-    CrmPipelineDistributionItem,
     CrmRepOversightItem,
-    CrmRepPerformanceItem,
-    CrmSourceDistributionItem,
     CrmStageCountItem,
     CrmStageHistoryListResponse,
     CrmStageHistoryRead,
     CrmTeamOversightResponse,
     CrmTimelineItem,
     CrmTimelineResponse,
-    CrmTimeTrendItem,
     VALID_ACTIVITY_TYPES,
+)
+from app.crm.follow_up_task_sync import (
+    cancel_follow_up_task,
+    complete_follow_up_task,
+    sync_follow_up_to_task,
 )
 from app.database.base import _utcnow
 from app.org_structure.models import DepartmentLeadershipAssignment, OrgRecordStatus
@@ -1379,6 +1378,9 @@ class CrmLeadService:
         self.session.add(follow_up)
         await self.session.flush()
 
+        # Synchronize corresponding Workforce & Agile Task
+        await sync_follow_up_to_task(self.session, follow_up, lead, actor.id)
+
         # Record activity for scheduled follow-up
         sched_act = CrmActivity(
             lead_id=lead.id,
@@ -1420,6 +1422,7 @@ class CrmLeadService:
             completed_at=follow_up.completed_at,
             created_by=follow_up.created_by,
             creator_name=actor.username,
+            task_id=follow_up.task_id,
             created_at=follow_up.created_at,
             updated_at=follow_up.updated_at,
             is_overdue=is_overdue,
@@ -1490,6 +1493,16 @@ class CrmLeadService:
             )
             self.session.add(activity)
 
+            # Update linked Workforce Task to DONE
+            await complete_follow_up_task(
+                self.session,
+                follow_up,
+                actor.id,
+                actor.username,
+                completion_notes=data.completion_notes,
+                outcome=data.outcome,
+            )
+
             if follow_up.follow_up_type in {"call", "meeting", "whatsapp", "email", "demo"}:
                 lead.last_contacted_at = now_dt
                 if lead.status == "new":
@@ -1506,6 +1519,14 @@ class CrmLeadService:
                 created_at=now_dt,
             )
             self.session.add(activity)
+
+            # Cancel linked Workforce Task (soft-delete / on hold)
+            await cancel_follow_up_task(
+                self.session,
+                follow_up,
+                actor.id,
+                actor.username,
+            )
 
         await self._recalculate_next_follow_up(lead)
         lead.updated_at = now_dt
@@ -1542,6 +1563,185 @@ class CrmLeadService:
             completed_at=follow_up.completed_at,
             created_by=follow_up.created_by,
             creator_name=creator_name,
+            task_id=follow_up.task_id,
+            created_at=follow_up.created_at,
+            updated_at=follow_up.updated_at,
+            is_overdue=is_overdue,
+        )
+
+    async def update_follow_up(
+        self,
+        follow_up_id: uuid.UUID,
+        data: CrmFollowUpUpdate,
+        actor: CurrentUser,
+    ) -> CrmFollowUpRead:
+        """Update scheduled follow-up details (due_at, notes, type, assigned_to) and synchronize linked task."""
+        stmt = (
+            select(CrmFollowUp)
+            .options(
+                selectinload(CrmFollowUp.lead).selectinload(CrmLead.stage),
+                selectinload(CrmFollowUp.lead).selectinload(CrmLead.pipeline),
+                selectinload(CrmFollowUp.assignee),
+                selectinload(CrmFollowUp.creator),
+            )
+            .where(CrmFollowUp.id == follow_up_id, CrmFollowUp.deleted_at.is_(None))
+        )
+        follow_up = (await self.session.execute(stmt)).scalar_one_or_none()
+        if not follow_up:
+            raise NotFoundException(f"Follow-up with id {follow_up_id} not found.")
+
+        lead = follow_up.lead
+        if not lead or lead.deleted_at is not None:
+            raise NotFoundException("Associated lead not found.")
+
+        role_type, scoped_user_ids = await self.get_actor_role_and_scope(actor)
+        if role_type == "salesperson":
+            if follow_up.assigned_to != actor.id and lead.assigned_to != actor.id and follow_up.created_by != actor.id:
+                raise ForbiddenException("You cannot mutate follow-ups assigned to other salespeople.")
+            if data.assigned_to and data.assigned_to != actor.id:
+                raise ForbiddenException("Salespeople can only assign follow-ups to themselves.")
+        elif role_type == "manager":
+            assert scoped_user_ids is not None
+            is_in_scope = (
+                (follow_up.assigned_to is not None and follow_up.assigned_to in scoped_user_ids)
+                or (lead.assigned_to is not None and lead.assigned_to in scoped_user_ids)
+                or (follow_up.created_by is not None and follow_up.created_by in scoped_user_ids)
+            )
+            if not is_in_scope:
+                raise ForbiddenException("Follow-up is outside your departmental scope.")
+            if data.assigned_to and data.assigned_to not in scoped_user_ids:
+                raise ForbiddenException("Managers can only assign follow-ups within their departmental scope.")
+
+        if data.assigned_to is not None:
+            assignee = await self.session.get(User, data.assigned_to)
+            if not assignee or assignee.deleted_at is not None or not assignee.is_active:
+                raise BadRequestException("Target assignee is not an active ERP user.")
+            follow_up.assigned_to = data.assigned_to
+
+        if data.due_at is not None:
+            due_time = data.due_at
+            if due_time.tzinfo is None:
+                due_time = due_time.replace(tzinfo=timezone.utc)
+            follow_up.due_at = due_time
+
+        if data.follow_up_type is not None:
+            follow_up.follow_up_type = data.follow_up_type
+
+        if data.notes is not None:
+            follow_up.notes = data.notes.strip() if data.notes else None
+
+        now_dt = _utcnow()
+        follow_up.updated_at = now_dt
+
+        # Synchronize updates to linked task
+        await sync_follow_up_to_task(self.session, follow_up, lead, actor.id)
+
+        await self._recalculate_next_follow_up(lead)
+        lead.updated_at = now_dt
+
+        await self.session.commit()
+        await self.session.refresh(follow_up)
+
+        assignee = follow_up.assignee
+        assignee_name = (assignee.display_name or assignee.full_name or assignee.username) if assignee else None
+        assignee_email = assignee.email if assignee else None
+
+        creator = follow_up.creator
+        creator_name = (creator.display_name or creator.full_name or creator.username) if creator else None
+
+        is_overdue = follow_up.status == "pending" and follow_up.due_at < datetime.now(timezone.utc)
+
+        return CrmFollowUpRead(
+            id=follow_up.id,
+            lead_id=lead.id,
+            lead_code=lead.lead_code,
+            lead_name=lead.name,
+            lead_phone=lead.normalized_phone or lead.original_phone,
+            lead_company=lead.company_name,
+            lead_priority=lead.priority,
+            lead_stage_name=lead.stage.name if lead.stage else None,
+            lead_pipeline_name=lead.pipeline.name if lead.pipeline else None,
+            assigned_to=follow_up.assigned_to,
+            assignee_name=assignee_name,
+            assignee_email=assignee_email,
+            due_at=follow_up.due_at,
+            follow_up_type=follow_up.follow_up_type,
+            notes=follow_up.notes,
+            status=follow_up.status,
+            completed_at=follow_up.completed_at,
+            created_by=follow_up.created_by,
+            creator_name=creator_name,
+            task_id=follow_up.task_id,
+            created_at=follow_up.created_at,
+            updated_at=follow_up.updated_at,
+            is_overdue=is_overdue,
+        )
+
+    async def sync_missing_follow_up_task(
+        self,
+        follow_up_id: uuid.UUID,
+        actor: CurrentUser,
+    ) -> CrmFollowUpRead:
+        """Retry or manually synchronize a follow-up to its workforce task without duplicate creation."""
+        stmt = (
+            select(CrmFollowUp)
+            .options(
+                selectinload(CrmFollowUp.lead).selectinload(CrmLead.stage),
+                selectinload(CrmFollowUp.lead).selectinload(CrmLead.pipeline),
+                selectinload(CrmFollowUp.assignee),
+                selectinload(CrmFollowUp.creator),
+            )
+            .where(CrmFollowUp.id == follow_up_id, CrmFollowUp.deleted_at.is_(None))
+        )
+        follow_up = (await self.session.execute(stmt)).scalar_one_or_none()
+        if not follow_up:
+            raise NotFoundException(f"Follow-up with id {follow_up_id} not found.")
+
+        lead = follow_up.lead
+        if not lead or lead.deleted_at is not None:
+            raise NotFoundException("Associated lead not found.")
+
+        await self._check_lead_scope(lead, actor, action="mutate")
+
+        await sync_follow_up_to_task(self.session, follow_up, lead, actor.id)
+        if follow_up.status == "completed":
+            await complete_follow_up_task(self.session, follow_up, actor.id, actor.username)
+        elif follow_up.status == "cancelled":
+            await cancel_follow_up_task(self.session, follow_up, actor.id, actor.username)
+
+        await self.session.commit()
+        await self.session.refresh(follow_up)
+
+        assignee = follow_up.assignee
+        assignee_name = (assignee.display_name or assignee.full_name or assignee.username) if assignee else None
+        assignee_email = assignee.email if assignee else None
+
+        creator = follow_up.creator
+        creator_name = (creator.display_name or creator.full_name or creator.username) if creator else None
+
+        is_overdue = follow_up.status == "pending" and follow_up.due_at < datetime.now(timezone.utc)
+
+        return CrmFollowUpRead(
+            id=follow_up.id,
+            lead_id=lead.id,
+            lead_code=lead.lead_code,
+            lead_name=lead.name,
+            lead_phone=lead.normalized_phone or lead.original_phone,
+            lead_company=lead.company_name,
+            lead_priority=lead.priority,
+            lead_stage_name=lead.stage.name if lead.stage else None,
+            lead_pipeline_name=lead.pipeline.name if lead.pipeline else None,
+            assigned_to=follow_up.assigned_to,
+            assignee_name=assignee_name,
+            assignee_email=assignee_email,
+            due_at=follow_up.due_at,
+            follow_up_type=follow_up.follow_up_type,
+            notes=follow_up.notes,
+            status=follow_up.status,
+            completed_at=follow_up.completed_at,
+            created_by=follow_up.created_by,
+            creator_name=creator_name,
+            task_id=follow_up.task_id,
             created_at=follow_up.created_at,
             updated_at=follow_up.updated_at,
             is_overdue=is_overdue,
@@ -1679,6 +1879,7 @@ class CrmLeadService:
                     completed_at=f.completed_at,
                     created_by=f.created_by,
                     creator_name=creator_name,
+                    task_id=f.task_id,
                     created_at=f.created_at,
                     updated_at=f.updated_at,
                     is_overdue=is_overdue,
@@ -2373,625 +2574,5 @@ class CrmLeadService:
             total_month_won=tot_won,
             total_month_lost=tot_lost,
         )
-
-    # -------------------------------------------------------------------------
-    # CRM Reports & Analytics Service
-    # -------------------------------------------------------------------------
-
-    async def get_crm_analytics(
-        self,
-        actor: CurrentUser,
-        start_date: str | None = None,
-        end_date: str | None = None,
-        pipeline_id: uuid.UUID | None = None,
-        salesperson_id: uuid.UUID | None = None,
-    ) -> CrmAnalyticsResponse:
-        """
-        Derives real CRM metrics from actual database records adhering strictly to:
-        - Role-based data scoping (Admin: company-wide, Manager: team, Salesperson: self only)
-        - Asia/Kolkata date boundaries
-        - Explicitly defined metric denominators with None when no closed leads exist
-        - Lead, pipeline, stage, campaign, source, rep workload, and time trend breakdown
-        """
-        now_utc = datetime.now(timezone.utc)
-        local_now = now_utc.astimezone(BUSINESS_TZ)
-        local_today = local_now.date()
-
-        # Parse & validate date boundaries
-        if end_date and end_date.strip():
-            try:
-                parsed_end = datetime.strptime(end_date.strip(), "%Y-%m-%d").date()
-            except ValueError:
-                raise BadRequestException("Invalid end_date format. Expected YYYY-MM-DD.")
-        else:
-            parsed_end = local_today
-
-        if start_date and start_date.strip():
-            try:
-                parsed_start = datetime.strptime(start_date.strip(), "%Y-%m-%d").date()
-            except ValueError:
-                raise BadRequestException("Invalid start_date format. Expected YYYY-MM-DD.")
-        else:
-            # Default to 30 days window up to end_date
-            parsed_start = parsed_end - timedelta(days=29)
-
-        if parsed_start > parsed_end:
-            raise BadRequestException("start_date must be before or equal to end_date.")
-
-        # Business boundaries in Asia/Kolkata converted to UTC for DB queries
-        start_dt = datetime(
-            parsed_start.year, parsed_start.month, parsed_start.day, 0, 0, 0, tzinfo=BUSINESS_TZ
-        ).astimezone(timezone.utc)
-        end_dt = datetime(
-            parsed_end.year, parsed_end.month, parsed_end.day, 23, 59, 59, 999999, tzinfo=BUSINESS_TZ
-        ).astimezone(timezone.utc)
-
-        local_today_start = datetime(
-            local_today.year, local_today.month, local_today.day, 0, 0, 0, tzinfo=BUSINESS_TZ
-        ).astimezone(timezone.utc)
-
-        # Scoping & Role checks
-        role_type, scoped_user_ids = await self.get_actor_role_and_scope(actor)
-
-        target_rep_id: uuid.UUID | None = None
-        target_reps: list[User] = []
-        scope_type: str
-
-        if role_type == "salesperson":
-            if salesperson_id is not None and salesperson_id != actor.id:
-                raise ForbiddenException("Salespeople can only query their own reports and performance.")
-            target_rep_id = actor.id
-            scope_type = "personal"
-            u_self = await self.session.get(User, actor.id)
-            if u_self:
-                target_reps = [u_self]
-        elif role_type == "manager":
-            assert scoped_user_ids is not None
-            if salesperson_id is not None:
-                if salesperson_id not in scoped_user_ids:
-                    raise ForbiddenException("Requested salesperson is outside your authorized scope.")
-                target_rep_id = salesperson_id
-            scope_type = "team"
-            reps_stmt = (
-                select(User)
-                .where(
-                    User.id.in_(list(scoped_user_ids)),
-                    User.deleted_at.is_(None),
-                )
-                .order_by(User.display_name.asc(), User.username.asc())
-            )
-            target_reps = list((await self.session.execute(reps_stmt)).scalars().all())
-        else:
-            # admin: company-wide
-            scope_type = "company_wide"
-            target_rep_id = salesperson_id
-            reps_stmt = (
-                select(User)
-                .where(
-                    User.deleted_at.is_(None),
-                    User.status == UserStatus.ACTIVE,
-                    or_(
-                        User.id.in_(select(CrmSalespersonConfig.user_id)),
-                        User.id.in_(
-                            select(CrmLead.assigned_to).where(
-                                CrmLead.assigned_to.is_not(None), CrmLead.deleted_at.is_(None)
-                            )
-                        ),
-                        User.id.in_(
-                            select(CrmFollowUp.assigned_to).where(
-                                CrmFollowUp.assigned_to.is_not(None), CrmFollowUp.deleted_at.is_(None)
-                            )
-                        ),
-                        User.manager_id.is_not(None),
-                        User.id == actor.id,
-                    ),
-                )
-                .order_by(User.display_name.asc(), User.username.asc())
-            )
-            target_reps = list((await self.session.execute(reps_stmt)).scalars().all())
-
-        # Base Lead Conditions (soft-delete + pipeline + scope)
-        base_scope_conditions = [CrmLead.deleted_at.is_(None)]
-        if pipeline_id is not None:
-            base_scope_conditions.append(CrmLead.pipeline_id == pipeline_id)
-
-        if target_rep_id is not None:
-            base_scope_conditions.append(CrmLead.assigned_to == target_rep_id)
-        elif role_type == "manager":
-            assert scoped_user_ids is not None
-            base_scope_conditions.append(
-                or_(
-                    CrmLead.assigned_to.in_(scoped_user_ids),
-                    and_(CrmLead.created_by.in_(scoped_user_ids), CrmLead.assigned_to.is_(None)),
-                )
-            )
-
-        # 1. Total all-time leads in scope
-        all_time_stmt = select(func.count(CrmLead.id)).where(*base_scope_conditions)
-        total_all_time_leads = (await self.session.execute(all_time_stmt)).scalar() or 0
-
-        # 2. Total active leads in scope (not won, not lost)
-        active_stmt = select(func.count(CrmLead.id)).where(
-            *base_scope_conditions,
-            CrmLead.status.notin_(["won", "lost"]),
-        )
-        total_active_leads = (await self.session.execute(active_stmt)).scalar() or 0
-
-        # 3. Total leads created in the selected date range
-        range_created_cond = and_(
-            CrmLead.created_at >= start_dt,
-            CrmLead.created_at <= end_dt,
-        )
-        range_leads_stmt = select(func.count(CrmLead.id)).where(
-            *base_scope_conditions,
-            range_created_cond,
-        )
-        total_leads_in_range = (await self.session.execute(range_leads_stmt)).scalar() or 0
-
-        # 4. Won & Lost in selected date range
-        won_condition = and_(
-            CrmLead.status == "won",
-            or_(
-                and_(CrmLead.won_at >= start_dt, CrmLead.won_at <= end_dt),
-                and_(CrmLead.won_at.is_(None), CrmLead.updated_at >= start_dt, CrmLead.updated_at <= end_dt),
-            ),
-        )
-        lost_condition = and_(
-            CrmLead.status == "lost",
-            or_(
-                and_(CrmLead.lost_at >= start_dt, CrmLead.lost_at <= end_dt),
-                and_(CrmLead.lost_at.is_(None), CrmLead.updated_at >= start_dt, CrmLead.updated_at <= end_dt),
-            ),
-        )
-
-        outcomes_stmt = select(
-            func.sum(case((won_condition, 1), else_=0)),
-            func.sum(case((lost_condition, 1), else_=0)),
-        ).where(*base_scope_conditions, or_(won_condition, lost_condition))
-        outcomes_row = (await self.session.execute(outcomes_stmt)).first()
-        won_count = int(outcomes_row[0] or 0) if outcomes_row else 0
-        lost_count = int(outcomes_row[1] or 0) if outcomes_row else 0
-        closed_count = won_count + lost_count
-
-        conversion_rate: float | None = (
-            round((won_count / closed_count) * 100.0, 1) if closed_count > 0 else None
-        )
-        win_rate_on_new: float | None = (
-            round((won_count / total_leads_in_range) * 100.0, 1) if total_leads_in_range > 0 else None
-        )
-
-        # 5. Assignment distribution of leads created in range
-        assign_stmt = select(
-            func.sum(case((CrmLead.assigned_to.is_not(None), 1), else_=0)),
-            func.sum(case((CrmLead.assigned_to.is_(None), 1), else_=0)),
-        ).where(*base_scope_conditions, range_created_cond)
-        assign_row = (await self.session.execute(assign_stmt)).first()
-        assigned_count = int(assign_row[0] or 0) if assign_row else 0
-        unassigned_count = int(assign_row[1] or 0) if assign_row else 0
-
-        # 6. Follow-ups in scope
-        fu_conditions = [CrmFollowUp.deleted_at.is_(None)]
-        if target_rep_id is not None:
-            fu_conditions.append(CrmFollowUp.assigned_to == target_rep_id)
-        elif role_type == "manager":
-            assert scoped_user_ids is not None
-            fu_conditions.append(CrmFollowUp.assigned_to.in_(scoped_user_ids))
-
-        fu_stmt = select(func.count(CrmFollowUp.id)).where(
-            *fu_conditions,
-            CrmFollowUp.due_at >= start_dt,
-            CrmFollowUp.due_at <= end_dt,
-        )
-        total_follow_ups = (await self.session.execute(fu_stmt)).scalar() or 0
-
-        # Overdue follow-ups currently pending
-        overdue_fu_stmt = select(func.count(CrmFollowUp.id)).where(
-            *fu_conditions,
-            CrmFollowUp.status == "pending",
-            CrmFollowUp.due_at < local_today_start,
-        )
-        overdue_follow_ups = (await self.session.execute(overdue_fu_stmt)).scalar() or 0
-
-        # 7. Activities in range
-        act_lead_subquery = select(CrmLead.id).where(*base_scope_conditions)
-        act_conditions = [CrmActivity.lead_id.in_(act_lead_subquery)]
-        if target_rep_id is not None:
-            act_conditions.append(CrmActivity.performed_by == target_rep_id)
-        elif role_type == "manager":
-            assert scoped_user_ids is not None
-            act_conditions.append(or_(CrmActivity.performed_by.in_(scoped_user_ids), CrmActivity.performed_by.is_(None)))
-
-        act_stmt = select(func.count(CrmActivity.id)).where(
-            *act_conditions,
-            CrmActivity.activity_at >= start_dt,
-            CrmActivity.activity_at <= end_dt,
-        )
-        total_activities = (await self.session.execute(act_stmt)).scalar() or 0
-
-        overview = CrmAnalyticsOverview(
-            total_leads_in_range=total_leads_in_range,
-            total_active_leads=total_active_leads,
-            total_all_time_leads=total_all_time_leads,
-            won_count=won_count,
-            lost_count=lost_count,
-            closed_count=closed_count,
-            conversion_rate=conversion_rate,
-            win_rate_on_new=win_rate_on_new,
-            assigned_count=assigned_count,
-            unassigned_count=unassigned_count,
-            total_follow_ups=total_follow_ups,
-            overdue_follow_ups=overdue_follow_ups,
-            total_activities=total_activities,
-        )
-
-        # ---------------------------------------------------------------------
-        # 8. Pipeline & Stage Distribution
-        # ---------------------------------------------------------------------
-        pipes_stmt = select(CrmPipeline).where(CrmPipeline.deleted_at.is_(None)).order_by(CrmPipeline.name.asc())
-        if pipeline_id is not None:
-            pipes_stmt = pipes_stmt.where(CrmPipeline.id == pipeline_id)
-        all_pipes = list((await self.session.execute(pipes_stmt)).scalars().all())
-
-        pipeline_items: list[CrmPipelineDistributionItem] = []
-        for pipe in all_pipes:
-            pipe_leads_cond = [*base_scope_conditions, CrmLead.pipeline_id == pipe.id]
-
-            # Stages for pipeline
-            stages_stmt = (
-                select(CrmPipelineStage)
-                .where(CrmPipelineStage.pipeline_id == pipe.id, CrmPipelineStage.deleted_at.is_(None))
-                .order_by(CrmPipelineStage.stage_order.asc())
-            )
-            stages = list((await self.session.execute(stages_stmt)).scalars().all())
-
-            # Counts for this pipeline
-            pipe_summary_stmt = select(
-                func.count(CrmLead.id).label("tot"),
-                func.sum(case((won_condition, 1), else_=0)).label("won"),
-                func.sum(case((lost_condition, 1), else_=0)).label("lost"),
-                func.sum(case((CrmLead.status.notin_(["won", "lost"]), 1), else_=0)).label("active"),
-            ).where(*pipe_leads_cond)
-            pipe_sum_row = (await self.session.execute(pipe_summary_stmt)).first()
-
-            p_tot = int(pipe_sum_row[0] or 0) if pipe_sum_row else 0
-            p_won = int(pipe_sum_row[1] or 0) if pipe_sum_row else 0
-            p_lost = int(pipe_sum_row[2] or 0) if pipe_sum_row else 0
-            p_act = int(pipe_sum_row[3] or 0) if pipe_sum_row else 0
-
-            # Stage counts
-            stage_counts_stmt = (
-                select(CrmLead.stage_id, func.count(CrmLead.id))
-                .where(*pipe_leads_cond)
-                .group_by(CrmLead.stage_id)
-            )
-            stage_counts_rows = (await self.session.execute(stage_counts_stmt)).all()
-            sc_map = {r[0]: int(r[1]) for r in stage_counts_rows if r[0] is not None}
-
-            stage_items = [
-                CrmStageCountItem(
-                    stage_id=st.id,
-                    stage_name=st.name,
-                    stage_type=st.stage_type,
-                    count=sc_map.get(st.id, 0),
-                )
-                for st in stages
-            ]
-
-            pipeline_items.append(
-                CrmPipelineDistributionItem(
-                    pipeline_id=pipe.id,
-                    pipeline_name=pipe.name,
-                    lead_count=p_tot,
-                    won_count=p_won,
-                    lost_count=p_lost,
-                    active_count=p_act,
-                    stages=stage_items,
-                )
-            )
-
-        # ---------------------------------------------------------------------
-        # 9. Campaign Performance Breakdown
-        # ---------------------------------------------------------------------
-        campaign_stmt = (
-            select(
-                CrmLead.campaign,
-                func.count(CrmLead.id).label("total_leads"),
-                func.sum(case((CrmLead.status == "won", 1), else_=0)).label("won_leads"),
-                func.sum(case((CrmLead.status == "lost", 1), else_=0)).label("lost_leads"),
-                func.sum(case((CrmLead.status.notin_(["won", "lost"]), 1), else_=0)).label("active_leads"),
-            )
-            .where(
-                *base_scope_conditions,
-                range_created_cond,
-            )
-            .group_by(CrmLead.campaign)
-            .order_by(func.count(CrmLead.id).desc())
-        )
-        campaign_rows = (await self.session.execute(campaign_stmt)).all()
-        campaign_items: list[CrmCampaignPerformanceItem] = []
-        for r in campaign_rows:
-            c_name = (r[0] or "").strip() or "(Direct / Unspecified)"
-            tot = int(r[1] or 0)
-            won = int(r[2] or 0)
-            lost = int(r[3] or 0)
-            act = int(r[4] or 0)
-            cl = won + lost
-            cr = round((won / cl) * 100.0, 1) if cl > 0 else None
-            campaign_items.append(
-                CrmCampaignPerformanceItem(
-                    campaign=c_name,
-                    total_leads=tot,
-                    won_leads=won,
-                    lost_leads=lost,
-                    active_leads=act,
-                    conversion_rate=cr,
-                )
-            )
-
-        # ---------------------------------------------------------------------
-        # 10. Source Distribution Breakdown
-        # ---------------------------------------------------------------------
-        source_stmt = (
-            select(
-                CrmLead.source_type,
-                func.count(CrmLead.id).label("total_leads"),
-                func.sum(case((CrmLead.status == "won", 1), else_=0)).label("won_leads"),
-                func.sum(case((CrmLead.status == "lost", 1), else_=0)).label("lost_leads"),
-            )
-            .where(
-                *base_scope_conditions,
-                range_created_cond,
-            )
-            .group_by(CrmLead.source_type)
-            .order_by(func.count(CrmLead.id).desc())
-        )
-        source_rows = (await self.session.execute(source_stmt)).all()
-        source_items: list[CrmSourceDistributionItem] = []
-        for r in source_rows:
-            stype = r[0] or "unspecified"
-            tot = int(r[1] or 0)
-            won = int(r[2] or 0)
-            lost = int(r[3] or 0)
-            cl = won + lost
-            cr = round((won / cl) * 100.0, 1) if cl > 0 else None
-            source_items.append(
-                CrmSourceDistributionItem(
-                    source_type=stype,
-                    total_leads=tot,
-                    won_leads=won,
-                    conversion_rate=cr,
-                )
-            )
-
-        # ---------------------------------------------------------------------
-        # 11. Salesperson Performance & Workload
-        # ---------------------------------------------------------------------
-        # If target_rep_id is specified (or role is salesperson), only that rep is reported
-        active_reps_list = [u for u in target_reps if target_rep_id is None or u.id == target_rep_id]
-        rep_ids = [u.id for u in active_reps_list]
-
-        rep_items: list[CrmRepPerformanceItem] = []
-        if rep_ids:
-            # Capacity configs
-            cap_stmt = select(CrmSalespersonConfig).where(CrmSalespersonConfig.user_id.in_(rep_ids))
-            cap_configs = {c.user_id: c for c in (await self.session.execute(cap_stmt)).scalars().all()}
-
-            # Bulk metric 1: Assigned leads total & active
-            rep_leads_cond = [
-                CrmLead.assigned_to.in_(rep_ids),
-                CrmLead.deleted_at.is_(None),
-            ]
-            if pipeline_id is not None:
-                rep_leads_cond.append(CrmLead.pipeline_id == pipeline_id)
-
-            rep_leads_stmt = (
-                select(
-                    CrmLead.assigned_to,
-                    func.count(CrmLead.id).label("assigned_tot"),
-                    func.sum(case((CrmLead.status.notin_(["won", "lost"]), 1), else_=0)).label("active_tot"),
-                    func.sum(case((range_created_cond, 1), else_=0)).label("new_in_range"),
-                    func.sum(case((won_condition, 1), else_=0)).label("won_tot"),
-                    func.sum(case((lost_condition, 1), else_=0)).label("lost_tot"),
-                )
-                .where(*rep_leads_cond)
-                .group_by(CrmLead.assigned_to)
-            )
-            rep_lead_rows = (await self.session.execute(rep_leads_stmt)).all()
-            rep_lead_map = {
-                r[0]: {
-                    "assigned": int(r[1] or 0),
-                    "active": int(r[2] or 0),
-                    "new_in_range": int(r[3] or 0),
-                    "won": int(r[4] or 0),
-                    "lost": int(r[5] or 0),
-                }
-                for r in rep_lead_rows
-                if r[0] is not None
-            }
-
-            # Bulk metric 2: Follow-ups per rep in range + overdue
-            rep_fu_cond = [
-                CrmFollowUp.assigned_to.in_(rep_ids),
-                CrmFollowUp.deleted_at.is_(None),
-            ]
-            if pipeline_id is not None:
-                rep_fu_cond.append(
-                    CrmFollowUp.lead_id.in_(
-                        select(CrmLead.id).where(CrmLead.pipeline_id == pipeline_id, CrmLead.deleted_at.is_(None))
-                    )
-                )
-
-            rep_fu_stmt = (
-                select(
-                    CrmFollowUp.assigned_to,
-                    func.sum(
-                        case(
-                            (and_(CrmFollowUp.due_at >= start_dt, CrmFollowUp.due_at <= end_dt), 1),
-                            else_=0,
-                        )
-                    ).label("fu_in_range"),
-                    func.sum(
-                        case(
-                            (and_(CrmFollowUp.status == "pending", CrmFollowUp.due_at < local_today_start), 1),
-                            else_=0,
-                        )
-                    ).label("overdue"),
-                )
-                .where(*rep_fu_cond)
-                .group_by(CrmFollowUp.assigned_to)
-            )
-            rep_fu_rows = (await self.session.execute(rep_fu_stmt)).all()
-            rep_fu_map = {
-                r[0]: {
-                    "total_fu": int(r[1] or 0),
-                    "overdue": int(r[2] or 0),
-                }
-                for r in rep_fu_rows
-                if r[0] is not None
-            }
-
-            # Bulk metric 3: Activities performed per rep in range
-            rep_act_stmt = (
-                select(
-                    CrmActivity.performed_by,
-                    func.count(CrmActivity.id),
-                )
-                .where(
-                    CrmActivity.performed_by.in_(rep_ids),
-                    CrmActivity.activity_at >= start_dt,
-                    CrmActivity.activity_at <= end_dt,
-                )
-                .group_by(CrmActivity.performed_by)
-            )
-            rep_act_rows = (await self.session.execute(rep_act_stmt)).all()
-            rep_act_map = {r[0]: int(r[1] or 0) for r in rep_act_rows if r[0] is not None}
-
-            for u in active_reps_list:
-                u_name = u.display_name or u.full_name or u.username
-                l_data = rep_lead_map.get(u.id, {})
-                f_data = rep_fu_map.get(u.id, {})
-                act_cnt = rep_act_map.get(u.id, 0)
-                cfg = cap_configs.get(u.id)
-
-                rep_won = l_data.get("won", 0)
-                rep_lost = l_data.get("lost", 0)
-                rep_closed = rep_won + rep_lost
-                rep_cr = round((rep_won / rep_closed) * 100.0, 1) if rep_closed > 0 else None
-
-                rep_items.append(
-                    CrmRepPerformanceItem(
-                        salesperson_id=u.id,
-                        salesperson_name=u_name,
-                        salesperson_email=u.email,
-                        assigned_leads=l_data.get("assigned", 0),
-                        active_leads=l_data.get("active", 0),
-                        new_leads_in_range=l_data.get("new_in_range", 0),
-                        won_count=rep_won,
-                        lost_count=rep_lost,
-                        conversion_rate=rep_cr,
-                        total_follow_ups=f_data.get("total_fu", 0),
-                        overdue_follow_ups=f_data.get("overdue", 0),
-                        activities_count=act_cnt,
-                        max_capacity=cfg.max_lead_capacity if cfg else None,
-                    )
-                )
-
-        # ---------------------------------------------------------------------
-        # 12. Trends Over Time (Asia/Kolkata Daily Bucketing)
-        # ---------------------------------------------------------------------
-        # Initialize day map for all dates in range
-        day_map: dict[str, dict[str, int]] = {}
-        curr_d = parsed_start
-        # Cap trend day series to at most 90 days to maintain fast response
-        max_days = min((parsed_end - parsed_start).days + 1, 90)
-        for i in range(max_days):
-            d_key = (parsed_start + timedelta(days=i)).isoformat()
-            day_map[d_key] = {"new": 0, "won": 0, "lost": 0, "act": 0}
-
-        # Query leads created in range with timestamp
-        trend_leads_stmt = select(
-            CrmLead.created_at,
-            CrmLead.status,
-            CrmLead.won_at,
-            CrmLead.lost_at,
-            CrmLead.updated_at,
-        ).where(
-            *base_scope_conditions,
-            or_(
-                range_created_cond,
-                won_condition,
-                lost_condition,
-            ),
-        )
-        trend_leads = (await self.session.execute(trend_leads_stmt)).all()
-        for r in trend_leads:
-            c_at = r[0]
-            st = r[1]
-            w_at = r[2]
-            l_at = r[3]
-            u_at = r[4]
-
-            # Created day
-            if c_at and start_dt <= c_at <= end_dt:
-                d_str = c_at.astimezone(BUSINESS_TZ).date().isoformat()
-                if d_str in day_map:
-                    day_map[d_str]["new"] += 1
-
-            # Won day
-            if st == "won":
-                eff_w = w_at or u_at
-                if eff_w and start_dt <= eff_w <= end_dt:
-                    d_str = eff_w.astimezone(BUSINESS_TZ).date().isoformat()
-                    if d_str in day_map:
-                        day_map[d_str]["won"] += 1
-
-            # Lost day
-            if st == "lost":
-                eff_l = l_at or u_at
-                if eff_l and start_dt <= eff_l <= end_dt:
-                    d_str = eff_l.astimezone(BUSINESS_TZ).date().isoformat()
-                    if d_str in day_map:
-                        day_map[d_str]["lost"] += 1
-
-        # Query activities in range
-        trend_act_stmt = select(CrmActivity.activity_at).where(
-            *act_conditions,
-            CrmActivity.activity_at >= start_dt,
-            CrmActivity.activity_at <= end_dt,
-        )
-        trend_acts = (await self.session.execute(trend_act_stmt)).scalars().all()
-        for a_at in trend_acts:
-            if a_at:
-                d_str = a_at.astimezone(BUSINESS_TZ).date().isoformat()
-                if d_str in day_map:
-                    day_map[d_str]["act"] += 1
-
-        trend_items = [
-            CrmTimeTrendItem(
-                date=k,
-                new_leads=v["new"],
-                won_leads=v["won"],
-                lost_leads=v["lost"],
-                activities_count=v["act"],
-            )
-            for k, v in sorted(day_map.items())
-        ]
-
-        return CrmAnalyticsResponse(
-            start_date=parsed_start.isoformat(),
-            end_date=parsed_end.isoformat(),
-            timezone="Asia/Kolkata",
-            role_type=role_type,
-            scope_type=scope_type,
-            pipeline_id=pipeline_id,
-            salesperson_id=target_rep_id,
-            overview=overview,
-            pipelines=pipeline_items,
-            campaigns=campaign_items,
-            sources=source_items,
-            reps=rep_items,
-            trends=trend_items,
-        )
-
 
 

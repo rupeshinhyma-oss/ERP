@@ -26,7 +26,9 @@ from app.auth.security import create_access_token
 from app.crm.models import CrmLead, CrmPipeline, CrmPipelineStage, CrmSalespersonConfig, CrmSalespersonTerritory
 from app.database.engine import get_sessionmaker
 from app.masters.states.models import State
+from app.rbac.models import Permission, Role, RolePermission
 from app.users.models import User, UserStatus
+from scripts.seed_crm_distribution_permissions import seed_crm_distribution_permissions
 
 
 ADMIN_ID = uuid.UUID("ea2b5763-5a4d-4f21-8bff-adc3e6cb8235")
@@ -397,3 +399,150 @@ async def test_bulk_eligibility_update_and_audit_logging(
         )).scalar_one_or_none()
         assert audit_entry is not None
         assert "lead assignment eligibility" in audit_entry.description.lower()
+
+
+# ==============================================================================
+# BUG-CRM-003 Focused RBAC and Scoping Verification Tests
+# ==============================================================================
+
+@pytest.mark.asyncio
+async def test_admin_company_wide_distribution_list_live_rbac(client: AsyncClient):
+    """
+    1. Administrator can access company-wide salesperson list.
+    Uses real token with database-backed permission resolution (no artificial permissions).
+    """
+    admin_token = create_access_token(ADMIN_ID).token
+    res = await client.get(
+        "/api/v1/crm/distribution/salespeople",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert res.status_code == 200
+    salespeople = res.json()["data"]
+    uids = [item["user_id"] for item in salespeople]
+
+    # Admin sees company-wide salespeople including across different teams
+    assert str(ADMIN_ID) in uids or len(uids) > 2
+    assert str(JOHN_ID) in uids
+    assert str(SALES_MANAGER_ID) in uids
+    assert str(OPS_EMPLOYEE_ID) in uids
+
+
+@pytest.mark.asyncio
+async def test_sales_manager_receives_200_and_scoped_salespeople_live_rbac(client: AsyncClient):
+    """
+    2. Sales Manager receives 200 and sees only authorized department/team salespeople.
+    Uses real token with database-backed permission resolution (no artificial permissions).
+    """
+    mgr_token = create_access_token(SALES_MANAGER_ID).token
+    res = await client.get(
+        "/api/v1/crm/distribution/salespeople",
+        headers={"Authorization": f"Bearer {mgr_token}"},
+    )
+    assert res.status_code == 200
+    salespeople = res.json()["data"]
+    uids = [item["user_id"] for item in salespeople]
+
+    # Must include authorized Sales team members (John and Sales Manager)
+    assert str(JOHN_ID) in uids
+    assert str(SALES_MANAGER_ID) in uids
+    # Must NOT include out-of-scope Operations employee
+    assert str(OPS_EMPLOYEE_ID) not in uids
+
+
+@pytest.mark.asyncio
+async def test_sales_manager_cannot_access_outside_scope_live_rbac(client: AsyncClient):
+    """
+    3. Sales Manager cannot access salespeople outside their scope.
+    Direct retrieval or mutation of an out-of-scope user returns 403 Forbidden.
+    """
+    mgr_token = create_access_token(SALES_MANAGER_ID).token
+
+    # 1. Single user detail endpoint
+    res_get = await client.get(
+        f"/api/v1/crm/distribution/salespeople/{OPS_EMPLOYEE_ID}",
+        headers={"Authorization": f"Bearer {mgr_token}"},
+    )
+    assert res_get.status_code == 403
+    assert "scope" in res_get.text.lower()
+
+    # 2. Single user update endpoint (also rejected if attempted)
+    res_put = await client.put(
+        f"/api/v1/crm/distribution/salespeople/{OPS_EMPLOYEE_ID}",
+        json={"is_eligible": True},
+        headers={"Authorization": f"Bearer {mgr_token}"},
+    )
+    assert res_put.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_salesperson_denied_distribution_list_live_rbac(client: AsyncClient):
+    """
+    4. Salesperson remains denied (403) because distribution-list access is not part of their policy.
+    Uses real token with database-backed permission resolution (no artificial permissions).
+    """
+    john_token = create_access_token(JOHN_ID).token
+    res = await client.get(
+        "/api/v1/crm/distribution/salespeople",
+        headers={"Authorization": f"Bearer {john_token}"},
+    )
+    assert res.status_code == 403
+    body = res.json()
+    assert body["success"] is False
+    assert "crm.distribution" in res.text
+
+
+@pytest.mark.asyncio
+async def test_missing_or_unauthorized_permission_produces_403(client: AsyncClient):
+    """
+    5. Missing or unauthorized permissions still produce the correct 403 response.
+    """
+    # User with unrelated permission (task.view)
+    unauth_token = create_access_token(OPS_EMPLOYEE_ID, permissions=["task.view"]).token
+    res = await client.get(
+        "/api/v1/crm/distribution/salespeople",
+        headers={"Authorization": f"Bearer {unauth_token}"},
+    )
+    assert res.status_code == 403
+
+    # User with empty permissions
+    empty_token = create_access_token(OPS_EMPLOYEE_ID, permissions=[]).token
+    res_empty = await client.get(
+        "/api/v1/crm/distribution/salespeople",
+        headers={"Authorization": f"Bearer {empty_token}"},
+    )
+    assert res_empty.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_permission_seeding_is_idempotent():
+    """
+    6. Permission seeding is idempotent and does not create duplicate permission records.
+    """
+    sessionmaker = get_sessionmaker()
+
+    # First seeding pass
+    await seed_crm_distribution_permissions()
+
+    async with sessionmaker() as session:
+        # Check permissions table count
+        perms_stmt = select(Permission).where(Permission.code.in_(["crm.distribution.view", "crm.distribution.manage"]))
+        perms = list((await session.execute(perms_stmt)).scalars().all())
+        assert len(perms) == 2
+
+        # Check Sales Manager role permission count
+        mgr_role = (await session.execute(select(Role).where(Role.name == "Sales Manager", Role.deleted_at.is_(None)))).scalar_one()
+        view_perm = next(p for p in perms if p.code == "crm.distribution.view")
+        rp_stmt = select(RolePermission).where(RolePermission.role_id == mgr_role.id, RolePermission.permission_id == view_perm.id)
+        mgr_role_perms = list((await session.execute(rp_stmt)).scalars().all())
+        assert len(mgr_role_perms) == 1
+
+    # Second seeding pass (must be completely idempotent)
+    await seed_crm_distribution_permissions()
+
+    async with sessionmaker() as session:
+        perms_after = list((await session.execute(perms_stmt)).scalars().all())
+        assert len(perms_after) == 2, "Seeding again must not create duplicate Permission rows"
+
+        mgr_role_perms_after = list((await session.execute(rp_stmt)).scalars().all())
+        assert len(mgr_role_perms_after) == 1, "Seeding again must not create duplicate RolePermission rows"
+

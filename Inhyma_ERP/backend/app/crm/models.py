@@ -340,6 +340,7 @@ class CrmFollowUp(Base, UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, Ve
         CheckConstraint("status IN ('pending', 'completed', 'cancelled')", name="ck_crm_follow_up_status"),
         Index("ix_crm_follow_ups_due_at", "due_at"),
         Index("ix_crm_follow_ups_status", "status"),
+        Index("ix_crm_follow_ups_task_id", "task_id"),
     )
 
     lead_id: Mapped[uuid.UUID] = mapped_column(
@@ -358,11 +359,15 @@ class CrmFollowUp(Base, UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, Ve
     created_by: Mapped[uuid.UUID | None] = mapped_column(
         GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
     )
+    task_id: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(), ForeignKey("tasks.id", ondelete="SET NULL"), nullable=True, index=True
+    )
 
     # Relationships
     lead: Mapped[CrmLead] = relationship("CrmLead", back_populates="follow_ups")
     assignee = relationship("User", foreign_keys=[assigned_to])
     creator = relationship("User", foreign_keys=[created_by])
+    task = relationship("Task", foreign_keys=[task_id])
 
 
 class CrmStageHistory(Base, UUIDPrimaryKeyMixin):

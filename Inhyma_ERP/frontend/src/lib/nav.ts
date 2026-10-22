@@ -62,7 +62,6 @@ export const NAV_SECTIONS: NavSection[] = [
       { key: "crm-leads", label: "Lead Database", path: "/crm/leads", icon: "lead", permission: "crm.leads.view" },
       { key: "crm-pipelines", label: "Pipeline Setup", path: "/crm/pipelines", icon: "pipeline", permission: "crm.pipelines.manage" },
       { key: "crm-distribution", label: "Salesperson Configuration", path: "/crm/distribution", icon: "users", permission: "crm.distribution.view" },
-      { key: "crm-reports", label: "Reports & Analytics", path: "/crm/reports", icon: "barChart", permission: "crm.leads.view" },
     ],
   },
   {
@@ -170,8 +169,6 @@ export const NAV_SECTIONS: NavSection[] = [
 export const PAGE_TITLES: Record<string, string> = {
   "crm-leads": "Lead Database",
   "crm/leads": "Lead Database",
-  "crm-reports": "CRM Reports & Analytics",
-  "crm/reports": "CRM Reports & Analytics",
   agents: "Agents",
   "industrial-zones": "Industrial Zones",
   leads: "Leads",

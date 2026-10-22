@@ -23,7 +23,6 @@ import {
   IconUsers,
   IconClock,
   IconUserCheck,
-  IconBarChart,
 } from "@/components/icons";
 
 export interface CrmProductLookupItem {
@@ -590,6 +589,7 @@ export function CrmLeadsPage() {
   // Tab 5: Quotations State
   const [leadQuotations, setLeadQuotations] = useState<CrmSalesQuotationRead[]>([]);
   const [loadingLeadQuotations, setLoadingLeadQuotations] = useState(false);
+  const [leadQuotationsError, setLeadQuotationsError] = useState<string | null>(null);
   const [selectedQuotationDetail, setSelectedQuotationDetail] = useState<CrmSalesQuotationRead | null>(null);
   const [quotationVersions, setQuotationVersions] = useState<CrmQuotationVersionRead[]>([]);
   const [loadingQuotationVersions, setLoadingQuotationVersions] = useState(false);
@@ -1262,13 +1262,15 @@ export function CrmLeadsPage() {
 
   const fetchLeadQuotations = useCallback(async (leadId: string) => {
     setLoadingLeadQuotations(true);
+    setLeadQuotationsError(null);
     try {
       const res = await apiGet<any>(`/api/v1/crm/leads/${leadId}/quotations`);
       const raw = res?.data !== undefined ? res.data : res;
       const items = Array.isArray(raw) ? raw : (raw?.items || []);
       setLeadQuotations(items);
-    } catch {
+    } catch (err: any) {
       setLeadQuotations([]);
+      setLeadQuotationsError(errorMessage(err) || "Failed to load sales quotations.");
     } finally {
       setLoadingLeadQuotations(false);
     }
@@ -1533,33 +1535,16 @@ export function CrmLeadsPage() {
       }
 
       setShowQuotationModal(false);
-      fetchLeadQuotations(selectedLead.id);
+      setPdfRetryQuotation(null);
+      await fetchLeadQuotations(selectedLead.id);
       fetchLeadActivities(selectedLead.id, 1);
 
-      if (savedQuote && savedQuote.id) {
-        // Automatically initiate PDF generation & browser download for the newly saved quotation
-        const downloadSuccess = await handleDownloadQuotationPdf(
-          savedQuote.id,
-          savedQuote.quotation_number,
-          savedQuote.version,
-          "download",
-          { suppressToast: true }
-        );
-
-        if (downloadSuccess) {
-          setPdfRetryQuotation(null);
-          showToast("Quotation saved successfully. PDF downloaded.", "success");
-        } else {
-          setPdfRetryQuotation({
-            id: savedQuote.id,
-            quotationNumber: savedQuote.quotation_number,
-            version: savedQuote.version,
-          });
-          showToast("Quotation saved, but PDF generation failed.", "warning");
-        }
-      } else {
-        showToast(isRevisionMode ? "New quotation revision created!" : "Quotation draft created successfully!", "success");
-      }
+      showToast(
+        isRevisionMode
+          ? "New quotation revision created successfully!"
+          : `Quotation draft ${savedQuote?.quotation_number ? `(${savedQuote.quotation_number}) ` : ""}saved successfully!`,
+        "success"
+      );
     } catch (err: any) {
       showToast(errorMessage(err) || "Failed to save quotation.", "error");
     } finally {
@@ -1675,28 +1660,17 @@ export function CrmLeadsPage() {
         ? quote.customer_name_snapshot
         : selectedLead?.name || ""
     ).trim();
-    const compName = (
-      quote.company_name_snapshot ||
-      selectedLead?.company_name ||
-      ""
-    ).trim();
 
-    const currencyStr = quote.currency || "INR";
     const formattedAmount = quote.total_amount != null
-      ? `${currencyStr} ${Number(quote.total_amount).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-      : `${currencyStr} 0.00`;
+      ? Number(quote.total_amount).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+      : "0.00";
 
-    const subject = `Sales Quotation ${quote.quotation_number} (v${quote.version}) — Inhyma Solutions LLP`;
+    const subject = `Quotation ${quote.quotation_number} (v${quote.version}) — Inhyma Solutions LLP`;
 
     const bodyLines = [
       contactName ? `Dear ${contactName},` : "Dear Customer,",
       "",
-      `Please find below the quotation details for ${quote.quotation_number}${compName ? ` (${compName})` : ""}:`,
-      "",
-      `Quotation No: ${quote.quotation_number} (v${quote.version})`,
-      `Amount: ${formattedAmount}`,
-      "",
-      "The official quotation PDF has been downloaded to your device. Please review and let us know if you have any questions.",
+      `Please find attached our quotation ${quote.quotation_number} (v${quote.version}), amounting to INR ${formattedAmount}.`,
       "",
       "Regards,",
       "Inhyma Solutions LLP",
@@ -1817,78 +1791,51 @@ export function CrmLeadsPage() {
         ? quote.customer_name_snapshot
         : selectedLead?.name || ""
     ).trim();
-    const currencyStr = quote.currency || "INR";
     const formattedAmount = quote.total_amount != null
       ? Number(quote.total_amount).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
       : "0.00";
 
     const messageLines = [
       contactName ? `Dear ${contactName},` : "Dear Customer,",
-      "Please find the quotation details below.",
-      `Quotation No: ${quote.quotation_number}`,
-      `Amount: ${currencyStr} ${formattedAmount}`,
-      "Please review and let us know if you have any questions.",
+      "",
+      `Please find our quotation ${quote.quotation_number} (v${quote.version}) for INR ${formattedAmount}.`,
+      "",
       "Regards,",
       "Inhyma Solutions LLP",
     ];
     const waMessage = messageLines.join("\n");
 
     try {
-      // 1. Download official PDF from backend
-      const { blob, filename } = await apiDownloadBlob(`/api/v1/crm/quotations/${quote.id}/pdf?version=${quote.version}`);
-      if (!blob || blob.size === 0) {
-        throw new Error("Generated PDF is empty or invalid. Please check quotation details.");
-      }
-      const pdfFileName = filename || `${quote.quotation_number}_v${quote.version}.pdf`;
-
-      // 2. Download PDF to device
-      if (typeof window !== "undefined" && typeof window.URL?.createObjectURL === "function") {
-        const url = window.URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = pdfFileName;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        setTimeout(() => {
-          try {
-            window.URL?.revokeObjectURL(url);
-          } catch {
-            // ignore
-          }
-        }, 5000);
-      }
-
-      // 3. Open WhatsApp directly via click-to-chat URL (no navigator.share or native dialog)
+      // Open WhatsApp directly via click-to-chat URL (no navigator.share or native dialog, no unwanted PDF download side effect)
       const waUrl = `https://wa.me/${cleanPhone}?text=${encodeURIComponent(waMessage)}`;
       const opened = window.open(waUrl, "_blank", "noopener,noreferrer");
       if (!opened) {
-        showToast("Popup was blocked by your browser. Quotation PDF was downloaded, but WhatsApp could not be opened automatically. Please allow popups or open WhatsApp manually.", "warning");
+        showToast("Popup was blocked by your browser. Please allow popups or open WhatsApp manually.", "warning");
       } else {
-        showToast("Quotation PDF downloaded. Attach it in WhatsApp before sending.", "info");
+        showToast("WhatsApp chat opened with quotation details.", "info");
       }
 
-      // 4. Record sharing activity without claiming sent/delivered
+      // Record sharing activity without claiming sent/delivered
       await apiPost(`/api/v1/crm/quotations/${quote.id}/share-activity`, {
         channel: "whatsapp",
         outcome: "opened",
         recipient: `+${cleanPhone}`,
         version: quote.version,
-        details: "WhatsApp chat opened; PDF downloaded for manual attachment",
+        details: "WhatsApp chat opened with quotation details",
       });
 
       if (selectedLead) {
         fetchLeadActivities(selectedLead.id, 1);
       }
     } catch (err: any) {
-      showToast(errorMessage(err) || "Failed to generate quotation PDF.", "error");
+      showToast(errorMessage(err) || "Failed to open WhatsApp.", "error");
       try {
         await apiPost(`/api/v1/crm/quotations/${quote.id}/share-activity`, {
           channel: "whatsapp",
           outcome: "failed",
           recipient: `+${cleanPhone}`,
           version: quote.version,
-          details: errorMessage(err) || "Error occurred during share initiation",
+          details: errorMessage(err) || "Error occurred during WhatsApp share",
         });
       } catch {
         // ignore logging failure
@@ -2217,26 +2164,6 @@ export function CrmLeadsPage() {
             >
               <IconUsers style={{ width: "14px", height: "14px" }} />
               Salesperson Workload
-            </button>
-            <button
-              type="button"
-              onClick={() => navigate("/crm/reports")}
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: "0.35rem",
-                padding: "0.45rem 0.85rem",
-                fontSize: "0.8125rem",
-                fontWeight: 600,
-                borderRadius: "0.375rem",
-                backgroundColor: "#fff",
-                color: "#4f46e5",
-                border: "1px solid #c7d2fe",
-                cursor: "pointer",
-              }}
-            >
-              <IconBarChart style={{ width: "14px", height: "14px" }} />
-              Reports & Analytics
             </button>
             <button
               type="button"
@@ -5421,7 +5348,7 @@ export function CrmLeadsPage() {
                                           <button
                                             type="button"
                                             disabled={completionSubmitting}
-                                            onClick={() => handleUpdateFollowUpStatus(fu.id, "completed")}
+                                            onClick={() => handleUpdateFollowUpStatus(fu.id, "completed", completionNotes)}
                                             style={{
                                               padding: "0.25rem 0.6rem",
                                               fontSize: "0.75rem",
@@ -5568,6 +5495,7 @@ export function CrmLeadsPage() {
                         {canManageLeads && (
                           <button
                             type="button"
+                            data-testid="crm-new-quotation-btn"
                             onClick={handleOpenNewQuotationModal}
                             style={{
                               padding: "0.4rem 0.85rem",
@@ -5673,6 +5601,42 @@ export function CrmLeadsPage() {
                         <div style={{ fontSize: "0.8125rem", color: "#64748b", padding: "1rem", textAlign: "center" }}>
                           Loading sales quotations...
                         </div>
+                      ) : leadQuotationsError ? (
+                        <div
+                          data-testid="crm-quotations-error-container"
+                          style={{
+                            padding: "2rem 1.5rem",
+                            textAlign: "center",
+                            backgroundColor: "#fef2f2",
+                            border: "1px solid #fecaca",
+                            borderRadius: "0.5rem",
+                          }}
+                        >
+                          <div style={{ fontSize: "1.75rem", marginBottom: "0.5rem" }}>⚠️</div>
+                          <h4 style={{ fontSize: "0.9375rem", fontWeight: 700, color: "#991b1b", margin: "0 0 0.25rem 0" }}>
+                            Failed to Load Quotations
+                          </h4>
+                          <p style={{ fontSize: "0.8125rem", color: "#b91c1c", margin: "0 0 0.75rem 0", maxWidth: "420px", marginLeft: "auto", marginRight: "auto" }}>
+                            {leadQuotationsError}
+                          </p>
+                          <button
+                            type="button"
+                            data-testid="crm-quotations-retry-btn"
+                            onClick={() => selectedLead && fetchLeadQuotations(selectedLead.id)}
+                            style={{
+                              padding: "0.4rem 0.85rem",
+                              fontSize: "0.75rem",
+                              fontWeight: 600,
+                              borderRadius: "0.375rem",
+                              border: "1px solid #dc2626",
+                              backgroundColor: "#dc2626",
+                              color: "#fff",
+                              cursor: "pointer",
+                            }}
+                          >
+                            Retry
+                          </button>
+                        </div>
                       ) : leadQuotations.length === 0 ? (
                         <div
                           style={{
@@ -5693,6 +5657,7 @@ export function CrmLeadsPage() {
                           {canManageLeads && (
                             <button
                               type="button"
+                              data-testid="crm-create-first-quotation-btn"
                               onClick={handleOpenNewQuotationModal}
                               style={{
                                 marginTop: "0.75rem",
@@ -5855,7 +5820,7 @@ export function CrmLeadsPage() {
                                         gap: "0.25rem",
                                       }}
                                     >
-                                      📄 {downloadingPdfKey === `${quote.id}-${quote.version}-download` ? "Downloading..." : "PDF"}
+                                      📄 {downloadingPdfKey === `${quote.id}-${quote.version}-download` ? "Downloading..." : "Download PDF"}
                                     </button>
 
                                     <button
