@@ -98,15 +98,26 @@ flowchart TD
   - Deprecated and removed legacy `Gatepass` navigation link to maintain a focused task execution dashboard.
 - **Zero-Synthetic-Data Enforcement:** Strict repository-wide policy banning automated mock/fake data generation scripts. Preserves authentic system users (`User A, B, C, D`, `Admin`) and ensures honest zero states across all tables.
 
-### 2.5 Leads & Sales Pipeline Engine (`/lead/list`)
-- Customer inquiry acquisition channels (`IndiaMart`, `Website`, `Exhibition`, `Cold Call`, `Referral`, etc.).
-- Complete lead tracking matrix: company profile, business type, contact person, priority categorization, requirements, allotted sales representative, and lifecycle statuses.
-- Real-time typeahead company extraction powered by `ClientNameAutocomplete`.
-- Soft-deletion lifecycle with single and bulk delete operations, fully recoverable via Trash.
+### 2.5 Customer Relationship Management (CRM) Full Suite & Branded Quotation Engine (`/crm`)
+- **Complete Inbound Lead Acquisition:** Multi-channel capture (`IndiaMart`, `Website`, `Exhibition`, `Cold Call`, `Referral`, etc.) with comprehensive lead intelligence (company, contacts, priority, deal valuation, estimated closing dates).
+- **Dynamic Lifecycle Pipeline Stages:** Configurable progression stages (`PipelineStage`) with SLA targets, color coding, and win/loss qualification tracking.
+- **Interactive Drag-and-Drop Kanban Board:** Visual stage board with real-time deal movement, optimistic drag feedback, and stage sum metrics.
+- **Bulk CSV/Excel Import Wizard:** Self-service data onboarding with header fuzzy matching, custom column mapping, preview validations, and duplicate prevention.
+- **Round-Robin Sales Distribution Engine:** Automated rules assigning incoming leads fairly across sales team members by geography, source, or rotation index.
+- **360° Lead Activity Timeline:** Unified timeline consolidating chronological interaction events (phone calls, meetings, notes, stage advancements, quotation dispatches, and linked tasks).
+- **1-Click B2B Company Master Conversion:** Converts qualified leads into permanent enterprise `Company` accounts in the B2B directory, retaining full contact rosters and historical context.
+- **Workforce Task Synchronization:** Setting follow-up deadlines auto-provisions assigned tickets in the Workforce Task module with bidirectional linkbacks.
+- **Branded ReportLab Quotation PDF:** Server-side engine generating official A4 sales quotations with corporate headers, itemized pricing, tax breakdowns, commercial terms, and signature blocks.
 
 ### 2.6 Purchase Management & Costing Engine (`/purchase/localpurchase` & `/purchase/importpurchase`)
 - **Local Purchase Orders:** Full domestic PO workflow with overhead expense absorption (Freight, Handling, Insurance). Calculates dynamic itemized landing costs via the Expense Factor formula and supports atomic inventory stock-in into destination warehouses.
 - **Import Consignments:** Multi-currency international purchase tracking with live exchange rates, shipping logistics (BL, vessel, container references), Indian Customs statutory tariff computation (Assessable Value, BCD, SWS 10%, IGST), and dual landing cost matrices (with vs. without statutory duty/tax).
+- **Uploaded Invoice File Streaming & Zero-Synthetic-PDF Policy:**
+  - Dedicated endpoint `GET /api/v1/purchase/import-orders/{purchase_id}/bill-file` streams the **actual uploaded file** attached by the operator in the Add/Edit form.
+  - Zero-synthetic PDF policy strictly prohibits generating mock or fabricated invoice PDFs.
+  - Multi-format viewer (`ImportPurchasePdfPage.tsx`): renders PDFs in native browser `<iframe>`, images with centered preview, and Word/Excel documents (`.docx`, `.xlsx`) as direct download cards with zero-state notices.
+  - Supports `Authorization: Bearer <token>` and `?token=<access_token>` query auth for seamless embedding.
+  - **Closed State Action Menu Lock:** When an import consignment reaches `closed` status, the row action menu (`⋮`) is strictly locked to show **ONLY** `Download Purchase`, stripping Edit, Confirm, and Delete operations.
 
 ### 2.7 Sales Proforma Invoices & Commercial Terms (`/proforma-invoice/list`)
 - Formal B2B quotation and Proforma Invoice lifecycle with independent Billing and Shipping address routing.
@@ -129,6 +140,17 @@ flowchart TD
 - **Watcher Polling Loop Protection:** Frontend session watcher (`ecosystemSession.ts`) distinguishes between an unauthenticated state (`notFound: true`) and an active revocation (`revoked: true`). Unauthenticated states retain local sessions and do not trigger infinite reload loops.
 - **SSO Switching Fallbacks:** `ssoBridge.ts` passes the caller's target path (`/login?sso_handover=...`) and gracefully falls back to direct navigation if the destination already holds a valid local session.
 
+### 2.11 Workforce Recurring Tasks Scheduling Engine & Automated Worker
+- **Dedicated Recurring Sub-Tab (`/tasks`):** Centralized view displaying scheduled repeating tasks, recurrence cadences, active status toggles, and next execution clocks.
+- **Flexible Recurrence Scheduling:** Supports Daily, Weekly on selected days, Monthly on specific dates, and custom Cron schedules with interval math.
+- **Background Daemon Worker (`recurring_worker.py`):** Asynchronous background worker inspecting active schedules, instantiating transactional tasks upon schedule maturity (`next_run_at <= utcnow()`), applying checklist blueprints and watchers, and advancing execution timestamps safely.
+- **Manual Trigger & Lifecycle Management:** Supervisors can manually trigger immediate task creation outside schedule windows, pause running schedules, or archive completed recurring workloads.
+
+### 2.12 Product Sync Integration (Yinglima -> Inhyma) & Relational Provisioning Adapter
+- **Cross-ERP Product Sync Adapter:** Connects China Sourcing (`Yinglima_ERP`) with India Distribution (`Inhyma_ERP`) over authenticated REST APIs.
+- **Dynamic Dependency Auto-Provisioning:** If an incoming product references a Category, Subcategory, Brand, UOM, or Tax rate not yet present in Inhyma, the adapter automatically provisions the relational master record before inserting the product, ensuring zero foreign key collisions.
+- **Deterministic Pagination & Real-Time Broadcast:** Enforces standard `limit` parameter handling, newest-first sorting (`created_at DESC`), and WebSocket push event dispatching (`PRODUCT_SYNCED`) to notify all active client sessions.
+
 ---
 
 ## 3. Frontend Architecture & Platform Hardening
@@ -150,12 +172,15 @@ Inhyma_ERP/
 ├── backend/
 │   ├── app/
 │   │   ├── companies/            # B2B company models, routes, intelligence schemas
+│   │   ├── crm/                  # CRM leads, pipelines, Kanban, distribution, quotations
 │   │   ├── masters/cities/       # City master with cascading state_id & district_id
 │   │   ├── masters/districts/    # District lookup and relations
 │   │   ├── masters/states/       # State lookup and relations
 │   │   ├── inventory/            # Stock adjustments & vouchers
-│   │   ├── purchase/             # Local & Import PO models, costing, stock-in, and routes
+│   │   ├── products/             # Product models, specs, and sync_adapter (Yinglima)
+│   │   ├── purchase/             # Local & Import PO models, costing, streaming & routes
 │   │   ├── sales/                # Proforma invoices, commercial terms, and routes
+│   │   ├── tasks/                # Workforce tasks, Jira board & recurring_worker.py
 │   │   ├── common/workflow.py    # Database-driven workflow transition validator
 │   │   ├── suppliers/            # Supplier directory with mandatory calling number
 │   │   ├── technical_tasks/      # Field service tickets & technician dispatch
@@ -165,10 +190,12 @@ Inhyma_ERP/
 │   └── tests/                    # Backend test suites (38 passing tests)
 ├── frontend/
 │   ├── src/
-│   │   ├── components/           # UI design tokens, SideDrawer, ActionMenu
+│   │   ├── components/           # UI design tokens, SideDrawer, ActionMenu, Kanban
 │   │   ├── lib/                  # autocompleteBlocker.ts, api.ts, purchaseApi.ts, workflowRules.ts
-│   │   ├── pages/                # Companies.tsx, Suppliers.tsx, LocalPurchasePage.tsx, etc.
-│   │   ├── styles/               # style.css (spin button removal)
+│   │   ├── pages/                # Companies, Suppliers, LocalPurchase, ImportPurchase,
+│   │   │                         # ImportPurchasePdfPage, crm/LeadListPage, crm/LeadKanbanPage,
+│   │   │                         # tasks/TasksPage (Recurring sub-tab)
+│   │   ├── styles/               # style.css (spin button removal, calc-locked, toasts)
 │   │   ├── App.tsx               # App lifecycle & blocker initialization
 │   │   └── main.tsx              # Wheel scroll lockout listener
 │   └── package.json

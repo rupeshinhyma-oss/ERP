@@ -64,6 +64,8 @@
 53. [GLOBAL UI STANDARD: Universal Filter Toggle Button & Collapsible Panel Specification](#53-global-ui-standard-universal-filter-toggle-button--collapsible-panel-specification)
 54. [GLOBAL UI STANDARD: Universal Page Header, 35px Action Button Standard, and Filter-Above-KPI Hierarchy Across All Modules](#54-global-ui-standard-universal-page-header-35px-action-button-standard-and-filter-above-kpi-hierarchy-across-all-modules)
 55. [PAYMENTS: Customer & Supplier Payments Engine, Cash Flow, and Technician Payment Handover](#55-payments-customer--supplier-payments-engine-cash-flow-and-technician-payment-handover)
+56. [CRM: Customer Relationship Management Full Suite (Leads, Pipeline, Distribution, Quotations)](#56-crm-customer-relationship-management-full-suite)
+57. [WORKFORCE: Recurring Tasks Scheduling Engine](#57-workforce-recurring-tasks-scheduling-engine)
 
 ---
 
@@ -2300,6 +2302,15 @@ Checklist to execute:
 5. **Workflow & Receiving Rules:**
    - Governed by `purchase.import.status` workflow transitions.
    - Final Stock-In atomically updates bonded or domestic warehouse inventory with foreign lot reference and landed unit cost.
+6. **Uploaded Invoice File Viewer (Zero-Synthetic PDF Policy):**
+   - The application strictly serves and displays the **actual uploaded file** attached in the "Attach Invoice" field on the Add/Edit form.
+   - Fabricated synthetic invoice PDF generation is completely eliminated.
+   - Multi-format preview: Native PDF rendering in a full-height iframe with browser print and download tools, centered image viewing, and a document preview card for `.docx`/`.xlsx` formats with 1-click download.
+   - Dedicated streaming endpoint `GET /api/v1/purchase/import-orders/{purchase_id}/bill-file` supporting inline preview, download disposition, bearer header, and `?token=` query param authentication.
+7. **Closed State Immutability & Action Menu Scope:**
+   - When an import consignment reaches `Closed` status, the row action menu (`⋮`) strictly displays **ONLY `Download Purchase`**.
+   - `Edit`, `Confirm`, and `Delete` actions are suppressed.
+   - Client-side navigation to `/addedit/:id` for closed consignments is blocked, and backend endpoint `PUT /purchase/import-orders/{id}` enforces `edit: "none"`.
 
 ### Test Cases
 - [ ] Verify navigating to `/purchase/importpurchase` loads import consignments table with foreign currency and INR totals.
@@ -2312,7 +2323,10 @@ Checklist to execute:
 - [ ] Verify both Landed Cost (With Duty) and Landed Cost (Without Duty) calculate and display accurately.
 - [ ] Verify saving the consignment updates table records and KPI cards.
 - [ ] Verify Stock-In atomic execution transfers stock into destination warehouse and sets consignment state to received.
-- [ ] Verify all 16 automated tests in `ImportPurchasePage.test.tsx` pass without errors.
+- [ ] Verify clicking the uploaded PDF invoice in the INVOICE column opens `/purchase-order/import-bill-file/:id` and renders the actual uploaded file inside an iframe without generating synthetic PDF.
+- [ ] Verify clicking an uploaded docx invoice displays the document card with file size and download button.
+- [ ] Verify that on a consignment with `Closed` status, clicking the Action menu (`⋮`) displays strictly ONLY `Download Purchase` (Edit is removed).
+- [ ] Verify all 45 automated tests in `ImportPurchasePage.test.tsx` and 6 tests in `ImportPurchasePdfPage.test.tsx` pass without errors.
 
 ---
 
@@ -2655,4 +2669,83 @@ Positioned directly underneath the collapsible filter panel, these three metric 
 - [ ] Verify attempting to record payment without required fields triggers validation messages.
 
 ---
-*End of Master Features & Testing Specification Manual. Maintained for Inhyma Solutions Enterprise ERP. Last updated: October 2026 (Universal Page Header Geometry & Spacing Standardization, Global 35px Header Action Button & Isolated Popover Standard, Universal Filter-Above-KPI Placement Hierarchy Across All Modules, Minimalist Header Cleanups on Trash and Audit modules, Dedicated Payments Module, Universal Filter Button UI Standardization, Session-Scoped Tokens, Masters Module Interactive Status Toggle Switch, Dual-Method Activate/Deactivate Routing, Extended Company Profile Intelligence, Cascading Geographic Resolution, Autocomplete & Autofill Suppression, Wheel Lockout, Typeahead Company Extraction, Stock Adjustment Client Name Autocomplete, Leads Inquiries Management Module, Typable Cascading Address Comboboxes, Follow Ups Module, HRMS Full Suite, Local & Import Purchase Modules, Proforma Invoices Commercial Terms, Database Workflow Rules Engine, HRMS All-Employee Attendance Calendar, Authoritative Payroll Excel Export Engine, and CRM Phase 1 Foundation).*
+
+## 56. CRM: Customer Relationship Management Full Suite
+
+### Overview & Route Mapping
+- **Primary Routes:** `/crm/leads`, `/crm/import`, `/crm/pipeline`, `/crm/distribution`.
+- **Primary Permissions:** `crm.leads.view`, `crm.leads.create`, `crm.leads.edit`, `crm.leads.delete`, `crm.leads.assign`, `crm.import`, `crm.pipeline.manage`, `crm.quotation.create`.
+- **Purpose:** Full lifecycle CRM covering lead ingestion via multi-column CSV import, dynamic multi-stage Kanban pipeline with drag-and-drop, rule-based round-robin salesperson lead distribution, 360° lead timeline with follow-ups synced to workforce tasks, and branded quotation PDF generation.
+
+### Key Visual & Functional Components
+1. **Interactive Kanban Pipeline & List Views (`/crm/leads`):**
+   - **Kanban Board:** Multi-column view organized by dynamic pipeline stages with real-time lead counts and monetary totals. Supports smooth HTML5 drag-and-drop card transitions between stages with optimistic UI updates and instant server persistence (`PATCH /api/v1/crm/leads/{id}/stage`).
+   - **List Grid:** 12-column sortable data grid featuring Lead Title, Company, Contact Person, Phone, Email, Salesperson, Stage, Value, Priority, and Created Date.
+   - **Lead Drawer Detail View:** 360° timeline capturing interaction history, call logs, notes, stage transitions, and linked quotations.
+   - **Company Master Linkage:** Dynamic typeahead search links leads directly to existing customer records in `companies` table, or auto-provisions new customer entries upon lead qualification.
+   - **Workforce Task Synchronization:** Creating a follow-up date and reminder in CRM automatically provisions a synchronized operational task in the Workforce Task queue (`tasks` table) assigned to the respective sales representative.
+2. **Dynamic Pipeline Configuration (`/crm/pipeline`):**
+   - Customizable sales funnel stages with drag re-ordering, custom HEX color picker, win probability percentage (0–100%), and terminal status flags (`Won`, `Lost`).
+   - Protected system stages with delete prevention on stages hosting active leads.
+3. **Lead CSV Import Engine (`/crm/import`):**
+   - 4-phase import workflow: File Upload ➔ Auto-Column Mapping ➔ Pre-Import Validation Preview ➔ Batch Ingestion.
+   - Configurable deduplication rules: detects duplicate phone numbers, emails, or company names with selectable action (`Skip`, `Overwrite`, `Create Duplicate`).
+   - Batch audit history log detailing successful imports, validation errors, and downloadable error CSVs.
+4. **Salesperson Distribution & Quotas (`/crm/distribution`):**
+   - Round-robin lead routing rules distributing incoming leads proportionally across active sales reps based on capacity and target quotas.
+   - Live workload dashboard displaying active, won, and lost lead counts per sales representative.
+5. **Branded Quotation Generation Engine:**
+   - Multi-item quotation creation modal with Product Master autocomplete, unit pricing, quantity, commercial discount %, HSN tax calculation (CGST/SGST/IGST), and total value.
+   - Configurable commercial terms: payment terms, delivery period, warranty terms, and validity date.
+   - Server and client PDF generation (`quotationPdf.ts`, `quotation_pdf.py`) with corporate logo, bank transfer details, and authorized signature.
+
+### QA Verification Test Cases
+- [ ] Verify navigating to `/crm/leads` displays the Kanban board with dynamic pipeline stages, lead counts, and monetary totals.
+- [ ] Verify dragging a lead card between Kanban columns updates its stage on the backend without visual glitches.
+- [ ] Verify switching to the List view renders the 12-column table with sorting, search, and salesperson filters.
+- [ ] Verify opening a lead opens the detail drawer with the full activity timeline, call logs, and linked quotations.
+- [ ] Verify scheduling a follow-up in CRM creates a corresponding linked task in `/tasks`.
+- [ ] Verify navigating to `/crm/import` allows uploading a CSV and auto-maps columns.
+- [ ] Verify importing a CSV with duplicate leads flags conflicts according to the chosen deduplication strategy.
+- [ ] Verify navigating to `/crm/pipeline` allows adding, editing, and re-ordering pipeline stages.
+- [ ] Verify navigating to `/crm/distribution` displays salesperson lead allocation quotas and distribution rules.
+- [ ] Verify generating a quotation for a lead creates an itemized quotation and downloads the branded A4 PDF.
+
+---
+
+## 57. WORKFORCE: Recurring Tasks Scheduling Engine
+
+### Overview & Route Mapping
+- **Primary Routes:** `/tasks` (Recurring tab), `/tasks/calendar`, `/tasks/kanban`.
+- **Primary Permissions:** `task.view`, `task.create`, `task.edit`, `task.delete`, `task.recurring.manage`.
+- **Purpose:** Automation engine for scheduled, repeating operational workforce tasks (daily machine maintenance, weekly stock reconciliation, monthly customer outreach, audit compliance) with automated ticket spawning, pause/resume, and archival lifecycles.
+
+### Key Visual & Functional Components
+1. **Recurring Schedule Sub-Tab (`/tasks`):**
+   - Dedicated **Recurring** sub-tab alongside My Tasks, Kanban, and Calendar.
+   - Displays all active, paused, and archived recurring task definitions with title, assignee, frequency rule, next run date, and status.
+2. **Recurring Schedule Modal (`RecurringScheduleModal.tsx`):**
+   - **Frequency Options:**
+     - **Daily:** Every N days, or weekdays only.
+     - **Weekly:** Specific days of the week (Monday through Sunday).
+     - **Monthly:** Specific day of the month (e.g. 1st or 15th), or relative day (e.g. last Friday).
+     - **Custom Interval:** Every X days/weeks/months.
+   - **Execution Window:** Start Date, optional End Date, or maximum occurrences limit.
+   - **Task Template Attributes:** Priority, category, estimated duration, checklist items, and default assignee.
+3. **Automated Spawning & Lifecycle Worker (`recurring_worker.py`, `recurring_calculator.py`):**
+   - Background scheduler checks active recurring schedules and automatically spawns fresh task instances when the next execution timestamp arrives.
+   - Pause / Resume controls toggle schedule activity without deleting history.
+   - Archiving safely retires schedules while preserving all previously spawned task tickets.
+
+### QA Verification Test Cases
+- [ ] Verify navigating to `/tasks` shows the **Recurring** sub-tab.
+- [ ] Verify clicking 'Create Recurring Schedule' opens the modal with frequency options (Daily, Weekly, Monthly, Custom).
+- [ ] Verify configuring a weekly recurring task calculates the next run timestamp accurately.
+- [ ] Verify saving the recurring schedule lists it in the Recurring tasks table.
+- [ ] Verify pausing an active recurring schedule stops automated ticket generation.
+- [ ] Verify resuming a paused schedule re-calculates the next run date.
+- [ ] Verify archiving a recurring schedule moves it to the archived filter while keeping past spawned tasks intact.
+
+---
+*End of Master Features & Testing Specification Manual. Maintained for Inhyma Solutions Enterprise ERP. Last updated: October 2026 (CRM Full Suite Phases 1-6, Workforce Recurring Tasks Scheduling Engine, Import Purchase Real Uploaded Invoice File Viewer & Closed State Restraints, Universal Page Header Geometry & Spacing Standardization, Global 35px Header Action Button & Isolated Popover Standard, Universal Filter-Above-KPI Placement Hierarchy Across All Modules, Minimalist Header Cleanups on Trash and Audit modules, Dedicated Payments Module, Universal Filter Button UI Standardization, Session-Scoped Tokens, Masters Module Interactive Status Toggle Switch, Dual-Method Activate/Deactivate Routing, Extended Company Profile Intelligence, Cascading Geographic Resolution, Autocomplete & Autofill Suppression, Wheel Lockout, Typeahead Company Extraction, Stock Adjustment Client Name Autocomplete, Leads Inquiries Management Module, Typable Cascading Address Comboboxes, Follow Ups Module, HRMS Full Suite, Local & Import Purchase Modules, Proforma Invoices Commercial Terms, Database Workflow Rules Engine, HRMS All-Employee Attendance Calendar, Authoritative Payroll Excel Export Engine).*
+

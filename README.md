@@ -23,9 +23,8 @@ The ecosystem comprises three autonomous systems:
    - Autonomous Production Planning & Distribution ERP (India Domestic Distribution)
    - FastAPI Backend (Port `8002`), React + TypeScript SPA Frontend (Port `5174`)
    - Complete visual uniqueness across all 39 sidebar routes with dedicated SVG icons.
-   - Standardized universal UI design system: uniform header filter toggle buttons across all modules (`#556987`, 8×14px, badge-less, default collapsed state).
    - Dynamic branding resolved from `ERP Settings -> Company Name` via unauthenticated contract `GET /organizations/public`.
-   - Local Argon2id Auth, Enterprise Tasks Module v2 (Jira-style boards, escalations, holds), Master Data, Inquiries, Planning Sheets, Transactional Outbox, Standalone Background Queue Worker.
+   - Local Argon2id Auth, Enterprise Tasks Module v2 (Jira-style boards, recurring tasks daemon worker, escalations, holds), CRM Full Suite (Pipelines, Kanban, Bulk Import, Round-Robin Distribution, Branded Quotations Engine), Local & Import Purchase with Real Bill Streaming, Master Data, Inquiries, Planning Sheets, Transactional Outbox, Standalone Background Queue Worker.
 
 ---
 
@@ -56,11 +55,11 @@ Located in **[`ERP_Main/docs/`](ERP_Main/docs/)**:
 
 ### B. India Distribution & Production (`Inhyma_ERP`)
 Located in **[`Inhyma_ERP/doc/`](Inhyma_ERP/doc/)**:
-- **[System Architecture & Design](Inhyma_ERP/doc/SYSTEM_ARCHITECTURE_AND_DESIGN.md)** — Distribution topology, B2B company intelligence, and cascading geography.
-- **[API Design & Endpoints](Inhyma_ERP/doc/API_DESIGN_AND_ENDPOINTS.md)** — REST API specifications for Companies, Masters, Inventory, and Technical Tasks.
-- **[Changelog & Function Changes](Inhyma_ERP/doc/CHANGELOG_AND_FUNCTION_CHANGES.md)** — Chronological release history, company intelligence, and cascading resolution.
+- **[System Architecture & Design](Inhyma_ERP/doc/SYSTEM_ARCHITECTURE_AND_DESIGN.md)** — Distribution topology, B2B company intelligence, CRM architecture, recurring tasks engine, and cascading geography.
+- **[API Design & Endpoints](Inhyma_ERP/doc/API_DESIGN_AND_ENDPOINTS.md)** — REST API specifications for CRM, Recurring Tasks, Purchase Orders, Companies, Masters, Inventory, and Technical Tasks.
+- **[Changelog & Function Changes](Inhyma_ERP/doc/CHANGELOG_AND_FUNCTION_CHANGES.md)** — Chronological release history, company intelligence, CRM suite, and cascading resolution.
 - **[Complete Living Technical Manual](Inhyma_ERP/doc/SYSTEM_DOCUMENTATION.md)** — Exhaustive 15-section technical manual.
-- **[Modules & Features Test Manual](Inhyma_ERP/MODULES_AND_FEATURES_TEST_MANUAL.md)** — 40-section QA test catalog.
+- **[Modules & Features Test Manual](Inhyma_ERP/MODULES_AND_FEATURES_TEST_MANUAL.md)** — 57-section QA test catalog.
 
 ### C. China Procurement & Sourcing (`Yinglima_ERP`)
 Located in **[`Yinglima_ERP/doc/`](Yinglima_ERP/doc/)**:

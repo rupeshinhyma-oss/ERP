@@ -131,7 +131,12 @@ Machine-to-machine internal service endpoints invoked by `ERP_Main` over authent
 | `DELETE`| `/api/v1/purchase/import-orders/{id}` | Soft-delete import consignment order | Authenticated / Admin |
 | `POST` | `/api/v1/purchase/import-orders/{id}/bill` | Upload consignment document / shipping bill | Authenticated |
 | `DELETE`| `/api/v1/purchase/import-orders/{id}/bill` | Delete uploaded consignment document | Authenticated |
-| `GET` | `/api/v1/purchase/import-orders/{id}/bill-file` | Stream or download consignment document | Authenticated |
+| `GET` | `/api/v1/purchase/import-orders/{id}/bill-file` | Stream or download original uploaded invoice/bill file (supports query `?token=<access_token>` and `?download=true`) | Authenticated |
+
+> **Bill File Streaming & Zero-Synthetic-PDF Policy:**
+> - `GET /api/v1/purchase/import-orders/{id}/bill-file`: Authenticated via standard `Authorization: Bearer <token>` or `?token=<jwt>` query parameter (allowing clean HTML `<iframe>` previews without CORS header issues).
+> - **Zero Synthetic PDF Generation:** The endpoint serves only the real, operator-uploaded invoice file. Synthetic PDF generation is banned. Multi-format support: PDF (`<iframe src={blobUrl}>`), images (preview + download), and Office documents (`.docx`/`.xlsx` download cards).
+> - **Closed Status Action Menu Lock:** Consignments in `closed` status strictly restrict the row action menu to `Download Purchase` only. Edit, Confirm, and Delete operations are removed.
 
 ---
 
@@ -186,3 +191,56 @@ Machine-to-machine internal service endpoints invoked by `ERP_Main` over authent
   - `403 Forbidden`: Returned when the user has no permissions or organization access to this ERP.
   - **`503 Service Unavailable`**: Returned when ERP_Main cannot be reached during handover verification after exhaustive candidate trials and the 40s wake-up budget (retryable by frontend).
   - Stale session fallback: If ERP_Main remains unreachable, an active session verified within `SSO_HANDOVER_STALE_OK_SECONDS` (900s) is accepted from memory cache (`_from_cache: True`).
+
+---
+
+## 12. Customer Relationship Management (CRM) Full Suite (`/crm`)
+
+| Method | Endpoint URI | Description | Permission Gate |
+| :--- | :--- | :--- | :--- |
+| `GET` | `/api/v1/crm/leads` | List CRM leads with search, source, stage, priority, and date range filters | `crm.view` |
+| `POST` | `/api/v1/crm/leads` | Create new CRM lead with contact, company, priority, and stage | `crm.create` |
+| `GET` | `/api/v1/crm/leads/{id}` | Inspect detailed lead profile, requirement notes, and linked entities | `crm.view` |
+| `PATCH` | `/api/v1/crm/leads/{id}` | Update lead fields, assignment, closing date, and expected revenue | `crm.update` |
+| `PATCH` | `/api/v1/crm/leads/{id}/stage` | Advance or update pipeline stage (Kanban drag-and-drop integration) | `crm.update` |
+| `GET` | `/api/v1/crm/leads/{id}/timeline` | Retrieve 360° chronological activity timeline (calls, notes, quotes, tasks) | `crm.view` |
+| `POST` | `/api/v1/crm/leads/{id}/convert-company` | Convert qualified lead into official B2B Company master record | `company.create` |
+| `DELETE`| `/api/v1/crm/leads/{id}` | Soft-delete CRM lead | `crm.delete` |
+| `POST` | `/api/v1/crm/import` | Bulk import leads from CSV/Excel with column mapping & deduplication | `crm.import` |
+| `GET` | `/api/v1/crm/pipeline` | List configured pipeline stages in sequential order | `crm.view` |
+| `POST` | `/api/v1/crm/pipeline` | Create, reorder, or update pipeline lifecycle stages and SLA hours | `crm.pipeline.manage` |
+| `GET` | `/api/v1/crm/distribution` | List round-robin sales distribution rules | `crm.distribution.manage` |
+| `POST` | `/api/v1/crm/distribution` | Update lead assignment routing rules and salesperson roster | `crm.distribution.manage` |
+| `POST` | `/api/v1/crm/distribution/assign-next` | Evaluates rules and auto-assigns next sales rep via round-robin | Authenticated |
+| `GET` | `/api/v1/crm/quotations` | List CRM quotations with status, lead, and client filters | `crm.quotation.view` |
+| `POST` | `/api/v1/crm/quotations` | Generate formal sales quotation with tax calculations & commercial terms | `crm.quotation.create` |
+| `GET` | `/api/v1/crm/quotations/{id}` | Retrieve quotation details and line items | `crm.quotation.view` |
+| `GET` | `/api/v1/crm/quotations/{id}/pdf` | Stream official branded ReportLab Quotation A4 PDF document | `crm.quotation.view` |
+
+---
+
+## 13. Workforce — Recurring Tasks Scheduling Engine (`/tasks/recurring-schedules`)
+
+| Method | Endpoint URI | Description | Permission Gate |
+| :--- | :--- | :--- | :--- |
+| `GET` | `/api/v1/tasks/recurring-schedules` | List recurring task schedules with cadence, status, and department filters | `task.view` |
+| `POST` | `/api/v1/tasks/recurring-schedules` | Create recurring schedule template (Daily, Weekly, Monthly, Cron) | `task.create` |
+| `GET` | `/api/v1/tasks/recurring-schedules/{id}` | Inspect schedule template details, blueprint subtasks, and run history | `task.view` |
+| `PATCH` | `/api/v1/tasks/recurring-schedules/{id}` | Update schedule recurrence pattern, priority, assignees, or dates | `task.update` |
+| `PATCH` | `/api/v1/tasks/recurring-schedules/{id}/status`| Pause, resume, or archive recurring schedule | `task.update` |
+| `POST` | `/api/v1/tasks/recurring-schedules/{id}/trigger`| Immediately spawn task instance from schedule blueprint ("Run Now") | `task.create` |
+| `DELETE`| `/api/v1/tasks/recurring-schedules/{id}`| Soft-delete recurring schedule template | `task.delete` |
+
+---
+
+## 14. Product Catalog Synchronization Adapter (`/products/sync-yinglima`)
+
+| Method | Endpoint URI | Description | Permission Gate |
+| :--- | :--- | :--- | :--- |
+| `POST` | `/api/v1/products/sync-yinglima` | Trigger synchronization of products from Yinglima (China Sourcing) to Inhyma | `product.manage` |
+| `GET` | `/api/v1/products/sync-status` | Inspect last synchronization run, items ingested, and dependency provision status | `product.view` |
+
+> **Dependency Auto-Provisioning Engine:**
+> - When synchronizing catalog items from Yinglima to Inhyma, if an incoming item references a Category, Subcategory, Brand, UOM, or Tax rate not present in Inhyma, the adapter auto-creates the record on the fly before persisting the product.
+> - Preserves relational foreign key integrity without human intervention.
+
