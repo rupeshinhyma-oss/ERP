@@ -23,24 +23,31 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
+    conn = op.get_bind()
+    insp = sa.inspect(conn)
+    cols = [c["name"] for c in insp.get_columns("crm_leads")]
+
     # 1. Add nullable company_id column to crm_leads
-    op.add_column(
-        "crm_leads",
-        sa.Column(
-            "company_id",
-            GUID(),
-            sa.ForeignKey("companies.id", ondelete="SET NULL"),
-            nullable=True,
-        ),
-    )
+    if "company_id" not in cols:
+        op.add_column(
+            "crm_leads",
+            sa.Column(
+                "company_id",
+                GUID(),
+                sa.ForeignKey("companies.id", ondelete="SET NULL"),
+                nullable=True,
+            ),
+        )
 
     # 2. Create index on company_id
-    op.create_index(
-        "ix_crm_leads_company_id",
-        "crm_leads",
-        ["company_id"],
-        unique=False,
-    )
+    indexes = [idx["name"] for idx in insp.get_indexes("crm_leads")]
+    if "ix_crm_leads_company_id" not in indexes:
+        op.create_index(
+            "ix_crm_leads_company_id",
+            "crm_leads",
+            ["company_id"],
+            unique=False,
+        )
 
 
 def downgrade() -> None:

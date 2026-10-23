@@ -133,6 +133,10 @@ class Product(Base, UUIDPrimaryKeyMixin, TimestampMixin, VersionMixin, SoftDelet
         lazy="selectin",
     )
 
+    @property
+    def is_active(self) -> bool:
+        return self.status == RecordStatus.ACTIVE
+
     def __repr__(self) -> str:
         """Return a debug-friendly representation."""
         return f"<Product code={self.product_code!r} name={self.product_name!r}>"

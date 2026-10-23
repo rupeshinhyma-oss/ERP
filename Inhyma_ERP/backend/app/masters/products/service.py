@@ -101,7 +101,7 @@ class ProductService:
             sub_category = await self.sub_category_repository.get_by_id(sub_category_id)
             if sub_category is None:
                 raise BadRequestException("The specified product sub-category does not exist.")
-            if category_id is not None and sub_category.category_id != category_id:
+            if category_id is not None and str(sub_category.category_id) != str(category_id):
                 raise BadRequestException("The specified sub-category does not belong to the specified category.")
 
         brand_id = field_values.get("brand_id")
@@ -254,6 +254,7 @@ class ProductService:
             await self.repository.session.flush()
 
         await self._invalidate_cache()
+        await self.repository.session.refresh(product, attribute_names=["hsn", "dimension_rows"])
         return product
 
     async def update(self, product_id: uuid.UUID, **field_values: Any) -> Product:
@@ -331,6 +332,7 @@ class ProductService:
         # Uses THIS request's own session so the cell refresh commits
         # together with the product edit itself.
         await refresh_planning_cells_for_record(self.repository.session, "product", product.id)
+        await self.repository.session.refresh(product, attribute_names=["hsn", "dimension_rows"])
         return product
 
     async def activate(self, product_id: uuid.UUID) -> Product:
@@ -446,7 +448,7 @@ class ProductService:
 
     async def get_machine_spares_universal_view(self, search: str | None = None) -> list[dict]:
         """Universal view showing machine-wise spare parts mapping."""
-        q = select(Product).where(Product.product_type == "Machine", Product.is_deleted.is_(False))
+        q = select(Product).where(Product.product_type == "Machine", Product.deleted_at.is_(None))
         if search and search.strip():
             term = f"%{search.strip()}%"
             q = q.where(
@@ -461,7 +463,7 @@ class ProductService:
         stmt = (
             select(ProductMachineSpare, Product)
             .join(Product, ProductMachineSpare.spare_part_id == Product.id)
-            .where(Product.is_deleted.is_(False))
+            .where(Product.deleted_at.is_(None))
         )
         mappings_res = (await self.repository.session.execute(stmt)).all()
 
@@ -480,7 +482,7 @@ class ProductService:
                 "remarks": mapping.remarks,
             })
 
-        spare_stmt = select(Product).where(Product.product_type == "Spare Part", Product.is_deleted.is_(False))
+        spare_stmt = select(Product).where(Product.product_type == "Spare Part", Product.deleted_at.is_(None))
         all_spares = (await self.repository.session.execute(spare_stmt)).scalars().all()
         for spare in all_spares:
             if spare.applicable_machine_ids:
