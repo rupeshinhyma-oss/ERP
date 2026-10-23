@@ -14,7 +14,7 @@ from app.database.base import GUID
 
 # revision identifiers, used by Alembic.
 revision: str = "r3c4d5e6f7a8"
-down_revision: Union[str, Sequence[str], None] = ("m9c0d1e2f3a4", "q2c3d4e5f6a7")
+down_revision: Union[str, Sequence[str], None] = "d32a657d3f2f"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
