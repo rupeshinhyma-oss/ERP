@@ -20,6 +20,7 @@ import {
   needsReason,
   type WorkflowRules,
 } from "@/lib/workflowRules";
+import { prefetchMasterProducts, fetchMasterProducts, filterCachedProducts } from "@/lib/productSearchCache";
 import {
   IMPORT_PURCHASE_API,
   buildImportPayload,
@@ -743,6 +744,10 @@ export function ImportPurchasePage({ defaultAdd = false }: { defaultAdd?: boolea
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
+  useEffect(() => {
+    void prefetchMasterProducts();
+  }, []);
+
   const setField = (key: keyof ImportFormValues, value: string) => setForm((prev) => ({ ...prev, [key]: value }));
   const effectiveCreatedDate = useMemo(() => {
     if (editingOrderId) {
@@ -948,23 +953,25 @@ export function ImportPurchasePage({ defaultAdd = false }: { defaultAdd?: boolea
     navigate("/purchase/importpurchase");
   };
 
-  // Product search: extracted from the Product Master
+  // Product search: extracted from the Product Master with instant cache response
   const fetchProducts = (queryText: string) => {
     const seq = ++productSearchSeq.current;
-    setIsProductLoading(true);
-    const url = queryText.trim()
-      ? `/masters/products?page=1&page_size=50&status=active&search=${encodeURIComponent(queryText.trim())}`
-      : `/masters/products?page=1&page_size=50&status=active`;
-    apiGet<any[]>(url)
-      .then((res) => {
+    const instant = filterCachedProducts(queryText, 50);
+    if (instant.length > 0) {
+      setProductSearchMatches(instant.map((p) => ({ product_name: p.product_name })));
+      setIsProductLoading(false);
+    } else {
+      setIsProductLoading(true);
+    }
+    fetchMasterProducts(queryText, 50)
+      .then((items) => {
         if (seq === productSearchSeq.current) {
-          setProductSearchMatches((res?.data || []).map((p) => ({ product_name: p.product_name })));
+          setProductSearchMatches(items.map((p) => ({ product_name: p.product_name })));
           setIsProductLoading(false);
         }
       })
       .catch(() => {
         if (seq === productSearchSeq.current) {
-          setProductSearchMatches([]);
           setIsProductLoading(false);
         }
       });

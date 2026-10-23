@@ -156,4 +156,43 @@ describe("DatePicker Component", () => {
     fireEvent.click(day20Btn);
     expect(handleChange).toHaveBeenCalledWith("20-09-2026");
   });
+
+  it("disables past days and previous month navigation when minDate is set", () => {
+    const handleChange = vi.fn();
+    render(
+      <DatePicker
+        value="21-09-2026"
+        minDate="21-09-2026"
+        onChange={handleChange}
+        ariaLabel="Expected Delivery Date"
+      />
+    );
+
+    const input = screen.getByLabelText("Expected Delivery Date");
+    fireEvent.click(input);
+
+    // Day 21 is allowed
+    const day21Btn = screen.getByRole("button", { name: "21" }) as HTMLButtonElement;
+    expect(day21Btn.disabled).toBe(false);
+
+    // Day 20 is disabled
+    const day20Btn = screen.getByRole("button", { name: "20" }) as HTMLButtonElement;
+    expect(day20Btn.disabled).toBe(true);
+    fireEvent.click(day20Btn);
+    expect(handleChange).not.toHaveBeenCalled();
+
+    // Previous Month button is disabled
+    const prevBtn = screen.getByRole("button", { name: /previous month/i }) as HTMLButtonElement;
+    expect(prevBtn.disabled).toBe(true);
+    fireEvent.click(prevBtn);
+    // Month should stay SEPTEMBER 2026
+    expect(screen.getByText(/SEPTEMBER 2026/i)).toBeTruthy();
+
+    // Day 22 is allowed and selectable
+    const day22Btn = screen.getByRole("button", { name: "22" }) as HTMLButtonElement;
+    expect(day22Btn.disabled).toBe(false);
+    fireEvent.click(day22Btn);
+    expect(handleChange).toHaveBeenCalledWith("22-09-2026");
+  });
 });
+

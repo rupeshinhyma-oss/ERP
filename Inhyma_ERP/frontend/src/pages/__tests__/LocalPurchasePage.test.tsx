@@ -115,7 +115,10 @@ beforeEach(() => {
 afterEach(() => cleanup());
 
 const suppliersLoaded = () =>
-  waitFor(() => expect(document.querySelectorAll("#local-supplier-options option").length).toBeGreaterThan(0));
+  waitFor(() => {
+    const el = document.querySelector('[data-testid="local-supplier-combobox"]');
+    expect(Number(el?.getAttribute("data-options-count") || 0)).toBeGreaterThan(0);
+  });
 
 const renderPurchasePage = (initialRoute = "/purchase-order/list") =>
   render(
@@ -285,7 +288,7 @@ describe("LocalPurchasePage row actions follow the database rules and the user's
     for (const id of ["edit", "confirm", "delete"]) expect(screen.getByTestId(`action-${id}-po-1`)).toBeTruthy();
   });
 
-  it("a confirmed purchase offers Download only (nobody edits it); Delete is admin-only", async () => {
+  it("a confirmed purchase offers Download only; Edit and Delete are removed", async () => {
     auth.perms = new Set(["localpurchase.update", "localpurchase.confirm"]);
     const originalOpen = window.open;
     window.open = vi.fn();
@@ -304,8 +307,10 @@ describe("LocalPurchasePage row actions follow the database rules and the user's
     auth.isSuperAdmin = true;
     await renderLoaded();
     fireEvent.click(screen.getByTestId("btn-action-po-2"));
-    expect(screen.getByTestId("action-delete-confirmed-po-2")).toBeTruthy();
+    expect(screen.queryByTestId("action-delete-confirmed-po-2")).toBeNull();
+    expect(screen.queryByTestId("action-delete-po-2")).toBeNull();
     expect(screen.queryByTestId("action-edit-po-2")).toBeNull();
+    expect(screen.getByTestId("action-download-po-2")).toBeTruthy();
   });
 
   it("Confirm is saved through the status API and the list is reloaded from the server", async () => {
@@ -362,7 +367,7 @@ describe("LocalPurchasePage add / edit form", () => {
     expect(screen.getByRole("heading", { name: "Add Local Purchase" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "← BACK" })).toBeTruthy();
     for (const label of ["Warehouse", "Supplier", "Invoice No.", "Invoice Date", "Bill File", "EXPENSES", "Packing & Forwarding", "Transport",
-      "Offloading", "Total Of All Expenses", "% Loading Expense (Value Based)", "PRODUCT SEARCH", "PRODUCT ITEM", "Unit Landing Rate (VB)",
+      "Offloading", "Total Of All Expenses", "% Loading Expense (Value Based)", "PRODUCT SEARCH", "PRODUCT ITEM", "Unit Landing Rate (INR) (VB)",
       "Total Landing Rate (VB)", "Grand Total", "Remarks"]) {
       expect(screen.getByText(label)).toBeTruthy();
     }
@@ -381,8 +386,10 @@ describe("LocalPurchasePage add / edit form", () => {
     expect(within(warehouse).getAllByRole("option").map((o) => o.textContent)).toEqual(["Select", "Mumbai", "Ahmedabad"]); // 'Mumbai Ordered' is not physical
     // suppliers are suggested as you type (keyword suggestion), from the Supplier master
     const supplier = screen.getByLabelText("Supplier") as HTMLInputElement;
-    const list = document.getElementById(supplier.getAttribute("list")!) as HTMLDataListElement;
-    expect(Array.from(list.options).map((o) => o.value)).toEqual(["S B Inks & Packaging Co.", "Darsh Impex India LLP Mumbai", "Local Traders"]);
+    fireEvent.focus(supplier);
+    expect(screen.getByText("S B Inks & Packaging Co.")).toBeTruthy();
+    expect(screen.getByText("Darsh Impex India LLP Mumbai")).toBeTruthy();
+    expect(screen.getByText("Local Traders")).toBeTruthy();
   });
 
   it("opens the Invoice Date picker defaulting to today and lets you pick a date", () => {

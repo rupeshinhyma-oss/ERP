@@ -47,6 +47,7 @@
    - 8.26. [CRM: Customer Relationship Management Full Suite, Quotations & Task Synchronization](#826-crm-customer-relationship-management-full-suite-leads-pipelines-distribution-timeline--branded-quotations-engine)
    - 8.27. [Workforce: Recurring Tasks Scheduling Engine & Automated Worker](#827-workforce-recurring-tasks-scheduling-engine--automated-spawning-worker)
    - 8.28. [Product Sync Adapter & Dynamic Relational Provisioning Engine](#828-product-sync-adapter--dynamic-relational-provisioning-engine-yinglima---inhyma)
+   - 8.29. [Communication: Internal Feed & Broadcast Announcements Engine](#829-communication-internal-feed--broadcast-announcements-engine)
 
 9. [Real-Time WebSocket & Event Synchronization](#9-real-time-websocket--event-synchronization)
 10. [Multi-Tier Caching Engine](#10-multi-tier-caching-engine)
@@ -895,6 +896,9 @@ A user may be assigned any number of Roles simultaneously (`POST /users/{id}/rol
   - Datalist supplier lookup (`<datalist id="local-supplier-options">`) enforcing selection from known suppliers.
   - UOM badge display pulled dynamically from `/masters/uom`.
   - A4 Local Purchase Order PDF generation with company header, party details, and tax breakdowns.
+  - **Unit Landing Rate (INR) (VB) Standardization:** Column header in both the UI table grid and generated PDF is standardized to `Unit Landing Rate (INR) (VB)` to emphasize Value-Based expense allocation.
+  - **Horizontal Side Scrollbar:** Added side scrollbar overflow styling on the local purchase data table and item breakdown panels to ensure clean presentation without vertical or horizontal clipping.
+  - **Confirmed Order Deletion Protection:** In `LocalPurchasePage.tsx`, purchase orders in `Confirmed` status strictly omit the `Delete` option from the row action menu (`⋮`). The backend endpoint `DELETE /api/v1/purchase/local-orders/{id}` verifies status and returns `400 Bad Request` if deletion of a confirmed order is attempted, preserving financial and inventory integrity.
 
 ### 8.22. Purchase: Import Purchase Consignments & Customs Landing Matrix
 - **Files:** `backend/app/purchase/import_routes.py`, `backend/app/purchase/models.py`, `backend/app/purchase/schemas.py`, `backend/app/purchase/costing.py`, `frontend/src/pages/purchase/ImportPurchasePage.tsx`, `frontend/src/lib/purchaseApi.ts`, `frontend/src/lib/importPurchasePdf.ts`.
@@ -963,6 +967,11 @@ A user may be assigned any number of Roles simultaneously (`POST /users/{id}/rol
   - Extended commercial terms: Payment Terms, Delivery Type (Godown/Door), Delivery Charge (To Pay/Paid), Third-Party Delivery.
   - Address routing: Billing Address and Shipping Address snapshotting with GSTIN details.
   - Sequential PI numbering rules (`proforma.numbering` group in `option_lists`).
+  - **Expected Delivery Date (`expected_delivery_date`):** Dedicated scheduling field defaulting to the current date and strictly validating that only present and future dates are selectable (`min={todayIso}`).
+  - **Connected Company & Address Automation:** Selecting a company in Billing or Shipping fields automatically loads and displays the company's full address card (address lines, city, state, pin, phone, email, and GSTIN).
+  - **Slide-Over "Add Company" Drawer (`AddCompanyDrawer.tsx`):** `+ Add` button next to company selectors triggers a right-side drawer to register a new company (Customer/Supplier/Both) with instant selection into the active form upon save.
+  - **Slide-Over "Edit Address" Drawer (`EditAddressDrawer.tsx`):** `Edit` button on Billing and Shipping address cards opens a slide-over drawer to edit and override address fields directly for the proforma document without mutating the master company record.
+  - **Side Scrollbar Support:** Enhanced horizontal and vertical overflow handling on tables and modal forms.
 
 ### 8.24. Database-Driven Status Rules & Dynamic Workflow Engine
 - **Files:** `backend/app/common/workflow.py`, `backend/alembic/versions/k1a2b3c4d5e8_seed_proforma_rules.py`, `backend/alembic/versions/m1a2b3c4d5ea_seed_purchase_rules.py`, `frontend/src/lib/workflowRules.ts`.
@@ -1045,6 +1054,32 @@ A user may be assigned any number of Roles simultaneously (`POST /users/{id}/rol
   - **Dynamic Dependency Auto-Provisioning:** If an incoming product references a Category, Subcategory, Brand, UOM, or Tax rate that does not yet exist in the destination ERP, the adapter dynamically creates the missing entity in the local masters before persisting the product, preventing foreign key integrity violations.
   - **Pagination & Query Normalization:** Enforces standard `limit` parameter handling and newest-first sorting (`created_at DESC`) to ensure deterministic catalog views.
   - **WebSocket Fanout:** Emits real-time `PRODUCT_SYNCED` notifications to connected UI sessions upon ingestion, automatically refreshing product lookup caches.
+
+### 8.29. Communication: Internal Feed & Broadcast Announcements Engine
+- **Files:** `backend/app/feed/routes.py`, `backend/app/feed/models.py`, `backend/app/feed/schemas.py`, `backend/app/feed/service.py`, `frontend/src/pages/feed/FeedPage.tsx`, `frontend/src/pages/feed/FeedComposer.tsx`, `frontend/src/pages/feed/FeedPostCard.tsx`, `frontend/src/pages/feed/FeedEditModal.tsx`, `frontend/src/lib/feedApi.ts`, `frontend/src/styles/feed.css`.
+- **Database Architecture:**
+  - `feed_posts`: Primary post entity with `title`, `content`, `post_type` (`announcement`, `general`, `alert`), `is_pinned`, `author_id`, `created_at`, `updated_at`, `deleted_at`.
+  - `feed_post_departments`: Relational targeting junction table linking posts to specific department IDs.
+  - `feed_post_recipients`: Direct recipient targeting junction table linking confidential broadcasts to individual user IDs.
+  - `feed_post_comments`: Comment entity supporting threaded discussions under posts with author reference, content, and soft deletion.
+  - `feed_post_reactions`: Reaction entity capturing user emoji reactions (`like`, `love`, `celebrate`, `rocket`, `insightful`, `clap`) ensuring 1 reaction type per user per post.
+  - `feed_post_reads`: Read-receipt tracking recording user viewing timestamps for compliance and broadcast visibility confirmation.
+- **Backend Endpoints (`/api/v1/feed`):**
+  - `GET /posts`: List scoped feed posts with pagination, search, post type filter, and department visibility checks.
+  - `POST /posts`: Create a new feed post or broadcast with targeted departments/recipients and pin status.
+  - `GET /posts/{id}`: Detailed post record, comments, reaction aggregations, and viewer status.
+  - `PUT /posts/{id}`: Edit post content (creator or administrator only).
+  - `DELETE /posts/{id}`: Soft-delete post.
+  - `POST /posts/{id}/pin`: Toggle post pinned status (administrators and managers).
+  - `POST /posts/{id}/comments`: Post a comment on a feed entry.
+  - `DELETE /comments/{comment_id}`: Remove comment.
+  - `POST /posts/{id}/reactions`: Toggle emoji reaction on a post.
+  - `POST /posts/{id}/mark-read`: Record user read receipt.
+- **Frontend Architecture & UX:**
+  - Accessible via the `/feed` route and the topbar/sidebar navigation.
+  - **Feed Composer (`FeedComposer.tsx`):** WYSIWYG post composer with announcement priority toggles, department multi-select dropdown, and validation.
+  - **Feed Timeline & Post Cards (`FeedPostCard.tsx`):** Render author avatars, department badges, pinned visual ribbons, emoji reaction picker popover, reaction counters, and expandable comment threads.
+  - **Interaction Privacy & RBAC:** Enforces granular view and interaction permissions so confidential and department-specific broadcasts are isolated strictly to authorized personnel.
 
 ---
 

@@ -2796,5 +2796,105 @@ Positioned directly underneath the collapsible filter panel, these three metric 
 - [ ] Verify archiving a recurring schedule moves it to the archived filter while keeping past spawned tasks intact.
 
 ---
-*End of Master Features & Testing Specification Manual. Maintained for Inhyma Solutions Enterprise ERP. Last updated: October 2026 (CRM Full Suite Phases 1-6, Workforce Recurring Tasks Scheduling Engine, Import Purchase Real Uploaded Invoice File Viewer & Closed State Restraints, Universal Page Header Geometry & Spacing Standardization, Global 35px Header Action Button & Isolated Popover Standard, Universal Filter-Above-KPI Placement Hierarchy Across All Modules, Minimalist Header Cleanups on Trash and Audit modules, Dedicated Payments Module, Universal Filter Button UI Standardization, Session-Scoped Tokens, Masters Module Interactive Status Toggle Switch, Dual-Method Activate/Deactivate Routing, Extended Company Profile Intelligence, Cascading Geographic Resolution, Autocomplete & Autofill Suppression, Wheel Lockout, Typeahead Company Extraction, Stock Adjustment Client Name Autocomplete, Leads Inquiries Management Module, Typable Cascading Address Comboboxes, Follow Ups Module, HRMS Full Suite, Local & Import Purchase Modules, Proforma Invoices Commercial Terms, Database Workflow Rules Engine, HRMS All-Employee Attendance Calendar, Authoritative Payroll Excel Export Engine).*
+
+## 58. PROFORMA INVOICES: Connected Address Automation, Expected Delivery Date Future Validation, and Slide-Over Add Company & Edit Address Drawers
+
+### Overview & Route Mapping
+- **Primary Routes:** `/proforma-invoice/list`, Proforma Add/Edit Modal (`ProformaInvoicesPage.tsx`).
+- **Primary Permissions:** `proforma.view`, `proforma.create`, `proforma.update`, `proforma.delete`.
+- **Purpose:** Accelerated sales ordering with automated billing/shipping company address resolution, inline slide-over drawer editing for custom address overrides, inline new company creation, and delivery date scheduling guards.
+
+### Key Visual & Functional Components
+1. **Expected Delivery Date (`expected_delivery_date`):**
+   - Renders in the primary Proforma modal form header.
+   - Automatically initializes to current date (`todayIso`).
+   - Strict Date Validation: Only current or future dates are permitted (`min={todayIso}`). Past dates in the datepicker are locked out, preventing operators from booking backdated delivery commitments.
+2. **Connected Company & Address Cards:**
+   - Selecting a company in Billing Address or Shipping Address dropdown dynamically extracts that company's address details.
+   - Automatically populates and visually renders the respective Address card (Address lines, City, State, Pincode, Phone, Email, and GSTIN).
+3. **Slide-Over "Add Company" Drawer (`AddCompanyDrawer.tsx`):**
+   - Clickable `+ Add` button placed adjacent to company selection.
+   - Opens right-side slide-over drawer allowing operators to quickly register a new company (Customer/Supplier/Both) with contact, tax, and address fields.
+   - Automatically selects the newly created company in the Proforma invoice upon save without requiring a page reload.
+4. **Slide-Over "Edit Address" Drawer (`EditAddressDrawer.tsx`):**
+   - Clickable `Edit` action button inside both the Billing and Shipping address preview cards.
+   - Opens right-side slide-over drawer prefilled with active address fields (Address lines 1 & 2, City, State, Pincode, GSTIN).
+   - Saving the drawer updates the specific Proforma Invoice address state without modifying the master company catalog.
+5. **Horizontal & Vertical Overflow:**
+   - Integrated side scrollbar handling on large proforma item grids and complex address cards.
+
+### QA Verification Test Cases
+- [ ] Verify opening the Proforma Invoice Add modal shows `Expected Delivery Date` defaulting to the current date.
+- [ ] Verify the date picker for Expected Delivery Date disables all past dates and allows only today or future dates.
+- [ ] Verify selecting a company in Billing Address dynamically renders the Billing Address card with that company's address and GSTIN.
+- [ ] Verify selecting a company in Shipping Address dynamically renders the Shipping Address card with that company's address and GSTIN.
+- [ ] Verify clicking `+ Add` next to company dropdown opens `AddCompanyDrawer`.
+- [ ] Verify creating a company via `AddCompanyDrawer` automatically populates it in the Proforma form.
+- [ ] Verify clicking `Edit` on the Billing Address card opens `EditAddressDrawer` with pre-filled address details.
+- [ ] Verify modifying address fields in `EditAddressDrawer` and saving updates the Proforma Invoice address card correctly.
+- [ ] Verify saving the Proforma Invoice preserves the custom edited address and expected delivery date.
+
+---
+
+## 59. LOCAL PURCHASE: Unit Landing Rate (INR) (VB) Renaming, Side Scrollbar, and Confirmed Order Delete Protection
+
+### Overview & Route Mapping
+- **Primary Routes:** `/purchase-order/local-purchase`, `/purchase-order/local-purchase/addedit/:id`, `/purchase-order/local-bill/:id`.
+- **Primary Permissions:** `purchase.local.view`, `purchase.local.create`, `purchase.local.edit`, `purchase.local.delete`, `purchase.local.confirm`.
+- **Purpose:** Enhanced landing cost clarity, grid navigation ergonomics, and critical audit protection prohibiting accidental deletion of confirmed commercial inventory receipts.
+
+### Key Visual & Functional Components
+1. **Landing Rate Column Renaming:**
+   - Renamed table column and PDF field from `Unit Landing Rate (INR)` to **`Unit Landing Rate (INR) (VB)`** across list grid, edit forms, and generated PDF purchase orders.
+   - Clarifies for procurement officers that line landing rates reflect Value-Based expense allocation.
+2. **Side Scrollbar Support:**
+   - Implemented horizontal side scrollbar styling on the purchase table and items container, enabling smooth navigation on multi-column layouts without layout clipping.
+3. **Confirmed Order Delete Lockout:**
+   - **Frontend UI Suppression:** In `LocalPurchasePage.tsx`, rows where status equals `Confirmed` strictly hide the `Delete` option from the row action dropdown menu (`⋮`).
+   - **Backend Guard:** `DELETE /api/v1/purchase/local-orders/{id}` verifies status; if the order is already in `confirmed` status, it rejects the deletion with HTTP 400 Bad Request ("Confirmed purchase orders cannot be deleted").
+
+### QA Verification Test Cases
+- [ ] Verify navigating to `/purchase-order/local-purchase` displays column header `Unit Landing Rate (INR) (VB)`.
+- [ ] Verify generating or downloading a Local Purchase Order PDF shows the `Unit Landing Rate (INR) (VB)` label.
+- [ ] Verify the table container features a functioning horizontal side scrollbar when columns exceed the viewport width.
+- [ ] Verify on a purchase order in `Pending` status, the action menu (`⋮`) displays the `Delete` option.
+- [ ] Verify on a purchase order in `Confirmed` status, the action menu (`⋮`) strictly hides the `Delete` option.
+- [ ] Verify sending a raw DELETE API request for a confirmed purchase order returns HTTP 400 with an error message preventing deletion.
+
+---
+
+## 60. FEED & BROADCAST: Enterprise Timeline, Department & Role Scoping, Interaction Privacy & Reactions
+
+### Overview & Route Mapping
+- **Primary Routes:** `/feed`, Topbar/Sidebar navigation link.
+- **Primary Permissions:** `feed.view`, `feed.create`, `feed.broadcast`, `feed.comment`, `feed.react`, `feed.moderate`.
+- **Purpose:** Centralized internal corporate communication channel supporting organization-wide broadcasts, targeted department feeds, interactive emoji reactions, comment threads, and role-based privacy safeguards.
+
+### Key Visual & Functional Components
+1. **Interactive Timeline & Post Composer (`FeedComposer.tsx`):**
+   - Rich post composer allowing authorized users to publish text updates, announcements, and critical notices.
+   - Pinned Announcements: High-priority broadcasts pinned to the top of the feed with distinct visual badge styling.
+2. **Granular Audience Targeting:**
+   - **Public / All Company:** Visible to all active personnel across all branches.
+   - **Department Scoping (`feed_post_departments`):** Restricts post visibility exclusively to designated departments (e.g. Sales, Service, Operations, Finance).
+   - **Direct Recipients (`feed_post_recipients`):** Confidential broadcasts targeted to specific individuals.
+3. **Reactions & Comment Threading (`FeedPostCard.tsx`):**
+   - Multi-reaction emoji picker (👍, ❤️, 🎉, 🚀, 💡, 👏) with live reaction counters.
+   - Interaction privacy: users can view aggregated counts and inspect reaction participants based on permissions.
+   - Nested comment threads with real-time updates and edit/delete permissions for authors and moderators.
+4. **Read Receipts & Delivery Tracking (`feed_post_reads`):**
+   - Tracks which users have viewed broadcasts for corporate accountability and compliance announcements.
+
+### QA Verification Test Cases
+- [ ] Verify navigating to `/feed` loads the company feed timeline with pinned posts at the top.
+- [ ] Verify creating a post in `FeedComposer` publishes it to the timeline.
+- [ ] Verify publishing a post targeted to a specific department is visible only to members of that department.
+- [ ] Verify reacting to a post with an emoji updates the reaction count in real-time.
+- [ ] Verify adding a comment displays it immediately under the post.
+- [ ] Verify editing and deleting a post is restricted to the post creator or system administrators.
+- [ ] Verify read status is recorded in `feed_post_reads` when an operator views a broadcast.
+
+---
+*End of Master Features & Testing Specification Manual. Maintained for Inhyma Solutions Enterprise ERP. Last updated: October 2026 (Sections 58-60: Proforma Invoices Address Automation & Future Date Constraints, Local Purchase Landing Rate VB & Delete Safety, Feed & Broadcast Module, CRM Full Suite, Workforce Recurring Tasks, Import Purchase Real Uploaded Invoice File Viewer, Universal Header Geometry & Sacing, Global 35px Header Action Button, Universal Filter-Above-KPI Placement Hierarchy, Minimalist Header Cleanups on Trash/Audit, Payments Module, Universal Filter Button UI Standardization, Session-Scoped Tokens, Masters Status Toggles, Company Profile Intelligence, Cascading Geography, Autocomplete Suppression, Wheel Lockout, HRMS Suite, Local & Import Purchase, Proforma Invoices Commercial Terms, Database Workflow Rules, Attendance Calendar, Payroll Excel Export).*
+
 

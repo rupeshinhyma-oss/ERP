@@ -24,7 +24,7 @@ The ecosystem comprises three autonomous systems:
    - FastAPI Backend (Port `8002`), React + TypeScript SPA Frontend (Port `5174`)
    - Complete visual uniqueness across all 39 sidebar routes with dedicated SVG icons.
    - Dynamic branding resolved from `ERP Settings -> Company Name` via unauthenticated contract `GET /organizations/public`.
-   - Local Argon2id Auth, Enterprise Tasks Module v2 (Jira-style boards, recurring tasks daemon worker, escalations, holds), CRM Full Suite (Pipelines, Kanban, Bulk Import, Round-Robin Distribution, Branded Quotations Engine), Local & Import Purchase with Real Bill Streaming, Product Master (Dedicated Machine Spares Dual-Tab Management, SideDrawer Header Actions, Accidental Delete Protection), Inquiries, Planning Sheets, Transactional Outbox, Standalone Background Queue Worker, Alembic Multi-Branch Deployment Resilience.
+   - Local Argon2id Auth, Enterprise Tasks Module v2 (Jira-style boards, recurring tasks daemon worker, escalations, holds), CRM Full Suite (Pipelines, Kanban, Bulk Import, Round-Robin Distribution, Branded Quotations Engine), Internal Feed & Broadcast Announcements Engine (RBAC, Department Targeting, Reactions & Comments), Proforma Invoices (Connected Address Automation, Expected Delivery Date Future Validation, Add Company & Edit Address Slide Drawers), Local & Import Purchase with Real Bill Streaming, Landing Rate (VB) Costing & Confirmed Order Delete Protection, Product Master (Dedicated Machine Spares Dual-Tab Management, SideDrawer Header Actions, Accidental Delete Protection), Inquiries, Planning Sheets, Transactional Outbox, Standalone Background Queue Worker, Alembic Multi-Branch Deployment Resilience.
 
 ---
 
@@ -59,7 +59,7 @@ Located in **[`Inhyma_ERP/doc/`](Inhyma_ERP/doc/)**:
 - **[API Design & Endpoints](Inhyma_ERP/doc/API_DESIGN_AND_ENDPOINTS.md)** — REST API specifications for CRM, Recurring Tasks, Purchase Orders, Companies, Masters, Inventory, and Technical Tasks.
 - **[Changelog & Function Changes](Inhyma_ERP/doc/CHANGELOG_AND_FUNCTION_CHANGES.md)** — Chronological release history, company intelligence, CRM suite, and cascading resolution.
 - **[Complete Living Technical Manual](Inhyma_ERP/doc/SYSTEM_DOCUMENTATION.md)** — Exhaustive 15-section technical manual.
-- **[Modules & Features Test Manual](Inhyma_ERP/MODULES_AND_FEATURES_TEST_MANUAL.md)** — 57-section QA test catalog.
+- **[Modules & Features Test Manual](Inhyma_ERP/MODULES_AND_FEATURES_TEST_MANUAL.md)** — 60-section QA test catalog.
 
 ### C. China Procurement & Sourcing (`Yinglima_ERP`)
 Located in **[`Yinglima_ERP/doc/`](Yinglima_ERP/doc/)**:

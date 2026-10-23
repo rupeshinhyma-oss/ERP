@@ -79,7 +79,7 @@ export function mapLocalPurchase(p: any, rules: WorkflowRules): PurchaseOrderRec
     warehouse: p.warehouse,
     basic_amount: p.invoice_value_ex_gst,
     invoice_total: p.invoice_value_inc_gst,
-    bill_file: p.bill_file_name || undefined,
+    bill_file: p.bill_file_name || p.bill_file || (p.bill_file_url ? p.bill_file_url.split("/").pop() : undefined),
     bill_file_url: p.bill_file_url || undefined,
     created_by: p.created_by,
     added_on: p.created_date,

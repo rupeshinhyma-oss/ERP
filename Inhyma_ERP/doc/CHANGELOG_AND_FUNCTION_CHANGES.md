@@ -2,6 +2,46 @@
 
 **System:** Inhyma_ERP (India Distribution)  
 **Scope:** Functional updates, schema migrations, UI hardening, and bug fixes.
+## [Release 2026-10-23] — Proforma Invoice Address Drawers & Future Dates, Local Purchase Safety & Landing Rate (VB), and Feed & Broadcast Ecosystem Integration
+
+### 1. Proforma Invoices: Connected Address Cards, Drawers & Future Date Constraints
+- **Expected Delivery Date (`expected_delivery_date`):**
+  - Added dedicated Expected Delivery Date input to the Proforma Invoice Add/Edit modal.
+  - Automatically defaults to the current day (`today`).
+  - Strict date rule: only today and future dates are permissible (`min={todayIso}`). Attempting to select past calendar dates is disabled in the picker.
+- **Connected Billing & Shipping Address Cards:**
+  - Company selection in the Billing and Shipping address blocks dynamically binds to the selected company profile.
+  - Selecting a company automatically fills and renders the respective Billing or Shipping Address card containing address lines, city, state, pincode, GSTIN, and contact details.
+- **Slide-Over "Add Company" Drawer (`AddCompanyDrawer.tsx`):**
+  - Integrated a `+ Add` button beside the company selector that triggers a high-density slide-over drawer.
+  - Allows immediate creation of Customer, Supplier, or Both accounts with GSTIN, PAN, primary calling phone, email, and addresses.
+  - Upon successful creation, the new company is automatically selected in the Proforma form with its addresses populated.
+- **Slide-Over "Edit Address" Drawer (`EditAddressDrawer.tsx`):**
+  - Added an `Edit` action button inside both the Billing and Shipping address preview cards.
+  - Clicking `Edit` opens the drawer prefilled with the active address data (address line 1 & 2, state, city, pincode, GSTIN).
+  - Saving the drawer updates the specific Proforma Invoice address state directly without mutating or dirtying the master company catalog.
+- **Side Scrollbar Support:**
+  - Added clean horizontal and vertical scrollbar overflow handling for tables and dense modal views.
+
+### 2. Local Purchase: Landing Rate Renaming, Side Scrollbar & Confirmed Order Delete Protection
+- **Column Header Renaming:**
+  - Standardized label across table and PDF views: renamed `Unit Landing Rate (INR)` to **`Unit Landing Rate (INR) (VB)`** to clearly designate Value-Based expense allocation.
+- **Side Scrollbar Overflow:**
+  - Added table-level horizontal side scrollbar styling for the local purchase order grid and items breakdown.
+- **Confirmed Order Delete Lockout:**
+  - In `LocalPurchasePage.tsx`, orders with status `Confirmed` strictly hide the `Delete` action button from the row action menu (`⋮`).
+  - Server-side guard in `app/purchase/local_routes.py` enforces deletion lockout: returns HTTP 400 if a deletion attempt is made on a confirmed purchase order.
+
+### 3. Feed & Broadcast Module: Ecosystem Pull & Merge Integration
+- **Upstream Merge from GitHub (`rupeshinhyma-oss/ERP`):**
+  - Clean pull and fast-forward merge of remote commits (`399c750`, `632f0e0`, `4371dad`, `3098a69`).
+  - Integrated enterprise **Feed & Broadcast Module** with RBAC and interaction privacy:
+    - **Backend Models & Endpoints (`app/feed`):** `FeedPost`, `FeedPostRecipient`, `FeedPostDepartment`, `FeedComment`, `FeedReaction`, and `FeedRead` models. Complete REST endpoints under `/api/v1/feed` for posts, pinned announcements, comments, reactions, and audience-targeted broadcasts.
+    - **Frontend Feed UI (`frontend/src/pages/feed`):** Interactive feed timeline, `FeedComposer` with department/role targeting, `FeedPostCard`, `FeedEditModal`, rich emoji reactions, and comment threading.
+    - **Alembic Reconciled Head:** Migrations `c2b3c4d5e6f7a8`, `d4e5f6a7b8c9`, and `e6f7a8b9c0d1` linearized cleanly on top of `d32a657d3f2f` to unified head `t5e6f7a8b9c0 (head)`.
+- **Product Test Alignment:**
+  - Aligned zero-stock mock queries with warehouse stock resolution in `test_crm_reports_and_analytics.py` and `test_product_dimensions_and_classification.py`.
+
 ## [Release 2026-10-23] — Machine Spare Parts View & Mapping, SideDrawer Redesign, Delete Protection, and Alembic Deployment Resilience
 
 ### 1. Dedicated Machine Spare Parts Page & View

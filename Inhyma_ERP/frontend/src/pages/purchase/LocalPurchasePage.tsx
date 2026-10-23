@@ -21,6 +21,7 @@ import {
 // The record types live in the shared data layer; re-exported so existing imports keep working.
 export type { LocalPurchaseItem, PurchaseOrderRecord } from "@/lib/purchaseApi";
 import type { PaginationMeta } from "@/types";
+import { prefetchMasterProducts, fetchMasterProducts, filterCachedProducts } from "@/lib/productSearchCache";
 
 type CatalogProduct = { product_name: string; product_code?: string | null; uom?: string | null; rate: number };
 
@@ -92,7 +93,12 @@ function SupplierCombobox({ value, onChange, options, error }: SupplierComboboxP
   const isDefaultSelect = !isOpen && value === "Select";
 
   return (
-    <div ref={containerRef} style={{ position: "relative", width: "100%" }}>
+    <div
+      ref={containerRef}
+      data-testid="local-supplier-combobox"
+      data-options-count={options.length}
+      style={{ position: "relative", width: "100%" }}
+    >
       <div
         style={{
           display: "flex",
@@ -116,7 +122,6 @@ function SupplierCombobox({ value, onChange, options, error }: SupplierComboboxP
           ref={inputRef}
           id="local-supplier-input"
           aria-label="Supplier"
-          list="local-supplier-options"
           role="combobox"
           autoComplete="off"
           type="text"
@@ -189,6 +194,7 @@ function SupplierCombobox({ value, onChange, options, error }: SupplierComboboxP
 
       {isOpen && (
         <div
+          data-testid="supplier-dropdown"
           style={{
             position: "absolute",
             top: "calc(100% + 2px)",
@@ -213,6 +219,12 @@ function SupplierCombobox({ value, onChange, options, error }: SupplierComboboxP
               cursor: "pointer",
               borderBottom: "1px solid #f1f5f9",
             }}
+            onMouseDown={(e) => {
+              e.preventDefault();
+              onChange("Select");
+              setIsOpen(false);
+              setSearch("");
+            }}
             onClick={() => {
               onChange("Select");
               setIsOpen(false);
@@ -226,6 +238,7 @@ function SupplierCombobox({ value, onChange, options, error }: SupplierComboboxP
             filteredOptions.map((opt) => (
               <div
                 key={opt}
+                data-testid={`supplier-option-${opt}`}
                 style={{
                   padding: "8px 12px",
                   fontSize: "13px",
@@ -233,6 +246,12 @@ function SupplierCombobox({ value, onChange, options, error }: SupplierComboboxP
                   fontWeight: opt === value ? 600 : 400,
                   background: opt === value ? "#eff6ff" : "transparent",
                   cursor: "pointer",
+                }}
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  onChange(opt);
+                  setIsOpen(false);
+                  setSearch("");
                 }}
                 onMouseEnter={(e) => {
                   if (opt !== value) e.currentTarget.style.backgroundColor = "#f8fafc";
@@ -262,12 +281,6 @@ function SupplierCombobox({ value, onChange, options, error }: SupplierComboboxP
           {error}
         </span>
       )}
-
-      <datalist id="local-supplier-options">
-        {options.map((n) => (
-          <option key={n} value={n} />
-        ))}
-      </datalist>
     </div>
   );
 }
@@ -425,7 +438,12 @@ export function LocalPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean
   // what each row's menu may offer this user (rules come from the database)
   const isInitialStatus = (o: PurchaseOrderRecord) => !!statusRules[o.status_key]?.initial;
   const canEditOrder = (o: PurchaseOrderRecord) => ruleCanEdit(statusRules, o.status_key, actor);
-  const canDeleteOrder = (o: PurchaseOrderRecord) => ruleCanDelete(statusRules, o.status_key, actor);
+  const canDeleteOrder = (o: PurchaseOrderRecord) => {
+    if ((o.status_key || "").toLowerCase() === "confirmed" || (o.status || "").toLowerCase() === "confirmed") {
+      return false;
+    }
+    return ruleCanDelete(statusRules, o.status_key, actor);
+  };
   const nextStatus = (o: PurchaseOrderRecord) => availableTransitions(statusRules, o.status_key, actor)[0];
   const confirmLabel = (o: PurchaseOrderRecord) => {
     const t = nextStatus(o);
@@ -560,9 +578,29 @@ export function LocalPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean
   // Section 3 & 4: Products
   const [productSearchQuery, setProductSearchQuery] = useState("");
   const [productSearchMatches, setProductSearchMatches] = useState<CatalogProduct[]>([]);
+  const [isProductDropdownOpen, setIsProductDropdownOpen] = useState(false);
+  const [isProductLoading, setIsProductLoading] = useState(false);
+  const productSearchContainerRef = useRef<HTMLDivElement>(null);
   const [formLineItems, setFormLineItems] = useState<LocalPurchaseItem[]>([]);
   const [formRemarks, setFormRemarks] = useState("");
   const [formErrors, setFormErrors] = useState<{ [key: string]: string }>({});
+
+  useEffect(() => {
+    void prefetchMasterProducts();
+  }, []);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (
+        productSearchContainerRef.current &&
+        !productSearchContainerRef.current.contains(e.target as Node)
+      ) {
+        setIsProductDropdownOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
 
   // Calculations for Expenses
   const totalExpenses = useMemo(() => {
@@ -907,30 +945,58 @@ export function LocalPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean
     window.open(`/purchase-order/bill-file/${order.id}`, "_blank");
   };
 
-  // Product search: the Product Master
+  // Product search: extracted from the Product Master with instant cache response
   const productSearchSeq = useRef(0);
-  const handleProductSearchChange = (val: string) => {
-    setProductSearchQuery(val);
-    if (!val.trim()) {
-      setProductSearchMatches([]);
-      return;
-    }
+  const fetchProducts = (queryText: string) => {
     const seq = ++productSearchSeq.current;
-    void apiGet<any[]>(`/masters/products?page=1&page_size=10&status=active&search=${encodeURIComponent(val.trim())}`)
-      .then((res) => {
-        if (seq !== productSearchSeq.current) return;
-        setProductSearchMatches(
-          (res?.data || []).map((p) => ({
-            product_name: p.product_name,
-            product_code: p.product_code,
-            uom: uomMapRef.current.get(p.uom_id) || null,
-            rate: Number(p.standard_cost) || 0,
-          }))
-        );
+    const instant = filterCachedProducts(queryText, 50);
+    if (instant.length > 0) {
+      setProductSearchMatches(
+        instant.map((p) => ({
+          product_name: p.product_name,
+          product_code: p.product_code,
+          uom: p.uom_id ? uomMapRef.current.get(p.uom_id) || null : null,
+          rate: Number(p.standard_cost) || 0,
+        }))
+      );
+      setIsProductLoading(false);
+    } else {
+      setIsProductLoading(true);
+    }
+    fetchMasterProducts(queryText, 50)
+      .then((items) => {
+        if (seq === productSearchSeq.current) {
+          setProductSearchMatches(
+            items.map((p) => ({
+              product_name: p.product_name,
+              product_code: p.product_code,
+              uom: p.uom_id ? uomMapRef.current.get(p.uom_id) || null : null,
+              rate: Number(p.standard_cost) || 0,
+            }))
+          );
+          setIsProductLoading(false);
+        }
       })
       .catch(() => {
-        if (seq === productSearchSeq.current) setProductSearchMatches([]);
+        if (seq === productSearchSeq.current) {
+          setIsProductLoading(false);
+        }
       });
+  };
+
+  const handleProductSearchChange = (val: string) => {
+    setProductSearchQuery(val);
+    setIsProductDropdownOpen(true);
+    fetchProducts(val);
+  };
+
+  const toggleProductDropdown = () => {
+    if (isProductDropdownOpen) {
+      setIsProductDropdownOpen(false);
+    } else {
+      setIsProductDropdownOpen(true);
+      fetchProducts(productSearchQuery);
+    }
   };
 
   const handleSelectProductMatch = (prod: CatalogProduct) => {
@@ -948,7 +1014,7 @@ export function LocalPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean
     };
     setFormLineItems((prev) => [...prev, newItem]);
     setProductSearchQuery("");
-    setProductSearchMatches([]);
+    setIsProductDropdownOpen(false);
   };
 
   const handleAddProductItem = () => {
@@ -1518,58 +1584,144 @@ export function LocalPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean
               <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: "8px" }}>
                 PRODUCT SEARCH
               </div>
-              <div style={{ position: "relative" }}>
-                <input
-                  type="text"
-                  placeholder="Enter Product Name / Model No"
-                  value={productSearchQuery}
-                  onChange={(e) => handleProductSearchChange(e.target.value)}
+              <div ref={productSearchContainerRef} style={{ position: "relative", width: "100%" }}>
+                <div
                   style={{
-                    width: "100%",
-                    height: "36px",
+                    display: "flex",
+                    alignItems: "center",
                     border: "1px solid #cbd5e1",
                     borderRadius: "4px",
-                    padding: "0 12px",
-                    fontSize: "13.5px",
-                    outline: "none",
+                    height: "36px",
+                    background: "#ffffff",
+                    padding: "0 8px 0 10px",
+                    boxSizing: "border-box",
+                    boxShadow: isProductDropdownOpen ? "0 0 0 2px rgba(37, 99, 235, 0.15)" : "none",
+                    transition: "border-color 0.15s, box-shadow 0.15s",
                   }}
-                />
-                {productSearchMatches.length > 0 && (
+                >
+                  <input
+                    aria-label="Product Search"
+                    type="text"
+                    placeholder="Enter Product Name / Model No"
+                    value={productSearchQuery}
+                    onFocus={() => {
+                      setIsProductDropdownOpen(true);
+                      fetchProducts(productSearchQuery);
+                    }}
+                    onChange={(e) => handleProductSearchChange(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        if (productSearchMatches.length > 0) {
+                          handleSelectProductMatch(productSearchMatches[0]);
+                        }
+                      } else if (e.key === "Escape") {
+                        setIsProductDropdownOpen(false);
+                      }
+                    }}
+                    style={{
+                      flex: 1,
+                      border: "none",
+                      outline: "none",
+                      fontSize: "13px",
+                      color: "#334155",
+                      background: "transparent",
+                      padding: 0,
+                    }}
+                  />
+                  <button
+                    type="button"
+                    aria-label="Toggle Product Dropdown"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      toggleProductDropdown();
+                    }}
+                    style={{
+                      background: "none",
+                      border: "none",
+                      cursor: "pointer",
+                      padding: "4px",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      color: "#64748b",
+                    }}
+                  >
+                    <svg
+                      style={{
+                        width: "16px",
+                        height: "16px",
+                        transition: "transform 0.2s",
+                        transform: isProductDropdownOpen ? "rotate(180deg)" : "rotate(0deg)",
+                      }}
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" />
+                    </svg>
+                  </button>
+                </div>
+                {isProductDropdownOpen && (
                   <div
                     style={{
                       position: "absolute",
-                      top: "100%",
+                      top: "calc(100% + 4px)",
                       left: 0,
                       right: 0,
                       background: "#ffffff",
                       border: "1px solid #cbd5e1",
-                      borderTop: "none",
-                      borderRadius: "0 0 4px 4px",
-                      zIndex: 50,
-                      maxHeight: "200px",
+                      borderRadius: "6px",
+                      boxShadow: "0 6px 16px rgba(0, 0, 0, 0.12)",
+                      zIndex: 100,
+                      maxHeight: "220px",
                       overflowY: "auto",
-                      boxShadow: "0 4px 12px rgba(0,0,0,0.1)",
                     }}
                   >
-                    {productSearchMatches.map((prod, idx) => (
-                      <div
-                        key={idx}
-                        onClick={() => handleSelectProductMatch(prod)}
-                        style={{
-                          padding: "8px 12px",
-                          cursor: "pointer",
-                          fontSize: "13px",
-                          borderBottom: "1px solid #f1f5f9",
-                          display: "flex",
-                          justifyContent: "space-between",
-                        }}
-                        onMouseEnter={(e) => (e.currentTarget.style.background = "#f8fafc")}
-                        onMouseLeave={(e) => (e.currentTarget.style.background = "#ffffff")}
-                      >
-                        <strong>{prod.product_name}</strong>
-                        <span style={{ color: "#64748b" }}>Rate: ₹{prod.rate.toLocaleString("en-IN")}</span>
+                    {isProductLoading ? (
+                      <div style={{ padding: "10px 12px", fontSize: "12px", color: "#64748b" }}>
+                        Loading products from Product Master...
                       </div>
-                    ))}
+                    ) : productSearchMatches.length > 0 ? (
+                      productSearchMatches.map((prod, idx) => (
+                        <div
+                          key={prod.product_code || prod.product_name + idx}
+                          role="option"
+                          aria-selected="false"
+                          onClick={() => handleSelectProductMatch(prod)}
+                          style={{
+                            padding: "9px 12px",
+                            cursor: "pointer",
+                            fontSize: "13px",
+                            borderBottom: "1px solid #f1f5f9",
+                            display: "flex",
+                            justifyContent: "space-between",
+                            alignItems: "center",
+                            transition: "background 0.1s",
+                          }}
+                          onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#f8fafc")}
+                          onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "transparent")}
+                        >
+                          <div>
+                            <strong style={{ color: "#1e293b" }}>{prod.product_name}</strong>
+                            {prod.product_code && (
+                              <span style={{ marginLeft: "8px", fontSize: "11.5px", color: "#64748b" }}>
+                                ({prod.product_code})
+                              </span>
+                            )}
+                          </div>
+                          {prod.rate > 0 && (
+                            <span style={{ color: "#64748b", fontSize: "12px" }}>
+                              Rate: ₹{prod.rate.toLocaleString("en-IN")}
+                            </span>
+                          )}
+                        </div>
+                      ))
+                    ) : (
+                      <div style={{ padding: "10px 12px", fontSize: "12px", color: "#94a3b8", fontStyle: "italic" }}>
+                        No matching products found in Product Master
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -1600,12 +1752,12 @@ export function LocalPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean
                 <table style={{ width: "100%", minWidth: "900px", borderCollapse: "separate", borderSpacing: 0 }}>
                   <thead>
                     <tr style={{ background: "#ffffff" }}>
-                      <th style={{ padding: "10px 12px", fontSize: "12px", fontWeight: 700, color: "#334155", borderBottom: "1px solid #cbd5e1", textAlign: "left", width: "24%" }}>Product Name</th>
+                      <th style={{ padding: "10px 12px", fontSize: "12px", fontWeight: 700, color: "#334155", borderBottom: "1px solid #cbd5e1", textAlign: "left", width: "27%" }}>Product Name</th>
                       <th style={{ padding: "10px 12px", fontSize: "12px", fontWeight: 700, color: "#334155", borderBottom: "1px solid #cbd5e1", textAlign: "left", width: "8%" }}>Qty</th>
-                      <th style={{ padding: "10px 12px", fontSize: "12px", fontWeight: 700, color: "#334155", borderBottom: "1px solid #cbd5e1", textAlign: "left", width: "12%" }}>Unit Rate</th>
-                      <th style={{ padding: "10px 12px", fontSize: "12px", fontWeight: 700, color: "#334155", borderBottom: "1px solid #cbd5e1", textAlign: "left", width: "12%" }}>Item Total</th>
+                      <th style={{ padding: "10px 12px", fontSize: "12px", fontWeight: 700, color: "#334155", borderBottom: "1px solid #cbd5e1", textAlign: "left", width: "10%" }}>Unit Rate</th>
+                      <th style={{ padding: "10px 12px", fontSize: "12px", fontWeight: 700, color: "#334155", borderBottom: "1px solid #cbd5e1", textAlign: "left", width: "11%" }}>Item Total</th>
                       <th style={{ padding: "10px 12px", fontSize: "12px", fontWeight: 700, color: "#334155", borderBottom: "1px solid #cbd5e1", textAlign: "left", width: "12%" }}>Expense Per Unit</th>
-                      <th style={{ padding: "10px 12px", fontSize: "12px", fontWeight: 700, color: "#334155", borderBottom: "1px solid #cbd5e1", textAlign: "left", width: "14%" }}>Unit Landing Rate (VB)</th>
+                      <th style={{ padding: "10px 12px", fontSize: "12px", fontWeight: 700, color: "#334155", borderBottom: "1px solid #cbd5e1", textAlign: "left", width: "14%" }}>Unit Landing Rate (INR) (VB)</th>
                       <th style={{ padding: "10px 12px", fontSize: "12px", fontWeight: 700, color: "#334155", borderBottom: "1px solid #cbd5e1", textAlign: "left", width: "14%" }}>Total Landing Rate (VB)</th>
                       <th style={{ padding: "10px 6px", fontSize: "12px", fontWeight: 700, color: "#334155", borderBottom: "1px solid #cbd5e1", width: "40px" }} />
                     </tr>
@@ -1630,19 +1782,50 @@ export function LocalPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean
                             />
                           </td>
                           <td style={{ padding: "6px 10px", borderBottom: "1px solid #e2e8f0" }}>
-                            <input
-                              type="number"
-                              min="1"
-                              step="any"
-                              value={row.quantity}
-                              onChange={(e) => handleUpdateLineItem(idx, "quantity", e.target.value)}
-                              style={{ width: "100%", height: "32px", border: "1px solid #cbd5e1", borderRadius: "3px", padding: "0 8px", fontSize: "12.5px" }}
-                            />
-                            {row.uom && (
-                              <span aria-label={`Unit ${idx + 1}`} style={{ marginLeft: "6px", fontSize: "12px", color: "#64748b" }}>
-                                {row.uom}
-                              </span>
-                            )}
+                            <div style={{ display: "flex", alignItems: "stretch", width: "85px", height: "32px" }}>
+                              <input
+                                type="number"
+                                min="1"
+                                step="any"
+                                value={row.quantity}
+                                onChange={(e) => handleUpdateLineItem(idx, "quantity", e.target.value)}
+                                style={{
+                                  flex: 1,
+                                  minWidth: 0,
+                                  height: "100%",
+                                  border: "1px solid #cbd5e1",
+                                  borderRight: row.uom ? "none" : "1px solid #cbd5e1",
+                                  borderRadius: row.uom ? "3px 0 0 3px" : "3px",
+                                  padding: "0 6px",
+                                  fontSize: "12.5px",
+                                  boxSizing: "border-box",
+                                  textAlign: "center",
+                                }}
+                              />
+                              {row.uom && (
+                                <span
+                                  aria-label={`Unit ${idx + 1}`}
+                                  style={{
+                                    display: "inline-flex",
+                                    alignItems: "center",
+                                    justifyContent: "center",
+                                    padding: "0 6px",
+                                    background: "#f8fafc",
+                                    border: "1px solid #cbd5e1",
+                                    borderLeft: "none",
+                                    borderRadius: "0 3px 3px 0",
+                                    fontSize: "10.5px",
+                                    fontWeight: 600,
+                                    color: "#64748b",
+                                    whiteSpace: "nowrap",
+                                    flexShrink: 0,
+                                    boxSizing: "border-box",
+                                  }}
+                                >
+                                  {row.uom}
+                                </span>
+                              )}
+                            </div>
                           </td>
                           <td style={{ padding: "6px 10px", borderBottom: "1px solid #e2e8f0" }}>
                             <input
@@ -1685,7 +1868,7 @@ export function LocalPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean
                               title="Calculated automatically (Unit Rate + Exp/Unit)"
                               style={{ height: "32px", border: "1px solid #cbd5e1", background: "#e9ecef", borderRadius: "3px", display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 8px", fontSize: "12.5px", color: "#334155", cursor: "not-allowed" }}
                             >
-                              <span>{row.unit_landing_rate ? row.unit_landing_rate.toFixed(2) : "0.00"}</span>
+                              <span>₹ {row.unit_landing_rate ? row.unit_landing_rate.toFixed(2) : "0.00"}</span>
                               <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#64748b" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }} aria-hidden="true">
                                 <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
                                 <path d="M7 11V7a5 5 0 0 1 10 0v4" />
@@ -1727,7 +1910,7 @@ export function LocalPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean
                     background: "#cbd5e1",
                     padding: "10px 16px",
                     display: "grid",
-                    gridTemplateColumns: "24% 8% 12% 12% 12% 14% 14% 40px",
+                    gridTemplateColumns: "27% 8% 10% 11% 12% 14% 14% 40px",
                     alignItems: "center",
                     fontWeight: 700,
                     fontSize: "12.5px",
@@ -3073,7 +3256,7 @@ export function LocalPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean
                             display: "inline-flex",
                             alignItems: "center",
                           }}
-                          title="View Bill File PDF"
+                          title={selectedOrder.bill_file ? `View Bill File: ${selectedOrder.bill_file}` : "View Bill File PDF"}
                         >
                           <svg
                             width="18"
@@ -3197,16 +3380,17 @@ export function LocalPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean
                       style={{
                         border: "1px solid #cbd5e1",
                         borderRadius: "4px",
-                        overflow: "hidden",
+                        overflowX: "auto",
+                        maxWidth: "100%",
                       }}
                     >
-                      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "12px" }}>
+                      <table style={{ width: "100%", minWidth: "780px", borderCollapse: "collapse", fontSize: "12px", whiteSpace: "nowrap" }}>
                         <thead>
                           <tr style={{ background: "#ffffff", borderBottom: "1px solid #cbd5e1" }}>
                             <th style={{ padding: "8px 10px", textAlign: "left", fontWeight: 700, color: "#334155", width: "55px" }}>
                               Sr No.
                             </th>
-                            <th style={{ padding: "8px 10px", textAlign: "left", fontWeight: 700, color: "#334155" }}>
+                            <th style={{ padding: "8px 10px", textAlign: "left", fontWeight: 700, color: "#334155", minWidth: "180px" }}>
                               Product Name
                             </th>
                             <th style={{ padding: "8px 10px", textAlign: "left", fontWeight: 700, color: "#334155", width: "85px" }}>
@@ -3221,8 +3405,8 @@ export function LocalPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean
                             <th style={{ padding: "8px 10px", textAlign: "left", fontWeight: 700, color: "#334155", width: "115px" }}>
                               Expense Per Unit
                             </th>
-                            <th style={{ padding: "8px 10px", textAlign: "left", fontWeight: 700, color: "#334155", width: "145px" }}>
-                              Unit Landing Rate (VB)
+                            <th style={{ padding: "8px 10px", textAlign: "left", fontWeight: 700, color: "#334155", minWidth: "165px" }}>
+                              Unit Landing Rate (INR) (VB)
                             </th>
                           </tr>
                         </thead>
@@ -3239,7 +3423,7 @@ export function LocalPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean
                               <td style={{ padding: "8px 10px", color: "#334155" }}>{item.product_name}</td>
                               <td style={{ padding: "8px 10px", color: "#334155" }}>
                                 <div>{item.quantity}</div>
-                                <div style={{ color: "#64748b", fontSize: "10.5px" }}>Nos</div>
+                                <div style={{ color: "#64748b", fontSize: "10.5px" }}>{item.uom || "Nos"}</div>
                               </td>
                               <td style={{ padding: "8px 10px", color: "#334155" }}>
                                 {formatIndianCurrency(Number(item.unit_rate) || 0)}
