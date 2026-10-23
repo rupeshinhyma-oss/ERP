@@ -38,13 +38,13 @@ def _get_alembic_command(python: str) -> list[str]:
     """Find the real alembic CLI binary or invoke with clean sys.path to avoid local directory shadowing."""
     alembic_bin = shutil.which("alembic")
     if alembic_bin:
-        return [alembic_bin, "upgrade", "head"]
+        return [alembic_bin, "upgrade", "heads"]
 
     bin_dir = Path(python).parent
     for name in ("alembic", "alembic.exe"):
         cand = bin_dir / name
         if cand.is_file():
-            return [str(cand), "upgrade", "head"]
+            return [str(cand), "upgrade", "heads"]
 
     return [
         python,
@@ -54,7 +54,7 @@ def _get_alembic_command(python: str) -> list[str]:
             "cwd = os.getcwd(); "
             "sys.path = [p for p in sys.path if p not in ('', cwd, os.path.abspath(cwd))]; "
             "from alembic.config import main; "
-            "sys.exit(main(argv=['upgrade', 'head']))"
+            "sys.exit(main(argv=['upgrade', 'heads']))"
         ),
     ]
 
@@ -172,7 +172,7 @@ def main() -> None:
             [python, "-m", "scripts.reconcile_alembic_version"],
         )
         _run_step(
-            "Applying database migrations (alembic upgrade head)",
+            "Applying database migrations (alembic upgrade heads)",
             _get_alembic_command(python),
         )
     else:
