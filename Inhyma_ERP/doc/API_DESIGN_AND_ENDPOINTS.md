@@ -244,3 +244,20 @@ Machine-to-machine internal service endpoints invoked by `ERP_Main` over authent
 > - When synchronizing catalog items from Yinglima to Inhyma, if an incoming item references a Category, Subcategory, Brand, UOM, or Tax rate not present in Inhyma, the adapter auto-creates the record on the fly before persisting the product.
 > - Preserves relational foreign key integrity without human intervention.
 
+---
+
+## 15. Product Master & Machine-Spares Compatibility Mapping Engine (`/products/machine-spares`)
+
+| Method | Endpoint URI | Description | Permission Gate |
+| :--- | :--- | :--- | :--- |
+| `GET` | `/api/v1/products/machine-spares/universal-view` | Inspect machine-wise spare parts compatibility matrix, linked codes, pricing, and stock levels | `product.view` |
+| `POST` | `/api/v1/products/machine-spares/map` | Map/associate a spare part to a machine model (`{ machine_id, spare_part_id, remarks? }`) | `product.update` |
+| `POST` | `/api/v1/products/machine-spares/unmap` | Unlink a spare part from a specific machine model (`{ machine_id, spare_part_id }`) | `product.update` |
+| `DELETE` | `/api/v1/products/machine-spares/unmap` | Idempotent alias to unlink a spare part from a machine model | `product.update` |
+
+> **Multi-Machine Association Model:**
+> - Machines and spare parts are associated through `product_machine_spares` join records.
+> - Standard spare parts can be linked to multiple machines concurrently (shared spares).
+> - Unlinking a spare part from one machine does not sever relationships with any other machine.
+
+

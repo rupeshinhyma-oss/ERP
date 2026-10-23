@@ -118,7 +118,7 @@
 
 ### Backend Stack
 - **Framework**: FastAPI (Python 3.11+) with Uvicorn ASGI server.
-- **ORM & Database**: SQLAlchemy 2.0 Async (`asyncpg` for PostgreSQL, `aiosqlite` for local dev) with Alembic migration versioning.
+- **ORM & Database**: SQLAlchemy 2.0 Async (`asyncpg` for PostgreSQL, `aiosqlite` for local dev) with Alembic migration versioning, strict single-head linear history enforcement (`tests/test_migrations_match_models.py`), idempotent DDL guards (`sa.inspect`), and container startup resilience (`alembic upgrade heads`).
 - **Data Validation**: Pydantic v2 schemas for high-throughput serialization.
 - **Authentication**: Argon2id password hashing (`argon2-cffi`) and PyJWT (HMAC-SHA256).
 - **Caching**: Dual-backend (`InMemoryCacheBackend` with LRU eviction and Redis client).
@@ -381,12 +381,24 @@ A user may be assigned any number of Roles simultaneously (`POST /users/{id}/rol
   - **Agent Types:** Multi-tier agent classifications and commission brackets.
 
 ### 8.5. Product Catalog & Dynamic Specification Builder
-- **Endpoints:** `GET /products`, `POST /products`, `PATCH /products/{id}`, `POST /products/{id}/specs`, `GET /products/{id}/datasheet-pdf`, `GET /masters/products/machine-spares/universal-view`, `GET /masters/products/package-dimensions`.
+- **Endpoints:** `GET /products`, `POST /products`, `PATCH /products/{id}`, `POST /products/{id}/specs`, `GET /products/{id}/datasheet-pdf`, `GET /masters/products/machine-spares/universal-view`, `POST /masters/products/machine-spares/map`, `POST /masters/products/machine-spares/unmap`, `GET /masters/products/package-dimensions`.
 - **Features:** Dynamic JSON specification builder allowing arbitrary technical specifications (e.g. Dimensions, Voltage, Speed, Material). Includes multi-image upload, supplier association, and ReportLab PDF datasheet generation.
 - **Master Multi-View Navigation Strip (`master-view-nav`):**
   - **`📦 Product Master` (`catalog`):** Main product catalog grid featuring column pinning, inline stock inspection, and bulk activation/deactivation.
   - **`⚙️ Machine-Spares Universal View` (`universal-view`):** Machine-wise spare parts breakdown showing all linked spare parts, codes, stock levels, and compatibility notes with a dedicated link modal (`/masters/products/machine-spares/universal-view`).
   - **`📐 Dimensions & Weights Report` (`dimensions-report`):** Package-level breakdown for multi-box products, displaying Length, Width, Height, CBM, Net Weight, and Gross Weight with direct CSV and XLSX export triggers.
+- **Dedicated Machine Spare Parts Management Interface:**
+  - Provides a dedicated 2-tab view:
+    - **`Selected (<count>)`**: Shows spare parts mapped to the current machine with quick `Remove` unlinking.
+    - **`All Spare Parts (<count>)`**: Global catalog of spare parts with search, pagination, and `+ Add` / `✓ Added` actions.
+  - Full 11-column data table layout: `#`, `PART NO.`, `ITEM CODE`, `PRODUCT NAME`, `BRAND`, `CATEGORY`, `SUB CATEGORY`, `OEM COMPATIBILITY`, `PRICE (INR)`, `SPECIFICATION`, `ACTION`.
+  - Supports multi-machine relationships: machines can share identical standard spares (e.g. standard bearings, belts) or maintain exclusive machine-specific spare parts.
+- **SideDrawer UI Architecture:**
+  - Upgraded with `headerActions` slot: `Edit Product` button is placed at the top-right header of `SideDrawer.tsx` alongside the close button.
+  - Eliminated bottom fixed button row to allow clean, unobstructed scrolling of product attributes and media.
+  - Embedded dedicated **Spare Parts** section for Machine products displaying mapped spares count, item preview, and a direct `Manage Spare Parts →` shortcut.
+- **Master Catalog Deletion Safety:**
+  - Row-level `Delete` action button removed from the Product Master list view (`ProductListPage.tsx`) to guard against accidental deletion of core catalog records.
 - **Real-Time Duplicate Prevention Guard (`ProductNameSuggestions`):**
   - Intercepts operator input in real-time, executing trigram/substring match queries against existing product catalog names to prevent creating duplicate SKU entries.
 - **Dimensional CBM Auto-Calculation:**

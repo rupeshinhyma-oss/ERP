@@ -2,6 +2,58 @@
 
 **System:** Inhyma_ERP (India Distribution)  
 **Scope:** Functional updates, schema migrations, UI hardening, and bug fixes.
+## [Release 2026-10-23] — Machine Spare Parts View & Mapping, SideDrawer Redesign, Delete Protection, and Alembic Deployment Resilience
+
+### 1. Dedicated Machine Spare Parts Page & View
+- **Dual-Tab Interface (`Selected` & `All Spare Parts`):**
+  - Built dedicated Machine Spares management page displaying tabbed navigation:
+    - **`Selected (<count>)`**: Displays only the spare parts currently mapped and compatible with the selected Machine.
+    - **`All Spare Parts (<count>)`**: Displays the global catalog of spare parts with search and pagination, allowing operators to quickly link/unlink spares.
+- **11-Column Table Architecture:**
+  - Standardized complete 11-column data table:
+    1. `#` (Row index)
+    2. `PART NO.` (Spare part number)
+    3. `ITEM CODE` (SKU identifier)
+    4. `PRODUCT NAME` (Catalog item name)
+    5. `BRAND` (Manufacturer brand badge)
+    6. `CATEGORY` (Top-level taxonomy)
+    7. `SUB CATEGORY` (Secondary classification)
+    8. `OEM COMPATIBILITY` (OEM model notes)
+    9. `PRICE (INR)` (Standard unit price formatted in INR)
+    10. `SPECIFICATION` (Technical specs / attributes)
+    11. `ACTION` (`+ Add` to machine, `✓ Added` status indicator, `Remove` from machine).
+- **Multi-Machine Relational Mapping:**
+  - Architecture fully supports shared and unique spare parts across machines:
+    - Multiple machines can share identical standard spares (e.g. common bearings, belts, heating elements).
+    - Specialized machines retain their own distinct machine-specific spare parts.
+    - Mapping and unmapping actions dynamically update `product_machine_spares` relational records and `applicable_machine_ids` arrays.
+
+### 2. SideDrawer Redesign & Spare Parts Integration
+- **Header Action Button Elevation:**
+  - Upgraded [`SideDrawer.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/components/SideDrawer.tsx) with a new `headerActions` prop slot.
+  - Moved the `Edit Product` action button from the bottom fixed footer directly into the drawer's top-right header adjacent to the close (`✕`) button.
+  - Removed the redundant bottom fixed action button row, eliminating bottom-bar occlusion and allowing the drawer content to scroll freely to the viewport bottom.
+- **Dedicated Spare Parts Section in Machine Detail Drawer:**
+  - When viewing any Machine in the Product Master detail drawer, a dedicated **Spare Parts** section renders the count of mapped spares.
+  - Lists mapped spare items with part code, name, and brand.
+  - Provides a direct `Manage Spare Parts →` action link that opens the dedicated Machine Spares page for that specific machine.
+
+### 3. Product Master Catalog Safety & Delete Option Removal
+- **Master Catalog Guard (`ProductListPage.tsx`):**
+  - Removed the row-level `Delete` action button from the `ACTION` column in the Product Master list view.
+  - Prevents accidental operator deletion of master catalog products that may be referenced in historical transactions, purchase orders, or BOM mappings.
+
+### 4. Alembic Migration Chain Merge & Deployment Resilience
+- **Alembic Multi-Head Reconciliation:**
+  - Resolved deployment failure on Render where `server.py` halted with exit code `255` (`Multiple head revisions are present for given argument 'head'`).
+  - Merged two divergent branch heads (`m9c0d1e2f3a4` inventory integrity and `q2c3d4e5f6a7` task recurring schedules) into single unified head `d32a657d3f2f` via [`d32a657d3f2f_merge_inventory_and_crm_heads.py`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/backend/alembic/versions/d32a657d3f2f_merge_inventory_and_crm_heads.py).
+- **Idempotent Migration Hardening:**
+  - Added `sa.inspect(conn)` guards to [`n5d6e7f8g9h0_add_company_id_to_crm_leads.py`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/backend/alembic/versions/n5d6e7f8g9h0_add_company_id_to_crm_leads.py) and [`p6e7f8g9h0i1_create_crm_quotations_and_lead_products.py`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/backend/alembic/versions/p6e7f8g9h0i1_create_crm_quotations_and_lead_products.py), ensuring table and column additions are idempotent and skip gracefully if already present in production.
+- **Server Startup Hardening (`server.py`):**
+  - Updated [`server.py`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/backend/server.py#L38-L58) to execute `alembic upgrade heads` (plural) during container boot, ensuring multi-branch compatibility and preventing startup termination.
+- **Verification:**
+  - Full test verification passing with `test_single_migration_head`, `test_tasks_recurring` (19/19 passed), and `test_health`.
+
 ## [Release 2026-10-22] — Import Purchase: Real Uploaded Invoice File Display, Zero-Synthetic-PDF Enforcement & Dedicated Streaming Endpoint
 
 ### 1. Zero Synthetic PDF Generation in Import Purchase

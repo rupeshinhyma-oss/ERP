@@ -23,6 +23,7 @@ Welcome to the dedicated documentation directory for **Inhyma_ERP** (India Distr
 
 - 📜 **[Changelog & Function Changes](CHANGELOG_AND_FUNCTION_CHANGES.md)**:
   - Chronological history of all functional updates, migrations, and bug fixes.
+  - Release October 23, 2026: Machine Spare Parts Dedicated Management (dual tabs `Selected` and `All Spare Parts`, 11-column data table, multi-machine shared & unique compatibility mapping); SideDrawer Header Action Button Architecture (`headerActions` slot elevation, bottom button elimination, dedicated Machine Spare Parts drawer section with direct navigation); Product Master Deletion Safety (removed row `Delete` action to guard master catalog); Alembic Migration Chain Merge & Container Startup Hardening (unified head `d32a657d3f2f`, idempotent DDL inspection checks, and `alembic upgrade heads` startup resilience).
   - Release October 22, 2026 (Part 2): Import Purchase: Real Uploaded Invoice File Display, Zero-Synthetic-PDF Policy & Dedicated Streaming Endpoint (`GET /purchase/import-orders/{id}/bill-file` with Bearer & `?token=` query auth), Closed Consignment Action Menu Lock (strictly displays `Download Purchase` only, removing Edit/Confirm/Delete).
   - Release October 22, 2026 (Part 1): CRM Full Suite (Phases 1–6: dynamic pipeline stages, drag-and-drop Kanban board, bulk CSV import wizard with auto-mapping & deduplication, round-robin salesperson lead distribution, 360° lead timeline, company master linking, follow-up sync to workforce tasks, and branded ReportLab Quotation PDF); Workforce Recurring Tasks Scheduling Engine (recurring sub-tab in `/tasks`, modal scheduler, `recurring_worker.py` daemon); Product Sync Adapter (Yinglima -> Inhyma with auto-provisioning of missing relational dependencies).
   - Release October 19, 2026: Universal Page Header Geometry & Spacing Standardization (`12px 20px`), Global 35px Header Action Button & Isolated Popover Standard (`.page-header-actions`), Universal Filter-Above-KPI Placement Hierarchy across all modules, and Minimalist Header Cleanups on Trash and Audit modules.
@@ -41,7 +42,7 @@ Welcome to the dedicated documentation directory for **Inhyma_ERP** (India Distr
   - Exhaustive 15-section technical manual covering all modules, database schemas, frontend tokens, and developer guidelines.
 
 - 🛡️ **[Disaster Recovery & Operational Runbooks](DISASTER_RECOVERY_AND_RUNBOOKS.md)**:
-  - Database pooler failover, Supabase storage synchronization procedures, and Alembic version desynchronization recovery (RB-03).
+  - Database pooler failover, Supabase storage synchronization procedures, Alembic version desynchronization recovery (RB-03), and resolving divergent migration heads (RB-04).
 
 ---
 

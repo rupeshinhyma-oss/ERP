@@ -384,7 +384,21 @@ Manage complete vendor team directory:
 10. **PRIMARY UOM:** Base unit (e.g. PCS, SET, KG).
 11. **PACKAGING CBM:** Calculated volume ($L \times W \times H / 1,000,000$).
 12. **STATUS:** `Active` / `Inactive` badge.
-13. **ACTIONS:** View Detail Drawer, Edit Product, Download PDF Datasheet, Delete (strictly zero-stock locked).
+13. **ACTIONS:**
+    - **View Detail Drawer** (`👁️`): Opens the full-height `SideDrawer` displaying complete product specifications, pricing, media gallery, and machine-spare links.
+    - **Edit Product** (`✏️`): Opens the full Add/Edit product modal.
+    - **Download PDF Datasheet** (`📄`): Downloads ReportLab PDF datasheet.
+    - *Note on Delete*: Row-level `Delete` action has been intentionally removed from the master list table to prevent accidental deletion of enterprise catalog items.
+
+### 6.2. Product View SideDrawer Architecture
+- **Header Actions Positioning:**
+  - The `Edit Product` action button is positioned at the top-right header of `SideDrawer.tsx` within the dedicated `headerActions` slot, adjacent to the close button (`✕`).
+  - The bottom fixed footer button row has been eliminated, ensuring uninterrupted scrolling of product specifications, dimensions, and photo galleries down to the viewport base.
+- **Dedicated Machine Spare Parts Section:**
+  - For products identified as `Machine` (`product_type == "Machine"`), the drawer includes an interactive **Spare Parts** section.
+  - Displays total count of currently mapped compatible spare parts.
+  - Lists mapped spares with Part Code, Name, and Brand badges.
+  - Features a prominent `Manage Spare Parts →` button that directly opens the dedicated Machine Spares management interface for that machine.
 
 ### 6.3. Add / Edit Product Form Fields
 - **Basic Details:**
@@ -418,10 +432,45 @@ Manage complete vendor team directory:
 - **Cloud Media & Photo Upload:**
   - Multi-image uploader uploading directly to **Supabase Storage** (`product-images` bucket).
 
+### 6.4. Machine Spare Parts Dedicated Management View
+- **Navigation:** Accessible from the Product Master list view, the Machine View SideDrawer (`Manage Spare Parts →`), or `/masters/products/machine-spares/:machineId`.
+- **Dual-Tab Architecture:**
+  1. **`Selected (<count>)` Tab:**
+     - Displays strictly the spare parts currently associated with the selected machine.
+     - Action column displays a `Remove` button to unlink the spare from this machine.
+  2. **`All Spare Parts (<count>)` Tab:**
+     - Catalogs all global spare parts available in the master inventory.
+     - Search bar filters by Part No, Item Code, Product Name, Brand, and OEM Compatibility.
+     - Action column displays `+ Add` for unlinked spares or a disabled `✓ Added` indicator for already mapped spares.
+- **11-Column Table Layout:**
+  1. `#`: Sequential index.
+  2. `PART NO.`: Spare part manufacturing number.
+  3. `ITEM CODE`: Product SKU / code.
+  4. `PRODUCT NAME`: Full internal catalog description.
+  5. `BRAND`: Brand classification badge.
+  6. `CATEGORY`: Top-level taxonomy.
+  7. `SUB CATEGORY`: Sub-level taxonomy.
+  8. `OEM COMPATIBILITY`: Compatible models and machine tags.
+  9. `PRICE (INR)`: Standard selling price formatted in INR currency (`₹XX,XXX.XX`).
+  10. `SPECIFICATION`: Technical specifications and parameter attributes.
+  11. `ACTION`: Interactive association controls (`+ Add`, `✓ Added`, `Remove`).
+- **Multi-Machine Association Model:**
+  - Spares can be shared across multiple machines (e.g. universal bearings, sensors) or assigned exclusively to a single machine.
+  - Unlinking a spare part from one machine does not alter its mapping to any other machine.
+
 ### Test Cases
 - [ ] Create a product, enter Length: `100`, Width: `50`, Height: `40`. Verify CBM calculates to `0.200000`.
 - [ ] Select HSN code with 13% Refund VAT and confirm Refund VAT % field auto-populates with `13`.
 - [ ] Click "Download PDF Datasheet" (`GET /api/v1/products/{id}/datasheet-pdf`) and verify ReportLab PDF generates.
+- [ ] Open Product Master table and verify the `ACTION` column contains View (`👁️`), Edit (`✏️`), and Datasheet (`📄`), with no `Delete` button present.
+- [ ] Open a Machine product's detail drawer and verify:
+  - `Edit Product` button is rendered at the top-right header next to the close (`✕`) button.
+  - Bottom drawer area has no sticky footer buttons.
+  - Dedicated **Spare Parts** section renders the mapped spare parts count and `Manage Spare Parts →` button.
+- [ ] Click `Manage Spare Parts →` and verify the dedicated 2-tab view opens:
+  - `Selected` tab shows only mapped spares with a `Remove` action.
+  - `All Spare Parts` tab shows the full spare catalog with 11 columns, real-time search, and `+ Add` / `✓ Added` buttons.
+  - Add a spare part in `All Spare Parts` tab and confirm it immediately appears in `Selected` tab with an incremented tab badge count.
 
 ---
 

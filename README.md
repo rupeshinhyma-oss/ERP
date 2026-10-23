@@ -24,7 +24,7 @@ The ecosystem comprises three autonomous systems:
    - FastAPI Backend (Port `8002`), React + TypeScript SPA Frontend (Port `5174`)
    - Complete visual uniqueness across all 39 sidebar routes with dedicated SVG icons.
    - Dynamic branding resolved from `ERP Settings -> Company Name` via unauthenticated contract `GET /organizations/public`.
-   - Local Argon2id Auth, Enterprise Tasks Module v2 (Jira-style boards, recurring tasks daemon worker, escalations, holds), CRM Full Suite (Pipelines, Kanban, Bulk Import, Round-Robin Distribution, Branded Quotations Engine), Local & Import Purchase with Real Bill Streaming, Master Data, Inquiries, Planning Sheets, Transactional Outbox, Standalone Background Queue Worker.
+   - Local Argon2id Auth, Enterprise Tasks Module v2 (Jira-style boards, recurring tasks daemon worker, escalations, holds), CRM Full Suite (Pipelines, Kanban, Bulk Import, Round-Robin Distribution, Branded Quotations Engine), Local & Import Purchase with Real Bill Streaming, Product Master (Dedicated Machine Spares Dual-Tab Management, SideDrawer Header Actions, Accidental Delete Protection), Inquiries, Planning Sheets, Transactional Outbox, Standalone Background Queue Worker, Alembic Multi-Branch Deployment Resilience.
 
 ---
 
