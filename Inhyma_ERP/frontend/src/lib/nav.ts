@@ -37,6 +37,7 @@ export const NAV_SECTIONS: NavSection[] = [
     label: "DASHBOARD",
     items: [
       { key: "dashboard", label: "Dashboard", path: "/dashboard", icon: "dashboard" },
+      { key: "feed", label: "Feed", path: "/feed", icon: "messageSquare", permission: "feed.view" },
     ],
   },
   {
@@ -175,6 +176,7 @@ export const PAGE_TITLES: Record<string, string> = {
   "lead-list": "Leads",
   trash: "Trash Management",
   dashboard: "Dashboard",
+  feed: "Feed & Broadcasts",
   reports: "Reports & Analytics",
   inquiries: "Inquiries",
   proforma: "Proforma Invoices",

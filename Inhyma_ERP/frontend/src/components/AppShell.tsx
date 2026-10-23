@@ -83,7 +83,18 @@ function getNotificationCategoryMeta(n: InAppNotification) {
   let badgeColor = "#475569";
   let badgeBorder = "#cbd5e1";
 
-  if (isOverdue) {
+  if (type.includes("feed")) {
+    if (type.includes("comment")) {
+      badgeLabel = "💬 FEED COMMENT";
+    } else if (type.includes("discussion")) {
+      badgeLabel = "👥 FEED REPLY";
+    } else {
+      badgeLabel = "📢 ANNOUNCEMENT";
+    }
+    badgeBg = "#eff6ff";
+    badgeColor = "#1d4ed8";
+    badgeBorder = "#bfdbfe";
+  } else if (isOverdue) {
     badgeLabel = "⚠️ OVERDUE";
     badgeBg = "#fef2f2";
     badgeColor = "#dc2626";

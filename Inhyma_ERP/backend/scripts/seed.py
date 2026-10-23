@@ -386,6 +386,10 @@ BOOTSTRAP_PERMISSIONS: list[tuple[str, str, str, str, str, str]] = [
     ("crm.leads.import", "crm", "crm-leads", "import", "ALL", "Import CRM leads via CSV files."),
     ("crm.leads.view", "crm", "crm-leads", "view", "ALL", "View CRM leads and import batches."),
     ("crm.leads.manage", "crm", "crm-leads", "manage", "ALL", "Full administrative control over CRM leads."),
+    # Feed & Broadcast Messaging
+    ("feed.view", "feed", "feed", "view", "ALL", "View accessible announcements and broadcast messages."),
+    ("feed.create", "feed", "feed", "create", "ALL", "Create and publish feed announcements to all or selected employees."),
+    ("feed.manage", "feed", "feed", "manage", "ALL", "Full administrative management of all feed announcements, drafts, and recipients."),
 ]
 
 SUPER_ADMIN_ROLE_NAME = "super_admin"
@@ -426,6 +430,7 @@ USER_ROLE_PERMISSION_CODES: list[str] = [
     "task.view",
     "task.assign",
     "task.escalate",
+    "feed.view",
 ]
 
 

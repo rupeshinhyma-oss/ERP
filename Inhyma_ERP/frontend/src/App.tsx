@@ -23,6 +23,7 @@ import { auth } from "@/lib/auth";
 import { LoginPage } from "@/pages/Login";
 import { AuthCallbackPage } from "@/pages/AuthCallback";
 import { DashboardPage } from "@/pages/Dashboard";
+import { FeedPage } from "@/pages/FeedPage";
 import { ForbiddenPage } from "@/pages/Forbidden";
 
 function HrmsRouteGuard({ permission, children }: { permission: string; children: React.ReactNode }) {
@@ -178,6 +179,7 @@ export function App() {
           <Route path="/quote/:token" element={<PublicSupplierQuotePage />} />
           <Route path="/" element={<Navigate to="/dashboard" replace />} />
           <Route path="/dashboard" element={<DashboardPage />} />
+          <Route path="/feed" element={<FeedPage />} />
           <Route path="/403" element={<ForbiddenPage />} />
           <Route path="/organization" element={<OrganizationPage />} />
           <Route path="/erp-settings" element={<OrganizationPage />} />
