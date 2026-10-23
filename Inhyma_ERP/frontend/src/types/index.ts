@@ -328,6 +328,7 @@ export interface Product extends MasterRecord {
   width?: number | null;
   height?: number | null;
   packaging_unit_cbm?: number | null;
+  cbm?: number | string | null;
   color?: string | null;
   material?: string | null;
   current_stock?: number;
@@ -343,6 +344,7 @@ export interface Product extends MasterRecord {
   hsn_number?: string | null;
   gst_percent?: number | null;
   import_duty_percent?: number | null;
+  packages?: ProductDimensionRow[] | null;
   dimensions_rows?: ProductDimensionRow[] | null;
 }
 
@@ -353,6 +355,9 @@ export interface ProductDimensionRow {
   length?: number | string;
   width?: number | string;
   height?: number | string;
+  length_cm?: number | string;
+  width_cm?: number | string;
+  height_cm?: number | string;
   cbm?: number | string;
   net_weight?: number | string;
   gross_weight?: number | string;

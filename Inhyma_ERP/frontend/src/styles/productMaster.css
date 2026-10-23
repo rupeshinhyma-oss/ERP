@@ -541,3 +541,212 @@
   background: #94a3b8;
   cursor: not-allowed;
 }
+
+/* Product Type Badges in Table Rows */
+.pm-type-badge {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 1.5px 8px;
+  border-radius: 12px;
+  line-height: 1.35;
+  border: 1px solid transparent;
+  width: fit-content;
+}
+
+.pm-type-badge.pm-type-spare {
+  color: #16a34a;
+  background-color: #dcfce7;
+  border-color: #bbf7d0;
+  cursor: default;
+  user-select: none;
+}
+
+.pm-type-badge.pm-type-machine {
+  color: #0284c7;
+  background-color: #e0f2fe;
+  border-color: #bae6fd;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.pm-type-badge.pm-type-machine:hover {
+  background-color: #bae6fd;
+  color: #0369a1;
+  border-color: #7dd3fc;
+}
+
+/* ==========================================================================
+   Spare Parts of Machine Page View (Matching Figma Prototype)
+   ========================================================================== */
+.pm-spares-page {
+  padding: 16px 24px 40px;
+}
+
+.pm-spares-topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.pm-spares-title {
+  font-size: 20px;
+  font-weight: 700;
+  color: #1e293b;
+  margin: 0;
+}
+
+.pm-spares-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background-color: #0061f2;
+  color: #ffffff;
+  border: 1px solid #0061f2;
+  border-radius: 6px;
+  padding: 8px 18px;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  letter-spacing: 0.02em;
+  transition: background-color 0.15s ease, opacity 0.15s ease;
+}
+
+.pm-spares-action-btn:hover:not(:disabled) {
+  background-color: #004ecc;
+}
+
+.pm-spares-action-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.pm-spares-card {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+  overflow: hidden;
+}
+
+.pm-spares-tabs {
+  display: flex;
+  gap: 24px;
+  border-bottom: 1px solid #e2e8f0;
+  padding: 0 18px;
+  background: #ffffff;
+}
+
+.pm-spares-tab-btn {
+  background: none;
+  border: none;
+  border-bottom: 2.5px solid transparent;
+  color: #64748b;
+  font-weight: 600;
+  font-size: 13.5px;
+  padding: 12px 6px;
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+
+.pm-spares-tab-btn:hover {
+  color: #1e293b;
+}
+
+.pm-spares-tab-btn.active {
+  color: #0061f2;
+  border-bottom-color: #0061f2;
+  font-weight: 700;
+}
+
+.pm-spares-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 18px;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.pm-spares-table-wrapper {
+  overflow-x: auto;
+  border-top: 1px solid #f1f5f9;
+}
+
+.pm-spares-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 13px;
+}
+
+.pm-spares-table th {
+  background: #ffffff;
+  color: #334155;
+  font-weight: 600;
+  font-size: 12.5px;
+  padding: 10px 12px;
+  border-bottom: 1px solid #e2e8f0;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.pm-spares-table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid #f1f5f9;
+  color: #334155;
+  white-space: nowrap;
+}
+
+.pm-spares-table tr:hover td {
+  background-color: #f8fafc;
+}
+
+.pm-spares-link {
+  color: #0061f2;
+  text-decoration: none;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.pm-spares-link:hover {
+  text-decoration: underline;
+  color: #004bba;
+}
+
+.pm-spares-pagination {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 18px;
+  border-top: 1px solid #f1f5f9;
+  font-size: 13px;
+  color: #64748b;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.pm-spares-page-btn {
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  padding: 5px 12px;
+  border-radius: 4px;
+  font-size: 12.5px;
+  color: #334155;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.pm-spares-page-btn:hover:not(:disabled) {
+  background: #f1f5f9;
+  border-color: #94a3b8;
+}
+
+.pm-spares-page-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
