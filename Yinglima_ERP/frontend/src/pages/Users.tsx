@@ -541,6 +541,21 @@ export function UsersPage() {
     });
     if (!confirmed) return;
 
+    const userIds = new Set(eligibleUsers.map((u) => u.id));
+    const previousRows = [...rows];
+
+    // 1. INSTANT 0ms OPTIMISTIC CUT-OFF
+    setSelectedIds(new Set());
+    if (statusFilter === "ACTIVE") {
+      setRows((prev) => prev.filter((u) => !userIds.has(u.id)));
+    } else {
+      setRows((prev) =>
+        prev.map((u) =>
+          userIds.has(u.id) ? { ...u, status: "INACTIVE", is_active: false } : u
+        )
+      );
+    }
+
     setBulkDeactivateLoading(true);
     try {
       const results = await Promise.allSettled(
@@ -559,15 +574,12 @@ export function UsersPage() {
 
       if (successfulIds.size > 0) {
         showToast(`Successfully deactivated ${successfulIds.size} user account(s).`, "success");
-        setRows((prev) =>
-          prev.map((u) =>
-            successfulIds.has(u.id) ? { ...u, status: "INACTIVE", is_active: false } : u
-          )
-        );
-        setSelectedIds(new Set());
+        setReloadCounter((c) => c + 1);
       }
 
       if (failureCount > 0) {
+        // Rollback on any failure
+        setRows(previousRows);
         showToast(`${failureCount} user(s) could not be deactivated.`, "warning");
       }
     } catch (err) {

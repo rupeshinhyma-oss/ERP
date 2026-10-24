@@ -126,6 +126,7 @@ export interface ConsignmentProductItem {
   supplier_id?: string | null;
   supplier_name?: string | null;
   supplier_brand?: string | null;
+  linked_supplier_ids?: string[];
 }
 
 export interface BillExtractedItem {

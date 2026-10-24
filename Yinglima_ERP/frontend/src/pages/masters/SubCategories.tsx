@@ -5,7 +5,6 @@ import { MasterPage, type FormState } from "@/components/MasterPage";
 import { StatusBadge } from "@/components/ui";
 import {
   SearchableSelectField,
-  StatusSelectField,
   TextField,
   nullIfBlank,
 } from "@/components/fields";
@@ -101,7 +100,6 @@ export function SubCategoriesPage() {
               ))}
           </SearchableSelectField>
           <TextField id="name" label="Sub-Category Name *" required maxLength={150} value={f.name} onChange={(v) => set("name", v)} />
-          <StatusSelectField value={f.status} onChange={(v) => set("status", v)} />
         </div>
       )}
       detailFields={(s) => [

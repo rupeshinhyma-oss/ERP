@@ -2261,12 +2261,23 @@ export function SuppliersPage() {
       variant: "warning",
     });
     if (!confirmed) return;
+    const idsToDeactivate = [...selectedIds];
+    const previousRows = [...rows];
+
+    // 1. INSTANT 0ms OPTIMISTIC CUT-OFF
+    setSelectedIds([]);
+    if (statusTab === "active") {
+      setRows((prev) => prev.filter((s) => !idsToDeactivate.includes(s.id)));
+    }
+
+    // 2. Server persistence
     await guardRowAction("bulk-deactivate", async () => {
       try {
-        await Promise.all(selectedIds.map((id) => apiPost(`/suppliers/${id}/deactivate`, {})));
-        setSelectedIds([]);
+        await Promise.all(idsToDeactivate.map((id) => apiPost(`/suppliers/${id}/deactivate`, {})));
         reload();
       } catch (err) {
+        setRows(previousRows);
+        setSelectedIds(idsToDeactivate);
         setError(err);
       }
     });
@@ -2281,12 +2292,23 @@ export function SuppliersPage() {
       variant: "primary",
     });
     if (!confirmed) return;
+    const idsToActivate = [...selectedIds];
+    const previousRows = [...rows];
+
+    // 1. INSTANT 0ms OPTIMISTIC CUT-OFF
+    setSelectedIds([]);
+    if (statusTab === "inactive") {
+      setRows((prev) => prev.filter((s) => !idsToActivate.includes(s.id)));
+    }
+
+    // 2. Server persistence
     await guardRowAction("bulk-activate", async () => {
       try {
-        await Promise.all(selectedIds.map((id) => apiPost(`/suppliers/${id}/activate`, {})));
-        setSelectedIds([]);
+        await Promise.all(idsToActivate.map((id) => apiPost(`/suppliers/${id}/activate`, {})));
         reload();
       } catch (err) {
+        setRows(previousRows);
+        setSelectedIds(idsToActivate);
         setError(err);
       }
     });

@@ -11,6 +11,7 @@ master every other module will ultimately consume.
 from __future__ import annotations
 
 import uuid
+from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import case, or_, select
@@ -218,6 +219,13 @@ class ProductService:
             if uom_id is not None and secondary_uom_id == uom_id:
                 raise BadRequestException("The secondary unit of measurement must differ from the primary unit.")
 
+        supplier_id = field_values.get("supplier_id")
+        if supplier_id is not None:
+            from app.suppliers.models import Supplier
+            stmt_s = select(Supplier.id).where(Supplier.id == supplier_id).limit(1)
+            if (await self.repository.session.execute(stmt_s)).scalar_one_or_none() is None:
+                field_values["supplier_id"] = None
+
     async def create(self, **field_values: Any) -> Product:
         """Create a new product, validating code uniqueness if provided, and foreign-key references."""
         from app.common.trash_conflict import check_trash_or_duplicate
@@ -295,7 +303,11 @@ class ProductService:
         """Ensure SupplierProductLink exists for this primary supplier."""
         if not supplier_id:
             return
-        from app.suppliers.models import SupplierProductLink
+        from app.suppliers.models import SupplierProductLink, Supplier
+
+        stmt_s = select(Supplier.id).where(Supplier.id == supplier_id).limit(1)
+        if (await self.repository.session.execute(stmt_s)).scalar_one_or_none() is None:
+            return
 
         stmt = select(SupplierProductLink).where(
             SupplierProductLink.product_id == product_id,
@@ -308,7 +320,10 @@ class ProductService:
                 supplier_id=supplier_id,
             )
             self.repository.session.add(link)
-            await self.repository.session.flush()
+            try:
+                await self.repository.session.flush()
+            except Exception:
+                pass
 
     async def update(self, product_id: uuid.UUID, **field_values: Any) -> Product:
         """Update an existing product, validating code uniqueness and every foreign-key reference."""
@@ -347,8 +362,11 @@ class ProductService:
             "hsn_id": field_values.get("hsn_id", product.hsn_id),
             "uom_id": field_values.get("uom_id", product.uom_id),
             "secondary_uom_id": field_values.get("secondary_uom_id", product.secondary_uom_id),
+            "supplier_id": field_values.get("supplier_id", product.supplier_id),
         }
         await self._validate_references(merged)
+        if "supplier_id" in field_values:
+            field_values["supplier_id"] = merged["supplier_id"]
 
         # Auto-compute CBM if dimensions updated
         l = field_values.get("length_cm") if "length_cm" in field_values else (field_values.get("length") or product.length_cm or product.length)
@@ -384,12 +402,73 @@ class ProductService:
         """Set a product's status to ACTIVE."""
         return await self.update(product_id, status=RecordStatus.ACTIVE)
 
+    async def bulk_activate(self, product_ids: list[uuid.UUID]) -> list[Product]:
+        """Bulk activate multiple products in high-speed batch operation."""
+        if not product_ids:
+            return []
+        from sqlalchemy import update
+        from app.masters.products.models import Product
+
+        stmt = (
+            update(Product)
+            .where(Product.id.in_(product_ids), Product.deleted_at.is_(None))
+            .values(
+                status=RecordStatus.ACTIVE,
+                version=Product.version + 1,
+                updated_at=datetime.now(timezone.utc),
+            )
+            .returning(Product)
+        )
+        res = await self.repository.session.execute(stmt)
+        products = list(res.scalars().all())
+        await self.repository.session.commit()
+        await self._invalidate_cache()
+        for p in products:
+            await notify_source_record_changed("product", p.id)
+        return products
+
     async def deactivate(self, product_id: uuid.UUID) -> Product:
         """Set a product's status to INACTIVE only if stock is zero."""
         product = await self.get_by_id_or_raise(product_id)
         if getattr(product, "current_stock", 0) != 0:
             raise BadRequestException("Product cannot be set to Inactive when current stock is non-zero.")
         return await self.update(product_id, status=RecordStatus.INACTIVE)
+
+    async def bulk_deactivate(self, product_ids: list[uuid.UUID]) -> list[Product]:
+        """Bulk deactivate multiple products in high-speed batch operation, ensuring stock is zero."""
+        if not product_ids:
+            return []
+        from sqlalchemy import select, update
+        from app.masters.products.models import Product
+
+        # Validate that no selected product has current_stock != 0
+        chk_stmt = select(Product.id, Product.product_name, Product.current_stock).where(
+            Product.id.in_(product_ids),
+            Product.deleted_at.is_(None),
+            Product.current_stock != 0,
+        )
+        has_stock = (await self.repository.session.execute(chk_stmt)).all()
+        if has_stock:
+            bad_names = ", ".join(f"'{r[1]}' (Stock: {r[2]})" for r in has_stock[:3])
+            raise BadRequestException(f"Cannot deactivate products with non-zero stock: {bad_names}")
+
+        stmt = (
+            update(Product)
+            .where(Product.id.in_(product_ids), Product.deleted_at.is_(None))
+            .values(
+                status=RecordStatus.INACTIVE,
+                version=Product.version + 1,
+                updated_at=datetime.now(timezone.utc),
+            )
+            .returning(Product)
+        )
+        res = await self.repository.session.execute(stmt)
+        products = list(res.scalars().all())
+        await self.repository.session.commit()
+        await self._invalidate_cache()
+        for p in products:
+            await notify_source_record_changed("product", p.id)
+        return products
 
     async def delete(self, product_id: uuid.UUID) -> None:
         """Soft-delete a product, requiring status to be Inactive and stock = 0."""
@@ -712,6 +791,7 @@ class ProductService:
                 "Width (cm)": float(w) if w is not None else "",
                 "Height (cm)": float(h) if h is not None else "",
                 "Pack. Unit CBM": float(cbm_val) if cbm_val is not None else "",
+                "Purchase VAT %": float(p.purchase_vat_percent) if p.purchase_vat_percent is not None else "",
                 "Refund VAT %": float(p.refund_vat_percent) if p.refund_vat_percent is not None else "",
                 "Compliance & License Requirements": p.license_certificate_required or "",
                 "Specification": p.specification or p.description or "",

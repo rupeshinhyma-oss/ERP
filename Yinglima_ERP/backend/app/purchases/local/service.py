@@ -445,16 +445,22 @@ class LocalPurchaseService:
             )
             .limit(1)
         )
-        prod = (await self.session.execute(stmt)).scalars().first()
+        res = await self.session.execute(stmt)
+        prod = res.scalars().first()
         if prod:
-            vat = float(prod.refund_vat_percent) if prod.refund_vat_percent is not None else 13.0
             hsn_str: str | None = None
+            hsn_obj = None
             if prod.hsn_id:
                 hsn_obj = await self.session.get(HsnCode, prod.hsn_id)
                 if hsn_obj:
                     hsn_str = hsn_obj.code
+            vat = (
+                float(hsn_obj.purchase_vat_percent)
+                if hsn_obj and hsn_obj.purchase_vat_percent is not None
+                else (float(prod.purchase_vat_percent or 0.0) if prod.purchase_vat_percent is not None else 0.0)
+            )
             return prod.id, prod.product_code, hsn_str, vat
-        return None, None, None, 13.0
+        return None, None, None, 0.0
 
     async def match_supplier(self, name: str) -> tuple[uuid.UUID | None, str]:
         """Fuzzy match supplier in Supplier Master."""
@@ -1162,13 +1168,13 @@ class LocalPurchaseService:
 
         # Cache HSN codes
         hsn_ids = [p.hsn_id for p in prod_map.values() if p.hsn_id]
-        hsn_map: dict[uuid.UUID, str] = {}
+        hsn_map: dict[uuid.UUID, HsnCode] = {}
         if hsn_ids:
             q_hsn = await self.session.execute(
                 select(HsnCode).where(HsnCode.id.in_(hsn_ids))
             )
             for h in q_hsn.scalars().all():
-                hsn_map[h.id] = h.code
+                hsn_map[h.id] = h
 
         items: list[dict[str, Any]] = []
         for r, qty in matched_rows:
@@ -1188,12 +1194,17 @@ class LocalPurchaseService:
                 if prod and prod.hsn_id and prod.hsn_id not in hsn_map:
                     h = await self.session.get(HsnCode, prod.hsn_id)
                     if h:
-                        hsn_map[prod.hsn_id] = h.code
+                        hsn_map[prod.hsn_id] = h
 
             if prod:
-                hsn_code = hsn_map.get(prod.hsn_id) if prod.hsn_id else None
+                hsn_obj = hsn_map.get(prod.hsn_id) if prod.hsn_id else None
+                hsn_code = hsn_obj.code if hsn_obj else None
                 unit_rate = float(prod.standard_cost or 0.0)
-                vat_rate = float(prod.refund_vat_percent or 0.0)
+                vat_rate = (
+                    float(hsn_obj.purchase_vat_percent)
+                    if hsn_obj and hsn_obj.purchase_vat_percent is not None
+                    else (float(prod.purchase_vat_percent or 0.0) if prod.purchase_vat_percent is not None else 0.0)
+                )
                 item_total = round(qty * unit_rate, 2)
                 vat_amount = round(item_total * (vat_rate / 100.0), 2)
                 items.append({
@@ -1328,10 +1339,13 @@ class LocalPurchaseService:
 
         return results
 
-    async def get_consignment_items(self, column_id: uuid.UUID) -> list[ConsignmentProductItem]:
+    async def get_consignment_items(
+        self, column_id: uuid.UUID, supplier_id: uuid.UUID | None = None
+    ) -> list[ConsignmentProductItem]:
         """
         Extract all products from a consignment column where planned quantity > 0,
         pre-populating product master standard cost, HSN, VAT rate, and supplier info.
+        If supplier_id is provided, filters strictly to items belonging to that supplier.
         """
         stmt = text("""
             SELECT pr.id as row_id,
@@ -1355,6 +1369,7 @@ class LocalPurchaseService:
         products_by_id: dict[uuid.UUID, Product] = {}
         hsns_by_id: dict[uuid.UUID, HsnCode] = {}
         suppliers_by_id: dict[uuid.UUID, Supplier] = {}
+        product_supplier_links: dict[uuid.UUID, list[uuid.UUID]] = {}
 
         if product_ids:
             p_stmt = (
@@ -1364,6 +1379,15 @@ class LocalPurchaseService:
             p_res = await self.session.execute(p_stmt)
             products = p_res.scalars().all()
             products_by_id = {p.id: p for p in products}
+
+            from app.suppliers.models import SupplierProductLink
+            spl_stmt = select(SupplierProductLink.product_id, SupplierProductLink.supplier_id).where(
+                SupplierProductLink.product_id.in_(product_ids)
+            )
+            spl_res = await self.session.execute(spl_stmt)
+            for p_id, s_id in spl_res.fetchall():
+                if p_id and s_id:
+                    product_supplier_links.setdefault(p_id, []).append(s_id)
 
             supplier_ids = [p.supplier_id for p in products if p.supplier_id is not None]
             hsn_ids = [p.hsn_id for p in products if p.hsn_id is not None]
@@ -1393,12 +1417,22 @@ class LocalPurchaseService:
             p_code = product.product_code if product else None
             hsn_code = hsn.code if hsn else None
             unit_rate = float(product.standard_cost or 0.0) if product else 0.0
-            vat_rate = float(hsn.gst_percent) if hsn and hsn.gst_percent is not None else (float(product.refund_vat_percent or 13.0) if product else 13.0)
+            vat_rate = (
+                float(hsn.purchase_vat_percent)
+                if hsn and hsn.purchase_vat_percent is not None
+                else (float(product.purchase_vat_percent or 0.0) if product and product.purchase_vat_percent is not None else 0.0)
+            )
             item_total = round(qty_val * unit_rate, 2)
 
             sup_id = supplier.id if supplier else (product.supplier_id if product else None)
             sup_name = supplier.company_name if supplier else None
             sup_brand = supplier.brand_description if supplier else None
+            linked_sups = product_supplier_links.get(prod_id, []) if prod_id else []
+
+            # If supplier_id filter is requested, verify primary supplier or secondary linked supplier
+            if supplier_id:
+                if sup_id != supplier_id and supplier_id not in linked_sups:
+                    continue
 
             items.append(
                 ConsignmentProductItem(
@@ -1413,6 +1447,7 @@ class LocalPurchaseService:
                     supplier_id=sup_id,
                     supplier_name=sup_name,
                     supplier_brand=sup_brand,
+                    linked_supplier_ids=linked_sups,
                 )
             )
 

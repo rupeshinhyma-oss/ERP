@@ -30,6 +30,7 @@ class ProductCreate(BaseModel):
     branch_ids: list[str] | None = None
     supplier_id: uuid.UUID | None = None
 
+    purchase_vat_percent: float | None = Field(default=None, ge=0, le=100)
     refund_vat_percent: float | None = Field(default=None, ge=0, le=100)
     license_certificate_required: str | None = None
 
@@ -101,6 +102,7 @@ class ProductUpdate(BaseModel):
     branch_ids: list[str] | None = None
     supplier_id: uuid.UUID | None = None
 
+    purchase_vat_percent: float | None = Field(default=None, ge=0, le=100)
     refund_vat_percent: float | None = Field(default=None, ge=0, le=100)
     license_certificate_required: str | None = None
 
@@ -160,6 +162,7 @@ class ProductRead(BaseModel):
     supplier_name: str | None = None
 
 
+    purchase_vat_percent: float = 0.0
     refund_vat_percent: float = 0.0
     license_certificate_required: str | None = None
 

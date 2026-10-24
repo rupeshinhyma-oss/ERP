@@ -261,10 +261,11 @@ async def get_consignments_lookup(
 async def get_consignment_items(
     column_id: uuid.UUID,
     request: Request,
+    supplier_id: uuid.UUID | None = Query(default=None, description="Optional supplier UUID to filter items"),
     service: LocalPurchaseService = Depends(get_service),
     _current_user: CurrentUser = Depends(require_permission('local_purchase.view')),
 ) -> dict:
-    items = await service.get_consignment_items(column_id)
+    items = await service.get_consignment_items(column_id, supplier_id=supplier_id)
     return build_success_response(
         data=[itm.model_dump() for itm in items],
         message=f"Loaded {len(items)} planned items from consignment.",

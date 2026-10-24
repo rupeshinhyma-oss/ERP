@@ -22,7 +22,7 @@ The **Masters** group (under `SETTINGS > Masters`) manages all system lookup ent
 | **3. Countries** | `/masters/countries` | `Countries.tsx` / `masters/countries/` | `countries` | National level records (China, India, UAE, etc.), dial codes, and ISO codes. |
 | **4. Currencies** | `/masters/currencies` | `Currencies.tsx` / `masters/currencies/` | `currencies` | Exchange rates, currency symbols (USD $, RMB ¥, INR ₹) for costing and quotes. |
 | **5. Units of Measurement (UOM)** | `/masters/uom` | `UnitsOfMeasurement.tsx` / `masters/uom/` | `units_of_measurement` | Units like PCS, CTN, SET, KGS, SQM used in product packaging and quotes. |
-| **6. HSN Codes** | `/masters/hsn` | `HsnCodes.tsx` / `masters/hsn/` | `hsn_codes` | Harmonized System Tariff codes, export tax refund rates (e.g. 13% China export VAT refund). |
+| **6. HSN Codes** | `/masters/hsn` | `Hsn.tsx` / `masters/hsn/` | `hsn_codes` | Harmonized System Tariff codes: GST %, Indian Import Duty %, China Purchase VAT %, and China Export VAT Refund %. |
 | **7. Categories** | `/masters/categories` | `Categories.tsx` / `masters/categories/` | `categories` | Top-level product and catalog classifications (e.g. Hardware, Furniture, Electronics). |
 | **8. Sub Categories** | `/masters/subcategories` | `SubCategories.tsx` / `masters/subcategories/` | `subcategories` | Second-level product groupings strictly tied to a parent Category (cascading dropdowns). |
 | **9. Brands** | `/masters/brands` | `Brands.tsx` / `masters/brands/` | `brands` | Private labels and manufacturer brands associated with catalog products. |
@@ -38,14 +38,30 @@ The **Masters** group (under `SETTINGS > Masters`) manages all system lookup ent
 [Countries] ──> [Provinces] ──> [Cities] ──> [Supplier & Buyer Addresses]
 [Categories] ──> [SubCategories] ──> [Product Master]
 [Currencies] ──> [Inquiry Quotations, Local Purchases, Sales Process]
-[HSN Codes] ──> [China Export VAT Refund Calculations in Sales Process]
+[HSN Codes] ──> [Import Duty & GST synced to Inhyma; Purchase VAT & Refund VAT in Product Master]
 [UOM] ──> [Packaging Specs, CBM/Carton Ratios in Planning Sheet]
 ```
 
 ---
 
-## 4. What Needs to Be Verified (Testing Checklist)
+## 4. HSN Master Multi-Tax Architecture (Dual VAT & Cross-ERP Duty)
 
+The HSN Codes Master (`/masters/hsn`) provides a unified, cross-border tax taxonomy:
+1. **GST % (`gst_percent`):** Goods & Services Tax rate (e.g. 18%).
+2. **Import Duty % (`import_duty_percent`):** Customs import tariff percentage used when goods arrive in India. When Yinglima products are scoped to Inhyma, this rate syncs directly into Inhyma's product tax profile.
+3. **Purchase VAT % (`purchase_vat_percent`):** Domestic Chinese input VAT rate (进项税) paid upon procurement (e.g. 13%, 9%, 6%). Auto-populates in Product Master when an HSN code is selected.
+4. **Refund VAT % (`refund_vat_percent`):** Chinese export tax rebate rate (退税率) refunded upon export (e.g. 13%, 9%, 0%). Auto-populates in Product Master.
+5. **Bulk Import Parity:** Full support for both **Add New** and **Update Existing** via CSV/XLSX, with sample template download auto-reflecting all 4 tax rates.
+
+---
+
+## 5. What Needs to Be Verified (Testing Checklist)
+
+- [ ] **HSN Tax Configuration & Bulk Import:**
+  - Create HSN code with GST %, Import Duty %, Purchase VAT %, and Refund VAT %.
+  - Verify "+ New HSN Code" drawer opens with blank tax inputs and subtle "0" placeholders (not requiring users to backspace/erase a literal "0").
+  - Import CSV with `Update Existing` checked; verify existing HSN codes update their tax rates without duplicate errors.
+  - Download Sample Template (`📥 Sample Template`); verify `Import Duty %` and `Purchase VAT %` appear with valid numeric examples.
 - [ ] **Cascading Geographic Dropdowns:**
   - Selecting Country "China" must only list Chinese provinces (e.g. Guangdong, Zhejiang).
   - Selecting Province "Guangdong" must filter city options to Guangzhou, Shenzhen, Foshan, etc.

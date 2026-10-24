@@ -45,7 +45,7 @@ The product detail side drawer is standardized to a generous **720px executive l
 4. **Packaging & Physical Dimensions Card:**
    - Structured 2-column grid displaying Primary UOM, Secondary UOM (with conversion factor), Packaging Quantity, Net Weight (kg), Gross Weight (kg), Dimensions (L × W × H cm), Packaging Unit CBM (formatted to 6 decimal places in bold blue `0.000000 CBM`), and MOQ.
 5. **Classification, Sourcing & Tax Card:**
-   - Primary Supplier, HSN Code, GST Rate %, Refund VAT % (green badge), Standard Price, Standard Cost, Color/Material, and Purchasable/Sellable status.
+   - Primary Supplier, HSN Code, GST Rate %, Purchase VAT % (blue badge), Refund VAT % (green badge), Standard Price, Standard Cost, Color/Material, and Purchasable/Sellable status.
 6. **Compliance, Licenses & Specifications Card:**
    - High-visibility alert banner for `license_certificate_required` and dedicated sections for technical specifications and notes.
 7. **System Timestamps & Action Footer:**
@@ -61,6 +61,18 @@ Products support flexible organizational scoping via database fields:
 * `branch_ids`: JSON array of specific branch IDs authorized to plan and stock this product.
 
 > **Logistics Impact:** The Shipment Planning module checks `organization_ids` and `branch_ids` to ensure each organization branch sheet only pulls products explicitly assigned to that location.
+
+---
+
+## 4.1. Status Management & High-Speed Bulk Operations
+
+* **Dedicated Bulk Status Endpoints:**
+  * `POST /api/v1/masters/products/bulk-activate`: High-speed batch activation for selected product IDs in a single database round-trip.
+  * `POST /api/v1/masters/products/bulk-deactivate`: High-speed batch deactivation ensuring all selected products have zero stock before transitioning to `inactive`.
+* **Form Streamlining:**
+  * The redundant `Status` select dropdown is removed from the Product creation and edit drawer form to prevent accidental status changes during standard edits.
+  * New products are automatically created with `status = "active"`.
+  * Status activation and deactivation are intentionally operated through the table's bulk action controls (`Bulk Activate` and `Bulk Inactive`).
 
 ---
 
@@ -149,7 +161,95 @@ Inhyma and Yinglima maintain independent relational UUID namespaces. Products ar
 * `packaging_gross_weight` (clamped to $\ge 0.001\text{ kg}$ to satisfy Inhyma schema checks)
 
 ### 6.3. Resilience & Fallback Mechanisms
-1. **Immediate HTTP Dispatch:** Dispatches immediately to Inhyma's `/api/v1/integration/events` using `PEER_SERVICE_CREDENTIALS`.
+1. **Immediate HTTP Dispatch:** Dispatches immediately to Inhyma's `/api/v1/integration/events` using `PEER_SERVICE_CREDENTIALS` / `FEDERATION_SERVICE_CREDENTIAL`.
 2. **Transactional Outbox Persistence:** Every event is committed to `integration_outbox_events` and `integration_outbox_deliveries`.
 3. **Async Queue Retry:** If Inhyma is sleeping, restarted, or experiencing temporary network partitions, the background worker polls and retries with exponential backoff.
 4. **Auto-Provisioning in Inhyma:** Inhyma's receiver adapter automatically creates missing Categories, Sub-Categories, Brands, UOMs, and Taxes on the fly so missing foreign keys never cause sync failures.
+
+### 6.4. Bulk Initial State Reconciliation Script
+* **Script Location:** `backend/scripts/sync_all_inhyma_products.py`
+* **Direct Pooler Database Connection:** Uses direct asynchronous database pooler connections with prepared statement caching disabled (`statement_cache_size=0`) to safely execute across Supabase PgBouncer instances.
+* **Reconciliation Results:**
+  * Total Yinglima catalog items assigned to Inhyma (`organization_id = 85c12bcb-10a1-4b1f-92ed-6ca72ac1b3b5`): **873 products**.
+  * **319 products newly created** in Inhyma ERP with complete technical specs, CBM, packaging weights, and explicit Inhyma organization assignment.
+  * **554 products updated** and reconciled in Inhyma ERP.
+  * **873 records created** in `synced_entity_mappings` (`source_erp_id = 'yinglima'`, `entity_type = 'product'`) linking source and target UUIDs for permanent idempotent synchronization.
+* **Zero Data Loss Guarantee & Strict Isolation:**
+  * Darsh Impex (652 items), FNB Solution (769 items), and native domestic Indian spare parts (`INH-xxxxx`, 935 items) existing in Inhyma ERP's database were **100% preserved and untouched**. No rows were deleted or overwritten.
+  * Inhyma ERP's Product Master frontend (`/product/list`) and repository query filters are strictly scoped to `synced_from=yinglima` and `organization_id = '85c12bcb-10a1-4b1f-92ed-6ca72ac1b3b5'`, ensuring that Inhyma ERP exclusively displays the 873 products originating from Yinglima, while hiding all domestic spare parts and other organizations.
+### 6.5. Inactivation vs. Deletion Event Semantics
+* **Inactivation (`status = 'inactive'`):**
+  * Dispatches `event_type = "product.updated"` with `payload = {"status": "inactive", "is_active": False}`.
+  * Inhyma's adapter sets `product.status = RecordStatus.INACTIVE` with `deleted_at = NULL`.
+  * The product remains visible and navigable under Inhyma's **Inactive** tab (`/product/list`).
+* **Reactivation (`status = 'active'`):**
+  * Dispatches `event_type = "product.updated"` with `payload = {"status": "active", "is_active": True}`.
+  * Inhyma's adapter sets `product.status = RecordStatus.ACTIVE`. The product immediately moves back into the **Active** tab.
+* **Deletion (`DELETE /{id}`):**
+  * Dispatches `event_type = "product.deleted"`.
+  * Inhyma's adapter sets `deleted_at = _utcnow()` (soft-deleted), removing the product completely from both Active and Inactive catalog views.
+
+---
+
+## 10. Foreign Key Resilience & Supplier Link Hardening
+* **Dangling Supplier Reference Prevention:**
+  * When updating products that carry historic, migrated, or deleted `supplier_id` references, `ProductService._validate_references()` dynamically checks `suppliers` table existence and clears orphan IDs (`field_values["supplier_id"] = None`) rather than triggering foreign key violations.
+  * `_sync_supplier_link()` guards the insertion into `supplier_product_links` by verifying the supplier exists and wrapping the database flush in a guarded handler.
+  * In the edit form (`Products.tsx`), sub-categories are strictly filtered by `category_id`, preventing cross-category mismatches.
+
+---
+
+## 11. Bulk Action High-Speed Status Updates & Instant UI Cut-Off
+* **High-Speed Single Request Endpoints:**
+  * `POST /api/v1/masters/products/bulk-activate` — Single atomic query activating multiple products.
+  * `POST /api/v1/masters/products/bulk-deactivate` — Single atomic query deactivating multiple products with zero-stock validation.
+* **Instant 0ms UI Cut-Off:**
+  * In `MasterPage.tsx`, executing **Bulk Inactive** while on the **Active** tab immediately strips the deactivated rows from the active view in 0ms, followed by background `reloadCounter` re-fetch to synchronize pagination counts and pull in succeeding page items.
+  * Executing **Bulk Activate** while on the **Inactive** tab immediately cuts the activated rows from the inactive view and moves them to Active.
+  * Editing an item's status in the form drawer and flipping its active/inactive state immediately removes it from the mismatched tab view.
+
+---
+
+## 12. Robust Media Filtering (`has_images`) & Product Gallery Performance
+* **PostgreSQL Scalar Guard (`CASE WHEN json_typeof(Product.images) == 'array'`):**
+  * In `ProductRepository._apply_dynamic_filters`, the `has_images` filter query previously executed `func.json_array_length(Product.images) > 0`.
+  * Because PostgreSQL query optimizers evaluate `WHERE` predicates in arbitrary order and historical products can have JSON scalar strings or `null` values in `images`, calling `json_array_length()` on non-array JSON triggered `asyncpg.exceptions.InvalidParameterValueError: cannot get array length of a scalar` (HTTP 500).
+  * **Solution:** Encapsulated image length computation within a SQL `case()` construct:
+    ```python
+    img_len = case(
+        (
+            and_(
+                Product.images.is_not(None),
+                func.json_typeof(Product.images) == "array",
+            ),
+            func.json_array_length(Product.images),
+        ),
+        else_=0,
+    )
+    if is_true:
+        stmt = stmt.where(img_len > 0)
+    else:
+        stmt = stmt.where(img_len == 0)
+    ```
+  * Guarantees that `json_array_length` is only executed when `json_typeof(images) == 'array'`.
+* **Product Gallery Integration (`ProductGallery.tsx`):**
+  * When opening `/product-gallery`, the frontend fetches `GET /api/v1/masters/products?has_images=true&page_size=100&sort_by=created_at&sort_order=desc`.
+  * With the safe array guard in place, this query executes in < 300ms, immediately returning products with photos without throwing 500 errors.
+
+---
+
+## 13. Dual VAT Architecture (`purchase_vat_percent` & `refund_vat_percent`)
+* **Purchase VAT % (`purchase_vat_percent`):**
+  * Stored on the `products` table as `numeric(5, 2) NOT NULL DEFAULT 0.00`.
+  * When selecting an HSN code in the Product Add/Edit form modal, `purchase_vat_percent` is auto-filled from the selected HSN code's configured purchase VAT rate, while remaining freely editable for manual overrides.
+  * Rendered as a prominent blue badge (`13%`) in the Executive Product Detail drawer.
+  * Fully mapped in Product CSV/Excel Import (Add New & Update Existing) and Export.
+* **Cross-ERP Tax Sync (`sync_inhyma.py`):**
+  * When synchronizing products assigned to the Inhyma organization, the sync payload packages the HSN code, GST %, and Import Duty % (derived from Yinglima's HSN Master) alongside the product's Purchase VAT % and Refund VAT %.
+  * Inhyma's product receives the complete tax profile, linking Indian Import Duty and GST seamlessly.
+  * Inhyma ERP's `_resolve_tax()` adapter correctly maps `Tax.gst_percent` from `payload["gst_percent"]` and `Tax.import_duty_percent` from `payload["import_duty_percent"]`, updating existing tax records whenever Yinglima transmits revised rates.
+* **Active / Inactive Status Sync Parity:**
+  * When a product is deactivated in Yinglima (or reactivated to Active), the sync engine transmits the status transition.
+  * In Inhyma ERP's product adapter, `product.status` is updated to `RecordStatus.INACTIVE` (or `ACTIVE`) while explicitly clearing `product.deleted_at = None`. This guarantees the product immediately displays in Inhyma's Inactive tab (or Active tab), rather than being hidden in soft-delete trash.
+
+

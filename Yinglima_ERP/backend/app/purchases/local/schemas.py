@@ -205,6 +205,7 @@ class ConsignmentProductItem(BaseModel):
     supplier_id: uuid.UUID | None = None
     supplier_name: str | None = None
     supplier_brand: str | None = None
+    linked_supplier_ids: list[uuid.UUID] = Field(default_factory=list)
 
 
 class BillExtractionItem(BaseModel):

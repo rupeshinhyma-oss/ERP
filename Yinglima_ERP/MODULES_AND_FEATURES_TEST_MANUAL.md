@@ -453,6 +453,15 @@ Manage complete vendor team directory:
 - [ ] Create a product, enter Length: `100`, Width: `50`, Height: `40`. Verify CBM calculates to `0.200000`.
 - [ ] Select HSN code with 13% Refund VAT and confirm Refund VAT % field auto-populates with `13`.
 - [ ] Select a Primary Supplier from the dropdown, save the product, and verify the supplier's name appears in the Product Master table, detail drawer, Shipment Planning grid (`Supplier Name` & `City`), and Supplier Master ("Products Supplied").
+- [ ] Verify that the Product Add/Edit form does not display the redundant `Status` select dropdown (new products default to `active`, edits preserve current status).
+- [ ] Select multiple rows in Product Master table on the **Active** tab, click `Bulk Actions ⌵` -> `Bulk Inactive`:
+  - Verify all selected items deactivate in a single fast batch request (`POST /api/v1/masters/products/bulk-deactivate`).
+  - Verify that the deactivated rows **immediately cut off (disappear)** from the Active table view without needing to click another tab.
+  - Verify that the table automatically refreshes in the background, updating the total record count and loading the next page items.
+- [ ] Switch to the **Inactive** tab, select rows, and click `Bulk Actions ⌵` -> `Bulk Activate`:
+  - Verify all selected items reactivate in a single fast batch request (`POST /api/v1/masters/products/bulk-activate`).
+  - Verify that the reactivated rows **immediately cut off (disappear)** from the Inactive table view and appear on the Active tab without manual page reloads.
+- [ ] Verify identical instant cut-off behavior across all other master modules (Categories, SubCategories, Brands, Suppliers, Buyers, Users, etc.).
 - [ ] Click "Download PDF Datasheet" (`GET /api/v1/products/{id}/datasheet-pdf`) and verify ReportLab PDF generates.
 - [ ] Open `/masters/products` and verify the table loads under 3 seconds with standard pagination (`Showing 1-50 of 3556`, `Page 1 of 72`) and zero 500 error banners.
 - [ ] Navigate through pages (`Next`, `Page 2`, `Page 3`) and verify 50 products render reliably per page.
@@ -470,14 +479,29 @@ Manage complete vendor team directory:
 - [ ] **Cross-ERP Update Sync:**
   - Update product attributes in Yinglima (e.g. `product_name`, `length_cm`, `weight`).
   - Verify that changes are reflected in Inhyma Product Master.
-- [ ] **One-Way Deactivation Cascade:**
+- [ ] **One-Way Deactivation & Soft Deletion Cascade:**
   - Deactivate the product in Yinglima (`POST /masters/products/{id}/deactivate`).
-  - Verify that the product status in Inhyma automatically changes to `inactive` (`is_active=False`).
+  - Verify that the product status in Inhyma automatically changes to `inactive` (`status = 'INACTIVE'`).
   - Reactivate the product in Yinglima. Verify Inhyma product updates to `active`.
+  - Delete a product in Yinglima (`DELETE /masters/products/{id}`).
+  - Verify that the product in Inhyma is automatically soft-deleted (`deleted_at` timestamp populated) and immediately disappears from Inhyma's active Product Master table.
 - [ ] **Strict One-Way Non-Reversal Validation:**
-  - Deactivate the product directly in Inhyma ERP.
+  - Deactivate or delete a product directly in Inhyma ERP.
   - Verify that the Yinglima product remains unaffected and stays `active`.
   - Create or edit a product directly in Inhyma ERP. Verify no event or record is pushed to Yinglima.
+- [ ] **Inhyma Organization Scoping & Domestic Spare Parts Exclusion Verification:**
+  - Open Inhyma ERP Product Master (`localhost:5174/product/list`).
+  - Verify the list strictly displays the 873 products originating from Yinglima ERP.
+  - Confirm that all 935 domestic Indian spare parts (`INH-xxxxx`) and non-Inhyma organizations (Darsh Impex, FNB Solution) are completely hidden/filtered out of the view.
+  - Query Inhyma ERP database directly and verify zero data loss: Darsh Impex (652 items), FNB Solution (769 items), and native domestic spare parts (935 items) remain 100% intact, active, and untouched in the database with all historical transactions valid.
+- [ ] **Bulk Initial Reconciliation Verification (`sync_all_inhyma_products.py`):**
+  - Run reconciliation script: `python backend/scripts/sync_all_inhyma_products.py`.
+  - Confirm all 873 products assigned to Inhyma in Yinglima ERP are reconciled in Inhyma ERP (319 new products inserted, 554 existing products updated with CBM, weight, UOM, and classifications).
+- [ ] **Product Master Edit Foreign Key Resilience:**
+  - Open an existing product containing unassigned or non-existent supplier links (or edit HSN, Sub-Category, and change Status to Inactive).
+  - Click Save. Confirm the form saves with 200 OK without any "An unexpected error occurred" banner.
+  - Verify that the updated HSN, Sub-Category, and Inactive status are persisted in Yinglima DB and synced to Inhyma DB.
+
 
 ---
 
@@ -501,6 +525,13 @@ Manage complete vendor team directory:
    - 💾 **Download Current Photo** button.
    - 📦 **Download All Media (ZIP / Batch)** button.
    - ✏️ **Quick Edit Product** button (opens side drawer).
+
+### Test Cases
+- [ ] Open `/product-gallery` and verify that the page loads cleanly in < 1 second without any HTTP 500 error on `/masters/products?has_images=true`.
+- [ ] Verify that products possessing image attachments render their cover cards with correct photo counts in the Product Catalog Media tab.
+- [ ] Test the backend endpoint `GET /api/v1/masters/products?has_images=true` and confirm HTTP 200 OK with correct total record count.
+- [ ] Test the backend endpoint `GET /api/v1/masters/products?has_images=false` and confirm HTTP 200 OK without scalar/array JSON errors.
+- [ ] Click on a product card in `/product-gallery` and confirm the Lightbox Carousel opens with full-resolution photo preview, zoom controls, and next/prev navigation.
 
 ---
 
@@ -832,7 +863,7 @@ Manage complete vendor team directory:
      - `Unit Rate`: Number input (`step="0.01"`, bold right-aligned in purchase currency).
        - **Mandatory Positive Rate (`> 0`):** Entering `0` or leaving rate empty highlights the cell with a red border (`2px solid #ef4444`), soft red background (`#fff5f5`), and warning label `▲ Rate > 0 req.`.
        - Direct typing automatically strips leading zeros so the user does not need to backspace.
-     - `VAT %`: Tax rate input (defaults to product VAT% or 13%).
+     - `VAT %`: Tax rate input (strictly defaults to HSN Master `purchase_vat_percent`, falling back to Product Master `purchase_vat_percent`, or `0.00%`).
      - `Item Total`: Auto-computed basic total (`Qty × Unit Rate`).
      - `Expense Per Unit`: Auto-computed value-based proportional landing expense.
      - `Unit Landing Rate (VB)`: Auto-computed (`Unit Rate + Expense Per Unit`).
@@ -929,6 +960,22 @@ Manage complete vendor team directory:
 - [ ] **TC-LP-10: Corporate Excel & CSV Export:**
   - Click `📥 Export ▾` &rarr; `📊 Export to Excel (.xlsx)` &rarr; verify `.xlsx` downloads with navy `#1E3A8A` header and complete purchase data.
   - Click `📥 Export ▾` &rarr; `📄 Export to CSV (.csv)` &rarr; verify `.csv` downloads with UTF-8 BOM encoding.
+- [ ] **TC-LP-11: Consignment Product Supplier Filtering:**
+  - Navigate to `/purchase/local/new`.
+  - Select Organization `Inhyma` & Branch `Inhyma Mumbai (INM)`.
+  - Select Consignment `Mum 48` (which contains 28 container items across multiple suppliers).
+  - Verify that when no supplier is selected, the system indicates that Consignment `Mum 48` contains items across multiple suppliers and prompts to select a supplier.
+  - Select Supplier `Dingye (Soontrue)` &rarr; verify exactly the 5 items belonging to Dingye populate the items table with planned quantities, and the banner shows `📦 5 planned item(s) for Dingye (Soontrue) from Consignment Mum 48`.
+  - Switch Supplier to `YUjun` &rarr; verify the items table automatically updates to show strictly the 7 items belonging to YUjun from Mum 48, and the banner updates to `📦 7 planned item(s) for YUjun from Consignment Mum 48`.
+  - Select a Supplier with no products in Mum 48 &rarr; verify the table sets items to 0 and displays `ℹ️ 0 planned items for [Supplier] in Consignment Mum 48`.
+- [ ] **TC-LP-12: Local Purchase Domestic VAT Rate Source Resolution (HSN Purchase VAT %):**
+  - Navigate to `/purchase/local/new`.
+  - Select Organization `Inhyma`, Branch `Inhyma Mumbai (INM)`, and Supplier `Prathamesh Packaging PVT LTD`.
+  - Select Consignment `Mum 48`.
+  - Product `Carton boxes for band sealer without thermocol` (`PROD-MUM-0002`) auto-loads with Qty `48`.
+  - Verify `VAT %` column strictly resolves to `0.00%` (derived from HSN `8422.a247` `purchase_vat_percent` or Product `purchase_vat_percent`).
+  - Verify the VAT % does **NOT** mistakenly default to Indian GST (`18.00%`) or China Export Refund VAT (`13.00%`).
+  - Search and add any product via Card 3 `PRODUCT SEARCH` &rarr; verify `VAT %` resolves from its HSN `purchase_vat_percent` (falling back to product `purchase_vat_percent`, defaulting to `0%`).
 
 ---
 
@@ -1294,8 +1341,12 @@ Manage complete vendor team directory:
 - **Purpose:** Interactive spreadsheet-like shipment planning workbook for branch logistics, dynamic column configuration, container CBM optimization, and audit logging.
 
 ### 14.1. Workbook Features & Sheet Architecture
-1. **Branch Sheet Tabs:**
+1. **Branch Sheet Tabs & Universal Entity Filtering:**
    - Multi-tab navigation across enterprise branches (e.g. `Mum Branch`, `MP Branch`, `GJ Branch`, `CN Central`).
+   - 🏢 / 👤 **Searchable Entity Selector (`Entity: All Entities (Organizations & Buyers)`):**
+     - Allows selecting a specific internal organization (`Inhyma`, `One Stop`, `F&B`, etc.) or buyer (`Prathamesh Packaging`, `Om Packaging`, `Darsh Impex`, etc.).
+     - Selecting **`All Entities (Organizations & Buyers)`** shows tabs for all 12+ sheets across the entire company.
+     - **Sheet Tab Navigation Hardening:** In `All Entities` mode, clicking any tab (e.g. `One Stop`, `Mumbai`, `Chennai`, `dubaidarsh`) directly opens that sheet, updates the active tab state, and loads its grid without resetting or snapping back to Inhyma.
    - ➕ **`+ Add New Sheet` Button & Modal:**
      - **Sheet Name** (*Required*): e.g. `TN Branch`.
      - **Associated Branch / Organization**: Dropdown selector.
@@ -1629,13 +1680,30 @@ Manage complete vendor team directory:
 ## 17. CONFIGURATIONS: HSN Codes Master Module
 
 - **Route:** `/masters/hsn`
-- **Table Columns:** SR. NO., HSN / SAC Code, Description, GST/VAT Rate (%), Refund VAT Rate (%), Status, Actions.
+- **Table Columns:** SR. NO., HSN CODE, DESCRIPTION, GST %, IMPORT DUTY %, PURCHASE VAT %, REFUND VAT %, STATUS, ACTION.
 - **Add / Edit Form Fields:**
-  - **HSN / SAC Code** (*Required*): 6 to 8 digit customs tariff code.
+  - **HSN Code** (*Required*): 6 to 8 digit customs tariff code.
   - **Description**: Trade description.
-  - **GST / VAT Rate (%)**: Standard domestic rate.
-  - **Refund VAT Rate (%)**: Export tax rebate percentage.
+  - **GST %**: Goods and Services Tax percentage (e.g. 18%).
+  - **Import Duty %**: Indian customs import tariff percentage (e.g. 7.5%).
+  - **Purchase VAT %**: China domestic input VAT percentage (e.g. 13%).
+  - **Refund VAT %**: China export rebate percentage (e.g. 13%).
   - **Status**: `Active` / `Inactive`.
+
+### Test Cases
+- [ ] Open `/masters/hsn`, verify table displays all 7 columns (`HSN Code`, `Description`, `GST %`, `Import Duty %`, `Purchase VAT %`, `Refund VAT %`, `Status`).
+- [ ] Click `+ New HSN Code`, verify all 4 tax percentage input boxes (`GST %`, `Import Duty %`, `Purchase VAT %`, `Refund VAT %`) open completely blank with soft grey placeholder `0` (not pre-filled with literal `0` text requiring deletion).
+- [ ] In `+ New HSN Code`, enter HSN Code: `8422.9090`, GST %: `18`, Import Duty %: `7.5`, Purchase VAT %: `13`, Refund VAT %: `13`. Save and verify record appears in table with all 4 tax rates. Delete test record after verification.
+- [ ] Click `📥 Sample Template` in HSN Master; verify downloaded template contains `Import Duty %` and `Purchase VAT %` with valid sample values.
+- [ ] In HSN Master, upload CSV with `Update Existing` checked; verify existing HSN codes update their `Import Duty %` and `Purchase VAT %` without throwing duplicate code errors.
+- [ ] In Product Master (`/masters/products`), open Add Product modal; select an HSN code from the dropdown. Verify both `Purchase VAT %` and `Refund VAT %` automatically populate from the selected HSN code.
+- [ ] In Product Master, verify the detail drawer renders both `Purchase VAT %` (blue badge) and `Refund VAT %` (green badge).
+- [ ] Click `📥 Sample Template` in Product Master; verify downloaded template contains `Purchase VAT %`.
+- [ ] In Product Master, upload CSV with `Update Existing` checked; verify `Purchase VAT %` updates accurately.
+- [ ] When a product with an HSN code is scoped to Inhyma organization, verify `sync_inhyma.py` packages `hsn_code`, `gst_percent`, `import_duty_percent`, and `purchase_vat_percent` in the synchronization payload.
+- [ ] In Inhyma ERP, verify that the linked Tax record correctly receives `GST %` (from Yinglima HSN GST %) and `Import Duty %` (from Yinglima HSN Import Duty %), and updates dynamically when product/tax rates are revised in Yinglima.
+- [ ] When updating an existing product in Yinglima, verify that all physical dimensions (`length_cm`, `width_cm`, `height_cm`, `packaging_unit_cbm`), packaging attributes (`packaging_gross_weight`, `packaging_net_weight`, `packaging_quantity`), specifications, descriptions, color, and material dynamically update in Inhyma ERP upon synchronization.
+- [ ] When a product is deactivated in Yinglima, verify that Inhyma ERP transitions the product to `status = 'INACTIVE'` with `deleted_at = None`, ensuring it immediately appears under Inhyma's Inactive tab (rather than being hidden in soft-delete trash).
 
 ---
 
@@ -2163,6 +2231,29 @@ A standardized suite of 8 production-grade Excel (`.xlsx`) files is maintained d
 | **TC-RBAC1-04** | Granular Sales Operator Gating | Assign `sale_process.view`, `sale_process.create`, and `sale_process.update` to a user. | User sees `+ Create Sale Process` and `Edit Order`. The `Delete Order` and `Export` buttons are strictly hidden. Backend rejects `DELETE /api/v1/sales/orders/{id}` with 403 Forbidden. |
 | **TC-RBAC1-05** | Stock Clerk Movement Isolation | Assign `stock_movement.view` and `stock_movement.create` to a user. | User can view movements and click `+ New Inward Entry` / `+ New Outward Entry`. High-risk `Cancel` and `Delete` action buttons are completely hidden. Backend rejects cancel/delete requests with 403. |
 | **TC-RBAC1-06** | Notification Rules Manager Gating | Assign only `notification_settings.view` to User A and `notification_settings.manage` to User B. | User A sees rule list with `🔒 Read Only` badge and disabled toggles. User B has toggle switches active and can edit rule conditions and templates. |
+
+---
+
+## 41. Cross-ERP Product Master Lifecycle & Inactivation Synchronization (`/masters/products`)
+
+### 41.1. Architectural Specification & Status Semantics
+- **One-Way Directional Synchronization:** Yinglima $\rightarrow$ Inhyma strictly for products assigned to Inhyma Solutions LLP (`85c12bcb-10a1-4b1f-92ed-6ca72ac1b3b5`).
+- **Event Distinction:**
+  * **Creation (`product.created`):** Dispatched upon creating a new product in Yinglima. Inhyma creates the product and assigns it to Inhyma's active catalog.
+  * **Inactivation (`product.updated` with `status: "inactive", is_active: False`):** Dispatched when a product is marked inactive. Inhyma sets `status = 'INACTIVE'` with `deleted_at = NULL`. The product immediately moves into Inhyma's `Inactive` tab without being sent to trash.
+  * **Re-activation (`product.updated` with `status: "active", is_active: True`):** Dispatched when reactivated in Yinglima. Inhyma sets `status = 'ACTIVE'`, moving it back into Inhyma's `Active` tab.
+  * **Deletion (`product.deleted`):** Dispatched when a product is deleted in Yinglima. Inhyma sets `deleted_at = now()` (soft-deleted), removing it from all active/inactive catalog views into trash.
+- **Reverse Flow Immunity:** Inactivating or deleting directly in Inhyma NEVER alters Yinglima's product catalog.
+
+### 41.2. Test Cases & Verification Matrix
+
+| Test ID | Test Scenario | Steps | Expected Result |
+| :--- | :--- | :--- | :--- |
+| **TC-SYNC-01** | Real-Time Product Creation Sync | Create a new product in Yinglima with Organization = Inhyma Solutions LLP. | Product is created in Yinglima and immediately synced to Inhyma. Appears under Inhyma's `Active` tab with identical specifications. |
+| **TC-SYNC-02** | Inactivation Separation from Trash | Mark a product Inactive in Yinglima (`status = "inactive"`). | Yinglima sends `product.updated` (`is_active = False`). Inhyma sets `status = 'INACTIVE'` and keeps `deleted_at = NULL`. Inhyma `Active` count drops by 1, and `Inactive` count increases by 1. Product is visible in Inhyma's `Inactive` tab. |
+| **TC-SYNC-03** | Product Re-activation Sync | Re-activate the inactive product in Yinglima (`status = "active"`). | Yinglima sends `product.updated` (`is_active = True`). Inhyma sets `status = 'ACTIVE'`. Product moves back from Inhyma's `Inactive` tab to `Active` tab. |
+| **TC-SYNC-04** | Product Deletion Removal | Delete a product in Yinglima (`DELETE /api/v1/masters/products/{id}`). | Yinglima sends `product.deleted`. Inhyma soft-deletes the product (`deleted_at` set). Product is removed from both Active and Inactive views in Inhyma. |
+| **TC-SYNC-05** | Reverse Inactivation Immunity | Set a product to Inactive directly in Inhyma ERP. | The product becomes inactive in Inhyma, but Yinglima's product remains Active. Zero reverse sync occurs. |
 
 ---
 *End of Master Features & Testing Specification Manual. Maintained for Yinglima Enterprise ERP.*

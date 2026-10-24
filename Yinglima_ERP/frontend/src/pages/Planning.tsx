@@ -1858,6 +1858,7 @@ export function PlanningPage() {
    * Chennai/Inhyma Mumbai / Buyer tabs etc.)
    */
   const [tabOrganizationFilterId, setTabOrganizationFilterId] = useState<string | null>(null);
+  const hasInitializedOrgRef = useRef(false);
   const [itemHeaderTitle, setItemHeaderTitle] = useState("ITEM");
   const [customTags, setCustomTags] = useState<PlanningStatusTag[]>([]);
   const [loading, setLoading] = useState(false);
@@ -2177,12 +2178,15 @@ export function PlanningPage() {
    */
   const setSheetUrlParam = useCallback(
     (sheetName: string, orgName?: string | null) => {
-      const effectiveOrgName = orgName !== undefined ? orgName : searchParams.get("org");
       const next: Record<string, string> = { sheet: sheetName };
-      if (effectiveOrgName) next.org = effectiveOrgName;
+      // Only include org in URL if an entity filter is actually active (not "All Entities")
+      if (tabOrganizationFilterId) {
+        const effectiveOrgName = orgName !== undefined ? orgName : searchParams.get("org");
+        if (effectiveOrgName) next.org = effectiveOrgName;
+      }
       setSearchParams(next, { replace: true });
     },
-    [searchParams, setSearchParams]
+    [tabOrganizationFilterId, searchParams, setSearchParams]
   );
 
   /**
@@ -2191,7 +2195,7 @@ export function PlanningPage() {
    * `?sheet=<name>` to a sheet ID. Only runs the match while
    * `activeOrganizationId` is still unset, so it doesn't fight with the
    * dropdown once the person has changed the filter themselves.
-   * If no org param is provided, default tabOrganizationFilterId to Inhyma.
+   * If no org param is provided, default tabOrganizationFilterId to Inhyma on initial mount.
    */
   useEffect(() => {
     if (!organizations.loaded || organizations.items.length === 0) return;
@@ -2202,17 +2206,23 @@ export function PlanningPage() {
       );
       if (matched) {
         if (activeOrganizationId === null) setActiveOrganizationId(matched.id);
-        setTabOrganizationFilterId((prev) => (prev !== null ? prev : matched.id));
+        setTabOrganizationFilterId(matched.id);
+        hasInitializedOrgRef.current = true;
         return;
       }
     }
-    // Default organization filter to Inhyma when not explicitly set
-    const inhymaOrg = organizations.items.find((o) => o.name.toLowerCase().includes("inhyma"));
-    if (inhymaOrg) {
-      setTabOrganizationFilterId((prev) => (prev === null ? inhymaOrg.id : prev));
+    // Only default organization filter on initial mount if never initialized and no sheet param is active
+    if (!hasInitializedOrgRef.current) {
+      hasInitializedOrgRef.current = true;
+      const urlSheet = searchParams.get("sheet") || searchParams.get("sheet_id");
+      if (!urlSheet) {
+        const inhymaOrg = organizations.items.find((o) => o.name.toLowerCase().includes("inhyma"));
+        if (inhymaOrg) {
+          setTabOrganizationFilterId(inhymaOrg.id);
+        }
+      }
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [organizations.loaded, organizations.items, searchParams]);
+  }, [organizations.loaded, organizations.items, searchParams, activeOrganizationId]);
 
   const loadSheets = useCallback(async () => {
     try {
@@ -2239,7 +2249,7 @@ export function PlanningPage() {
         // If an explicit sheet was matched from URL params, switch to its org/buyer so its tab is visible!
         if (matched) {
           const matchedOrgId = matched.organization_id ?? (matched.buyer_id ? `buyer:${matched.buyer_id}` : null);
-          setTabOrganizationFilterId(matchedOrgId);
+          setTabOrganizationFilterId((prev) => (prev === null && hasInitializedOrgRef.current ? null : matchedOrgId));
         } else {
           const defaultOrgId = inhymaOrg ? inhymaOrg.id : (target.organization_id ?? null);
           setTabOrganizationFilterId((prev) => (prev !== null ? prev : defaultOrgId));
@@ -2261,10 +2271,14 @@ export function PlanningPage() {
     if (matched && matched.id !== activeSheetId) {
       setActiveSheetId(matched.id);
       setSheetUrlParam(matched.name);
-      const targetOrgId = matched.organization_id ?? (matched.buyer_id ? `buyer:${matched.buyer_id}` : null);
-      setTabOrganizationFilterId(targetOrgId);
+      // Keep "All Entities" (null) mode if user intentionally selected All Entities
+      setTabOrganizationFilterId((prev) => {
+        if (prev === null) return null;
+        const targetOrgId = matched.organization_id ?? (matched.buyer_id ? `buyer:${matched.buyer_id}` : null);
+        return targetOrgId;
+      });
     }
-  }, [searchParams, sheets, activeSheetId]);
+  }, [searchParams, sheets, activeSheetId, setSheetUrlParam]);
 
   // Highlight and scroll to specific row when row_id is present
   useEffect(() => {
@@ -4213,7 +4227,23 @@ export function PlanningPage() {
           </label>
           <SearchableEntityDropdown
             value={tabOrganizationFilterId}
-            onChange={(val) => setTabOrganizationFilterId(val)}
+            onChange={(val) => {
+              setTabOrganizationFilterId(val);
+              if (!val) {
+                setActiveOrganizationId(null);
+                const next: Record<string, string> = {};
+                const currentSheet = searchParams.get("sheet");
+                if (currentSheet) next.sheet = currentSheet;
+                setSearchParams(next, { replace: true });
+              } else if (!val.startsWith("buyer:")) {
+                const orgObj = organizations.items.find((o) => o.id === val);
+                const next: Record<string, string> = {};
+                const currentSheet = searchParams.get("sheet");
+                if (currentSheet) next.sheet = currentSheet;
+                if (orgObj) next.org = orgObj.name;
+                setSearchParams(next, { replace: true });
+              }
+            }}
             organizations={organizations.items}
             buyers={buyersLookup.items}
           />

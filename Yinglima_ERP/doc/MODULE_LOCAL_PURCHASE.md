@@ -56,13 +56,18 @@ The **Local Purchase** module allows China operations to record domestic procure
    - Dispatches in-app notifications and email alerts to configured procurement roles and managers.
    - Topbar alert includes PO number, supplier name, and total amount with direct link to the purchase order.
 
-### Release 2026-10-22: Global UI Button Standardization (Filter & Export)
-1. **Unified Orange Export Button (`#f59e0b`):**
-   - Standardized the list header Export dropdown button to match Products Master's vibrant orange styling (`btn-imp-exp` / `#f59e0b`, white text `#ffffff`, `fontWeight: 700`, `borderRadius: 6px`, `border: none`).
-   - Replaced old white outline button (`📥 Export ▼`) with clean `"Export ▾"` button with orange shadow.
-2. **Standardized Funnel Filter Toggle Button:**
-   - Replaced wide `"Filters"` text button with the standard compact Funnel SVG icon button (`btn-header-filter`).
-   - State colors: dark slate background (`#475569`) when closed, primary blue (`#0061f2`) when open or active filters applied, with red numeric count badge (`#ef4444`).
+### Release 2026-10-23: Consignment Product Supplier Filtering
+1. **Consignment Line Items Scoped to Selected Supplier:**
+   - Multi-supplier consignments (e.g. shipping containers like `Mum 48` carrying products across 10+ different manufacturing vendors) now strictly filter to only the products belonging to the selected supplier when generating local purchase orders.
+   - Prevents unassociated vendor goods from populating into single-supplier purchase orders and bills.
+2. **Bidirectional Cascading Flow:**
+   - **Supplier Selected First &rarr; Consignment Selected:** Only planned products in the chosen consignment belonging to the active supplier auto-populate.
+   - **Consignment Selected First &rarr; Supplier Selected:** Selecting or switching the supplier immediately re-filters the consignment's planned items with instant 0ms latency from cached consignment data.
+   - **Zero Matching Products Handling:** When a supplier has 0 planned items in a selected consignment, the table clears gracefully with an informative toast and zero-count badge (`ℹ️ 0 planned items for [Supplier] in Consignment [Code]`).
+   - **Accurate Information Badge:** The table header displays: `📦 {count} planned item(s) for {supplier} from Consignment {code}` with a `Load Planned Items` refresh button.
+3. **Backend Query Optimization:**
+   - `GET /api/v1/purchases/local/consignments/{column_id}/items` accepts optional `supplier_id` query parameter for direct server-side filtering.
+   - Response items include `linked_supplier_ids` to support secondary supplier relationships via `SupplierProductLink`.
 
 ---
 

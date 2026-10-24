@@ -28,7 +28,7 @@ class ProductRepository(BaseRepository[Product]):
         """Apply filters, matching organization_id against both single and multi-org fields, has_images, and is_spare."""
         if not filters:
             return stmt
-        from sqlalchemy import String, cast, func, or_, select
+        from sqlalchemy import String, and_, case, cast, func, or_, select
         from app.common.filtering import FilterParams
         from app.masters.product_categories.models import ProductCategory
         from app.masters.product_sub_categories.models import ProductSubCategory
@@ -51,18 +51,20 @@ class ProductRepository(BaseRepository[Product]):
             )
         if has_images is not None:
             is_true = str(has_images).lower() in ("true", "1", "yes")
+            img_len = case(
+                (
+                    and_(
+                        Product.images.is_not(None),
+                        func.json_typeof(Product.images) == "array",
+                    ),
+                    func.json_array_length(Product.images),
+                ),
+                else_=0,
+            )
             if is_true:
-                stmt = stmt.where(
-                    Product.images.is_not(None),
-                    func.json_array_length(Product.images) > 0,
-                )
+                stmt = stmt.where(img_len > 0)
             else:
-                stmt = stmt.where(
-                    or_(
-                        Product.images.is_(None),
-                        func.json_array_length(Product.images) == 0,
-                    )
-                )
+                stmt = stmt.where(img_len == 0)
         if is_spare is not None:
             is_spare_bool = str(is_spare).lower() in ("true", "1", "yes")
             spare_cat_subq = select(ProductCategory.id).where(

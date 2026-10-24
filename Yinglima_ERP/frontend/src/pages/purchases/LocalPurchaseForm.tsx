@@ -128,13 +128,14 @@ export function LocalPurchaseFormPage() {
     "/suppliers",
     500
   );
-  const hsnLookup = useLookup<{ id: string; code: string }>("/masters/hsn", 500);
+  const hsnLookup = useLookup<{ id: string; code: string; purchase_vat_percent?: number }>("/masters/hsn", 500);
   const productLookup = useLookup<{
     id: string;
     product_name: string;
     product_code?: string;
     hsn_id?: string;
     hsn_code?: string;
+    purchase_vat_percent?: number;
     refund_vat_percent?: number;
     standard_cost?: number;
     packaging_quantity?: number;
@@ -403,9 +404,61 @@ export function LocalPurchaseFormPage() {
   }, [matchingSheet, planningColumnId, consignmentCode, items.length]);
 
   const [loadingConsignmentItems, setLoadingConsignmentItems] = useState(false);
+  const [consignmentRawItems, setConsignmentRawItems] = useState<ConsignmentProductItem[]>([]);
+
+  const mapConsignmentItemToLocal = (it: ConsignmentProductItem): LocalPurchaseItem => {
+    const qty = it.quantity || 0;
+    const rate = it.unit_rate || 0;
+    const vat = it.vat_rate || 0;
+    const itemTotal = Number((qty * rate).toFixed(2));
+    const vatAmt = Number(((itemTotal * vat) / 100).toFixed(2));
+    return {
+      product_id: it.product_id,
+      product_name: it.product_name,
+      product_code: it.product_code || undefined,
+      hsn_code: it.hsn_code || undefined,
+      quantity: it.quantity,
+      unit_rate: it.unit_rate,
+      vat_rate: it.vat_rate,
+      item_total: itemTotal,
+      vat_amount: vatAmt,
+      expense_per_unit: 0,
+      unit_landing_rate: rate,
+      total_landing_rate: itemTotal,
+    };
+  };
+
+  const isItemForSupplier = (
+    item: ConsignmentProductItem,
+    targetSupId: string,
+    targetSupName?: string
+  ): boolean => {
+    if (!targetSupId) return false;
+    if (item.supplier_id && String(item.supplier_id).toLowerCase() === String(targetSupId).toLowerCase()) {
+      return true;
+    }
+    if (item.linked_supplier_ids && item.linked_supplier_ids.some((id) => String(id).toLowerCase() === String(targetSupId).toLowerCase())) {
+      return true;
+    }
+    if (targetSupName) {
+      const cleanTarget = targetSupName.trim().toLowerCase();
+      if (item.supplier_brand && (cleanTarget.includes(item.supplier_brand.toLowerCase()) || item.supplier_brand.toLowerCase().includes(cleanTarget))) {
+        return true;
+      }
+      if (item.supplier_name && (cleanTarget.includes(item.supplier_name.toLowerCase()) || item.supplier_name.toLowerCase().includes(cleanTarget))) {
+        return true;
+      }
+    }
+    return false;
+  };
 
   // Auto-populate line items from Shipment Planning Consignment column
-  const loadConsignmentItems = async (colId: string, codeName: string) => {
+  const loadConsignmentItems = async (
+    colId: string,
+    codeName: string,
+    overrideSupId?: string,
+    overrideSupName?: string
+  ) => {
     if (!colId) return;
     setLoadingConsignmentItems(true);
     try {
@@ -413,57 +466,75 @@ export function LocalPurchaseFormPage() {
         `/purchases/local/consignments/${colId}/items`
       );
       const data = Array.isArray(res.data) ? res.data : [];
-      if (data.length > 0) {
-        const mapped: LocalPurchaseItem[] = data.map((it) => {
-          const qty = it.quantity || 0;
-          const rate = it.unit_rate || 0;
-          const vat = it.vat_rate || 0;
-          const itemTotal = Number((qty * rate).toFixed(2));
-          const vatAmt = Number(((itemTotal * vat) / 100).toFixed(2));
-          return {
-            product_id: it.product_id,
-            product_name: it.product_name,
-            product_code: it.product_code || undefined,
-            hsn_code: it.hsn_code || undefined,
-            quantity: it.quantity,
-            unit_rate: it.unit_rate,
-            vat_rate: it.vat_rate,
-            item_total: itemTotal,
-            vat_amount: vatAmt,
-            expense_per_unit: 0,
-            unit_landing_rate: rate,
-            total_landing_rate: itemTotal,
-          };
-        });
-        setItems(mapped);
+      setConsignmentRawItems(data);
 
-        // Auto-select supplier if not selected yet and all items share the same supplier
-        if (!supplierId) {
-          const withSup = data.filter((d) => d.supplier_id);
-          if (withSup.length > 0) {
-            const firstSupId = withSup[0].supplier_id!;
-            const allSame = withSup.every((d) => d.supplier_id === firstSupId);
-            if (allSame) {
-              await handleSelectSupplier(firstSupId);
-            }
+      const targetSupId = overrideSupId !== undefined ? overrideSupId : supplierId;
+      const targetSupName = overrideSupName !== undefined ? overrideSupName : supplierName;
+
+      if (data.length === 0) {
+        setItems([]);
+        setPlanningInfo({ sheetName: `Consignment ${codeName}`, count: 0, items: [] });
+        toast(`Consignment ${codeName} has no items with planned quantity > 0. Table cleared.`, "info");
+        return;
+      }
+
+      if (targetSupId) {
+        // Filter strictly to items belonging to this supplier
+        const matching = data.filter((it) => isItemForSupplier(it, targetSupId, targetSupName));
+        if (matching.length > 0) {
+          const mapped = matching.map(mapConsignmentItemToLocal);
+          setItems(mapped);
+          setPlanningInfo({
+            sheetName: `Consignment ${codeName}`,
+            count: mapped.length,
+            items: mapped,
+          });
+          setSubmitAttempted(false);
+          setErrors((prev) => {
+            const next = { ...prev };
+            delete next.items;
+            delete next.unit_rates;
+            delete next.quantities;
+            return next;
+          });
+          toast(
+            `🚢 Auto-populated ${mapped.length} planned product(s) for ${targetSupName || "selected supplier"} from Consignment ${codeName}!`,
+            "success"
+          );
+        } else {
+          setItems([]);
+          setPlanningInfo({
+            sheetName: `Consignment ${codeName}`,
+            count: 0,
+            items: [],
+          });
+          toast(
+            `Consignment ${codeName} has 0 planned products for ${targetSupName || "selected supplier"}. Table cleared.`,
+            "info"
+          );
+        }
+      } else {
+        // No supplier selected yet: check if all items belong to a single supplier
+        const withSup = data.filter((d) => d.supplier_id);
+        if (withSup.length > 0) {
+          const firstSupId = withSup[0].supplier_id!;
+          const allSame = withSup.every((d) => d.supplier_id === firstSupId);
+          if (allSame) {
+            await handleSelectSupplier(firstSupId);
+            return;
           }
         }
-
-        setSubmitAttempted(false);
-        setErrors((prev) => {
-          const next = { ...prev };
-          delete next.items;
-          delete next.unit_rates;
-          delete next.quantities;
-          return next;
+        // Consignment contains products from multiple suppliers: do not dump mixed products into a single vendor bill
+        setItems([]);
+        setPlanningInfo({
+          sheetName: `Consignment ${codeName}`,
+          count: data.length,
+          items: [],
         });
         toast(
-          `🚢 Auto-populated ${mapped.length} planned products from Consignment ${codeName}!`,
-          "success"
+          `Consignment ${codeName} contains ${data.length} planned items across multiple suppliers. Please select a Supplier above to load their products.`,
+          "info"
         );
-      } else {
-        setItems([]);
-        toast(`Consignment ${codeName} has no items with planned quantity > 0. Table cleared.`, "info");
       }
     } catch (err) {
       console.error("Failed to load consignment items:", err);
@@ -478,6 +549,8 @@ export function LocalPurchaseFormPage() {
 
     const executeOrgChange = () => {
       setItems([]);
+      setConsignmentRawItems([]);
+      setPlanningInfo(null);
       setOrganizationId(orgId);
       const org = availableOrganizations.find((o) => o.id === orgId);
       setOrganizationName(org?.name || "");
@@ -517,6 +590,8 @@ export function LocalPurchaseFormPage() {
 
     const executeBranchChange = () => {
       setItems([]);
+      setConsignmentRawItems([]);
+      setPlanningInfo(null);
       setBranchId(brId);
       const br = availableBranches.find((b) => b.id === brId);
       setBranchName(br?.name || "");
@@ -572,6 +647,8 @@ export function LocalPurchaseFormPage() {
             setItems([]);
             setPlanningColumnId("");
             setConsignmentCode("");
+            setConsignmentRawItems([]);
+            setPlanningInfo(null);
             setSwitchModal(null);
           },
         });
@@ -579,6 +656,8 @@ export function LocalPurchaseFormPage() {
       }
       setPlanningColumnId("");
       setConsignmentCode("");
+      setConsignmentRawItems([]);
+      setPlanningInfo(null);
       return;
     }
 
@@ -629,13 +708,56 @@ export function LocalPurchaseFormPage() {
     const comp = sup?.company_name?.trim();
     const hasBrand = Boolean(brand);
     const showComp = Boolean(hasBrand && comp && comp.toLowerCase() !== brand!.toLowerCase());
-    setSupplierName(hasBrand ? (showComp ? `${brand} (${comp})` : brand!) : (comp || ""));
+    const resolvedName = hasBrand ? (showComp ? `${brand} (${comp})` : brand!) : (comp || "");
+    setSupplierName(resolvedName);
     if (errors.supplier_id) {
       setErrors((prev) => {
         const next = { ...prev };
         delete next.supplier_id;
         return next;
       });
+    }
+
+    // IF A CONSIGNMENT IS SELECTED: Automatically load/filter products for this supplier from the consignment!
+    if (planningColumnId && consignmentCode) {
+      if (consignmentRawItems.length > 0) {
+        const matching = consignmentRawItems.filter((it) => isItemForSupplier(it, supId, resolvedName));
+        if (matching.length > 0) {
+          const mapped = matching.map(mapConsignmentItemToLocal);
+          setItems(mapped);
+          setPlanningInfo({
+            sheetName: `Consignment ${consignmentCode}`,
+            count: mapped.length,
+            items: mapped,
+          });
+          setSubmitAttempted(false);
+          setErrors((prev) => {
+            const next = { ...prev };
+            delete next.items;
+            delete next.unit_rates;
+            delete next.quantities;
+            return next;
+          });
+          toast(
+            `🚢 Auto-populated ${mapped.length} planned product(s) for ${resolvedName} from Consignment ${consignmentCode}!`,
+            "success"
+          );
+        } else {
+          setItems([]);
+          setPlanningInfo({
+            sheetName: `Consignment ${consignmentCode}`,
+            count: 0,
+            items: [],
+          });
+          toast(
+            `Consignment ${consignmentCode} has 0 planned products for ${resolvedName}. Table cleared.`,
+            "info"
+          );
+        }
+      } else {
+        await loadConsignmentItems(planningColumnId, consignmentCode, supId, resolvedName);
+      }
+      return;
     }
 
     // Auto-update existing lines that have unit_rate === 0 if quotes exist for this supplier
@@ -690,6 +812,7 @@ export function LocalPurchaseFormPage() {
   // Auto-fetch planned items from Shipment Planning for selected Supplier
   useEffect(() => {
     if (isEdit) return;
+    if (planningColumnId) return; // When a consignment column is active, consignment handles planned items
     if (!supplierId && !supplierName) {
       setPlanningInfo(null);
       return;
@@ -799,6 +922,7 @@ export function LocalPurchaseFormPage() {
             product_code: it.product_code,
             hsn_id: it.hsn_id,
             hsn_code: it.hsn_code,
+            purchase_vat_percent: it.purchase_vat_percent,
             refund_vat_percent: it.refund_vat_percent,
             standard_cost: it.standard_cost,
             packaging_quantity: it.packaging_quantity != null ? Number(it.packaging_quantity) : undefined,
@@ -827,14 +951,16 @@ export function LocalPurchaseFormPage() {
     product_code?: string;
     hsn_id?: string;
     hsn_code?: string;
+    purchase_vat_percent?: number;
     refund_vat_percent?: number;
     standard_cost?: number;
     packaging_quantity?: number;
     minimum_order_quantity?: number;
   }) => {
+    const resolvedHsnObj = prod.hsn_id ? hsnLookup.items?.find((h) => h.id === prod.hsn_id) : undefined;
     const resolvedHsn =
       prod.hsn_code ||
-      (prod.hsn_id ? hsnLookup.items?.find((h) => h.id === prod.hsn_id)?.code : undefined) ||
+      resolvedHsnObj?.code ||
       null;
 
     let quotePrice: number | undefined = undefined;
@@ -898,9 +1024,11 @@ export function LocalPurchaseFormPage() {
     }
 
     const vatRate =
-      prod.refund_vat_percent !== undefined && prod.refund_vat_percent !== null
-        ? Number(prod.refund_vat_percent)
-        : 0;
+      resolvedHsnObj?.purchase_vat_percent !== undefined && resolvedHsnObj?.purchase_vat_percent !== null
+        ? Number(resolvedHsnObj.purchase_vat_percent)
+        : (prod.purchase_vat_percent !== undefined && prod.purchase_vat_percent !== null
+            ? Number(prod.purchase_vat_percent)
+            : 0);
 
     const initialQty = typeof resolvedQuantity === "number" ? resolvedQuantity : 0;
     const initialRate = typeof resolvedRate === "number" ? resolvedRate : 0;
@@ -2198,7 +2326,7 @@ export function LocalPurchaseFormPage() {
               {planningInfo && planningInfo.count > 0 && (
                 <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
                   <span style={{ fontSize: "12px", color: "#0369a1", background: "#f0f9ff", border: "1px solid #bae6fd", padding: "3px 10px", borderRadius: "6px", fontWeight: 600 }}>
-                    📦 {planningInfo.count} planned item(s) from <strong>{planningInfo.sheetName}</strong>
+                    📦 {planningInfo.count} planned item(s) {supplierName ? `for ${supplierName}` : ""} from <strong>{planningInfo.sheetName}</strong>
                   </span>
                   <button
                     type="button"
@@ -2222,7 +2350,14 @@ export function LocalPurchaseFormPage() {
               {planningInfo && planningInfo.count === 0 && supplierName && (
                 <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
                   <span style={{ fontSize: "12px", color: "#64748b", background: "#f8fafc", border: "1px solid #e2e8f0", padding: "3px 10px", borderRadius: "6px", fontWeight: 500 }}>
-                    ℹ️ 0 planned items for <strong>{supplierName}</strong> in {planningInfo.sheetName || "planning sheet"}
+                    ℹ️ 0 planned items for <strong>{supplierName}</strong> in {planningInfo.sheetName || "consignment / sheet"}
+                  </span>
+                </div>
+              )}
+              {planningColumnId && !supplierId && consignmentCode && (
+                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                  <span style={{ fontSize: "12px", color: "#b45309", background: "#fef3c7", border: "1px solid #fde68a", padding: "3px 10px", borderRadius: "6px", fontWeight: 600 }}>
+                    ⚠️ Consignment <strong>{consignmentCode}</strong> selected. Please select a Supplier above to load their products.
                   </span>
                 </div>
               )}

@@ -15,10 +15,11 @@ Rules:
 
 from __future__ import annotations
 
+import json
 import uuid
 from typing import Any
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import desc, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import app.users.models  # noqa: F401
@@ -147,7 +148,7 @@ async def build_product_sync_payload(
     width_cm = float(raw_width) if raw_width is not None else None
     height_cm = float(raw_height) if raw_height is not None else None
 
-    return {
+    result = {
         "product_id": str(product.id),
         "product_code": product.product_code,
         "product_name": product.product_name,
@@ -164,6 +165,9 @@ async def build_product_sync_payload(
         "uom_name": uom.name if uom else None,
         "uom_code": uom.code if uom else "PCS",
         "hsn_code": hsn.code if hsn else None,
+        "gst_percent": float(hsn.gst_percent or 0.0) if hsn else 0.0,
+        "import_duty_percent": float(hsn.import_duty_percent or 0.0) if hsn else 0.0,
+        "purchase_vat_percent": float(product.purchase_vat_percent or (hsn.purchase_vat_percent if hsn else 0.0) or 0.0),
         "refund_vat_percent": float(product.refund_vat_percent or 0.0),
         "license_certificate_required": product.license_certificate_required,
         "specification": product.specification,
@@ -184,8 +188,30 @@ async def build_product_sync_payload(
         "material": product.material,
         "is_active": active_flag,
         "status": status_str,
-        "version": getattr(product, "version", 1),
     }
+
+    # Ensure strictly monotonic sync_version so Inhyma OCC accepts every update/status transition
+    stmt = (
+        select(IntegrationOutboxEvent.payload)
+        .where(
+            IntegrationOutboxEvent.aggregate_type == "product",
+            IntegrationOutboxEvent.aggregate_id == product.id,
+        )
+        .order_by(desc(IntegrationOutboxEvent.created_at))
+        .limit(1)
+    )
+    last_payload_raw = (await db.execute(stmt)).scalar_one_or_none()
+    last_version = 0
+    if last_payload_raw:
+        try:
+            parsed = json.loads(last_payload_raw) if isinstance(last_payload_raw, str) else last_payload_raw
+            last_version = int(parsed.get("version", 0))
+        except Exception:
+            pass
+
+    current_ver = int(getattr(product, "version", 1) or 1)
+    result["version"] = max(current_ver, last_version + 1)
+    return result
 
 
 async def sync_product_to_inhyma(

@@ -70,6 +70,7 @@ class Product(Base, UUIDPrimaryKeyMixin, TimestampMixin, VersionMixin, SoftDelet
 
 
     # --- Tax & Compliance ---------------------------------------------------------
+    purchase_vat_percent: Mapped[float] = mapped_column(Numeric(5, 2), default=0.0, nullable=False)
     refund_vat_percent: Mapped[float] = mapped_column(Numeric(5, 2), default=0.0, nullable=False)
     license_certificate_required: Mapped[str | None] = mapped_column(Text, nullable=True)  # Highlight RED in Inquiry if set
 

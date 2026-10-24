@@ -8,11 +8,16 @@ and natural-key conflict/repair matching for products synced from Yinglima.
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 import uuid
 from typing import Any
 
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
 
 from app.cache.dependency import get_cache
 from app.cache.manager import CacheManager
@@ -200,11 +205,25 @@ class ProductSyncAdapter(BaseEntitySyncAdapter):
         stmt = select(Tax).where(func.lower(Tax.hsn_number) == hsn_code.lower()).limit(1)
         tax = (await session.execute(stmt)).scalar_one_or_none()
         if tax:
+            updated = False
+            if "gst_percent" in payload and payload["gst_percent"] is not None:
+                tax.gst_percent = float(payload["gst_percent"])
+                updated = True
+            if "import_duty_percent" in payload and payload["import_duty_percent"] is not None:
+                tax.import_duty_percent = float(payload["import_duty_percent"])
+                updated = True
+            if updated:
+                await session.flush()
             return tax.id
+
+        gst_val = payload.get("gst_percent")
+        if gst_val is None:
+            gst_val = payload.get("refund_vat_percent") or 0.0
 
         new_tax = Tax(
             hsn_number=hsn_code[:50],
-            gst_percent=float(payload.get("refund_vat_percent") or 0.0),
+            gst_percent=float(gst_val),
+            import_duty_percent=float(payload.get("import_duty_percent") or 0.0),
             status=RecordStatus.ACTIVE,
         )
         session.add(new_tax)
@@ -411,9 +430,11 @@ class ProductSyncAdapter(BaseEntitySyncAdapter):
         is_active_val = payload.get("is_active")
         if is_active_val is False or status_val == "inactive":
             product.status = RecordStatus.INACTIVE
+            product.deleted_at = None
             logger.info("Deactivated Inhyma product '%s' (%s) per source sync.", product.product_name_tally, product.id)
         elif is_active_val is True or status_val == "active":
             product.status = RecordStatus.ACTIVE
+            product.deleted_at = None
 
         # Re-resolve classifications if names provided
         if payload.get("category_name") or payload.get("category_code"):
@@ -426,6 +447,11 @@ class ProductSyncAdapter(BaseEntitySyncAdapter):
             product.uom_id = await self._resolve_uom(session, payload)
         if payload.get("hsn_code"):
             product.hsn_id = await self._resolve_tax(session, payload)
+
+        org_id, org_ids = await self._resolve_organization(session)
+        if org_id:
+            product.organization_id = org_id
+            product.organization_ids = org_ids
 
         await session.flush()
 
@@ -447,8 +473,9 @@ class ProductSyncAdapter(BaseEntitySyncAdapter):
         if product is None:
             return
 
-        # Always soft-deactivate to preserve historical references and inventory integrity
+        # Soft-delete the product when deleted in source ERP
         product.status = RecordStatus.INACTIVE
+        product.deleted_at = _utcnow()
         await session.flush()
 
         try:
@@ -457,8 +484,8 @@ class ProductSyncAdapter(BaseEntitySyncAdapter):
         except Exception:
             pass
 
-        logger.info("Automatically deactivated Inhyma product '%s' (ID: %s).", product.product_name_tally, local_id)
-        await _broadcast_product_live_event("product.deactivated", local_id, product.product_name_tally)
+        logger.info("Automatically soft-deleted Inhyma product '%s' (ID: %s) per source deletion.", product.product_name_tally, local_id)
+        await _broadcast_product_live_event("product.deleted", local_id, product.product_name_tally)
 
     async def get_local_version(self, session: AsyncSession, local_id: uuid.UUID) -> int | None:
         """Return the current OCC version integer of the local entity, or None if not found."""

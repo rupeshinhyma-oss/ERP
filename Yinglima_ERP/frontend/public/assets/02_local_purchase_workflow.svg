@@ -1,0 +1,112 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 680" width="100%" height="100%">
+  <defs>
+    <style>
+      .title { font-family: 'Segoe UI', system-ui, sans-serif; font-size: 20px; font-weight: 700; fill: #0f172a; }
+      .subtitle { font-family: 'Segoe UI', system-ui, sans-serif; font-size: 13px; fill: #64748b; }
+      .card-head { font-family: 'Segoe UI', system-ui, sans-serif; font-size: 13px; font-weight: 700; }
+      .card-body { font-family: 'Segoe UI', system-ui, sans-serif; font-size: 11px; fill: #334155; }
+      .arrow { stroke: #2563eb; stroke-width: 2; fill: none; }
+      .arrow-green { stroke: #16a34a; stroke-width: 2; fill: none; }
+      .arrow-red { stroke: #dc2626; stroke-width: 2; fill: none; }
+    </style>
+    <filter id="card-shadow" x="-5%" y="-5%" width="110%" height="115%">
+      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#0f172a" flood-opacity="0.08" />
+    </filter>
+    <marker id="m-blue" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1 L 10 5 L 0 9 z" fill="#2563eb" />
+    </marker>
+    <marker id="m-green" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1 L 10 5 L 0 9 z" fill="#16a34a" />
+    </marker>
+    <marker id="m-red" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1 L 10 5 L 0 9 z" fill="#dc2626" />
+    </marker>
+  </defs>
+
+  <rect width="1000" height="680" fill="#f8fafc" rx="10" />
+
+  <!-- Header -->
+  <rect x="25" y="20" width="950" height="55" rx="8" fill="#ffffff" stroke="#e2e8f0" filter="url(#card-shadow)" />
+  <text x="45" y="47" class="title">Local Purchase &amp; Domestic Tax Workflow Engine</text>
+  <text x="45" y="65" class="subtitle">Multi-Vendor Consignment Isolation, Domestic Purchase VAT % &amp; Value-Based Landing Cost</text>
+
+  <!-- Step 1: Essentials -->
+  <rect x="25" y="95" width="280" height="130" rx="8" fill="#ffffff" stroke="#cbd5e1" filter="url(#card-shadow)" />
+  <rect x="25" y="95" width="280" height="28" rx="8" fill="#f1f5f9" />
+  <text x="35" y="114" class="card-head" fill="#1e293b">CARD 1: INVOICE ESSENTIALS</text>
+  <text x="35" y="140" class="card-body">&bull; Organization: Inhyma</text>
+  <text x="35" y="158" class="card-body">&bull; Branch: Inhyma Mumbai (INM)</text>
+  <text x="35" y="176" class="card-body">&bull; Consignment: Mum 48 (28 planned items)</text>
+  <text x="35" y="194" class="card-body">&bull; Supplier: Prathamesh Packaging PVT LTD</text>
+  <text x="35" y="212" class="card-body">&bull; Invoice No, Date &amp; Invoice Total (RMB)</text>
+
+  <!-- Step 2: Auto Filter Engine -->
+  <path d="M 305 160 L 350 160" class="arrow" marker-end="url(#m-blue)" />
+
+  <rect x="360" y="95" width="300" height="130" rx="8" fill="#eff6ff" stroke="#93c5fd" filter="url(#card-shadow)" />
+  <rect x="360" y="95" width="300" height="28" rx="8" fill="#dbeafe" />
+  <text x="370" y="114" class="card-head" fill="#1e40af">MULTI-VENDOR CONSIGNMENT ISOLATION</text>
+  <text x="370" y="140" class="card-body">&bull; Intersects Consignment Mum 48 with Supplier</text>
+  <text x="370" y="158" class="card-body">&bull; Checks Primary Supplier + SupplierProductLink</text>
+  <text x="370" y="176" class="card-body">&bull; Isolates Prathamesh items: 1 planned product</text>
+  <text x="370" y="194" class="card-body">&bull; Auto-loads: Carton boxes (PROD-MUM-0002)</text>
+  <text x="370" y="212" class="card-body">&bull; Planned Qty: 48 units populated instantly</text>
+
+  <!-- Step 3: Tax Resolution -->
+  <path d="M 660 160 L 705 160" class="arrow" marker-end="url(#m-blue)" />
+
+  <rect x="715" y="95" width="260" height="130" rx="8" fill="#fdf4ff" stroke="#f0abfc" filter="url(#card-shadow)" />
+  <rect x="715" y="95" width="260" height="28" rx="8" fill="#fae8ff" />
+  <text x="725" y="114" class="card-head" fill="#86198f">PURCHASE VAT % RESOLUTION</text>
+  <text x="725" y="140" class="card-body">1. Check HSN purchase_vat_percent (0%)</text>
+  <text x="725" y="158" class="card-body">2. Fallback to Product purchase_vat_percent</text>
+  <text x="725" y="176" class="card-body">3. Default: 0.00%</text>
+  <text x="725" y="198" class="card-body" fill="#15803d" font-weight="700">&check; PROD-MUM-0002 resolves to 0.00%</text>
+  <text x="725" y="214" class="card-body" fill="#dc2626">&cross; Indian GST 18% &amp; Export 13% excluded</text>
+
+  <!-- Step 4: Value-Based Landing Cost -->
+  <rect x="25" y="260" width="460" height="150" rx="8" fill="#ffffff" stroke="#cbd5e1" filter="url(#card-shadow)" />
+  <rect x="25" y="260" width="460" height="28" rx="8" fill="#f1f5f9" />
+  <text x="35" y="279" class="card-head" fill="#1e293b">CARD 2: VALUE-BASED (VB) LANDING EXPENSES</text>
+  <text x="35" y="306" class="card-body">&bull; Packaging Charges (¥) + Transport Freight (¥) + Offloading (¥) + Misc (¥)</text>
+  <text x="35" y="324" class="card-body">&bull; Formula: Expense Ratio = Total Expenses / Total Basic Line Value</text>
+  <text x="35" y="342" class="card-body">&bull; Unit Landing Rate = Unit Rate &times; (1 + Expense Ratio)</text>
+  <text x="35" y="360" class="card-body">&bull; Distributes actual factory arrival landing expenses across consignment items</text>
+  <text x="35" y="378" class="card-body">&bull; Total Landing Rate (VB) = Qty &times; Unit Landing Rate</text>
+
+  <!-- Step 5: Items Table with Rate Guard -->
+  <rect x="515" y="260" width="460" height="150" rx="8" fill="#ffffff" stroke="#cbd5e1" filter="url(#card-shadow)" />
+  <rect x="515" y="260" width="460" height="28" rx="8" fill="#f1f5f9" />
+  <text x="525" y="279" class="card-head" fill="#1e293b">CARD 4: LINE ITEMS TABLE &amp; ZERO-RATE GUARD</text>
+  <text x="525" y="306" class="card-body">&bull; Columns: # | Product Name | HSN | Qty | Unit Rate | VAT % | Total</text>
+  <text x="525" y="324" class="card-body">&bull; Mandatory Positive Rate: Unit Rate &gt; 0.00 required</text>
+  <text x="525" y="342" class="card-body">&bull; If Rate = 0: Cell turns red with warning label ▲ Rate &gt; 0 req.</text>
+  <text x="525" y="360" class="card-body">&bull; Automatically strips leading zeros upon typing for clean fast entry</text>
+  <text x="525" y="378" class="card-body">&bull; Form submission blocked if any line has zero unit cost</text>
+
+  <!-- Connectors to Financial Reconciliation -->
+  <path d="M 255 410 L 255 455 L 450 455" class="arrow" marker-end="url(#m-blue)" />
+  <path d="M 745 410 L 745 455 L 550 455" class="arrow" marker-end="url(#m-blue)" />
+
+  <!-- Step 6: Reconciliation & Quality Gate -->
+  <rect x="150" y="470" width="700" height="180" rx="10" fill="#ffffff" stroke="#64748b" stroke-width="1.5" filter="url(#card-shadow)" />
+  <rect x="150" y="470" width="700" height="30" rx="10" fill="#f8fafc" />
+  <text x="170" y="490" class="card-head" fill="#0f172a">CARD 5: SMART FINANCIAL RECONCILIATION &amp; QUALITY GATE</text>
+
+  <!-- Difference Formula -->
+  <text x="170" y="520" class="card-body" font-size="12px">Calculates Discrepancy: &Delta; = | Entered Invoice Total Value - Calculated Line Items Total with VAT |</text>
+
+  <!-- State Red -->
+  <rect x="170" y="535" width="310" height="75" rx="6" fill="#fef2f2" stroke="#ef4444" stroke-width="1.5" />
+  <text x="180" y="555" class="card-head" fill="#b91c1c">&cross; DISCREPANCY &gt; 0.05 (SUBMISSION BLOCKED)</text>
+  <text x="180" y="573" class="card-body" fill="#7f1d1d">&bull; Red Alert Banner flags exact difference amount</text>
+  <text x="180" y="591" class="card-body" fill="#7f1d1d">&bull; Save button is strictly disabled</text>
+
+  <!-- State Green -->
+  <rect x="520" y="535" width="310" height="75" rx="6" fill="#f0fdf4" stroke="#22c55e" stroke-width="1.5" />
+  <text x="530" y="555" class="card-head" fill="#15803d">&check; DISCREPANCY &le; 0.05 (PERFECT MATCH)</text>
+  <text x="530" y="573" class="card-body" fill="#14532d">&bull; Green Banner confirms mathematical parity</text>
+  <text x="530" y="591" class="card-body" fill="#14532d">&bull; Enables Submit Local Purchase to confirm order</text>
+
+  <text x="170" y="632" class="card-body" fill="#2563eb" font-weight="600">&rarr; Confirmed Local Purchase records factory RMB cost for downstream Export Commercial Invoices</text>
+</svg>

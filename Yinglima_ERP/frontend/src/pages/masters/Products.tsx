@@ -25,7 +25,6 @@ import { SearchableFilterDropdown } from "@/components/SearchableDropdown";
 import {
   MultiSelectField,
   SelectField,
-  StatusSelectField,
   TextAreaField,
   TextField,
   autoTitleCase,
@@ -58,6 +57,7 @@ const EMPTY: FormState = {
   supplier_id: "",
   organization_ids_json: "[]",
   branch_ids_json: "[]",
+  purchase_vat_percent: "",
   refund_vat_percent: "",
   license_certificate_required: "",
   conversion_factor: "",
@@ -1095,6 +1095,7 @@ export function ProductsPage() {
         { key: "Width (cm)", label: "Width (cm)" },
         { key: "Height (cm)", label: "Height (cm)" },
         { key: "Pack. Unit CBM", label: "Packaging Unit CBM", required: true },
+        { key: "Purchase VAT %", label: "Purchase VAT %" },
         { key: "Refund VAT %", label: "Refund VAT %" },
         { key: "Compliance & License Requirements", label: "Compliance & License Requirements" },
         { key: "Specification", label: "Specification" },
@@ -1126,6 +1127,7 @@ export function ProductsPage() {
               : []
           ),
           branch_ids_json: JSON.stringify(item?.branch_ids || []),
+          purchase_vat_percent: str(item?.purchase_vat_percent),
           refund_vat_percent: str(item?.refund_vat_percent),
           license_certificate_required: str(item?.license_certificate_required),
           conversion_factor: str(item?.conversion_factor),
@@ -1254,6 +1256,7 @@ export function ProductsPage() {
             try { return JSON.parse(f.branch_ids_json || "[]"); }
             catch { return []; }
           })(),
+          purchase_vat_percent: numOrNull(f.purchase_vat_percent) ?? 0,
           refund_vat_percent: numOrNull(f.refund_vat_percent) ?? 0,
           license_certificate_required: nullIfBlank(f.license_certificate_required),
           conversion_factor: numOrNull(f.conversion_factor),
@@ -1442,7 +1445,7 @@ export function ProductsPage() {
                 })}
               </SelectField>
 
-              {/* Row 2: HSN Code, Refund VAT %, Organization (spans 2 columns) */}
+              {/* Row 2: HSN Code, Purchase VAT %, Refund VAT %, Organization (spans 2 columns) */}
               <SelectField
                 id="hsn_id"
                 label="HSN Code *"
@@ -1451,16 +1454,18 @@ export function ProductsPage() {
                 onChange={(v) => {
                   set("hsn_id", v);
                   const picked = hsnCodes.items.find((h) => h.id === v);
+                  set("purchase_vat_percent", String(picked?.purchase_vat_percent ?? 0));
                   set("refund_vat_percent", String(picked?.refund_vat_percent ?? 0));
                 }}
               >
                 <option value="">-- Select HSN Code --</option>
                 {hsnCodes.items.map((h) => (
                   <option key={h.id} value={h.id}>
-                    {`${h.code} - ${h.description || ""} (Refund VAT: ${h.refund_vat_percent || 0}%)`}
+                    {`${h.code} - ${h.description || ""} (Purchase VAT: ${h.purchase_vat_percent || 0}%, Refund VAT: ${h.refund_vat_percent || 0}%)`}
                   </option>
                 ))}
               </SelectField>
+              <TextField id="purchase_vat_percent" label="Purchase VAT %" type="number" step="0.01" min={0} max={100} placeholder="Auto from HSN or manual" value={f.purchase_vat_percent} onChange={(v) => set("purchase_vat_percent", v)} />
               <TextField id="refund_vat_percent" label="Refund VAT %" type="number" step="0.01" min={0} max={100} placeholder="Auto from HSN or manual" value={f.refund_vat_percent} onChange={(v) => set("refund_vat_percent", v)} />
               <div style={{ gridColumn: "span 2" }}>
                 <MultiSelectField
@@ -1754,11 +1759,6 @@ export function ProductsPage() {
                   );
                 })()}
               </div>
-            </div>
-
-            <div className="section-title">Status</div>
-            <div className="form-grid">
-              <StatusSelectField value={f.status} onChange={(v) => set("status", v)} />
             </div>
           </>
         );
@@ -2349,7 +2349,24 @@ export function ProductsPage() {
                     value: hsn?.gst_percent != null ? `${hsn.gst_percent}%` : "—",
                   },
                   {
-                    label: "Refund VAT % / GST %",
+                    label: "Purchase VAT %",
+                    value: (
+                      <span
+                        style={{
+                          color: "#1e40af",
+                          fontWeight: 700,
+                          background: "#dbeafe",
+                          padding: "2px 8px",
+                          borderRadius: "4px",
+                          display: "inline-block",
+                        }}
+                      >
+                        {p.purchase_vat_percent != null ? `${p.purchase_vat_percent}%` : "0%"}
+                      </span>
+                    ),
+                  },
+                  {
+                    label: "Refund VAT %",
                     value: (
                       <span
                         style={{

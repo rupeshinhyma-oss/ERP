@@ -15,7 +15,7 @@ from httpx import AsyncClient, ASGITransport
 sys.path.insert(0, r"D:\Om work1\ERP\Yinglima_ERP\backend")
 
 import app.users.models  # noqa: F401
-from app.main import app
+from app.main import app as fastapi_app
 from app.database.engine import get_sessionmaker
 from app.rbac.repository import PermissionRepository, RoleRepository
 from app.auth.service import CurrentUser
@@ -143,7 +143,7 @@ async def test_api_endpoints_rbac_http():
     """Verify HTTP requests through FastAPI router return 403 Forbidden when permission is missing and 200 when granted."""
     from app.auth.dependencies import get_current_user
 
-    transport = ASGITransport(app=app)
+    transport = ASGITransport(app=fastapi_app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         # 1. User with NO permissions
         user_no_perms = CurrentUser(
@@ -151,7 +151,7 @@ async def test_api_endpoints_rbac_http():
             username="blocked_user",
             permissions=set(),
         )
-        app.dependency_overrides[get_current_user] = lambda: user_no_perms
+        fastapi_app.dependency_overrides[get_current_user] = lambda: user_no_perms
 
         # Sale Process: expect 403
         r_sales = await client.get("/api/v1/sales/orders")
@@ -171,7 +171,7 @@ async def test_api_endpoints_rbac_http():
             username="view_only_user",
             permissions={"sale_process.view", "stock_movement.view", "notification_settings.view"},
         )
-        app.dependency_overrides[get_current_user] = lambda: user_view_only
+        fastapi_app.dependency_overrides[get_current_user] = lambda: user_view_only
 
         # Read operations should succeed (200 OK)
         r_sales_view = await client.get("/api/v1/sales/orders")
@@ -194,7 +194,7 @@ async def test_api_endpoints_rbac_http():
         assert r_notif_update.status_code == 403, f"Expected 403 on PUT /notifications/rules without manage permission, got {r_notif_update.status_code}"
 
     # Clean up override
-    app.dependency_overrides.clear()
+    fastapi_app.dependency_overrides.clear()
 
 
 async def main():

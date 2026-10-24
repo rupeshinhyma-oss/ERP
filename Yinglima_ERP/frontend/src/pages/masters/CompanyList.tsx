@@ -1,6 +1,6 @@
 import { MasterPage, type FormState } from "@/components/MasterPage";
 import { StatusBadge } from "@/components/ui";
-import { StatusSelectField, TextField } from "@/components/fields";
+import { TextField } from "@/components/fields";
 import { ItemPopoverCell } from "@/components/ItemPopoverCell";
 import type { MasterRecord, CompanyBranch } from "@/types";
 
@@ -124,7 +124,6 @@ export function CompanyListPage() {
                 value={f.name}
                 onChange={(v) => set("name", v)}
               />
-              <StatusSelectField value={f.status} onChange={(v) => set("status", v)} />
             </div>
 
             {/* Operating Branches & Code Prefixes Section */}

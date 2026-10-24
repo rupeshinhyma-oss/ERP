@@ -2,7 +2,7 @@
 
 import { MasterPage, type FormState } from "@/components/MasterPage";
 import { StatusBadge, dash } from "@/components/ui";
-import { StatusSelectField, TextField, nullIfBlank } from "@/components/fields";
+import { TextField, nullIfBlank } from "@/components/fields";
 import type { Uom } from "@/types";
 
 const EMPTY: FormState = { name: "", short_name: "", status: "active" };
@@ -49,7 +49,6 @@ export function UomPage() {
         <div className="form-grid">
           <TextField id="name" label="Name *" required maxLength={100} placeholder="Kilogram" value={f.name} onChange={(v) => set("name", v)} />
           <TextField id="short_name" label="Short Name" maxLength={20} placeholder="kg" value={f.short_name} onChange={(v) => set("short_name", v)} />
-          <StatusSelectField value={f.status} onChange={(v) => set("status", v)} />
         </div>
       )}
       detailFields={(u) => [

@@ -2,7 +2,7 @@
 
 import { MasterPage, type FormState } from "@/components/MasterPage";
 import { StatusBadge, dash } from "@/components/ui";
-import { StatusSelectField, TextField, nullIfBlank } from "@/components/fields";
+import { TextField, nullIfBlank } from "@/components/fields";
 import type { Currency } from "@/types";
 
 const EMPTY: FormState = { name: "", code: "", symbol: "", decimal_places: "2", status: "active" };
@@ -57,7 +57,6 @@ export function CurrenciesPage() {
           <TextField id="code" label="Currency Code *" required maxLength={10} placeholder="INR" value={f.code} onChange={(v) => set("code", v)} />
           <TextField id="symbol" label="Currency Symbol" maxLength={10} placeholder="₹" value={f.symbol} onChange={(v) => set("symbol", v)} />
           <TextField id="decimal_places" label="Decimal Places" type="number" min={0} max={6} value={f.decimal_places} onChange={(v) => set("decimal_places", v)} />
-          <StatusSelectField value={f.status} onChange={(v) => set("status", v)} />
         </div>
       )}
       detailFields={(c) => [

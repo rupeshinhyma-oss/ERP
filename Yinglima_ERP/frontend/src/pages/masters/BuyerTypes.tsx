@@ -2,7 +2,7 @@
 
 import { MasterPage, type FormState } from "@/components/MasterPage";
 import { StatusBadge } from "@/components/ui";
-import { StatusSelectField, TextField } from "@/components/fields";
+import { TextField } from "@/components/fields";
 
 export interface BuyerTypeItem {
   id: string;
@@ -51,7 +51,6 @@ export function BuyerTypesPage() {
       renderFields={(f, set) => (
         <div className="form-grid">
           <TextField id="name" label="Buyer Type Name *" required maxLength={150} value={f.name} onChange={(v) => set("name", v)} />
-          <StatusSelectField value={f.status} onChange={(v) => set("status", v)} />
         </div>
       )}
       detailFields={(b) => [

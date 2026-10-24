@@ -9,6 +9,7 @@ entry for ``"product" -> moduleChannel("inventory")``.
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 
 from fastapi import APIRouter, Depends, File, Query, Request, UploadFile, status
@@ -23,6 +24,7 @@ from app.auth.service import CurrentUser
 from app.common.list_query import ListQueryParams, get_list_query_params
 from app.common.pagination import PageMeta
 from app.common.storage import save_uploaded_file
+from app.core.constants import RecordStatus
 from app.core.logging import get_logger
 from app.core.responses import build_success_response
 from app.database.session import get_db_session
@@ -305,12 +307,108 @@ async def update_product(
     if await is_inhyma_organization(
         db, product=product, organization_ids=getattr(payload, "organization_ids", None), organization_id=getattr(payload, "organization_id", None)
     ) or await was_product_synced_to_inhyma(db, product.id):
-        is_inactive = (payload.status == "inactive")
-        evt_type = "product.deactivated" if is_inactive else "product.updated"
+        product_is_active = (product.status == RecordStatus.ACTIVE or str(product.status).lower() == "active")
         await sync_product_to_inhyma(
-            db, product, event_type=evt_type, actor_id=current_user.id, is_active=(not is_inactive)
+            db, product, event_type="product.updated", actor_id=current_user.id, is_active=product_is_active
         )
     return build_success_response(data=data, request_id=request.state.request_id)
+
+
+from pydantic import BaseModel
+
+
+class BulkStatusPayload(BaseModel):
+    ids: list[uuid.UUID]
+
+
+@router.post("/bulk-activate", summary="Bulk activate products")
+async def bulk_activate_products(
+    payload: BulkStatusPayload,
+    request: Request,
+    service: ProductService = Depends(get_product_service),
+    current_user: CurrentUser = Depends(require_permission("product.update")),
+    audit_service: AuditService = Depends(get_audit_service),
+    db: AsyncSession = Depends(get_db_session),
+    dispatcher: EventDispatcher = Depends(get_event_dispatcher),
+) -> dict:
+    """Set status of multiple products to active in high-speed batch."""
+    products = await service.bulk_activate(payload.ids)
+    sync_tasks = []
+    for product in products:
+        await _record_action(
+            audit_service=audit_service,
+            request=request,
+            action=AuditAction.UPDATE,
+            actor=current_user,
+            entity_id=product.id,
+            description=f"Activated product {product.product_name!r}.",
+        )
+        await _publish_product_event(
+            db=db,
+            dispatcher=dispatcher,
+            event_type="product.updated",
+            product_id=product.id,
+            user_id=current_user.id,
+            changes={"is_active": True},
+        )
+        if await is_inhyma_organization(db, product=product) or await was_product_synced_to_inhyma(db, product.id):
+            sync_tasks.append(
+                sync_product_to_inhyma(
+                    db, product, event_type="product.updated", actor_id=current_user.id, is_active=True
+                )
+            )
+    if sync_tasks:
+        await asyncio.gather(*sync_tasks, return_exceptions=True)
+    return build_success_response(
+        data={"count": len(products), "ids": [str(p.id) for p in products]},
+        request_id=request.state.request_id,
+        message=f"Successfully activated {len(products)} product(s).",
+    )
+
+
+@router.post("/bulk-deactivate", summary="Bulk deactivate products")
+async def bulk_deactivate_products(
+    payload: BulkStatusPayload,
+    request: Request,
+    service: ProductService = Depends(get_product_service),
+    current_user: CurrentUser = Depends(require_permission("product.update")),
+    audit_service: AuditService = Depends(get_audit_service),
+    db: AsyncSession = Depends(get_db_session),
+    dispatcher: EventDispatcher = Depends(get_event_dispatcher),
+) -> dict:
+    """Set status of multiple products to inactive in high-speed batch."""
+    products = await service.bulk_deactivate(payload.ids)
+    sync_tasks = []
+    for product in products:
+        await _record_action(
+            audit_service=audit_service,
+            request=request,
+            action=AuditAction.UPDATE,
+            actor=current_user,
+            entity_id=product.id,
+            description=f"Deactivated product {product.product_name!r}.",
+        )
+        await _publish_product_event(
+            db=db,
+            dispatcher=dispatcher,
+            event_type="product.updated",
+            product_id=product.id,
+            user_id=current_user.id,
+            changes={"is_active": False},
+        )
+        if await is_inhyma_organization(db, product=product) or await was_product_synced_to_inhyma(db, product.id):
+            sync_tasks.append(
+                sync_product_to_inhyma(
+                    db, product, event_type="product.updated", actor_id=current_user.id, is_active=False
+                )
+            )
+    if sync_tasks:
+        await asyncio.gather(*sync_tasks, return_exceptions=True)
+    return build_success_response(
+        data={"count": len(products), "ids": [str(p.id) for p in products]},
+        request_id=request.state.request_id,
+        message=f"Successfully deactivated {len(products)} product(s).",
+    )
 
 
 @router.post("/{product_id}/activate", summary="Activate a product")
@@ -381,7 +479,7 @@ async def deactivate_product(
     # Automatic deactivation in Inhyma
     if await is_inhyma_organization(db, product=product) or await was_product_synced_to_inhyma(db, product.id):
         await sync_product_to_inhyma(
-            db, product, event_type="product.deactivated", actor_id=current_user.id, is_active=False
+            db, product, event_type="product.updated", actor_id=current_user.id, is_active=False
         )
     return build_success_response(data=data, request_id=request.state.request_id)
 
@@ -397,14 +495,14 @@ async def delete_product(
     dispatcher: EventDispatcher = Depends(get_event_dispatcher),
 ) -> dict:
     """Soft-delete a product."""
-    if await was_product_synced_to_inhyma(db, product_id):
-        try:
-            prod_for_deact = await service.get_by_id_or_raise(product_id)
+    try:
+        prod_for_deact = await service.get_by_id_or_raise(product_id)
+        if await is_inhyma_organization(db, product=prod_for_deact) or await was_product_synced_to_inhyma(db, product_id):
             await sync_product_to_inhyma(
-                db, prod_for_deact, event_type="product.deactivated", actor_id=current_user.id, is_active=False
+                db, prod_for_deact, event_type="product.deleted", actor_id=current_user.id, is_active=False
             )
-        except Exception:
-            pass
+    except Exception:
+        pass
     await service.delete(product_id)
     await _record_action(
         audit_service=audit_service,
