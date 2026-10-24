@@ -460,6 +460,39 @@ describe("Product Master (/product/list)", () => {
     fireEvent.click(backBtn);
     expect(screen.queryByTestId("machine-spares-page")).toBeNull();
   });
+
+  it("renders product name suggestions as an absolute overlay dropdown and allows selection", async () => {
+    render(
+      <BrowserRouter>
+        <ProductsPage defaultAdd={true} />
+      </BrowserRouter>
+    );
+
+    const nameInput = screen.getByPlaceholderText("Enter product name as per Tally") as HTMLInputElement;
+    expect(nameInput).toBeTruthy();
+
+    // Type query with >= 2 characters
+    fireEvent.change(nameInput, { target: { value: "Rotary" } });
+
+    // Wait for debounced suggestions dropdown
+    await waitFor(() => {
+      const suggestions = screen.getByTestId("product-name-suggestions");
+      expect(suggestions).toBeTruthy();
+      expect(suggestions.style.position).toBe("absolute");
+      expect(suggestions.style.zIndex).toBe("1050");
+    });
+
+    // Verify dropdown lists the matching product
+    expect(screen.getByText(/Existing products matching/i)).toBeTruthy();
+    const item = screen.getByText("ISL150 Rotary PFS 4 Stations");
+    expect(item).toBeTruthy();
+
+    // Clicking the item selects it and closes the dropdown
+    fireEvent.click(item);
+    expect(nameInput.value).toBe("ISL150 Rotary PFS 4 Stations");
+    expect(screen.queryByTestId("product-name-suggestions")).toBeNull();
+  });
 });
+
 
 

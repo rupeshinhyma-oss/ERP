@@ -59,8 +59,35 @@ function formatIndianCurrency(amount: number): string {
  * Duplicate guard for the Product Name field (spec): while typing, existing products whose name or code contains
  * what was typed -- ANY part of the name, not only the start -- are listed, and an exact match says "already exists".
  */
-function ProductNameSuggestions({ term, excludeId }: { term: string; excludeId?: string | null }) {
+interface ProductNameSuggestionsProps {
+  term: string;
+  excludeId?: string | null;
+  isOpen?: boolean;
+  onClose?: () => void;
+  onSelect?: (productName: string) => void;
+}
+
+/**
+ * Duplicate guard for the Product Name field: while typing, existing products whose name or code contains
+ * what was typed are displayed in an overlay dropdown list.
+ * An exact match displays a duplicate warning banner.
+ */
+function ProductNameSuggestions({
+  term,
+  excludeId,
+  isOpen = true,
+  onClose,
+  onSelect,
+}: ProductNameSuggestionsProps) {
   const [matches, setMatches] = useState<Array<{ id: string; product_name_tally?: string | null; product_name?: string | null; product_code?: string | null }>>([]);
+  const [isDismissed, setIsDismissed] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  // Reset dismissed state whenever user modifies the search term
+  useEffect(() => {
+    setIsDismissed(false);
+  }, [term]);
+
   useEffect(() => {
     const q = term.trim();
     if (q.length < 2) {
@@ -76,29 +103,190 @@ function ProductNameSuggestions({ term, excludeId }: { term: string; excludeId?:
         .catch(() => {
           if (!cancelled) setMatches([]);
         });
-    }, 300);
+    }, 250);
     return () => {
       cancelled = true;
       clearTimeout(timer);
     };
   }, [term, excludeId]);
-  if (matches.length === 0) return null;
+
+  // Click outside and Escape key to close the dropdown
+  useEffect(() => {
+    const handleOutsideClick = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setIsDismissed(true);
+        onClose?.();
+      }
+    };
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setIsDismissed(true);
+        onClose?.();
+      }
+    };
+    document.addEventListener("mousedown", handleOutsideClick);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", handleOutsideClick);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [onClose]);
+
+  if (!isOpen || isDismissed || matches.length === 0) return null;
+
   const typed = term.trim().toLowerCase();
   const exact = matches.find((p) => (p.product_name_tally || p.product_name || "").trim().toLowerCase() === typed);
+
   return (
-    <div data-testid="product-name-suggestions" style={{ marginTop: "4px", border: "1px solid #e2e8f0", borderRadius: "6px", background: "#fff", fontSize: "12.5px" }}>
+    <div
+      ref={containerRef}
+      data-testid="product-name-suggestions"
+      style={{
+        position: "absolute",
+        top: "calc(100% + 4px)",
+        left: 0,
+        right: 0,
+        zIndex: 1050,
+        background: "#ffffff",
+        border: "1px solid #cbd5e1",
+        borderRadius: "6px",
+        boxShadow: "0 10px 25px -5px rgba(0, 0, 0, 0.12), 0 8px 10px -6px rgba(0, 0, 0, 0.08)",
+        maxHeight: "260px",
+        overflowY: "auto",
+        fontSize: "12.5px",
+      }}
+    >
       {exact && (
-        <div style={{ padding: "6px 10px", background: "#fef2f2", color: "#b91c1c", fontWeight: 600 }}>
-          "{exact.product_name_tally || exact.product_name}" already exists{exact.product_code ? ` (Code: ${exact.product_code})` : ""} - it cannot be saved again.
+        <div
+          style={{
+            padding: "8px 12px",
+            background: "#fef2f2",
+            color: "#b91c1c",
+            fontWeight: 600,
+            borderBottom: "1px solid #fee2e2",
+            display: "flex",
+            alignItems: "center",
+            gap: "6px",
+          }}
+        >
+          <span style={{ fontSize: "14px" }}>⚠️</span>
+          <span>
+            "{exact.product_name_tally || exact.product_name}" already exists{exact.product_code ? ` (${exact.product_code})` : ""} - it cannot be saved again.
+          </span>
         </div>
       )}
-      <div style={{ padding: "4px 10px", color: "#64748b", fontWeight: 600 }}>Existing products matching "{term.trim()}"</div>
-      {matches.map((p) => (
-        <div key={p.id} style={{ padding: "4px 10px", borderTop: "1px solid #f1f5f9" }}>
-          {p.product_name_tally || p.product_name}
-          {p.product_code ? <span style={{ color: "#64748b" }}> - {p.product_code}</span> : null}
+
+      <div
+        style={{
+          padding: "7px 12px",
+          background: "#f8fafc",
+          borderBottom: "1px solid #e2e8f0",
+          color: "#64748b",
+          fontWeight: 600,
+          fontSize: "11px",
+          textTransform: "uppercase",
+          letterSpacing: "0.03em",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          position: "sticky",
+          top: 0,
+          zIndex: 1,
+        }}
+      >
+        <span>
+          Existing products matching <span style={{ color: "#0f172a" }}>"{term.trim()}"</span>
+        </span>
+        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+          <span
+            style={{
+              background: "#e2e8f0",
+              color: "#475569",
+              padding: "1px 6px",
+              borderRadius: "10px",
+              fontSize: "10.5px",
+            }}
+          >
+            {matches.length}
+          </span>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              setIsDismissed(true);
+              onClose?.();
+            }}
+            title="Close suggestions"
+            style={{
+              background: "transparent",
+              border: "none",
+              color: "#94a3b8",
+              cursor: "pointer",
+              fontSize: "13px",
+              lineHeight: 1,
+              padding: "2px",
+            }}
+          >
+            ✕
+          </button>
         </div>
-      ))}
+      </div>
+
+      <div style={{ display: "flex", flexDirection: "column" }}>
+        {matches.map((p) => {
+          const pName = p.product_name_tally || p.product_name || "";
+          return (
+            <div
+              key={p.id}
+              role="button"
+              tabIndex={0}
+              onClick={() => {
+                onSelect?.(pName);
+                setIsDismissed(true);
+                onClose?.();
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  onSelect?.(pName);
+                  setIsDismissed(true);
+                  onClose?.();
+                }
+              }}
+              style={{
+                padding: "8px 12px",
+                borderTop: "1px solid #f1f5f9",
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: "8px",
+                transition: "background 0.15s ease",
+              }}
+              onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#f1f5f9")}
+              onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "transparent")}
+            >
+              <span style={{ color: "#1e293b", fontWeight: 500 }}>{pName}</span>
+              {p.product_code ? (
+                <span
+                  style={{
+                    color: "#64748b",
+                    fontSize: "11px",
+                    background: "#f8fafc",
+                    border: "1px solid #e2e8f0",
+                    padding: "2px 6px",
+                    borderRadius: "4px",
+                    fontFamily: "monospace",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {p.product_code}
+                </span>
+              ) : null}
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -706,6 +894,7 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
   const [isFormOpen, setIsFormOpen] = useState(defaultAdd || (typeof window !== "undefined" && window.location.pathname.toLowerCase().includes("add")));
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [formState, setFormState] = useState<Record<string, any>>({});
+  const [nameSuggestionsOpen, setNameSuggestionsOpen] = useState(false);
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
   const [formSubmitting, setFormSubmitting] = useState(false);
   const [errorMessageBanner, setErrorMessageBanner] = useState<string | null>(null);
@@ -1218,6 +1407,7 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
     });
     setDimensionRows([]);
     setFormErrors({});
+    setNameSuggestionsOpen(false);
     setIsFormOpen(true);
   };
 
@@ -1272,6 +1462,7 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
       setDimensionRows([]);
     }
     setFormErrors({});
+    setNameSuggestionsOpen(false);
     setIsFormOpen(true);
   };
 
@@ -1559,14 +1750,30 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
                   <label className="pm-form-label">
                     Product Name (As Per Tally) <span className="req">*</span>
                   </label>
-                  <input
-                    type="text"
-                    className="pm-form-input"
-                    required
-                    value={formState.product_name_tally || ""}
-                    onChange={(e) => setFormState({ ...formState, product_name_tally: e.target.value })}
-                  />
-                  <ProductNameSuggestions term={formState.product_name_tally || ""} excludeId={editingProduct?.id} />
+                  <div style={{ position: "relative" }}>
+                    <input
+                      type="text"
+                      className="pm-form-input"
+                      required
+                      value={formState.product_name_tally || ""}
+                      onChange={(e) => {
+                        setFormState({ ...formState, product_name_tally: e.target.value });
+                        setNameSuggestionsOpen(true);
+                      }}
+                      onFocus={() => setNameSuggestionsOpen(true)}
+                      placeholder="Enter product name as per Tally"
+                    />
+                    <ProductNameSuggestions
+                      term={formState.product_name_tally || ""}
+                      excludeId={editingProduct?.id}
+                      isOpen={nameSuggestionsOpen}
+                      onClose={() => setNameSuggestionsOpen(false)}
+                      onSelect={(selectedName) => {
+                        setFormState((prev) => ({ ...prev, product_name_tally: selectedName }));
+                        setNameSuggestionsOpen(false);
+                      }}
+                    />
+                  </div>
                   {formErrors.product_name_tally && (
                     <span style={{ color: "#ef4444", fontSize: "12px" }}>
                       {formErrors.product_name_tally}
