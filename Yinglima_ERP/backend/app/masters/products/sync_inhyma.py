@@ -188,6 +188,8 @@ async def build_product_sync_payload(
         "material": product.material,
         "is_active": active_flag,
         "status": status_str,
+        "organization_id": str(product.organization_id) if product.organization_id else None,
+        "organization_ids": [str(x) for x in (product.organization_ids or [])],
     }
 
     # Ensure strictly monotonic sync_version so Inhyma OCC accepts every update/status transition
