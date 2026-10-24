@@ -8,17 +8,21 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
+import { Can } from "@/components/ui";
 import { apiDelete, apiGet, downloadExport, errorMessage } from "@/lib/api";
 import { useLookup } from "@/lib/lookups";
 import { useToast } from "@/lib/toast";
+import { useConfirm } from "@/lib/confirm";
 import type { SaleOrder, SaleSummaryMetrics } from "@/types/saleProcess";
 import { SaleProcessDetailModal } from "./SaleProcessDetailModal";
 
 export function SaleProcessListPage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const toast = useToast();
+  const confirm = useConfirm();
 
   const [orders, setOrders] = useState<SaleOrder[]>([]);
   const [loading, setLoading] = useState(true);
@@ -53,6 +57,18 @@ export function SaleProcessListPage() {
   const [actionMenuPos, setActionMenuPos] = useState<{ top: number; right: number } | null>(null);
   const [viewOrderId, setViewOrderId] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
+
+  // Sync deep link query params (from notifications or external links)
+  useEffect(() => {
+    const s = searchParams.get("search");
+    const id = searchParams.get("id");
+    if (s) {
+      setSearch(s);
+    }
+    if (id) {
+      setViewOrderId(id);
+    }
+  }, [searchParams]);
 
   // Close kebab action menu on outside click or scroll
   useEffect(() => {
@@ -138,7 +154,14 @@ export function SaleProcessListPage() {
 
   // Delete handler
   const handleDelete = async (orderId: string, orderNo: string) => {
-    if (!window.confirm(`Are you sure you want to delete Sale Order ${orderNo}?`)) return;
+    const confirmed = await confirm({
+      title: "Delete Sale Order",
+      message: `Are you sure you want to delete Sale Order ${orderNo}? This action cannot be undone.`,
+      itemName: orderNo,
+      confirmLabel: "Delete Order",
+      variant: "danger",
+    });
+    if (!confirmed) return;
     try {
       await apiDelete(`/sales/orders/${orderId}`);
       toast(`Order ${orderNo} deleted.`, "success");
@@ -286,35 +309,39 @@ export function SaleProcessListPage() {
           </div>
 
           <div style={{ display: "flex", gap: "10px", alignItems: "center", flexWrap: "wrap" }}>
-            {/* Filter Toggle */}
+            {/* Filter Toggle (Matching Products Master) */}
             <button
               type="button"
+              className={`btn btn-header-filter ${filterOpen ? "active" : ""}`}
               onClick={() => setFilterOpen((prev) => !prev)}
+              title="Toggle Filter Options"
               style={{
-                background: filterOpen || activeFiltersCount > 0 ? "#0061f2" : "#ffffff",
-                color: filterOpen || activeFiltersCount > 0 ? "#ffffff" : "#334155",
-                border: "1px solid #cbd5e1",
-                padding: "8px 14px",
+                background: filterOpen ? "#0061f2" : "#475569",
+                color: "#ffffff",
+                padding: "8px 12px",
                 borderRadius: "6px",
-                fontWeight: 600,
-                fontSize: "13px",
+                border: "none",
                 display: "inline-flex",
                 alignItems: "center",
+                justifyContent: "center",
                 gap: "6px",
                 cursor: "pointer",
-                boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
+                boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
               }}
             >
-              <span>🔍 Filters</span>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon>
+              </svg>
               {activeFiltersCount > 0 && (
                 <span
                   style={{
-                    background: filterOpen ? "#ffffff" : "#0061f2",
-                    color: filterOpen ? "#0061f2" : "#ffffff",
+                    background: "#ef4444",
+                    color: "#ffffff",
                     fontSize: "10px",
                     fontWeight: 800,
                     borderRadius: "10px",
-                    padding: "1px 6px",
+                    padding: "1px 5px",
+                    lineHeight: 1,
                   }}
                 >
                   {activeFiltersCount}
@@ -322,51 +349,56 @@ export function SaleProcessListPage() {
               )}
             </button>
 
-            {/* Export Button */}
-            <button
-              type="button"
-              onClick={handleExport}
-              disabled={exporting}
-              style={{
-                background: "#ffffff",
-                color: "#1e293b",
-                border: "1px solid #cbd5e1",
-                padding: "8px 14px",
-                borderRadius: "6px",
-                fontWeight: 600,
-                fontSize: "13px",
-                cursor: exporting ? "wait" : "pointer",
-                display: "inline-flex",
-                alignItems: "center",
-                gap: "6px",
-                boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
-              }}
-            >
-              <span>📊</span>
-              <span>{exporting ? "Exporting..." : "Export"}</span>
-            </button>
-
             {/* Create Sale Order Button */}
-            <Link
-              to="/sale/process/new"
-              style={{
-                background: "#0061f2",
-                color: "#ffffff",
-                border: "none",
-                padding: "8px 16px",
-                borderRadius: "6px",
-                fontWeight: 600,
-                fontSize: "13px",
-                display: "inline-flex",
-                alignItems: "center",
-                gap: "6px",
-                textDecoration: "none",
-                boxShadow: "0 2px 4px rgba(0,97,242,0.25)",
-              }}
-            >
-              <span>+</span>
-              <span>Create Sale Process</span>
-            </Link>
+            <Can permission="sale_process.create">
+              <Link
+                to="/sale/process/new"
+                className="btn btn-add-new"
+                style={{
+                  background: "#0061f2",
+                  color: "#ffffff",
+                  border: "none",
+                  padding: "8px 16px",
+                  borderRadius: "6px",
+                  fontWeight: 600,
+                  fontSize: "13px",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  textDecoration: "none",
+                  boxShadow: "0 2px 4px rgba(0,97,242,0.25)",
+                }}
+              >
+                <span>+ Create Sale Process</span>
+              </Link>
+            </Can>
+
+            {/* Export Button (Matching Products Master Imp / Exp style) */}
+            <Can permission="sale_process.export">
+              <button
+                type="button"
+                className="btn btn-imp-exp"
+                onClick={handleExport}
+                disabled={exporting}
+                title="Export Sale Process to Excel"
+                style={{
+                  background: "#f59e0b",
+                  color: "#ffffff",
+                  border: "none",
+                  padding: "8px 16px",
+                  borderRadius: "6px",
+                  fontWeight: 700,
+                  fontSize: "13px",
+                  cursor: exporting ? "wait" : "pointer",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  boxShadow: "0 2px 4px rgba(245, 158, 11, 0.25)",
+                }}
+              >
+                <span>{exporting ? "Exporting..." : "Export"}</span>
+              </button>
+            </Can>
           </div>
         </div>
 
@@ -1116,62 +1148,66 @@ export function SaleProcessListPage() {
                   <span>👁️</span> <span>View Details</span>
                 </button>
 
-                <button
-                  type="button"
-                  onClick={() => {
-                    const id = activeOrder.id;
-                    setOpenActionId(null);
-                    setActionMenuPos(null);
-                    navigate(`/sale/process/${id}/edit`);
-                  }}
-                  style={{
-                    width: "100%",
-                    padding: "9px 12px",
-                    border: "none",
-                    background: "none",
-                    textAlign: "left",
-                    fontSize: "13px",
-                    cursor: "pointer",
-                    color: "#334155",
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "8px",
-                    borderTop: "1px solid #f1f5f9",
-                  }}
-                  onMouseEnter={(e) => (e.currentTarget.style.background = "#f1f5f9")}
-                  onMouseLeave={(e) => (e.currentTarget.style.background = "none")}
-                >
-                  <span>✏️</span> <span>Edit Order</span>
-                </button>
+                <Can permission="sale_process.update">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const id = activeOrder.id;
+                      setOpenActionId(null);
+                      setActionMenuPos(null);
+                      navigate(`/sale/process/${id}/edit`);
+                    }}
+                    style={{
+                      width: "100%",
+                      padding: "9px 12px",
+                      border: "none",
+                      background: "none",
+                      textAlign: "left",
+                      fontSize: "13px",
+                      cursor: "pointer",
+                      color: "#334155",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "8px",
+                      borderTop: "1px solid #f1f5f9",
+                    }}
+                    onMouseEnter={(e) => (e.currentTarget.style.background = "#f1f5f9")}
+                    onMouseLeave={(e) => (e.currentTarget.style.background = "none")}
+                  >
+                    <span>✏️</span> <span>Edit Order</span>
+                  </button>
+                </Can>
 
-                <button
-                  type="button"
-                  onClick={() => {
-                    const id = activeOrder.id;
-                    const orderNo = activeOrder.order_no;
-                    setOpenActionId(null);
-                    setActionMenuPos(null);
-                    handleDelete(id, orderNo);
-                  }}
-                  style={{
-                    width: "100%",
-                    padding: "9px 12px",
-                    border: "none",
-                    background: "none",
-                    textAlign: "left",
-                    fontSize: "13px",
-                    cursor: "pointer",
-                    color: "#dc2626",
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "8px",
-                    borderTop: "1px solid #f1f5f9",
-                  }}
-                  onMouseEnter={(e) => (e.currentTarget.style.background = "#fee2e2")}
-                  onMouseLeave={(e) => (e.currentTarget.style.background = "none")}
-                >
-                  <span>🗑️</span> <span>Delete</span>
-                </button>
+                <Can permission="sale_process.delete">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const id = activeOrder.id;
+                      const orderNo = activeOrder.order_no;
+                      setOpenActionId(null);
+                      setActionMenuPos(null);
+                      handleDelete(id, orderNo);
+                    }}
+                    style={{
+                      width: "100%",
+                      padding: "9px 12px",
+                      border: "none",
+                      background: "none",
+                      textAlign: "left",
+                      fontSize: "13px",
+                      cursor: "pointer",
+                      color: "#dc2626",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "8px",
+                      borderTop: "1px solid #f1f5f9",
+                    }}
+                    onMouseEnter={(e) => (e.currentTarget.style.background = "#fee2e2")}
+                    onMouseLeave={(e) => (e.currentTarget.style.background = "none")}
+                  >
+                    <span>🗑️</span> <span>Delete</span>
+                  </button>
+                </Can>
               </div>
             );
           })()}

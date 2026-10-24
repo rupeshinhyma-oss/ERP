@@ -18,6 +18,7 @@ import { Banner, Can, TableMessageRow } from "@/components/ui";
 import { SearchableDropdown, SearchableDropdownMultiPanel, type DropdownOption, type FetchOptions } from "@/components/SearchableDropdown";
 import { SelectField, TextAreaField, TextField } from "@/components/fields";
 import { apiDelete, apiGet, apiPatch, apiPost, downloadExport, toQueryString } from "@/lib/api";
+import { useConfirm } from "@/lib/confirm";
 import { useLiveModule } from "@/lib/live/useLive";
 import { useAuth, usePendingGuard } from "@/lib/hooks";
 import { autoTitleCase } from "@/utils/text";
@@ -201,13 +202,24 @@ export function InquiriesPage() {
   }, [buyerIdParam, buyerNames, resolveBuyerName]);
 
   useEffect(() => {
+    const handleNavActiveClick = (e: Event) => {
+      const customEvent = e as CustomEvent<{ key?: string; path?: string }>;
+      if (customEvent.detail?.key === "inquiries") {
+        navigateToView({ layer: "companies" });
+        window.scrollTo({ top: 0, behavior: "smooth" });
+      }
+    };
+    window.addEventListener("erp:nav-active-click", handleNavActiveClick);
+    return () => window.removeEventListener("erp:nav-active-click", handleNavActiveClick);
+  }, [navigateToView]);
+
+  useEffect(() => {
     (async () => {
       try {
-        const [codeRes, prodRes, uomRes, buyerRes] = await Promise.all([
+        const [codeRes, uomRes, buyerRes] = await Promise.all([
           apiGet<ConsignmentCode[]>("/inquiries/consignment-codes"),
-          apiGet<any>("/masters/products?page_size=1000"),
-          apiGet<any>("/masters/uom?page_size=1000"),
-          apiGet<any>("/buyers?limit=1000"),
+          apiGet<any>("/masters/uom?page_size=100"),
+          apiGet<any>("/buyers?page_size=200"),
         ]);
         const cMap: Record<string, string> = {};
         codeRes.data.forEach((c) => { cMap[c.id] = c.code; });
@@ -217,11 +229,6 @@ export function InquiriesPage() {
         const bMap: Record<string, string> = {};
         bList.forEach((b: any) => { bMap[b.id] = b.company_name || b.name || "Buyer"; });
         setBuyerNames(bMap);
-
-        const pList: any[] = Array.isArray(prodRes.data) ? prodRes.data : prodRes.data?.data || [];
-        const pMap: Record<string, string> = {};
-        pList.forEach((p: any) => { pMap[p.id] = `${p.product_code || ""} — ${p.product_name || p.product_name_tally || ""}`; });
-        setProductNames(pMap);
 
         const uList: any[] = Array.isArray(uomRes.data) ? uomRes.data : uomRes.data?.data || [];
         const uMap: Record<string, string> = {};
@@ -233,35 +240,24 @@ export function InquiriesPage() {
     })();
   }, [refreshTrigger]);
 
-  // Calculate dynamic inquiry counts from database without unnecessary refetches on view change
+  // Lazy-load products in lightweight format only when navigating into the items view layer
   useEffect(() => {
-    (async () => {
-      try {
-        const { data: summaries } = await apiGet<CompanySummary[]>("/inquiries/companies");
-        let pending = 0;
-        let approved = 0;
-        let ongoing = 0;
-        let completed = 0;
-        let total_order = 0;
-
-        for (const s of summaries) {
-          const totalConsignments = s.consignment_count || 0;
-          const fullyApproved = s.approved_count || 0;
-          const proposed = s.proposed_count || 0;
-          const partial = Math.max(0, totalConsignments - fullyApproved - proposed);
-
-          total_order += totalConsignments;
-          completed += fullyApproved;
-          approved += fullyApproved + partial;
-          pending += proposed;
-          ongoing += proposed + partial;
+    if (view.layer === "items" && Object.keys(productNames).length === 0) {
+      (async () => {
+        try {
+          const prodRes = await apiGet<any>("/masters/products?light_list=true&page_size=200");
+          const pList: any[] = Array.isArray(prodRes.data) ? prodRes.data : prodRes.data?.data || [];
+          const pMap: Record<string, string> = {};
+          pList.forEach((p: any) => {
+            pMap[p.id] = `${p.product_code || ""} — ${p.product_name || p.product_name_tally || ""}`;
+          });
+          setProductNames(pMap);
+        } catch {
+          /* best-effort */
         }
-        setStats({ pending, approved, ongoing, completed, total_order });
-      } catch {
-        /* fallback */
-      }
-    })();
-  }, [refreshTrigger]);
+      })();
+    }
+  }, [view.layer, productNames]);
 
   return (
     <AppShell activeKey="inquiries">
@@ -514,6 +510,7 @@ export function InquiriesPage() {
             onOpenQuickAdd={(buyerId) => { setQuickAddInitialBuyerId(buyerId || ""); setQuickAddOpen(true); }}
             activeStatusTab={companyStatusTab}
             onTabChange={setCompanyStatusTab}
+            onStatsUpdate={setStats}
           />
         )}
         {view.layer === "consignments" && (
@@ -573,6 +570,7 @@ function CompaniesView({
   onOpenQuickAdd,
   activeStatusTab,
   onTabChange,
+  onStatsUpdate,
 }: {
   onOpenCompany: (buyerId: string) => void;
   resolveBuyerName: (buyerId: string) => Promise<void>;
@@ -582,6 +580,7 @@ function CompaniesView({
   onOpenQuickAdd: (buyerId?: string) => void;
   activeStatusTab?: "all" | "pending" | "ongoing" | "approved" | "completed";
   onTabChange?: (tab: "all" | "pending" | "ongoing" | "approved" | "completed") => void;
+  onStatsUpdate?: (stats: { pending: number; approved: number; ongoing: number; completed: number; total_order: number }) => void;
 }) {
   const [summaries, setSummaries] = useState<CompanySummary[]>([]);
   const [loading, setLoading] = useState(true);
@@ -597,6 +596,27 @@ function CompaniesView({
       const { data } = await apiGet<CompanySummary[]>("/inquiries/companies");
       const activeSummaries = data.filter((s) => s.consignment_count > 0);
       setSummaries(activeSummaries);
+
+      let pending = 0;
+      let approved = 0;
+      let ongoing = 0;
+      let completed = 0;
+      let total_order = 0;
+
+      for (const s of data) {
+        const totalConsignments = s.consignment_count || 0;
+        const fullyApproved = s.approved_count || 0;
+        const proposed = s.proposed_count || 0;
+        const partial = Math.max(0, totalConsignments - fullyApproved - proposed);
+
+        total_order += totalConsignments;
+        completed += fullyApproved;
+        approved += fullyApproved + partial;
+        pending += proposed;
+        ongoing += proposed + partial;
+      }
+      onStatsUpdate?.({ pending, approved, ongoing, completed, total_order });
+
       activeSummaries.forEach((s) => {
         if (!s.company_name || s.company_name === "Unknown Company") {
           void resolveBuyerName(s.buyer_id);
@@ -607,7 +627,7 @@ function CompaniesView({
     } finally {
       setLoading(false);
     }
-  }, [onError, resolveBuyerName]);
+  }, [onError, resolveBuyerName, onStatsUpdate]);
 
   useEffect(() => {
     void loadSummaries();
@@ -661,8 +681,18 @@ function CompaniesView({
     );
   };
 
+  const confirm = useConfirm();
+
   async function handleDeleteCompanyInquiries(buyerId: string) {
-    if (!window.confirm("Are you sure you want to delete all consignments for this buyer company?")) return;
+    const buyerName = buyerNames[buyerId] || "this buyer company";
+    const confirmed = await confirm({
+      title: "Delete All Consignments",
+      message: `Are you sure you want to delete all consignments for ${buyerName}? This will safely move them to Trash.`,
+      itemName: buyerName,
+      confirmLabel: "Delete All",
+      variant: "danger",
+    });
+    if (!confirmed) return;
     try {
       const { data: consignments } = await apiGet<InquiryListItem[]>(`/inquiries/companies/${buyerId}`);
       await Promise.all(consignments.map((c) => apiDelete(`/inquiries/${c.id}`)));
@@ -674,7 +704,13 @@ function CompaniesView({
 
   async function handleBulkDeleteCompanies() {
     if (!selectedBuyerIds.length) return;
-    if (!window.confirm(`Delete all consignments for the ${selectedBuyerIds.length} selected buyer company(ies)? This will safely move them to Trash.`)) return;
+    const confirmed = await confirm({
+      title: "Delete Selected Companies' Consignments",
+      message: `Delete all consignments for the ${selectedBuyerIds.length} selected buyer company(ies)? This will safely move them to Trash.`,
+      confirmLabel: "Delete Selected",
+      variant: "danger",
+    });
+    if (!confirmed) return;
     try {
       setLoading(true);
       for (const buyerId of selectedBuyerIds) {
@@ -998,8 +1034,19 @@ function ConsignmentsView({
     );
   };
 
+  const confirm = useConfirm();
+
   async function handleDelete(inquiryId: string) {
-    if (!window.confirm("Delete this consignment and all its items?")) return;
+    const row = rows.find((r) => r.id === inquiryId);
+    const code = row ? (row.consignment_code || codeNames[row.consignment_code_id] || "Consignment") : "Consignment";
+    const confirmed = await confirm({
+      title: "Delete Consignment",
+      message: `Are you sure you want to delete consignment "${code}" and all its line items? They can be restored from Trash.`,
+      itemName: code,
+      confirmLabel: "Delete Consignment",
+      variant: "danger",
+    });
+    if (!confirmed) return;
     await guardRowAction(`delete:${inquiryId}`, async () => {
       try {
         await apiDelete(`/inquiries/${inquiryId}`);
@@ -1013,7 +1060,13 @@ function ConsignmentsView({
 
   async function handleBulkDelete() {
     if (!selectedInquiryIds.length) return;
-    if (!window.confirm(`Delete ${selectedInquiryIds.length} selected consignment(s) and all their items? They can be restored from Trash.`)) return;
+    const confirmed = await confirm({
+      title: "Delete Selected Consignments",
+      message: `Delete ${selectedInquiryIds.length} selected consignment(s) and all their line items? They can be restored from Trash.`,
+      confirmLabel: "Delete Selected",
+      variant: "danger",
+    });
+    if (!confirmed) return;
     await guardRowAction("bulk-delete", async () => {
       try {
         await Promise.all(selectedInquiryIds.map((id) => apiDelete(`/inquiries/${id}`)));
@@ -1227,6 +1280,7 @@ function ItemsView({
   canDelete: boolean;
   onError: (err: unknown) => void;
 }) {
+  const confirm = useConfirm();
   const [inquiry, setInquiry] = useState<Inquiry | null>(null);
   const [loading, setLoading] = useState(true);
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
@@ -1512,9 +1566,14 @@ function ItemsView({
   }
 
   async function handleDeleteQuote(quote: Quotation) {
-    if (!window.confirm(`Are you sure you want to delete Quotation #${quote.quote_number}?`)) {
-      return;
-    }
+    const confirmed = await confirm({
+      title: "Delete Quotation",
+      message: `Are you sure you want to delete Quotation #${quote.quote_number}?`,
+      itemName: `Quotation #${quote.quote_number}`,
+      confirmLabel: "Delete Quotation",
+      variant: "danger",
+    });
+    if (!confirmed) return;
     await guardRowAction(`quote_delete:${quote.id}`, async () => {
       try {
         await apiDelete(`/inquiries/quotations/${quote.id}`);
@@ -1540,7 +1599,15 @@ function ItemsView({
   }
 
   async function handleDeleteItem(item: InquiryItem) {
-    if (!window.confirm("Are you sure you want to delete this product item?")) return;
+    const itemName = item.product_name || item.product_name_tally || "Product Item";
+    const confirmed = await confirm({
+      title: "Delete Product Item",
+      message: "Are you sure you want to delete this product item? All linked quotations and specifications will be removed.",
+      itemName,
+      confirmLabel: "Delete Item",
+      variant: "danger",
+    });
+    if (!confirmed) return;
     try {
       await apiDelete(`/inquiries/${inquiryId}/items/${item.id}`);
       if (selectedItemId === item.id) {
@@ -6835,8 +6902,15 @@ function AddItemModal({
   const productFetcher = useCallback(
     async (term: string, signal: AbortSignal): Promise<DropdownOption[]> => {
       try {
+        let cleanTerm = term.trim();
+        const codeMatch = cleanTerm.match(/\(([^)]+)\)$/);
+        if (codeMatch && codeMatch[1]) {
+          cleanTerm = codeMatch[1].trim();
+        } else if (cleanTerm.includes("—")) {
+          cleanTerm = cleanTerm.split("—")[0].trim();
+        }
         const { data } = await apiGet<any>(
-          "/masters/products" + toQueryString({ search: term, page: 1, page_size: 20, sort_order: "asc", status: "active" }),
+          "/masters/products" + toQueryString({ search: cleanTerm, page: 1, page_size: 20, sort_order: "asc", status: "active" }),
           { signal }
         );
         const list = Array.isArray(data) ? data : data?.data || [];
@@ -7212,7 +7286,7 @@ function QuickInquiryDrawer({
     (async () => {
       try {
         const [compRes, uomRes] = await Promise.all([
-          apiGet<any>("/buyers?limit=1000"),
+          apiGet<any>("/buyers?page_size=200"),
           apiGet<any[]>("/masters/uom"),
         ]);
         const buyersList = Array.isArray(compRes.data) ? compRes.data : compRes.data?.data || [];
@@ -7480,11 +7554,19 @@ function QuickInquiryDrawer({
 
   const productFetcher: FetchOptions = useCallback(
     async (term, signal) => {
+      let cleanTerm = term.trim();
+      const codeMatch = cleanTerm.match(/\(([^)]+)\)$/);
+      if (codeMatch && codeMatch[1]) {
+        cleanTerm = codeMatch[1].trim();
+      } else if (cleanTerm.includes("—")) {
+        cleanTerm = cleanTerm.split("—")[0].trim();
+      }
       const { data } = await apiGet<any[]>(
-        "/masters/products" + toQueryString({ search: term, page: 1, page_size: 20, sort_order: "asc", status: "active" }),
+        "/masters/products" + toQueryString({ search: cleanTerm, page: 1, page_size: 20, sort_order: "asc", status: "active" }),
         { signal }
       );
-      return data.map((d) => ({
+      const list = Array.isArray(data) ? data : (data as any)?.data || [];
+      return list.map((d: any) => ({
         value: d.id,
         label: `${d.product_name_tally || d.product_name} (${d.product_code || "NO-CODE"})`,
       }));

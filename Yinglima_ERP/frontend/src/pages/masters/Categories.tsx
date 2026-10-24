@@ -2,7 +2,7 @@
 
 import { MasterPage, type FormState } from "@/components/MasterPage";
 import { StatusBadge } from "@/components/ui";
-import { StatusSelectField, TextField, nullIfBlank } from "@/components/fields";
+import { TextField, nullIfBlank } from "@/components/fields";
 import type { ProductCategory } from "@/types";
 
 const EMPTY: FormState = { code: "", name: "", status: "active" };
@@ -44,7 +44,6 @@ export function CategoriesPage() {
       renderFields={(f, set) => (
         <div className="form-grid">
           <TextField id="name" label="Category Name *" required maxLength={150} value={f.name} onChange={(v) => set("name", v)} />
-          <StatusSelectField value={f.status} onChange={(v) => set("status", v)} />
         </div>
       )}
       detailFields={(c) => [

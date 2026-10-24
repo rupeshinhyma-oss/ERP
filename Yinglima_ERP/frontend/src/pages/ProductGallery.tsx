@@ -1,8 +1,10 @@
 import { useState, useEffect, useMemo } from "react";
 import { AppShell } from "@/components/AppShell";
 import { SideDrawer, DetailFieldGrid } from "@/components/SideDrawer";
+import { SearchableFilterDropdown } from "@/components/SearchableDropdown";
 import { apiGet, apiPatch, API_ORIGIN } from "@/lib/api";
 import { usePendingGuard, useAuth } from "@/lib/hooks";
+import { useConfirm } from "@/lib/confirm";
 import { useLookup } from "@/lib/lookups";
 import type {
   Product,
@@ -354,6 +356,7 @@ type GalleryTab = "all" | "products" | "suppliers" | "quotations";
 
 export function ProductGalleryPage() {
   const { hasPermission } = useAuth();
+  const confirm = useConfirm();
   const canDeleteProductMedia = hasPermission("product.update");
   const canDeleteSupplierMedia = hasPermission("supplier.update");
 
@@ -376,6 +379,20 @@ export function ProductGalleryPage() {
   // Phase 7: keyed by "productId:photoIndex" so deleting one photo never
   // disables the delete control for another photo/product.
   const { isPending: isPhotoDeletePending, guard: guardPhotoDelete } = usePendingGuard<string>();
+
+  useEffect(() => {
+    const handleNavActiveClick = (e: Event) => {
+      const customEvent = e as CustomEvent<{ key?: string; path?: string }>;
+      if (customEvent.detail?.key === "product-gallery") {
+        setSelectedProduct(null);
+        setSelectedSupplier(null);
+        setSelectedQuotation(null);
+        window.scrollTo({ top: 0, behavior: "smooth" });
+      }
+    };
+    window.addEventListener("erp:nav-active-click", handleNavActiveClick);
+    return () => window.removeEventListener("erp:nav-active-click", handleNavActiveClick);
+  }, []);
 
   const categories = useLookup<ProductCategory>("/masters/product-categories", 250);
   const subCategories = useLookup<ProductSubCategory>("/masters/product-sub-categories", 250);
@@ -520,9 +537,15 @@ export function ProductGalleryPage() {
 
   const handleQuickRemoveProductImage = async (prod: Product, imgUrl: string, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
-    if (!window.confirm(`Permanently remove broken image from "${prod.product_name_tally || prod.product_name || "product"}"?`)) {
-      return;
-    }
+    const prodName = prod.product_name_tally || prod.product_name || "product";
+    const confirmed = await confirm({
+      title: "Remove Broken Image",
+      message: `Permanently remove broken image from "${prodName}"?`,
+      itemName: prodName,
+      confirmLabel: "Remove Image",
+      variant: "danger",
+    });
+    if (!confirmed) return;
     const rawImages = Array.isArray(prod.images) && prod.images.length > 0
       ? prod.images
       : (prod.image_url ? [prod.image_url] : []);
@@ -550,9 +573,14 @@ export function ProductGalleryPage() {
 
   const handleQuickRemoveSupplierImage = async (supp: Supplier, mediaUrl: string, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
-    if (!window.confirm(`Permanently remove broken visit photo from "${supp.company_name}"?`)) {
-      return;
-    }
+    const confirmed = await confirm({
+      title: "Remove Broken Visit Photo",
+      message: `Permanently remove broken visit photo from "${supp.company_name}"?`,
+      itemName: supp.company_name,
+      confirmLabel: "Remove Photo",
+      variant: "danger",
+    });
+    if (!confirmed) return;
     const suppMedia = getSupplierMedia(supp);
     const updatedRaw = suppMedia.filter((u) => u !== mediaUrl);
     const updatedPayload = {
@@ -682,68 +710,65 @@ export function ProductGalleryPage() {
             }}
           />
 
-          <select
-            value={categoryFilter}
-            onChange={(e) => {
-              setCategoryFilter(e.target.value);
-              setSubCategoryFilter("");
-            }}
-            style={{
-              padding: "9px 14px",
-              borderRadius: "6px",
-              border: "1px solid #cbd5e0",
-              fontSize: "13.5px",
-              background: "#ffffff",
-              minWidth: "160px",
-            }}
-          >
-            <option value="">All Categories</option>
-            {categories.items.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))}
-          </select>
+          <div style={{ minWidth: "170px" }}>
+            <SearchableFilterDropdown
+              value={categoryFilter || null}
+              onChange={(val) => {
+                setCategoryFilter(val || "");
+                setSubCategoryFilter("");
+              }}
+              placeholder="All Categories"
+              allLabel="All Categories"
+              fetchOptions={async (term) => {
+                const q = term.toLowerCase().trim();
+                return categories.items
+                  .filter((c) => !q || c.name.toLowerCase().includes(q))
+                  .map((c) => ({ value: c.id, label: c.name }));
+              }}
+              fetchLabelForValue={async (val) => {
+                const c = categories.items.find((item) => item.id === val);
+                return c ? c.name : "";
+              }}
+            />
+          </div>
 
-          <select
-            value={subCategoryFilter}
-            onChange={(e) => setSubCategoryFilter(e.target.value)}
-            style={{
-              padding: "9px 14px",
-              borderRadius: "6px",
-              border: "1px solid #cbd5e0",
-              fontSize: "13.5px",
-              background: "#ffffff",
-              minWidth: "160px",
-            }}
-          >
-            <option value="">All Sub Categories</option>
-            {scopedSubCategories.map((sc: ProductSubCategory) => (
-              <option key={sc.id} value={sc.id}>
-                {sc.name}
-              </option>
-            ))}
-          </select>
+          <div style={{ minWidth: "170px" }}>
+            <SearchableFilterDropdown
+              value={subCategoryFilter || null}
+              onChange={(val) => setSubCategoryFilter(val || "")}
+              placeholder="All Sub Categories"
+              allLabel="All Sub Categories"
+              fetchOptions={async (term) => {
+                const q = term.toLowerCase().trim();
+                return scopedSubCategories
+                  .filter((sc: ProductSubCategory) => !q || sc.name.toLowerCase().includes(q) || (sc.code && sc.code.toLowerCase().includes(q)))
+                  .map((sc: ProductSubCategory) => ({ value: sc.id, label: sc.name }));
+              }}
+              fetchLabelForValue={async (val) => {
+                const sc = subCategories.items.find((item) => item.id === val);
+                return sc ? sc.name : "";
+              }}
+            />
+          </div>
 
-          <select
-            value={brandFilter}
-            onChange={(e) => setBrandFilter(e.target.value)}
-            style={{
-              padding: "9px 14px",
-              borderRadius: "6px",
-              border: "1px solid #cbd5e0",
-              fontSize: "13.5px",
-              background: "#ffffff",
-              minWidth: "160px",
-            }}
-          >
-            <option value="">All Brands</option>
-            {brands.items.map((b) => (
-              <option key={b.id} value={b.id}>
-                {b.name}
-              </option>
-            ))}
-          </select>
+          <div style={{ minWidth: "170px" }}>
+            <SearchableFilterDropdown
+              value={brandFilter || null}
+              onChange={(val) => setBrandFilter(val || "")}
+              placeholder="All Brands"
+              allLabel="All Brands"
+              fetchOptions={async (term) => {
+                const q = term.toLowerCase().trim();
+                return brands.items
+                  .filter((b) => !q || b.name.toLowerCase().includes(q))
+                  .map((b) => ({ value: b.id, label: b.name }));
+              }}
+              fetchLabelForValue={async (val) => {
+                const b = brands.items.find((item) => item.id === val);
+                return b ? b.name : "";
+              }}
+            />
+          </div>
         </div>
 
         {loading ? (
@@ -1397,7 +1422,14 @@ export function ProductGalleryPage() {
             const confirmMsg = count === 1
               ? "Are you sure you want to delete this media from the product?"
               : `Are you sure you want to delete ${count} selected media files from the product?`;
-            if (!window.confirm(confirmMsg)) return;
+            const confirmed = await confirm({
+              title: "Delete Product Media",
+              message: confirmMsg,
+              itemName: p.product_name_tally || p.product_name || "Product",
+              confirmLabel: "Delete Media",
+              variant: "danger",
+            });
+            if (!confirmed) return;
 
             const deleteKey = count === 1 ? `${p.id}:${indicesToDelete[0]}` : `${p.id}:bulk-delete`;
             await guardPhotoDelete(deleteKey, async () => {
@@ -1774,7 +1806,14 @@ export function ProductGalleryPage() {
             const confirmMsg = count === 1
               ? "Are you sure you want to delete this visit photo from the supplier?"
               : `Are you sure you want to delete ${count} selected visit media files from the supplier?`;
-            if (!window.confirm(confirmMsg)) return;
+            const confirmed = await confirm({
+              title: "Delete Visit Media",
+              message: confirmMsg,
+              itemName: supp.company_name,
+              confirmLabel: "Delete Media",
+              variant: "danger",
+            });
+            if (!confirmed) return;
 
             const deleteKey = count === 1 ? `supp:${supp.id}:${indicesToDelete[0]}` : `supp:${supp.id}:bulk-delete`;
             await guardPhotoDelete(deleteKey, async () => {

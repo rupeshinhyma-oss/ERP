@@ -307,6 +307,19 @@ export function LocalPurchaseDetailModal({
                         {detail.currency} ({currencySymbol})
                       </strong>
                     </div>
+                    {detail.consignment_code && (
+                      <div>
+                        <span style={{ color: "#64748b" }}>Consignment: </span>
+                        <strong style={{ color: "#0369a1" }}>{detail.consignment_code}</strong>
+                        {detail.branch_name ? ` (${detail.branch_name})` : ""}
+                      </div>
+                    )}
+                    {detail.organization_name && (
+                      <div>
+                        <span style={{ color: "#64748b" }}>Organization: </span>
+                        <strong>{detail.organization_name}</strong>
+                      </div>
+                    )}
                   </div>
                 </div>
 
@@ -325,8 +338,20 @@ export function LocalPurchaseDetailModal({
                     From (Supplier)
                   </div>
                   <div style={{ fontSize: "12.5px", color: "#1e293b", lineHeight: "1.6" }}>
-                    <div style={{ fontWeight: 700, fontSize: "13.5px", color: "#0f172a" }}>
-                      {detail.supplier_name}
+                    <div style={{ fontSize: "13.5px", color: "#0f172a" }}>
+                      {(() => {
+                        const raw = detail.supplier_name || "-";
+                        const m = raw.match(/^(.+?)\s*\((.+?)\)$/);
+                        if (m) {
+                          return (
+                            <span>
+                              <strong style={{ fontWeight: 700, color: "#0f172a" }}>{m[1]}</strong>
+                              <span style={{ color: "#64748b", marginLeft: "5px", fontWeight: 400 }}>({m[2]})</span>
+                            </span>
+                          );
+                        }
+                        return <strong style={{ fontWeight: 700, color: "#0f172a" }}>{raw}</strong>;
+                      })()}
                     </div>
                     <div style={{ fontSize: "11.5px", color: "#64748b" }}>
                       Domestic Factory / Vendor
@@ -651,7 +676,7 @@ export function LocalPurchaseDetailModal({
 
                             <td style={{ padding: "7px 8px", textAlign: "right", color: "#475569", background: "#f8fafc", whiteSpace: "nowrap" }}>
                               {currencySymbol}{" "}
-                              {item.expense_per_unit.toLocaleString("en-US", {
+                              {(item.expense_per_unit ?? 0).toLocaleString("en-US", {
                                 minimumFractionDigits: 2,
                                 maximumFractionDigits: 2,
                               })}
@@ -659,7 +684,7 @@ export function LocalPurchaseDetailModal({
 
                             <td style={{ padding: "7px 8px", textAlign: "right", fontWeight: 700, color: "#1e40af", background: "#f8fafc", whiteSpace: "nowrap" }}>
                               {currencySymbol}{" "}
-                              {item.unit_landing_rate.toLocaleString("en-US", {
+                              {(item.unit_landing_rate ?? 0).toLocaleString("en-US", {
                                 minimumFractionDigits: 2,
                                 maximumFractionDigits: 2,
                               })}
@@ -667,7 +692,7 @@ export function LocalPurchaseDetailModal({
 
                             <td style={{ padding: "7px 10px", textAlign: "right", fontWeight: 800, color: "#059669", background: "#f8fafc", whiteSpace: "nowrap" }}>
                               {currencySymbol}{" "}
-                              {item.total_landing_rate.toLocaleString("en-US", {
+                              {(item.total_landing_rate ?? 0).toLocaleString("en-US", {
                                 minimumFractionDigits: 2,
                                 maximumFractionDigits: 2,
                               })}

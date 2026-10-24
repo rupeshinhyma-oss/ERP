@@ -23,7 +23,8 @@
 12. [Module 10: USER MANAGEMENT — Users, Positions & RBAC (`/users`, `/positions`, `/rbac`)](#12-module-10-user-management--users-positions--rbac-users-positions-rbac)
 13. [Module 11: SETTINGS — Master Data Tables (12 Masters Import/Export)](#13-module-11-settings--master-data-tables-12-masters-importexport)
 14. [Module 12: GOVERNANCE — Audit Log & Trash Recovery (`/audit`, `/trash`)](#14-module-12-governance--audit-log--trash-recovery-audit-trash)
-15. [Master "When User Says Test" Verification Protocol](#15-master-when-user-says-test-verification-protocol)
+15. [Module 13: AUTOMATION — Notification & Rules System (`/settings/notifications`)](#15-module-13-automation--notification--rules-system-settingsnotifications)
+16. [Master "When User Says Test" Verification Protocol](#16-master-when-user-says-test-verification-protocol)
 
 ---
 
@@ -66,6 +67,7 @@
 | 13 | **Settings: Masters** | `/masters/*` | 12 Auxiliary masters | **Standardized Import & Export (XLSX/CSV)** for all 12 |
 | 14 | **Audit Log** | `/audit` | System compliance | Immutable change tracking with actor, timestamp, diff |
 | 15 | **Trash & Recovery** | `/trash` | Soft-delete recycle bin | Restore or permanent purge of soft-deleted records |
+| 16 | **Notification Rules**| `/settings/notifications` | Enterprise alert automation | In-app alerts, unread counter badge, rule configuration |
 
 ---
 
@@ -296,12 +298,40 @@
 
 ## 11. Module 9: PLANNING — Master Shipment Planning Grid (`/planning`)
 
-### 11.1. Capabilities & Calculations
-- **Container Sizing**: 20ft GP (33 CBM), 40ft GP (67 CBM), 40ft HQ (76 CBM).
-- **Automated CBM Calculation**: `(Length(cm) * Width(cm) * Height(cm) / 1,000,000) * Number of Cartons`.
-- **Weight Check**: Gross Weight vs Net Weight vs Maximum Container Payload.
-- **Export Test**:
-  - Verify exporting shipment plan produces container utilization sheet with CBM%, weights, and carton packing summary.
+### 11.1. Capabilities, Multi-Sheet Architecture & Calculations
+- **Dynamic Multi-Sheet System**:
+  - Separate dedicated sheets for each **Operating Organization Branch** (e.g. Inhyma Mumbai, Inhyma Ahmedabad, Inhyma Indore, Inhyma Chennai, Darsh Impex Mumbai, Darsh Impex Chennai, Test Group, One Stop, F&B).
+  - Dedicated **Buyer Planning Sheets** (e.g. Om Packaging, Prathamesh Packaging, Darsh Impex Mumbai).
+  - Branch data isolation: Organization branch sheets only pull products explicitly assigned to that organization and branch in Product Master.
+- **Live Master Product Linkage ("Extract From" Columns)**:
+  - 5 core product master lookup columns configured as live `LINKED_LOOKUP` fields extracting directly from Product Master (`product`):
+    * `Brand of Supplier` $\rightarrow$ `supplier_name`
+    * `City` / `Supplier City` $\rightarrow$ `supplier_city`
+    * `PKG QTY` $\rightarrow$ `packaging_quantity`
+    * `UNIT WEIGHT/PKG (KG)` $\rightarrow$ `packaging_gross_weight`
+    * `CBM/PKG (KG)` $\rightarrow$ `packaging_unit_cbm`
+- **Automated Mathematical Formula Columns**:
+  - Native formula engine evaluates:
+    * $\text{NO. OF PKG} = [\text{Group Qty}] / [\text{PKG QTY}]$
+    * $\text{TOTAL WEIGHT} = [\text{NO. OF PKG}] \times [\text{UNIT WEIGHT/PKG (KG)}]$
+    * $\text{TOTAL CBM} = [\text{NO. OF PKG}] \times [\text{CBM/PKG (KG)}]$
+  - Store-on-write persistence with zero-division safety and dependency resolution.
+- **Auto-Fit & 80% Zoom Viewport Optimization**:
+  - Fluid table geometry with `whiteSpace: "normal"` headers and pinned, auto-fitted Action column so Edit/Delete actions remain fully visible without clipping at 80% zoom.
+- **Automated Event Hooks**:
+  - Dispatches `shipment_requirement_raised` when urgent planning requirements are raised.
+  - Dispatches `shipment_status_ordered` when container shipments are confirmed.
+
+### 11.2. Verification Checklist
+- [ ] **Linked Lookup Auto-Population Test**:
+  - Add product to sheet $\rightarrow$ Verify Brand of Supplier, City, PKG QTY, Unit Weight, and CBM auto-populate from Product Master.
+- [ ] **Formula Engine Test**:
+  - Enter quantity in shipment column $\rightarrow$ Verify No. of Pkg, Total Weight, and Total CBM immediately recalculate and persist.
+- [ ] **Zoom Viewport Test**:
+  - Switch browser zoom to 80% $\rightarrow$ Verify table fits smoothly with no horizontal Action column overflow.
+- [ ] **Container Sizing Check**:
+  - 20ft GP (33 CBM), 40ft GP (67 CBM), 40ft HQ (76 CBM).
+  - Gross Weight vs Net Weight vs Maximum Container Payload.
 
 ---
 
@@ -356,7 +386,40 @@ Every master table adheres to strict standardized CRUD, search, pagination, uniq
 
 ---
 
-## 15. Master "When User Says Test" Verification Protocol
+## 15. Module 13: AUTOMATION — Notification & Rules System (`/settings/notifications`)
+
+### 15.1. Capabilities & Event Triggers
+- **Central Event-Driven Rules Engine**:
+  - Automatically captures domain events across ERP modules:
+    * `shipment_requirement_raised` (Shipment Planning)
+    * `shipment_status_ordered` (Shipment Planning)
+    * `sale_process_created` (Sales Process)
+    * `local_purchase_created` (Local Purchase)
+    * `inquiry_created` (Inquiries / RFQ)
+- **Granular Multi-Channel Delivery**:
+  - `in_app`: Real-time alerts in topbar `NotificationBell` with unread count badge.
+  - `email`: Outbound email notifications via SMTP.
+  - `push`: Web browser notifications.
+- **Recipient Target Resolution**:
+  - Role-based targeting (e.g. `admin`, `logistics_manager`, `procurement_manager`).
+  - Direct user assignment (`user_ids`) with instant typeahead user search.
+  - Automatic recipient deduplication.
+- **Topbar Bell & Polling**:
+  - Background polling every 30 seconds for unread count.
+  - Interactive drawer with mark as read, mark all read, and direct navigation links.
+
+### 15.2. Verification Checklist
+- [ ] **Event Dispatch Test**:
+  - Trigger an event (create Sale Process, Local Purchase, or Inquiry) $\rightarrow$ Verify notification arrives in topbar inbox.
+- [ ] **User Search Test**:
+  - Open Notification Settings $\rightarrow$ Click Edit Rule $\rightarrow$ Type username in search bar $\rightarrow$ Verify matching users display and can be selected.
+- [ ] **Read State & Badge Sync**:
+  - Click notification $\rightarrow$ Verify unread count decrements by 1 and target document opens.
+  - Click "Mark all as read" $\rightarrow$ Verify unread badge clears completely.
+
+---
+
+## 16. Master "When User Says Test" Verification Protocol
 
 Whenever the user asks to **"test this"**, **"verify"**, or before concluding any task on Yinglima ERP, follow this **Strict 6-Step Protocol**:
 

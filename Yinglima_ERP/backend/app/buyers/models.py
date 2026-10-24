@@ -96,6 +96,9 @@ class Buyer(Base, UUIDPrimaryKeyMixin, TimestampMixin, VersionMixin, SoftDeleteM
     country_id: Mapped[uuid.UUID] = mapped_column(
         GUID(), ForeignKey("countries.id", ondelete="RESTRICT"), nullable=False, index=True
     )  # "Country* (dropdown menu) by default Uganda" -- default applied at the schema layer
+    state_id: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(), ForeignKey("states.id", ondelete="RESTRICT"), nullable=True, index=True
+    )
     city: Mapped[str | None] = mapped_column(String(150), nullable=True)  # "City (description field)" -- free text
     address: Mapped[str | None] = mapped_column(Text, nullable=True)
 
@@ -132,6 +135,11 @@ class Buyer(Base, UUIDPrimaryKeyMixin, TimestampMixin, VersionMixin, SoftDeleteM
     # Notes explicitly require an Inactive state reachable even when a
     # record can never be hard/soft-deleted (see BuyerService.delete()).
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False, index=True)
+
+    # User who added this buyer (shown as "Added By" in the list; display-only).
+    created_by_id: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
 
     emails: Mapped[list["BuyerEmail"]] = relationship(
         back_populates="buyer", cascade="all, delete-orphan", lazy="selectin"

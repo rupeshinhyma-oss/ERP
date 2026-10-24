@@ -32,6 +32,7 @@ from app.core.exceptions import BadRequestException, ConflictException, NotFound
 from app.masters.countries.repository import CountryRepository
 from app.masters.product_categories.repository import ProductCategoryRepository
 from app.masters.product_sub_categories.repository import ProductSubCategoryRepository
+from app.masters.states.repository import StateRepository
 from app.planning.ws_manager import notify_source_record_changed, refresh_planning_cells_for_record
 
 DROPDOWN_CACHE_NAME = "buyers"
@@ -50,6 +51,7 @@ class BuyerService:
         category_repository: ProductCategoryRepository,
         sub_category_repository: ProductSubCategoryRepository,
         cache_manager: CacheManager,
+        state_repository: StateRepository | None = None,
     ) -> None:
         self.repository = repository
         self.contact_repository = contact_repository
@@ -57,6 +59,7 @@ class BuyerService:
         self.category_repository = category_repository
         self.sub_category_repository = sub_category_repository
         self.cache_manager = cache_manager
+        self.state_repository = state_repository or StateRepository(repository.session)
 
     # ------------------------------------------------------------------
     # Reads
@@ -83,7 +86,9 @@ class BuyerService:
         ``SupplierService.list_paginated``.
         """
         if category_id is None and sub_category_id is None:
-            return await self.repository.paginated_list(query)
+            items, total = await self.repository.paginated_list(query)
+            await self.attach_creator_names(items)
+            return items, total
 
         base_stmt = self.repository._base_select()
         base_stmt = self.repository._apply_search(base_stmt, query.search.normalized)
@@ -102,7 +107,25 @@ class BuyerService:
         list_stmt = list_stmt.offset(query.page.offset).limit(query.page.limit)
         result = await self.repository.session.execute(list_stmt)
         items = list(result.scalars().unique().all())
+        await self.attach_creator_names(items)
         return items, total
+
+    async def attach_creator_names(self, buyers: list[Buyer]) -> None:
+        """Set a display-only ``created_by_name`` on each buyer (one query for the whole page)."""
+        from sqlalchemy import select
+        from app.users.models import User
+
+        ids = {b.created_by_id for b in buyers if b.created_by_id}
+        names: dict[uuid.UUID, str] = {}
+        if ids:
+            rows = await self.repository.session.execute(
+                select(User.id, User.display_name, User.first_name, User.last_name, User.username).where(User.id.in_(ids))
+            )
+            for uid, display_name, first, last, username in rows.all():
+                full = " ".join(p for p in (first, last) if p)
+                names[uid] = display_name or full or username or ""
+        for b in buyers:
+            setattr(b, "created_by_name", names.get(b.created_by_id) if b.created_by_id else None)
 
     async def get_category_ids(self, buyer_id: uuid.UUID) -> list[uuid.UUID]:
         return await self.repository.list_all_category_ids(buyer_id)
@@ -120,6 +143,13 @@ class BuyerService:
     async def _validate_country(self, country_id: uuid.UUID) -> None:
         if await self.country_repository.get_by_id(country_id) is None:
             raise BadRequestException("The specified country does not exist.")
+
+    async def _validate_state(self, state_id: uuid.UUID, country_id: uuid.UUID | None = None) -> None:
+        state = await self.state_repository.get_by_id(state_id)
+        if state is None:
+            raise BadRequestException("The specified state does not exist.")
+        if country_id is not None and state.country_id != country_id:
+            raise BadRequestException("The specified state does not belong to the selected country.")
 
     async def _validate_categories(self, category_ids: list[uuid.UUID]) -> None:
         """
@@ -196,6 +226,8 @@ class BuyerService:
         emails = field_values.pop("emails", []) or []
 
         await self._validate_country(country_id)
+        if field_values.get("state_id") is not None:
+            await self._validate_state(field_values["state_id"], country_id)
         await self._validate_categories(category_ids)
         await self._validate_sub_categories(sub_category_ids)
         self._validate_potential_reason(field_values.get("potential"), field_values.get("potential_reason"))
@@ -277,6 +309,9 @@ class BuyerService:
 
         if "country_id" in field_values and field_values["country_id"] is not None:
             await self._validate_country(field_values["country_id"])
+        if "state_id" in field_values and field_values["state_id"] is not None:
+            target_country = field_values.get("country_id", buyer.country_id)
+            await self._validate_state(field_values["state_id"], target_country)
         if category_ids is not None:
             await self._validate_categories(category_ids)
         if sub_category_ids is not None:
@@ -349,7 +384,7 @@ class BuyerService:
         # A version-only payload (no other field actually changed) still
         # correctly reaches repository.update() and is still checked,
         # since `version` alone makes `changes` non-empty.
-        changes = {k: v for k, v in field_values.items() if v is not None}
+        changes = dict(field_values)
         if changes:
             await self.repository.update(buyer, **changes)
 
@@ -371,27 +406,47 @@ class BuyerService:
         }
         if primary_contact_fields.intersection(field_values.keys()):
             primary = await self.contact_repository.get_primary_contact(buyer_id)
-            if primary is not None:
-                await self.contact_repository.update(
-                    primary,
-                    salutation=field_values.get("contact_salutation", primary.salutation),
-                    person_name=field_values.get("contact_full_name", primary.person_name) or primary.person_name,
-                    designation=field_values.get("contact_designation", primary.designation),
-                    calling_number=field_values.get("contact_calling_number", primary.calling_number),
-                    whatsapp_number=field_values.get("contact_whatsapp_number", primary.whatsapp_number),
-                )
-            elif field_values.get("contact_full_name"):
-                await self.contact_repository.create(
-                    buyer_id=buyer_id,
-                    salutation=field_values.get("contact_salutation"),
-                    person_name=field_values["contact_full_name"],
-                    designation=field_values.get("contact_designation"),
-                    country_id=field_values.get("country_id", buyer.country_id),
-                    calling_number=field_values.get("contact_calling_number"),
-                    whatsapp_number=field_values.get("contact_whatsapp_number"),
-                    email=None,
-                    is_primary=True,
-                )
+            new_name = field_values.get("contact_full_name")
+            if new_name:
+                if primary is not None:
+                    contact_updates: dict[str, Any] = {"person_name": new_name}
+                    if "contact_salutation" in field_values:
+                        contact_updates["salutation"] = field_values["contact_salutation"]
+                    if "contact_designation" in field_values:
+                        contact_updates["designation"] = field_values["contact_designation"]
+                    if "contact_calling_number" in field_values:
+                        contact_updates["calling_number"] = field_values["contact_calling_number"]
+                    if "contact_whatsapp_number" in field_values:
+                        contact_updates["whatsapp_number"] = field_values["contact_whatsapp_number"]
+                    await self.contact_repository.update(primary, **contact_updates)
+                else:
+                    await self.contact_repository.create(
+                        buyer_id=buyer_id,
+                        salutation=field_values.get("contact_salutation"),
+                        person_name=new_name,
+                        designation=field_values.get("contact_designation"),
+                        country_id=field_values.get("country_id", buyer.country_id),
+                        calling_number=field_values.get("contact_calling_number"),
+                        whatsapp_number=field_values.get("contact_whatsapp_number"),
+                        email=None,
+                        is_primary=True,
+                    )
+            elif "contact_full_name" in field_values and not new_name:
+                # User explicitly cleared the primary contact name from the main form
+                if primary is not None:
+                    await self.contact_repository.delete(primary)
+            elif primary is not None:
+                contact_updates = {}
+                if "contact_salutation" in field_values:
+                    contact_updates["salutation"] = field_values["contact_salutation"]
+                if "contact_designation" in field_values:
+                    contact_updates["designation"] = field_values["contact_designation"]
+                if "contact_calling_number" in field_values:
+                    contact_updates["calling_number"] = field_values["contact_calling_number"]
+                if "contact_whatsapp_number" in field_values:
+                    contact_updates["whatsapp_number"] = field_values["contact_whatsapp_number"]
+                if contact_updates:
+                    await self.contact_repository.update(primary, **contact_updates)
 
         await self._invalidate_cache()
         # Same store-on-write hook as Products/Suppliers -- Buyers is a
@@ -462,15 +517,81 @@ class BuyerService:
         await self._invalidate_cache()
 
     # ------------------------------------------------------------------
+    # ------------------------------------------------------------------
     # Contacts
     # ------------------------------------------------------------------
 
+    async def _sync_buyer_primary_fields(
+        self,
+        buyer: Buyer,
+        *,
+        salutation: str | None,
+        full_name: str | None,
+        designation: str | None,
+        calling_number: str | None,
+        whatsapp_number: str | None,
+        email: str | None,
+    ) -> None:
+        """Sync primary contact fields into the buyer profile row and its email roster."""
+        await self.repository.update(
+            buyer,
+            contact_salutation=salutation,
+            contact_full_name=full_name,
+            contact_designation=designation,
+            contact_calling_number=calling_number,
+            contact_whatsapp_number=whatsapp_number,
+        )
+        if email and email.strip():
+            clean_email = email.strip()
+            existing_emails = [e.email for e in buyer.emails] if buyer.emails else []
+            if clean_email not in existing_emails:
+                await self.repository.replace_emails(buyer.id, [clean_email] + existing_emails)
+            else:
+                reordered = [clean_email] + [e for e in existing_emails if e != clean_email]
+                await self.repository.replace_emails(buyer.id, reordered)
+            await self.repository.session.refresh(buyer, ["emails"])
+
     async def add_contact(self, buyer_id: uuid.UUID, **field_values: Any) -> BuyerContact:
         """Add a contact person to a buyer (document: "Add Contacts of Buyer (Client)")."""
-        await self.get_by_id_or_raise(buyer_id)
+        buyer = await self.get_by_id_or_raise(buyer_id)
         if field_values.get("country_id"):
             await self._validate_country(field_values["country_id"])
-        return await self.contact_repository.create(buyer_id=buyer_id, is_primary=False, **field_values)
+
+        explicit_is_primary = field_values.pop("is_primary", None)
+        existing_primary = await self.contact_repository.get_primary_contact(buyer_id)
+
+        # Auto-promote to primary if explicitly requested OR if buyer currently has no primary contact
+        should_be_primary = False
+        if explicit_is_primary is True:
+            should_be_primary = True
+        elif explicit_is_primary is None and (
+            existing_primary is None or not (buyer.contact_full_name and buyer.contact_full_name.strip())
+        ):
+            should_be_primary = True
+
+        if should_be_primary:
+            if existing_primary is not None:
+                await self.contact_repository.update(existing_primary, is_primary=False)
+
+            await self._sync_buyer_primary_fields(
+                buyer,
+                salutation=field_values.get("salutation"),
+                full_name=field_values.get("person_name"),
+                designation=field_values.get("designation"),
+                calling_number=field_values.get("calling_number"),
+                whatsapp_number=field_values.get("whatsapp_number"),
+                email=field_values.get("email"),
+            )
+
+        contact = await self.contact_repository.create(
+            buyer_id=buyer_id,
+            is_primary=should_be_primary,
+            **field_values,
+        )
+        await self._invalidate_cache()
+        await notify_source_record_changed("buyer", buyer_id)
+        await refresh_planning_cells_for_record(self.repository.session, "buyer", buyer_id)
+        return contact
 
     async def get_contact_or_raise(self, buyer_id: uuid.UUID, contact_id: uuid.UUID) -> BuyerContact:
         contact = await self.contact_repository.get_by_id(contact_id)
@@ -479,12 +600,60 @@ class BuyerService:
         return contact
 
     async def update_contact(self, buyer_id: uuid.UUID, contact_id: uuid.UUID, **field_values: Any) -> BuyerContact:
+        buyer = await self.get_by_id_or_raise(buyer_id)
         contact = await self.get_contact_or_raise(buyer_id, contact_id)
         if field_values.get("country_id"):
             await self._validate_country(field_values["country_id"])
+
+        explicit_is_primary = field_values.get("is_primary")
+        if explicit_is_primary is True and not contact.is_primary:
+            existing_primary = await self.contact_repository.get_primary_contact(buyer_id)
+            if existing_primary and existing_primary.id != contact.id:
+                await self.contact_repository.update(existing_primary, is_primary=False)
+
         changes = {k: v for k, v in field_values.items() if v is not None}
         if changes:
             await self.contact_repository.update(contact, **changes)
+
+        # If this contact is primary (or just became primary), sync to buyer profile row
+        if contact.is_primary or explicit_is_primary is True:
+            await self._sync_buyer_primary_fields(
+                buyer,
+                salutation=contact.salutation,
+                full_name=contact.person_name,
+                designation=contact.designation,
+                calling_number=contact.calling_number,
+                whatsapp_number=contact.whatsapp_number,
+                email=contact.email,
+            )
+
+        await self._invalidate_cache()
+        await notify_source_record_changed("buyer", buyer_id)
+        await refresh_planning_cells_for_record(self.repository.session, "buyer", buyer_id)
+        return contact
+
+    async def set_primary_contact(self, buyer_id: uuid.UUID, contact_id: uuid.UUID) -> BuyerContact:
+        """Promote a contact person to be the buyer's Primary Contact and sync to the buyer profile row."""
+        buyer = await self.get_by_id_or_raise(buyer_id)
+        contact = await self.get_contact_or_raise(buyer_id, contact_id)
+
+        existing_primary = await self.contact_repository.get_primary_contact(buyer_id)
+        if existing_primary and existing_primary.id != contact.id:
+            await self.contact_repository.update(existing_primary, is_primary=False)
+
+        await self.contact_repository.update(contact, is_primary=True)
+        await self._sync_buyer_primary_fields(
+            buyer,
+            salutation=contact.salutation,
+            full_name=contact.person_name,
+            designation=contact.designation,
+            calling_number=contact.calling_number,
+            whatsapp_number=contact.whatsapp_number,
+            email=contact.email,
+        )
+        await self._invalidate_cache()
+        await notify_source_record_changed("buyer", buyer_id)
+        await refresh_planning_cells_for_record(self.repository.session, "buyer", buyer_id)
         return contact
 
     async def delete_contact(self, buyer_id: uuid.UUID, contact_id: uuid.UUID) -> None:
@@ -493,9 +662,10 @@ class BuyerService:
         if contact.is_primary:
             raise BadRequestException(
                 "This is the buyer's primary contact (mirrored from the main form) and cannot be deleted "
-                "directly -- edit it via the buyer's own contact fields instead."
+                "directly -- promote another contact first or edit the buyer profile."
             )
         await self.contact_repository.delete(contact)
+        await self._invalidate_cache()
 
     # ------------------------------------------------------------------
     # Import / Export
@@ -509,6 +679,7 @@ class BuyerService:
         buyers = await self.repository.list_all()
 
         countries = {c.id: c.name for c in await self.country_repository.list_all()}
+        states = {s.id: s.name for s in await self.state_repository.list_all()}
         categories = {c.id: c.name for c in await self.category_repository.list_all()}
         sub_categories = {sc.id: sc.name for sc in await self.sub_category_repository.list_all()}
 
@@ -523,6 +694,8 @@ class BuyerService:
             potential_str = b.potential.value.upper() if hasattr(b.potential, "value") else str(b.potential or "").upper()
             grade_str = f"Grade {b.buyer_grade.value.upper()}" if hasattr(b.buyer_grade, "value") else (f"Grade {b.buyer_grade}" if b.buyer_grade else "")
 
+            sec_c = next((c for c in getattr(b, "contacts", []) if not c.is_primary), None)
+
             rows.append(
                 {
                     "Company Name": b.company_name,
@@ -530,6 +703,7 @@ class BuyerService:
                     "Product Categories": ", ".join(filter(None, cat_names)),
                     "Product Sub Categories": ", ".join(filter(None, sub_cat_names)),
                     "Country": countries.get(b.country_id, ""),
+                    "State / Province": states.get(b.state_id, "") if b.state_id else "",
                     "City": b.city or "",
                     "Address": b.address or "",
                     "Contact Salutation": b.contact_salutation or "",
@@ -537,6 +711,10 @@ class BuyerService:
                     "Designation": b.contact_designation or "",
                     "Calling Number": b.contact_calling_number or "",
                     "WhatsApp Number": b.contact_whatsapp_number or "",
+                    "Contact Person 2": sec_c.person_name if sec_c and sec_c.person_name else "",
+                    "Designation 2": sec_c.designation if sec_c and sec_c.designation else "",
+                    "Calling Number 2": sec_c.calling_number if sec_c and sec_c.calling_number else "",
+                    "WhatsApp Number 2": sec_c.whatsapp_number if sec_c and sec_c.whatsapp_number else "",
                     "Emails": ", ".join(emails),
                     "Tax ID / GST Number": b.tax_id_number or "",
                     "Website": b.website or "",
@@ -554,7 +732,9 @@ class BuyerService:
             return build_csv_export(EXPORT_HEADERS, rows)
         return build_excel_export(EXPORT_HEADERS, rows, sheet_title="Buyers")
 
-    async def import_file(self, filename: str, raw_bytes: bytes, *, update_existing: bool = False) -> Any:
+    async def import_file(
+        self, filename: str, raw_bytes: bytes, *, update_existing: bool = False, created_by_id: uuid.UUID | None = None
+    ) -> Any:
         """Validate and import buyers from an uploaded CSV/XLSX file with 3-way duplicate detection and update mode."""
         from app.buyers.validators import validate_buyer_row
         from app.masters.import_export import model_to_dict, parse_rows_from_file, run_import
@@ -565,6 +745,7 @@ class BuyerService:
         rows = parse_rows_from_file(filename, raw_bytes)
 
         all_countries = await self.country_repository.list_all()
+        all_states = await self.state_repository.list_all()
         all_cats = await self.category_repository.list_all()
         all_sub_cats = await self.sub_category_repository.list_all()
 
@@ -575,6 +756,7 @@ class BuyerService:
             valid_buyer_type_map.setdefault(builtin, "Dealer / Trader" if "trader" in builtin and "dealer" in builtin else builtin.title())
 
         country_name_map = {str(c.id): c.name for c in all_countries}
+        state_name_map = {str(s.id): s.name for s in all_states}
 
         existing_buyers = await self.repository.list_all()
         existing_name_map = {b.company_name.strip().lower(): b for b in existing_buyers}
@@ -595,6 +777,7 @@ class BuyerService:
             return {
                 "Company Name": b.company_name,
                 "Country": country_name_map.get(str(b.country_id), "—"),
+                "State / Province": state_name_map.get(str(b.state_id), "—") if b.state_id else "—",
                 "Calling Number": getattr(b, "contact_calling_number", "—") or "—",
                 "WhatsApp Number": getattr(b, "contact_whatsapp_number", "—") or "—",
                 "Status": "Active" if b.is_active else "Inactive",
@@ -607,6 +790,13 @@ class BuyerService:
             calling_num = field_values.get("contact_calling_number")
             wa_num = field_values.get("contact_whatsapp_number")
             country_raw = field_values.pop("country_raw", "").strip()
+            state_raw = field_values.pop("state_raw", None)
+            if state_raw:
+                state_raw = str(state_raw).strip()
+            contact_person_2 = field_values.pop("contact_person_2", None)
+            designation_2 = field_values.pop("designation_2", None)
+            calling_number_2 = field_values.pop("calling_number_2", None)
+            whatsapp_number_2 = field_values.pop("whatsapp_number_2", None)
             cat_names_raw = field_values.pop("category_names_raw", None)
             sub_cat_names_raw = field_values.pop("sub_category_names_raw", None)
             emails = field_values.pop("emails", None)
@@ -639,6 +829,7 @@ class BuyerService:
                         has_changes = True
 
                 # Strict Country validation if provided
+                target_country_id = target_buyer.country_id
                 if country_raw and country_raw.strip():
                     matched_country = next(
                         (c for c in all_countries if c.code.upper() == country_raw.upper() or c.name.lower() == country_raw.lower()),
@@ -648,6 +839,21 @@ class BuyerService:
                         raise BadRequestException(f"Country '{country_raw}' does not exist in Country Master.")
                     if target_buyer.country_id != matched_country.id:
                         update_kwargs["country_id"] = matched_country.id
+                        has_changes = True
+                    target_country_id = matched_country.id
+
+                # State validation if provided
+                if state_raw:
+                    s_match = next(
+                        (s for s in all_states if s.country_id == target_country_id and (s.name.lower() == state_raw.lower() or (s.code and s.code.lower() == state_raw.lower()))),
+                        None,
+                    )
+                    if s_match is None:
+                        s_match = next((s for s in all_states if s.name.lower() == state_raw.lower() or (s.code and s.code.lower() == state_raw.lower())), None)
+                    if s_match is None:
+                        raise BadRequestException(f"State '{state_raw}' does not exist in State Master.")
+                    if target_buyer.state_id != s_match.id:
+                        update_kwargs["state_id"] = s_match.id
                         has_changes = True
 
                 # Category validation if provided
@@ -734,8 +940,9 @@ class BuyerService:
 
                 # Other direct fields: ONLY update if non-null and not empty/blank string
                 skip_fields = {
-                    "company_name", "buyer_type", "country_id", "contact_calling_number", "contact_whatsapp_number",
+                    "company_name", "buyer_type", "country_id", "state_id", "state_raw", "contact_calling_number", "contact_whatsapp_number",
                     "category_ids", "sub_category_ids", "contact_full_name", "contact_designation", "contact_salutation",
+                    "contact_person_2", "designation_2", "calling_number_2", "whatsapp_number_2",
                     "emails",
                 }
                 for k, v in field_values.items():
@@ -765,11 +972,27 @@ class BuyerService:
                 # Update primary contact if contact name was supplied in this row
                 contact_name = field_values.get("contact_full_name")
                 if contact_name and str(contact_name).strip():
-                    primary_contact = next((c for c in getattr(target_buyer, "contacts", []) if c.is_primary), None)
+                    clean_cname = str(contact_name).strip()
+                    if (target_buyer.contact_full_name or "").strip() != clean_cname:
+                        update_kwargs["contact_full_name"] = clean_cname
+                        has_changes = True
+                    if field_values.get("contact_salutation") and (target_buyer.contact_salutation or "").strip() != str(field_values["contact_salutation"]).strip():
+                        update_kwargs["contact_salutation"] = str(field_values["contact_salutation"]).strip()
+                        has_changes = True
+                    if field_values.get("contact_designation") and (target_buyer.contact_designation or "").strip() != str(field_values["contact_designation"]).strip():
+                        update_kwargs["contact_designation"] = str(field_values["contact_designation"]).strip()
+                        has_changes = True
+
+                    primary_contact = next((c for c in getattr(target_buyer, "contacts", []) if c.is_primary and getattr(c, "deleted_at", None) is None), None)
+                    if primary_contact is None:
+                        primary_contact = await self.contact_repository.get_primary_contact(target_buyer.id)
+
                     if primary_contact:
                         c_updates: dict[str, Any] = {}
-                        if (primary_contact.person_name or "").strip() != str(contact_name).strip():
-                            c_updates["person_name"] = str(contact_name).strip()
+                        if (primary_contact.person_name or "").strip() != clean_cname:
+                            c_updates["person_name"] = clean_cname
+                        if field_values.get("contact_salutation") and (primary_contact.salutation or "").strip() != str(field_values["contact_salutation"]).strip():
+                            c_updates["salutation"] = str(field_values["contact_salutation"]).strip()
                         if field_values.get("contact_designation") and (primary_contact.designation or "").strip() != str(field_values["contact_designation"]).strip():
                             c_updates["designation"] = str(field_values["contact_designation"]).strip()
                         if calling_num and (primary_contact.calling_number or "").strip() != str(calling_num).strip():
@@ -784,13 +1007,52 @@ class BuyerService:
                         await self.contact_repository.create(
                             buyer_id=target_buyer.id,
                             salutation=field_values.get("contact_salutation"),
-                            person_name=str(contact_name).strip(),
+                            person_name=clean_cname,
                             designation=field_values.get("contact_designation"),
                             country_id=update_kwargs.get("country_id", target_buyer.country_id),
                             calling_number=calling_num or target_buyer.contact_calling_number,
                             whatsapp_number=wa_num or target_buyer.contact_whatsapp_number,
                             email=None,
                             is_primary=True,
+                        )
+
+                # Update / create secondary contact if contact_person_2 was supplied in this row
+                if contact_person_2 and str(contact_person_2).strip():
+                    c2_name = str(contact_person_2).strip()
+                    sec_c = next(
+                        (c for c in getattr(target_buyer, "contacts", []) if not c.is_primary and (c.person_name or "").strip().lower() == c2_name.lower()),
+                        None,
+                    )
+                    if sec_c is None:
+                        non_primaries = [c for c in getattr(target_buyer, "contacts", []) if not c.is_primary]
+                        if len(non_primaries) == 1:
+                            sec_c = non_primaries[0]
+
+                    if sec_c:
+                        c2_up: dict[str, Any] = {}
+                        if (sec_c.person_name or "").strip() != c2_name:
+                            c2_up["person_name"] = c2_name
+                        if designation_2 and (sec_c.designation or "").strip() != str(designation_2).strip():
+                            c2_up["designation"] = str(designation_2).strip()
+                        if calling_number_2 and (sec_c.calling_number or "").strip() != str(calling_number_2).strip():
+                            c2_up["calling_number"] = str(calling_number_2).strip()
+                        if whatsapp_number_2 and (sec_c.whatsapp_number or "").strip() != str(whatsapp_number_2).strip():
+                            c2_up["whatsapp_number"] = str(whatsapp_number_2).strip()
+                        if c2_up:
+                            has_changes = True
+                            await self.contact_repository.update(sec_c, **c2_up)
+                    else:
+                        has_changes = True
+                        await self.contact_repository.create(
+                            buyer_id=target_buyer.id,
+                            salutation=None,
+                            person_name=c2_name,
+                            designation=str(designation_2).strip() if designation_2 else None,
+                            country_id=update_kwargs.get("country_id", target_buyer.country_id),
+                            calling_number=calling_number_2,
+                            whatsapp_number=whatsapp_number_2,
+                            email=None,
+                            is_primary=False,
                         )
 
                 # Persist updates to target buyer (never blanking out any existing field)
@@ -877,6 +1139,18 @@ class BuyerService:
                 raise BadRequestException(f"Country '{country_raw}' does not exist in Country Master.")
             field_values["country_id"] = country.id
 
+            # State validation if provided
+            if state_raw:
+                s_match = next(
+                    (s for s in all_states if s.country_id == country.id and (s.name.lower() == state_raw.lower() or (s.code and s.code.lower() == state_raw.lower()))),
+                    None,
+                )
+                if s_match is None:
+                    s_match = next((s for s in all_states if s.name.lower() == state_raw.lower() or (s.code and s.code.lower() == state_raw.lower())), None)
+                if s_match is None:
+                    raise BadRequestException(f"State '{state_raw}' does not exist in State Master.")
+                field_values["state_id"] = s_match.id
+
             # Strict Category validation
             category_ids = []
             if cat_names_raw:
@@ -904,7 +1178,24 @@ class BuyerService:
             field_values["sub_category_ids"] = sub_category_ids
             field_values["emails"] = emails or []
 
+            if created_by_id is not None:
+                field_values["created_by_id"] = created_by_id
             buyer = await self.create(**field_values)
+
+            # Secondary contact if provided in import
+            if contact_person_2 and str(contact_person_2).strip():
+                await self.contact_repository.create(
+                    buyer_id=buyer.id,
+                    salutation=None,
+                    person_name=str(contact_person_2).strip(),
+                    designation=str(designation_2).strip() if designation_2 else None,
+                    country_id=buyer.country_id,
+                    calling_number=calling_number_2,
+                    whatsapp_number=whatsapp_number_2,
+                    email=None,
+                    is_primary=False,
+                )
+
             seen_in_batch.add(batch_key)
             existing_name_map[batch_key] = buyer
             if clean_call and len(clean_call) >= 6:
@@ -915,4 +1206,4 @@ class BuyerService:
 
         summary = await run_import(rows, row_validator=validate_buyer_row, row_creator=_create)
         await self._invalidate_cache()
-        return summary
+        return summary

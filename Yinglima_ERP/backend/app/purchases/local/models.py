@@ -23,6 +23,22 @@ class LocalPurchase(Base, UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin):
 
 
 
+    # Sourcing & Consignment Link (Shipment Planning cascade)
+    organization_id: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(), ForeignKey("master_companies.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    organization_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    branch_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    branch_name: Mapped[str | None] = mapped_column(String(150), nullable=True)
+    group_label: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    consignment_code: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
+    planning_sheet_id: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(), ForeignKey("planning_sheets.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    planning_column_id: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(), ForeignKey("planning_columns.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+
     supplier_id: Mapped[uuid.UUID] = mapped_column(
         GUID(), ForeignKey("suppliers.id"), nullable=False, index=True
     )

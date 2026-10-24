@@ -87,6 +87,8 @@ export interface MasterRecord {
   id: string;
   version?: number;
   status: string;
+  created_at?: string | null;
+  updated_at?: string | null;
 }
 
 export interface Country extends MasterRecord {
@@ -127,6 +129,8 @@ export interface Hsn extends MasterRecord {
   code: string;
   description?: string | null;
   gst_percent: number;
+  import_duty_percent?: number | null;
+  purchase_vat_percent?: number | null;
   refund_vat_percent?: number | null;
 }
 
@@ -191,6 +195,7 @@ export interface Product extends MasterRecord {
   supplier_id?: string | null;
   supplier_name?: string | null;
 
+  purchase_vat_percent?: number | null;
   refund_vat_percent?: number | null;
   license_certificate_required?: string | null;
   conversion_factor?: number | null;
@@ -198,6 +203,7 @@ export interface Product extends MasterRecord {
   description?: string | null;
   image_url?: string | null;
   images?: string[] | null;
+  images_omitted?: boolean | null;
   packaging_quantity?: number | null;
   packaging_net_weight?: number | null;
   packaging_gross_weight?: number | null;
@@ -508,7 +514,6 @@ export interface Supplier {
   emails?: string[];
   tax_id_number?: string | null;
   address?: string | null;
-  town?: string | null;
   primary_website?: string | null;
   secondary_website?: string | null;
   supplier_grade?: string | null;

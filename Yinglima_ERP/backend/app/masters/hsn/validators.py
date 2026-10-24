@@ -23,10 +23,43 @@ def validate_hsn_row(raw_row: dict[str, str], row_number: int) -> dict[str, Any]
     if gst_percent < 0 or gst_percent > 100:
         raise BadRequestException(f"Row {row_number}: 'gst_percent' must be between 0 and 100.")
 
+    import_duty_raw = (
+        raw_row.get("import_duty_percent")
+        or raw_row.get("Import Duty %")
+        or raw_row.get("import_duty")
+        or raw_row.get("Import Duty")
+        or "0"
+    ).strip().replace("%", "")
+    try:
+        import_duty_percent = float(import_duty_raw)
+    except ValueError as exc:
+        raise BadRequestException(f"Row {row_number}: 'import_duty_percent' must be numeric.") from exc
+    if import_duty_percent < 0 or import_duty_percent > 100:
+        raise BadRequestException(f"Row {row_number}: 'import_duty_percent' must be between 0 and 100.")
+
+    purchase_vat_raw = (
+        raw_row.get("purchase_vat_percent")
+        or raw_row.get("Purchase VAT %")
+        or raw_row.get("pay_vat_percent")
+        or raw_row.get("Pay VAT %")
+        or raw_row.get("pay_vat")
+        or raw_row.get("purchase_vat")
+        or raw_row.get("Purchase VAT")
+        or raw_row.get("Pay VAT")
+        or "0"
+    ).strip().replace("%", "")
+    try:
+        purchase_vat_percent = float(purchase_vat_raw)
+    except ValueError as exc:
+        raise BadRequestException(f"Row {row_number}: 'purchase_vat_percent' must be numeric.") from exc
+    if purchase_vat_percent < 0 or purchase_vat_percent > 100:
+        raise BadRequestException(f"Row {row_number}: 'purchase_vat_percent' must be between 0 and 100.")
+
     refund_vat_raw = (
         raw_row.get("refund_vat_percent")
         or raw_row.get("Refund VAT %")
         or raw_row.get("refund_vat")
+        or raw_row.get("Refund VAT")
         or "0"
     ).strip().replace("%", "")
     try:
@@ -48,6 +81,8 @@ def validate_hsn_row(raw_row: dict[str, str], row_number: int) -> dict[str, Any]
         "code": code,
         "description": (raw_row.get("description") or raw_row.get("Description") or "").strip() or None,
         "gst_percent": gst_percent,
+        "import_duty_percent": import_duty_percent,
+        "purchase_vat_percent": purchase_vat_percent,
         "refund_vat_percent": refund_vat_percent,
         "status": status,
     }

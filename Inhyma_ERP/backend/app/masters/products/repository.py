@@ -233,3 +233,41 @@ class ProductRepository(BaseRepository[Product]):
         stmt = select(exists().where(SupplierProductLink.product_id == product_id))
         result = await self.session.execute(stmt)
         return bool(result.scalar())
+
+    def _apply_dynamic_filters(self, stmt, filters):
+        """Apply dynamic filters, matching organization_id against column and JSON array, and scoping to Yinglima sync."""
+        if filters and hasattr(filters, "exact"):
+            from sqlalchemy import cast, or_, select, String
+            from app.integration.sync_models import SyncedEntityMapping
+
+            synced_from = filters.exact.get("synced_from")
+            org_val = filters.exact.get("organization_id")
+
+            if str(synced_from).lower() == "yinglima" or str(org_val).lower() == "85c12bcb-10a1-4b1f-92ed-6ca72ac1b3b5":
+                # Strictly scope to products synced from Yinglima, excluding local INH- domestic spare parts
+                stmt = stmt.where(
+                    Product.id.in_(
+                        select(SyncedEntityMapping.local_entity_id).where(
+                            SyncedEntityMapping.source_erp_id == "yinglima",
+                            SyncedEntityMapping.entity_type == "product",
+                        )
+                    )
+                )
+            elif org_val and str(org_val).lower() != "blank":
+                try:
+                    org_uuid = uuid.UUID(str(org_val))
+                    stmt = stmt.where(
+                        or_(
+                            Product.organization_id == org_uuid,
+                            cast(Product.organization_ids, String).like(f"%{org_val}%"),
+                        )
+                    )
+                except ValueError:
+                    pass
+
+            from app.common.filtering import FilterParams
+            filtered_exact = {k: v for k, v in filters.exact.items() if k not in ("organization_id", "synced_from")}
+            return super()._apply_dynamic_filters(
+                stmt, FilterParams(exact=filtered_exact, ranges=getattr(filters, "ranges", {}))
+            )
+        return super()._apply_dynamic_filters(stmt, filters)

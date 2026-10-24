@@ -30,6 +30,7 @@ class ProductCreate(BaseModel):
     branch_ids: list[str] | None = None
     supplier_id: uuid.UUID | None = None
 
+    purchase_vat_percent: float | None = Field(default=None, ge=0, le=100)
     refund_vat_percent: float | None = Field(default=None, ge=0, le=100)
     license_certificate_required: str | None = None
 
@@ -101,6 +102,7 @@ class ProductUpdate(BaseModel):
     branch_ids: list[str] | None = None
     supplier_id: uuid.UUID | None = None
 
+    purchase_vat_percent: float | None = Field(default=None, ge=0, le=100)
     refund_vat_percent: float | None = Field(default=None, ge=0, le=100)
     license_certificate_required: str | None = None
 
@@ -160,12 +162,15 @@ class ProductRead(BaseModel):
     supplier_name: str | None = None
 
 
+    purchase_vat_percent: float = 0.0
     refund_vat_percent: float = 0.0
     license_certificate_required: str | None = None
 
     specification: str | None
     description: str | None
     images: list[str] | None = None
+    # True when photos exist but were left out of a lightweight list response.
+    images_omitted: bool | None = None
 
     @computed_field
     @property

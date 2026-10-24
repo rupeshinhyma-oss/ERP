@@ -44,6 +44,7 @@ from app.planning.schemas import (
     PlanningGridRead,
     PlanningItemAutoPopulate,
     PlanningItemDescriptionUpdate,
+    PlanningItemWidthUpdate,
     PlanningItemLinkRecord,
     PlanningItemSourceConfigure,
     PlanningRowCreate,
@@ -60,7 +61,11 @@ from app.planning.schemas import (
     PlanningStatusTagRead,
     SourceModuleInfo,
 )
-from app.planning.service import PlanningService
+import re
+from sqlalchemy import select
+from app.planning import source_registry
+from app.planning.models import PlanningColumnSourceType
+from app.planning.service import PlanningService, _mum_derived_kind_and_group
 from app.rbac.dependencies import require_any_permission, require_permission
 
 router = APIRouter(prefix="/planning", tags=["Shipment Planning"])
@@ -294,6 +299,8 @@ async def create_sheet(
         name=payload.name,
         organization_id=payload.organization_id,
         branch_id=payload.branch_id,
+        buyer_id=payload.buyer_id,
+        buyer_branch_name=payload.buyer_branch_name,
         mum_group_label=payload.mum_group_label or "Mum",
         description=payload.description,
         user_id=current_user.id,
@@ -554,40 +561,85 @@ async def get_grid(
         sheet_id, columns=columns, rows=rows
     )
 
+    # Prefetch product records in batch for LINKED_LOOKUP columns so missing/unmaterialized cells never render blank
+    product_map: dict[uuid.UUID, Any] = {}
+    has_product_lookups = any(
+        c.source_type == PlanningColumnSourceType.LINKED_LOOKUP and c.source_module == "product"
+        for c in columns
+    )
+    if has_product_lookups:
+        prod_ids = [r.linked_record_id for r in rows if r.linked_record_id]
+        if prod_ids:
+            from app.masters.products.models import Product
+            from app.masters.products.repository import ProductRepository
+            prod_records = list((await service.row_repository.session.execute(
+                select(Product).where(Product.id.in_(prod_ids))
+            )).scalars().all())
+            prod_repo = ProductRepository(service.row_repository.session)
+            await prod_repo.attach_planning_supplier_info(prod_records)
+            product_map = {p.id: p for p in prod_records}
+
     row_reads = []
     for row in rows:
         cells_by_column_id = {cell.column_id: cell for cell in row.cells}
         cell_reads = []
         mum_approval_dates = mum_approval_dates_by_row.get(row.id, {})
-        # Iterate every column, not just columns with a stored cell: a
-        # LINKED_LOOKUP/AGGREGATE/FORMULA column whose computed value is
-        # None (e.g. an unlinked row, or a formula referencing a still-
-        # empty sibling) has no PlanningCell row at all -- the frontend
-        # still needs one grid entry per (row, column) to render an empty
-        # cell.
         for column in columns:
             cell = cells_by_column_id.get(column.id)
-            # Everything is already computed and stored -- see
-            # PlanningService.recompute_and_store_cell and every write
-            # path that calls it (set_cell_value, link_row_to_*,
-            # configure_column_source, auto_populate_rows_from_item_source,
-            # and the cross-module hooks in
-            # app.masters.products/suppliers/buyers' own update() methods
-            # via app.planning.ws_manager.refresh_planning_cells_for_record).
-            # Reading the grid is now a plain read of already-stored
-            # values: no recomputation of any kind happens here, which is
-            # the entire point of the store-on-write architecture -- a
-            # sheet with 10,000+ rows costs exactly the same per-row work
-            # to display as one with 10.
             display_value = cell.value if cell is not None else None
-            # Document: "the Approval column should show over the cell the
-            # date ... when that Mum ... got the blue number". The Approval
-            # Date column stays MANUAL (admins can still type over it), but
-            # when nobody has typed a value for this row, auto-show the
-            # earliest-numbered Mum group's approval date instead of a
-            # blank cell -- see this function's own note above on why this
-            # one piece stays a per-request overlay rather than a stored
-            # value.
+
+            # Fall back to live Product Master lookup if cell is missing or empty
+            if (
+                (display_value is None or display_value == "")
+                and column.source_type == PlanningColumnSourceType.LINKED_LOOKUP
+                and column.source_module == "product"
+            ):
+                effective_id = (cell.linked_record_id if cell and cell.linked_record_id else row.linked_record_id)
+                if effective_id in product_map:
+                    prod = product_map[effective_id]
+                    module = source_registry.get_source_module("product")
+                    if module:
+                        raw_val = module.value_getter(prod, column.source_field or "")
+                        if raw_val is not None:
+                            display_value = str(raw_val)
+
+            # Fall back to live Mum-derived formula evaluation if cell is missing or empty
+            if (
+                (display_value is None or display_value == "")
+                and column.source_type == PlanningColumnSourceType.FORMULA
+            ):
+                mum_derived = _mum_derived_kind_and_group(column.name, label=sheet.mum_group_label or "Mum")
+                if mum_derived:
+                    kind, group_num = mum_derived
+                    mum_col = next((c for c in columns if re.match(rf"^{re.escape(sheet.mum_group_label or 'Mum')}[\s\-]*0*{group_num}$", c.name.strip(), re.IGNORECASE)), None)
+                    if mum_col:
+                        mum_cell = cells_by_column_id.get(mum_col.id)
+                        mum_val_str = mum_cell.value if mum_cell else None
+                        if mum_val_str:
+                            try:
+                                mum_val = float(mum_val_str)
+                                prod = product_map.get(row.linked_record_id)
+                                pkg_col = next((c for c in columns if c.source_type == PlanningColumnSourceType.LINKED_LOOKUP and c.source_field == "packaging_quantity"), None)
+                                pkg_cell = cells_by_column_id.get(pkg_col.id) if pkg_col else None
+                                pkg_val = float(pkg_cell.value) if pkg_cell and pkg_cell.value else (float(prod.packaging_quantity) if prod and prod.packaging_quantity else None)
+
+                                if pkg_val and pkg_val > 0:
+                                    pkg_count = mum_val / pkg_val
+                                    if kind == "pkg_count":
+                                        display_value = str(round(pkg_count, 4))
+                                    elif kind == "total_weight":
+                                        wt_col = next((c for c in columns if c.source_type == PlanningColumnSourceType.LINKED_LOOKUP and c.source_field == "packaging_gross_weight"), None)
+                                        wt_cell = cells_by_column_id.get(wt_col.id) if wt_col else None
+                                        wt_val = float(wt_cell.value) if wt_cell and wt_cell.value else (float(prod.packaging_gross_weight) if prod and prod.packaging_gross_weight else 0.0)
+                                        display_value = str(round(pkg_count * wt_val, 4))
+                                    elif kind == "total_cbm":
+                                        cbm_col = next((c for c in columns if c.source_type == PlanningColumnSourceType.LINKED_LOOKUP and c.source_field == "packaging_unit_cbm"), None)
+                                        cbm_cell = cells_by_column_id.get(cbm_col.id) if cbm_col else None
+                                        cbm_val = float(cbm_cell.value) if cbm_cell and cbm_cell.value else (float(prod.packaging_unit_cbm) if prod and prod.packaging_unit_cbm else 0.0)
+                                        display_value = str(round(pkg_count * cbm_val, 6))
+                            except (ValueError, TypeError):
+                                pass
+
             auto_approval_date: str | None = None
             if column.id == approval_date_column_id and not display_value and mum_approval_dates:
                 auto_approval_date = mum_approval_dates[min(mum_approval_dates.keys())]
@@ -608,21 +660,11 @@ async def get_grid(
                     "updated_at": None,
                 }
             cell_data["display_value"] = display_value
-            # The frontend's grid cell renders MANUAL columns from `value`,
-            # not `display_value` -- the Approval Date column is MANUAL, so
-            # the auto-computed date must also be surfaced as `value`, or it
-            # silently never renders even though it was computed correctly.
-            # Real typed-in values (the `cell is not None` case above)
-            # already have their own `value` from the DB and are left untouched.
+            if cell_data.get("value") in (None, "") and display_value is not None:
+                cell_data["value"] = display_value
             is_auto_filled = auto_approval_date is not None and cell_data.get("value") in (None, "")
             if is_auto_filled:
                 cell_data["value"] = auto_approval_date
-            # Explicit flag rather than making the frontend infer "was this
-            # auto-filled?" by comparing strings (a manually-typed date
-            # that happens to coincide with a Mum group's date would be
-            # misread as auto-filled and get overwritten by the hidden-aware
-            # recompute) -- unset entirely for every other column, so it
-            # never leaks into unrelated cells' shape.
             if column.id == approval_date_column_id:
                 cell_data["is_auto_approval_date"] = is_auto_filled
             cell_reads.append(cell_data)
@@ -1147,6 +1189,27 @@ async def set_item_column_description(
     data = PlanningSheetRead.model_validate(sheet).model_dump(mode="json")
     await _broadcast(sheet_id, "item_description_changed", data, current_user=current_user, service=service)
     return build_success_response(data=data, request_id=request.state.request_id, message="ITEM column description updated.")
+
+
+@router.patch(
+    "/sheets/{sheet_id}/item-width",
+    summary="Set (or clear) the sheet's built-in ITEM column server-persisted display width",
+)
+async def set_item_column_width(
+    sheet_id: uuid.UUID,
+    payload: PlanningItemWidthUpdate,
+    request: Request,
+    service: PlanningService = Depends(get_planning_service),
+    current_user: CurrentUser = Depends(require_permission("planning.column.manage")),
+) -> dict:
+    """
+    Drag-to-resize the built-in ITEM column. Shared across every user viewing
+    the sheet (matching PlanningColumn.width_px).
+    """
+    sheet = await service.set_item_column_width(sheet_id, width_px=payload.width_px)
+    data = PlanningSheetRead.model_validate(sheet).model_dump(mode="json")
+    await _broadcast(sheet_id, "item_width_changed", data, current_user=current_user, service=service)
+    return build_success_response(data=data, request_id=request.state.request_id, message="ITEM column width updated.")
 
 
 # ---------------------------------------------------------------------------

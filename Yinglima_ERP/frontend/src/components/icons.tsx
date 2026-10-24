@@ -510,6 +510,18 @@ export function IconDatabase(props: IconProps) {
   );
 }
 
+/** Stock Movement (Inward & Outward Inventory Movement Arrows) */
+export function IconStockMovement(props: IconProps) {
+  return (
+    <NavSvg {...props}>
+      <path d="M8 3 4 7l4 4" />
+      <path d="M4 7h16" />
+      <path d="m16 21 4-4-4-4" />
+      <path d="M20 17H4" />
+    </NavSvg>
+  );
+}
+
 /** Icon lookup by the string keys the nav config uses. */
 export const ICONS = {
   dashboard: IconDashboard,
@@ -518,6 +530,7 @@ export const ICONS = {
   shoppingCart: IconShoppingCart,
   box: IconBox,
   image: IconImage,
+  stockMovement: IconStockMovement,
   layers: IconLayers,
   folderTree: IconFolderTree,
   award: IconAward,
@@ -539,6 +552,7 @@ export const ICONS = {
   clock: IconClock,
   trash: IconTrash,
   database: IconDatabase,
+  bell: IconBell,
   chevronDown: IconChevronDown,
   chevronRight: IconChevronRight,
   userPlus: IconUserPlus,

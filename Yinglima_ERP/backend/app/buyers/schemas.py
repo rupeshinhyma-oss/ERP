@@ -40,6 +40,7 @@ class BuyerContactCreate(BaseModel):
     calling_number: str | None = Field(default=None, max_length=20)
     whatsapp_number: str | None = Field(default=None, max_length=20)
     email: EmailStr | None = None
+    is_primary: bool | None = None
 
     @field_validator("email", mode="before")
     @classmethod
@@ -62,6 +63,7 @@ class BuyerContactUpdate(BaseModel):
     calling_number: str | None = Field(default=None, max_length=20)
     whatsapp_number: str | None = Field(default=None, max_length=20)
     email: EmailStr | None = None
+    is_primary: bool | None = None
 
     @field_validator("email", mode="before")
     @classmethod
@@ -108,6 +110,7 @@ class BuyerCreate(BaseModel):
     )
     buyer_type: str | None = None
     country_id: uuid.UUID  # default Uganda applied by the caller (frontend/route), not forced here
+    state_id: uuid.UUID | None = None
     city: str | None = Field(default=None, max_length=150)
     address: str | None = None
 
@@ -163,6 +166,7 @@ class BuyerUpdate(BaseModel):
     sub_category_ids: list[uuid.UUID] | None = None
     buyer_type: str | None = None
     country_id: uuid.UUID | None = None
+    state_id: uuid.UUID | None = None
     city: str | None = Field(default=None, max_length=150)
     address: str | None = None
 
@@ -237,6 +241,7 @@ class BuyerRead(BaseModel):
     company_name: str
     buyer_type: str | None
     country_id: uuid.UUID
+    state_id: uuid.UUID | None = None
     city: str | None
     address: str | None
 
@@ -276,12 +281,14 @@ class BuyerListItemRead(BaseModel):
     company_name: str
     buyer_type: str | None
     country_id: uuid.UUID
+    state_id: uuid.UUID | None = None
     current_status: BuyerCurrentStatus | None
     potential: BuyerPotential | None
     buyer_grade: BuyerGrade | None
     is_active: bool
     created_at: datetime
     updated_at: datetime
+    created_by_name: str | None = None
 
     category_ids: list[uuid.UUID] = Field(default_factory=list)
     sub_category_ids: list[uuid.UUID] = Field(default_factory=list)

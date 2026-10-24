@@ -26,10 +26,11 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 from pypdf import PdfReader
-from sqlalchemy import or_, select
+from sqlalchemy import or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import BadRequestException, NotFoundException
+from app.masters.company_list.models import MasterCompany
 from app.masters.hsn.models import HsnCode
 from app.masters.products.models import Product
 from app.planning.models import PlanningCell, PlanningColumn, PlanningRow, PlanningSheet
@@ -38,10 +39,13 @@ from app.purchases.local.repository import LocalPurchaseRepository
 from app.purchases.local.schemas import (
     BillExtractionItem,
     BillExtractionResponse,
+    ConsignmentColumnInfo,
+    ConsignmentProductItem,
     LocalPurchaseCreate,
     LocalPurchaseItemCreate,
     LocalPurchaseItemUpdate,
     LocalPurchaseUpdate,
+    SheetConsignmentLookup,
 )
 from app.suppliers.models import Supplier
 
@@ -197,6 +201,14 @@ class LocalPurchaseService:
             )
 
         purchase = LocalPurchase(
+            organization_id=payload.organization_id,
+            organization_name=payload.organization_name,
+            branch_id=payload.branch_id,
+            branch_name=payload.branch_name,
+            group_label=payload.group_label,
+            consignment_code=payload.consignment_code,
+            planning_sheet_id=payload.planning_sheet_id,
+            planning_column_id=payload.planning_column_id,
             supplier_id=payload.supplier_id,
             supplier_name=payload.supplier_name,
             invoice_no=payload.invoice_no,
@@ -239,6 +251,21 @@ class LocalPurchaseService:
             db_items.append(db_item)
 
         created = await self.repo.create_purchase(purchase, db_items)
+        try:
+            from app.notifications.service import NotificationService
+            inv_str = created.invoice_no or "Bill"
+            supp_str = created.supplier_name or "Supplier"
+            val_str = f"{created.currency or 'RMB'} {created.invoice_total_value:,.2f}"
+            await NotificationService.dispatch_event(
+                self.session,
+                event_key="local_purchase_created",
+                title=f"Local Purchase Recorded: {inv_str} ({supp_str})",
+                message=f"Purchase bill {inv_str} recorded for {supp_str} total {val_str}.",
+                link=f"/purchase/local?search={created.invoice_no or ''}&id={created.id}",
+                sender_id=created_by_id,
+            )
+        except Exception as e:
+            logger.warning(f"Failed to dispatch local_purchase_created notification: {e}")
         return created
 
     async def update_purchase(
@@ -252,6 +279,23 @@ class LocalPurchaseService:
             raise NotFoundException(f"Local purchase with id {purchase_id} not found.")
 
         # Update scalar fields if provided
+        if payload.organization_id is not None:
+            purchase.organization_id = payload.organization_id
+        if payload.organization_name is not None:
+            purchase.organization_name = payload.organization_name
+        if payload.branch_id is not None:
+            purchase.branch_id = payload.branch_id
+        if payload.branch_name is not None:
+            purchase.branch_name = payload.branch_name
+        if payload.group_label is not None:
+            purchase.group_label = payload.group_label
+        if payload.consignment_code is not None:
+            purchase.consignment_code = payload.consignment_code
+        if payload.planning_sheet_id is not None:
+            purchase.planning_sheet_id = payload.planning_sheet_id
+        if payload.planning_column_id is not None:
+            purchase.planning_column_id = payload.planning_column_id
+
         if payload.supplier_id is not None:
             purchase.supplier_id = payload.supplier_id
         if payload.supplier_name is not None:
@@ -401,16 +445,22 @@ class LocalPurchaseService:
             )
             .limit(1)
         )
-        prod = (await self.session.execute(stmt)).scalars().first()
+        res = await self.session.execute(stmt)
+        prod = res.scalars().first()
         if prod:
-            vat = float(prod.refund_vat_percent) if prod.refund_vat_percent is not None else 13.0
             hsn_str: str | None = None
+            hsn_obj = None
             if prod.hsn_id:
                 hsn_obj = await self.session.get(HsnCode, prod.hsn_id)
                 if hsn_obj:
                     hsn_str = hsn_obj.code
+            vat = (
+                float(hsn_obj.purchase_vat_percent)
+                if hsn_obj and hsn_obj.purchase_vat_percent is not None
+                else (float(prod.purchase_vat_percent or 0.0) if prod.purchase_vat_percent is not None else 0.0)
+            )
             return prod.id, prod.product_code, hsn_str, vat
-        return None, None, None, 13.0
+        return None, None, None, 0.0
 
     async def match_supplier(self, name: str) -> tuple[uuid.UUID | None, str]:
         """Fuzzy match supplier in Supplier Master."""
@@ -1118,13 +1168,13 @@ class LocalPurchaseService:
 
         # Cache HSN codes
         hsn_ids = [p.hsn_id for p in prod_map.values() if p.hsn_id]
-        hsn_map: dict[uuid.UUID, str] = {}
+        hsn_map: dict[uuid.UUID, HsnCode] = {}
         if hsn_ids:
             q_hsn = await self.session.execute(
                 select(HsnCode).where(HsnCode.id.in_(hsn_ids))
             )
             for h in q_hsn.scalars().all():
-                hsn_map[h.id] = h.code
+                hsn_map[h.id] = h
 
         items: list[dict[str, Any]] = []
         for r, qty in matched_rows:
@@ -1144,12 +1194,17 @@ class LocalPurchaseService:
                 if prod and prod.hsn_id and prod.hsn_id not in hsn_map:
                     h = await self.session.get(HsnCode, prod.hsn_id)
                     if h:
-                        hsn_map[prod.hsn_id] = h.code
+                        hsn_map[prod.hsn_id] = h
 
             if prod:
-                hsn_code = hsn_map.get(prod.hsn_id) if prod.hsn_id else None
+                hsn_obj = hsn_map.get(prod.hsn_id) if prod.hsn_id else None
+                hsn_code = hsn_obj.code if hsn_obj else None
                 unit_rate = float(prod.standard_cost or 0.0)
-                vat_rate = float(prod.refund_vat_percent or 0.0)
+                vat_rate = (
+                    float(hsn_obj.purchase_vat_percent)
+                    if hsn_obj and hsn_obj.purchase_vat_percent is not None
+                    else (float(prod.purchase_vat_percent or 0.0) if prod.purchase_vat_percent is not None else 0.0)
+                )
                 item_total = round(qty * unit_rate, 2)
                 vat_amount = round(item_total * (vat_rate / 100.0), 2)
                 items.append({
@@ -1191,4 +1246,211 @@ class LocalPurchaseService:
             "sheet_name": matched_sheet.name,
             "count": len(items),
         }
+
+    async def get_consignments_lookup(self) -> list[SheetConsignmentLookup]:
+        """
+        Fetch all active planning sheets, their organization/branch bindings,
+        group labels, and all active consignment columns with planned items counts.
+        """
+        stmt = (
+            select(PlanningSheet, MasterCompany)
+            .outerjoin(MasterCompany, MasterCompany.id == PlanningSheet.organization_id)
+            .where(PlanningSheet.deleted_at.is_(None))
+            .order_by(PlanningSheet.name.asc())
+        )
+        res = await self.session.execute(stmt)
+        results: list[SheetConsignmentLookup] = []
+
+        for sheet, company in res.all():
+            org_id = sheet.organization_id
+            org_name = company.name if company else None
+
+            # Resolve branch name from company's branches JSON
+            branch_id = sheet.branch_id
+            branch_name = None
+            if company and company.branches and branch_id:
+                for b in company.branches:
+                    if b.get("id") == branch_id:
+                        pfx = f" ({b['code_prefix']})" if b.get("code_prefix") else ""
+                        branch_name = f"{b.get('name', branch_id)}{pfx}"
+                        break
+            if not branch_name and branch_id:
+                branch_name = branch_id
+
+            # Determine group label
+            group_label = sheet.mum_group_label or "Mum"
+
+            # Query non-deleted columns on this sheet
+            col_stmt = (
+                select(PlanningColumn)
+                .where(PlanningColumn.sheet_id == sheet.id, PlanningColumn.deleted_at.is_(None))
+                .order_by(PlanningColumn.position.asc())
+            )
+            col_res = await self.session.execute(col_stmt)
+            columns = col_res.scalars().all()
+
+            consignments: list[ConsignmentColumnInfo] = []
+            for col in columns:
+                cl = col.name.strip().lower()
+                # Exclude non-consignment helper columns
+                if any(x in cl for x in ("remark", "total", "pkg", "tally", "approval", "supplier", "city", "weight", "cbm")):
+                    continue
+                # Match consignment naming pattern (e.g. Mum 48, GJ14, MP-06, etc.)
+                m = re.search(r"([A-Za-z]+)[\s\-]*(\d+)", col.name)
+                if not m:
+                    continue
+
+                # Count rows where planned quantity > 0
+                count_stmt = text("""
+                    SELECT count(*)
+                    FROM planning_cells pc
+                    JOIN planning_rows pr ON pr.id = pc.row_id
+                    WHERE pc.column_id = :col_id
+                      AND pr.deleted_at IS NULL
+                      AND NULLIF(regexp_replace(pc.value, '[^0-9.]', '', 'g'), '')::numeric > 0
+                """)
+                cell_count_res = await self.session.execute(count_stmt, {"col_id": str(col.id)})
+                planned_count = cell_count_res.scalar() or 0
+
+                consignments.append(
+                    ConsignmentColumnInfo(
+                        column_id=col.id,
+                        column_name=col.name,
+                        consignment_code=col.name.strip(),
+                        position=col.position,
+                        planned_items_count=planned_count,
+                    )
+                )
+
+            # Only include sheets that have consignment columns
+            if consignments:
+                results.append(
+                    SheetConsignmentLookup(
+                        sheet_id=sheet.id,
+                        sheet_name=sheet.name,
+                        organization_id=org_id,
+                        organization_name=org_name,
+                        branch_id=branch_id,
+                        branch_name=branch_name,
+                        group_label=group_label,
+                        consignments=consignments,
+                    )
+                )
+
+        return results
+
+    async def get_consignment_items(
+        self, column_id: uuid.UUID, supplier_id: uuid.UUID | None = None
+    ) -> list[ConsignmentProductItem]:
+        """
+        Extract all products from a consignment column where planned quantity > 0,
+        pre-populating product master standard cost, HSN, VAT rate, and supplier info.
+        If supplier_id is provided, filters strictly to items belonging to that supplier.
+        """
+        stmt = text("""
+            SELECT pr.id as row_id,
+                   pr.label as item_label,
+                   pr.linked_record_id as product_id,
+                   NULLIF(regexp_replace(pc.value, '[^0-9.]', '', 'g'), '')::numeric as qty
+            FROM planning_cells pc
+            JOIN planning_rows pr ON pr.id = pc.row_id
+            WHERE pc.column_id = :col_id
+              AND pr.deleted_at IS NULL
+              AND NULLIF(regexp_replace(pc.value, '[^0-9.]', '', 'g'), '')::numeric > 0
+            ORDER BY pr.position ASC
+        """)
+        res = await self.session.execute(stmt, {"col_id": str(column_id)})
+        rows = res.fetchall()
+        if not rows:
+            return []
+
+        # Collect product IDs
+        product_ids = [r[2] for r in rows if r[2] is not None]
+        products_by_id: dict[uuid.UUID, Product] = {}
+        hsns_by_id: dict[uuid.UUID, HsnCode] = {}
+        suppliers_by_id: dict[uuid.UUID, Supplier] = {}
+        product_supplier_links: dict[uuid.UUID, list[uuid.UUID]] = {}
+
+        if product_ids:
+            p_stmt = (
+                select(Product)
+                .where(Product.id.in_(product_ids), Product.deleted_at.is_(None))
+            )
+            p_res = await self.session.execute(p_stmt)
+            products = p_res.scalars().all()
+            products_by_id = {p.id: p for p in products}
+
+            from app.suppliers.models import SupplierProductLink
+            spl_stmt = select(SupplierProductLink.product_id, SupplierProductLink.supplier_id).where(
+                SupplierProductLink.product_id.in_(product_ids)
+            )
+            spl_res = await self.session.execute(spl_stmt)
+            for p_id, s_id in spl_res.fetchall():
+                if p_id and s_id:
+                    product_supplier_links.setdefault(p_id, []).append(s_id)
+
+            supplier_ids = [p.supplier_id for p in products if p.supplier_id is not None]
+            hsn_ids = [p.hsn_id for p in products if p.hsn_id is not None]
+
+            if supplier_ids:
+                s_stmt = select(Supplier).where(Supplier.id.in_(supplier_ids))
+                s_res = await self.session.execute(s_stmt)
+                suppliers_by_id = {s.id: s for s in s_res.scalars().all()}
+
+            if hsn_ids:
+                h_stmt = select(HsnCode).where(HsnCode.id.in_(hsn_ids))
+                h_res = await self.session.execute(h_stmt)
+                hsns_by_id = {h.id: h for h in h_res.scalars().all()}
+
+        items: list[ConsignmentProductItem] = []
+        for r in rows:
+            row_id, item_label, prod_id, qty = r
+            qty_val = float(qty or 0)
+            if qty_val <= 0:
+                continue
+
+            product = products_by_id.get(prod_id) if prod_id else None
+            hsn = hsns_by_id.get(product.hsn_id) if product and product.hsn_id else None
+            supplier = suppliers_by_id.get(product.supplier_id) if product and product.supplier_id else None
+
+            p_name = product.product_name if product else item_label
+            p_code = product.product_code if product else None
+            hsn_code = hsn.code if hsn else None
+            unit_rate = float(product.standard_cost or 0.0) if product else 0.0
+            vat_rate = (
+                float(hsn.purchase_vat_percent)
+                if hsn and hsn.purchase_vat_percent is not None
+                else (float(product.purchase_vat_percent or 0.0) if product and product.purchase_vat_percent is not None else 0.0)
+            )
+            item_total = round(qty_val * unit_rate, 2)
+
+            sup_id = supplier.id if supplier else (product.supplier_id if product else None)
+            sup_name = supplier.company_name if supplier else None
+            sup_brand = supplier.brand_description if supplier else None
+            linked_sups = product_supplier_links.get(prod_id, []) if prod_id else []
+
+            # If supplier_id filter is requested, verify primary supplier or secondary linked supplier
+            if supplier_id:
+                if sup_id != supplier_id and supplier_id not in linked_sups:
+                    continue
+
+            items.append(
+                ConsignmentProductItem(
+                    product_id=prod_id,
+                    product_name=p_name,
+                    product_code=p_code,
+                    hsn_code=hsn_code,
+                    quantity=qty_val,
+                    unit_rate=unit_rate,
+                    vat_rate=vat_rate,
+                    item_total=item_total,
+                    supplier_id=sup_id,
+                    supplier_name=sup_name,
+                    supplier_brand=sup_brand,
+                    linked_supplier_ids=linked_sups,
+                )
+            )
+
+        return items
+
 

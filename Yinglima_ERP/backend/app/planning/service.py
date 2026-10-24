@@ -15,6 +15,7 @@ row/column) inside one logical operation.
 
 from __future__ import annotations
 
+import logging
 import re
 import uuid
 from decimal import Decimal
@@ -50,6 +51,7 @@ from app.planning.repository import (
 )
 
 MODULE_NAME = "planning"
+logger = logging.getLogger("planning")
 
 # Sentinel for compute_cell_display_value's optional `prefetched_record`
 # param -- see that method's docstring for why this can't just default to
@@ -61,7 +63,7 @@ def _is_pure_mum_column(name: str, *, label: str = "Mum") -> bool:
     cleaned = name.strip().lower()
     if "remark" in cleaned or cleaned.startswith(("no. of pkg", "total")):
         return False
-    return bool(re.match(rf"^{re.escape(label.lower())}\s*\d+$", cleaned, re.IGNORECASE))
+    return bool(re.match(rf"^{re.escape(label.lower())}[\s\-]*0*\d+$", cleaned, re.IGNORECASE))
 
 
 def mum_num_from_column_name(col_name: str, *, label: str = "Mum") -> int | None:
@@ -79,7 +81,7 @@ def mum_num_from_column_name(col_name: str, *, label: str = "Mum") -> int | None
     cleaned = col_name.strip().lower()
     if "remark" in cleaned or cleaned.startswith(("no. of pkg", "total")):
         return None
-    match = re.search(rf"^{re.escape(label.lower())}\s*(\d+)$", cleaned, re.IGNORECASE)
+    match = re.search(rf"^{re.escape(label.lower())}[\s\-]*0*(\d+)$", cleaned, re.IGNORECASE)
     return int(match.group(1)) if match else None
 
 
@@ -102,9 +104,9 @@ def mum_num_from_column_name(col_name: str, *, label: str = "Mum") -> int | None
 # packaging_unit_cbm) via the row's linked_record_id -- never typed in --
 # so editing an item in Product Master changes these totals immediately,
 # with no per-column config for an admin to get wrong.
-_MUM_PKG_COUNT_RE_TEMPLATE = r"^no\.?\s*of\s*pkg\s*{label}\s*(\d+)$"
-_MUM_TOTAL_WEIGHT_RE_TEMPLATE = r"^total\s*weight\s*{label}\s*(\d+)$"
-_MUM_TOTAL_CBM_RE_TEMPLATE = r"^total\s*cbm\s*{label}\s*(\d+)$"
+_MUM_PKG_COUNT_RE_TEMPLATE = r"^no\.?\s*of\s*pkg\s*{label}[\s\-]*0*(\d+)$"
+_MUM_TOTAL_WEIGHT_RE_TEMPLATE = r"^total\s*weight\s*{label}[\s\-]*0*(\d+)$"
+_MUM_TOTAL_CBM_RE_TEMPLATE = r"^total\s*cbm\s*{label}[\s\-]*0*(\d+)$"
 
 
 def _mum_derived_kind_and_group(name: str, *, label: str = "Mum") -> tuple[str, int] | None:
@@ -303,6 +305,8 @@ class PlanningService:
         name: str,
         organization_id: uuid.UUID | None = None,
         branch_id: str | None = None,
+        buyer_id: uuid.UUID | None = None,
+        buyer_branch_name: str | None = None,
         mum_group_label: str = "Mum",
         description: str | None = None,
         user_id: uuid.UUID,
@@ -316,10 +320,15 @@ class PlanningService:
         if await self.sheet_repository.get_by_name(name):
             raise ConflictException(f"A sheet named {name!r} already exists.")
 
-        # Validate organization_id/branch_id against Product Master's real
-        # organization/branch list if provided -- every sheet must represent one
-        # actual, existing branch, not just a name that sounds like one.
-        if organization_id is not None or branch_id:
+        if buyer_id is not None:
+            # Sheet is linked to a Buyer: organization_id and branch_id are not required
+            buyer_branch_name = (buyer_branch_name or "").strip() or name
+            organization_id = None
+            branch_id = None
+        elif organization_id is not None or branch_id:
+            # Validate organization_id/branch_id against Product Master's real
+            # organization/branch list if provided -- every sheet must represent one
+            # actual, existing branch, not just a name that sounds like one.
             branch_id = (branch_id or "").strip()
             if not branch_id:
                 raise BadRequestException("A branch is required to create a sheet.")
@@ -345,6 +354,8 @@ class PlanningService:
             created_by=user_id,
             organization_id=organization_id,
             branch_id=branch_id,
+            buyer_id=buyer_id,
+            buyer_branch_name=buyer_branch_name,
             item_source_type=PlanningColumnSourceType.LINKED_LOOKUP,
             item_source_module="product",
             item_source_field="product_name",
@@ -364,7 +375,7 @@ class PlanningService:
         base_columns = [
             ("TEST(Y/N)", PlanningColumnDataType.TEXT, PlanningColumnSourceType.MANUAL, None, None),
             ("APPROVAL DATE", PlanningColumnDataType.TEXT, PlanningColumnSourceType.MANUAL, None, None),
-            ("Supplier Name", PlanningColumnDataType.TEXT, PlanningColumnSourceType.LINKED_LOOKUP, "product", "supplier_name"),
+            ("Brand of Supplier", PlanningColumnDataType.TEXT, PlanningColumnSourceType.LINKED_LOOKUP, "product", "supplier_name"),
             ("City", PlanningColumnDataType.TEXT, PlanningColumnSourceType.LINKED_LOOKUP, "product", "supplier_city"),
             ("PKG QTY", PlanningColumnDataType.NUMBER, PlanningColumnSourceType.LINKED_LOOKUP, "product", "packaging_quantity"),
             ("UNIT WEIGHT/PKG (KG)", PlanningColumnDataType.NUMBER, PlanningColumnSourceType.LINKED_LOOKUP, "product", "packaging_gross_weight"),
@@ -533,7 +544,7 @@ class PlanningService:
                     user_id=user_id,
                     username=username,
                 )
-            except (BadRequestException, FormulaError):
+            except BadRequestException:
                 # A column whose config can't carry over as-is (e.g. an
                 # ordinary FORMULA referencing a column that didn't exist
                 # yet at copy time) is left MANUAL rather than aborting
@@ -945,7 +956,7 @@ class PlanningService:
             derived = _mum_derived_kind_and_group(col.name, label=mum_label)
             if derived is not None and derived[1] > max_mum:
                 max_mum = derived[1]
-            remarks_match = re.match(rf"^{re.escape(mum_label)}\s*(\d+)\s*remarks$", col.name.strip(), re.IGNORECASE)
+            remarks_match = re.match(rf"^{re.escape(mum_label)}[\s\-]*0*(\d+)\s*remarks?$", col.name.strip(), re.IGNORECASE)
             if remarks_match and int(remarks_match.group(1)) > max_mum:
                 max_mum = int(remarks_match.group(1))
 
@@ -955,7 +966,7 @@ class PlanningService:
 
         # 2. Check and ensure shared product lookup columns exist
         base_lookup_specs = [
-            ("Supplier Name", PlanningColumnDataType.TEXT, "supplier_name"),
+            ("Brand of Supplier", PlanningColumnDataType.TEXT, "supplier_name"),
             ("City", PlanningColumnDataType.TEXT, "supplier_city"),
             ("PKG QTY", PlanningColumnDataType.NUMBER, "packaging_quantity"),
             ("UNIT WEIGHT/PKG (KG)", PlanningColumnDataType.NUMBER, "packaging_gross_weight"),
@@ -968,27 +979,38 @@ class PlanningService:
                 (
                     c
                     for c in all_cols_list
-                    if c.source_type == PlanningColumnSourceType.LINKED_LOOKUP
-                    and c.source_module == "product"
-                    and c.source_field == field
+                    if (
+                        (c.source_type == PlanningColumnSourceType.LINKED_LOOKUP and c.source_field == field)
+                        or (c.name.strip().upper() == label_text.upper())
+                        or (field == "supplier_city" and c.name.strip().upper() == "SUPPLIER CITY")
+                    )
                 ),
                 None,
             )
-            if not existing:
-                lookup_col = PlanningColumn(
-                    sheet_id=sheet_id,
-                    name=label_text,
-                    data_type=dtype,
-                    position=len(all_cols_list),
-                    created_by=user_id,
-                    source_type=PlanningColumnSourceType.LINKED_LOOKUP,
-                    source_module="product",
-                    source_field=field,
-                    auto_populate_enabled=True,
-                    is_locked=True,
-                )
-                new_columns_to_add.append(lookup_col)
-                all_cols_list.append(lookup_col)
+            if existing:
+                # If existing column was manual or missing proper linkage, upgrade it to LINKED_LOOKUP
+                if existing.source_type != PlanningColumnSourceType.LINKED_LOOKUP or existing.source_field != field:
+                    existing.source_type = PlanningColumnSourceType.LINKED_LOOKUP
+                    existing.source_module = "product"
+                    existing.source_field = field
+                    existing.data_type = dtype
+                    existing.is_locked = True
+                continue
+
+            lookup_col = PlanningColumn(
+                sheet_id=sheet_id,
+                name=label_text,
+                data_type=dtype,
+                position=len(all_cols_list),
+                created_by=user_id,
+                source_type=PlanningColumnSourceType.LINKED_LOOKUP,
+                source_module="product",
+                source_field=field,
+                auto_populate_enabled=True,
+                is_locked=True,
+            )
+            new_columns_to_add.append(lookup_col)
+            all_cols_list.append(lookup_col)
 
         # 3. Create the 5 companion columns for next_mum_num
         label_upper = mum_label.upper()
@@ -1126,7 +1148,7 @@ class PlanningService:
                 kind, group_num = derived
                 groups.setdefault(group_num, {})[kind] = column
                 continue
-            remarks_match = re.match(rf"^{re.escape(mum_label)}\s*(\d+)\s*remarks$", column.name.strip(), re.IGNORECASE)
+            remarks_match = re.match(rf"^{re.escape(mum_label)}[\s\-]*0*(\d+)\s*remarks?$", column.name.strip(), re.IGNORECASE)
             if remarks_match:
                 groups.setdefault(int(remarks_match.group(1)), {})["remarks"] = column
                 continue
@@ -2774,11 +2796,9 @@ class PlanningService:
                 if (
                     s.item_source_type == PlanningColumnSourceType.LINKED_LOOKUP
                     and s.item_source_module == "product"
-                    and s.organization_id is not None
                 ):
-                    org_match = str(s.organization_id) in prod_org_ids
-                    branch_match = s.branch_id is None or (s.branch_id in prod_branch_ids)
-                    if org_match and branch_match:
+                    if s.buyer_id is not None:
+                        # Buyer sheets can contain products across all organizations
                         exists_stmt = select(PlanningRow.id).where(
                             PlanningRow.sheet_id == s.id,
                             PlanningRow.linked_record_id == record_id,
@@ -2799,17 +2819,41 @@ class PlanningService:
                             )
                             self.row_repository.session.add(single_row)
                             await self.row_repository.session.flush()
-                    else:
-                        remove_stmt = (
-                            update(PlanningRow)
-                            .where(
+                    elif s.organization_id is not None:
+                        org_match = str(s.organization_id) in prod_org_ids
+                        branch_match = s.branch_id is None or (s.branch_id in prod_branch_ids)
+                        if org_match and branch_match:
+                            exists_stmt = select(PlanningRow.id).where(
                                 PlanningRow.sheet_id == s.id,
                                 PlanningRow.linked_record_id == record_id,
                                 PlanningRow.deleted_at.is_(None),
                             )
-                            .values({PlanningRow.deleted_at: datetime.now(timezone.utc)})
-                        )
-                        await self.row_repository.session.execute(remove_stmt)
+                            exists = (await self.row_repository.session.execute(exists_stmt)).scalar_one_or_none()
+                            if not exists:
+                                existing_rows = await self.row_repository.list_for_sheet(s.id)
+                                item_display = active_prod.product_name_tally or active_prod.product_name
+                                label_val = item_display if item_display is not None else "Product record"
+                                single_row = PlanningRow(
+                                    id=uuid.uuid4(),
+                                    sheet_id=s.id,
+                                    label=label_val,
+                                    position=len(existing_rows),
+                                    linked_record_id=record_id,
+                                    created_by=s.created_by,
+                                )
+                                self.row_repository.session.add(single_row)
+                                await self.row_repository.session.flush()
+                        else:
+                            remove_stmt = (
+                                update(PlanningRow)
+                                .where(
+                                    PlanningRow.sheet_id == s.id,
+                                    PlanningRow.linked_record_id == record_id,
+                                    PlanningRow.deleted_at.is_(None),
+                                )
+                                .values({PlanningRow.deleted_at: datetime.now(timezone.utc)})
+                            )
+                            await self.row_repository.session.execute(remove_stmt)
 
         # --- 1. LINKED_LOOKUP cells pointing at this exact record ---
         affected_cells = await self.cell_repository.list_linked_to_record(record_id)
@@ -2950,7 +2994,7 @@ class PlanningService:
             return next((c for c in sibling_columns if c.id != column.id and predicate(c)), None)
 
         mum_col = _find_sibling(
-            lambda c: re.match(rf"^{re.escape(label)}\s*{group_number}$", c.name.strip(), re.IGNORECASE)
+            lambda c: re.match(rf"^{re.escape(label)}[\s\-]*0*{group_number}$", c.name.strip(), re.IGNORECASE)
         )
         pkg_qty_col = _find_sibling(
             lambda c: c.source_type == PlanningColumnSourceType.LINKED_LOOKUP
@@ -3387,6 +3431,25 @@ class PlanningService:
                         pass
 
             await self.recompute_and_store_row(sheet_id, row_id)
+
+            if value is not None and value.strip() and not is_test_yn_column and not is_approval_date_column:
+                try:
+                    from app.notifications.service import NotificationService
+                    sheet = await self.sheet_repository.get_by_id(sheet_id)
+                    sheet_name = sheet.name if sheet else "Shipment Sheet"
+                    item_name = row.label or "Item"
+                    col_name = column.name or "Requirement"
+                    await NotificationService.dispatch_event(
+                        self.sheet_repository.session,
+                        event_key="shipment_requirement_raised",
+                        title=f"Requirement Added: {value} pcs - {item_name}",
+                        message=f"{username} entered {value} in column '{col_name}' for item '{item_name}' on sheet '{sheet_name}'.",
+                        link=f"/planning?sheet={sheet_name}&sheet_id={sheet_id}&row_id={row_id}",
+                        sender_id=user_id,
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to dispatch shipment_requirement_raised notification: {e}")
+
         return cell
 
     async def set_cell_status(
@@ -3499,6 +3562,27 @@ class PlanningService:
                 new_value=new_status,
                 description=f"Changed status on '{row.label}' / '{column.name}' from {old_status!r} to {new_status!r}.",
             )
+
+            if new_status in ("blue_ordered", "green_purchased", "yellow_dispatched"):
+                try:
+                    from app.notifications.service import NotificationService
+                    sheet = await self.sheet_repository.get_by_id(sheet_id)
+                    sheet_name = sheet.name if sheet else "Shipment Sheet"
+                    item_name = row.label or "Item"
+                    col_name = column.name or "Requirement"
+                    qty_str = f" ({cell.value} pcs)" if cell and cell.value else ""
+                    status_name = new_status.replace("_", " ").title()
+                    await NotificationService.dispatch_event(
+                        self.sheet_repository.session,
+                        event_key="shipment_status_ordered",
+                        title=f"Status Update: {item_name} marked as {status_name}",
+                        message=f"{username} updated '{item_name}'{qty_str} on sheet '{sheet_name}' ({col_name}) to {status_name}.",
+                        link=f"/planning?sheet={sheet_name}&sheet_id={sheet_id}&row_id={row_id}",
+                        sender_id=user_id,
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to dispatch shipment_status_ordered notification: {e}")
+
         return cell
 
     async def set_cell_description(
@@ -3632,6 +3716,20 @@ class PlanningService:
                 description="Updated description on the ITEM column.",
             )
         return sheet
+
+    async def set_item_column_width(
+        self, sheet_id: uuid.UUID, *, width_px: int | None
+    ) -> PlanningSheet:
+        """
+        Set (or clear, if ``width_px`` is None) the sheet's built-in ITEM column server-persisted width.
+
+        Deliberately does NOT call ``_record_change``/broadcast a change-log
+        entry (resizing is a cosmetic preference, matching set_column_width).
+        """
+        sheet = await self.get_sheet_or_raise(sheet_id)
+        if width_px is not None:
+            width_px = max(40, min(800, width_px))
+        return await self.sheet_repository.update(sheet, item_width_px=width_px)
 
     # --- Status tags (admin-defined custom colors beyond the 3 built-ins) ---------
 

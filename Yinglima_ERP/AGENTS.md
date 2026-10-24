@@ -1,19 +1,20 @@
 # AI Assistant & Developer Guidelines
 
-## Living Documentation & Testing Manual Policy (Mandatory)
+## Living Documentation & Module-Specific Update Policy (Strict & Mandatory)
 
-Whenever any features, functions, API endpoints, database schemas, frontend components, forms, fields, modals, or architecture components are added, modified, or removed in this codebase:
+**GOLDEN RULE:** Whenever ANY feature, function, API endpoint, database schema, bug fix, frontend component, field, modal, button, or calculation is added, updated, or removed in Yinglima ERP:
 
-1. **Update `doc/SYSTEM_DOCUMENTATION.md`**:
-   - Keep the file map, feature descriptions, and API route tables aligned with the current code.
-   - If a new module, table, endpoint, page, or background worker is introduced, document its architecture, purpose, and usage in `doc/SYSTEM_DOCUMENTATION.md`.
-   - Update the **Last Updated** timestamp and relevant section numbers.
+1. **Update the Specific Module Guide (`doc/MODULE_<NAME>.md`)**:
+   - Every single module has a dedicated document (e.g. `doc/MODULE_BUYERS.md`, `doc/MODULE_SUPPLIERS.md`, `doc/MODULE_PRODUCT_MASTER.md`, `doc/MODULE_SHIPMENT_PLANNING.md`, `doc/MODULE_NOTIFICATIONS.md`, `doc/MODULE_LOCAL_PURCHASE.md`, `doc/MODULE_SALE_PROCESS.md`, `doc/MODULE_INQUIRIES.md`, `doc/MODULE_USER_MANAGEMENT.md`, `doc/MODULE_SETTINGS_MASTERS.md`, etc.).
+   - You MUST update that exact module document in the same session, documenting what was changed, new fields, revised calculations, and UI enhancements so that full operational memory is preserved.
 
-2. **Update `MODULES_AND_FEATURES_TEST_MANUAL.md`**:
-   - Keep the complete catalog of all UI views, tables, forms, fields, dropdown sources, action buttons, modals, and test checklists aligned with the active frontend.
-   - If a new button, form tab, input field, modal, calculation, or module is introduced or edited, document its exact UI specifications, required validations, and test cases in `MODULES_AND_FEATURES_TEST_MANUAL.md`.
+2. **Update the Changelog (`doc/CHANGELOG_AND_FUNCTION_CHANGES.md`)**:
+   - Record the release / patch under the current date with file paths, design decisions, and database migrations.
 
-3. **Zero Inaccuracies & Zero Feature Loss**:
+3. **Update the Test Manual (`MODULES_AND_FEATURES_TEST_MANUAL.md`) & Master Registry (`YINGLIMA_MODULE_FEATURE_AND_TESTING_REGISTRY.md`)**:
+   - Keep the test cases, validation checklists, and form field specifications synchronized with the live frontend and backend.
+
+4. **Zero Inaccuracies & Zero Feature Loss**:
    - Ensure file paths, schema references, and code references reflect the exact codebase state.
    - Never remove or break existing cataloged features during development.
 

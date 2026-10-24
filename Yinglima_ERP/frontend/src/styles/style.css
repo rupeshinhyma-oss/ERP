@@ -631,18 +631,53 @@ svg {
   background: #eff6ff;
 }
 
+.btn-header-filter {
+  background: #475569;
+  border: none;
+  color: #ffffff;
+  padding: 8px 12px;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  cursor: pointer;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  transition: background-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.btn-header-filter:hover {
+  background: #334155;
+}
+
+.btn-header-filter.active,
+.btn-header-filter[data-active="true"] {
+  background: #0061f2;
+}
+
+.btn-header-filter.active:hover,
+.btn-header-filter[data-active="true"]:hover {
+  background: #0052cc;
+}
+
 .btn-imp-exp {
   background: #f59e0b;
-  border-color: #f59e0b;
+  border: none;
   color: #ffffff;
   font-weight: 700;
+  font-size: 13px;
   padding: 8px 16px;
-  border-radius: 4px;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  box-shadow: 0 2px 4px rgba(245, 158, 11, 0.25);
+  transition: background-color 0.15s ease, box-shadow 0.15s ease;
 }
 
 .btn-imp-exp:hover {
   background: #d97706;
-  border-color: #d97706;
 }
 
 .btn-bulk-actions {

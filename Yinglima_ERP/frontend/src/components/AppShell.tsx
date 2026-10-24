@@ -37,22 +37,97 @@ import type { Profile } from "@/types";
 const NAV_SCROLL_KEY = "erp_sidebar_nav_scroll";
 
 /* ------------------------------------------------------------------ */
+/* ------------------------------------------------------------------ */
 /* Notifications                                                      */
 /* ------------------------------------------------------------------ */
 
-interface Notification {
+interface NotificationItem {
   id: string;
-  type: "overdue" | "urgent";
+  user_id: string;
+  sender_id?: string | null;
+  type: string;
+  module?: string | null;
   title: string;
   message: string;
+  link?: string | null;
+  is_read: boolean;
+  created_at: string;
+}
+
+function formatRelativeTime(dateStr: string): string {
+  try {
+    const diff = Math.floor((Date.now() - new Date(dateStr).getTime()) / 1000);
+    if (diff < 60) return "Just now";
+    if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+    if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+    return `${Math.floor(diff / 86400)}d ago`;
+  } catch {
+    return "";
+  }
+}
+
+function getNotificationIcon(type: string, module?: string | null): string {
+  if (type === "shipment_requirement_raised") return "📦";
+  if (type === "shipment_status_ordered") return "🔵";
+  if (type === "sale_process_created" || module === "sales") return "💼";
+  if (type === "local_purchase_created" || module === "purchases") return "🛒";
+  if (type === "inquiry_created" || module === "inquiries") return "📩";
+  return "🔔";
+}
+
+function cleanNotificationTitle(text: string): string {
+  if (!text) return "";
+  return text.replace(/^[\p{Extended_Pictographic}\uFE0F\u200D\s]+/u, "").trim();
 }
 
 function NotificationBell() {
   const [open, setOpen] = useState(false);
-  const [notifications] = useState<Notification[]>([]);
+  const [notifications, setNotifications] = useState<NotificationItem[]>([]);
+  const [unreadCount, setUnreadCount] = useState<number>(0);
+  const [loading, setLoading] = useState(false);
   const wrapperRef = useRef<HTMLDivElement>(null);
+  const navigate = useNavigate();
 
-  // Any click outside the bell closes the dropdown.
+  // Periodic poll for unread notification count
+  const pollUnreadCount = useCallback(async () => {
+    try {
+      const res = await apiGet<{ unread_count: number }>("/notifications/unread-count");
+      if (res && res.data && typeof res.data.unread_count === "number") {
+        setUnreadCount(res.data.unread_count);
+      }
+    } catch {
+      /* ignore background poll errors */
+    }
+  }, []);
+
+  useEffect(() => {
+    void pollUnreadCount();
+    const interval = setInterval(pollUnreadCount, 30000);
+    return () => clearInterval(interval);
+  }, [pollUnreadCount]);
+
+  // Load full notification list when opened
+  const loadNotifications = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await apiGet<NotificationItem[]>("/notifications?limit=30");
+      const list = Array.isArray(res.data) ? res.data : (res.data as any)?.data || [];
+      setNotifications(list);
+    } catch {
+      /* best effort */
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (open) {
+      void loadNotifications();
+      void pollUnreadCount();
+    }
+  }, [open, loadNotifications, pollUnreadCount]);
+
+  // Close dropdown on click outside
   useEffect(() => {
     if (!open) return;
     const onDocClick = (e: MouseEvent) => {
@@ -64,128 +139,272 @@ function NotificationBell() {
     return () => document.removeEventListener("click", onDocClick);
   }, [open]);
 
-  const count = notifications.length;
+  const handleMarkAllRead = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      await apiPost("/notifications/read-all", {});
+      setNotifications((prev) => prev.map((n) => ({ ...n, is_read: true })));
+      setUnreadCount(0);
+    } catch {
+      /* best effort */
+    }
+  };
+
+  const handleItemClick = async (notif: NotificationItem) => {
+    if (!notif.is_read) {
+      try {
+        await apiPost(`/notifications/${notif.id}/read`, {});
+        setNotifications((prev) =>
+          prev.map((n) => (n.id === notif.id ? { ...n, is_read: true } : n))
+        );
+        setUnreadCount((c) => Math.max(0, c - 1));
+      } catch {
+        /* best effort */
+      }
+    }
+    setOpen(false);
+    if (notif.link) {
+      navigate(notif.link);
+    }
+  };
 
   return (
     <div style={{ position: "relative" }} ref={wrapperRef}>
       <button
         className="icon-btn"
         title="Notifications"
-        style={{ position: "relative", cursor: "pointer" }}
+        style={{ position: "relative", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
         onClick={(e) => {
           e.stopPropagation();
           setOpen((v) => !v);
         }}
       >
         <IconBell />
-        {count > 0 && (
+        {unreadCount > 0 && (
           <span
             style={{
-              display: "inline-block",
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
               position: "absolute",
-              top: "-2px",
-              right: "-2px",
-              background: "#dc2626",
+              top: "-3px",
+              right: "-3px",
+              background: "#ef4444",
               color: "#ffffff",
-              fontSize: "10px",
+              fontSize: "10.5px",
               fontWeight: 800,
               padding: "1px 5px",
               borderRadius: "10px",
-              minWidth: "16px",
-              textAlign: "center",
+              minWidth: "18px",
+              height: "18px",
+              boxShadow: "0 2px 5px rgba(239,68,68,0.4)",
               border: "2px solid #ffffff",
+              lineHeight: 1,
             }}
           >
-            {count > 99 ? "99+" : count}
+            {unreadCount > 99 ? "99+" : unreadCount}
           </span>
         )}
       </button>
-      <div
-        style={{
-          display: open ? "block" : "none",
-          position: "absolute",
-          right: 0,
-          top: "42px",
-          width: "340px",
-          background: "#ffffff",
-          border: "1px solid #cbd5e1",
-          borderRadius: "10px",
-          boxShadow: "0 12px 28px rgba(0,0,0,0.15)",
-          zIndex: 99999,
-          overflow: "hidden",
-        }}
-      >
+
+      {open && (
         <div
           style={{
-            padding: "12px 16px",
-            borderBottom: "1px solid #e2e8f0",
-            fontWeight: 700,
-            fontSize: "13.5px",
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            background: "#f8fafc",
+            position: "absolute",
+            right: 0,
+            top: "42px",
+            width: "380px",
+            background: "#ffffff",
+            border: "1px solid #cbd5e1",
+            borderRadius: "12px",
+            boxShadow: "0 14px 34px rgba(0,0,0,0.18)",
+            zIndex: 99999,
+            overflow: "hidden",
+            animation: "fadeIn 0.15s ease",
           }}
         >
-          <span style={{ color: "#1e293b" }}>Notifications</span>
-          <span
+          {/* Header */}
+          <div
             style={{
-              fontSize: "11px",
-              background: "#e0e7ff",
-              color: "#2563eb",
-              padding: "2px 8px",
+              padding: "12px 16px",
+              borderBottom: "1px solid #e2e8f0",
               fontWeight: 700,
-              borderRadius: "10px",
+              fontSize: "13.5px",
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              background: "#f8fafc",
             }}
           >
-            {count} active
-          </span>
-        </div>
-        <div style={{ maxHeight: "320px", overflowY: "auto", padding: "4px 0" }}>
-          {count === 0 ? (
-            <div style={{ padding: "24px", textAlign: "center", color: "#64748b", fontSize: "13px" }}>
-              No pending or overdue notifications
-            </div>
-          ) : (
-            notifications.map((n) => (
-              <div
-                key={`${n.type}-${n.id}`}
-                style={{
-                  padding: "12px 16px",
-                  borderBottom: "1px solid #f1f5f9",
-                  cursor: "pointer",
-                  transition: "background 0.15s ease",
-                }}
-                onMouseOver={(e) => {
-                  e.currentTarget.style.background = "#f8fafc";
-                }}
-                onMouseOut={(e) => {
-                  e.currentTarget.style.background = "transparent";
-                }}
-                onClick={() => {
-                  setOpen(false);
-                }}
-              >
-                <div
+            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              <span style={{ color: "#1e293b" }}>Notifications</span>
+              {unreadCount > 0 && (
+                <span
                   style={{
-                    fontSize: "13px",
+                    fontSize: "11px",
+                    background: "#fee2e2",
+                    color: "#dc2626",
+                    padding: "2px 8px",
                     fontWeight: 700,
-                    color: n.type === "overdue" ? "#dc2626" : "#d97706",
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "6px",
+                    borderRadius: "10px",
                   }}
                 >
-                  {n.type === "overdue" ? "⚠️" : "⚡"} {n.title}
-                </div>
-                <div style={{ fontSize: "12px", color: "#475569", marginTop: "2px" }}>
-                  {n.message}
-                </div>
+                  {unreadCount} unread
+                </span>
+              )}
+            </div>
+            {unreadCount > 0 && (
+              <button
+                type="button"
+                onClick={handleMarkAllRead}
+                style={{
+                  background: "none",
+                  border: "none",
+                  color: "#2563eb",
+                  fontSize: "12px",
+                  fontWeight: 600,
+                  cursor: "pointer",
+                  padding: "2px 6px",
+                }}
+              >
+                Mark all read
+              </button>
+            )}
+          </div>
+
+          {/* List */}
+          <div style={{ maxHeight: "360px", overflowY: "auto" }}>
+            {loading && notifications.length === 0 ? (
+              <div style={{ padding: "28px", textAlign: "center", color: "#64748b", fontSize: "13px" }}>
+                Loading alerts...
               </div>
-            ))
-          )}
+            ) : notifications.length === 0 ? (
+              <div style={{ padding: "36px 20px", textAlign: "center", color: "#64748b", fontSize: "13px" }}>
+                <div style={{ fontSize: "28px", marginBottom: "8px" }}>🎉</div>
+                <div style={{ fontWeight: 600, color: "#1e293b", marginBottom: "4px" }}>You're all caught up!</div>
+                <div style={{ fontSize: "12px", color: "#94a3b8" }}>No unread notifications at the moment.</div>
+              </div>
+            ) : (
+              notifications.map((n) => {
+                const icon = getNotificationIcon(n.type, n.module);
+                return (
+                  <div
+                    key={n.id}
+                    onClick={() => void handleItemClick(n)}
+                    style={{
+                      padding: "12px 16px",
+                      borderBottom: "1px solid #f1f5f9",
+                      cursor: "pointer",
+                      background: n.is_read ? "#ffffff" : "#f0f7ff",
+                      transition: "background 0.15s ease",
+                      display: "flex",
+                      gap: "12px",
+                      alignItems: "flex-start",
+                      position: "relative",
+                    }}
+                    onMouseOver={(e) => {
+                      e.currentTarget.style.background = n.is_read ? "#f8fafc" : "#e0f2fe";
+                    }}
+                    onMouseOut={(e) => {
+                      e.currentTarget.style.background = n.is_read ? "#ffffff" : "#f0f7ff";
+                    }}
+                  >
+                    <div
+                      style={{
+                        width: "36px",
+                        height: "36px",
+                        borderRadius: "8px",
+                        background: n.is_read ? "#f1f5f9" : "#eff6ff",
+                        border: n.is_read ? "1px solid #e2e8f0" : "1px solid #bfdbfe",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        fontSize: "17px",
+                        flexShrink: 0,
+                      }}
+                    >
+                      {icon}
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div
+                        style={{
+                          fontSize: "13px",
+                          fontWeight: n.is_read ? 600 : 700,
+                          color: "#0f172a",
+                          marginBottom: "2px",
+                          display: "flex",
+                          justifyContent: "space-between",
+                          alignItems: "baseline",
+                        }}
+                      >
+                        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          {cleanNotificationTitle(n.title)}
+                        </span>
+                        <span style={{ fontSize: "11px", color: "#94a3b8", fontWeight: 400, flexShrink: 0, marginLeft: "8px" }}>
+                          {formatRelativeTime(n.created_at)}
+                        </span>
+                      </div>
+                      <div
+                        style={{
+                          fontSize: "12px",
+                          color: "#475569",
+                          lineHeight: "1.4",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          display: "-webkit-box",
+                          WebkitLineClamp: 2,
+                          WebkitBoxOrient: "vertical",
+                        }}
+                      >
+                        {n.message}
+                      </div>
+                    </div>
+                    {!n.is_read && (
+                      <span
+                        style={{
+                          width: "8px",
+                          height: "8px",
+                          borderRadius: "50%",
+                          background: "#2563eb",
+                          flexShrink: 0,
+                          marginTop: "6px",
+                        }}
+                        title="Unread"
+                      />
+                    )}
+                  </div>
+                );
+              })
+            )}
+          </div>
+
+          {/* Footer */}
+          <div
+            style={{
+              padding: "10px 16px",
+              background: "#f8fafc",
+              borderTop: "1px solid #e2e8f0",
+              textAlign: "center",
+            }}
+          >
+            <Link
+              to="/notification-settings"
+              onClick={() => setOpen(false)}
+              style={{
+                fontSize: "12px",
+                color: "#2563eb",
+                fontWeight: 600,
+                textDecoration: "none",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "4px",
+              }}
+            >
+              ⚙️ Configure Notification Rules & Alerts
+            </Link>
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }
@@ -632,6 +851,15 @@ function Sidebar({
                                 background: isChildActive ? "#e0edff" : "transparent",
                                 transition: "all 0.12s ease",
                               }}
+                              onClick={() => {
+                                if (isChildActive) {
+                                  window.dispatchEvent(
+                                    new CustomEvent("erp:nav-active-click", {
+                                      detail: { key: child.key, path: child.path },
+                                    })
+                                  );
+                                }
+                              }}
                             >
                               <span>{child.label}</span>
                             </Link>
@@ -644,12 +872,22 @@ function Sidebar({
               }
 
               const Icon = ICONS[item.icon];
+              const isItemActive = item.key === activeKey;
               return (
                 <Link
                   key={item.key}
                   to={item.path || "#"}
-                  className={`nav-item ${item.key === activeKey ? "active" : ""}`}
+                  className={`nav-item ${isItemActive ? "active" : ""}`}
                   title={collapsed ? item.label : undefined}
+                  onClick={() => {
+                    if (isItemActive) {
+                      window.dispatchEvent(
+                        new CustomEvent("erp:nav-active-click", {
+                          detail: { key: item.key, path: item.path },
+                        })
+                      );
+                    }
+                  }}
                 >
                   <Icon />
                   <span className="nav-label">{item.label}</span>

@@ -13,6 +13,7 @@ from app.database.session import get_db_session
 from app.masters.countries.repository import CountryRepository
 from app.masters.product_categories.repository import ProductCategoryRepository
 from app.masters.product_sub_categories.repository import ProductSubCategoryRepository
+from app.masters.states.repository import StateRepository
 
 
 def get_buyer_service(
@@ -27,4 +28,5 @@ def get_buyer_service(
         ProductCategoryRepository(db),
         ProductSubCategoryRepository(db),
         cache_manager,
+        StateRepository(db),
     )

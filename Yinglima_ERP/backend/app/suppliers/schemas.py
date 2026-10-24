@@ -42,10 +42,11 @@ class SupplierContactCreate(BaseModel):
     designation: str | None = Field(default=None, max_length=150)
     handling_territory: str | None = Field(default=None, max_length=150)
     country_id: uuid.UUID | None = None
-    calling_number: str | None = Field(default=None, max_length=50)
-    whatsapp_number: str | None = Field(default=None, max_length=50)
-    wechat_number: str | None = Field(default=None, max_length=50)
+    calling_number: str | None = Field(default=None, max_length=150)
+    whatsapp_number: str | None = Field(default=None, max_length=150)
+    wechat_number: str | None = Field(default=None, max_length=150)
     email: EmailStr | None = None
+    is_primary: bool | None = None
 
     @field_validator("email", mode="before")
     @classmethod
@@ -66,10 +67,11 @@ class SupplierContactUpdate(BaseModel):
     designation: str | None = Field(default=None, max_length=150)
     handling_territory: str | None = Field(default=None, max_length=150)
     country_id: uuid.UUID | None = None
-    calling_number: str | None = Field(default=None, max_length=50)
-    whatsapp_number: str | None = Field(default=None, max_length=50)
-    wechat_number: str | None = Field(default=None, max_length=50)
+    calling_number: str | None = Field(default=None, max_length=150)
+    whatsapp_number: str | None = Field(default=None, max_length=150)
+    wechat_number: str | None = Field(default=None, max_length=150)
     email: EmailStr | None = None
+    is_primary: bool | None = None
 
     @field_validator("email", mode="before")
     @classmethod
@@ -123,15 +125,14 @@ class SupplierCreate(BaseModel):
     contact_salutation: str | None = Field(default=None, max_length=10)
     contact_full_name: str | None = Field(default=None, max_length=150)
     contact_designation: str | None = Field(default=None, max_length=150)
-    contact_calling_number: str | None = Field(default=None, max_length=50)
-    contact_whatsapp_number: str | None = Field(default=None, max_length=50)
-    contact_wechat_number: str | None = Field(default=None, max_length=50)
+    contact_calling_number: str | None = Field(default=None, max_length=150)
+    contact_whatsapp_number: str | None = Field(default=None, max_length=150)
+    contact_wechat_number: str | None = Field(default=None, max_length=150)
     emails: list[EmailStr] = Field(default_factory=list, description="Email ID (multiple emails).")
 
     # --- Second form ---
     tax_id_number: str | None = Field(default=None, max_length=100)
     address: str | None = None
-    town: str | None = Field(default=None, max_length=150)
     primary_website: str | None = Field(default=None, max_length=5000)
     secondary_website: str | None = Field(default=None, max_length=5000)
     sub_category_ids: list[uuid.UUID] = Field(
@@ -189,14 +190,13 @@ class SupplierUpdate(BaseModel):
     contact_salutation: str | None = Field(default=None, max_length=10)
     contact_full_name: str | None = Field(default=None, max_length=150)
     contact_designation: str | None = Field(default=None, max_length=150)
-    contact_calling_number: str | None = Field(default=None, max_length=50)
-    contact_whatsapp_number: str | None = Field(default=None, max_length=50)
-    contact_wechat_number: str | None = Field(default=None, max_length=50)
+    contact_calling_number: str | None = Field(default=None, max_length=150)
+    contact_whatsapp_number: str | None = Field(default=None, max_length=150)
+    contact_wechat_number: str | None = Field(default=None, max_length=150)
     emails: list[EmailStr] | None = None
 
     tax_id_number: str | None = Field(default=None, max_length=100)
     address: str | None = None
-    town: str | None = Field(default=None, max_length=150)
     primary_website: str | None = Field(default=None, max_length=5000)
     secondary_website: str | None = Field(default=None, max_length=5000)
     sub_category_ids: list[uuid.UUID] | None = None
@@ -291,7 +291,6 @@ class SupplierRead(BaseModel):
 
     tax_id_number: str | None
     address: str | None
-    town: str | None
     primary_website: str | None
     secondary_website: str | None
     supplier_grade: SupplierGrade | None

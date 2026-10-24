@@ -160,8 +160,10 @@ class BaseRepository(Generic[ModelT]):
             try:
                 if hasattr(column.type, "python_type") and column.type.python_type is uuid.UUID:
                     is_uuid_col = True
+                elif getattr(column.type, "__class__", None).__name__ == "GUID":
+                    is_uuid_col = True
             except (NotImplementedError, AttributeError):
-                is_uuid_col = False
+                is_uuid_col = getattr(column.type, "__class__", None).__name__ == "GUID"
 
             if isinstance(value, str) and isinstance(column.type, (String, Text)):
                 stmt = stmt.where(func.lower(column) == value.lower())
@@ -185,7 +187,13 @@ class BaseRepository(Generic[ModelT]):
                 stmt = stmt.where(column == value)
         return stmt
 
-    async def paginated_list(self, query: "ListQueryParams") -> Tuple[List[ModelT], int]:
+    async def paginated_list(
+        self,
+        query: "ListQueryParams",
+        *,
+        load_options: tuple = (),
+        extra_columns: tuple = (),
+    ) -> Tuple[List[ModelT], int]:
         """
         Fetch one page of rows plus the total matching count, applying search/sort/filters.
 
@@ -224,6 +232,10 @@ class BaseRepository(Generic[ModelT]):
         # plan as the actual page fetch, rather than twice.
         list_stmt = self._apply_sort(base_stmt, query.sort)
         list_stmt = list_stmt.offset(query.page.offset).limit(query.page.limit)
+        if load_options:
+            list_stmt = list_stmt.options(*load_options)
+        if extra_columns:
+            list_stmt = list_stmt.add_columns(*extra_columns)
         list_stmt = list_stmt.add_columns(func.count().over().label("__total_count"))
 
         result = await self.session.execute(list_stmt)
@@ -242,6 +254,10 @@ class BaseRepository(Generic[ModelT]):
 
         total = int(rows[0][-1])
         items = [row[0] for row in rows]
+        if extra_columns:
+            for row in rows:
+                for offset, col in enumerate(extra_columns, start=1):
+                    setattr(row[0], col.key, row[offset])
 
         return items, total
 
@@ -275,8 +291,10 @@ class BaseRepository(Generic[ModelT]):
             try:
                 if hasattr(column.type, "python_type") and column.type.python_type is uuid.UUID:
                     is_uuid_col = True
+                elif getattr(column.type, "__class__", None).__name__ == "GUID":
+                    is_uuid_col = True
             except (NotImplementedError, AttributeError):
-                is_uuid_col = False
+                is_uuid_col = getattr(column.type, "__class__", None).__name__ == "GUID"
 
             is_bool_col = False
             try:

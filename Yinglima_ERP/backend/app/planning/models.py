@@ -180,6 +180,14 @@ class PlanningSheet(UUIDPrimaryKeyMixin, TimestampMixin, VersionMixin, SoftDelet
         "(PlanningService.create_sheet checks it against the chosen organization's actual "
         "branches list), not via a database constraint.",
     )
+    buyer_id: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(), ForeignKey("buyers.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    buyer_branch_name: Mapped[str | None] = mapped_column(
+        String(150),
+        nullable=True,
+        doc="For sheets linked to a Buyer, the manually entered branch / delivery location name.",
+    )
 
     # --- ITEM column data source (mirrors PlanningColumn's dynamic-source feature) ---
     # The first "ITEM" column of every sheet is not a row in planning_columns
@@ -216,6 +224,13 @@ class PlanningSheet(UUIDPrimaryKeyMixin, TimestampMixin, VersionMixin, SoftDelet
         Integer,
         nullable=True,
         doc="Persisted state of the ITEM column's 'How many records to load' selector. NULL means 'All'.",
+    )
+    item_width_px: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+        default=None,
+        doc="Persisted display width of the sheet's built-in first (ITEM) column in pixels. "
+        "When NULL, falls back to default (240px). Mirrors PlanningColumn.width_px.",
     )
 
     # --- Mum-group label (the "Mum" in "Mum 1" / "NO. OF PKG MUM1" / etc.) ---

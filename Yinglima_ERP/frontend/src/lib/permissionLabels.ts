@@ -31,6 +31,7 @@ export const MODULE_NAMES: Record<string, string> = {
   state: "States & Provinces",
   city: "Cities",
   user: "Users & Accounts",
+  position: "Positions & Designations",
   organization: "Organizations",
   audit: "System Audit Logs",
   trash: "Trash",
@@ -38,21 +39,27 @@ export const MODULE_NAMES: Record<string, string> = {
   inquiry: "Inquiries & Quotations",
   product_price: "Product Prices",
   local_purchase: "Local Purchase",
+  sale_process: "Sale Process",
+  stock_movement: "Stock Movement",
+  notification_settings: "Notification Rules",
 };
 
 /** Icons for every module in the ERP system. */
 export const MODULE_ICONS: Record<string, string> = {
   supplier: "🚚",
   buyer: "🤝",
+  sale_process: "🛒",
   planning: "🚢",
   inquiry: "📩",
   local_purchase: "🛒",
   product: "📦",
   product_price: "🏷️",
   productgallery: "🖼️",
+  stock_movement: "📦",
   user: "👤",
   position: "🎖️",
   roles_permissions: "🛡️",
+  notification_settings: "🔔",
   city: "🏙️",
   state: "🗺️",
   country: "🌍",
@@ -84,15 +91,15 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
     id: "core",
     title: "Core Business & Operations",
     icon: "🏢",
-    description: "Suppliers, Buyers, Planning, Inquiries, and Local Purchase",
-    modules: ["supplier", "buyer", "planning", "inquiry", "local_purchase"],
+    description: "Suppliers, Buyers, Sale Process, Planning, Inquiries, and Local Purchase",
+    modules: ["supplier", "buyer", "sale_process", "planning", "inquiry", "local_purchase"],
   },
   {
     id: "inventory",
     title: "Inventory & Catalog",
     icon: "📦",
-    description: "Product Master, Product Prices, and Gallery",
-    modules: ["product", "product_price", "productgallery"],
+    description: "Product Master, Product Prices, Gallery, and Stock Movements",
+    modules: ["product", "product_price", "productgallery", "stock_movement"],
   },
   {
     id: "admin",
@@ -105,7 +112,7 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
     id: "masters",
     title: "Settings & Masters",
     icon: "⚙️",
-    description: "12 Lookup Tables, Organization Profile, Audit Logs, and Trash",
+    description: "12 Lookup Tables, Notification Rules, Organization Profile, Audit Logs, and Trash",
     modules: [
       "city",
       "state",
@@ -119,6 +126,7 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
       "suppliertype",
       "buyertype",
       "organizationlist",
+      "notification_settings",
       "organization",
       "audit",
       "trash",
@@ -151,6 +159,7 @@ const ACTION_LABELS: Record<string, string> = {
   currentstatus: "Current Status",
   potential: "Potential",
   clientgrade: "Client Grade",
+  cancel: "Cancel / Reverse",
 };
 
 export const ACTION_ICONS: Record<string, string> = {
@@ -171,6 +180,7 @@ export const ACTION_ICONS: Record<string, string> = {
   currentstatus: "📊",
   potential: "📈",
   clientgrade: "⭐",
+  cancel: "↩️",
 };
 
 /**
@@ -190,6 +200,10 @@ const FULL_CODE_LABELS: Record<string, string> = {
   "inquiry.approve": "Approve Quotation",
   "inquiry.send_message": "Send Messages (Email/WeChat)",
   "local_purchase.export": "Export / Print",
+  "sale_process.approve": "Update Status / Workflow",
+  "sale_process.export": "Export Excel & CI/Packing Docs",
+  "stock_movement.cancel": "Cancel / Reverse Movement",
+  "notification_settings.manage": "Manage Notification Rules",
 };
 
 /** "product.create" -> "Create"; unknown actions fall back to the raw code. */

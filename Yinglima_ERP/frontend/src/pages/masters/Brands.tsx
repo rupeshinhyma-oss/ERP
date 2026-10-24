@@ -2,7 +2,7 @@
 
 import { MasterPage, type FormState } from "@/components/MasterPage";
 import { StatusBadge } from "@/components/ui";
-import { StatusSelectField, TextField, nullIfBlank } from "@/components/fields";
+import { TextField, nullIfBlank } from "@/components/fields";
 import type { Brand } from "@/types";
 
 const EMPTY: FormState = { name: "", code: "", status: "active" };
@@ -44,7 +44,6 @@ export function BrandsPage() {
       renderFields={(f, set) => (
         <div className="form-grid">
           <TextField id="name" label="Brand Name *" required maxLength={150} value={f.name} onChange={(v) => set("name", v)} />
-          <StatusSelectField value={f.status} onChange={(v) => set("status", v)} />
         </div>
       )}
       detailFields={(b) => [

@@ -46,6 +46,7 @@ class BuyerRepository(BaseRepository[Buyer]):
     sortable_fields = ("company_name", "created_at", "updated_at", "buyer_grade", "current_status")
     filterable_fields = (
         "country_id",
+        "state_id",
         "buyer_type",
         "buyer_grade",
         "current_status",

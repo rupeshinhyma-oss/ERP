@@ -60,7 +60,17 @@ To eliminate duplicate AI quotation extraction and double-billing of OpenAI/Gemi
 
 ---
 
-## 5. What Needs to Be Verified (Testing Checklist)
+## 5. Automated Event Notifications
+
+Whenever a buyer submits or an operator logs a new inquiry:
+* **Event Hook:** `inquiry_created`
+* **Trigger Payload:** `{ "inquiry_id": inquiry.id, "inquiry_code": inquiry.inquiry_code, "buyer_name": buyer.company_name, "buyer_id": buyer.id }`
+* **Notification Delivery:** Real-time in-app notification delivered to sales and procurement coordinators configured in Notification Settings.
+* **Direct Navigation:** Clicking the topbar alert navigates directly to `/inquiries/{inquiry_id}`.
+
+---
+
+## 6. What Needs to Be Verified (Testing Checklist)
 
 - [ ] **Creation & Item Entry:**
   - Create an Inquiry for an active Buyer. Add 3 target products with required quantities.
@@ -76,7 +86,7 @@ To eliminate duplicate AI quotation extraction and double-billing of OpenAI/Gemi
 
 ---
 
-## 6. Critical Constraints: What to KEEP / What NOT to Break
+## 7. Critical Constraints: What to KEEP / What NOT to Break
 
 > [!CAUTION]
 > **Strict rules to observe when modifying Inquiries:**
@@ -89,4 +99,15 @@ To eliminate duplicate AI quotation extraction and double-billing of OpenAI/Gemi
    - Always record the exchange rate used at quote creation time so historical quotes remain mathematically immutable when current market rates fluctuate.
 4. **Deduplication Integrity:**
    - Never bypass the `email_inbound_processed` lookup; doing so will cause repeated OpenAI GPT calls on every poller loop iteration.
+
+---
+
+## 8. Type-Ahead & Product Master Search Specifications
+
+### Smart Focus Dropdown Handling:
+- Product dropdowns format items as `Product Name (Product Code)` (e.g. `FR400 Band Sealer MSH (DAR-00063)`).
+- When a user places cursor/focus or clicks on an already-selected product item (`inputValue === label`), the dropdown automatically queries with `""` to display all active master products, highlighting the currently selected product with a green checkmark (`✓`).
+- When a user types or pastes a query into the field, the input switches to active search mode (`isUserTyping = true`).
+- `productFetcher` automatically detects and strips composite parentheses `(CODE)` or dashes (`CODE — Name`), querying the database by product code or name so pasted labels resolve immediately without "No matches." errors.
+
 

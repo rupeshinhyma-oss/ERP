@@ -35,6 +35,10 @@ class GUID(TypeDecorator):
     impl = CHAR
     cache_ok = True
 
+    @property
+    def python_type(self) -> type[uuid.UUID]:
+        return uuid.UUID
+
     def load_dialect_impl(self, dialect):
         """Use the native UUID type on PostgreSQL, CHAR(36) elsewhere."""
         if dialect.name == "postgresql":

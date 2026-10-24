@@ -7,19 +7,23 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
 import { AppShell } from "@/components/AppShell";
 import { apiDelete, apiGet, downloadExport, errorMessage } from "@/lib/api";
 import { useLookup } from "@/lib/lookups";
 import { useToast } from "@/lib/toast";
+import { useConfirm } from "@/lib/confirm";
 import type { LocalPurchaseSummary } from "@/types/localPurchase";
 import { LocalPurchaseDetailModal } from "./LocalPurchaseDetailModal";
+import { SearchableFilterDropdown } from "@/components/SearchableDropdown";
 
 export function LocalPurchasesPage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { hasPermission } = useAuth();
   const toast = useToast();
+  const confirm = useConfirm();
 
   const [purchases, setPurchases] = useState<LocalPurchaseSummary[]>([]);
   const [loading, setLoading] = useState(true);
@@ -40,6 +44,18 @@ export function LocalPurchasesPage() {
   const [viewPurchaseId, setViewPurchaseId] = useState<string | null>(null);
   const [exportOpen, setExportOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
+
+  // Sync deep link query params (from notifications or external links)
+  useEffect(() => {
+    const s = searchParams.get("search");
+    const id = searchParams.get("id");
+    if (s) {
+      setSearch(s);
+    }
+    if (id) {
+      setViewPurchaseId(id);
+    }
+  }, [searchParams]);
 
   // Close kebab action menu on outside click
   useEffect(() => {
@@ -104,9 +120,14 @@ export function LocalPurchasesPage() {
 
   // Delete Purchase
   const handleDelete = async (id: string, invoiceNo: string) => {
-    if (!window.confirm(`Are you sure you want to delete purchase invoice "${invoiceNo}"?`)) {
-      return;
-    }
+    const confirmed = await confirm({
+      title: "Delete Purchase Invoice",
+      message: `Are you sure you want to delete purchase invoice "${invoiceNo}"? This action cannot be undone.`,
+      itemName: invoiceNo,
+      confirmLabel: "Delete Invoice",
+      variant: "danger",
+    });
+    if (!confirmed) return;
     try {
       await apiDelete(`/purchases/local/${id}`);
       toast(`Purchase invoice "${invoiceNo}" deleted successfully.`, "success");
@@ -180,74 +201,74 @@ export function LocalPurchasesPage() {
 
           {/* Action Buttons */}
           <div className="page-header-actions" style={{ display: "flex", gap: "10px", alignItems: "center", flexWrap: "wrap" }}>
-            {/* Filter Toggle Button */}
+            {/* Filter Toggle Button (Matching Products Master) */}
             <button
               type="button"
-              className="btn"
+              className={`btn btn-header-filter ${filterOpen ? "active" : ""}`}
               onClick={() => setFilterOpen((prev) => !prev)}
               style={{
-                background: filterOpen || activeFiltersCount > 0 ? "#0061f2" : "#ffffff",
-                color: filterOpen || activeFiltersCount > 0 ? "#ffffff" : "#334155",
-                border: "1px solid #cbd5e1",
-                padding: "8px 14px",
+                background: filterOpen ? "#0061f2" : "#475569",
+                color: "#ffffff",
+                padding: "8px 12px",
                 borderRadius: "6px",
-                fontWeight: 600,
-                fontSize: "13px",
+                border: "none",
                 display: "inline-flex",
                 alignItems: "center",
+                justifyContent: "center",
                 gap: "6px",
                 cursor: "pointer",
-                boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
+                boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
               }}
               title="Toggle Filter Options"
             >
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
                 <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon>
               </svg>
-              <span>Filters</span>
               {activeFiltersCount > 0 && (
-                <span style={{
-                  background: filterOpen ? "#ffffff" : "#0061f2",
-                  color: filterOpen ? "#0061f2" : "#ffffff",
-                  fontSize: "10px",
-                  fontWeight: 800,
-                  borderRadius: "10px",
-                  padding: "1px 6px",
-                  marginLeft: "2px",
-                }}>
+                <span
+                  style={{
+                    background: "#ef4444",
+                    color: "#ffffff",
+                    fontSize: "10px",
+                    fontWeight: 800,
+                    borderRadius: "10px",
+                    padding: "1px 5px",
+                    lineHeight: 1,
+                  }}
+                >
                   {activeFiltersCount}
                 </span>
               )}
             </button>
 
-            {/* Export Dropdown */}
+            {/* Export Dropdown (Matching Products Master Orange Imp/Exp Style) */}
             {hasPermission("local_purchase.export") && (
             <div style={{ position: "relative", display: "inline-block" }}>
               <button
                 type="button"
+                className="btn btn-imp-exp"
                 onClick={(e) => {
                   e.stopPropagation();
                   setExportOpen((prev) => !prev);
                 }}
                 disabled={exporting}
                 style={{
-                  background: "#ffffff",
-                  color: "#1e293b",
-                  border: "1px solid #cbd5e1",
-                  padding: "8px 14px",
+                  background: "#f59e0b",
+                  color: "#ffffff",
+                  border: "none",
+                  padding: "8px 16px",
                   borderRadius: "6px",
-                  fontWeight: 600,
+                  fontWeight: 700,
                   fontSize: "13px",
                   cursor: exporting ? "wait" : "pointer",
                   display: "inline-flex",
                   alignItems: "center",
                   gap: "6px",
-                  boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
+                  boxShadow: "0 2px 4px rgba(245, 158, 11, 0.25)",
                 }}
+                title="Export Local Purchases"
               >
-                <span style={{ fontSize: "14px" }}>📥</span>
-                <span>{exporting ? "Exporting..." : "Export"}</span>
-                <span style={{ fontSize: "10px", color: "#64748b" }}>▼</span>
+                <span>{exporting ? "Exporting..." : "Export ▾"}</span>
               </button>
 
               {exportOpen && (
@@ -437,21 +458,26 @@ export function LocalPurchasesPage() {
                 <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px", display: "block" }}>
                   Supplier
                 </label>
-                <select
-                  value={selectedSupplierId}
-                  onChange={(e) => {
-                    setSelectedSupplierId(e.target.value);
+                <SearchableFilterDropdown
+                  value={selectedSupplierId || null}
+                  onChange={(val) => {
+                    setSelectedSupplierId(val || "");
                     setPage(1);
                   }}
-                  style={{ width: "100%", padding: "7px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "13px", background: "#ffffff" }}
-                >
-                  <option value="">All Suppliers</option>
-                  {supplierLookup.items?.map((sup: { id: string; company_name: string }) => (
-                    <option key={sup.id} value={sup.id}>
-                      {sup.company_name}
-                    </option>
-                  ))}
-                </select>
+                  placeholder="All Suppliers"
+                  allLabel="All Suppliers"
+                  fetchOptions={async (term) => {
+                    const q = term.toLowerCase().trim();
+                    const items = (supplierLookup.items || []) as { id: string; company_name: string }[];
+                    return items
+                      .filter((s) => !q || s.company_name.toLowerCase().includes(q))
+                      .map((s) => ({ value: s.id, label: s.company_name }));
+                  }}
+                  fetchLabelForValue={async (val) => {
+                    const s = (supplierLookup.items || []).find((item: { id: string }) => item.id === val);
+                    return s ? (s as any).company_name : "";
+                  }}
+                />
               </div>
 
               {/* Status Filter */}
@@ -733,7 +759,42 @@ export function LocalPurchasesPage() {
 
                         {/* Supplier */}
                         <td style={{ fontWeight: 600, color: "#334155" }}>
-                          {p.supplier_name}
+                          <div>
+                            {(() => {
+                              const raw = p.supplier_name || "-";
+                              const m = raw.match(/^(.+?)\s*\((.+?)\)$/);
+                              if (m) {
+                                return (
+                                  <span>
+                                    <strong style={{ fontWeight: 700, color: "#0f172a" }}>{m[1]}</strong>
+                                    <span style={{ color: "#64748b", marginLeft: "4px", fontWeight: 400 }}>({m[2]})</span>
+                                  </span>
+                                );
+                              }
+                              return <strong style={{ fontWeight: 600, color: "#1e293b" }}>{raw}</strong>;
+                            })()}
+                          </div>
+                          {p.consignment_code && (
+                            <div style={{ marginTop: "4px" }}>
+                              <span
+                                style={{
+                                  fontSize: "11px",
+                                  fontWeight: 700,
+                                  color: "#0369a1",
+                                  background: "#e0f2fe",
+                                  border: "1px solid #bae6fd",
+                                  padding: "2px 6px",
+                                  borderRadius: "4px",
+                                  display: "inline-flex",
+                                  alignItems: "center",
+                                  gap: "4px",
+                                }}
+                              >
+                                🚢 {p.consignment_code}
+                                {p.branch_name ? ` • ${p.branch_name}` : ""}
+                              </span>
+                            </div>
+                          )}
                         </td>
 
                         {/* Invoice Total Value with VAT */}

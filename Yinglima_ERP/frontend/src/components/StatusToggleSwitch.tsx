@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { apiPost } from "@/lib/api";
 import { useToast } from "@/lib/toast";
+import { invalidateLookupCache } from "@/lib/lookups";
 
 interface StatusToggleSwitchProps {
   id: string;
@@ -45,6 +46,7 @@ export function StatusToggleSwitch({
 
     try {
       await apiPost(`${apiBase}/${id}/${action}`);
+      invalidateLookupCache(apiBase);
       toast(
         name
           ? `"${name}" marked as ${nextStatus === "active" ? "Active" : "Inactive"}.`

@@ -33,8 +33,10 @@ class PlanningSheetCreate(BaseModel):
     """
 
     name: str = Field(..., min_length=1, max_length=150, description="e.g. 'Mum Branch'.")
-    organization_id: uuid.UUID = Field(..., description="The Product Master organization (MasterCompany) this sheet's branch belongs to.")
-    branch_id: str = Field(..., min_length=1, max_length=100, description="One of organization_id's branch ids (from MasterCompany.branches).")
+    organization_id: uuid.UUID | None = Field(default=None, description="The Product Master organization (MasterCompany) this sheet's branch belongs to.")
+    branch_id: str | None = Field(default=None, max_length=100, description="One of organization_id's branch ids (from MasterCompany.branches).")
+    buyer_id: uuid.UUID | None = Field(default=None, description="Linked Buyer profile ID for buyer-specific planning sheets.")
+    buyer_branch_name: str | None = Field(default=None, max_length=150, description="Manually specified branch/delivery location for buyer sheets.")
     mum_group_label: str = Field(default="Mum", min_length=1, max_length=50, description="Group label name (e.g. 'Mum', 'CN', 'MP').")
     description: str | None = Field(default=None)
 
@@ -66,6 +68,7 @@ class PlanningSheetRead(BaseModel):
     item_description: str | None = None
     item_auto_populate_enabled: bool = False
     item_auto_populate_limit: int | None = None
+    item_width_px: int | None = None
     mum_group_label: str = Field(
         default="Mum",
         description="The word this sheet's group columns use, e.g. 'Mum' in 'Mum 1' / "
@@ -78,6 +81,12 @@ class PlanningSheetRead(BaseModel):
     )
     branch_id: str | None = Field(
         default=None, description="This sheet's linked branch id (from organization_id's MasterCompany.branches). NULL for sheets created before this link existed."
+    )
+    buyer_id: uuid.UUID | None = Field(
+        default=None, description="Linked Buyer profile ID for buyer-specific planning sheets."
+    )
+    buyer_branch_name: str | None = Field(
+        default=None, description="Manually specified branch/delivery location for buyer sheets."
     )
     created_by: uuid.UUID
     created_at: datetime
@@ -196,6 +205,16 @@ class PlanningColumnWidthUpdate(BaseModel):
     the frontend's auto-computed width based on its header label length
     (see computeHeaderWidth in Planning.tsx) -- lets a user "reset" a
     column back to automatic sizing without deleting/recreating it.
+    """
+
+    width_px: int | None = Field(default=None, ge=40, le=800)
+
+
+class PlanningItemWidthUpdate(BaseModel):
+    """
+    Set the sheet's built-in first (ITEM) column display width (drag-to-resize).
+
+    ``width_px: null`` clears a manual override, reverting to the default 240px.
     """
 
     width_px: int | None = Field(default=None, ge=40, le=800)

@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { MasterPage, type FormState } from "@/components/MasterPage";
 import { StatusBadge, dash } from "@/components/ui";
-import { SelectField, StatusSelectField, TextField, nullIfBlank } from "@/components/fields";
+import { SelectField, TextField, nullIfBlank } from "@/components/fields";
 import { useLookup, useNameMap } from "@/lib/lookups";
 import type { Country, State } from "@/types";
 
@@ -92,7 +92,6 @@ export function StatesPage() {
           </SelectField>
           <TextField id="name" label="Province / Region Name *" required maxLength={150} value={f.name} onChange={(v) => set("name", v)} />
           <TextField id="code" label="Province Code" maxLength={20} value={f.code} onChange={(v) => set("code", v)} />
-          <StatusSelectField value={f.status} onChange={(v) => set("status", v)} />
         </div>
       )}
       detailFields={(s) => [

@@ -122,6 +122,15 @@ api_router.include_router(local_purchases_router)
 from app.sales.routes import router as sales_router
 api_router.include_router(sales_router)
 
+# Stock Movement: Inward & Outward Register, Live Stock Balance
+from app.stock.routes import router as stock_router
+api_router.include_router(stock_router)
+
+
+# Notifications & Alert Rules
+from app.notifications.routes import router as notifications_router
+api_router.include_router(notifications_router)
+
 # Phase 1 (Live Events): generic real-time WebSocket infrastructure --
 # see app/events/ and doc/EVENTS_ARCHITECTURE.md. Not module-specific;
 # any future module's routes/services publish through this without

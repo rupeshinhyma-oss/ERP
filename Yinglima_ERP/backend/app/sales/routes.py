@@ -26,6 +26,7 @@ from app.core.exceptions import NotFoundException
 from app.core.logging import get_logger
 from app.core.responses import build_success_response
 from app.database.session import get_db_session
+from app.rbac.dependencies import require_permission
 from app.sales.schemas import (
     PlanningConsignmentColumnResponse,
     PlanningConsignmentItemsResponse,
@@ -60,7 +61,7 @@ async def get_sales_metrics(
     date_from: date | None = Query(default=None),
     date_to: date | None = Query(default=None),
     service: SaleService = Depends(get_sale_service),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permission("sale_process.view")),
 ) -> dict:
     req_id = getattr(request.state, "request_id", "-")
     metrics = await service.repo.get_metrics(
@@ -88,7 +89,7 @@ async def list_planning_consignments(
     buyer_name: str | None = Query(default=None),
     sheet_id: uuid.UUID | None = Query(default=None),
     service: SaleService = Depends(get_sale_service),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permission("sale_process.view")),
 ) -> dict:
     req_id = getattr(request.state, "request_id", "-")
     consignments = await service.get_planning_consignments(
@@ -111,7 +112,7 @@ async def extract_consignment_items(
     column_id: uuid.UUID,
     request: Request,
     service: SaleService = Depends(get_sale_service),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permission("sale_process.view")),
 ) -> dict:
     req_id = getattr(request.state, "request_id", "-")
     result = await service.extract_consignment_items(column_id)
@@ -137,7 +138,7 @@ async def list_sale_orders(
     date_from: date | None = Query(default=None),
     date_to: date | None = Query(default=None),
     service: SaleService = Depends(get_sale_service),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permission("sale_process.view")),
 ) -> dict:
     req_id = getattr(request.state, "request_id", "-")
     offset = (page - 1) * page_size
@@ -213,7 +214,7 @@ async def get_product_costing_info(
     request: Request,
     quantity: float = Query(default=1.0, ge=0.01),
     service: SaleService = Depends(get_sale_service),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permission("sale_process.view")),
 ) -> dict:
     req_id = getattr(request.state, "request_id", "-") if request else "-"
     data = await service.get_product_costing_info(product_id, quantity)
@@ -225,7 +226,7 @@ async def create_sale_order(
     payload: SaleOrderCreate,
     request: Request,
     service: SaleService = Depends(get_sale_service),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permission("sale_process.create")),
 ) -> dict:
     req_id = getattr(request.state, "request_id", "-")
     order = await service.create_order(payload, current_user=current_user)
@@ -244,7 +245,7 @@ async def get_sale_order(
     id: uuid.UUID,
     request: Request,
     service: SaleService = Depends(get_sale_service),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permission("sale_process.view")),
 ) -> dict:
     req_id = getattr(request.state, "request_id", "-")
     order = await service.repo.get_by_id(id)
@@ -262,7 +263,7 @@ async def update_sale_order(
     payload: SaleOrderUpdate,
     request: Request,
     service: SaleService = Depends(get_sale_service),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permission("sale_process.update")),
 ) -> dict:
     req_id = getattr(request.state, "request_id", "-")
     order = await service.update_order(id, payload)
@@ -281,7 +282,7 @@ async def update_order_status(
     payload: SaleOrderStatusUpdate,
     request: Request,
     service: SaleService = Depends(get_sale_service),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permission("sale_process.approve")),
 ) -> dict:
     req_id = getattr(request.state, "request_id", "-")
     order = await service.update_status(id, payload.status, payload.remarks)
@@ -299,7 +300,7 @@ async def delete_sale_order(
     id: uuid.UUID,
     request: Request,
     service: SaleService = Depends(get_sale_service),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permission("sale_process.delete")),
 ) -> dict:
     req_id = getattr(request.state, "request_id", "-")
     deleted_by = getattr(current_user, "name", getattr(current_user, "username", "Admin"))
@@ -324,7 +325,7 @@ async def export_sale_orders(
     date_from: date | None = Query(default=None),
     date_to: date | None = Query(default=None),
     service: SaleService = Depends(get_sale_service),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permission("sale_process.export")),
 ) -> Response:
     records, _ = await service.repo.list_with_filters(
         search=search,
@@ -356,7 +357,7 @@ async def get_trade_document_details(
     id: uuid.UUID,
     request: Request,
     service: SaleService = Depends(get_sale_service),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permission("sale_process.view")),
 ) -> dict:
     req_id = getattr(request.state, "request_id", "-")
     data = await service.get_trade_document_details(id)
@@ -371,7 +372,7 @@ async def export_trade_documents_excel(
     id: uuid.UUID,
     mode: str = Query("internal", description="Export mode: 'internal' (16 columns) or 'customer' (7 columns)"),
     service: SaleService = Depends(get_sale_service),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permission("sale_process.export")),
 ) -> Response:
     output = await service.export_trade_documents_excel(id, mode=mode)
     order = await service.repo.get_by_id(id)

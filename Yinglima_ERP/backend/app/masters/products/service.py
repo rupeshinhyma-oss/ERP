@@ -11,9 +11,10 @@ master every other module will ultimately consume.
 from __future__ import annotations
 
 import uuid
+from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import select, or_
+from sqlalchemy import case, or_, select
 
 from app.cache.manager import CacheManager
 from app.common.list_query import ListQueryParams
@@ -76,9 +77,31 @@ class ProductService:
         await self.repository.attach_planning_supplier_info([product])
         return product
 
-    async def list_paginated(self, query: ListQueryParams) -> tuple[list[Product], int]:
-        """Return a page of products matching the given search/sort/filter parameters."""
-        products, total = await self.repository.paginated_list(query)
+    async def list_paginated(
+        self, query: ListQueryParams, *, light: bool = False
+    ) -> tuple[list[Product], int]:
+        """Return a page of products matching the given search/sort/filter parameters.
+
+        With ``light=True`` the heavy ``images`` column is deferred (never read
+        from the DB) and an ``images_omitted`` flag tells clients whether photos
+        exist, to be fetched via the single-product endpoint on demand.
+        """
+        if light:
+            from sqlalchemy import String, cast, func
+            from sqlalchemy.orm import defer
+            from sqlalchemy.orm.attributes import set_committed_value
+
+            products, total = await self.repository.paginated_list(
+                query,
+                load_options=(defer(Product.images),),
+                extra_columns=(
+                    (func.length(cast(Product.images, String)) > 4).label("images_omitted"),
+                ),
+            )
+            for p in products:
+                set_committed_value(p, "images", None)
+        else:
+            products, total = await self.repository.paginated_list(query)
         hsn_ids = {p.hsn_id for p in products if p.hsn_id}
         if hsn_ids:
             hsns = await self.hsn_repository.list_all()
@@ -135,6 +158,29 @@ class ProductService:
             for r in rows
         ]
 
+    async def list_products_lookup(self, limit: int = 1000) -> list[dict[str, str]]:
+        """Return lightweight active products {id, name, product_name, product_code} for fast UI lookups."""
+        from sqlalchemy import select
+        stmt = (
+            select(Product.id, Product.product_name_tally, Product.product_name, Product.product_code)
+            .where(Product.deleted_at.is_(None))
+            .where(Product.status == "active")
+            .order_by(Product.product_name_tally.asc())
+            .limit(limit)
+        )
+        res = await self.repository.session.execute(stmt)
+        rows = res.all()
+        return [
+            {
+                "id": str(r.id),
+                "name": r.product_name or r.product_name_tally or "",
+                "product_name": r.product_name or r.product_name_tally or "",
+                "product_code": r.product_code or "",
+                "code": r.product_code or "",
+            }
+            for r in rows
+        ]
+
     async def _invalidate_cache(self) -> None:
         """Invalidate the products dropdown cache after any mutation."""
         await self.cache_manager.invalidate_dropdown(DROPDOWN_CACHE_NAME)
@@ -172,6 +218,13 @@ class ProductService:
                 raise BadRequestException("The specified secondary unit of measurement does not exist.")
             if uom_id is not None and secondary_uom_id == uom_id:
                 raise BadRequestException("The secondary unit of measurement must differ from the primary unit.")
+
+        supplier_id = field_values.get("supplier_id")
+        if supplier_id is not None:
+            from app.suppliers.models import Supplier
+            stmt_s = select(Supplier.id).where(Supplier.id == supplier_id).limit(1)
+            if (await self.repository.session.execute(stmt_s)).scalar_one_or_none() is None:
+                field_values["supplier_id"] = None
 
     async def create(self, **field_values: Any) -> Product:
         """Create a new product, validating code uniqueness if provided, and foreign-key references."""
@@ -250,7 +303,11 @@ class ProductService:
         """Ensure SupplierProductLink exists for this primary supplier."""
         if not supplier_id:
             return
-        from app.suppliers.models import SupplierProductLink
+        from app.suppliers.models import SupplierProductLink, Supplier
+
+        stmt_s = select(Supplier.id).where(Supplier.id == supplier_id).limit(1)
+        if (await self.repository.session.execute(stmt_s)).scalar_one_or_none() is None:
+            return
 
         stmt = select(SupplierProductLink).where(
             SupplierProductLink.product_id == product_id,
@@ -263,7 +320,10 @@ class ProductService:
                 supplier_id=supplier_id,
             )
             self.repository.session.add(link)
-            await self.repository.session.flush()
+            try:
+                await self.repository.session.flush()
+            except Exception:
+                pass
 
     async def update(self, product_id: uuid.UUID, **field_values: Any) -> Product:
         """Update an existing product, validating code uniqueness and every foreign-key reference."""
@@ -302,8 +362,11 @@ class ProductService:
             "hsn_id": field_values.get("hsn_id", product.hsn_id),
             "uom_id": field_values.get("uom_id", product.uom_id),
             "secondary_uom_id": field_values.get("secondary_uom_id", product.secondary_uom_id),
+            "supplier_id": field_values.get("supplier_id", product.supplier_id),
         }
         await self._validate_references(merged)
+        if "supplier_id" in field_values:
+            field_values["supplier_id"] = merged["supplier_id"]
 
         # Auto-compute CBM if dimensions updated
         l = field_values.get("length_cm") if "length_cm" in field_values else (field_values.get("length") or product.length_cm or product.length)
@@ -339,12 +402,73 @@ class ProductService:
         """Set a product's status to ACTIVE."""
         return await self.update(product_id, status=RecordStatus.ACTIVE)
 
+    async def bulk_activate(self, product_ids: list[uuid.UUID]) -> list[Product]:
+        """Bulk activate multiple products in high-speed batch operation."""
+        if not product_ids:
+            return []
+        from sqlalchemy import update
+        from app.masters.products.models import Product
+
+        stmt = (
+            update(Product)
+            .where(Product.id.in_(product_ids), Product.deleted_at.is_(None))
+            .values(
+                status=RecordStatus.ACTIVE,
+                version=Product.version + 1,
+                updated_at=datetime.now(timezone.utc),
+            )
+            .returning(Product)
+        )
+        res = await self.repository.session.execute(stmt)
+        products = list(res.scalars().all())
+        await self.repository.session.commit()
+        await self._invalidate_cache()
+        for p in products:
+            await notify_source_record_changed("product", p.id)
+        return products
+
     async def deactivate(self, product_id: uuid.UUID) -> Product:
         """Set a product's status to INACTIVE only if stock is zero."""
         product = await self.get_by_id_or_raise(product_id)
         if getattr(product, "current_stock", 0) != 0:
             raise BadRequestException("Product cannot be set to Inactive when current stock is non-zero.")
         return await self.update(product_id, status=RecordStatus.INACTIVE)
+
+    async def bulk_deactivate(self, product_ids: list[uuid.UUID]) -> list[Product]:
+        """Bulk deactivate multiple products in high-speed batch operation, ensuring stock is zero."""
+        if not product_ids:
+            return []
+        from sqlalchemy import select, update
+        from app.masters.products.models import Product
+
+        # Validate that no selected product has current_stock != 0
+        chk_stmt = select(Product.id, Product.product_name, Product.current_stock).where(
+            Product.id.in_(product_ids),
+            Product.deleted_at.is_(None),
+            Product.current_stock != 0,
+        )
+        has_stock = (await self.repository.session.execute(chk_stmt)).all()
+        if has_stock:
+            bad_names = ", ".join(f"'{r[1]}' (Stock: {r[2]})" for r in has_stock[:3])
+            raise BadRequestException(f"Cannot deactivate products with non-zero stock: {bad_names}")
+
+        stmt = (
+            update(Product)
+            .where(Product.id.in_(product_ids), Product.deleted_at.is_(None))
+            .values(
+                status=RecordStatus.INACTIVE,
+                version=Product.version + 1,
+                updated_at=datetime.now(timezone.utc),
+            )
+            .returning(Product)
+        )
+        res = await self.repository.session.execute(stmt)
+        products = list(res.scalars().all())
+        await self.repository.session.commit()
+        await self._invalidate_cache()
+        for p in products:
+            await notify_source_record_changed("product", p.id)
+        return products
 
     async def delete(self, product_id: uuid.UUID) -> None:
         """Soft-delete a product, requiring status to be Inactive and stock = 0."""
@@ -381,8 +505,11 @@ class ProductService:
         uoms_map = {str(u.id): (u.short_name or u.name or u.code) for u in await self.uom_repository.list(limit=2000)}
 
         from app.suppliers.models import Supplier
-        sup_rows = (await self.repository.session.execute(select(Supplier.id, Supplier.company_name).where(Supplier.deleted_at.is_(None)))).all()
-        suppliers_map = {str(r.id): r.company_name for r in sup_rows}
+        sup_rows = (await self.repository.session.execute(select(Supplier.id, Supplier.company_name, Supplier.brand_description).where(Supplier.deleted_at.is_(None)))).all()
+        suppliers_map = {
+            str(r.id): (r.brand_description.strip() if r.brand_description and r.brand_description.strip() else r.company_name)
+            for r in sup_rows
+        }
 
         def _serialize_for_compare(p: Product) -> dict[str, Any]:
             return {
@@ -391,7 +518,7 @@ class ProductService:
                 "Brand": brands_map.get(str(p.brand_id), "—") if p.brand_id else "—",
                 "Category": categories_map.get(str(p.category_id), "—") if p.category_id else "—",
                 "Sub Category": sub_categories_map.get(str(p.sub_category_id), "—") if p.sub_category_id else "—",
-                "Primary Supplier": suppliers_map.get(str(p.supplier_id), "—") if p.supplier_id else "—",
+                "Supplier Brand": suppliers_map.get(str(p.supplier_id), "—") if p.supplier_id else "—",
                 "HSN Code": hsns_map.get(str(p.hsn_id), "—") if p.hsn_id else "—",
                 "UOM": uoms_map.get(str(p.uom_id), "—") if p.uom_id else "—",
                 "Pack. Qty": p.packaging_quantity if p.packaging_quantity is not None else "—",
@@ -416,9 +543,27 @@ class ProductService:
 
             supplier_name = field_values.pop("supplier_name", None)
             if supplier_name:
-                stmt_sup = select(Supplier).where(
-                    Supplier.company_name.ilike(supplier_name.strip()),
-                    Supplier.deleted_at.is_(None),
+                clean_sup = supplier_name.strip()
+                stmt_sup = (
+                    select(Supplier)
+                    .where(
+                        or_(
+                            Supplier.brand_description.ilike(clean_sup),
+                            Supplier.company_name.ilike(clean_sup),
+                            Supplier.brand_description.ilike(f"{clean_sup}%"),
+                            Supplier.company_name.ilike(f"{clean_sup}%"),
+                        ),
+                        Supplier.deleted_at.is_(None),
+                    )
+                    .order_by(
+                        case(
+                            (Supplier.brand_description.ilike(clean_sup), 1),
+                            (Supplier.company_name.ilike(clean_sup), 2),
+                            (Supplier.brand_description.ilike(f"{clean_sup}%"), 3),
+                            (Supplier.company_name.ilike(f"{clean_sup}%"), 4),
+                            else_=5,
+                        )
+                    )
                 )
                 res_sup = await self.repository.session.execute(stmt_sup)
                 found_supplier = res_sup.scalars().first()
@@ -592,9 +737,12 @@ class ProductService:
         # Suppliers lookup for Primary Supplier
         from app.suppliers.models import Supplier
         sup_res = await self.repository.session.execute(
-            select(Supplier.id, Supplier.company_name).where(Supplier.deleted_at.is_(None))
+            select(Supplier.id, Supplier.company_name, Supplier.brand_description).where(Supplier.deleted_at.is_(None))
         )
-        suppliers_export_map = {str(row.id): row.company_name for row in sup_res}
+        suppliers_export_map = {
+            str(row.id): (row.brand_description.strip() if row.brand_description and row.brand_description.strip() else row.company_name)
+            for row in sup_res
+        }
 
         # Organizations
         org_res = await self.repository.session.execute(select(MasterCompany.id, MasterCompany.name, MasterCompany.branches))
@@ -631,7 +779,7 @@ class ProductService:
                 "Brand": brands.get(str(p.brand_id), "") if p.brand_id else "",
                 "Category": categories.get(str(p.category_id), "") if p.category_id else "",
                 "Sub Category": sub_categories.get(str(p.sub_category_id), "") if p.sub_category_id else "",
-                "Primary Supplier": suppliers_export_map.get(str(p.supplier_id), "") if p.supplier_id else "",
+                "Supplier Brand": suppliers_export_map.get(str(p.supplier_id), "") if p.supplier_id else "",
                 "HSN Code": hsns.get(str(p.hsn_id), "") if p.hsn_id else "",
                 "UOM": uoms.get(str(p.uom_id), "") if p.uom_id else "",
                 "Organization": ", ".join(org_names),
@@ -643,6 +791,7 @@ class ProductService:
                 "Width (cm)": float(w) if w is not None else "",
                 "Height (cm)": float(h) if h is not None else "",
                 "Pack. Unit CBM": float(cbm_val) if cbm_val is not None else "",
+                "Purchase VAT %": float(p.purchase_vat_percent) if p.purchase_vat_percent is not None else "",
                 "Refund VAT %": float(p.refund_vat_percent) if p.refund_vat_percent is not None else "",
                 "Compliance & License Requirements": p.license_certificate_required or "",
                 "Specification": p.specification or p.description or "",

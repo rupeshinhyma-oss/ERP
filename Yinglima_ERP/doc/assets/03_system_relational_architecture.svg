@@ -1,0 +1,147 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 620" width="100%" height="100%">
+  <defs>
+    <style>
+      .title { font-family: 'Segoe UI', system-ui, sans-serif; font-size: 19px; font-weight: 700; fill: #0f172a; }
+      .sub { font-family: 'Segoe UI', system-ui, sans-serif; font-size: 12px; fill: #64748b; }
+      .table-head { font-family: 'Segoe UI', system-ui, sans-serif; font-size: 12px; font-weight: 700; fill: #ffffff; }
+      .table-field { font-family: 'Segoe UI', system-ui, sans-serif; font-size: 10px; fill: #334155; }
+      .rel-label { font-family: 'Segoe UI', system-ui, sans-serif; font-size: 10px; font-weight: 600; fill: #2563eb; }
+      .line { stroke: #3b82f6; stroke-width: 2; fill: none; }
+      .line-green { stroke: #16a34a; stroke-width: 2; fill: none; }
+    </style>
+    <filter id="tbl-shadow" x="-5%" y="-5%" width="110%" height="115%">
+      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#0f172a" flood-opacity="0.08" />
+    </filter>
+  </defs>
+
+  <rect width="1000" height="620" fill="#f8fafc" rx="10" />
+
+  <!-- Header -->
+  <rect x="25" y="15" width="950" height="50" rx="8" fill="#ffffff" stroke="#e2e8f0" filter="url(#tbl-shadow)" />
+  <text x="45" y="38" class="title">System Relational &amp; Entity Data Transfer Architecture</text>
+  <text x="45" y="54" class="sub">How database tables, foreign keys, and operational datasets flow between modules</text>
+
+  <!-- TABLE: SUPPLIERS (x=30, y=85) -->
+  <rect x="30" y="85" width="170" height="135" rx="6" fill="#ffffff" stroke="#cbd5e1" filter="url(#tbl-shadow)" />
+  <rect x="30" y="85" width="170" height="26" rx="6" fill="#334155" />
+  <text x="40" y="102" class="table-head">SUPPLIERS</text>
+  <text x="40" y="125" class="table-field">&bull; id (UUID, PK)</text>
+  <text x="40" y="141" class="table-field">&bull; company_name</text>
+  <text x="40" y="157" class="table-field">&bull; city_id, state_id</text>
+  <text x="40" y="173" class="table-field">&bull; uscc_tax_id</text>
+  <text x="40" y="189" class="table-field">&bull; wechat_id, phone</text>
+  <text x="40" y="205" class="table-field">&bull; status, grade</text>
+
+  <!-- TABLE: HSN_CODES (x=30, y=240) -->
+  <rect x="30" y="240" width="170" height="135" rx="6" fill="#ffffff" stroke="#cbd5e1" filter="url(#tbl-shadow)" />
+  <rect x="30" y="240" width="170" height="26" rx="6" fill="#475569" />
+  <text x="40" y="257" class="table-head">HSN_CODES</text>
+  <text x="40" y="280" class="table-field">&bull; id (UUID, PK)</text>
+  <text x="40" y="296" class="table-field">&bull; code (e.g. 8422.a247)</text>
+  <text x="40" y="312" class="table-field">&bull; purchase_vat_percent (0%)</text>
+  <text x="40" y="328" class="table-field">&bull; refund_vat_percent (13%)</text>
+  <text x="40" y="344" class="table-field">&bull; gst_percent (18%)</text>
+  <text x="40" y="360" class="table-field">&bull; import_duty_percent</text>
+
+  <!-- TABLE: PRODUCTS (x=240, y=140) -->
+  <rect x="240" y="140" width="200" height="175" rx="6" fill="#ffffff" stroke="#93c5fd" filter="url(#tbl-shadow)" />
+  <rect x="240" y="140" width="200" height="26" rx="6" fill="#1e40af" />
+  <text x="250" y="157" class="table-head">PRODUCTS</text>
+  <text x="250" y="180" class="table-field">&bull; id (UUID, PK)</text>
+  <text x="250" y="196" class="table-field">&bull; name, product_code</text>
+  <text x="250" y="212" class="table-field">&bull; supplier_id (FK &rarr; Suppliers)</text>
+  <text x="250" y="228" class="table-field">&bull; hsn_id (FK &rarr; HSN_Codes)</text>
+  <text x="250" y="244" class="table-field">&bull; length, width, height (cm)</text>
+  <text x="250" y="260" class="table-field">&bull; packaging_unit_cbm (m³)</text>
+  <text x="250" y="276" class="table-field">&bull; packaging_quantity</text>
+  <text x="250" y="292" class="table-field">&bull; gross_weight, net_weight</text>
+  <text x="250" y="308" class="table-field">&bull; purchase_vat_percent</text>
+
+  <!-- TABLE: BUYERS (x=30, y=400) -->
+  <rect x="30" y="400" width="170" height="120" rx="6" fill="#ffffff" stroke="#cbd5e1" filter="url(#tbl-shadow)" />
+  <rect x="30" y="400" width="170" height="26" rx="6" fill="#334155" />
+  <text x="40" y="417" class="table-head">BUYERS</text>
+  <text x="40" y="440" class="table-field">&bull; id (UUID, PK)</text>
+  <text x="40" y="456" class="table-field">&bull; company_name</text>
+  <text x="40" y="472" class="table-field">&bull; country_id, port_id</text>
+  <text x="40" y="488" class="table-field">&bull; payment_terms</text>
+  <text x="40" y="504" class="table-field">&bull; preferred_currency</text>
+
+  <!-- TABLE: PLANNING_COLUMNS (Consignments) (x=480, y=85) -->
+  <rect x="480" y="85" width="200" height="145" rx="6" fill="#ffffff" stroke="#fde047" filter="url(#tbl-shadow)" />
+  <rect x="480" y="85" width="200" height="26" rx="6" fill="#854d0e" />
+  <text x="490" y="102" class="table-head">PLANNING_COLUMNS</text>
+  <text x="490" y="125" class="table-field">&bull; id (UUID, PK)</text>
+  <text x="490" y="141" class="table-field">&bull; sheet_id (FK &rarr; Branch)</text>
+  <text x="490" y="157" class="table-field">&bull; name (e.g. Mum 48)</text>
+  <text x="490" y="173" class="table-field">&bull; container_type (40HQ)</text>
+  <text x="490" y="189" class="table-field">&bull; container_number, seal_no</text>
+  <text x="490" y="205" class="table-field">&bull; vessel, etd, eta, pod</text>
+  <text x="490" y="221" class="table-field">&bull; total_cbm, total_packages</text>
+
+  <!-- TABLE: LOCAL_PURCHASES (x=480, y=260) -->
+  <rect x="480" y="260" width="200" height="155" rx="6" fill="#ffffff" stroke="#93c5fd" filter="url(#tbl-shadow)" />
+  <rect x="480" y="260" width="200" height="26" rx="6" fill="#2563eb" />
+  <text x="490" y="277" class="table-head">LOCAL_PURCHASES</text>
+  <text x="490" y="300" class="table-field">&bull; id (UUID, PK)</text>
+  <text x="490" y="316" class="table-field">&bull; supplier_id (FK &rarr; Suppliers)</text>
+  <text x="490" y="332" class="table-field">&bull; planning_column_id (Mum 48)</text>
+  <text x="490" y="348" class="table-field">&bull; invoice_number, date</text>
+  <text x="490" y="364" class="table-field">&bull; total_amount (RMB ¥)</text>
+  <text x="490" y="380" class="table-field">&bull; transport_charges, offloading</text>
+  <text x="490" y="396" class="table-field">&bull; status (CONFIRMED)</text>
+
+  <!-- TABLE: LOCAL_PURCHASE_ITEMS (x=480, y=440) -->
+  <rect x="480" y="440" width="200" height="135" rx="6" fill="#ffffff" stroke="#93c5fd" filter="url(#tbl-shadow)" />
+  <rect x="480" y="440" width="200" height="26" rx="6" fill="#1d4ed8" />
+  <text x="490" y="457" class="table-head">LOCAL_PURCHASE_ITEMS</text>
+  <text x="490" y="480" class="table-field">&bull; id (UUID, PK)</text>
+  <text x="490" y="496" class="table-field">&bull; local_purchase_id (FK)</text>
+  <text x="490" y="512" class="table-field">&bull; product_id (FK &rarr; Products)</text>
+  <text x="490" y="528" class="table-field">&bull; quantity, unit_rate (RMB)</text>
+  <text x="490" y="544" class="table-field">&bull; vat_rate (0%/13%), item_total</text>
+  <text x="490" y="560" class="table-field">&bull; landing_rate_vb</text>
+
+  <!-- TABLE: SALE_PROCESS_ORDERS (x=730, y=140) -->
+  <rect x="730" y="140" width="220" height="165" rx="6" fill="#ffffff" stroke="#86efac" filter="url(#tbl-shadow)" />
+  <rect x="730" y="140" width="220" height="26" rx="6" fill="#166534" />
+  <text x="740" y="157" class="table-head">SALE_PROCESS_ORDERS</text>
+  <text x="740" y="180" class="table-field">&bull; id (UUID, PK)</text>
+  <text x="740" y="196" class="table-field">&bull; buyer_id (FK &rarr; Buyers)</text>
+  <text x="740" y="212" class="table-field">&bull; planning_column_id (Mum 48)</text>
+  <text x="740" y="228" class="table-field">&bull; exchange_rate (USD/RMB)</text>
+  <text x="740" y="244" class="table-field">&bull; container_freight_usd</text>
+  <text x="740" y="260" class="table-field">&bull; total_amount_usd</text>
+  <text x="740" y="276" class="table-field">&bull; profit_margin_usd, margin_pct</text>
+  <text x="740" y="292" class="table-field">&bull; status (INVOICED)</text>
+
+  <!-- TABLE: COMMERCIAL_INVOICES (x=730, y=340) -->
+  <rect x="730" y="340" width="220" height="150" rx="6" fill="#ffffff" stroke="#86efac" filter="url(#tbl-shadow)" />
+  <rect x="730" y="340" width="220" height="26" rx="6" fill="#15803d" />
+  <text x="740" y="357" class="table-head">COMMERCIAL_INVOICES</text>
+  <text x="740" y="380" class="table-field">&bull; id (UUID, PK)</text>
+  <text x="740" y="396" class="table-field">&bull; sale_process_id (FK)</text>
+  <text x="740" y="412" class="table-field">&bull; invoice_number (e.g. YL-2026)</text>
+  <text x="740" y="428" class="table-field">&bull; 16-column line items JSON</text>
+  <text x="740" y="444" class="table-field">&bull; excel_file_url (.xlsx)</text>
+  <text x="740" y="460" class="table-field">&bull; packing_list_url (.xlsx)</text>
+  <text x="740" y="476" class="table-field">&bull; bank_payment_status</text>
+
+  <!-- Relationship Lines -->
+  <!-- Suppliers -> Products -->
+  <line x1="200" y1="150" x2="240" y2="170" class="line" />
+  <!-- HSN -> Products -->
+  <line x1="200" y1="280" x2="240" y2="240" class="line" />
+  <!-- Products -> Planning Cells -->
+  <line x1="440" y1="180" x2="480" y2="140" class="line" />
+  <!-- Planning Columns -> Local Purchases -->
+  <line x1="580" y1="230" x2="580" y2="260" class="line" />
+  <!-- Local Purchases -> Local Purchase Items -->
+  <line x1="580" y1="415" x2="580" y2="440" class="line" />
+  <!-- Planning Columns -> Sale Process -->
+  <line x1="680" y1="140" x2="730" y2="180" class="line-green" />
+  <!-- Local Purchase Items -> Sale Process (Cost link) -->
+  <line x1="680" y1="480" x2="730" y2="250" stroke="#16a34a" stroke-width="2" stroke-dasharray="3,3" />
+  <!-- Sale Process -> Commercial Invoices -->
+  <line x1="840" y1="305" x2="840" y2="340" class="line-green" />
+</svg>

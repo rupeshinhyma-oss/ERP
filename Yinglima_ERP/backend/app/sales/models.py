@@ -34,8 +34,8 @@ class SaleOrder(Base, UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin):
     )
     organization_name: Mapped[str] = mapped_column(String(150), default="Yinglima", nullable=False)
 
-    buyer_id: Mapped[uuid.UUID] = mapped_column(
-        GUID(), ForeignKey("buyers.id"), nullable=False, index=True
+    buyer_id: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(), ForeignKey("buyers.id", ondelete="SET NULL"), nullable=True, index=True
     )
     buyer_name: Mapped[str] = mapped_column(String(200), nullable=False)
     buyer_branch_id: Mapped[str | None] = mapped_column(String(100), nullable=True)

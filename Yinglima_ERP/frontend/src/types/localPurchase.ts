@@ -13,10 +13,10 @@ export interface LocalPurchaseItem {
   unit_rate: number | ""; // in RMB
   vat_rate: number | ""; // default 13%
   item_total: number; // Basic total (qty * unit_rate)
-  vat_amount: number;
-  expense_per_unit: number; // Value-Based allocated expense per unit
-  unit_landing_rate: number; // unit_rate + expense_per_unit
-  total_landing_rate: number; // quantity * unit_landing_rate
+  vat_amount?: number;
+  expense_per_unit?: number; // Value-Based allocated expense per unit
+  unit_landing_rate?: number; // unit_rate + expense_per_unit
+  total_landing_rate?: number; // quantity * unit_landing_rate
   planning_sheet_name?: string;
   planning_row_id?: string;
   created_at?: string;
@@ -24,6 +24,14 @@ export interface LocalPurchaseItem {
 
 export interface LocalPurchaseSummary {
   id: string;
+  organization_id?: string | null;
+  organization_name?: string | null;
+  branch_id?: string | null;
+  branch_name?: string | null;
+  group_label?: string | null;
+  consignment_code?: string | null;
+  planning_sheet_id?: string | null;
+  planning_column_id?: string | null;
   supplier_id: string;
   supplier_name: string;
   invoice_no: string;
@@ -54,6 +62,14 @@ export interface LocalPurchaseDetail extends LocalPurchaseSummary {
 }
 
 export interface LocalPurchasePayload {
+  organization_id?: string | null;
+  organization_name?: string | null;
+  branch_id?: string | null;
+  branch_name?: string | null;
+  group_label?: string | null;
+  consignment_code?: string | null;
+  planning_sheet_id?: string | null;
+  planning_column_id?: string | null;
   supplier_id: string;
   supplier_name: string;
   invoice_no: string;
@@ -77,6 +93,40 @@ export interface LocalPurchasePayload {
     unit_rate: number;
     vat_rate: number;
   }>;
+}
+
+export interface ConsignmentColumnInfo {
+  column_id: string;
+  column_name: string;
+  consignment_code: string;
+  position: number;
+  planned_items_count: number;
+}
+
+export interface SheetConsignmentLookup {
+  sheet_id: string;
+  sheet_name: string;
+  organization_id?: string | null;
+  organization_name?: string | null;
+  branch_id?: string | null;
+  branch_name?: string | null;
+  group_label: string;
+  consignments: ConsignmentColumnInfo[];
+}
+
+export interface ConsignmentProductItem {
+  product_id?: string | null;
+  product_name: string;
+  product_code?: string | null;
+  hsn_code?: string | null;
+  quantity: number;
+  unit_rate: number;
+  vat_rate: number;
+  item_total: number;
+  supplier_id?: string | null;
+  supplier_name?: string | null;
+  supplier_brand?: string | null;
+  linked_supplier_ids?: string[];
 }
 
 export interface BillExtractedItem {

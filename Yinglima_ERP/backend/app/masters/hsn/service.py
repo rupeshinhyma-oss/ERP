@@ -149,6 +149,8 @@ class HsnService:
                 "HSN Code": h.code,
                 "Description": h.description or "",
                 "GST %": h.gst_percent,
+                "Import Duty %": h.import_duty_percent if h.import_duty_percent is not None else 0.0,
+                "Purchase VAT %": h.purchase_vat_percent if h.purchase_vat_percent is not None else 0.0,
                 "Refund VAT %": h.refund_vat_percent if h.refund_vat_percent is not None else 0.0,
                 "Status": h.status.value.capitalize(),
             }

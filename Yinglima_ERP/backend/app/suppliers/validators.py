@@ -21,28 +21,31 @@ def validate_phone_number(value: str | None, *, field_label: str) -> str | None:
     """
     Validate a phone/WhatsApp/WeChat number against the document's digit-count rule.
 
-    Accepts an optional leading "+" and country code; only the digit count
-    (ignoring separators like spaces, dashes, or parentheses) is checked,
-    per the document: "maximum 11 digit restriction... (7 to 11 digit
-    allowed)". Returns the value unchanged (not reformatted) so the
-    country-code prefix the user entered is preserved.
+    Accepts an optional leading "+" and country code. If multiple phone numbers
+    are entered (separated by comma, slash, semicolon, or newline), each individual
+    number is validated against the 7-15 digit rule.
     """
     if value is None or not value.strip():
         return None
-    digit_count = len(_DIGITS_ONLY.sub("", value))
-    if digit_count < PHONE_MIN_DIGITS or digit_count > PHONE_MAX_DIGITS:
-        raise BadRequestException(
-            f"{field_label} must have between {PHONE_MIN_DIGITS} and {PHONE_MAX_DIGITS} digits "
-            f"(including country code); got {digit_count}."
-        )
-    return value.strip()
+    cleaned_val = value.strip()
+    segments = [s.strip() for s in re.split(r"[,/;\n]+", cleaned_val) if s.strip()]
+    for segment in segments:
+        digit_count = len(_DIGITS_ONLY.sub("", segment))
+        if digit_count < PHONE_MIN_DIGITS or digit_count > PHONE_MAX_DIGITS:
+            raise BadRequestException(
+                f"{field_label} ({segment}) must have between {PHONE_MIN_DIGITS} and {PHONE_MAX_DIGITS} digits "
+                f"(including country code); got {digit_count}."
+            )
+    return cleaned_val
 
 
 def validate_email_format(value: str) -> str:
-    """Minimal, dependency-free email shape check (full RFC validation is out of scope)."""
+    """Minimal, dependency-free email shape check; supports multiple comma-separated emails."""
     value = value.strip()
-    if "@" not in value or value.startswith("@") or value.endswith("@"):
-        raise BadRequestException(f"{value!r} is not a valid email address.")
+    emails = [e.strip() for e in value.split(",") if e.strip()]
+    for e in emails:
+        if "@" not in e or e.startswith("@") or e.endswith("@"):
+            raise BadRequestException(f"{e!r} is not a valid email address.")
     return value
 
 
@@ -55,9 +58,10 @@ def _get_field(row: dict[str, Any], *aliases: str, default: str = "") -> str:
                 return v
         norm_a = a.lower().replace(" ", "_").replace("-", "_").replace("/", "_").replace("?", "")
         for k, v in row.items():
-            if v is not None and str(k).strip().lower().replace(" ", "_").replace("-", "_").replace("/", "_").replace("?", "") == norm_a:
-                if str(v).strip():
-                    return str(v).strip()
+            if v is not None and k.strip().lower().replace(" ", "_").replace("-", "_").replace("/", "_").replace("?", "") == norm_a:
+                val = str(v).strip()
+                if val:
+                    return val
     return default
 
 
@@ -116,9 +120,19 @@ def validate_supplier_row(raw_row: dict[str, Any], row_number: int) -> dict[str,
     status_str = _get_field(raw_row, "Status", "is_active", default="active").lower()
     is_active = status_str in ("active", "true", "yes", "1", "y")
 
-    calling_number_raw = _get_field(raw_row, "Calling Number", "Contact Calling Number", "contact_calling_number", "Phone")
-    whatsapp_number_raw = _get_field(raw_row, "WhatsApp Number", "Contact WhatsApp Number", "contact_whatsapp_number", "WhatsApp")
-    wechat_number_raw = _get_field(raw_row, "WeChat Number", "Contact WeChat Number", "contact_wechat_number", "WeChat")
+    # --- Contact 1 (Primary Contact) ---
+    calling_number_raw = _get_field(
+        raw_row, "Calling Number", "Calling Number 1", "Contact Calling Number", "Contact Calling Number 1",
+        "contact_calling_number", "Phone", "Phone 1", "Mobile", "Mobile 1"
+    )
+    whatsapp_number_raw = _get_field(
+        raw_row, "WhatsApp Number", "WhatsApp Number 1", "Contact WhatsApp Number", "Contact WhatsApp Number 1",
+        "contact_whatsapp_number", "WhatsApp", "WhatsApp 1"
+    )
+    wechat_number_raw = _get_field(
+        raw_row, "WeChat Number", "WeChat Number 1", "Contact WeChat Number", "Contact WeChat Number 1",
+        "contact_wechat_number", "WeChat", "WeChat 1"
+    )
 
     calling_number = validate_phone_number(
         calling_number_raw, field_label=f"Row {row_number}: Calling Number"
@@ -135,12 +149,70 @@ def validate_supplier_row(raw_row: dict[str, Any], row_number: int) -> dict[str,
     email_raw = _get_field(raw_row, "Emails", "Email", "email", "emails")
     email = validate_email_format(email_raw) if email_raw else None
 
-    brand_desc = _get_field(raw_row, "Brand Description", "Brand", "brand_description")
-    contact_name = _get_field(raw_row, "Contact Person", "Contact Person Name", "contact_full_name", "contact_person")
-    designation = _get_field(raw_row, "Designation", "contact_designation")
+    brand_desc = _get_field(
+        raw_row,
+        "Brand of Supplier's Products",
+        "Brand of Suppliers Products",
+        "Brand of Supplier",
+        "Supplier Brand",
+        "Brand Description",
+        "Brand Name",
+        "Brand",
+        "brand_description",
+    )
+    contact_name = _get_field(
+        raw_row, "Contact Person", "Contact Person 1", "Contact Person Name", "Contact Person Name 1",
+        "Primary Contact Person", "contact_full_name", "contact_person"
+    )
+    designation = _get_field(raw_row, "Designation", "Designation 1", "Primary Designation", "contact_designation")
+
+    # --- Contact 2 (Secondary Contact) ---
+    contact_name_2 = _get_field(
+        raw_row, "Contact Person 2", "Contact Person Name 2", "Secondary Contact Person",
+        "contact_full_name_2", "contact_person_2"
+    )
+    designation_2 = _get_field(raw_row, "Designation 2", "Secondary Designation", "contact_designation_2")
+    calling_number_raw_2 = _get_field(
+        raw_row, "Calling Number 2", "Contact Calling Number 2", "Secondary Calling Number",
+        "contact_calling_number_2", "Phone 2", "Mobile 2"
+    )
+    whatsapp_number_raw_2 = _get_field(
+        raw_row, "WhatsApp Number 2", "Contact WhatsApp Number 2", "Secondary WhatsApp Number",
+        "contact_whatsapp_number_2", "WhatsApp 2"
+    )
+    wechat_number_raw_2 = _get_field(
+        raw_row, "WeChat Number 2", "Contact WeChat Number 2", "Secondary WeChat Number",
+        "contact_wechat_number_2", "WeChat 2"
+    )
+    email_raw_2 = _get_field(raw_row, "Email 2", "Contact Email 2", "Secondary Email", "email_2")
+
+    calling_number_2 = validate_phone_number(
+        calling_number_raw_2, field_label=f"Row {row_number}: Calling Number 2"
+    ) if calling_number_raw_2 else None
+
+    whatsapp_number_2 = validate_phone_number(
+        whatsapp_number_raw_2, field_label=f"Row {row_number}: WhatsApp Number 2"
+    ) if whatsapp_number_raw_2 else None
+
+    wechat_number_2 = validate_phone_number(
+        wechat_number_raw_2, field_label=f"Row {row_number}: WeChat Number 2"
+    ) if wechat_number_raw_2 else None
+
+    email_2 = validate_email_format(email_raw_2) if email_raw_2 else None
+
+    contact_2_data = None
+    if contact_name_2 or calling_number_2 or whatsapp_number_2 or wechat_number_2 or email_2:
+        contact_2_data = {
+            "person_name": contact_name_2 or "Contact Person 2",
+            "designation": designation_2 or None,
+            "calling_number": calling_number_2,
+            "whatsapp_number": whatsapp_number_2,
+            "wechat_number": wechat_number_2,
+            "email": email_2,
+        }
+
     tax_id = _get_field(raw_row, "Tax ID / GST Number", "Tax ID Number", "tax_id_number", "GST")
     address = _get_field(raw_row, "Address", "address")
-    town = _get_field(raw_row, "Town", "town")
     primary_website = _get_field(raw_row, "Primary Website", "Website", "primary_website")
     secondary_website = _get_field(raw_row, "Secondary Website", "secondary_website")
     potential_reason = _get_field(raw_row, "Potential Reason", "potential_reason")
@@ -166,9 +238,9 @@ def validate_supplier_row(raw_row: dict[str, Any], row_number: int) -> dict[str,
         "contact_whatsapp_number": whatsapp_number,
         "contact_wechat_number": wechat_number,
         "email": email,
+        "contact_2": contact_2_data,
         "tax_id_number": tax_id or None,
         "address": address or None,
-        "town": town or None,
         "primary_website": primary_website or None,
         "secondary_website": secondary_website or None,
         "supplier_grade": grade,

@@ -12,9 +12,10 @@ import { useAuth } from "@/lib/auth";
 import { Pagination } from "@/components/Pagination";
 import { SideDrawer, DetailFieldGrid } from "@/components/SideDrawer";
 import { Banner, Modal } from "@/components/ui";
-import { SearchableDropdown } from "@/components/SearchableDropdown";
+import { SearchableDropdown, SearchableFilterDropdown } from "@/components/SearchableDropdown";
 import { ProductTradeHistoryDrawer } from "@/components/ProductTradeHistoryDrawer";
 import { apiDelete, apiGet, apiPatch, apiPost, apiPut, API_ORIGIN, downloadExport, toQueryString } from "@/lib/api";
+import { useConfirm } from "@/lib/confirm";
 import { useLookup } from "@/lib/lookups";
 import type { Brand, Hsn, Product, ProductCategory, ProductSubCategory, Uom } from "@/types";
 
@@ -23,7 +24,7 @@ const PRODUCT_PRICE_COLUMNS = [
   "Product Name & Code",
   "Category & Brand",
   "Best Price (Quote)",
-  "Primary Supplier",
+  "Supplier Brand",
   "Actions",
 ];
 
@@ -77,6 +78,7 @@ interface SupplierLookupItem {
   id: string;
   company_name: string;
   supplier_type?: string;
+  brand_description?: string;
 }
 
 function resolveImageUrl(url: string | null | undefined): string {
@@ -106,6 +108,7 @@ function formatCurrency(amount: number | null | undefined, currency = "CNY"): st
 
 export function ProductPricesPage() {
   const { hasPermission } = useAuth();
+  const confirm = useConfirm();
   // Query Filters & Pagination State
   const [items, setItems] = useState<ProductPriceRow[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
@@ -356,13 +359,18 @@ export function ProductPricesPage() {
         ? list.filter(
             (s) =>
               s.company_name.toLowerCase().includes(clean) ||
+              (s.brand_description && s.brand_description.toLowerCase().includes(clean)) ||
               (s.supplier_type && s.supplier_type.toLowerCase().includes(clean))
           )
         : list;
-      return filtered.map((s) => ({
-        value: s.id,
-        label: `${s.company_name}${s.supplier_type ? ` (${s.supplier_type})` : ""}`,
-      }));
+      return filtered.map((s) => {
+        const brand = s.brand_description?.trim();
+        const display = brand ? `${brand} (${s.company_name})` : s.company_name;
+        return {
+          value: s.id,
+          label: `${display}${s.supplier_type ? ` [${s.supplier_type}]` : ""}`,
+        };
+      });
     },
     [allSuppliers]
   );
@@ -381,7 +389,10 @@ export function ProductPricesPage() {
         }
       }
       const match = list.find((s) => s.id === id);
-      return match ? `${match.company_name}${match.supplier_type ? ` (${match.supplier_type})` : ""}` : id;
+      if (!match) return id;
+      const brand = match.brand_description?.trim();
+      const display = brand ? `${brand} (${match.company_name})` : match.company_name;
+      return `${display}${match.supplier_type ? ` [${match.supplier_type}]` : ""}`;
     },
     [allSuppliers]
   );
@@ -710,7 +721,14 @@ export function ProductPricesPage() {
 
   // Delete a supplier quote link with Instant Optimistic UI
   const handleDeleteQuote = async (linkId: string, productId: string, supplierName: string) => {
-    if (!confirm(`Remove price quote from ${supplierName}?`)) return;
+    const confirmed = await confirm({
+      title: "Remove Price Quote",
+      message: `Are you sure you want to remove the price quote from ${supplierName}?`,
+      itemName: supplierName,
+      confirmLabel: "Remove Quote",
+      variant: "danger",
+    });
+    if (!confirmed) return;
 
     // 1. INSTANT OPTIMISTIC SUB-TABLE REMOVAL
     const remainingQuotes = (supplierQuotes[productId] || []).filter((q) => q.link_id !== linkId);
@@ -1013,6 +1031,19 @@ export function ProductPricesPage() {
     setDrawerProduct(null);
   };
 
+  useEffect(() => {
+    const handleNavActiveClick = (e: Event) => {
+      const customEvent = e as CustomEvent<{ key?: string; path?: string }>;
+      if (customEvent.detail?.key === "product-prices") {
+        setHistoryDrawerOpen(false);
+        closeProductDrawer();
+        window.scrollTo({ top: 0, behavior: "smooth" });
+      }
+    };
+    window.addEventListener("erp:nav-active-click", handleNavActiveClick);
+    return () => window.removeEventListener("erp:nav-active-click", handleNavActiveClick);
+  }, []);
+
   // Export with active filters and direct file download
   const handleExport = async (format: "xlsx" | "csv") => {
     setExporting(true);
@@ -1091,17 +1122,17 @@ export function ProductPricesPage() {
               🔄 Refresh
             </button>
 
-            {/* Filter Funnel Toggle (Moved to Right) */}
+            {/* Filter Funnel Toggle (Matching Products Master) */}
             <button
               type="button"
-              className="btn"
+              className={`btn btn-header-filter ${filterOpen ? "active" : ""}`}
               style={{
                 background: filterOpen ? "#0061f2" : "#475569",
                 color: "#ffffff",
-                padding: "6px 12px",
+                padding: "8px 12px",
                 borderRadius: "6px",
                 border: "none",
-                display: "flex",
+                display: "inline-flex",
                 alignItems: "center",
                 justifyContent: "center",
                 cursor: "pointer",
@@ -1115,42 +1146,31 @@ export function ProductPricesPage() {
               </svg>
             </button>
 
-            {/* Export Dropdown (Moved to Right) */}
+            {/* Export Dropdown (Matching Products Master Orange Imp/Exp Style) */}
             {hasPermission("product_price.export") && (
               <div ref={exportMenuRef} style={{ position: "relative", display: "inline-block" }}>
               <button
                 type="button"
-                className="btn btn-secondary"
+                className="btn btn-imp-exp"
                 onClick={() => setExportMenuOpen((v) => !v)}
                 disabled={exporting}
                 style={{
-                  background: "#ffffff",
-                  color: "#1e293b",
-                  border: "1px solid #cbd5e1",
-                  padding: "6px 14px",
+                  background: "#f59e0b",
+                  color: "#ffffff",
+                  border: "none",
+                  padding: "8px 16px",
                   borderRadius: "6px",
-                  fontWeight: 600,
+                  fontWeight: 700,
                   fontSize: "13px",
                   cursor: exporting ? "wait" : "pointer",
                   display: "inline-flex",
                   alignItems: "center",
                   gap: "6px",
-                  boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
+                  boxShadow: "0 2px 4px rgba(245, 158, 11, 0.25)",
                 }}
                 title="Export complete pricing directory"
               >
-                {exporting ? (
-                  <>
-                    <span style={{ fontSize: "12px" }}>⏳</span>
-                    <span>Exporting...</span>
-                  </>
-                ) : (
-                  <>
-                    <span style={{ fontSize: "14px" }}>📥</span>
-                    <span>Export</span>
-                    <span style={{ fontSize: "10px", color: "#64748b", marginLeft: "2px" }}>▼</span>
-                  </>
-                )}
+                <span>{exporting ? "Exporting..." : "Export ▾"}</span>
               </button>
 
               {exportMenuOpen && (
@@ -1277,86 +1297,74 @@ export function ProductPricesPage() {
               {/* Category Filter */}
               <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
                 <label style={{ fontSize: "13px", fontWeight: 600, color: "#334155" }}>Category</label>
-                <select
-                  value={categoryFilter}
-                  onChange={(e) => {
-                    setCategoryFilter(e.target.value);
+                <SearchableFilterDropdown
+                  value={categoryFilter || null}
+                  onChange={(val) => {
+                    setCategoryFilter(val || "");
                     setSubCategoryFilter("");
                     setPage(1);
                   }}
-                  style={{
-                    padding: "9px 12px",
-                    borderRadius: "6px",
-                    border: "1px solid #cbd5e0",
-                    fontSize: "13.5px",
-                    background: "#ffffff",
-                    color: "#1e293b",
-                    width: "100%",
+                  placeholder="All"
+                  allLabel="All"
+                  fetchOptions={async (term) => {
+                    const q = term.toLowerCase().trim();
+                    return categories.items
+                      .filter((c) => !q || c.name.toLowerCase().includes(q))
+                      .map((c) => ({ value: c.id, label: c.name }));
                   }}
-                >
-                  <option value="">All</option>
-                  {categories.items.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name}
-                    </option>
-                  ))}
-                </select>
+                  fetchLabelForValue={async (val) => {
+                    const c = categories.items.find((item) => item.id === val);
+                    return c ? c.name : "";
+                  }}
+                />
               </div>
 
               {/* Sub Category Filter */}
               <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
                 <label style={{ fontSize: "13px", fontWeight: 600, color: "#334155" }}>Sub Category</label>
-                <select
-                  value={subCategoryFilter}
-                  onChange={(e) => {
-                    setSubCategoryFilter(e.target.value);
+                <SearchableFilterDropdown
+                  value={subCategoryFilter || null}
+                  onChange={(val) => {
+                    setSubCategoryFilter(val || "");
                     setPage(1);
                   }}
-                  style={{
-                    padding: "9px 12px",
-                    borderRadius: "6px",
-                    border: "1px solid #cbd5e0",
-                    fontSize: "13.5px",
-                    background: "#ffffff",
-                    color: "#1e293b",
-                    width: "100%",
+                  placeholder="All"
+                  allLabel="All"
+                  fetchOptions={async (term) => {
+                    const q = term.toLowerCase().trim();
+                    return scopedSubCategories
+                      .filter((sc) => !q || sc.name.toLowerCase().includes(q) || (sc.code && sc.code.toLowerCase().includes(q)))
+                      .map((sc) => ({ value: sc.id, label: sc.name }));
                   }}
-                >
-                  <option value="">All</option>
-                  {scopedSubCategories.map((sc) => (
-                    <option key={sc.id} value={sc.id}>
-                      {sc.name}
-                    </option>
-                  ))}
-                </select>
+                  fetchLabelForValue={async (val) => {
+                    const sc = subCategories.items.find((item) => item.id === val);
+                    return sc ? sc.name : "";
+                  }}
+                />
               </div>
 
               {/* Brand Filter */}
               <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
                 <label style={{ fontSize: "13px", fontWeight: 600, color: "#334155" }}>Brand</label>
-                <select
-                  value={brandFilter}
-                  onChange={(e) => {
-                    setBrandFilter(e.target.value);
+                <SearchableFilterDropdown
+                  value={brandFilter || null}
+                  onChange={(val) => {
+                    setBrandFilter(val || "");
                     setPage(1);
                   }}
-                  style={{
-                    padding: "9px 12px",
-                    borderRadius: "6px",
-                    border: "1px solid #cbd5e0",
-                    fontSize: "13.5px",
-                    background: "#ffffff",
-                    color: "#1e293b",
-                    width: "100%",
+                  placeholder="All"
+                  allLabel="All"
+                  fetchOptions={async (term) => {
+                    const q = term.toLowerCase().trim();
+                    return brands.items
+                      .filter((b) => !q || b.name.toLowerCase().includes(q))
+                      .map((b) => ({ value: b.id, label: b.name }));
                   }}
-                >
-                  <option value="">All</option>
-                  {brands.items.map((b) => (
-                    <option key={b.id} value={b.id}>
-                      {b.name}
-                    </option>
-                  ))}
-                </select>
+                  fetchLabelForValue={async (val) => {
+                    const b = brands.items.find((item) => item.id === val);
+                    return b ? b.name : "";
+                  }}
+                />
               </div>
 
               {/* Pricing Status Filter */}
@@ -1398,7 +1406,10 @@ export function ProductPricesPage() {
                   fontWeight: 600,
                   fontSize: "13px",
                   cursor: "pointer",
+                  transition: "background-color 0.15s ease",
                 }}
+                onMouseEnter={(e) => (e.currentTarget.style.background = "#475569")}
+                onMouseLeave={(e) => (e.currentTarget.style.background = "#64748b")}
                 onClick={() => {
                   setCategoryFilter("");
                   setSubCategoryFilter("");
@@ -1410,26 +1421,6 @@ export function ProductPricesPage() {
                 }}
               >
                 Reset
-              </button>
-              <button
-                type="button"
-                style={{
-                  padding: "8px 18px",
-                  borderRadius: "6px",
-                  border: "none",
-                  background: "#f59e0b",
-                  color: "#ffffff",
-                  fontWeight: 600,
-                  fontSize: "13px",
-                  cursor: "pointer",
-                }}
-                onClick={() => {
-                  setDebouncedSearch(searchTerm);
-                  setPage(1);
-                  fetchPrices();
-                }}
-              >
-                Search
               </button>
             </div>
           </div>
@@ -1702,7 +1693,7 @@ export function ProductPricesPage() {
                               ...getFreezeStyle(4, true),
                             }}
                           >
-                            Primary Supplier
+                            Supplier Brand
                           </th>
                         );
                       case 5:

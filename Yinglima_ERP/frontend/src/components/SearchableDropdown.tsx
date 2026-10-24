@@ -26,6 +26,7 @@ export interface DropdownOption {
   label: string;
   sublabel?: string;
   group?: string;
+  renderLabel?: () => React.ReactNode;
 }
 
 export const isUUID = (s: string) =>
@@ -57,6 +58,7 @@ export interface SearchableDropdownProps extends SharedProps {
   disabled?: boolean;
   onCreateNew?: (typedText: string) => void;
   createNewLabel?: (typedText: string) => string;
+  inputStyle?: React.CSSProperties;
 }
 
 export function SearchableDropdown({
@@ -72,6 +74,7 @@ export function SearchableDropdown({
   disabled = false,
   onCreateNew,
   createNewLabel,
+  inputStyle,
 }: SearchableDropdownProps) {
   const [inputValue, setInputValue] = useState("");
   const [label, setLabel] = useState("");
@@ -201,7 +204,8 @@ export function SearchableDropdown({
     } catch {
       /* ignore */
     }
-    const term = inputValue.trim();
+    const isUnchangedSelection = value !== null && inputValue.trim() === (label || "").trim();
+    const term = isUnchangedSelection ? "" : inputValue.trim();
     void search.run(async (signal) => {
       const found = await fetchOptions(term, signal);
       setOptions(found || []);
@@ -213,7 +217,8 @@ export function SearchableDropdown({
   function handleClick() {
     if (disabled) return;
     if (!open) {
-      const term = inputValue.trim();
+      const isUnchangedSelection = value !== null && inputValue.trim() === (label || "").trim();
+      const term = isUnchangedSelection ? "" : inputValue.trim();
       void search.run(async (signal) => {
         const found = await fetchOptions(term, signal);
         setOptions(found || []);
@@ -242,7 +247,8 @@ export function SearchableDropdown({
     if (!open) {
       if (e.key === "ArrowDown" || e.key === "ArrowUp") {
         e.preventDefault();
-        const term = inputValue.trim();
+        const isUnchangedSelection = value !== null && inputValue.trim() === (label || "").trim();
+        const term = isUnchangedSelection ? "" : inputValue.trim();
         void search.run(async (signal) => {
           const found = await fetchOptions(term, signal);
           setOptions(found || []);
@@ -294,6 +300,8 @@ export function SearchableDropdown({
           border: hasError ? "1.5px solid #ef4444" : undefined,
           boxShadow: hasError ? "0 0 0 3px rgba(239, 68, 68, 0.15)" : undefined,
           paddingRight: !disabled && inputValue ? "56px" : "30px",
+          ...inputStyle,
+          ...(hasError ? { border: "1.5px solid #ef4444", boxShadow: "0 0 0 3px rgba(239, 68, 68, 0.15)" } : {}),
           ...(disabled
             ? {
                 background: "#f8fafc",
@@ -382,7 +390,8 @@ export function SearchableDropdown({
             if (open) {
               closeResults();
             } else {
-              const term = inputValue.trim();
+              const isUnchangedSelection = value !== null && inputValue.trim() === (label || "").trim();
+              const term = isUnchangedSelection ? "" : inputValue.trim();
               void search.run(async (signal) => {
                 const found = await fetchOptions(term, signal);
                 setOptions(found || []);
@@ -465,7 +474,7 @@ export function SearchableDropdown({
                         }}
                       >
                         <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                          <span>{opt.label}</span>
+                          <span>{opt.renderLabel ? opt.renderLabel() : opt.label}</span>
                           {opt.sublabel && (
                             <span style={{ fontSize: "11px", color: "#64748b", background: "#f1f5f9", padding: "1px 6px", borderRadius: "4px" }}>
                               {opt.sublabel}
@@ -529,7 +538,7 @@ export function SearchableDropdown({
                           }}
                         >
                           <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                            <span>{opt.label}</span>
+                            <span>{opt.renderLabel ? opt.renderLabel() : opt.label}</span>
                             {opt.sublabel && (
                               <span style={{ fontSize: "11px", color: "#64748b", background: "#f1f5f9", padding: "1px 6px", borderRadius: "4px" }}>
                                 {opt.sublabel}
@@ -1771,3 +1780,389 @@ export function SearchableDropdownMultiPanel({
     </div>
   );
 }
+
+/* ------------------------------------------------------------------ */
+/* Single-Select Filter Dropdown with Top Search & "All" Option       */
+/* ------------------------------------------------------------------ */
+
+export interface SearchableFilterDropdownProps extends SharedProps {
+  value: string | null;
+  onChange: (value: string | null, label: string) => void;
+  placeholder?: string;
+  allLabel?: string;
+  id?: string;
+  disabled?: boolean;
+}
+
+export function SearchableFilterDropdown({
+  value,
+  onChange,
+  placeholder,
+  allLabel = "All",
+  fetchOptions,
+  fetchLabelForValue,
+  id,
+  disabled = false,
+}: SearchableFilterDropdownProps) {
+  const [open, setOpen] = useState(false);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [options, setOptions] = useState<DropdownOption[]>([]);
+  const [label, setLabel] = useState<string>("");
+  const [loading, setLoading] = useState(false);
+  const [highlightIndex, setHighlightIndex] = useState(-1);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const search = useSearchController();
+  const fetchLabelRef = useRef(fetchLabelForValue);
+  fetchLabelRef.current = fetchLabelForValue;
+
+  // Resolve display label whenever value changes
+  useEffect(() => {
+    if (!value) {
+      setLabel("");
+      return;
+    }
+    // Check in-memory cache first
+    if (labelMemoryCache.has(value)) {
+      setLabel(labelMemoryCache.get(value)!);
+      return;
+    }
+    // Check current loaded options
+    const found = options.find((o) => o.value === value);
+    if (found && found.label) {
+      setLabel(found.label);
+      if (!isUUID(found.label)) {
+        labelMemoryCache.set(value, found.label);
+      }
+      return;
+    }
+    // Fetch label from API
+    let cancelled = false;
+    const fetchFn = fetchLabelRef.current;
+    if (fetchFn) {
+      fetchFn(value)
+        .then((resolved) => {
+          if (!cancelled && resolved) {
+            setLabel(resolved);
+            if (!isUUID(resolved)) {
+              labelMemoryCache.set(value, resolved);
+            }
+          }
+        })
+        .catch(() => {});
+    } else {
+      setLabel(value);
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [value, options]);
+
+  // Click outside to close dropdown
+  useEffect(() => {
+    if (!open) return;
+    function handleClickOutside(e: MouseEvent) {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setOpen(false);
+        setSearchTerm("");
+        setHighlightIndex(-1);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [open]);
+
+  // When opening: focus search bar & fetch initial list
+  useEffect(() => {
+    if (open) {
+      setTimeout(() => {
+        searchInputRef.current?.focus();
+      }, 50);
+
+      setLoading(true);
+      void search.run(async (signal) => {
+        try {
+          const found = await fetchOptions("", signal);
+          setOptions(found || []);
+        } finally {
+          setLoading(false);
+        }
+      }, 0);
+    }
+  }, [open]);
+
+  // Type in search bar
+  function handleSearch(term: string) {
+    setSearchTerm(term);
+    setHighlightIndex(-1);
+    void search.run(async (signal) => {
+      setLoading(true);
+      try {
+        const found = await fetchOptions(term.trim(), signal);
+        setOptions(found || []);
+      } finally {
+        setLoading(false);
+      }
+    }, 150);
+  }
+
+  function handleSelect(val: string | null, lbl: string) {
+    onChange(val, lbl);
+    setOpen(false);
+    setSearchTerm("");
+    setHighlightIndex(-1);
+  }
+
+  // Keyboard navigation inside dropdown
+  function handleKeyDown(e: React.KeyboardEvent) {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      setOpen(false);
+      setSearchTerm("");
+      setHighlightIndex(-1);
+      return;
+    }
+    const totalItems = 1 + options.length; // index 0 is "All", indices 1..N are options
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setHighlightIndex((prev) => (prev < totalItems - 1 ? prev + 1 : 0));
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setHighlightIndex((prev) => (prev > 0 ? prev - 1 : totalItems - 1));
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      if (highlightIndex === 0) {
+        handleSelect(null, allLabel);
+      } else if (highlightIndex > 0 && options[highlightIndex - 1]) {
+        const opt = options[highlightIndex - 1];
+        handleSelect(opt.value, opt.label);
+      }
+    }
+  }
+
+  const isAllActive = !value;
+  const displayLabel = value ? (label || value) : (disabled && placeholder ? placeholder : allLabel);
+
+  return (
+    <div
+      ref={containerRef}
+      id={id}
+      style={{
+        position: "relative",
+        width: "100%",
+        fontFamily: "inherit",
+      }}
+    >
+      {/* Closed Trigger / Selector Button */}
+      <div
+        tabIndex={disabled ? -1 : 0}
+        onClick={() => {
+          if (!disabled) setOpen((prev) => !prev);
+        }}
+        onKeyDown={(e) => {
+          if (disabled) return;
+          if (e.key === "Enter" || e.key === " " || e.key === "ArrowDown") {
+            e.preventDefault();
+            setOpen(true);
+          }
+        }}
+        style={{
+          width: "100%",
+          minHeight: "38px",
+          padding: "6px 12px",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: "8px",
+          background: disabled ? "#f8fafc" : "#ffffff",
+          border: open ? "1.5px solid #2563eb" : "1px solid #cbd5e1",
+          borderRadius: "6px",
+          cursor: disabled ? "not-allowed" : "pointer",
+          boxSizing: "border-box",
+          transition: "border-color 0.15s ease, box-shadow 0.15s ease",
+          boxShadow: open ? "0 0 0 3px rgba(37, 99, 235, 0.12)" : "none",
+          outline: "none",
+        }}
+      >
+        <span
+          style={{
+            fontSize: "13px",
+            color: disabled ? "#94a3b8" : value ? "#0f172a" : "#334155",
+            fontWeight: value ? 600 : 500,
+            whiteSpace: "nowrap",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            flex: 1,
+          }}
+        >
+          {displayLabel}
+        </span>
+        <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+          {!disabled && Boolean(value) && (
+            <span
+              role="button"
+              tabIndex={0}
+              title="Clear filter (Show All)"
+              onClick={(e) => {
+                e.stopPropagation();
+                handleSelect(null, allLabel);
+              }}
+              style={{
+                width: "18px",
+                height: "18px",
+                borderRadius: "50%",
+                background: "#e2e8f0",
+                color: "#64748b",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontSize: "10px",
+                cursor: "pointer",
+                fontWeight: 700,
+                lineHeight: 1,
+                transition: "all 0.15s ease",
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = "#cbd5e1";
+                e.currentTarget.style.color = "#0f172a";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = "#e2e8f0";
+                e.currentTarget.style.color = "#64748b";
+              }}
+            >
+              ✕
+            </span>
+          )}
+          <span
+            style={{
+              color: "#94a3b8",
+              fontSize: "10px",
+              transform: open ? "rotate(180deg)" : "none",
+              transition: "transform 0.2s ease",
+              pointerEvents: "none",
+            }}
+          >
+            ▼
+          </span>
+        </div>
+      </div>
+
+      {/* Dropdown Popover */}
+      {open && (
+        <div
+          onKeyDown={handleKeyDown}
+          style={{
+            position: "absolute",
+            top: "calc(100% + 4px)",
+            left: 0,
+            right: 0,
+            zIndex: 9999,
+            background: "#ffffff",
+            border: "1px solid #cbd5e1",
+            borderRadius: "6px",
+            boxShadow: "0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.05)",
+            overflow: "hidden",
+            display: "flex",
+            flexDirection: "column",
+            maxHeight: "320px",
+          }}
+        >
+          {/* Top Search Field */}
+          <div style={{ padding: "8px", borderBottom: "1px solid #f1f5f9", background: "#f8fafc" }}>
+            <input
+              ref={searchInputRef}
+              type="text"
+              placeholder="Search / Type here..."
+              value={searchTerm}
+              onChange={(e) => handleSearch(e.target.value)}
+              style={{
+                width: "100%",
+                padding: "6px 10px",
+                fontSize: "13px",
+                border: "1px solid #cbd5e1",
+                borderRadius: "4px",
+                outline: "none",
+                background: "#ffffff",
+                boxSizing: "border-box",
+              }}
+            />
+          </div>
+
+          {/* Options List */}
+          <div style={{ overflowY: "auto", flex: 1, maxHeight: "260px" }}>
+            {/* "All" Item directly below search bar */}
+            <div
+              onClick={() => handleSelect(null, allLabel)}
+              style={{
+                padding: "8px 12px",
+                fontSize: "13px",
+                cursor: "pointer",
+                fontWeight: isAllActive ? 600 : 500,
+                background: isAllActive
+                  ? "#2563eb"
+                  : highlightIndex === 0
+                  ? "#f1f5f9"
+                  : "#ffffff",
+                color: isAllActive ? "#ffffff" : "#0f172a",
+                borderBottom: "1px solid #f1f5f9",
+                transition: "background 0.1s ease",
+              }}
+              onMouseEnter={(e) => {
+                if (!isAllActive) e.currentTarget.style.background = "#f1f5f9";
+              }}
+              onMouseLeave={(e) => {
+                if (!isAllActive) e.currentTarget.style.background = "#ffffff";
+              }}
+            >
+              {allLabel}
+            </div>
+
+            {loading ? (
+              <div style={{ padding: "12px", textAlign: "center", color: "#94a3b8", fontSize: "13px" }}>
+                Loading...
+              </div>
+            ) : options.length === 0 && searchTerm ? (
+              <div style={{ padding: "12px", textAlign: "center", color: "#94a3b8", fontSize: "13px" }}>
+                No matching results
+              </div>
+            ) : (
+              options.map((opt, idx) => {
+                const isSelected = opt.value === value;
+                const isHighlighted = highlightIndex === idx + 1;
+                return (
+                  <div
+                    key={opt.value}
+                    onClick={() => handleSelect(opt.value, opt.label)}
+                    style={{
+                      padding: "8px 12px",
+                      fontSize: "13px",
+                      cursor: "pointer",
+                      fontWeight: isSelected ? 600 : 400,
+                      background: isSelected
+                        ? "#2563eb"
+                        : isHighlighted
+                        ? "#f1f5f9"
+                        : "#ffffff",
+                      color: isSelected ? "#ffffff" : "#1e293b",
+                      transition: "background 0.1s ease",
+                    }}
+                    onMouseEnter={(e) => {
+                      if (!isSelected) e.currentTarget.style.background = "#f8fafc";
+                    }}
+                    onMouseLeave={(e) => {
+                      if (!isSelected) e.currentTarget.style.background = "#ffffff";
+                    }}
+                  >
+                    {opt.label}
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+

@@ -511,14 +511,19 @@ class ProductPriceRepository:
     async def list_suppliers_lookup(self) -> list[dict[str, Any]]:
         """Fast, lightweight lookup of suppliers for price assignment dropdowns."""
         sql = text("""
-            SELECT id, company_name, supplier_type
+            SELECT id, company_name, supplier_type, brand_description
             FROM suppliers
             WHERE is_active = true
             ORDER BY company_name ASC
         """)
         res = await self.session.execute(sql)
         return [
-            {"id": str(r[0]), "company_name": r[1], "supplier_type": r[2]}
+            {
+                "id": str(r[0]),
+                "company_name": r[1],
+                "supplier_type": r[2],
+                "brand_description": r[3] or "",
+            }
             for r in res.fetchall()
         ]
 

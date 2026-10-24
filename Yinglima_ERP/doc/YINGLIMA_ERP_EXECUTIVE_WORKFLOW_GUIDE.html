@@ -1,0 +1,1092 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Yinglima ERP — Complete System Workflow &amp; Architecture Manual</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --primary: #1e3a8a;
+      --primary-light: #eff6ff;
+      --accent: #2563eb;
+      --success: #16a34a;
+      --warning: #ca8a04;
+      --danger: #dc2626;
+      --text-main: #0f172a;
+      --text-muted: #475569;
+      --border-color: #e2e8f0;
+      --bg-page: #f8fafc;
+      --bg-card: #ffffff;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Inter', system-ui, -apple-system, sans-serif;
+      background: var(--bg-page);
+      color: var(--text-main);
+      line-height: 1.6;
+      padding-bottom: 80px;
+    }
+    /* Top Action Bar */
+    .top-bar {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      background: rgba(255, 255, 255, 0.95);
+      backdrop-filter: blur(8px);
+      border-bottom: 1px solid var(--border-color);
+      padding: 12px 32px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .brand-logo {
+      background: #1e3a8a;
+      color: white;
+      font-weight: 800;
+      font-size: 14px;
+      padding: 6px 12px;
+      border-radius: 6px;
+      letter-spacing: 0.5px;
+    }
+    .brand-title {
+      font-size: 15px;
+      font-weight: 700;
+      color: #0f172a;
+    }
+    .btn-print {
+      background: #2563eb;
+      color: white;
+      border: none;
+      padding: 8px 16px;
+      border-radius: 6px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      transition: background 0.2s;
+    }
+    .btn-print:hover { background: #1d4ed8; }
+
+    /* Main Container */
+    .container {
+      max-width: 1100px;
+      margin: 32px auto;
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      border-radius: 12px;
+      box-shadow: 0 4px 16px rgba(15, 23, 42, 0.04);
+      padding: 48px 56px;
+    }
+
+    /* Typography */
+    .doc-h1 {
+      font-size: 28px;
+      font-weight: 800;
+      color: #0f172a;
+      border-bottom: 2px solid #e2e8f0;
+      padding-bottom: 14px;
+      margin-top: 10px;
+      margin-bottom: 20px;
+    }
+    .doc-h2 {
+      font-size: 20px;
+      font-weight: 700;
+      color: #1e3a8a;
+      margin-top: 36px;
+      margin-bottom: 14px;
+      padding-left: 12px;
+      border-left: 4px solid #2563eb;
+    }
+    .doc-h3 {
+      font-size: 16px;
+      font-weight: 600;
+      color: #334155;
+      margin-top: 24px;
+      margin-bottom: 10px;
+    }
+    .doc-p {
+      font-size: 14px;
+      color: #334155;
+      margin-bottom: 14px;
+    }
+    .doc-quote {
+      background: #eff6ff;
+      border-left: 4px solid #3b82f6;
+      padding: 12px 18px;
+      border-radius: 0 6px 6px 0;
+      font-size: 13px;
+      color: #1e40af;
+      margin-bottom: 20px;
+    }
+    .doc-hr {
+      border: 0;
+      height: 1px;
+      background: #e2e8f0;
+      margin: 32px 0;
+    }
+    .doc-li {
+      font-size: 14px;
+      color: #334155;
+      margin-left: 24px;
+      margin-bottom: 6px;
+    }
+    .doc-num-item {
+      font-size: 14px;
+      color: #334155;
+      margin-bottom: 8px;
+      padding-left: 4px;
+    }
+    code {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px;
+      background: #f1f5f9;
+      color: #0f172a;
+      padding: 2px 6px;
+      border-radius: 4px;
+      border: 1px solid #e2e8f0;
+    }
+    .code-block {
+      background: #0f172a;
+      color: #f8fafc;
+      padding: 16px;
+      border-radius: 8px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px;
+      overflow-x: auto;
+      margin: 16px 0;
+    }
+    .code-block code {
+      background: transparent;
+      color: inherit;
+      border: none;
+      padding: 0;
+    }
+
+    /* Diagrams & SVGs */
+    .svg-container {
+      background: #ffffff;
+      border: 1px solid #cbd5e1;
+      border-radius: 10px;
+      padding: 16px;
+      margin: 24px 0;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+      display: flex;
+      justify-content: center;
+      overflow-x: auto;
+    }
+    .svg-container svg {
+      max-width: 100%;
+      height: auto;
+      display: block;
+    }
+
+    /* Tables */
+    .table-responsive {
+      overflow-x: auto;
+      margin: 20px 0;
+      border-radius: 8px;
+      border: 1px solid #e2e8f0;
+    }
+    .data-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+      text-align: left;
+    }
+    .data-table th {
+      background: #f1f5f9;
+      color: #1e293b;
+      font-weight: 700;
+      padding: 10px 14px;
+      border-bottom: 1px solid #cbd5e1;
+    }
+    .data-table td {
+      padding: 10px 14px;
+      border-bottom: 1px solid #e2e8f0;
+      color: #334155;
+    }
+    .data-table tr:hover td {
+      background: #f8fafc;
+    }
+
+    /* Print Styles */
+    @media print {
+      .top-bar { display: none; }
+      body { background: white; padding: 0; }
+      .container {
+        box-shadow: none;
+        border: none;
+        max-width: 100%;
+        margin: 0;
+        padding: 0;
+      }
+      .svg-container {
+        box-shadow: none;
+        page-break-inside: avoid;
+      }
+      .data-table { page-break-inside: avoid; }
+      .doc-h2 { page-break-before: auto; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Sticky Top Header -->
+  <div class="top-bar">
+    <div class="brand">
+      <span class="brand-logo">YINGLIMA ERP</span>
+      <span class="brand-title">Executive Operations &amp; Architectural Workflow Manual</span>
+    </div>
+    <button class="btn-print" onclick="window.print()">
+      🖨️ Print / Save as PDF
+    </button>
+  </div>
+
+  <!-- Document Container -->
+  <div class="container">
+    <h1 class="doc-h1">Yinglima ERP — Complete System Workflow, Architecture &amp; Module Guide</h1>
+<blockquote class="doc-quote"><strong>Document Type:</strong> Executive Architecture, System Workflow &amp; User Interface Manual</blockquote>
+<blockquote class="doc-quote"><strong>Prepared For:</strong> Executive Management, Operations Leadership, and QA &amp; Development Teams</blockquote>
+<blockquote class="doc-quote"><strong>System:</strong> <strong>Yinglima ERP</strong> (China Global Procurement &amp; Export Trade Engine)</blockquote>
+<blockquote class="doc-quote"><strong>Location:</strong> `/doc/YINGLIMA_ERP_COMPLETE_WORKFLOW_AND_SYSTEM_GUIDE.md`</blockquote>
+<blockquote class="doc-quote"><strong>Version:</strong> 2.4.0 (Enterprise Edition)</blockquote>
+<blockquote class="doc-quote"><strong>Status:</strong> Production Reference</blockquote>
+<hr class="doc-hr"/>
+<h2 class="doc-h2">Table of Contents</h2>
+<div class="doc-num-item"><strong>1.</strong> [Master End-to-End System Flow Diagrams](#1-master-end-to-end-system-flow-diagrams)</div>
+<li class="doc-li">1.1. [High-Level Business Lifecycle Flow](#11-high-level-business-lifecycle-flow)</li>
+<li class="doc-li">1.2. [Cross-Border Commercial &amp; Financial Lifecycle](#12-cross-border-commercial--financial-lifecycle)</li>
+<li class="doc-li">1.3. [System Relational &amp; Data Transfer Architecture](#13-system-relational--data-transfer-architecture)</li>
+<div class="doc-num-item"><strong>2.</strong> [Executive System Overview &amp; Core Philosophy](#2-executive-system-overview--core-philosophy)</div>
+<div class="doc-num-item"><strong>3.</strong> [Module-by-Module Comprehensive Workflows &amp; Screen Guide](#3-module-by-module-comprehensive-workflows--screen-guide)</div>
+<li class="doc-li">3.1. [DASHBOARD Module (<code>/dashboard</code>)](#31-dashboard-module-dashboard)</li>
+<li class="doc-li">3.2. [CONTACT: Suppliers Master Module (<code>/suppliers</code>)](#32-contact-suppliers-master-module-suppliers)</li>
+<li class="doc-li">3.3. [CONTACT: Buyers Master Module (<code>/buyers</code>)](#33-contact-buyers-master-module-buyers)</li>
+<li class="doc-li">3.4. [INVENTORY: Product Master &amp; Gallery (<code>/masters/products</code>, <code>/inventory/product-gallery</code>)](#34-inventory-product-master--gallery-mastersproducts-inventoryproduct-gallery)</li>
+<li class="doc-li">3.5. [INVENTORY: Product Prices &amp; Quotation Matrix (<code>/inventory/product-prices</code>)](#35-inventory-product-prices--quotation-matrix-inventoryproduct-prices)</li>
+<li class="doc-li">3.6. [INVENTORY: Stock Movement &amp; Live Inventory Ledger (<code>/inventory/stock-movement</code>)](#36-inventory-stock-movement--live-inventory-ledger-inventorystock-movement)</li>
+<li class="doc-li">3.7. [SALE: Inquiries &amp; RFQ Lifecycle Engine (<code>/inquiries</code>)](#37-sale-inquiries--rfq-lifecycle-engine-inquiries)</li>
+<li class="doc-li">3.8. [PURCHASE: Local Purchase Module (<code>/purchases/local</code>)](#38-purchase-local-purchase-module-purchaseslocal)</li>
+<li class="doc-li">3.9. [PLANNING: Master Shipment Planning Grid (<code>/planning</code>)](#39-planning-master-shipment-planning-grid-planning)</li>
+<li class="doc-li">3.10. [SALE: Sale Process &amp; Official Export Trade Engine (<code>/sale/process</code>)](#310-sale-sale-process--official-export-trade-engine-saleprocess)</li>
+<li class="doc-li">3.11. [CONFIGURATIONS: System Masters (HSN, Geography, Currency, UOM, Organizations)](#311-configurations-system-masters-hsn-geography-currency-uom-organizations)</li>
+<li class="doc-li">3.12. [USER MANAGEMENT: Users &amp; RBAC Permissions (<code>/users</code>, <code>/roles</code>)](#312-user-management-users--rbac-permissions-users-roles)</li>
+<li class="doc-li">3.13. [GOVERNANCE: Audit Log &amp; Recycle Bin (<code>/settings/audit-log</code>, <code>/settings/trash</code>)](#313-governance-audit-log--recycle-bin-settingsaudit-log-settingstrash)</li>
+<li class="doc-li">3.14. [CROSS-ERP: Automated Synchronization Engine (Yinglima &amp;rarr; Inhyma)](#314-cross-erp-automated-synchronization-engine-yinglima--inhyma)</li>
+<div class="doc-num-item"><strong>4.</strong> [Step-by-Step Operational Cheatsheet for Daily Business Execution](#4-step-by-step-operational-cheatsheet-for-daily-business-execution)</div>
+<hr class="doc-hr"/>
+<h1 class="doc-h1">1. Master End-to-End System Flow Diagrams</h1>
+<h3 class="doc-h3">1.1. High-Level Business Lifecycle Flow</h3>
+<div class="svg-container" title="Yinglima ERP End-to-End Business Flow Diagram"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 820" width="100%" height="100%">
+  <defs>
+    <style>
+      .title { font-family: 'Segoe UI', system-ui, sans-serif; font-size: 22px; font-weight: 700; fill: #0f172a; }
+      .subtitle { font-family: 'Segoe UI', system-ui, sans-serif; font-size: 13px; fill: #64748b; }
+      .phase-title { font-family: 'Segoe UI', system-ui, sans-serif; font-size: 14px; font-weight: 700; }
+      .card-title { font-family: 'Segoe UI', system-ui, sans-serif; font-size: 13px; font-weight: 600; fill: #0f172a; }
+      .card-desc { font-family: 'Segoe UI', system-ui, sans-serif; font-size: 11px; fill: #475569; }
+      .badge { font-family: 'Segoe UI', system-ui, sans-serif; font-size: 10px; font-weight: 700; }
+      .flow-arrow { stroke: #3b82f6; stroke-width: 2.5; fill: none; stroke-dasharray: 4,4; animation: dash 30s linear infinite; }
+      .solid-arrow { stroke: #2563eb; stroke-width: 2; fill: none; }
+    </style>
+    <filter id="shadow" x="-5%" y="-5%" width="110%" height="115%" filterUnits="userSpaceOnUse">
+      <feDropShadow dx="0" dy="3" stdDeviation="4" flood-color="#0f172a" flood-opacity="0.08" />
+    </filter>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1 L 10 5 L 0 9 z" fill="#2563eb" />
+    </marker>
+    <marker id="arrow-green" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1 L 10 5 L 0 9 z" fill="#16a34a" />
+    </marker>
+    <marker id="arrow-purple" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1 L 10 5 L 0 9 z" fill="#9333ea" />
+    </marker>
+  </defs>
+
+  <!-- Canvas Background -->
+  <rect width="1100" height="820" fill="#f8fafc" rx="12" />
+
+  <!-- Header -->
+  <rect x="25" y="20" width="1050" height="60" rx="8" fill="#ffffff" stroke="#e2e8f0" stroke-width="1" filter="url(#shadow)" />
+  <text x="50" y="48" class="title">Yinglima ERP — Master End-to-End Business Architecture Flow</text>
+  <text x="50" y="68" class="subtitle">Complete Procurement, Planning, Local Factory Purchase &amp; Global Export Invoicing Engine</text>
+
+  <!-- ==================== PHASE 1: MASTERS ==================== -->
+  <rect x="25" y="100" width="320" height="200" rx="10" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5" filter="url(#shadow)" />
+  <rect x="25" y="100" width="320" height="36" rx="10" fill="#f1f5f9" />
+  <text x="45" y="124" class="phase-title" fill="#334155">1. FOUNDATION &amp; MASTER SETUP</text>
+
+  <rect x="45" y="150" width="130" height="60" rx="6" fill="#f8fafc" stroke="#e2e8f0" />
+  <text x="55" y="172" class="card-title">Suppliers Master</text>
+  <text x="55" y="190" class="card-desc">China Factories &amp; USCC</text>
+
+  <rect x="195" y="150" width="130" height="60" rx="6" fill="#f8fafc" stroke="#e2e8f0" />
+  <text x="205" y="172" class="card-title">Buyers Master</text>
+  <text x="205" y="190" class="card-desc">Overseas Importers</text>
+
+  <rect x="45" y="225" width="280" height="60" rx="6" fill="#eff6ff" stroke="#bfdbfe" />
+  <text x="55" y="248" class="card-title" fill="#1d4ed8">Product Master &amp; HSN Master</text>
+  <text x="55" y="266" class="card-desc">Dimensions, CBM, Weights, China VAT (0%/13%), GST (18%)</text>
+
+  <!-- ==================== PHASE 2: SOURCING ==================== -->
+  <rect x="390" y="100" width="320" height="200" rx="10" fill="#ffffff" stroke="#93c5fd" stroke-width="1.5" filter="url(#shadow)" />
+  <rect x="390" y="100" width="320" height="36" rx="10" fill="#dbeafe" />
+  <text x="410" y="124" class="phase-title" fill="#1e40af">2. SOURCING &amp; RFQ DISCOVERY</text>
+
+  <rect x="410" y="150" width="280" height="60" rx="6" fill="#f0f9ff" stroke="#bae6fd" />
+  <text x="420" y="172" class="card-title">Product Prices &amp; Quotation Matrix</text>
+  <text x="420" y="190" class="card-desc">Multi-Supplier Quotes, Preferred Star (⭐) Sourcing Partner</text>
+
+  <rect x="410" y="225" width="280" height="60" rx="6" fill="#f0fdf4" stroke="#bbf7d0" />
+  <text x="420" y="248" class="card-title" fill="#15803d">Inquiries &amp; RFQ Lifecycle Engine</text>
+  <text x="420" y="266" class="card-desc">Buyer RFQ &rarr; Auto-Mail to Factories &rarr; AI Bill Ingestion</text>
+
+  <!-- ==================== PHASE 3: PLANNING ==================== -->
+  <rect x="755" y="100" width="320" height="200" rx="10" fill="#ffffff" stroke="#fde047" stroke-width="1.5" filter="url(#shadow)" />
+  <rect x="755" y="100" width="320" height="36" rx="10" fill="#fef9c3" />
+  <text x="775" y="124" class="phase-title" fill="#854d0e">3. SHIPMENT &amp; CONTAINER PLANNING</text>
+
+  <rect x="775" y="150" width="280" height="60" rx="6" fill="#fefce8" stroke="#fef08a" />
+  <text x="785" y="172" class="card-title">Master Planning Grid (/planning)</text>
+  <text x="785" y="190" class="card-desc">Multi-Sheet Branches (Mumbai, Ahmedabad...) &amp; Buyer Sheets</text>
+
+  <rect x="775" y="225" width="280" height="60" rx="6" fill="#fefce8" stroke="#fef08a" />
+  <text x="785" y="248" class="card-title">Consignment Containerization</text>
+  <text x="785" y="266" class="card-desc">Containers (Mum 48, Mum 49) with 20GP (28 m³) &amp; 40HQ (68 m³) CBM</text>
+
+  <!-- ==================== PHASE 4: LOCAL PURCHASE ==================== -->
+  <rect x="25" y="340" width="500" height="240" rx="10" fill="#ffffff" stroke="#93c5fd" stroke-width="1.5" filter="url(#shadow)" />
+  <rect x="25" y="340" width="500" height="36" rx="10" fill="#eff6ff" />
+  <text x="45" y="364" class="phase-title" fill="#1e40af">4. DOMESTIC CHINA FACTORY PROCUREMENT (/purchases/local)</text>
+
+  <rect x="45" y="390" width="460" height="50" rx="6" fill="#f8fafc" stroke="#e2e8f0" />
+  <text x="55" y="410" class="card-title">Consignment Multi-Vendor Isolation</text>
+  <text x="55" y="426" class="card-desc">Select Mum 48 + Supplier &rarr; Loads ONLY that factory's planned products</text>
+
+  <rect x="45" y="450" width="220" height="55" rx="6" fill="#eff6ff" stroke="#bfdbfe" />
+  <text x="55" y="470" class="card-title">Domestic Purchase VAT %</text>
+  <text x="55" y="488" class="card-desc">Strict HSN Purchase VAT (0%/13%)<br/>(Indian GST 18% strictly excluded)</text>
+
+  <rect x="285" y="450" width="220" height="55" rx="6" fill="#f8fafc" stroke="#e2e8f0" />
+  <text x="295" y="470" class="card-title">Value-Based Landing Cost</text>
+  <text x="295" y="488" class="card-desc">Allocates transport &amp; offloading proportionally across line items</text>
+
+  <rect x="45" y="515" width="460" height="50" rx="6" fill="#f0fdf4" stroke="#86efac" />
+  <text x="55" y="536" class="card-title" fill="#15803d">Smart Financial Reconciliation &amp; Quality Hard-Stop</text>
+  <text x="55" y="552" class="card-desc">Enforces |Invoice Total - Items Total| &le; 0.05 before allowing purchase confirmation</text>
+
+  <!-- ==================== PHASE 5: SALE PROCESS ==================== -->
+  <rect x="575" y="340" width="500" height="240" rx="10" fill="#ffffff" stroke="#86efac" stroke-width="1.5" filter="url(#shadow)" />
+  <rect x="575" y="340" width="500" height="36" rx="10" fill="#f0fdf4" />
+  <text x="595" y="364" class="phase-title" fill="#15803d">5. EXPORT TRADE &amp; COMMERCIAL INVOICING (/sale/process)</text>
+
+  <rect x="595" y="390" width="460" height="50" rx="6" fill="#f8fafc" stroke="#e2e8f0" />
+  <text x="605" y="410" class="card-title">Consignment Auto-Sourcing</text>
+  <text x="605" y="426" class="card-desc">Pulls planned Mum 48 quantities + factory RMB rates from Confirmed Local Purchases</text>
+
+  <rect x="595" y="450" width="460" height="60" rx="6" fill="#f0fdf4" stroke="#bbf7d0" />
+  <text x="605" y="470" class="card-title" fill="#166534">The 16-Column Master CI Calculation Engine</text>
+  <text x="605" y="486" class="card-desc">RMB Purchase Cost &rarr; 13% China Export VAT Refund &rarr; Ocean Freight by CBM</text>
+  <text x="605" y="500" class="card-desc">&rarr; Profit Margin % &rarr; Unit FOB/CFR Selling Price in USD ($)</text>
+
+  <rect x="595" y="520" width="460" height="45" rx="6" fill="#ecfdf5" stroke="#a7f3d0" />
+  <text x="605" y="540" class="card-title" fill="#047857">1-Click Corporate Trade Documents</text>
+  <text x="605" y="555" class="card-desc">Generates Official Commercial Invoice (.xlsx) &amp; Packing List (.xlsx)</text>
+
+  <!-- ==================== PHASE 6: CROSS-ERP SYNC ==================== -->
+  <rect x="25" y="620" width="1050" height="170" rx="10" fill="#ffffff" stroke="#c084fc" stroke-width="1.5" filter="url(#shadow)" />
+  <rect x="25" y="620" width="1050" height="36" rx="10" fill="#faf5ff" />
+  <text x="45" y="644" class="phase-title" fill="#6b21a8">6. CROSS-BORDER ERP SYNCHRONIZATION PIPELINE (Yinglima China &rarr; Inhyma India)</text>
+
+  <rect x="45" y="670" width="280" height="100" rx="6" fill="#fdf4ff" stroke="#f5d0fe" />
+  <text x="55" y="694" class="card-title" fill="#86198f">Yinglima PostgreSQL Outbox</text>
+  <text x="55" y="712" class="card-desc">&bull; Product dimensions (L, W, H, CBM)</text>
+  <text x="55" y="728" class="card-desc">&bull; Packaging gross/net weights &amp; specs</text>
+  <text x="55" y="744" class="card-desc">&bull; Active / Inactive status parity</text>
+
+  <path d="M 335 720 L 415 720" class="solid-arrow" stroke="#9333ea" marker-end="url(#arrow-purple)" />
+  <text x="340" y="712" class="badge" fill="#9333ea">REST WEBHOOK</text>
+
+  <rect x="425" y="670" width="300" height="100" rx="6" fill="#f5f3ff" stroke="#ddd6fe" />
+  <text x="435" y="694" class="card-title" fill="#5b21b6">Event Relay &amp; Tax Adapter</text>
+  <text x="435" y="712" class="card-desc">&bull; Maps Indian GST (18%) from HSN Master</text>
+  <text x="435" y="728" class="card-desc">&bull; Maps Indian Import Duty (7.5%) from HSN</text>
+  <text x="435" y="744" class="card-desc">&bull; Handles soft-deletes and reactivation</text>
+
+  <path d="M 735 720 L 815 720" class="solid-arrow" stroke="#9333ea" marker-end="url(#arrow-purple)" />
+  <text x="740" y="712" class="badge" fill="#9333ea">AUTO-UPDATE</text>
+
+  <rect x="825" y="670" width="230" height="100" rx="6" fill="#eff6ff" stroke="#bfdbfe" />
+  <text x="835" y="694" class="card-title" fill="#1e40af">Inhyma ERP (India Customs)</text>
+  <text x="835" y="712" class="card-desc">&bull; Indian warehouse receiving</text>
+  <text x="835" y="728" class="card-desc">&bull; Customs bill of entry filing</text>
+  <text x="835" y="744" class="card-desc">&bull; Domestic GST sales invoices</text>
+
+  <!-- Connectors between Top Phases -->
+  <path d="M 345 200 L 380 200" class="solid-arrow" marker-end="url(#arrow)" />
+  <path d="M 710 200 L 745 200" class="solid-arrow" marker-end="url(#arrow)" />
+  
+  <path d="M 915 300 L 915 330" class="solid-arrow" stroke="#16a34a" marker-end="url(#arrow-green)" />
+  <path d="M 800 300 L 800 320 L 275 320 L 275 330" class="solid-arrow" marker-end="url(#arrow)" />
+  <path d="M 525 460 L 565 460" class="solid-arrow" stroke="#16a34a" marker-end="url(#arrow-green)" />
+  <text x="530" y="450" class="badge" fill="#16a34a">RMB COST</text>
+
+  <path d="M 185 300 L 185 610" class="solid-arrow" stroke="#9333ea" marker-end="url(#arrow-purple)" />
+  <text x="195" y="605" class="badge" fill="#9333ea">SYNC EVENT</text>
+</svg>
+</div>
+<div class="mermaid-box"><pre class="mermaid">flowchart TD
+    %% Styling
+    classDef master fill:#f8fafc,stroke:#64748b,stroke-width:2px;
+    classDef procurement fill:#eff6ff,stroke:#2563eb,stroke-width:2px;
+    classDef planning fill:#fefce8,stroke:#ca8a04,stroke-width:2px;
+    classDef export fill:#f0fdf4,stroke:#16a34a,stroke-width:2px;
+    classDef sync fill:#faf5ff,stroke:#9333ea,stroke-width:2px;
+
+    subgraph PHASE_1 [&quot;1. Foundation and Master Configuration&quot;]
+        M1[&quot;Suppliers Master (Chinese Factories and Tax ID)&quot;]:::master
+        M2[&quot;Buyers Master (Overseas Importers and Credit)&quot;]:::master
+        M3[&quot;HSN Master (HSN, Purchase VAT, Refund VAT, GST, Duty)&quot;]:::master
+        M4[&quot;Product Master (Dimensions, CBM, Weights, Photos, Dual VAT)&quot;]:::master
+        M1 --&gt; M4
+        M3 --&gt; M4
+    end
+
+    subgraph PHASE_2 [&quot;2. Sourcing and RFQ Price Discovery&quot;]
+        P1[&quot;Product Prices (Multi-Supplier Quotes and Preferred Star)&quot;]:::procurement
+        P2[&quot;Inquiries / RFQ Engine (Buyer RFQ, Auto-Mail, AI Parser)&quot;]:::procurement
+        M4 --&gt; P1
+        M2 --&gt; P2
+        P1 --&gt; P2
+    end
+
+    subgraph PHASE_3 [&quot;3. Shipment and Container Planning&quot;]
+        PL1[&quot;Shipment Planning Grid (Multi-Sheet Branch and Buyer Sheets)&quot;]:::planning
+        PL2[&quot;Consignment Containerization (Mum 48, Mum 49... 20GP/40HQ CBM)&quot;]:::planning
+        M4 -.-&gt;|Live Packaging Link| PL1
+        P2 --&gt; PL1
+        PL1 --&gt; PL2
+    end
+
+    subgraph PHASE_4 [&quot;4. Domestic China Factory Procurement&quot;]
+        LP1[&quot;Local Purchase Orders (Scoped by Supplier and Consignment)&quot;]:::procurement
+        LP2[&quot;Value-Based Landing Cost Engine (Freight, Offloading, Purchase VAT)&quot;]:::procurement
+        LP3[&quot;Invoice Matching and Reconciliation (Strict Tolerance Blocker)&quot;]:::procurement
+        PL2 --&gt;|Filter by Supplier| LP1
+        M1 --&gt; LP1
+        LP1 --&gt; LP2
+        LP2 --&gt; LP3
+    end
+
+    subgraph PHASE_5 [&quot;5. International Export and Commercial Invoicing&quot;]
+        SP1[&quot;Sale Process Orders (Direct Consignment Pull)&quot;]:::export
+        SP2[&quot;16-Column Master CI Engine (Factory RMB + 13% Export VAT Refund)&quot;]:::export
+        SP3[&quot;Freight / CBM Distribution (FOB / CFR USD Price Discovery)&quot;]:::export
+        SP4[&quot;Official Export Documents (Excel Commercial Invoice and Packing List)&quot;]:::export
+        LP3 --&gt;|Source Factory RMB Cost| SP2
+        PL2 --&gt;|Source Quantities and CBM| SP1
+        SP1 --&gt; SP2
+        SP2 --&gt; SP3
+        SP3 --&gt; SP4
+    end
+
+    subgraph PHASE_6 [&quot;6. Cross-Border ERP Integration&quot;]
+        SYNC1[&quot;Asynchronous Outbox Event Pipeline&quot;]:::sync
+        SYNC2[&quot;Inhyma ERP (India Customs and Distribution)&quot;]:::sync
+        M4 ==&gt;|Sync Payload| SYNC1
+        SYNC1 ==&gt;|REST Webhook| SYNC2
+    end</pre></div>
+<hr class="doc-hr"/>
+<h3 class="doc-h3">1.2. Cross-Border Commercial &amp; Financial Lifecycle</h3>
+<div class="mermaid-box"><pre class="mermaid">sequenceDiagram
+    autonumber
+    actor Buyer as Overseas Buyer (e.g. Inhyma India)
+    participant YL_Plan as Yinglima Shipment Planning
+    participant YL_LP as Yinglima Local Purchase
+    actor Supplier as China Factory (e.g. Dingye / Prathamesh)
+    participant YL_Sale as Yinglima Sale Process (CI Engine)
+    participant ChinaCustoms as China Export Customs
+    participant InhymaERP as Inhyma ERP (India)
+
+    Buyer-&gt;&gt;YL_Plan: Place order items into container plan (e.g. Consignment Mum 48)
+    YL_Plan-&gt;&gt;YL_LP: Container items become available for procurement
+    Note over YL_LP: Filter by Supplier: Loads only that factory&#x27;s products
+    YL_LP-&gt;&gt;Supplier: Generate Local Purchase Order in RMB
+    Supplier--&gt;&gt;YL_LP: Deliver goods to warehouse + provide factory invoice
+    Note over YL_LP: Enter landing costs, apply Purchase VAT, reconcile invoice
+    YL_Plan-&gt;&gt;YL_Sale: Transfer confirmed container consignment to Sale Process
+    Note over YL_Sale: 16-Column CI Engine runs: Auto-fetch RMB, 13% VAT Refund, Freight/CBM, FOB/CFR USD
+    YL_Sale-&gt;&gt;ChinaCustoms: Generate official 16-col Commercial Invoice &amp; Packing List
+    YL_Sale--&gt;&gt;Buyer: Issue Export CI in USD ($)
+    YL_Sale-&gt;&gt;InhymaERP: Trigger cross-ERP sync with exact products, HSN, weights &amp; Indian taxes</pre></div>
+<hr class="doc-hr"/>
+<h3 class="doc-h3">1.3. System Relational &amp; Data Transfer Architecture</h3>
+<div class="mermaid-box"><pre class="mermaid">erDiagram
+    SUPPLIERS ||--o{ PRODUCTS : &quot;manufactures (primary)&quot;
+    SUPPLIERS ||--o{ SUPPLIER_PRODUCT_LINKS : &quot;supplies (secondary)&quot;
+    PRODUCTS ||--o{ SUPPLIER_PRODUCT_LINKS : &quot;supplied by&quot;
+    HSN_CODES ||--o{ PRODUCTS : &quot;classifies (tax &amp; duty)&quot;
+    BUYERS ||--o{ INQUIRIES : &quot;issues RFQ&quot;
+    BUYERS ||--o{ SALE_PROCESS_ORDERS : &quot;purchases container&quot;
+    
+    PLANNING_SHEETS ||--o{ PLANNING_COLUMNS : &quot;contains containers&quot;
+    PLANNING_COLUMNS ||--o{ PLANNING_CELLS : &quot;has planned qty&quot;
+    PRODUCTS ||--o{ PLANNING_ROWS : &quot;linked item row&quot;
+    
+    PLANNING_COLUMNS ||--o{ LOCAL_PURCHASES : &quot;source consignment&quot;
+    SUPPLIERS ||--o{ LOCAL_PURCHASES : &quot;bills to&quot;
+    LOCAL_PURCHASES ||--o{ LOCAL_PURCHASE_ITEMS : &quot;contains purchased products&quot;
+    
+    PLANNING_COLUMNS ||--o{ SALE_PROCESS_ORDERS : &quot;exports container&quot;
+    LOCAL_PURCHASE_ITEMS ||--o{ SALE_PROCESS_ITEMS : &quot;sources factory cost &amp; supplier&quot;
+    SALE_PROCESS_ORDERS ||--o{ SALE_PROCESS_ITEMS : &quot;bills line items&quot;
+    SALE_PROCESS_ORDERS ||--o{ COMMERCIAL_INVOICES : &quot;generates official CI &amp; PL&quot;</pre></div>
+<hr class="doc-hr"/>
+<h1 class="doc-h1">2. Executive System Overview &amp; Core Philosophy</h1>
+<p class="doc-p"><strong>Yinglima ERP</strong> is purpose-built to orchestrate high-volume international sourcing, domestic procurement within Mainland China, complex multi-vendor container consolidation, and official export trade documentation.</p>
+<h3 class="doc-h3">Core Architectural Pillars:</h3>
+<div class="doc-num-item"><strong>1.</strong> <strong>Dual-Currency Accounting:</strong></div>
+<li class="doc-li"><strong>Domestic Operations (RMB <code>¥</code>):</strong> Sourcing quotes, factory local purchases, inland logistics, local offloading, and domestic purchase VAT (进项税).</li>
+<li class="doc-li"><strong>International Export Operations (USD <code>$</code>):</strong> Overseas sales pricing, ocean freight allocations, export VAT refunds (出口退税), and official Commercial Invoices.</li>
+<div class="doc-num-item"><strong>2.</strong> <strong>Three-Tier Multi-Tax Engine:</strong></div>
+<li class="doc-li"><strong>China Purchase VAT % (进项税):</strong> Domestic VAT (0%, 9%, 13%) incurred on domestic Chinese factory purchases.</li>
+<li class="doc-li"><strong>China Export Refund VAT % (出口退税):</strong> Rebate claimed back from the Chinese government upon export (e.g. 13% for machinery).</li>
+<li class="doc-li"><strong>Indian GST % &amp; Import Duty %:</strong> Downstream destination taxation passed dynamically to overseas subsidiaries (e.g. Inhyma India).</li>
+<div class="doc-num-item"><strong>3.</strong> <strong>Consignment Multi-Vendor Container Consolidation:</strong></div>
+<li class="doc-li">A single 40HQ container (e.g. <code>Mum 48</code>) holds cargo from 10+ distinct factories. The system provides complete multi-vendor isolation so that local purchase orders and factory invoices never cross-contaminate unrelated suppliers.</li>
+<div class="doc-num-item"><strong>4.</strong> <strong>Strict Financial Reconciliations &amp; Quality Gates:</strong></div>
+<li class="doc-li">Local Purchase features a mathematical $\Delta \le 0.05$ discrepancy blocker between invoice header and calculated line items.</li>
+<li class="doc-li">Zero-rate product lines are strictly prevented from saving to eliminate missing costs in downstream commercial invoices.</li>
+<hr class="doc-hr"/>
+<h1 class="doc-h1">3. Module-by-Module Comprehensive Workflows &amp; Screen Guide</h1>
+<hr class="doc-hr"/>
+<h2 class="doc-h2">3.1. DASHBOARD Module (`/dashboard`)</h2>
+<div class="mermaid-box"><pre class="mermaid">flowchart LR
+    A[&quot;User Authentication / SSO Login&quot;] --&gt; B[&quot;Active Session and Role Verification&quot;]
+    B --&gt; C[&quot;Personalized Executive Welcome Portal&quot;]
+    C --&gt; D1[&quot;Global Sidebar Navigation (Masters, Planning, Purchases, Sales)&quot;]
+    C --&gt; D2[&quot;Header Bar Context (Active Entity, Notifications, Profile)&quot;]</pre></div>
+<h3 class="doc-h3">Business Purpose &amp; What is Happening:</h3>
+<p class="doc-p">The Dashboard (<code>/dashboard</code>) serves as the central landing page and secure authenticated portal gateway for Yinglima ERP.</p>
+<li class="doc-li"><strong>Clean Gateway Architecture:</strong> In Yinglima ERP, the dashboard is designed as a focused, distraction-free landing portal. Rather than displaying cluttered or decoupled KPI cards on the root page, <strong>all primary operational KPIs, tracking metrics, and financial registers are embedded directly inside their respective dedicated functional modules</strong> where decisions occur in real-time context:</li>
+<li class="doc-li"><strong>Sourcing &amp; RFQ Statuses:</strong> Tracked inside <strong>Inquiries (<code>/inquiries</code>)</strong> (Dedicated status cards for *Pending RFQs*, *Approved Quotes*, *Ongoing Inquiries*, and *Completed Consignments*).</li>
+<li class="doc-li"><strong>Container Capacity &amp; Volume Tracking:</strong> Tracked live inside <strong>Shipment Planning (<code>/planning</code>)</strong> (Real-time container CBM rollups against 20GP/40HQ limits, package counts, and weights).</li>
+<li class="doc-li"><strong>Procurement Balances &amp; Financial Reconciliations:</strong> Audited on-the-fly inside <strong>Local Purchase (<code>/purchases/local</code>)</strong> (Live invoice-to-item discrepancy matching and landing cost distributions).</li>
+<li class="doc-li"><strong>Trade Margins &amp; Commercial Export Values:</strong> Computed dynamically inside <strong>Sale Process (<code>/sale/process</code>)</strong> (16-Column export CIF/FOB summary, profit margins, and export VAT refunds).</li>
+<h3 class="doc-h3">Visual Appearance &amp; User Interface:</h3>
+<li class="doc-li"><strong>Personalized Header:</strong> A clean, modern greeting: <code>&quot;Welcome To {Full Name}&quot;</code> (e.g. <code>Welcome To Rupesh Malla</code> or current logged-in user name).</li>
+<li class="doc-li"><strong>Navigation Shell (<code>AppShell</code>):</strong></li>
+<li class="doc-li">Left navigation drawer providing instant 1-click access to all operational modules (Suppliers, Buyers, Product Master, Product Prices, Product Gallery, Stock Movement, Sale Process, Inquiries, Local Purchase, Shipment Planning, Users, and Settings).</li>
+<li class="doc-li">Top system bar featuring the active corporate entity selector (<code>🏢 Yinglima LLP</code>), notification alert bell, and user account dropdown.</li>
+<hr class="doc-hr"/>
+<h2 class="doc-h2">3.2. CONTACT: Suppliers Master Module (`/suppliers`)</h2>
+<div class="mermaid-box"><pre class="mermaid">flowchart TD
+    S_Start[&quot;Open Suppliers Master&quot;] --&gt; S_List[&quot;Searchable Table (Company, City, Type, Grade, Status)&quot;]
+    S_List --&gt; S_Add[&quot;Click Add Supplier&quot;]
+    S_Add --&gt; S_Form[&quot;Supplier Entry Drawer Form&quot;]
+    S_Form --&gt; S_DupCheck{&quot;Duplicate Name or Phone?&quot;}
+    S_DupCheck --&gt;|Duplicate Found| S_Alert[&quot;Show Warning and Prevent Duplicate&quot;]
+    S_DupCheck --&gt;|Clean Record| S_Save[&quot;Save Supplier and Upload Photos/Videos&quot;]
+    S_Save --&gt; S_Link[&quot;Link Manufactured Products in Detail Drawer&quot;]</pre></div>
+<h3 class="doc-h3">Business Purpose &amp; What is Happening:</h3>
+<p class="doc-p">Maintains the master repository of all verified Chinese manufacturing plants, trading companies, and logistics agents. Stores critical operational data such as factory locations, WeChat contacts, China Unified Social Credit Codes (USCC), factory audit photos, and product linkages.</p>
+<h3 class="doc-h3">Visual Appearance &amp; User Interface:</h3>
+<li class="doc-li"><strong>Supplier Directory Table:</strong></li>
+<li class="doc-li">Columns: *Sr No*, *Company Name (Bold)*, *Supplier Type (Badge)*, *Location (Province &amp; City)*, *Grade (A/B/C)*, *Status (New/Existing)*, *Product Count*, and *Actions*.</li>
+<li class="doc-li">Color-coded badges: Green for Grade A, Blue for Grade B, Amber for Grade C.</li>
+<li class="doc-li"><strong>Supplier Entry Form (Modal/Drawer):</strong></li>
+<li class="doc-li">*Company Information:* Company Name, Type (Manufacturer/Trader/Agent), China Tax USCC (18 digits).</li>
+<li class="doc-li">*Geographic Selectors:* Dynamic cascading dropdowns (Country &amp;rarr; Province &amp;rarr; City &amp;rarr; District).</li>
+<li class="doc-li">*Communication:* Contact Person, Mobile, Email, and WeChat ID (vital for Chinese factory communication).</li>
+<li class="doc-li">*Factory Verification Media:* Multi-file upload for factory visit photos (audits, machine floors) and embedded video link badges (YouTube, Google Drive, OneDrive).</li>
+<li class="doc-li"><strong>Secondary Product Links:</strong> A dedicated tab inside the Supplier Detail drawer allows linking secondary products this vendor can supply.</li>
+<hr class="doc-hr"/>
+<h2 class="doc-h2">3.3. CONTACT: Buyers Master Module (`/buyers`)</h2>
+<div class="mermaid-box"><pre class="mermaid">flowchart LR
+    B1[&quot;Create Buyer Profile&quot;] --&gt; B2[&quot;Configure Billing / Shipping Addresses&quot;]
+    B2 --&gt; B3[&quot;Set Credit Terms &amp; Preferred Currency (USD / INR / RMB)&quot;]
+    B3 --&gt; B4[&quot;Associate Buyer Planning Sheets (e.g. Om Packaging, Darsh Impex)&quot;]</pre></div>
+<h3 class="doc-h3">Business Purpose &amp; What is Happening:</h3>
+<p class="doc-p">Manages domestic and international buyer accounts, their designated destination delivery ports (e.g. Nhava Sheva, Chennai), agreed credit terms, default billing currencies, and dedicated shipment planning sheets.</p>
+<h3 class="doc-h3">Visual Appearance &amp; User Interface:</h3>
+<li class="doc-li"><strong>Buyer Directory:</strong> Cards and table view displaying buyer company name, country, primary contact, payment credit terms (e.g. *30% Advance, 70% against BL*), and active consignment counts.</li>
+<li class="doc-li"><strong>Detail Drawer:</strong> Tabs for *Overview*, *Associated Consignments*, *Inquiries*, and *Commercial Invoices History*.</li>
+<hr class="doc-hr"/>
+<h2 class="doc-h2">3.4. INVENTORY: Product Master &amp; Gallery (`/masters/products`, `/inventory/product-gallery`)</h2>
+<div class="mermaid-box"><pre class="mermaid">flowchart TD
+    P_In[&quot;Product Entry / Edit&quot;] --&gt; P_Tax[&quot;Select HSN Code&quot;]
+    P_Tax --&gt; P_AutoTax[&quot;Auto-Populate:&lt;br/&gt;- Purchase VAT % (进项税)&lt;br/&gt;- Refund VAT % (出口退税)&lt;br/&gt;- Indian GST % &amp; Import Duty %&quot;]
+    P_AutoTax --&gt; P_Dim[&quot;Enter Physical Dimensions&lt;br/&gt;(Length × Width × Height in cm)&quot;]
+    P_Dim --&gt; P_AutoCBM[&quot;Auto-Calculate CBM:&lt;br/&gt;CBM = (L × W × H) / 1,000,000&quot;]
+    P_AutoCBM --&gt; P_Pkg[&quot;Enter Packaging Specs&lt;br/&gt;(Pkg Qty, Gross Weight, Net Weight)&quot;]
+    P_Pkg --&gt; P_Save[&quot;Save Product &amp; Multi-Image Gallery&quot;]
+    P_Save --&gt; P_Sync[&quot;Trigger Outbox Sync to Inhyma ERP (India)&quot;]</pre></div>
+<h3 class="doc-h3">Business Purpose &amp; What is Happening:</h3>
+<p class="doc-p">The central source of truth for all physical products, machinery, spare parts, and packaging materials. Every line item planned in containers, purchased from factories, or exported on commercial invoices references this master record.</p>
+<h3 class="doc-h3">Visual Appearance &amp; User Interface:</h3>
+<li class="doc-li"><strong>Product Directory Table:</strong></li>
+<li class="doc-li">Thumbnail preview, Product Name, Product Code (<code>PROD-MUM-xxxx</code>), Brand, Category &amp; Subcategory, HSN Code, Packaging Qty, Unit CBM, Gross Weight, Purchase VAT %, and Status (Active/Inactive).</li>
+<li class="doc-li"><strong>Executive Detail Drawer (Right Side):</strong></li>
+<li class="doc-li">*Identity Badge:* High-contrast code badge with active/inactive status pill.</li>
+<li class="doc-li">*Image Viewer:* Multi-image carousel with zoom modal.</li>
+<li class="doc-li">*Operating Locations:* Assigned organizations (e.g. Inhyma, Darsh Impex) and operating branches (Mumbai, Ahmedabad, Chennai, Indore).</li>
+<li class="doc-li">*Packaging &amp; Dimensions Grid:* Auto-computed CBM highlighted in bold blue (<code>XX.XXXXXX CBM</code>).</li>
+<li class="doc-li">*Classification, Sourcing &amp; Tax:* Primary Supplier Brand, HSN Code, GST Rate (18%), Domestic Purchase VAT % (0%/13%), and Export Refund VAT % (13%).</li>
+<li class="doc-li"><strong>Product Gallery (<code>/inventory/product-gallery</code>):</strong> A visual grid displaying high-resolution machinery pictures with instant search by name, model, or barcode.</li>
+<hr class="doc-hr"/>
+<h2 class="doc-h2">3.5. INVENTORY: Product Prices &amp; Quotation Matrix (`/inventory/product-prices`)</h2>
+<div class="mermaid-box"><pre class="mermaid">flowchart LR
+    PP1[&quot;Product Selected&quot;] --&gt; PP2[&quot;Supplier A Quote (¥ 120.00)&quot;]
+    PP1 --&gt; PP3[&quot;Supplier B Quote (¥ 115.00)&quot;]
+    PP1 --&gt; PP4[&quot;Supplier C Quote (¥ 110.00)&quot;]
+    PP4 --&gt; PP_Star[&quot;Click Star to Mark Preferred Supplier&quot;]
+    PP_Star --&gt; PP_Auto[&quot;Auto-Pulls Preferred Rate into Inquiries and Planning&quot;]</pre></div>
+<h3 class="doc-h3">Business Purpose &amp; What is Happening:</h3>
+<p class="doc-p">Enables procurement teams to track competing quotations from multiple factories for the exact same product. Allows designating a <strong>Preferred Supplier (<code>⭐</code>)</strong> whose pricing automatically acts as the benchmark quote in inquiries and purchase orders.</p>
+<h3 class="doc-h3">Visual Appearance &amp; User Interface:</h3>
+<li class="doc-li"><strong>Price Matrix Table:</strong> Product name on the left, followed by columns for each quoting supplier, unit price in RMB (<code>¥</code>), minimum order quantity (MOQ), lead time (days), and validity date.</li>
+<li class="doc-li"><strong>Preferred Star Button:</strong> Instant click-to-toggle star (<code>⭐</code>) that sets the default sourcing partner.</li>
+<hr class="doc-hr"/>
+<h2 class="doc-h2">3.6. INVENTORY: Stock Movement &amp; Live Inventory Ledger (`/inventory/stock-movement`)</h2>
+<div class="mermaid-box"><pre class="mermaid">flowchart TD
+    SM1[&quot;Goods Receipt / Inward&lt;br/&gt;(From Confirmed Local Purchase)&quot;] --&gt; SM_Ledger[&quot;Central Stock Ledger&quot;]
+    SM2[&quot;Container Dispatch / Outward&lt;br/&gt;(From Sale Process / Loading)&quot;] --&gt; SM_Ledger
+    SM_Ledger --&gt; SM_Bal[&quot;Live Warehouse Stock Balance Calculation&lt;br/&gt;Current Stock = Opening + Inward - Outward&quot;]</pre></div>
+<h3 class="doc-h3">Business Purpose &amp; What is Happening:</h3>
+<p class="doc-p">Maintains real-time stock balances across China transit warehouses. Automatically increments inventory when domestic factory local purchases are received, and decrements inventory when container shipments depart.</p>
+<h3 class="doc-h3">Visual Appearance &amp; User Interface:</h3>
+<li class="doc-li"><strong>Tabbed Register:</strong> Tabs for <code>Live Stock Summary</code>, <code>Inward Register (+Receipts)</code>, and <code>Outward Register (-Shipments)</code>.</li>
+<li class="doc-li"><strong>Filters:</strong> Quick filtering by Warehouse Location, Product Category, and Date Range.</li>
+<hr class="doc-hr"/>
+<h2 class="doc-h2">3.7. SALE: Inquiries &amp; RFQ Lifecycle Engine (`/inquiries`)</h2>
+<div class="mermaid-box"><pre class="mermaid">flowchart TD
+    INQ_L1[&quot;Layer 1: Buyer Inquiries Directory&quot;] --&gt; INQ_L2[&quot;Layer 2: Buyer Consignments (FB1, FB2, FB3)&quot;]
+    INQ_L2 --&gt; INQ_L3[&quot;Layer 3: Inquiry Line Items and RFQs&quot;]
+    INQ_L3 --&gt; INQ_Dispatch[&quot;Automated RFQ Email Dispatch to Suppliers&quot;]
+    INQ_Dispatch --&gt; INQ_AI[&quot;Supplier Replies with Quote or Bill&quot;]
+    INQ_AI --&gt; INQ_Extract[&quot;AI Document Extraction Parses Prices into Matrix&quot;]
+    INQ_Extract --&gt; INQ_Approve[&quot;Manager Approves Best Quote for Local Purchase&quot;]</pre></div>
+<h3 class="doc-h3">Business Purpose &amp; What is Happening:</h3>
+<p class="doc-p">Manages customer requests for quotation (RFQs) through a synchronized 3-layer architecture. Connects client specifications to multiple Chinese factory RFQs, auto-dispatches emails, and ingests supplier quotation sheets using AI document parsing.</p>
+<h3 class="doc-h3">Visual Appearance &amp; User Interface:</h3>
+<li class="doc-li"><strong>Layer 1 Directory:</strong> High-level summary cards showing count of Pending RFQs, Approved Quotes, Ongoing Inquiries, and Completed Consignments.</li>
+<li class="doc-li"><strong>Layer 2 Consignments:</strong> Grouped consignments for each buyer (e.g. *FB1 Inquiry for Inhyma*).</li>
+<li class="doc-li"><strong>Layer 3 RFQ Matrix:</strong> Detailed line items listing requested quantity, target price, factory responses, and supplier quote comparisons.</li>
+<li class="doc-li"><strong>AI Mailbox Ingestion:</strong> Drag-and-drop zone for PDF/Excel supplier quotation bills with instant data extraction into table rows.</li>
+<hr class="doc-hr"/>
+<h2 class="doc-h2">3.8. PURCHASE: Local Purchase Module (`/purchases/local`)</h2>
+<div class="svg-container" title="Local Purchase & Tax Workflow Diagram"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 680" width="100%" height="100%">
+  <defs>
+    <style>
+      .title { font-family: 'Segoe UI', system-ui, sans-serif; font-size: 20px; font-weight: 700; fill: #0f172a; }
+      .subtitle { font-family: 'Segoe UI', system-ui, sans-serif; font-size: 13px; fill: #64748b; }
+      .card-head { font-family: 'Segoe UI', system-ui, sans-serif; font-size: 13px; font-weight: 700; }
+      .card-body { font-family: 'Segoe UI', system-ui, sans-serif; font-size: 11px; fill: #334155; }
+      .arrow { stroke: #2563eb; stroke-width: 2; fill: none; }
+      .arrow-green { stroke: #16a34a; stroke-width: 2; fill: none; }
+      .arrow-red { stroke: #dc2626; stroke-width: 2; fill: none; }
+    </style>
+    <filter id="card-shadow" x="-5%" y="-5%" width="110%" height="115%">
+      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#0f172a" flood-opacity="0.08" />
+    </filter>
+    <marker id="m-blue" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1 L 10 5 L 0 9 z" fill="#2563eb" />
+    </marker>
+    <marker id="m-green" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1 L 10 5 L 0 9 z" fill="#16a34a" />
+    </marker>
+    <marker id="m-red" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1 L 10 5 L 0 9 z" fill="#dc2626" />
+    </marker>
+  </defs>
+
+  <rect width="1000" height="680" fill="#f8fafc" rx="10" />
+
+  <!-- Header -->
+  <rect x="25" y="20" width="950" height="55" rx="8" fill="#ffffff" stroke="#e2e8f0" filter="url(#card-shadow)" />
+  <text x="45" y="47" class="title">Local Purchase &amp; Domestic Tax Workflow Engine</text>
+  <text x="45" y="65" class="subtitle">Multi-Vendor Consignment Isolation, Domestic Purchase VAT % &amp; Value-Based Landing Cost</text>
+
+  <!-- Step 1: Essentials -->
+  <rect x="25" y="95" width="280" height="130" rx="8" fill="#ffffff" stroke="#cbd5e1" filter="url(#card-shadow)" />
+  <rect x="25" y="95" width="280" height="28" rx="8" fill="#f1f5f9" />
+  <text x="35" y="114" class="card-head" fill="#1e293b">CARD 1: INVOICE ESSENTIALS</text>
+  <text x="35" y="140" class="card-body">&bull; Organization: Inhyma</text>
+  <text x="35" y="158" class="card-body">&bull; Branch: Inhyma Mumbai (INM)</text>
+  <text x="35" y="176" class="card-body">&bull; Consignment: Mum 48 (28 planned items)</text>
+  <text x="35" y="194" class="card-body">&bull; Supplier: Prathamesh Packaging PVT LTD</text>
+  <text x="35" y="212" class="card-body">&bull; Invoice No, Date &amp; Invoice Total (RMB)</text>
+
+  <!-- Step 2: Auto Filter Engine -->
+  <path d="M 305 160 L 350 160" class="arrow" marker-end="url(#m-blue)" />
+
+  <rect x="360" y="95" width="300" height="130" rx="8" fill="#eff6ff" stroke="#93c5fd" filter="url(#card-shadow)" />
+  <rect x="360" y="95" width="300" height="28" rx="8" fill="#dbeafe" />
+  <text x="370" y="114" class="card-head" fill="#1e40af">MULTI-VENDOR CONSIGNMENT ISOLATION</text>
+  <text x="370" y="140" class="card-body">&bull; Intersects Consignment Mum 48 with Supplier</text>
+  <text x="370" y="158" class="card-body">&bull; Checks Primary Supplier + SupplierProductLink</text>
+  <text x="370" y="176" class="card-body">&bull; Isolates Prathamesh items: 1 planned product</text>
+  <text x="370" y="194" class="card-body">&bull; Auto-loads: Carton boxes (PROD-MUM-0002)</text>
+  <text x="370" y="212" class="card-body">&bull; Planned Qty: 48 units populated instantly</text>
+
+  <!-- Step 3: Tax Resolution -->
+  <path d="M 660 160 L 705 160" class="arrow" marker-end="url(#m-blue)" />
+
+  <rect x="715" y="95" width="260" height="130" rx="8" fill="#fdf4ff" stroke="#f0abfc" filter="url(#card-shadow)" />
+  <rect x="715" y="95" width="260" height="28" rx="8" fill="#fae8ff" />
+  <text x="725" y="114" class="card-head" fill="#86198f">PURCHASE VAT % RESOLUTION</text>
+  <text x="725" y="140" class="card-body">1. Check HSN purchase_vat_percent (0%)</text>
+  <text x="725" y="158" class="card-body">2. Fallback to Product purchase_vat_percent</text>
+  <text x="725" y="176" class="card-body">3. Default: 0.00%</text>
+  <text x="725" y="198" class="card-body" fill="#15803d" font-weight="700">&check; PROD-MUM-0002 resolves to 0.00%</text>
+  <text x="725" y="214" class="card-body" fill="#dc2626">&cross; Indian GST 18% &amp; Export 13% excluded</text>
+
+  <!-- Step 4: Value-Based Landing Cost -->
+  <rect x="25" y="260" width="460" height="150" rx="8" fill="#ffffff" stroke="#cbd5e1" filter="url(#card-shadow)" />
+  <rect x="25" y="260" width="460" height="28" rx="8" fill="#f1f5f9" />
+  <text x="35" y="279" class="card-head" fill="#1e293b">CARD 2: VALUE-BASED (VB) LANDING EXPENSES</text>
+  <text x="35" y="306" class="card-body">&bull; Packaging Charges (¥) + Transport Freight (¥) + Offloading (¥) + Misc (¥)</text>
+  <text x="35" y="324" class="card-body">&bull; Formula: Expense Ratio = Total Expenses / Total Basic Line Value</text>
+  <text x="35" y="342" class="card-body">&bull; Unit Landing Rate = Unit Rate &times; (1 + Expense Ratio)</text>
+  <text x="35" y="360" class="card-body">&bull; Distributes actual factory arrival landing expenses across consignment items</text>
+  <text x="35" y="378" class="card-body">&bull; Total Landing Rate (VB) = Qty &times; Unit Landing Rate</text>
+
+  <!-- Step 5: Items Table with Rate Guard -->
+  <rect x="515" y="260" width="460" height="150" rx="8" fill="#ffffff" stroke="#cbd5e1" filter="url(#card-shadow)" />
+  <rect x="515" y="260" width="460" height="28" rx="8" fill="#f1f5f9" />
+  <text x="525" y="279" class="card-head" fill="#1e293b">CARD 4: LINE ITEMS TABLE &amp; ZERO-RATE GUARD</text>
+  <text x="525" y="306" class="card-body">&bull; Columns: # | Product Name | HSN | Qty | Unit Rate | VAT % | Total</text>
+  <text x="525" y="324" class="card-body">&bull; Mandatory Positive Rate: Unit Rate &gt; 0.00 required</text>
+  <text x="525" y="342" class="card-body">&bull; If Rate = 0: Cell turns red with warning label ▲ Rate &gt; 0 req.</text>
+  <text x="525" y="360" class="card-body">&bull; Automatically strips leading zeros upon typing for clean fast entry</text>
+  <text x="525" y="378" class="card-body">&bull; Form submission blocked if any line has zero unit cost</text>
+
+  <!-- Connectors to Financial Reconciliation -->
+  <path d="M 255 410 L 255 455 L 450 455" class="arrow" marker-end="url(#m-blue)" />
+  <path d="M 745 410 L 745 455 L 550 455" class="arrow" marker-end="url(#m-blue)" />
+
+  <!-- Step 6: Reconciliation & Quality Gate -->
+  <rect x="150" y="470" width="700" height="180" rx="10" fill="#ffffff" stroke="#64748b" stroke-width="1.5" filter="url(#card-shadow)" />
+  <rect x="150" y="470" width="700" height="30" rx="10" fill="#f8fafc" />
+  <text x="170" y="490" class="card-head" fill="#0f172a">CARD 5: SMART FINANCIAL RECONCILIATION &amp; QUALITY GATE</text>
+
+  <!-- Difference Formula -->
+  <text x="170" y="520" class="card-body" font-size="12px">Calculates Discrepancy: &Delta; = | Entered Invoice Total Value - Calculated Line Items Total with VAT |</text>
+
+  <!-- State Red -->
+  <rect x="170" y="535" width="310" height="75" rx="6" fill="#fef2f2" stroke="#ef4444" stroke-width="1.5" />
+  <text x="180" y="555" class="card-head" fill="#b91c1c">&cross; DISCREPANCY &gt; 0.05 (SUBMISSION BLOCKED)</text>
+  <text x="180" y="573" class="card-body" fill="#7f1d1d">&bull; Red Alert Banner flags exact difference amount</text>
+  <text x="180" y="591" class="card-body" fill="#7f1d1d">&bull; Save button is strictly disabled</text>
+
+  <!-- State Green -->
+  <rect x="520" y="535" width="310" height="75" rx="6" fill="#f0fdf4" stroke="#22c55e" stroke-width="1.5" />
+  <text x="530" y="555" class="card-head" fill="#15803d">&check; DISCREPANCY &le; 0.05 (PERFECT MATCH)</text>
+  <text x="530" y="573" class="card-body" fill="#14532d">&bull; Green Banner confirms mathematical parity</text>
+  <text x="530" y="591" class="card-body" fill="#14532d">&bull; Enables Submit Local Purchase to confirm order</text>
+
+  <text x="170" y="632" class="card-body" fill="#2563eb" font-weight="600">&rarr; Confirmed Local Purchase records factory RMB cost for downstream Export Commercial Invoices</text>
+</svg>
+</div>
+<div class="mermaid-box"><pre class="mermaid">flowchart TD
+    LP_Start[&quot;Open Local Purchase Form&quot;] --&gt; LP_C1[&quot;Card 1: Essentials (Org, Branch, Consignment, Supplier)&quot;]
+    LP_C1 --&gt; LP_Scope{&quot;Consignment and Supplier Selected?&quot;}
+    LP_Scope --&gt;|Yes| LP_AutoLoad[&quot;Auto-Load Only That Supplier Planned Products&quot;]
+    LP_Scope --&gt;|No| LP_Manual[&quot;Add items manually via Card 3 Product Search&quot;]
+    LP_AutoLoad --&gt; LP_C2[&quot;Card 2: Value-Based Landing Expenses&quot;]
+    LP_Manual --&gt; LP_C2
+    LP_C2 --&gt; LP_C4[&quot;Card 4: Line Items Table&quot;]
+    
+    subgraph TAX_RESOLUTION [&quot;Strict Domestic Purchase VAT Resolution&quot;]
+        LP_C4 -.-&gt;|Check 1| T1[&quot;HSN Master purchase_vat_percent&quot;]
+        T1 -.-&gt;|If Null, Check 2| T2[&quot;Product Master purchase_vat_percent&quot;]
+        T2 -.-&gt;|Fallback| T3[&quot;Default 0.00%&quot;]
+        T3 -.-&gt;|Result| T_Final[&quot;Domestic Purchase VAT Applied (0%, 9%, 13%)&quot;]
+    end
+    
+    T_Final --&gt; LP_Recon[&quot;Card 5: Financial Reconciliation Check&quot;]
+    LP_Recon --&gt; LP_Check{&quot;Discrepancy &lt;= 0.05?&quot;}
+    LP_Check --&gt;|Diff &gt; 0.05| LP_Block[&quot;RED BANNER: Hard Submission Blocker&quot;]
+    LP_Check --&gt;|Diff &lt;= 0.05| LP_Pass[&quot;GREEN BANNER: Perfect Match Enabled&quot;]
+    LP_Pass --&gt; LP_Submit[&quot;Save Confirmed Local Purchase&quot;]</pre></div>
+<h3 class="doc-h3">Business Purpose &amp; What is Happening:</h3>
+<p class="doc-p">The domestic Chinese procurement hub. Generates factory purchase orders in RMB (<code>¥</code>), records official Chinese supplier tax invoices, apportions inland transportation and offloading expenses, and applies domestic Chinese Purchase VAT (进项税).</p>
+<h3 class="doc-h3">Visual Appearance &amp; User Interface:</h3>
+<div class="doc-num-item"><strong>1.</strong> <strong>Card 1: Procurement &amp; Invoice Essentials:</strong></div>
+<li class="doc-li">Dropdowns for *Organization* (e.g. Inhyma), *Operating Branch* (e.g. Inhyma Mumbai INM), *Consignment* (e.g. <code>Mum 48</code>), and *Supplier* (e.g. <code>Prathamesh Packaging PVT LTD</code>).</li>
+<li class="doc-li">*Invoice No*, *Invoice Date*, *Billing Currency* (RMB <code>¥</code>), and *Invoice Total Value*.</li>
+<li class="doc-li">*Supplier-Scoped Consignment Filtering Banner:* Live pill showing: <code>📦 {N} planned item(s) for {supplier} from Consignment {code}</code>.</li>
+<div class="doc-num-item"><strong>2.</strong> <strong>Card 2: Value-Based (VB) Landing Expense Engine:</strong></div>
+<li class="doc-li">Four distinct input boxes: <code>Packaging Charges</code>, <code>Transport / Freight</code>, <code>Offloading Charges</code>, and <code>Other Misc Charges</code>.</li>
+<li class="doc-li">Live summary showing total landing expenses and percentage loading ratio.</li>
+<div class="doc-num-item"><strong>3.</strong> <strong>Card 3: Product Search Bar:</strong></div>
+<li class="doc-li">Fast autocomplete search allowing manual addition of products scoped to the selected organization.</li>
+<div class="doc-num-item"><strong>4.</strong> <strong>Card 4: Consignment Line Items Table:</strong></div>
+<li class="doc-li">Columns: <code>#</code>, <code>Product Name (Bold with code pill)</code>, <code>HSN Code</code>, <code>Qty</code>, <code>Unit Rate (RMB)</code>, <code>VAT % (Domestic Purchase VAT)</code>, <code>Item Total</code>, <code>Expense Per Unit</code>, <code>Unit Landing Rate (VB)</code>, and <code>Total Landing Rate (VB)</code>.</li>
+<li class="doc-li"><strong>Zero Rate Guard:</strong> Cells with <code>Rate = 0</code> display a red border and <code>▲ Rate &gt; 0 req.</code> blocker label.</li>
+<div class="doc-num-item"><strong>5.</strong> <strong>Card 5: Smart Financial Reconciliation Banner:</strong></div>
+<li class="doc-li"><strong>Green Banner:</strong> <code>✅ Invoice Total Matches Line Items Perfectly</code> (discrepancy $\le 0.05$).</li>
+<li class="doc-li"><strong>Red Blocker Banner:</strong> <code>⛔ Discrepancy Detected: Entered invoice total differs from items total with VAT by [diff]. Adjust line items or invoice total to match before submitting.</code></li>
+<div class="doc-num-item"><strong>6.</strong> <strong>Card 6: Document Attachment &amp; Bill Extraction:</strong></div>
+<li class="doc-li">Upload invoice PDF, image, or Excel file with download preview.</li>
+<hr class="doc-hr"/>
+<h2 class="doc-h2">3.9. PLANNING: Master Shipment Planning Grid (`/planning`)</h2>
+<div class="mermaid-box"><pre class="mermaid">flowchart TD
+    PL_Grid[&quot;Open Master Planning Sheet (/planning)&quot;] --&gt; PL_Tabs[&quot;Select Operating Branch or Buyer Tab&lt;br/&gt;(e.g. Inhyma Mumbai, Inhyma Ahmedabad, Darsh Impex)&quot;]
+    PL_Tabs --&gt; PL_Rows[&quot;Product Master Rows Linked&quot;]
+    PL_Rows --&gt; PL_Auto[&quot;Auto-Fetch 5 Master Packaging Columns:&lt;br/&gt;Brand of Supplier | City | PKG QTY | Unit Weight (kg) | Unit CBM (m³)&quot;]
+    PL_Auto --&gt; PL_Containers[&quot;Consignment Columns (Mum 48, Mum 49, Mum 50...)&quot;]
+    PL_Containers --&gt; PL_Input[&quot;User Inputs Planned Quantities in Container Cells&quot;]
+    PL_Input --&gt; PL_Formulas[&quot;Dynamic Companion Column Rollups:&lt;br/&gt;- NO. OF PKG = Qty / PKG QTY&lt;br/&gt;- TOTAL WEIGHT = NO. OF PKG × Unit Weight&lt;br/&gt;- TOTAL CBM = NO. OF PKG × Unit CBM&quot;]
+    PL_Formulas --&gt; PL_Summary[&quot;Container Header Summary Rollup:&lt;br/&gt;Total Container CBM vs 20GP (28 m³) / 40HQ (68 m³) Limit&quot;]</pre></div>
+<h3 class="doc-h3">Business Purpose &amp; What is Happening:</h3>
+<p class="doc-p">Replicates and digitizes the enterprise Excel *Master Planning Sheet China TO India*. Provides an interactive, reactive spreadsheet grid tracking full-container load (FCL) and less-than-container load (LCL) shipments, container numbers, seal numbers, vessels, ETD, ETA, port of discharge, lab test requirements, cargo readiness, and real-time container volume (CBM) utilization.</p>
+<h3 class="doc-h3">Visual Appearance &amp; User Interface:</h3>
+<li class="doc-li"><strong>Multi-Sheet Navigation Tabs:</strong></li>
+<li class="doc-li">Branch Tabs: <code>Inhyma Mumbai</code>, <code>Inhyma Ahmedabad</code>, <code>Inhyma Indore</code>, <code>Inhyma Chennai</code>, <code>Darsh Impex Mumbai</code>, <code>Darsh Impex Chennai</code>, <code>Test Group</code>, <code>One Stop</code>, <code>F&amp;B</code>.</li>
+<li class="doc-li">Buyer Tabs: <code>Om Packaging</code>, <code>Prathamesh Packaging</code>, <code>Darsh Impex Mumbai</code>.</li>
+<li class="doc-li"><strong>Spreadsheet Grid Columns:</strong></li>
+<li class="doc-li">*Fixed Headers:* <code>ITEM (Product Name)</code>, <code>TALLY ENTRY POSTED</code>, <code>APPROVAL DATE</code>.</li>
+<li class="doc-li">*Dynamic Consignment Sets:* Columns grouped by container (e.g. <code>MUM 48</code>, <code>MUM 48 REMARKS</code>, <code>MUM 49</code>, <code>MUM 49 REMARKS</code>).</li>
+<li class="doc-li">*Automated Master Specifications:* <code>BRAND OF SUPPLIER</code>, <code>CITY</code>, <code>PKG QTY</code>, <code>UNIT WEIGHT/PKG (KG)</code>, <code>CBM/PKG (M3)</code>.</li>
+<li class="doc-li">*Companion Rollups:* <code>NO OF PKG</code>, <code>TOTAL WEIGHT (KG)</code>, <code>TOTAL CBM (M3)</code>.</li>
+<li class="doc-li"><strong>Live CBM Utilization Progress Bars:</strong> Visual container capacity indicators showing current load vs max container volume (e.g. 65.4 / 68.0 CBM for 40HQ).</li>
+<hr class="doc-hr"/>
+<h2 class="doc-h2">3.10. SALE: Sale Process &amp; Official Export Trade Engine (`/sale/process`)</h2>
+<div class="svg-container" title="Sale Process 16-Column CI Engine Diagram"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 650" width="100%" height="100%">
+  <defs>
+    <style>
+      .title { font-family: 'Segoe UI', system-ui, sans-serif; font-size: 20px; font-weight: 700; fill: #0f172a; }
+      .subtitle { font-family: 'Segoe UI', system-ui, sans-serif; font-size: 13px; fill: #64748b; }
+      .head { font-family: 'Segoe UI', system-ui, sans-serif; font-size: 13px; font-weight: 700; }
+      .body { font-family: 'Segoe UI', system-ui, sans-serif; font-size: 11px; fill: #334155; }
+      .col-box { font-family: 'Segoe UI', system-ui, sans-serif; font-size: 10px; font-weight: 600; text-anchor: middle; }
+    </style>
+    <filter id="ci-shadow" x="-5%" y="-5%" width="110%" height="115%">
+      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#0f172a" flood-opacity="0.08" />
+    </filter>
+  </defs>
+
+  <rect width="1000" height="650" fill="#f8fafc" rx="10" />
+
+  <!-- Header -->
+  <rect x="25" y="20" width="950" height="55" rx="8" fill="#ffffff" stroke="#e2e8f0" filter="url(#ci-shadow)" />
+  <text x="45" y="47" class="title">Sale Process — 16-Column Export Costing &amp; Commercial Invoice Engine</text>
+  <text x="45" y="65" class="subtitle">From Container Consignment to Official Customs Commercial Invoice &amp; Packing List</text>
+
+  <!-- Step 1: Sourcing Inputs -->
+  <rect x="25" y="95" width="460" height="110" rx="8" fill="#eff6ff" stroke="#bfdbfe" filter="url(#ci-shadow)" />
+  <text x="40" y="118" class="head" fill="#1e40af">1. CONSIGNMENT CONTAINER PULL</text>
+  <text x="40" y="140" class="body">&bull; Selects Consignment (e.g. Mum 48 container)</text>
+  <text x="40" y="158" class="body">&bull; Imports all planned items, product codes, HSN codes, and order quantities</text>
+  <text x="40" y="176" class="body">&bull; Pulls packaging dimensions (cartons, weights, CBM per product)</text>
+
+  <rect x="515" y="95" width="460" height="110" rx="8" fill="#f0fdf4" stroke="#bbf7d0" filter="url(#ci-shadow)" />
+  <text x="530" y="118" class="head" fill="#166534">2. FACTORY RMB COST AUTO-MATCHING</text>
+  <text x="530" y="140" class="body">&bull; Matches products with Confirmed Local Purchases</text>
+  <text x="530" y="158" class="body">&bull; Automatically extracts factory purchase price in RMB (¥) and supplier name</text>
+  <text x="530" y="176" class="body">&bull; Eliminates manual price lookup and ensures zero discrepancies</text>
+
+  <!-- The 16-Column Table Diagram -->
+  <rect x="25" y="230" width="950" height="240" rx="8" fill="#ffffff" stroke="#cbd5e1" filter="url(#ci-shadow)" />
+  <rect x="25" y="230" width="950" height="30" rx="8" fill="#1e3a8a" />
+  <text x="45" y="250" class="head" fill="#ffffff">THE 16-COLUMN EXPORT COMMERCIAL INVOICE FINANCIAL MATRIX</text>
+
+  <!-- Column Pills -->
+  <!-- Row 1: Columns 1-4 -->
+  <rect x="40" y="275" width="205" height="36" rx="4" fill="#f1f5f9" stroke="#cbd5e1" />
+  <text x="142" y="297" class="col-box" fill="#0f172a">1. S/N &amp; 2. Description</text>
+
+  <rect x="270" y="275" width="205" height="36" rx="4" fill="#f1f5f9" stroke="#cbd5e1" />
+  <text x="372" y="297" class="col-box" fill="#0f172a">3. HSN Code (Tariff)</text>
+
+  <rect x="500" y="275" width="205" height="36" rx="4" fill="#f1f5f9" stroke="#cbd5e1" />
+  <text x="602" y="297" class="col-box" fill="#0f172a">4. Order Quantity (UOM)</text>
+
+  <rect x="730" y="275" width="225" height="36" rx="4" fill="#f0f9ff" stroke="#0284c7" />
+  <text x="842" y="297" class="col-box" fill="#0369a1">5 &amp; 6. Export Total USD ($)</text>
+
+  <!-- Row 2: Columns 7-10 -->
+  <rect x="40" y="325" width="205" height="36" rx="4" fill="#fefce8" stroke="#ca8a04" />
+  <text x="142" y="347" class="col-box" fill="#854d0e">7. Supplier Sourcing (RMB)</text>
+
+  <rect x="270" y="325" width="205" height="36" rx="4" fill="#fefce8" stroke="#ca8a04" />
+  <text x="372" y="347" class="col-box" fill="#854d0e">8. Total Sourcing (RMB)</text>
+
+  <rect x="500" y="325" width="205" height="36" rx="4" fill="#fdf4ff" stroke="#c084fc" />
+  <text x="602" y="347" class="col-box" fill="#7e22ce">9. China Refund Rate (13%)</text>
+
+  <rect x="730" y="325" width="225" height="36" rx="4" fill="#fdf4ff" stroke="#c084fc" />
+  <text x="842" y="347" class="col-box" fill="#7e22ce">10. VAT Refund Amount (RMB)</text>
+
+  <!-- Row 3: Columns 11-16 -->
+  <rect x="40" y="375" width="205" height="36" rx="4" fill="#f8fafc" stroke="#94a3b8" />
+  <text x="142" y="397" class="col-box" fill="#334155">11. USD/RMB Exchange Rate</text>
+
+  <rect x="270" y="375" width="205" height="36" rx="4" fill="#eff6ff" stroke="#60a5fa" />
+  <text x="372" y="397" class="col-box" fill="#1d4ed8">12. Gross Cost &amp; 13. Net USD</text>
+
+  <rect x="500" y="375" width="205" height="36" rx="4" fill="#f0fdf4" stroke="#4ade80" />
+  <text x="602" y="397" class="col-box" fill="#15803d">14. Ocean Freight per CBM</text>
+
+  <rect x="730" y="375" width="225" height="36" rx="4" fill="#ecfdf5" stroke="#10b981" />
+  <text x="842" y="397" class="col-box" fill="#047857">15 &amp; 16. Profit Margin &amp; %</text>
+
+  <!-- Mathematical Highlights -->
+  <rect x="40" y="425" width="915" height="30" rx="4" fill="#f8fafc" />
+  <text x="50" y="445" class="body" font-size="11px">&bull; Net Cost USD = (Total RMB - VAT Refund RMB) / Exchange Rate  |  Ocean Freight allocated proportionally based on line CBM volume</text>
+
+  <!-- Output Deliverables -->
+  <rect x="25" y="495" width="460" height="130" rx="8" fill="#ffffff" stroke="#cbd5e1" filter="url(#ci-shadow)" />
+  <rect x="25" y="495" width="460" height="28" rx="8" fill="#f1f5f9" />
+  <text x="40" y="514" class="head" fill="#1e3a8a">OFFICIAL COMMERCIAL INVOICE (.XLSX)</text>
+  <text x="40" y="538" class="body">&bull; Corporate Excel with official letterhead, company seal, bank details</text>
+  <text x="40" y="556" class="body">&bull; Product descriptions, HSN, FOB/CFR USD unit rates &amp; totals</text>
+  <text x="40" y="574" class="body">&bull; Ready for international bank wire transfer and customs declaration</text>
+  <text x="40" y="592" class="body">&bull; Generated in 1 click via direct streaming backend service</text>
+
+  <rect x="515" y="495" width="460" height="130" rx="8" fill="#ffffff" stroke="#cbd5e1" filter="url(#ci-shadow)" />
+  <rect x="515" y="495" width="460" height="28" rx="8" fill="#f1f5f9" />
+  <text x="530" y="514" class="head" fill="#15803d">OFFICIAL PACKING LIST (.XLSX)</text>
+  <text x="530" y="538" class="body">&bull; Detailed package breakdown by carton number and pallet</text>
+  <text x="530" y="556" class="body">&bull; Gross weights (KG), net weights (KG), and CBM volumes (m³)</text>
+  <text x="530" y="574" class="body">&bull; Container &amp; seal number verified against Shipment Planning</text>
+  <text x="530" y="592" class="body">&bull; Sourced directly by shipping lines and port customs inspectors</text>
+</svg>
+</div>
+<div class="mermaid-box"><pre class="mermaid">flowchart TD
+    SP_Start[&quot;Open Sale Process Form&quot;] --&gt; SP_Consign[&quot;Select Shipment Consignment (Mum 48)&quot;]
+    SP_Consign --&gt; SP_Load[&quot;Pull Planned Container Items and Quantities&quot;]
+    SP_Load --&gt; SP_Match[&quot;Match with Confirmed Local Purchases&quot;]
+    SP_Match --&gt; SP_RMB[&quot;Source Exact Factory RMB Cost and Supplier Name&quot;]
+    SP_RMB --&gt; SP_16Col[&quot;Execute 16-Column Commercial Invoice Engine&quot;]
+    
+    subgraph CALC_ENGINE [&quot;16-Column CI Calculation Workflow&quot;]
+        SP_16Col --&gt; C1[&quot;1. Basic Export Sale Total = Qty x Unit Price USD&quot;]
+        SP_16Col --&gt; C2[&quot;2. Factory Sourcing Total = Qty x Supplier RMB Price&quot;]
+        SP_16Col --&gt; C3[&quot;3. China VAT Refund RMB = (Total RMB / 1.13) x 13%&quot;]
+        SP_16Col --&gt; C4[&quot;4. Ocean Freight Distribution by Line CBM&quot;]
+        SP_16Col --&gt; C5[&quot;5. Net Sourcing USD = (Total RMB - VAT Refund) / Rate&quot;]
+        SP_16Col --&gt; C6[&quot;6. Profit Margin USD and % Calculation&quot;]
+    end
+    
+    CALC_ENGINE --&gt; SP_Summary[&quot;Summary: Total CIF/FOB USD, Margin %, Total CBM, Total Weight&quot;]
+    SP_Summary --&gt; SP_Export[&quot;Export Commercial Invoice and Packing List (.xlsx)&quot;]</pre></div>
+<h3 class="doc-h3">Business Purpose &amp; What is Happening:</h3>
+<p class="doc-p">The international trade and billing engine. Connects confirmed buyer orders, confirmed supplier local purchases, container shipping allocations, export VAT refunds, and Commercial Invoice (CI) 16-column calculations. Generates official trade documents required by shipping lines and customs authorities.</p>
+<h3 class="doc-h3">Visual Appearance &amp; User Interface:</h3>
+<li class="doc-li"><strong>Order Header Section:</strong></li>
+<li class="doc-li">Buyer selection, Consignment dropdown (<code>Mum 48</code>), Currency (USD <code>$</code>), USD/RMB Exchange Rate (e.g. <code>7.25</code>), Destination Port (e.g. Nhava Sheva, India), Container No, and Seal No.</li>
+<li class="doc-li"><strong>The 16-Column Master CI Grid:</strong></li>
+<div class="doc-num-item"><strong>1.</strong> <code>S/N</code>: Sequence index.</div>
+<div class="doc-num-item"><strong>2.</strong> <code>Product Description</code>: Product name and technical specifications.</div>
+<div class="doc-num-item"><strong>3.</strong> <code>HSN Code</code>: 8-digit international tariff code.</div>
+<div class="doc-num-item"><strong>4.</strong> <code>Quantity</code>: Order quantity.</div>
+<div class="doc-num-item"><strong>5.</strong> <code>Unit Price (USD)</code>: Export sale price per unit.</div>
+<div class="doc-num-item"><strong>6.</strong> <code>Total Amount (USD)</code>: <code>Quantity × Unit Price (USD)</code>.</div>
+<div class="doc-num-item"><strong>7.</strong> <code>Supplier Sourcing (RMB)</code>: Factory purchase rate auto-sourced from Local Purchase.</div>
+<div class="doc-num-item"><strong>8.</strong> <code>Total Purchase (RMB)</code>: Total factory cost.</div>
+<div class="doc-num-item"><strong>9.</strong> <code>VAT Refund Rate (%)</code>: China export tax rebate (13%).</div>
+<div class="doc-num-item"><strong>10.</strong> <code>VAT Refund Amount (RMB)</code>: Refund claimed back from China tax authorities.</div>
+<div class="doc-num-item"><strong>11.</strong> <code>Exchange Rate</code>: Applied currency conversion factor.</div>
+<div class="doc-num-item"><strong>12.</strong> <code>Gross Sourcing Cost (USD)</code>: Factory cost in USD.</div>
+<div class="doc-num-item"><strong>13.</strong> <code>Net Sourcing Cost (USD)</code>: Factory cost net of Chinese VAT refund.</div>
+<div class="doc-num-item"><strong>14.</strong> <code>Freight Allocation (USD)</code>: Container ocean freight allocated by CBM volume.</div>
+<div class="doc-num-item"><strong>15.</strong> <code>Profit Margin (USD)</code>: Net trade profit.</div>
+<div class="doc-num-item"><strong>16.</strong> <code>Profit Margin (%)</code>: Net margin percentage.</div>
+<li class="doc-li"><strong>Export Action Bar:</strong></li>
+<li class="doc-li"><code>📊 Export Commercial Invoice (Excel)</code>: Generates corporate <code>.xlsx</code> with official headers, seal boxes, bank wire instructions, and totals.</li>
+<li class="doc-li"><code>📄 Export Packing List (Excel)</code>: Generates shipping packing list itemizing carton numbers, gross weights, net weights, and CBMs.</li>
+<hr class="doc-hr"/>
+<h2 class="doc-h2">3.11. CONFIGURATIONS: System Masters (HSN, Geography, Currency, UOM, Organizations)</h2>
+<div class="mermaid-box"><pre class="mermaid">flowchart TD
+    M_HSN[&quot;HSN Codes Master (Tax and Duty Rates)&quot;] --&gt; CENTRAL_CORE[&quot;Central Business Logic and Form Dropdowns&quot;]
+    M_Geo[&quot;Geography Master (Countries, Provinces, Cities)&quot;] --&gt; CENTRAL_CORE
+    M_Curr[&quot;Currencies Master (RMB, USD, INR, Rates)&quot;] --&gt; CENTRAL_CORE
+    M_UOM[&quot;UOM Master (PCS, SET, BAG, MTR, KGS)&quot;] --&gt; CENTRAL_CORE
+    M_Org[&quot;Organizations and Branches (Inhyma, Darsh, Branches)&quot;] --&gt; CENTRAL_CORE</pre></div>
+<h3 class="doc-h3">Business Purpose &amp; What is Happening:</h3>
+<p class="doc-p">Provides standardized configuration across all operational forms:</p>
+<li class="doc-li"><strong>HSN Codes Master (<code>/masters/hsn</code>):</strong> Maintains tariff codes with 4 simultaneous tax rates: *China Domestic Purchase VAT %*, *China Export Refund VAT %*, *Indian GST %*, and *Indian Import Duty %*.</li>
+<li class="doc-li"><strong>Geography Masters (<code>/masters/countries</code>, <code>/masters/states</code>, <code>/masters/cities</code>):</strong> Cascading location hierarchy for Chinese factories and overseas buyers.</li>
+<li class="doc-li"><strong>Currencies Master (<code>/masters/currencies</code>):</strong> Maintains standard exchange rates (USD &amp;rarr; RMB, USD &amp;rarr; INR).</li>
+<li class="doc-li"><strong>Units of Measurement (<code>/masters/uom</code>):</strong> Defines standard units (PCS, SET, BAG, BOX, MTR, KGS, ROLL).</li>
+<li class="doc-li"><strong>Organization &amp; Operating Branches (<code>/masters/companies</code>):</strong> Multi-tenant scoping for company entities (Inhyma, Darsh Impex) and their branches (Mumbai, Ahmedabad, Indore, Chennai).</li>
+<hr class="doc-hr"/>
+<h2 class="doc-h2">3.12. USER MANAGEMENT: Users &amp; RBAC Permissions (`/users`, `/roles`)</h2>
+<div class="mermaid-box"><pre class="mermaid">flowchart TD
+    U_User[&quot;User Account&quot;] --&gt; U_Dept[&quot;Department Assignment&lt;br/&gt;(Procurement, Sales, Planning, Accounts, Admin)&quot;]
+    U_Dept --&gt; U_Roles[&quot;Role-Based Permissions Matrix&quot;]
+    U_Roles --&gt; G1[&quot;local_purchase.view / create / update / delete&quot;]
+    U_Roles --&gt; G2[&quot;planning.view / update_cells / manage_sheets&quot;]
+    U_Roles --&gt; G3[&quot;sales_process.view / generate_ci / export_excel&quot;]
+    U_Roles --&gt; G4[&quot;masters.hsn.manage / products.manage&quot;]</pre></div>
+<h3 class="doc-h3">Business Purpose &amp; What is Happening:</h3>
+<p class="doc-p">Enforces enterprise security through granular, action-level Role-Based Access Control (RBAC). Restricts sensitive business actions (e.g. modifying purchase prices, approving shipments, exporting invoices, or deleting records) to authorized personnel.</p>
+<h3 class="doc-h3">Visual Appearance &amp; User Interface:</h3>
+<li class="doc-li"><strong>Users Directory:</strong> Table of staff members, avatars, assigned department, role pills, status toggles, and last login timestamps.</li>
+<li class="doc-li"><strong>Permissions Matrix Grid:</strong> Accordion checkboxes granting view, create, edit, delete, export, or audit capabilities across all modules.</li>
+<hr class="doc-hr"/>
+<h2 class="doc-h2">3.13. GOVERNANCE: Audit Log &amp; Recycle Bin (`/settings/audit-log`, `/settings/trash`)</h2>
+<div class="mermaid-box"><pre class="mermaid">flowchart LR
+    Act[&quot;User / System Action&lt;br/&gt;(Create, Edit, Delete, Sync)&quot;] --&gt; Audit[&quot;Audit Log Register&lt;br/&gt;(Timestamp, User, Entity, IP, Before/After JSON Diffs)&quot;]
+    Act -.-&gt;|Soft Delete| Trash[&quot;Recycle Bin (Trash)&lt;br/&gt;(30-Day Recovery Buffer, Instant Restore)&quot;]</pre></div>
+<h3 class="doc-h3">Business Purpose &amp; What is Happening:</h3>
+<li class="doc-li"><strong>Audit Log (<code>/settings/audit-log</code>):</strong> Immutable compliance trail logging every write action, field-level before/after JSON diffs, acting user ID, and IP address.</li>
+<li class="doc-li"><strong>Trash &amp; Recovery (<code>/settings/trash</code>):</strong> Soft-delete safety net (<code>deleted_at IS NOT NULL</code>). Allows immediate 1-click restoration of accidentally deleted suppliers, products, purchase orders, or planning rows.</li>
+<hr class="doc-hr"/>
+<h2 class="doc-h2">3.14. CROSS-ERP: Automated Synchronization Engine (Yinglima &amp;rarr; Inhyma)</h2>
+<div class="mermaid-box"><pre class="mermaid">flowchart LR
+    subgraph YINGLIMA_CHINA [&quot;Yinglima ERP (China)&quot;]
+        Y_Event[&quot;Product / Tax / Status Change&quot;] --&gt; Y_Outbox[&quot;Outbox Event Queue (PostgreSQL)&quot;]
+        Y_Outbox --&gt; Y_Relay[&quot;Reliable Background Event Relay Daemon&quot;]
+    end
+
+    subgraph INHYMA_INDIA [&quot;Inhyma ERP (India)&quot;]
+        I_Adapter[&quot;Product &amp; Tax Adapter&quot;] --&gt; I_DB[&quot;Inhyma Database Updates&quot;]
+    end
+
+    Y_Relay ==&gt;|Secure Encrypted REST Webhook| I_Adapter
+    I_Adapter -.-&gt;|Syncs| S1[&quot;Dimensions (L, W, H, CBM)&quot;]
+    I_Adapter -.-&gt;|Syncs| S2[&quot;Packaging Weights (Gross, Net, Qty)&quot;]
+    I_Adapter -.-&gt;|Syncs| S3[&quot;Indian Tax (GST 18% &amp; Import Duty 7.5%)&quot;]
+    I_Adapter -.-&gt;|Syncs| S4[&quot;Active / Inactive Status Parity&quot;]</pre></div>
+<h3 class="doc-h3">Business Purpose &amp; What is Happening:</h3>
+<p class="doc-p">Whenever a product, packaging dimension, HSN tariff code, or status is modified in Yinglima (China), the automated event relay immediately broadcasts the update to Inhyma ERP (India). This guarantees that Indian customs clearance, warehouse receiving, and local GST billing reflect the exact physical specifications and tax rates without manual double-entry.</p>
+<hr class="doc-hr"/>
+<h1 class="doc-h1">4. Step-by-Step Operational Cheatsheet for Daily Business Execution</h1>
+<p class="doc-p">Follow this chronological checklist to execute an end-to-end container shipment from initial inquiry to export clearance:</p>
+<div class="table-responsive"><table class="data-table">
+<thead><tr><th>Step</th><th>Module</th><th>User Action</th><th>Verification &amp; Expected Outcome</th></tr></thead>
+<tbody>
+<tr><td><strong>1</strong></td><td><strong>Suppliers</strong></td><td>Register Chinese factory (e.g. <code>Prathamesh Packaging PVT LTD</code>)</td><td>Verified with China USCC Tax ID, province, city, and WeChat contact.</td></tr>
+<tr><td><strong>2</strong></td><td><strong>HSN Master</strong></td><td>Create/Verify HSN Code (e.g. <code>8422.a247</code>)</td><td>Set China Purchase VAT (0%), Export Refund VAT (13%), Indian GST (18%), and Duty (7.5%).</td></tr>
+<tr><td><strong>3</strong></td><td><strong>Product Master</strong></td><td>Create Product (e.g. <code>PROD-MUM-0002</code> Carton Boxes)</td><td>Link to Supplier, assign HSN, enter L×W×H dimensions (auto-computes CBM), and upload photo.</td></tr>
+<tr><td><strong>4</strong></td><td><strong>Shipment Planning</strong></td><td>Open Branch Sheet (e.g. <code>Inhyma Mumbai</code>), find container <code>Mum 48</code></td><td>Enter planned order quantity (e.g. <code>48 units</code>). System automatically rollups carton count and total CBM.</td></tr>
+<tr><td><strong>5</strong></td><td><strong>Local Purchase</strong></td><td>Navigate to <code>/purchase/local/new</code>. Select <code>Inhyma Mumbai</code>, <code>Mum 48</code>, and <code>Prathamesh Packaging</code></td><td>System auto-loads <strong>only</strong> Prathamesh&#x27;s 48 units. Purchase VAT % strictly evaluates to <strong>0.00%</strong> from HSN.</td></tr>
+<tr><td><strong>6</strong></td><td><strong>Local Purchase</strong></td><td>Enter factory invoice no, upload bill file, enter landing freight/offloading expenses, enter unit rate</td><td>Value-Based landing costs distribute across items. Enter matching Invoice Total. Green banner appears ($\Delta \le 0.05$). Click Submit.</td></tr>
+<tr><td><strong>7</strong></td><td><strong>Sale Process</strong></td><td>Navigate to <code>/sale/process/new</code>. Select Consignment <code>Mum 48</code></td><td>System imports all confirmed container products. Factory RMB rates auto-source from Confirmed Local Purchase.</td></tr>
+<tr><td><strong>8</strong></td><td><strong>Sale Process</strong></td><td>Enter ocean container freight USD and export profit margin %</td><td>16-Column engine computes VAT refund, net sourcing USD, and FOB/CFR selling prices per unit.</td></tr>
+<tr><td><strong>9</strong></td><td><strong>Sale Process</strong></td><td>Click <code>Export Commercial Invoice (.xlsx)</code> &amp; <code>Export Packing List (.xlsx)</code></td><td>Corporate Excel trade documents download instantly with official formatting for customs clearance.</td></tr>
+<tr><td><strong>10</strong></td><td><strong>Cross-ERP Sync</strong></td><td>Background event relay triggers automatically</td><td>Inhyma ERP (India) receives updated product dimensions, gross weights, and Indian GST/duty codes.</td></tr>
+</tbody></table></div>
+<hr class="doc-hr"/>
+<blockquote class="doc-quote"><strong>Document Approval:</strong></blockquote>
+<blockquote class="doc-quote"><strong>Prepared by:</strong> Antigravity AI Engineering Architecture Team</blockquote>
+<blockquote class="doc-quote"><strong>System Scope:</strong> Yinglima ERP — China Procurement &amp; Trade Export Engine</blockquote>
+<blockquote class="doc-quote"><strong>Review Date:</strong> October 2026</blockquote>
+  </div>
+
+</body>
+</html>

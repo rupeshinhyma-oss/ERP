@@ -1,0 +1,157 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 820" width="100%" height="100%">
+  <defs>
+    <style>
+      .title { font-family: 'Segoe UI', system-ui, sans-serif; font-size: 22px; font-weight: 700; fill: #0f172a; }
+      .subtitle { font-family: 'Segoe UI', system-ui, sans-serif; font-size: 13px; fill: #64748b; }
+      .phase-title { font-family: 'Segoe UI', system-ui, sans-serif; font-size: 14px; font-weight: 700; }
+      .card-title { font-family: 'Segoe UI', system-ui, sans-serif; font-size: 13px; font-weight: 600; fill: #0f172a; }
+      .card-desc { font-family: 'Segoe UI', system-ui, sans-serif; font-size: 11px; fill: #475569; }
+      .badge { font-family: 'Segoe UI', system-ui, sans-serif; font-size: 10px; font-weight: 700; }
+      .flow-arrow { stroke: #3b82f6; stroke-width: 2.5; fill: none; stroke-dasharray: 4,4; animation: dash 30s linear infinite; }
+      .solid-arrow { stroke: #2563eb; stroke-width: 2; fill: none; }
+    </style>
+    <filter id="shadow" x="-5%" y="-5%" width="110%" height="115%" filterUnits="userSpaceOnUse">
+      <feDropShadow dx="0" dy="3" stdDeviation="4" flood-color="#0f172a" flood-opacity="0.08" />
+    </filter>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1 L 10 5 L 0 9 z" fill="#2563eb" />
+    </marker>
+    <marker id="arrow-green" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1 L 10 5 L 0 9 z" fill="#16a34a" />
+    </marker>
+    <marker id="arrow-purple" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1 L 10 5 L 0 9 z" fill="#9333ea" />
+    </marker>
+  </defs>
+
+  <!-- Canvas Background -->
+  <rect width="1100" height="820" fill="#f8fafc" rx="12" />
+
+  <!-- Header -->
+  <rect x="25" y="20" width="1050" height="60" rx="8" fill="#ffffff" stroke="#e2e8f0" stroke-width="1" filter="url(#shadow)" />
+  <text x="50" y="48" class="title">Yinglima ERP — Master End-to-End Business Architecture Flow</text>
+  <text x="50" y="68" class="subtitle">Complete Procurement, Planning, Local Factory Purchase &amp; Global Export Invoicing Engine</text>
+
+  <!-- ==================== PHASE 1: MASTERS ==================== -->
+  <rect x="25" y="100" width="320" height="200" rx="10" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5" filter="url(#shadow)" />
+  <rect x="25" y="100" width="320" height="36" rx="10" fill="#f1f5f9" />
+  <text x="45" y="124" class="phase-title" fill="#334155">1. FOUNDATION &amp; MASTER SETUP</text>
+
+  <rect x="45" y="150" width="130" height="60" rx="6" fill="#f8fafc" stroke="#e2e8f0" />
+  <text x="55" y="172" class="card-title">Suppliers Master</text>
+  <text x="55" y="190" class="card-desc">China Factories &amp; USCC</text>
+
+  <rect x="195" y="150" width="130" height="60" rx="6" fill="#f8fafc" stroke="#e2e8f0" />
+  <text x="205" y="172" class="card-title">Buyers Master</text>
+  <text x="205" y="190" class="card-desc">Overseas Importers</text>
+
+  <rect x="45" y="225" width="280" height="60" rx="6" fill="#eff6ff" stroke="#bfdbfe" />
+  <text x="55" y="248" class="card-title" fill="#1d4ed8">Product Master &amp; HSN Master</text>
+  <text x="55" y="266" class="card-desc">Dimensions, CBM, Weights, China VAT (0%/13%), GST (18%)</text>
+
+  <!-- ==================== PHASE 2: SOURCING ==================== -->
+  <rect x="390" y="100" width="320" height="200" rx="10" fill="#ffffff" stroke="#93c5fd" stroke-width="1.5" filter="url(#shadow)" />
+  <rect x="390" y="100" width="320" height="36" rx="10" fill="#dbeafe" />
+  <text x="410" y="124" class="phase-title" fill="#1e40af">2. SOURCING &amp; RFQ DISCOVERY</text>
+
+  <rect x="410" y="150" width="280" height="60" rx="6" fill="#f0f9ff" stroke="#bae6fd" />
+  <text x="420" y="172" class="card-title">Product Prices &amp; Quotation Matrix</text>
+  <text x="420" y="190" class="card-desc">Multi-Supplier Quotes, Preferred Star (⭐) Sourcing Partner</text>
+
+  <rect x="410" y="225" width="280" height="60" rx="6" fill="#f0fdf4" stroke="#bbf7d0" />
+  <text x="420" y="248" class="card-title" fill="#15803d">Inquiries &amp; RFQ Lifecycle Engine</text>
+  <text x="420" y="266" class="card-desc">Buyer RFQ &rarr; Auto-Mail to Factories &rarr; AI Bill Ingestion</text>
+
+  <!-- ==================== PHASE 3: PLANNING ==================== -->
+  <rect x="755" y="100" width="320" height="200" rx="10" fill="#ffffff" stroke="#fde047" stroke-width="1.5" filter="url(#shadow)" />
+  <rect x="755" y="100" width="320" height="36" rx="10" fill="#fef9c3" />
+  <text x="775" y="124" class="phase-title" fill="#854d0e">3. SHIPMENT &amp; CONTAINER PLANNING</text>
+
+  <rect x="775" y="150" width="280" height="60" rx="6" fill="#fefce8" stroke="#fef08a" />
+  <text x="785" y="172" class="card-title">Master Planning Grid (/planning)</text>
+  <text x="785" y="190" class="card-desc">Multi-Sheet Branches (Mumbai, Ahmedabad...) &amp; Buyer Sheets</text>
+
+  <rect x="775" y="225" width="280" height="60" rx="6" fill="#fefce8" stroke="#fef08a" />
+  <text x="785" y="248" class="card-title">Consignment Containerization</text>
+  <text x="785" y="266" class="card-desc">Containers (Mum 48, Mum 49) with 20GP (28 m³) &amp; 40HQ (68 m³) CBM</text>
+
+  <!-- ==================== PHASE 4: LOCAL PURCHASE ==================== -->
+  <rect x="25" y="340" width="500" height="240" rx="10" fill="#ffffff" stroke="#93c5fd" stroke-width="1.5" filter="url(#shadow)" />
+  <rect x="25" y="340" width="500" height="36" rx="10" fill="#eff6ff" />
+  <text x="45" y="364" class="phase-title" fill="#1e40af">4. DOMESTIC CHINA FACTORY PROCUREMENT (/purchases/local)</text>
+
+  <rect x="45" y="390" width="460" height="50" rx="6" fill="#f8fafc" stroke="#e2e8f0" />
+  <text x="55" y="410" class="card-title">Consignment Multi-Vendor Isolation</text>
+  <text x="55" y="426" class="card-desc">Select Mum 48 + Supplier &rarr; Loads ONLY that factory's planned products</text>
+
+  <rect x="45" y="450" width="220" height="55" rx="6" fill="#eff6ff" stroke="#bfdbfe" />
+  <text x="55" y="470" class="card-title">Domestic Purchase VAT %</text>
+  <text x="55" y="488" class="card-desc">Strict HSN Purchase VAT (0%/13%)<br/>(Indian GST 18% strictly excluded)</text>
+
+  <rect x="285" y="450" width="220" height="55" rx="6" fill="#f8fafc" stroke="#e2e8f0" />
+  <text x="295" y="470" class="card-title">Value-Based Landing Cost</text>
+  <text x="295" y="488" class="card-desc">Allocates transport &amp; offloading proportionally across line items</text>
+
+  <rect x="45" y="515" width="460" height="50" rx="6" fill="#f0fdf4" stroke="#86efac" />
+  <text x="55" y="536" class="card-title" fill="#15803d">Smart Financial Reconciliation &amp; Quality Hard-Stop</text>
+  <text x="55" y="552" class="card-desc">Enforces |Invoice Total - Items Total| &le; 0.05 before allowing purchase confirmation</text>
+
+  <!-- ==================== PHASE 5: SALE PROCESS ==================== -->
+  <rect x="575" y="340" width="500" height="240" rx="10" fill="#ffffff" stroke="#86efac" stroke-width="1.5" filter="url(#shadow)" />
+  <rect x="575" y="340" width="500" height="36" rx="10" fill="#f0fdf4" />
+  <text x="595" y="364" class="phase-title" fill="#15803d">5. EXPORT TRADE &amp; COMMERCIAL INVOICING (/sale/process)</text>
+
+  <rect x="595" y="390" width="460" height="50" rx="6" fill="#f8fafc" stroke="#e2e8f0" />
+  <text x="605" y="410" class="card-title">Consignment Auto-Sourcing</text>
+  <text x="605" y="426" class="card-desc">Pulls planned Mum 48 quantities + factory RMB rates from Confirmed Local Purchases</text>
+
+  <rect x="595" y="450" width="460" height="60" rx="6" fill="#f0fdf4" stroke="#bbf7d0" />
+  <text x="605" y="470" class="card-title" fill="#166534">The 16-Column Master CI Calculation Engine</text>
+  <text x="605" y="486" class="card-desc">RMB Purchase Cost &rarr; 13% China Export VAT Refund &rarr; Ocean Freight by CBM</text>
+  <text x="605" y="500" class="card-desc">&rarr; Profit Margin % &rarr; Unit FOB/CFR Selling Price in USD ($)</text>
+
+  <rect x="595" y="520" width="460" height="45" rx="6" fill="#ecfdf5" stroke="#a7f3d0" />
+  <text x="605" y="540" class="card-title" fill="#047857">1-Click Corporate Trade Documents</text>
+  <text x="605" y="555" class="card-desc">Generates Official Commercial Invoice (.xlsx) &amp; Packing List (.xlsx)</text>
+
+  <!-- ==================== PHASE 6: CROSS-ERP SYNC ==================== -->
+  <rect x="25" y="620" width="1050" height="170" rx="10" fill="#ffffff" stroke="#c084fc" stroke-width="1.5" filter="url(#shadow)" />
+  <rect x="25" y="620" width="1050" height="36" rx="10" fill="#faf5ff" />
+  <text x="45" y="644" class="phase-title" fill="#6b21a8">6. CROSS-BORDER ERP SYNCHRONIZATION PIPELINE (Yinglima China &rarr; Inhyma India)</text>
+
+  <rect x="45" y="670" width="280" height="100" rx="6" fill="#fdf4ff" stroke="#f5d0fe" />
+  <text x="55" y="694" class="card-title" fill="#86198f">Yinglima PostgreSQL Outbox</text>
+  <text x="55" y="712" class="card-desc">&bull; Product dimensions (L, W, H, CBM)</text>
+  <text x="55" y="728" class="card-desc">&bull; Packaging gross/net weights &amp; specs</text>
+  <text x="55" y="744" class="card-desc">&bull; Active / Inactive status parity</text>
+
+  <path d="M 335 720 L 415 720" class="solid-arrow" stroke="#9333ea" marker-end="url(#arrow-purple)" />
+  <text x="340" y="712" class="badge" fill="#9333ea">REST WEBHOOK</text>
+
+  <rect x="425" y="670" width="300" height="100" rx="6" fill="#f5f3ff" stroke="#ddd6fe" />
+  <text x="435" y="694" class="card-title" fill="#5b21b6">Event Relay &amp; Tax Adapter</text>
+  <text x="435" y="712" class="card-desc">&bull; Maps Indian GST (18%) from HSN Master</text>
+  <text x="435" y="728" class="card-desc">&bull; Maps Indian Import Duty (7.5%) from HSN</text>
+  <text x="435" y="744" class="card-desc">&bull; Handles soft-deletes and reactivation</text>
+
+  <path d="M 735 720 L 815 720" class="solid-arrow" stroke="#9333ea" marker-end="url(#arrow-purple)" />
+  <text x="740" y="712" class="badge" fill="#9333ea">AUTO-UPDATE</text>
+
+  <rect x="825" y="670" width="230" height="100" rx="6" fill="#eff6ff" stroke="#bfdbfe" />
+  <text x="835" y="694" class="card-title" fill="#1e40af">Inhyma ERP (India Customs)</text>
+  <text x="835" y="712" class="card-desc">&bull; Indian warehouse receiving</text>
+  <text x="835" y="728" class="card-desc">&bull; Customs bill of entry filing</text>
+  <text x="835" y="744" class="card-desc">&bull; Domestic GST sales invoices</text>
+
+  <!-- Connectors between Top Phases -->
+  <path d="M 345 200 L 380 200" class="solid-arrow" marker-end="url(#arrow)" />
+  <path d="M 710 200 L 745 200" class="solid-arrow" marker-end="url(#arrow)" />
+  
+  <path d="M 915 300 L 915 330" class="solid-arrow" stroke="#16a34a" marker-end="url(#arrow-green)" />
+  <path d="M 800 300 L 800 320 L 275 320 L 275 330" class="solid-arrow" marker-end="url(#arrow)" />
+  <path d="M 525 460 L 565 460" class="solid-arrow" stroke="#16a34a" marker-end="url(#arrow-green)" />
+  <text x="530" y="450" class="badge" fill="#16a34a">RMB COST</text>
+
+  <path d="M 185 300 L 185 610" class="solid-arrow" stroke="#9333ea" marker-end="url(#arrow-purple)" />
+  <text x="195" y="605" class="badge" fill="#9333ea">SYNC EVENT</text>
+</svg>

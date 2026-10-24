@@ -49,12 +49,33 @@ NEW_MODULE_PERMISSIONS = [
     ("local_purchase.update", "local_purchase", "local_purchases", "update", "ALL", "Edit local purchase orders and update landing costs."),
     ("local_purchase.delete", "local_purchase", "local_purchases", "delete", "ALL", "Delete or cancel local purchase orders."),
     ("local_purchase.export", "local_purchase", "local_purchases", "export", "ALL", "Export or print local purchase orders."),
+
+    # --- Sale Process ---
+    ("sale_process.view", "sale_process", "sales", "view", "ALL", "View sale orders, status metrics, and document details."),
+    ("sale_process.create", "sale_process", "sales", "create", "ALL", "Create new sale orders from shipments or scratch."),
+    ("sale_process.update", "sale_process", "sales", "update", "ALL", "Edit sale orders, line items, and container details."),
+    ("sale_process.approve", "sale_process", "sales", "approve", "ALL", "Update order status workflow (Confirmed, Approved, Dispatched, LR)."),
+    ("sale_process.delete", "sale_process", "sales", "delete", "ALL", "Delete or cancel sale orders."),
+    ("sale_process.export", "sale_process", "sales", "export", "ALL", "Export sale orders to Excel and download Commercial Invoice & Packing List."),
+
+    # --- Stock Movements ---
+    ("stock_movement.view", "stock_movement", "stock-movement", "view", "ALL", "View stock movements, live balances, and Kardex ledgers."),
+    ("stock_movement.create", "stock_movement", "stock-movement", "create", "ALL", "Create inward receipts and outward dispatches."),
+    ("stock_movement.cancel", "stock_movement", "stock-movement", "update", "ALL", "Cancel or reverse stock movements."),
+    ("stock_movement.delete", "stock_movement", "stock-movement", "delete", "ALL", "Delete stock movement records."),
+
+    # --- Notification Rules ---
+    ("notification_settings.view", "notification_settings", "notification-settings", "view", "ALL", "View notification trigger rules and mapped recipients."),
+    ("notification_settings.manage", "notification_settings", "notification-settings", "manage", "ALL", "Configure and update notification rules and recipient mappings."),
 ]
 
 DEFAULT_USER_VIEW_PERMS = {
     "inquiry.view",
     "product_price.view",
     "local_purchase.view",
+    "sale_process.view",
+    "stock_movement.view",
+    "notification_settings.view",
 }
 
 

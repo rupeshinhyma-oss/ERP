@@ -143,8 +143,8 @@ def test_create_local_purchase_without_organization_and_branch():
             )
         ],
     )
-    assert not hasattr(payload, "organization_id")
-    assert not hasattr(payload, "branch_id")
+    assert payload.organization_id is None
+    assert payload.branch_id is None
     assert payload.invoice_no == "INV-2026-TEST"
 
 

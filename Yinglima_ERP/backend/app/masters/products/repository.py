@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from collections.abc import Sequence
 from typing import Any
 
 from sqlalchemy import Select
@@ -17,22 +18,25 @@ class ProductRepository(BaseRepository[Product]):
 
     searchable_fields = ("product_code", "product_name", "product_name_tally", "product_name_invoice", "barcode")
     sortable_fields = ("product_code", "product_name", "created_at", "updated_at", "standard_price")
-    filterable_fields = ("status", "category_id", "sub_category_id", "brand_id", "hsn_id", "uom_id", "organization_id", "has_images")
+    filterable_fields = ("status", "category_id", "sub_category_id", "brand_id", "hsn_id", "uom_id", "organization_id", "has_images", "is_spare")
 
     def __init__(self, session: AsyncSession) -> None:
         """Bind to a DB session, operating on the ``Product`` model."""
         super().__init__(session, Product)
 
     def _apply_dynamic_filters(self, stmt: Select, filters: Any) -> Select:
-        """Apply filters, matching organization_id against both single and multi-org fields and has_images."""
+        """Apply filters, matching organization_id against both single and multi-org fields, has_images, and is_spare."""
         if not filters:
             return stmt
-        from sqlalchemy import String, cast, func, or_
+        from sqlalchemy import String, and_, case, cast, func, or_, select
         from app.common.filtering import FilterParams
+        from app.masters.product_categories.models import ProductCategory
+        from app.masters.product_sub_categories.models import ProductSubCategory
 
         exact_copy = dict(filters.exact)
         org_id = exact_copy.pop("organization_id", None)
         has_images = exact_copy.pop("has_images", None)
+        is_spare = exact_copy.pop("is_spare", None)
 
         filters_copy = FilterParams(exact=exact_copy, ranges=filters.ranges)
         stmt = super()._apply_dynamic_filters(stmt, filters_copy)
@@ -47,18 +51,40 @@ class ProductRepository(BaseRepository[Product]):
             )
         if has_images is not None:
             is_true = str(has_images).lower() in ("true", "1", "yes")
+            img_len = case(
+                (
+                    and_(
+                        Product.images.is_not(None),
+                        func.json_typeof(Product.images) == "array",
+                    ),
+                    func.json_array_length(Product.images),
+                ),
+                else_=0,
+            )
             if is_true:
-                stmt = stmt.where(
-                    Product.images.is_not(None),
-                    func.json_array_length(Product.images) > 0,
-                )
+                stmt = stmt.where(img_len > 0)
             else:
-                stmt = stmt.where(
-                    or_(
-                        Product.images.is_(None),
-                        func.json_array_length(Product.images) == 0,
-                    )
-                )
+                stmt = stmt.where(img_len == 0)
+        if is_spare is not None:
+            is_spare_bool = str(is_spare).lower() in ("true", "1", "yes")
+            spare_cat_subq = select(ProductCategory.id).where(
+                or_(ProductCategory.name.ilike("%spare%"), ProductCategory.name.ilike("%spae%"))
+            )
+            spare_subcat_subq = select(ProductSubCategory.id).where(
+                or_(ProductSubCategory.name.ilike("%spare%"), ProductSubCategory.name.ilike("%spae%"))
+            )
+            spare_condition = or_(
+                Product.category_id.in_(spare_cat_subq),
+                Product.sub_category_id.in_(spare_subcat_subq),
+                Product.product_name.ilike("%spare%"),
+                Product.product_name.ilike("%spae%"),
+                Product.product_name_tally.ilike("%spare%"),
+                Product.product_name_invoice.ilike("%spare%"),
+            )
+            if is_spare_bool:
+                stmt = stmt.where(spare_condition)
+            else:
+                stmt = stmt.where(~spare_condition)
         return stmt
 
     async def get_by_id(self, id_: uuid.UUID) -> Product | None:
@@ -75,14 +101,15 @@ class ProductRepository(BaseRepository[Product]):
             await self.attach_planning_supplier_info(list(records_by_id.values()))
         return records_by_id
 
-    async def attach_planning_supplier_info(self, products: list[Product]) -> None:
+    async def attach_planning_supplier_info(self, products: Sequence[Product]) -> None:
         """
-        Attach each product's primary supplier's name/city.
+        Attach each product's primary supplier's name/city from Product Master.
 
-        Supports both direct ``Product.supplier_id`` and fallback to the
-        earliest ``SupplierProductLink`` created for that product. Sets
-        ``supplier_name``, ``_planning_supplier_name``, and ``_planning_supplier_city``
-        on each product in place.
+        Strictly respects ``Product.supplier_id`` set directly in Product Master.
+        If a product does not have an explicit primary supplier assigned in Product
+        Master (``supplier_id`` is None), it leaves ``_planning_supplier_name``,
+        ``_planning_supplier_city``, and ``supplier_name`` as None (blank in Shipment
+        Planning), strictly ignoring any secondary or supplier-side links.
         """
         if not products:
             return
@@ -92,72 +119,35 @@ class ProductRepository(BaseRepository[Product]):
             setattr(product, "_planning_supplier_city", None)
             setattr(product, "supplier_name", None)
 
-        from sqlalchemy import func, select
+        from sqlalchemy import select
         from app.masters.cities.models import City
-        from app.suppliers.models import Supplier, SupplierProductLink
+        from app.suppliers.models import Supplier
 
-        # 1. For products with an explicit product.supplier_id, query directly
+        # Only for products with an explicit product.supplier_id in Product Master
         direct_supplier_ids = [p.supplier_id for p in products if p.supplier_id]
         supplier_info_by_supplier_id: dict[uuid.UUID, tuple[str, str | None]] = {}
         if direct_supplier_ids:
             stmt_direct = (
-                select(Supplier.id, Supplier.company_name, City.name.label("city_name"))
+                select(Supplier.id, Supplier.company_name, Supplier.brand_description, City.name.label("city_name"))
                 .outerjoin(City, City.id == Supplier.city_id)
                 .where(Supplier.id.in_(direct_supplier_ids))
             )
             res_direct = await self.session.execute(stmt_direct)
             supplier_info_by_supplier_id = {
-                row.id: (row.company_name, row.city_name) for row in res_direct.all()
+                row.id: (
+                    (row.brand_description.strip() if row.brand_description and row.brand_description.strip() else row.company_name),
+                    row.city_name,
+                )
+                for row in res_direct.all()
             }
 
-        # 2. For products without explicit product.supplier_id, fallback to earliest SupplierProductLink
-        products_needing_link = [p for p in products if not p.supplier_id]
-        supplier_info_by_product_id: dict[uuid.UUID, tuple[uuid.UUID, str, str | None]] = {}
-        if products_needing_link:
-            needing_ids = [p.id for p in products_needing_link]
-            ranked = (
-                select(
-                    SupplierProductLink.product_id,
-                    SupplierProductLink.supplier_id,
-                    func.row_number()
-                    .over(
-                        partition_by=SupplierProductLink.product_id,
-                        order_by=SupplierProductLink.created_at.asc(),
-                    )
-                    .label("rn"),
-                )
-                .where(SupplierProductLink.product_id.in_(needing_ids))
-                .subquery()
-            )
-            stmt_link = (
-                select(
-                    ranked.c.product_id,
-                    Supplier.id.label("supplier_id"),
-                    Supplier.company_name,
-                    City.name.label("city_name"),
-                )
-                .join(Supplier, Supplier.id == ranked.c.supplier_id)
-                .outerjoin(City, City.id == Supplier.city_id)
-                .where(ranked.c.rn == 1)
-            )
-            res_link = await self.session.execute(stmt_link)
-            supplier_info_by_product_id = {
-                row.product_id: (row.supplier_id, row.company_name, row.city_name) for row in res_link.all()
-            }
-
-        # 3. Attach info to products
+        # Attach info to products strictly when product.supplier_id matches
         for product in products:
             if product.supplier_id and product.supplier_id in supplier_info_by_supplier_id:
                 info = supplier_info_by_supplier_id[product.supplier_id]
                 setattr(product, "supplier_name", info[0])
                 setattr(product, "_planning_supplier_name", info[0])
                 setattr(product, "_planning_supplier_city", info[1])
-            elif product.id in supplier_info_by_product_id:
-                info = supplier_info_by_product_id[product.id]
-                product.supplier_id = info[0]
-                setattr(product, "supplier_name", info[1])
-                setattr(product, "_planning_supplier_name", info[1])
-                setattr(product, "_planning_supplier_city", info[2])
 
     def _apply_search(self, stmt, term: str | None):
         """

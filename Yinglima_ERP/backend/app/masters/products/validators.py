@@ -75,6 +75,7 @@ def validate_product_row(raw_row: dict[str, str], row_number: int) -> dict[str, 
     width = _parse_optional_float_aliases(raw_row, "Width (cm)", "Width (CM)", "width_cm", "width", row_number=row_number)
     height = _parse_optional_float_aliases(raw_row, "Height (cm)", "Height (CM)", "height_cm", "height", row_number=row_number)
     cbm = _parse_optional_float_aliases(raw_row, "Pack. Unit CBM", "Packaging Unit CBM", "packaging_unit_cbm", "cbm", row_number=row_number)
+    purchase_vat = _parse_optional_float_aliases(raw_row, "Purchase VAT %", "purchase_vat_percent", "Pay VAT %", "pay_vat_percent", "Purchase VAT", "Pay VAT", row_number=row_number)
     refund_vat = _parse_optional_float_aliases(raw_row, "Refund VAT %", "refund_vat_percent", "Refund VAT", row_number=row_number)
 
     if pack_qty is not None and pack_qty <= 0:
@@ -95,7 +96,7 @@ def validate_product_row(raw_row: dict[str, str], row_number: int) -> dict[str, 
     spec = _get_val(raw_row, "Specification", "specification", "Compliance & License Requirements", "Product Specification")
     desc = _get_val(raw_row, "Description", "description")
     license_req = _get_val(raw_row, "Compliance & License Requirements", "license_certificate_required")
-    supplier_name = _get_val(raw_row, "Primary Supplier", "primary_supplier", "Supplier", "supplier_name", "Supplier Name", "Supplier (Primary)")
+    supplier_name = _get_val(raw_row, "Supplier Brand", "Brand of Supplier", "Primary Supplier", "primary_supplier", "Supplier", "supplier_name", "Supplier Name", "Supplier (Primary)")
 
     return {
         "product_code": product_code,
@@ -118,6 +119,7 @@ def validate_product_row(raw_row: dict[str, str], row_number: int) -> dict[str, 
         "width_cm": width,
         "height_cm": height,
         "packaging_unit_cbm": cbm,
+        "purchase_vat_percent": purchase_vat,
         "refund_vat_percent": refund_vat,
         "is_purchasable": True,
         "is_sellable": True,

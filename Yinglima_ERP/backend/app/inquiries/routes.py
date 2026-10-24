@@ -378,6 +378,19 @@ async def create_item(
         user_id=current_user.id,
         changes=payload.model_dump(mode="json"),
     )
+    try:
+        from app.notifications.service import NotificationService
+        p_name = item.product.product_name if getattr(item, "product", None) else "Product"
+        await NotificationService.dispatch_event(
+            db,
+            event_key="inquiry_created",
+            title=f"📩 New Inquiry Item: {p_name} ({item.quantity})",
+            message=f"{current_user.username} created an inquiry for {item.quantity} pcs of {p_name}.",
+            link=f"/inquiries",
+            sender_id=current_user.id,
+        )
+    except Exception as e:
+        logger.warning(f"Failed to dispatch inquiry_created notification: {e}")
     return build_success_response(data=data, request_id=request.state.request_id, message="Inquiry item added.")
 
 

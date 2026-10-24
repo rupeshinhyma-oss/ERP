@@ -2,7 +2,7 @@
 
 import { MasterPage, type FormState } from "@/components/MasterPage";
 import { StatusBadge, dash } from "@/components/ui";
-import { StatusSelectField, TextField, nullIfBlank } from "@/components/fields";
+import { TextField, nullIfBlank } from "@/components/fields";
 import type { Country } from "@/types";
 
 const EMPTY: FormState = {
@@ -68,7 +68,6 @@ export function CountriesPage() {
           <TextField id="phone_code" label="Phone Code" maxLength={10} placeholder="+91" value={f.phone_code} onChange={(v) => set("phone_code", v)} />
           <TextField id="nationality" label="Nationality" maxLength={100} value={f.nationality} onChange={(v) => set("nationality", v)} />
           <TextField id="currency" label="Currency Code" maxLength={10} placeholder="INR" value={f.currency} onChange={(v) => set("currency", v)} />
-          <StatusSelectField value={f.status} onChange={(v) => set("status", v)} />
         </div>
       )}
       detailFields={(c) => [

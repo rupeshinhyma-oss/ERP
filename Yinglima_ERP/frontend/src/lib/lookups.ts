@@ -95,6 +95,9 @@ export function invalidateLookupCache(apiBase?: string) {
   } else {
     lookupCache.clear();
   }
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent("lookup:invalidated", { detail: { apiBase } }));
+  }
 }
 
 export function useLookup<T>(apiBase: string, pageSize = 250, includeInactive = false): LookupResult<T> {
@@ -102,6 +105,19 @@ export function useLookup<T>(apiBase: string, pageSize = 250, includeInactive = 
   const reload = useCallback(() => {
     invalidateLookupCache(apiBase);
     setVersion((v) => v + 1);
+  }, [apiBase]);
+
+  // Reactively re-fetch whenever the cache for this apiBase is invalidated from elsewhere in the app
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent)?.detail;
+      if (!detail?.apiBase || apiBase.startsWith(detail.apiBase) || detail.apiBase.startsWith(apiBase)) {
+        setVersion((v) => v + 1);
+      }
+    };
+    window.addEventListener("lookup:invalidated", handler);
+    return () => window.removeEventListener("lookup:invalidated", handler);
   }, [apiBase]);
 
   const cacheKey = `${apiBase}?page=1&page_size=${pageSize}&sort_order=asc${includeInactive ? "" : "&status=active"}`;

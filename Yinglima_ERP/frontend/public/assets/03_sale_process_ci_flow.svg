@@ -1,0 +1,100 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 650" width="100%" height="100%">
+  <defs>
+    <style>
+      .title { font-family: 'Segoe UI', system-ui, sans-serif; font-size: 20px; font-weight: 700; fill: #0f172a; }
+      .subtitle { font-family: 'Segoe UI', system-ui, sans-serif; font-size: 13px; fill: #64748b; }
+      .head { font-family: 'Segoe UI', system-ui, sans-serif; font-size: 13px; font-weight: 700; }
+      .body { font-family: 'Segoe UI', system-ui, sans-serif; font-size: 11px; fill: #334155; }
+      .col-box { font-family: 'Segoe UI', system-ui, sans-serif; font-size: 10px; font-weight: 600; text-anchor: middle; }
+    </style>
+    <filter id="ci-shadow" x="-5%" y="-5%" width="110%" height="115%">
+      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#0f172a" flood-opacity="0.08" />
+    </filter>
+  </defs>
+
+  <rect width="1000" height="650" fill="#f8fafc" rx="10" />
+
+  <!-- Header -->
+  <rect x="25" y="20" width="950" height="55" rx="8" fill="#ffffff" stroke="#e2e8f0" filter="url(#ci-shadow)" />
+  <text x="45" y="47" class="title">Sale Process — 16-Column Export Costing &amp; Commercial Invoice Engine</text>
+  <text x="45" y="65" class="subtitle">From Container Consignment to Official Customs Commercial Invoice &amp; Packing List</text>
+
+  <!-- Step 1: Sourcing Inputs -->
+  <rect x="25" y="95" width="460" height="110" rx="8" fill="#eff6ff" stroke="#bfdbfe" filter="url(#ci-shadow)" />
+  <text x="40" y="118" class="head" fill="#1e40af">1. CONSIGNMENT CONTAINER PULL</text>
+  <text x="40" y="140" class="body">&bull; Selects Consignment (e.g. Mum 48 container)</text>
+  <text x="40" y="158" class="body">&bull; Imports all planned items, product codes, HSN codes, and order quantities</text>
+  <text x="40" y="176" class="body">&bull; Pulls packaging dimensions (cartons, weights, CBM per product)</text>
+
+  <rect x="515" y="95" width="460" height="110" rx="8" fill="#f0fdf4" stroke="#bbf7d0" filter="url(#ci-shadow)" />
+  <text x="530" y="118" class="head" fill="#166534">2. FACTORY RMB COST AUTO-MATCHING</text>
+  <text x="530" y="140" class="body">&bull; Matches products with Confirmed Local Purchases</text>
+  <text x="530" y="158" class="body">&bull; Automatically extracts factory purchase price in RMB (¥) and supplier name</text>
+  <text x="530" y="176" class="body">&bull; Eliminates manual price lookup and ensures zero discrepancies</text>
+
+  <!-- The 16-Column Table Diagram -->
+  <rect x="25" y="230" width="950" height="240" rx="8" fill="#ffffff" stroke="#cbd5e1" filter="url(#ci-shadow)" />
+  <rect x="25" y="230" width="950" height="30" rx="8" fill="#1e3a8a" />
+  <text x="45" y="250" class="head" fill="#ffffff">THE 16-COLUMN EXPORT COMMERCIAL INVOICE FINANCIAL MATRIX</text>
+
+  <!-- Column Pills -->
+  <!-- Row 1: Columns 1-4 -->
+  <rect x="40" y="275" width="205" height="36" rx="4" fill="#f1f5f9" stroke="#cbd5e1" />
+  <text x="142" y="297" class="col-box" fill="#0f172a">1. S/N &amp; 2. Description</text>
+
+  <rect x="270" y="275" width="205" height="36" rx="4" fill="#f1f5f9" stroke="#cbd5e1" />
+  <text x="372" y="297" class="col-box" fill="#0f172a">3. HSN Code (Tariff)</text>
+
+  <rect x="500" y="275" width="205" height="36" rx="4" fill="#f1f5f9" stroke="#cbd5e1" />
+  <text x="602" y="297" class="col-box" fill="#0f172a">4. Order Quantity (UOM)</text>
+
+  <rect x="730" y="275" width="225" height="36" rx="4" fill="#f0f9ff" stroke="#0284c7" />
+  <text x="842" y="297" class="col-box" fill="#0369a1">5 &amp; 6. Export Total USD ($)</text>
+
+  <!-- Row 2: Columns 7-10 -->
+  <rect x="40" y="325" width="205" height="36" rx="4" fill="#fefce8" stroke="#ca8a04" />
+  <text x="142" y="347" class="col-box" fill="#854d0e">7. Supplier Sourcing (RMB)</text>
+
+  <rect x="270" y="325" width="205" height="36" rx="4" fill="#fefce8" stroke="#ca8a04" />
+  <text x="372" y="347" class="col-box" fill="#854d0e">8. Total Sourcing (RMB)</text>
+
+  <rect x="500" y="325" width="205" height="36" rx="4" fill="#fdf4ff" stroke="#c084fc" />
+  <text x="602" y="347" class="col-box" fill="#7e22ce">9. China Refund Rate (13%)</text>
+
+  <rect x="730" y="325" width="225" height="36" rx="4" fill="#fdf4ff" stroke="#c084fc" />
+  <text x="842" y="347" class="col-box" fill="#7e22ce">10. VAT Refund Amount (RMB)</text>
+
+  <!-- Row 3: Columns 11-16 -->
+  <rect x="40" y="375" width="205" height="36" rx="4" fill="#f8fafc" stroke="#94a3b8" />
+  <text x="142" y="397" class="col-box" fill="#334155">11. USD/RMB Exchange Rate</text>
+
+  <rect x="270" y="375" width="205" height="36" rx="4" fill="#eff6ff" stroke="#60a5fa" />
+  <text x="372" y="397" class="col-box" fill="#1d4ed8">12. Gross Cost &amp; 13. Net USD</text>
+
+  <rect x="500" y="375" width="205" height="36" rx="4" fill="#f0fdf4" stroke="#4ade80" />
+  <text x="602" y="397" class="col-box" fill="#15803d">14. Ocean Freight per CBM</text>
+
+  <rect x="730" y="375" width="225" height="36" rx="4" fill="#ecfdf5" stroke="#10b981" />
+  <text x="842" y="397" class="col-box" fill="#047857">15 &amp; 16. Profit Margin &amp; %</text>
+
+  <!-- Mathematical Highlights -->
+  <rect x="40" y="425" width="915" height="30" rx="4" fill="#f8fafc" />
+  <text x="50" y="445" class="body" font-size="11px">&bull; Net Cost USD = (Total RMB - VAT Refund RMB) / Exchange Rate  |  Ocean Freight allocated proportionally based on line CBM volume</text>
+
+  <!-- Output Deliverables -->
+  <rect x="25" y="495" width="460" height="130" rx="8" fill="#ffffff" stroke="#cbd5e1" filter="url(#ci-shadow)" />
+  <rect x="25" y="495" width="460" height="28" rx="8" fill="#f1f5f9" />
+  <text x="40" y="514" class="head" fill="#1e3a8a">OFFICIAL COMMERCIAL INVOICE (.XLSX)</text>
+  <text x="40" y="538" class="body">&bull; Corporate Excel with official letterhead, company seal, bank details</text>
+  <text x="40" y="556" class="body">&bull; Product descriptions, HSN, FOB/CFR USD unit rates &amp; totals</text>
+  <text x="40" y="574" class="body">&bull; Ready for international bank wire transfer and customs declaration</text>
+  <text x="40" y="592" class="body">&bull; Generated in 1 click via direct streaming backend service</text>
+
+  <rect x="515" y="495" width="460" height="130" rx="8" fill="#ffffff" stroke="#cbd5e1" filter="url(#ci-shadow)" />
+  <rect x="515" y="495" width="460" height="28" rx="8" fill="#f1f5f9" />
+  <text x="530" y="514" class="head" fill="#15803d">OFFICIAL PACKING LIST (.XLSX)</text>
+  <text x="530" y="538" class="body">&bull; Detailed package breakdown by carton number and pallet</text>
+  <text x="530" y="556" class="body">&bull; Gross weights (KG), net weights (KG), and CBM volumes (m³)</text>
+  <text x="530" y="574" class="body">&bull; Container &amp; seal number verified against Shipment Planning</text>
+  <text x="530" y="592" class="body">&bull; Sourced directly by shipping lines and port customs inspectors</text>
+</svg>

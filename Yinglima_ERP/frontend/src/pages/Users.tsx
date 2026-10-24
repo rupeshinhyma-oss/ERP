@@ -17,6 +17,7 @@ import { SelectField, TextField } from "@/components/fields";
 import { apiDelete, apiGet, apiPatch, apiPost, apiPut, toQueryString } from "@/lib/api";
 import { useAuth, useDebouncedValue, useModalHistorySync, usePendingGuard } from "@/lib/hooks";
 import { useToast } from "@/lib/toast";
+import { useConfirm } from "@/lib/confirm";
 import { createSsoHandoverUrl, getEcosystemErps } from "@/lib/ssoBridge";
 import { groupPermissionsByModule, PERMISSION_SECTIONS } from "@/lib/permissionLabels";
 import { PermissionMatrixEditor } from "@/components/PermissionMatrixEditor";
@@ -274,6 +275,7 @@ const EMPTY_EDIT = {
 export function UsersPage() {
   const { profile, hasPermission, isSuperAdmin } = useAuth();
   const showToast = useToast();
+  const confirm = useConfirm();
 
   const [rows, setRows] = useState<User[]>([]);
   const [pagination, setPagination] = useState<PaginationMeta | undefined>();
@@ -322,6 +324,27 @@ export function UsersPage() {
   }, [setSearchParams]);
 
   useModalHistorySync(Boolean(viewUser), handleCloseViewUser);
+  useModalHistorySync(createOpen, () => {
+    setCreateOpen(false);
+    setAutoManagerNotice(null);
+  });
+  useModalHistorySync(editOpen, () => setEditOpen(false));
+
+  useEffect(() => {
+    const handleNavActiveClick = (e: Event) => {
+      const customEvent = e as CustomEvent<{ key?: string; path?: string }>;
+      if (customEvent.detail?.key === "users") {
+        setCreateOpen(false);
+        setAutoManagerNotice(null);
+        setEditOpen(false);
+        setOverridesUserId(null);
+        handleCloseViewUser();
+        window.scrollTo({ top: 0, behavior: "smooth" });
+      }
+    };
+    window.addEventListener("erp:nav-active-click", handleNavActiveClick);
+    return () => window.removeEventListener("erp:nav-active-click", handleNavActiveClick);
+  }, [handleCloseViewUser]);
 
   // Universal search deep-link: `?id=` opens that user's detail view
   // directly, so clicking a Users result in the topbar search lands on the
@@ -451,7 +474,15 @@ export function UsersPage() {
 
   /* --- Actions --- */
   async function runAction(path: string, confirmMessage?: string, onDone?: () => void) {
-    if (confirmMessage && !confirm(confirmMessage)) return;
+    if (confirmMessage) {
+      const confirmed = await confirm({
+        title: "Account Action",
+        message: confirmMessage,
+        confirmLabel: "Proceed",
+        variant: "warning",
+      });
+      if (!confirmed) return;
+    }
     try {
       const res = await apiPost<any>(path);
       const data = res?.data;
@@ -467,8 +498,6 @@ export function UsersPage() {
       setError(err);
     }
   }
-
-
 
   const [bulkDeactivateLoading, setBulkDeactivateLoading] = useState(false);
 
@@ -504,7 +533,28 @@ export function UsersPage() {
       warningMsg += `\n\nNote: ${skippedItems.join(" and ")} will be skipped.`;
     }
 
-    if (!confirm(warningMsg)) return;
+    const confirmed = await confirm({
+      title: "Deactivate User Accounts",
+      message: warningMsg,
+      confirmLabel: "Deactivate Accounts",
+      variant: "danger",
+    });
+    if (!confirmed) return;
+
+    const userIds = new Set(eligibleUsers.map((u) => u.id));
+    const previousRows = [...rows];
+
+    // 1. INSTANT 0ms OPTIMISTIC CUT-OFF
+    setSelectedIds(new Set());
+    if (statusFilter === "ACTIVE") {
+      setRows((prev) => prev.filter((u) => !userIds.has(u.id)));
+    } else {
+      setRows((prev) =>
+        prev.map((u) =>
+          userIds.has(u.id) ? { ...u, status: "INACTIVE", is_active: false } : u
+        )
+      );
+    }
 
     setBulkDeactivateLoading(true);
     try {
@@ -524,15 +574,12 @@ export function UsersPage() {
 
       if (successfulIds.size > 0) {
         showToast(`Successfully deactivated ${successfulIds.size} user account(s).`, "success");
-        setRows((prev) =>
-          prev.map((u) =>
-            successfulIds.has(u.id) ? { ...u, status: "INACTIVE", is_active: false } : u
-          )
-        );
-        setSelectedIds(new Set());
+        setReloadCounter((c) => c + 1);
       }
 
       if (failureCount > 0) {
+        // Rollback on any failure
+        setRows(previousRows);
         showToast(`${failureCount} user(s) could not be deactivated.`, "warning");
       }
     } catch (err) {
@@ -857,7 +904,14 @@ export function UsersPage() {
    * old duplicate "admin" role from before that role was retired.
    */
   async function removeAdminRole(userId: string, username: string) {
-    if (!confirm(`Revoke Administrator privileges from '${username}'?`)) return;
+    const confirmed = await confirm({
+      title: "Revoke Administrator Privileges",
+      message: `Revoke Administrator privileges from '${username}'?`,
+      itemName: username,
+      confirmLabel: "Revoke Privileges",
+      variant: "danger",
+    });
+    if (!confirmed) return;
     await guardRowAction(`admin-role:${userId}`, async () => {
       try {
         const { data: allRoles } = await apiGet<Role[]>("/rbac/roles");

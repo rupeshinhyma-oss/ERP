@@ -31,6 +31,8 @@ IMPORT_HEADERS = [
     "is_purchasable",
     "is_sellable",
     "primary_supplier",
+    "purchase_vat_percent",
+    "refund_vat_percent",
     "status",
 ]
 
@@ -40,7 +42,7 @@ EXPORT_HEADERS = [
     "Brand",
     "Category",
     "Sub Category",
-    "Primary Supplier",
+    "Supplier Brand",
     "HSN Code",
     "UOM",
     "Organization",
@@ -52,6 +54,7 @@ EXPORT_HEADERS = [
     "Width (cm)",
     "Height (cm)",
     "Pack. Unit CBM",
+    "Purchase VAT %",
     "Refund VAT %",
     "Compliance & License Requirements",
     "Specification",

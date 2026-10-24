@@ -2,7 +2,7 @@
 
 import { MasterPage, type FormState } from "@/components/MasterPage";
 import { StatusBadge } from "@/components/ui";
-import { StatusSelectField, TextField } from "@/components/fields";
+import { TextField } from "@/components/fields";
 import type { SupplierType } from "@/types";
 
 const EMPTY: FormState = { name: "", status: "active" };
@@ -42,7 +42,6 @@ export function SupplierTypesPage() {
       renderFields={(f, set) => (
         <div className="form-grid">
           <TextField id="name" label="Supplier Type Name *" required maxLength={150} value={f.name} onChange={(v) => set("name", v)} />
-          <StatusSelectField value={f.status} onChange={(v) => set("status", v)} />
         </div>
       )}
       detailFields={(b) => [

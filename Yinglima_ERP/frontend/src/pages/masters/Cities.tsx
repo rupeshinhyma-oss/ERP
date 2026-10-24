@@ -9,7 +9,7 @@
 
 import { MasterPage, type FormState } from "@/components/MasterPage";
 import { StatusBadge } from "@/components/ui";
-import { SelectField, StatusSelectField, TextField } from "@/components/fields";
+import { SelectField, TextField } from "@/components/fields";
 import { useLookup, useNameMap } from "@/lib/lookups";
 import type { City, Country, State } from "@/types";
 
@@ -112,7 +112,6 @@ export function CitiesPage() {
               ))}
             </SelectField>
             <TextField id="name" label="City Name *" required maxLength={150} value={f.name} onChange={(v) => set("name", v)} />
-            <StatusSelectField value={f.status} onChange={(v) => set("status", v)} />
           </div>
         );
       }}

@@ -46,7 +46,6 @@ class SupplierRepository(BaseRepository[Supplier]):
         "contact_wechat_number",
         "tax_id_number",
         "address",
-        "town",
         "primary_website",
         "secondary_website",
         "brand_description",
@@ -85,7 +84,7 @@ class SupplierRepository(BaseRepository[Supplier]):
     def _apply_search(self, stmt: Select, term: str | None) -> Select:
         """
         Comprehensive search matching anything visible on the supplier row / details:
-        company name, geography (country name/code, state, city, town), contacts,
+        company name, geography (country name/code, state, city), contacts,
         phone numbers, emails, websites, tax ID, categories, sub-categories, and products.
         """
         if not term:
@@ -105,7 +104,6 @@ class SupplierRepository(BaseRepository[Supplier]):
             Supplier.contact_wechat_number,
             Supplier.tax_id_number,
             Supplier.address,
-            Supplier.town,
             Supplier.primary_website,
             Supplier.secondary_website,
             Supplier.brand_description,
