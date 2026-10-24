@@ -814,6 +814,40 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
   const findTaxByHsnNumber = (hsnNumber?: string | null) =>
     hsnNumber ? allTaxes.find((t) => t.hsn_number === hsnNumber) : undefined;
 
+  const findCategoryById = (id?: string | null) =>
+    id ? (allCategories.find((c) => c.id === id) || categories.items.find((c) => c.id === id)) : undefined;
+
+  const getCategoryNameForProduct = (p?: Product | null) => {
+    if (!p) return "";
+    const cat = findCategoryById(p.category_id);
+    if (cat?.name) return cat.name;
+    if ((p as any).category_name) return (p as any).category_name;
+    if (p.category_id === "cat-machines") return "Machines";
+    if (p.category_id === "cat-spares") return "Spares";
+    return "";
+  };
+
+  const isSpareProduct = (p?: Product | null) => {
+    if (!p) return false;
+    const catName = getCategoryNameForProduct(p).toLowerCase();
+    if (catName.includes("spare")) return true;
+    if (p.category_id === "cat-spares") return true;
+    if ((p.product_type || "").trim().toLowerCase() === "spare part") return true;
+    return false;
+  };
+
+  const isMachineProduct = (p?: Product | null) => {
+    if (!p) return false;
+    if (isSpareProduct(p)) return false;
+    const catName = getCategoryNameForProduct(p).toLowerCase();
+    if (catName.includes("machin")) return true;
+    if (p.category_id === "cat-machines") return true;
+    if ((p.product_type || "").trim().toLowerCase() === "machine") {
+      if (!catName || catName.includes("machin") || catName.includes("equip")) return true;
+    }
+    return false;
+  };
+
   // Products Data
   const [products, setProducts] = useState<Product[]>(isTestMode ? INITIAL_PRODUCT_MASTER_ITEMS : []);
   const [loading, setLoading] = useState(true);
@@ -1232,10 +1266,7 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
 
     const initialLinked = products
       .filter((p) => {
-        const isSpare =
-          (p.product_type || "").trim().toLowerCase() === "spare part" ||
-          (!p.product_type && p.category_id === "cat-spares");
-        if (!isSpare) return false;
+        if (!isSpareProduct(p)) return false;
         const machineIds = p.applicable_machine_ids || [];
         return machineIds.map(String).includes(String(machine.id));
       })
@@ -1258,13 +1289,8 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
   };
 
   const allSpareProducts = useMemo(() => {
-    return products.filter((p) => {
-      const isSpare =
-        (p.product_type || "").trim().toLowerCase() === "spare part" ||
-        (!p.product_type && p.category_id === "cat-spares");
-      return isSpare;
-    });
-  }, [products]);
+    return products.filter((p) => isSpareProduct(p));
+  }, [products, allCategories, categories.items]);
 
   const selectedSpareProducts = useMemo(() => {
     return allSpareProducts.filter((p) => machineSparesLinkedIds.includes(String(p.id)));
@@ -1380,8 +1406,11 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
     const defaultTax = findTaxByHsnNumber("8422.30.00") || allTaxes[0];
     const initialCatId = allCategories[0]?.id || "";
     const matchingSubs = allSubCategories.filter((sc) => sc.category_id === initialCatId);
+    const initialCat = findCategoryById(initialCatId);
+    const initialCatName = (initialCat?.name || "").toLowerCase();
+    const initialProductType = initialCatName.includes("spare") ? "Spare Part" : "Machine";
     setFormState({
-      product_type: "Machine",
+      product_type: initialProductType,
       applicable_machine_ids: [],
       product_name_tally: "",
       product_name_invoice: "",
@@ -1419,8 +1448,12 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
     // that were never saved against a real Tax record) by HSN number.
     const fallbackHsnNumber = PRODUCT_HSN_MAP[p.product_name_tally || p.product_name || ""] || "8422.30.00";
     const resolvedTax = findTaxById(p.hsn_id) || findTaxByHsnNumber(p.hsn_number) || findTaxByHsnNumber(fallbackHsnNumber);
+    const editCatId = p.category_id || categories.items[0]?.id || "";
+    const editCat = findCategoryById(editCatId);
+    const editCatName = (editCat?.name || "").toLowerCase();
+    const derivedProductType = editCatName.includes("spare") ? "Spare Part" : (p.product_type || "Machine");
     setFormState({
-      product_type: p.product_type || "Machine",
+      product_type: derivedProductType,
       applicable_machine_ids: p.applicable_machine_ids || [],
       product_name_tally: p.product_name_tally || p.product_name || "",
       product_name_invoice: p.product_name_invoice || "",
@@ -1577,13 +1610,16 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
     setFormSubmitting(true);
     try {
       const pCode = formState.product_code?.trim();
+      const selCat = findCategoryById(formState.category_id);
+      const catName = (selCat?.name || "").toLowerCase();
+      const effectiveProductType = catName.includes("spare") ? "Spare Part" : "Machine";
       const payload: Partial<Product> = {
         product_name_tally: formState.product_name_tally.trim(),
         product_name: formState.product_name_tally.trim(),
         product_name_invoice: formState.product_name_invoice?.trim() || undefined,
         product_code: pCode && pCode !== "-" ? pCode : undefined,
-        product_type: formState.product_type || "Machine",
-        applicable_machine_ids: formState.product_type === "Spare Part" ? formState.applicable_machine_ids || [] : undefined,
+        product_type: effectiveProductType,
+        applicable_machine_ids: effectiveProductType === "Spare Part" ? formState.applicable_machine_ids || [] : undefined,
         brand_id: isUUID(formState.brand_id) ? formState.brand_id : (isTestMode && formState.brand_id ? formState.brand_id : undefined),
         category_id: formState.category_id,
         sub_category_id: isUUID(formState.sub_category_id) ? formState.sub_category_id : (isTestMode && formState.sub_category_id ? formState.sub_category_id : undefined),
@@ -1726,24 +1762,6 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
 
           <div className="pm-form-card">
             <form onSubmit={handleSaveProduct}>
-              {/* Row 0: Product Type (Machine vs Spare Part) */}
-              <div className="pm-grid-3" style={{ marginBottom: "16px" }}>
-                <div className="pm-form-group">
-                  <label className="pm-form-label">
-                    Product Type <span className="req">*</span>
-                  </label>
-                  <select
-                    className="pm-form-input"
-                    value={formState.product_type || "Machine"}
-                    onChange={(e) => setFormState({ ...formState, product_type: e.target.value })}
-                  >
-                    <option value="Machine">Machine</option>
-                    <option value="Spare Part">Spare Part</option>
-                  </select>
-                </div>
-              </div>
-
-
               {/* Row 1: Product Name (As Per Tally) *, Product Name (As Per Invoice), Product Code */}
               <div className="pm-grid-3">
                 <div className="pm-form-group">
@@ -1829,9 +1847,13 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
                     setFormState((prev) => {
                       const validSubs = allSubCategories.filter((sc) => sc.category_id === v);
                       const keepSub = validSubs.some((sc) => sc.id === prev.sub_category_id);
+                      const selCategory = findCategoryById(v);
+                      const categoryName = (selCategory?.name || "").toLowerCase();
+                      const derivedType = categoryName.includes("spare") ? "Spare Part" : "Machine";
                       return {
                         ...prev,
                         category_id: v,
+                        product_type: derivedType,
                         sub_category_id: keepSub ? prev.sub_category_id : (validSubs[0]?.id || ""),
                       };
                     });
@@ -2395,30 +2417,20 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
   const renderProductDetailDrawer = () => {
     if (!drawerProduct) return null;
 
-    const isMachine =
-      (drawerProduct.product_type || "").trim().toLowerCase() === "machine" ||
-      (!drawerProduct.product_type && drawerProduct.category_id !== "cat-spares");
-    const isSpare =
-      (drawerProduct.product_type || "").trim().toLowerCase() === "spare part" ||
-      (!drawerProduct.product_type && drawerProduct.category_id === "cat-spares");
+    const isMachine = isMachineProduct(drawerProduct);
+    const isSpare = isSpareProduct(drawerProduct);
 
     const midStr = String(drawerProduct.id);
     const mappedSpareIds = machineSparesUniversalMap[midStr] || [];
     const drawerSelectedSpares = products.filter((p) => {
-      const pIsSpare =
-        (p.product_type || "").trim().toLowerCase() === "spare part" ||
-        (!p.product_type && p.category_id === "cat-spares");
-      if (!pIsSpare) return false;
+      if (!isSpareProduct(p)) return false;
       const pIdStr = String(p.id);
       const applicableIds = (p.applicable_machine_ids || []).map(String);
       return mappedSpareIds.includes(pIdStr) || applicableIds.includes(midStr);
     });
 
     const drawerApplicableMachines = products.filter((p) => {
-      const pIsMachine =
-        (p.product_type || "").trim().toLowerCase() === "machine" ||
-        (!p.product_type && p.category_id !== "cat-spares");
-      if (!pIsMachine) return false;
+      if (!isMachineProduct(p)) return false;
       const mIdStr = String(p.id);
       const mSpares = machineSparesUniversalMap[mIdStr] || [];
       const inApplicable = (drawerProduct.applicable_machine_ids || []).map(String).includes(mIdStr);
@@ -2467,9 +2479,8 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
               <div><strong>Product Name (Tally):</strong> {drawerProduct.product_name_tally || "—"}</div>
               <div><strong>Product Name (Invoice):</strong> {drawerProduct.product_name_invoice || "—"}</div>
               <div><strong>Product Code:</strong> {drawerProduct.product_code || "—"}</div>
-              <div><strong>Product Type:</strong> {drawerProduct.product_type || "Machine"}</div>
+              <div><strong>Category:</strong> {getCategoryNameForProduct(drawerProduct) || "—"}</div>
               <div><strong>Brand:</strong> {brands.items.find((b) => b.id === drawerProduct.brand_id)?.name || "Yinglima"}</div>
-              <div><strong>Category:</strong> {categories.items.find((c) => c.id === drawerProduct.category_id)?.name || "Machines"}</div>
               <div><strong>Sub Category:</strong> {subCategories.items.find((sc) => sc.id === drawerProduct.sub_category_id)?.name || "Miscellaneous"}</div>
               <div><strong>HSN Code:</strong> {drawerProduct.hsn_number || PRODUCT_HSN_MAP[drawerProduct.product_name_tally || ""] || "8422.30.00"}</div>
               <div><strong>GST %:</strong> {drawerProduct.gst_percent != null ? `${drawerProduct.gst_percent}%` : "18%"}</div>
@@ -3611,9 +3622,9 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
                                     </td>
                                   );
                                 case 2: {
-                                  const isSpare =
-                                    (p.product_type || "").trim().toLowerCase() === "spare part" ||
-                                    (!p.product_type && p.category_id === "cat-spares");
+                                  const catName = getCategoryNameForProduct(p);
+                                  const isSpare = isSpareProduct(p);
+                                  const isMachine = isMachineProduct(p);
                                   return (
                                     <td key="cell-2" style={{ minWidth: "220px", ...getFreezeStyle(2, false) }}>
                                       <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: "4px" }}>
@@ -3627,27 +3638,48 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
                                         >
                                           {name}
                                         </a>
-                                        {isSpare ? (
-                                          <span
-                                            className="pm-type-badge pm-type-spare"
-                                            data-testid={`badge-spare-${p.id}`}
-                                          >
-                                            Spare Part
-                                          </span>
-                                        ) : (
-                                          <button
-                                            type="button"
-                                            className="pm-type-badge pm-type-machine"
-                                            data-testid={`badge-machine-${p.id}`}
-                                            onClick={(e) => {
-                                              e.stopPropagation();
-                                              handleOpenMachineSpares(p);
-                                            }}
-                                            title={`View Spare Parts of ${name}`}
-                                          >
-                                            Machine
-                                          </button>
-                                        )}
+                                        {catName ? (
+                                          isMachine ? (
+                                            <button
+                                              type="button"
+                                              className="pm-type-badge pm-type-machine"
+                                              data-testid={`badge-machine-${p.id}`}
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                handleOpenMachineSpares(p);
+                                              }}
+                                              title={`View Spare Parts of ${name} (${catName})`}
+                                            >
+                                              {catName}
+                                            </button>
+                                          ) : isSpare ? (
+                                            <span
+                                              className="pm-type-badge pm-type-spare"
+                                              data-testid={`badge-spare-${p.id}`}
+                                            >
+                                              {catName}
+                                            </span>
+                                          ) : (
+                                            <span
+                                              className="pm-type-badge pm-type-category"
+                                              data-testid={`badge-category-${p.id}`}
+                                              style={{
+                                                display: "inline-block",
+                                                fontSize: "11px",
+                                                fontWeight: 600,
+                                                padding: "1.5px 8px",
+                                                borderRadius: "12px",
+                                                lineHeight: "1.35",
+                                                color: "#475569",
+                                                backgroundColor: "#f1f5f9",
+                                                border: "1px solid #e2e8f0",
+                                                width: "fit-content",
+                                              }}
+                                            >
+                                              {catName}
+                                            </span>
+                                          )
+                                        ) : null}
                                       </div>
                                     </td>
                                   );

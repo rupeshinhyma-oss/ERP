@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { apiGet, apiPost } from "@/lib/api";
+import { apiGet } from "@/lib/api";
 
 export const DEFAULT_INDIAN_STATES = [
   "Andhra Pradesh",
@@ -212,43 +212,48 @@ export function AddCompanyDrawer({ isOpen, onClose, onSuccess }: AddCompanyDrawe
       return;
     }
 
-    const selectedStateObj = states.find((s) => s.id === stateId);
-    const selectedDistrictObj = districts.find((d) => d.id === districtId);
-    const selectedCityObj = cities.find((c) => c.id === cityId);
-    const selectedSalesPersonObj = salesPersons.find((sp) => sp.id === salesPersonId);
+    setSaving(true);
+    try {
+      const selectedStateObj = states.find((s) => s.id === stateId);
+      const selectedDistrictObj = districts.find((d) => d.id === districtId);
+      const selectedCityObj = cities.find((c) => c.id === cityId);
+      const selectedSalesPersonObj = salesPersons.find((sp) => sp.id === salesPersonId);
 
-    const cityName = selectedCityObj?.name || cityId || "";
-    const stateName = selectedStateObj?.name || "";
-    const districtName = selectedDistrictObj?.name || "";
+      const cityName = selectedCityObj?.name || cityId || "";
+      const stateName = selectedStateObj?.name || "";
+      const districtName = selectedDistrictObj?.name || "";
 
-    const enrichedCompany = {
-      id: `proforma-comp-${Date.now()}`,
-      company_name: companyName.trim(),
-      company_type: businessType || "B2C",
-      tax_id_number: gstNo.trim().toUpperCase(),
-      area: area.trim(),
-      state_id: stateId,
-      state: stateName,
-      state_name: stateName,
-      district_id: districtId,
-      district: districtName,
-      city_id: cityId,
-      city: cityName,
-      city_name: cityName,
-      contact_salutation: salutation || "Mr",
-      contact_full_name: fullName.trim(),
-      contact_designation: designation.trim(),
-      contact_indiamart_number: contactIndiaMart.trim(),
-      contact_calling_number: contactDirect.trim(),
-      contact_whatsapp_number: whatsAppNumber.trim(),
-      primary_website: webpage.trim(),
-      sales_person_id: salesPersonId,
-      sales_person_name: selectedSalesPersonObj?.full_name || selectedSalesPersonObj?.username || "",
-      is_proforma_only: true,
-    };
+      const enrichedCompany = {
+        id: `proforma-comp-${Date.now()}`,
+        company_name: companyName.trim(),
+        company_type: businessType || "B2C",
+        tax_id_number: gstNo.trim().toUpperCase(),
+        area: area.trim(),
+        state_id: stateId,
+        state: stateName,
+        state_name: stateName,
+        district_id: districtId,
+        district: districtName,
+        city_id: cityId,
+        city: cityName,
+        city_name: cityName,
+        contact_salutation: salutation || "Mr",
+        contact_full_name: fullName.trim(),
+        contact_designation: designation.trim(),
+        contact_indiamart_number: contactIndiaMart.trim(),
+        contact_calling_number: contactDirect.trim(),
+        contact_whatsapp_number: whatsAppNumber.trim(),
+        primary_website: webpage.trim(),
+        sales_person_id: salesPersonId,
+        sales_person_name: selectedSalesPersonObj?.full_name || selectedSalesPersonObj?.username || "",
+        is_proforma_only: true,
+      };
 
-    onSuccess(enrichedCompany);
-    onClose();
+      onSuccess(enrichedCompany);
+      onClose();
+    } finally {
+      setSaving(false);
+    }
   };
 
   const inputStyle: React.CSSProperties = {

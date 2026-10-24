@@ -435,7 +435,7 @@ describe("Product Master (/product/list)", () => {
 
     const spareBadge = screen.getByTestId("badge-spare-prd-003");
     expect(spareBadge.tagName.toLowerCase()).toBe("span");
-    expect(spareBadge.textContent).toContain("Spare Part");
+    expect(spareBadge.textContent).toContain("Spare");
 
     // Click Machine badge -> opens dedicated machine spares page
     fireEvent.click(machineBadge);
