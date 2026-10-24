@@ -22,22 +22,36 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.create_table(
-        'feed_post_departments',
-        sa.Column('id', GUID(), nullable=False),
-        sa.Column('post_id', GUID(), nullable=False),
-        sa.Column('department_id', GUID(), nullable=False),
-        sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
-        sa.ForeignKeyConstraint(['department_id'], ['roles.id'], ondelete='CASCADE'),
-        sa.ForeignKeyConstraint(['post_id'], ['feed_posts.id'], ondelete='CASCADE'),
-        sa.PrimaryKeyConstraint('id'),
-        sa.UniqueConstraint('post_id', 'department_id', name='uq_feed_post_department')
-    )
-    op.create_index(op.f('ix_feed_post_departments_department_id'), 'feed_post_departments', ['department_id'], unique=False)
-    op.create_index(op.f('ix_feed_post_departments_post_id'), 'feed_post_departments', ['post_id'], unique=False)
+    bind = op.get_bind()
+    insp = sa.inspect(bind)
+    if not insp.has_table('feed_post_departments'):
+        op.create_table(
+            'feed_post_departments',
+            sa.Column('id', GUID(), nullable=False),
+            sa.Column('post_id', GUID(), nullable=False),
+            sa.Column('department_id', GUID(), nullable=False),
+            sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
+            sa.ForeignKeyConstraint(['department_id'], ['roles.id'], ondelete='CASCADE'),
+            sa.ForeignKeyConstraint(['post_id'], ['feed_posts.id'], ondelete='CASCADE'),
+            sa.PrimaryKeyConstraint('id'),
+            sa.UniqueConstraint('post_id', 'department_id', name='uq_feed_post_department')
+        )
+
+    insp = sa.inspect(bind)
+    existing_indexes = {idx['name'] for idx in insp.get_indexes('feed_post_departments')} if insp.has_table('feed_post_departments') else set()
+    if 'ix_feed_post_departments_department_id' not in existing_indexes:
+        op.create_index(op.f('ix_feed_post_departments_department_id'), 'feed_post_departments', ['department_id'], unique=False)
+    if 'ix_feed_post_departments_post_id' not in existing_indexes:
+        op.create_index(op.f('ix_feed_post_departments_post_id'), 'feed_post_departments', ['post_id'], unique=False)
 
 
 def downgrade() -> None:
-    op.drop_index(op.f('ix_feed_post_departments_post_id'), table_name='feed_post_departments')
-    op.drop_index(op.f('ix_feed_post_departments_department_id'), table_name='feed_post_departments')
-    op.drop_table('feed_post_departments')
+    bind = op.get_bind()
+    insp = sa.inspect(bind)
+    if insp.has_table('feed_post_departments'):
+        existing_indexes = {idx['name'] for idx in insp.get_indexes('feed_post_departments')}
+        if 'ix_feed_post_departments_post_id' in existing_indexes:
+            op.drop_index(op.f('ix_feed_post_departments_post_id'), table_name='feed_post_departments')
+        if 'ix_feed_post_departments_department_id' in existing_indexes:
+            op.drop_index(op.f('ix_feed_post_departments_department_id'), table_name='feed_post_departments')
+        op.drop_table('feed_post_departments')
