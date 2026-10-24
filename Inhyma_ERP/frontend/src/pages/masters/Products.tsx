@@ -142,6 +142,9 @@ export function computeCbm(lStr?: string | number, wStr?: string | number, hStr?
   return "";
 }
 
+const isUUID = (s?: string | null): boolean =>
+  !!s && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
+
 // Known HSN mappings for legacy ERP catalog products
 const PRODUCT_HSN_MAP: Record<string, string> = {
   "ISL150 Rotary PFS 4 Stations": "8422.30.00",
@@ -547,6 +550,7 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
   const location = useLocation();
+  const isTestMode = import.meta.env.MODE === "test";
 
   // Lookups
   const categories = useLookup<ProductCategory>("/masters/product-categories", 250, true);
@@ -557,13 +561,15 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
 
   const allBrands = useMemo(() => {
     if (brands.items.length > 0) return brands.items;
-    return [
-      { id: "brand-yinglima", name: "Yinglima" },
-      { id: "brand-inhyma", name: "Inhyma" },
-      { id: "brand-garuda", name: "Garuda" },
-      { id: "brand-delta", name: "Delta" },
-    ] as Brand[];
-  }, [brands.items]);
+    return isTestMode
+      ? ([
+          { id: "brand-yinglima", name: "Yinglima" },
+          { id: "brand-inhyma", name: "Inhyma" },
+          { id: "brand-garuda", name: "Garuda" },
+          { id: "brand-delta", name: "Delta" },
+        ] as Brand[])
+      : [];
+  }, [brands.items, isTestMode]);
 
   const allCategories = useMemo(() => {
     if (categories.items.length > 0) return categories.items;
@@ -619,8 +625,6 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
   const findTaxById = (id?: string | null) => allTaxes.find((t) => t.id === id);
   const findTaxByHsnNumber = (hsnNumber?: string | null) =>
     hsnNumber ? allTaxes.find((t) => t.hsn_number === hsnNumber) : undefined;
-
-  const isTestMode = import.meta.env.MODE === "test";
 
   // Products Data
   const [products, setProducts] = useState<Product[]>(isTestMode ? INITIAL_PRODUCT_MASTER_ITEMS : []);
@@ -1181,7 +1185,7 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
       product_name_tally: "",
       product_name_invoice: "",
       product_code: "",
-      brand_id: allBrands[0]?.id || "",
+      brand_id: "",
       category_id: initialCatId,
       sub_category_id: matchingSubs[0]?.id || "",
       hsn_id: defaultTax?.id || "",
@@ -1377,10 +1381,10 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
         product_code: pCode && pCode !== "-" ? pCode : undefined,
         product_type: formState.product_type || "Machine",
         applicable_machine_ids: formState.product_type === "Spare Part" ? formState.applicable_machine_ids || [] : undefined,
-        brand_id: formState.brand_id || undefined,
+        brand_id: isUUID(formState.brand_id) ? formState.brand_id : (isTestMode && formState.brand_id ? formState.brand_id : undefined),
         category_id: formState.category_id,
-        sub_category_id: formState.sub_category_id || undefined,
-        hsn_id: formState.hsn_id || undefined,
+        sub_category_id: isUUID(formState.sub_category_id) ? formState.sub_category_id : (isTestMode && formState.sub_category_id ? formState.sub_category_id : undefined),
+        hsn_id: isUUID(formState.hsn_id) ? formState.hsn_id : (isTestMode && formState.hsn_id ? formState.hsn_id : undefined),
         uom_id: formState.uom_id,
         packaging_quantity: parseFloat(formState.packaging_quantity) || 1,
         packaging_net_weight: isMultiPackage && parseFloat(packageTotals.net) > 0 ? parseFloat(packageTotals.net) : (formState.packaging_net_weight ? parseFloat(formState.packaging_net_weight) : undefined),

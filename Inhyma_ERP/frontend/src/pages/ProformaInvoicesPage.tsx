@@ -349,6 +349,17 @@ export function ProformaInvoicesPage({
   const [isAddCompanyDrawerOpen, setIsAddCompanyDrawerOpen] = useState(false);
   const [isEditAddressDrawerOpen, setIsEditAddressDrawerOpen] = useState(false);
   const [editingAddressType, setEditingAddressType] = useState<"Billing" | "Shipping">("Billing");
+  const [addressDrawerMode, setAddressDrawerMode] = useState<"add" | "edit">("edit");
+  const [shippingAddressDetails, setShippingAddressDetails] = useState<{
+    company_name?: string;
+    tax_id_number?: string;
+    address?: string;
+    state?: string;
+    city?: string;
+    pincode?: string;
+    contact_person?: string;
+    contact_number?: string;
+  } | null>(null);
 
   useEffect(() => {
     if (loggedInUserName) {
@@ -821,6 +832,7 @@ export function ProformaInvoicesPage({
 
   const handleSelectCompany = (c: any) => {
     setSelectedCompany(c);
+    setShippingAddressDetails(null);
 
     const cityName = c.city_name || c.city || "";
     const stateName = c.state_name || c.state || "";
@@ -841,12 +853,58 @@ export function ProformaInvoicesPage({
     }));
   };
 
-  const handleOpenEditAddress = (type: "Billing" | "Shipping") => {
+  const handleOpenAddAddress = (type: "Billing" | "Shipping") => {
     setEditingAddressType(type);
+    setAddressDrawerMode("add");
     setIsEditAddressDrawerOpen(true);
   };
 
-  const editAddressInitialData = useMemo(() => {
+  const handleOpenEditAddress = (type: "Billing" | "Shipping") => {
+    setEditingAddressType(type);
+    setAddressDrawerMode("edit");
+    setIsEditAddressDrawerOpen(true);
+  };
+
+  const primaryAddressData = useMemo<Partial<EditAddressData>>(() => {
+    const pinMatch = formState.billing_address ? formState.billing_address.match(/\b\d{6}\b/) : null;
+    return {
+      company_name: selectedCompany?.company_name || formState.company_name || "",
+      tax_id_number:
+        selectedCompany?.tax_id_number && selectedCompany.tax_id_number !== "-"
+          ? selectedCompany.tax_id_number
+          : "",
+      address: selectedCompany?.address || formState.billing_address || "",
+      state: selectedCompany?.state_name || formState.state || "",
+      city: selectedCompany?.city_name || formState.city || "",
+      pincode: selectedCompany?.pincode || (pinMatch ? pinMatch[0] : "") || "",
+      contact_person:
+        selectedCompany?.contact_full_name && selectedCompany.contact_full_name !== "-"
+          ? selectedCompany.contact_full_name
+          : "",
+      contact_number:
+        selectedCompany?.contact_calling_number ||
+        selectedCompany?.contact_whatsapp_number ||
+        "",
+    };
+  }, [selectedCompany, formState]);
+
+  const editAddressInitialData = useMemo<Partial<EditAddressData>>(() => {
+    if (addressDrawerMode === "add") {
+      return {
+        company_name: selectedCompany?.company_name || formState.company_name || "",
+        tax_id_number:
+          selectedCompany?.tax_id_number && selectedCompany.tax_id_number !== "-"
+            ? selectedCompany.tax_id_number
+            : "",
+        address: "",
+        state: "",
+        city: "",
+        pincode: "",
+        contact_person: "",
+        contact_number: "",
+      };
+    }
+
     if (editingAddressType === "Billing") {
       const pinMatch = formState.billing_address ? formState.billing_address.match(/\b\d{6}\b/) : null;
       return {
@@ -868,23 +926,26 @@ export function ProformaInvoicesPage({
     } else {
       const pinMatch = formState.shipping_address ? formState.shipping_address.match(/\b\d{6}\b/) : null;
       return {
-        company_name: selectedCompany?.company_name || formState.company_name || "",
+        company_name:
+          shippingAddressDetails?.company_name || selectedCompany?.company_name || formState.company_name || "",
         tax_id_number:
-          selectedCompany?.tax_id_number && selectedCompany.tax_id_number !== "-"
+          shippingAddressDetails?.tax_id_number ||
+          (selectedCompany?.tax_id_number && selectedCompany.tax_id_number !== "-"
             ? selectedCompany.tax_id_number
-            : "",
-        address: formState.shipping_address || selectedCompany?.address || "",
-        state: selectedCompany?.state_name || formState.state || "",
-        city: selectedCompany?.city_name || formState.city || "",
-        pincode: (pinMatch ? pinMatch[0] : "") || selectedCompany?.pincode || "",
-        contact_person: selectedCompany?.contact_full_name || "-",
+            : ""),
+        address: shippingAddressDetails?.address || formState.shipping_address || selectedCompany?.address || "",
+        state: shippingAddressDetails?.state || selectedCompany?.state_name || formState.state || "",
+        city: shippingAddressDetails?.city || selectedCompany?.city_name || formState.city || "",
+        pincode: shippingAddressDetails?.pincode || (pinMatch ? pinMatch[0] : "") || selectedCompany?.pincode || "",
+        contact_person: shippingAddressDetails?.contact_person || selectedCompany?.contact_full_name || "-",
         contact_number:
+          shippingAddressDetails?.contact_number ||
           selectedCompany?.contact_calling_number ||
           selectedCompany?.contact_whatsapp_number ||
           "",
       };
     }
-  }, [editingAddressType, selectedCompany, formState]);
+  }, [addressDrawerMode, editingAddressType, selectedCompany, formState, shippingAddressDetails]);
 
   const handleSaveAddress = (data: EditAddressData) => {
     if (editingAddressType === "Billing") {
@@ -915,6 +976,16 @@ export function ProformaInvoicesPage({
         ...prev,
         shipping_address: data.formatted_address,
       }));
+      setShippingAddressDetails({
+        company_name: data.company_name,
+        tax_id_number: data.tax_id_number,
+        address: data.address,
+        state: data.state,
+        city: data.city,
+        pincode: data.pincode,
+        contact_person: data.contact_person,
+        contact_number: data.contact_number,
+      });
     }
     setIsEditAddressDrawerOpen(false);
   };
@@ -1453,11 +1524,8 @@ export function ProformaInvoicesPage({
                   <button
                     type="button"
                     title="Add Address"
-                    onClick={() => {
-                      if (!formState.billing_address && selectedCompany?.address) {
-                        setFormState((prev) => ({ ...prev, billing_address: selectedCompany.address || "" }));
-                      }
-                    }}
+                    data-testid="btn-add-billing-address"
+                    onClick={() => handleOpenAddAddress("Billing")}
                     style={{
                       height: "34px",
                       padding: "0 14px",
@@ -1522,7 +1590,11 @@ export function ProformaInvoicesPage({
                   <button
                     type="button"
                     title="Clear"
-                    onClick={() => setFormState({ ...formState, shipping_address: "" })}
+                    data-testid="btn-clear-shipping-address"
+                    onClick={() => {
+                      setFormState({ ...formState, shipping_address: "" });
+                      setShippingAddressDetails(null);
+                    }}
                     style={{ width: "34px", height: "34px", background: "#dc2626", color: "#ffffff", border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
                   >
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -1533,11 +1605,8 @@ export function ProformaInvoicesPage({
                   <button
                     type="button"
                     title="Add Address"
-                    onClick={() => {
-                      if (!formState.shipping_address && formState.billing_address) {
-                        setFormState((prev) => ({ ...prev, shipping_address: prev.billing_address }));
-                      }
-                    }}
+                    data-testid="btn-add-shipping-address"
+                    onClick={() => handleOpenAddAddress("Shipping")}
                     style={{
                       height: "34px",
                       padding: "0 14px",
@@ -1556,7 +1625,7 @@ export function ProformaInvoicesPage({
                   </button>
                 </div>
 
-                {selectedCompany && formState.shipping_address && (
+                {Boolean(formState.shipping_address || shippingAddressDetails) && (
                   <div style={{ marginTop: "10px" }}>
                     <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: "4px" }}>
                       <button
@@ -1585,7 +1654,7 @@ export function ProformaInvoicesPage({
                     </div>
                     <div style={{ fontSize: "12px", lineHeight: "1.6", color: "#1e293b" }}>
                       <div style={{ fontWeight: 700, fontSize: "13px", color: "#0f172a", marginBottom: "4px" }}>
-                        {selectedCompany.company_name}
+                        {shippingAddressDetails?.company_name || selectedCompany?.company_name || formState.company_name}
                       </div>
                       <div>
                         <strong style={{ fontWeight: 700 }}>Address:</strong>{" "}
@@ -1593,12 +1662,22 @@ export function ProformaInvoicesPage({
                       </div>
                       <div>
                         <strong style={{ fontWeight: 700 }}>Phone:</strong>{" "}
-                        <span style={{ color: "#334155" }}>{selectedCompany.contact_calling_number || selectedCompany.contact_whatsapp_number || "-"}</span>
+                        <span style={{ color: "#334155" }}>
+                          {shippingAddressDetails?.contact_number || selectedCompany?.contact_calling_number || selectedCompany?.contact_whatsapp_number || "-"}
+                        </span>
                       </div>
                       <div>
                         <strong style={{ fontWeight: 700 }}>GST No:</strong>{" "}
-                        <span style={{ color: "#334155" }}>{selectedCompany.tax_id_number || "-"}</span>
+                        <span style={{ color: "#334155" }}>
+                          {shippingAddressDetails?.tax_id_number || selectedCompany?.tax_id_number || "-"}
+                        </span>
                       </div>
+                      {shippingAddressDetails?.contact_person && shippingAddressDetails.contact_person !== "-" && (
+                        <div>
+                          <strong style={{ fontWeight: 700 }}>Contact Person:</strong>{" "}
+                          <span style={{ color: "#334155" }}>{shippingAddressDetails.contact_person}</span>
+                        </div>
+                      )}
                     </div>
                   </div>
                 )}
@@ -1946,7 +2025,9 @@ export function ProformaInvoicesPage({
           isOpen={isEditAddressDrawerOpen}
           onClose={() => setIsEditAddressDrawerOpen(false)}
           addressType={editingAddressType}
+          title={addressDrawerMode === "add" ? "Add Address" : "Edit Address"}
           initialData={editAddressInitialData}
+          primaryData={primaryAddressData}
           onSave={handleSaveAddress}
         />
       </AppShell>

@@ -972,5 +972,83 @@ describe("Proforma list: workflow actions follow the database rules and the user
     expect(screen.getByText("John Doe")).toBeTruthy();
     expect(screen.getAllByText("9876543210").length).toBeGreaterThanOrEqual(1);
   });
+
+  it("opens Add Address drawer when clicking + Add on Shipping Address card and supports Copy Primary", async () => {
+    renderAdd();
+    await screen.findByDisplayValue("Godown");
+
+    // Select company
+    const input = screen.getByPlaceholderText("Enter Customer Name");
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: "BUILDMART" } });
+    const option = await screen.findByRole("option", { name: "BUILDMART SOLUTIONS" });
+    fireEvent.click(option);
+
+    // Click + Add button on Shipping Address card
+    const addShippingBtn = await screen.findByTestId("btn-add-shipping-address");
+    expect(addShippingBtn).toBeTruthy();
+    fireEvent.click(addShippingBtn);
+
+    // Add Address drawer should open with title "Add Address"
+    expect(await screen.findByRole("heading", { name: "Add Address" })).toBeTruthy();
+
+    // Verify company name is prefilled, address is empty initially in add mode
+    expect((screen.getByTestId("input-edit-company-name") as HTMLInputElement).value).toBe("BUILDMART SOLUTIONS");
+    expect((screen.getByTestId("input-edit-address") as HTMLInputElement).value).toBe("");
+
+    // Click Copy Primary button
+    const copyPrimaryBtn = screen.getByTestId("btn-copy-primary-address");
+    expect(copyPrimaryBtn).toBeTruthy();
+    fireEvent.click(copyPrimaryBtn);
+
+    // Address and contact details should now be populated from primary company
+    expect((screen.getByTestId("input-edit-address") as HTMLInputElement).value).toContain("PLOT NO 200, WARD 4A");
+    expect((screen.getByTestId("input-edit-contact-number") as HTMLInputElement).value).toBe("9825840850");
+
+    // Modify shipping address for custom shipping destination
+    fireEvent.change(screen.getByTestId("input-edit-address"), {
+      target: { value: "WAREHOUSE 4B, GIDC INDUSTRIAL AREA" },
+    });
+
+    // Submit drawer
+    fireEvent.click(screen.getByTestId("btn-submit-edit-address"));
+
+    // Verify drawer closed and shipping address card updated with custom shipping address
+    expect(screen.queryByRole("heading", { name: "Add Address" })).toBeNull();
+    expect(await screen.findByText(/WAREHOUSE 4B, GIDC INDUSTRIAL AREA/)).toBeTruthy();
+  });
+
+  it("opens Add Address drawer when clicking + Add on Billing Address card", async () => {
+    renderAdd();
+    await screen.findByDisplayValue("Godown");
+
+    // Click + Add button on Billing Address card before selecting company
+    const addBillingBtn = await screen.findByTestId("btn-add-billing-address");
+    expect(addBillingBtn).toBeTruthy();
+    fireEvent.click(addBillingBtn);
+
+    // Add Address drawer should open with title "Add Address"
+    expect(await screen.findByRole("heading", { name: "Add Address" })).toBeTruthy();
+    expect((screen.getByTestId("input-edit-company-name") as HTMLInputElement).value).toBe("");
+
+    // Enter billing details
+    fireEvent.change(screen.getByTestId("input-edit-company-name"), { target: { value: "GLOBAL CORP" } });
+    fireEvent.change(screen.getByTestId("input-edit-gst-no"), { target: { value: "27AAAAA0000A1Z5" } });
+    fireEvent.change(screen.getByTestId("input-edit-address"), { target: { value: "SECTOR 18, MIDC" } });
+    fireEvent.change(screen.getByTestId("select-edit-state"), { target: { value: "Maharashtra" } });
+    const cityInput = screen.queryByTestId("select-edit-city") || screen.getByTestId("input-edit-city");
+    fireEvent.change(cityInput, { target: { value: "Navi Mumbai" } });
+    fireEvent.change(screen.getByTestId("input-edit-pincode"), { target: { value: "400705" } });
+    fireEvent.change(screen.getByTestId("input-edit-contact-number"), { target: { value: "9820098200" } });
+
+    // Submit drawer
+    fireEvent.click(screen.getByTestId("btn-submit-edit-address"));
+
+    // Verify drawer closed and billing address populated
+    expect(screen.queryByRole("heading", { name: "Add Address" })).toBeNull();
+    expect(await screen.findByText(/SECTOR 18, MIDC/)).toBeTruthy();
+  });
 });
+
+
 

@@ -18,7 +18,9 @@ export interface EditAddressDrawerProps {
   isOpen: boolean;
   onClose: () => void;
   addressType: "Billing" | "Shipping";
+  title?: string;
   initialData?: Partial<EditAddressData>;
+  primaryData?: Partial<EditAddressData>;
   onSave: (data: EditAddressData) => void;
 }
 
@@ -36,7 +38,9 @@ export function EditAddressDrawer({
   isOpen,
   onClose,
   addressType,
+  title,
   initialData,
+  primaryData,
   onSave,
 }: EditAddressDrawerProps) {
   const [companyName, setCompanyName] = useState("");
@@ -71,11 +75,28 @@ export function EditAddressDrawer({
     setStateName(initialData?.state || "");
     setCityName(initialData?.city || "");
     setPincode(detectedPin);
-    setContactPerson(initialData?.contact_person || "-");
+    const cp = initialData?.contact_person;
+    setContactPerson(cp && cp !== "-" ? cp : "");
     setContactNumber(initialData?.contact_number || "");
     setErrors({});
     setAlertError(null);
   }, [isOpen, initialData]);
+
+  const handleCopyPrimary = () => {
+    if (!primaryData) return;
+    if (primaryData.company_name) setCompanyName(primaryData.company_name);
+    if (primaryData.tax_id_number && primaryData.tax_id_number !== "-") setGstNo(primaryData.tax_id_number);
+    if (primaryData.address) setAddress(primaryData.address);
+    if (primaryData.state) setStateName(primaryData.state);
+    if (primaryData.city) setCityName(primaryData.city);
+    if (primaryData.pincode) setPincode(primaryData.pincode);
+    if (primaryData.contact_person && primaryData.contact_person !== "-") {
+      setContactPerson(primaryData.contact_person);
+    }
+    if (primaryData.contact_number) setContactNumber(primaryData.contact_number);
+    setErrors({});
+    setAlertError(null);
+  };
 
   // Load States on open
   useEffect(() => {
@@ -249,7 +270,7 @@ export function EditAddressDrawer({
           }}
         >
           <h2 style={{ margin: 0, fontSize: "16px", fontWeight: 700, color: "#1e293b" }}>
-            Edit Address
+            {title || "Edit Address"}
           </h2>
           <button
             type="button"
@@ -305,12 +326,34 @@ export function EditAddressDrawer({
 
           {/* Company Name */}
           <div>
-            <label style={labelStyle}>
-              Company Name <span style={{ color: "#ef4444" }}>*</span>
-            </label>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "5px" }}>
+              <label style={{ ...labelStyle, marginBottom: 0 }}>
+                Company Name <span style={{ color: "#ef4444" }}>*</span>
+              </label>
+              {primaryData && (
+                <button
+                  type="button"
+                  data-testid="btn-copy-primary-address"
+                  onClick={handleCopyPrimary}
+                  style={{
+                    background: "none",
+                    border: "none",
+                    color: "#0061f2",
+                    fontSize: "12px",
+                    fontWeight: 600,
+                    cursor: "pointer",
+                    padding: 0,
+                    textDecoration: "none",
+                  }}
+                >
+                  Copy Primary
+                </button>
+              )}
+            </div>
             <input
               type="text"
               data-testid="input-edit-company-name"
+              placeholder="Enter Company Name"
               value={companyName}
               onChange={(e) => {
                 setCompanyName(e.target.value);
@@ -336,6 +379,7 @@ export function EditAddressDrawer({
             <input
               type="text"
               data-testid="input-edit-gst-no"
+              placeholder="Enter GST No"
               value={gstNo}
               onChange={(e) => {
                 setGstNo(e.target.value.toUpperCase());
@@ -361,6 +405,7 @@ export function EditAddressDrawer({
             <input
               type="text"
               data-testid="input-edit-address"
+              placeholder="Enter Address"
               value={address}
               onChange={(e) => {
                 setAddress(e.target.value);
@@ -397,7 +442,7 @@ export function EditAddressDrawer({
                   borderColor: errors.state ? "#ef4444" : "#cbd5e1",
                 }}
               >
-                <option value="">Select State</option>
+                <option value="">Select</option>
                 {states.map((s) => (
                   <option key={s.id} value={s.name}>
                     {s.name}
@@ -415,10 +460,11 @@ export function EditAddressDrawer({
               <label style={labelStyle}>
                 City <span style={{ color: "#ef4444" }}>*</span>
               </label>
-              {cities.length > 0 ? (
+              {cities.length > 0 || !stateName ? (
                 <select
                   data-testid="select-edit-city"
                   value={cityName}
+                  disabled={!stateName}
                   onChange={(e) => {
                     setCityName(e.target.value);
                     if (errors.city) setErrors((prev) => ({ ...prev, city: "" }));
@@ -426,9 +472,11 @@ export function EditAddressDrawer({
                   style={{
                     ...selectStyle,
                     borderColor: errors.city ? "#ef4444" : "#cbd5e1",
+                    opacity: !stateName ? 0.8 : 1,
+                    cursor: !stateName ? "not-allowed" : "pointer",
                   }}
                 >
-                  <option value="">Select City</option>
+                  <option value="">Select</option>
                   {cities.map((c) => (
                     <option key={c.id} value={c.name}>
                       {c.name}
@@ -468,6 +516,7 @@ export function EditAddressDrawer({
               <input
                 type="text"
                 data-testid="input-edit-pincode"
+                placeholder="Enter Pin Code"
                 value={pincode}
                 onChange={(e) => {
                   setPincode(e.target.value);
@@ -504,20 +553,21 @@ export function EditAddressDrawer({
                 <input
                   type="text"
                   data-testid="input-edit-contact-person"
+                  placeholder="Contact Person"
                   value={contactPerson}
                   onChange={(e) => setContactPerson(e.target.value)}
                   style={{
                     ...inputStyle,
-                    paddingRight: "36px",
+                    paddingRight: contactPerson ? "36px" : "10px",
                   }}
                 />
-                {contactPerson && contactPerson !== "-" && (
+                {contactPerson && (
                   <button
                     type="button"
                     title="Clear Contact Person"
                     aria-label="Clear Contact Person"
                     data-testid="btn-clear-contact-person"
-                    onClick={() => setContactPerson("-")}
+                    onClick={() => setContactPerson("")}
                     style={{
                       position: "absolute",
                       right: "6px",
@@ -563,6 +613,7 @@ export function EditAddressDrawer({
               <input
                 type="text"
                 data-testid="input-edit-contact-number"
+                placeholder="Enter Contact Number"
                 value={contactNumber}
                 onChange={(e) => {
                   setContactNumber(e.target.value);
