@@ -118,6 +118,7 @@ def test_spare_part_product_type_schema():
 async def test_zero_stock_delete_enforcement_on_product_stock():
     """Verify single and bulk delete raise 'Stock exists' if product has current_stock > 0."""
     repo = MagicMock()
+    repo.session = AsyncMock()
     category_repo = MagicMock()
     sub_category_repo = MagicMock()
     brand_repo = MagicMock()
@@ -138,6 +139,15 @@ async def test_zero_stock_delete_enforcement_on_product_stock():
     prod_with_stock.product_name_tally = "Machine Alpha"
     prod_with_stock.status = RecordStatus.INACTIVE
     prod_with_stock.current_stock = 3.0  # Stock > 0
+
+    stock_record = MagicMock()
+    stock_record.total_qty = 3.0
+    stock_record.mumbai = 3.0
+    mock_scalars = MagicMock()
+    mock_scalars.all.return_value = [stock_record]
+    mock_res = MagicMock()
+    mock_res.scalars.return_value = mock_scalars
+    repo.session.execute.return_value = mock_res
 
     service.get_by_id_or_raise = AsyncMock(return_value=prod_with_stock)
 

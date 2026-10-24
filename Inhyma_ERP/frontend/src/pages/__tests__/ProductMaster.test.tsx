@@ -415,5 +415,51 @@ describe("Product Master (/product/list)", () => {
     fireEvent.click(deleteBtn);
     expect(screen.queryByPlaceholderText("e.g. Master Carton, Unit Box...")).toBeNull();
   });
+
+  it("renders Machine and Spare Part badges on rows and clicking Machine badge opens machine spares page", async () => {
+    render(
+      <BrowserRouter>
+        <ProductsPage />
+      </BrowserRouter>
+    );
+
+    // Initial seed product prd-001 is a Machine; prd-003 is Spares
+    await waitFor(() => {
+      expect(screen.getByTestId("badge-machine-prd-001")).toBeTruthy();
+      expect(screen.getByTestId("badge-spare-prd-003")).toBeTruthy();
+    });
+
+    const machineBadge = screen.getByTestId("badge-machine-prd-001");
+    expect(machineBadge.tagName.toLowerCase()).toBe("button");
+    expect(machineBadge.textContent).toContain("Machine");
+
+    const spareBadge = screen.getByTestId("badge-spare-prd-003");
+    expect(spareBadge.tagName.toLowerCase()).toBe("span");
+    expect(spareBadge.textContent).toContain("Spare Part");
+
+    // Click Machine badge -> opens dedicated machine spares page
+    fireEvent.click(machineBadge);
+    await waitFor(() => {
+      expect(screen.getByTestId("machine-spares-page")).toBeTruthy();
+      expect(screen.getByTestId("machine-spares-title")).toBeTruthy();
+      expect(screen.getByTestId("spares-tab-selected")).toBeTruthy();
+      expect(screen.getByTestId("spares-tab-all")).toBeTruthy();
+    });
+
+    // Verify tabs can be switched
+    const allTab = screen.getByTestId("spares-tab-all");
+    fireEvent.click(allTab);
+    expect(screen.getByTestId("select-spares-btn")).toBeTruthy();
+
+    const selectedTab = screen.getByTestId("spares-tab-selected");
+    fireEvent.click(selectedTab);
+    expect(screen.getByTestId("remove-spares-btn")).toBeTruthy();
+
+    // Click Back to Product Master
+    const backBtn = screen.getByTestId("back-to-products-btn");
+    fireEvent.click(backBtn);
+    expect(screen.queryByTestId("machine-spares-page")).toBeNull();
+  });
 });
+
 

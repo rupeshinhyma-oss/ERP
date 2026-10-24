@@ -2,6 +2,98 @@
 
 **System:** Inhyma_ERP (India Distribution)  
 **Scope:** Functional updates, schema migrations, UI hardening, and bug fixes.
+## [Release 2026-10-23] — Proforma Invoice Address Drawers & Future Dates, Local Purchase Safety & Landing Rate (VB), and Feed & Broadcast Ecosystem Integration
+
+### 1. Proforma Invoices: Connected Address Cards, Drawers & Future Date Constraints
+- **Expected Delivery Date (`expected_delivery_date`):**
+  - Added dedicated Expected Delivery Date input to the Proforma Invoice Add/Edit modal.
+  - Automatically defaults to the current day (`today`).
+  - Strict date rule: only today and future dates are permissible (`min={todayIso}`). Attempting to select past calendar dates is disabled in the picker.
+- **Connected Billing & Shipping Address Cards:**
+  - Company selection in the Billing and Shipping address blocks dynamically binds to the selected company profile.
+  - Selecting a company automatically fills and renders the respective Billing or Shipping Address card containing address lines, city, state, pincode, GSTIN, and contact details.
+- **Slide-Over "Add Company" Drawer (`AddCompanyDrawer.tsx`):**
+  - Integrated a `+ Add` button beside the company selector that triggers a high-density slide-over drawer.
+  - Allows immediate creation of Customer, Supplier, or Both accounts with GSTIN, PAN, primary calling phone, email, and addresses.
+  - Upon successful creation, the new company is automatically selected in the Proforma form with its addresses populated.
+- **Slide-Over "Edit Address" Drawer (`EditAddressDrawer.tsx`):**
+  - Added an `Edit` action button inside both the Billing and Shipping address preview cards.
+  - Clicking `Edit` opens the drawer prefilled with the active address data (address line 1 & 2, state, city, pincode, GSTIN).
+  - Saving the drawer updates the specific Proforma Invoice address state directly without mutating or dirtying the master company catalog.
+- **Side Scrollbar Support:**
+  - Added clean horizontal and vertical scrollbar overflow handling for tables and dense modal views.
+
+### 2. Local Purchase: Landing Rate Renaming, Side Scrollbar & Confirmed Order Delete Protection
+- **Column Header Renaming:**
+  - Standardized label across table and PDF views: renamed `Unit Landing Rate (INR)` to **`Unit Landing Rate (INR) (VB)`** to clearly designate Value-Based expense allocation.
+- **Side Scrollbar Overflow:**
+  - Added table-level horizontal side scrollbar styling for the local purchase order grid and items breakdown.
+- **Confirmed Order Delete Lockout:**
+  - In `LocalPurchasePage.tsx`, orders with status `Confirmed` strictly hide the `Delete` action button from the row action menu (`⋮`).
+  - Server-side guard in `app/purchase/local_routes.py` enforces deletion lockout: returns HTTP 400 if a deletion attempt is made on a confirmed purchase order.
+
+### 3. Feed & Broadcast Module: Ecosystem Pull & Merge Integration
+- **Upstream Merge from GitHub (`rupeshinhyma-oss/ERP`):**
+  - Clean pull and fast-forward merge of remote commits (`399c750`, `632f0e0`, `4371dad`, `3098a69`).
+  - Integrated enterprise **Feed & Broadcast Module** with RBAC and interaction privacy:
+    - **Backend Models & Endpoints (`app/feed`):** `FeedPost`, `FeedPostRecipient`, `FeedPostDepartment`, `FeedComment`, `FeedReaction`, and `FeedRead` models. Complete REST endpoints under `/api/v1/feed` for posts, pinned announcements, comments, reactions, and audience-targeted broadcasts.
+    - **Frontend Feed UI (`frontend/src/pages/feed`):** Interactive feed timeline, `FeedComposer` with department/role targeting, `FeedPostCard`, `FeedEditModal`, rich emoji reactions, and comment threading.
+    - **Alembic Reconciled Head:** Migrations `c2b3c4d5e6f7a8`, `d4e5f6a7b8c9`, and `e6f7a8b9c0d1` linearized cleanly on top of `d32a657d3f2f` to unified head `t5e6f7a8b9c0 (head)`.
+- **Product Test Alignment:**
+  - Aligned zero-stock mock queries with warehouse stock resolution in `test_crm_reports_and_analytics.py` and `test_product_dimensions_and_classification.py`.
+
+## [Release 2026-10-23] — Machine Spare Parts View & Mapping, SideDrawer Redesign, Delete Protection, and Alembic Deployment Resilience
+
+### 1. Dedicated Machine Spare Parts Page & View
+- **Dual-Tab Interface (`Selected` & `All Spare Parts`):**
+  - Built dedicated Machine Spares management page displaying tabbed navigation:
+    - **`Selected (<count>)`**: Displays only the spare parts currently mapped and compatible with the selected Machine.
+    - **`All Spare Parts (<count>)`**: Displays the global catalog of spare parts with search and pagination, allowing operators to quickly link/unlink spares.
+- **11-Column Table Architecture:**
+  - Standardized complete 11-column data table:
+    1. `#` (Row index)
+    2. `PART NO.` (Spare part number)
+    3. `ITEM CODE` (SKU identifier)
+    4. `PRODUCT NAME` (Catalog item name)
+    5. `BRAND` (Manufacturer brand badge)
+    6. `CATEGORY` (Top-level taxonomy)
+    7. `SUB CATEGORY` (Secondary classification)
+    8. `OEM COMPATIBILITY` (OEM model notes)
+    9. `PRICE (INR)` (Standard unit price formatted in INR)
+    10. `SPECIFICATION` (Technical specs / attributes)
+    11. `ACTION` (`+ Add` to machine, `✓ Added` status indicator, `Remove` from machine).
+- **Multi-Machine Relational Mapping:**
+  - Architecture fully supports shared and unique spare parts across machines:
+    - Multiple machines can share identical standard spares (e.g. common bearings, belts, heating elements).
+    - Specialized machines retain their own distinct machine-specific spare parts.
+    - Mapping and unmapping actions dynamically update `product_machine_spares` relational records and `applicable_machine_ids` arrays.
+
+### 2. SideDrawer Redesign & Spare Parts Integration
+- **Header Action Button Elevation:**
+  - Upgraded [`SideDrawer.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/components/SideDrawer.tsx) with a new `headerActions` prop slot.
+  - Moved the `Edit Product` action button from the bottom fixed footer directly into the drawer's top-right header adjacent to the close (`✕`) button.
+  - Removed the redundant bottom fixed action button row, eliminating bottom-bar occlusion and allowing the drawer content to scroll freely to the viewport bottom.
+- **Dedicated Spare Parts Section in Machine Detail Drawer:**
+  - When viewing any Machine in the Product Master detail drawer, a dedicated **Spare Parts** section renders the count of mapped spares.
+  - Lists mapped spare items with part code, name, and brand.
+  - Provides a direct `Manage Spare Parts →` action link that opens the dedicated Machine Spares page for that specific machine.
+
+### 3. Product Master Catalog Safety & Delete Option Removal
+- **Master Catalog Guard (`ProductListPage.tsx`):**
+  - Removed the row-level `Delete` action button from the `ACTION` column in the Product Master list view.
+  - Prevents accidental operator deletion of master catalog products that may be referenced in historical transactions, purchase orders, or BOM mappings.
+
+### 4. Alembic Migration Chain Merge & Deployment Resilience
+- **Alembic Multi-Head Reconciliation:**
+  - Resolved deployment failure on Render where `server.py` halted with exit code `255` (`Multiple head revisions are present for given argument 'head'`).
+  - Merged two divergent branch heads (`m9c0d1e2f3a4` inventory integrity and `q2c3d4e5f6a7` task recurring schedules) into single unified head `d32a657d3f2f` via [`d32a657d3f2f_merge_inventory_and_crm_heads.py`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/backend/alembic/versions/d32a657d3f2f_merge_inventory_and_crm_heads.py).
+- **Idempotent Migration Hardening:**
+  - Added `sa.inspect(conn)` guards to [`n5d6e7f8g9h0_add_company_id_to_crm_leads.py`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/backend/alembic/versions/n5d6e7f8g9h0_add_company_id_to_crm_leads.py) and [`p6e7f8g9h0i1_create_crm_quotations_and_lead_products.py`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/backend/alembic/versions/p6e7f8g9h0i1_create_crm_quotations_and_lead_products.py), ensuring table and column additions are idempotent and skip gracefully if already present in production.
+- **Server Startup Hardening (`server.py`):**
+  - Updated [`server.py`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/backend/server.py#L38-L58) to execute `alembic upgrade heads` (plural) during container boot, ensuring multi-branch compatibility and preventing startup termination.
+- **Verification:**
+  - Full test verification passing with `test_single_migration_head`, `test_tasks_recurring` (19/19 passed), and `test_health`.
+
 ## [Release 2026-10-22] — Import Purchase: Real Uploaded Invoice File Display, Zero-Synthetic-PDF Enforcement & Dedicated Streaming Endpoint
 
 ### 1. Zero Synthetic PDF Generation in Import Purchase
@@ -58,6 +150,50 @@
 - **E2E Browser Verification:**
   - Verified with browser subagent on `http://localhost:5174/purchase/importpurchase` that clicking `SEALING MACHINE INFORMATION.pdf` renders the genuine `GLF-50 SEALING MACHINE` document in the viewer, and clicking `Import Purchase (inhyma).docx` displays the document preview card.
   - Verified on the `Closed` tab that clicking the action menu (`⋮`) for closed order `JK4561` displays strictly **ONLY** `Download Purchase`, with `Edit` removed.
+## [Release 2026-10-22] — CRM Full Suite (Phases 1–6), Branded Quotations Engine & Workforce Recurring Tasks Scheduling Engine
+
+### 1. CRM Lead Management & Interactive Kanban Pipeline ([`CrmLeadsPage.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/crm/CrmLeadsPage.tsx), [`lead_routes.py`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/backend/app/crm/lead_routes.py))
+- **Interactive Kanban Board View:**
+  - Implemented dynamic drag-and-drop lead pipeline cards across customizable sales stages with stage-wise lead counts and monetary totals.
+  - Seamless drag transitions update lead stage via `PATCH /api/v1/crm/leads/{id}/stage` with optimistic UI updates and server rollback on failure.
+- **Data-Dense List View:**
+  - 12-column sortable table with multi-criteria filtering: salesperson assignment, pipeline stage, priority, date range, and keyword search.
+  - Bulk actions for salesperson re-assignment and stage migration.
+- **Lead Detail Drawer & Activity Log:**
+  - Comprehensive 360° lead timeline recording calls, notes, stage transitions, and linked quotations.
+  - **Company Master Integration:** Links leads directly to existing customer records in `companies` table via typeahead matching or provisions new company records upon lead qualification.
+  - **Follow-up Sync with Workforce Tasks:** Creating a lead follow-up automatically synchronizes a linked workforce task (`tasks` table) assigned to the salesperson.
+
+### 2. CRM Dynamic Pipeline Setup ([`PipelineSetupPage.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/crm/PipelineSetupPage.tsx))
+- **Configurable Sales Stages (`/crm/pipeline`):**
+  - Full CRUD for sales stages: stage name, sequence order, win probability percentage (0–100%), custom HEX color palette, and closure flag (`is_won` / `is_lost`).
+  - Stage deletion guard preventing removal of stages currently populated by active leads.
+
+### 3. CRM Lead CSV Import Engine ([`LeadImportPage.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/crm/LeadImportPage.tsx), [`import_service.py`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/backend/app/crm/import_service.py))
+- **Intelligent Field Mapping & Pre-Validation:**
+  - 4-step wizard: File Upload ➔ Auto-Column Mapping ➔ Pre-Import Validation Preview ➔ Batch Execution.
+  - Duplicate detection by phone number, email address, or company name with selectable conflict strategy (`Skip`, `Overwrite`, `Create Duplicate`).
+  - Batch audit history tracking imported, failed, and skipped row counts with downloadable error logs.
+
+### 4. Salesperson Lead Distribution & Quotas ([`SalespersonDistributionPage.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/crm/SalespersonDistributionPage.tsx), [`assignment_service.py`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/backend/app/crm/assignment_service.py))
+- **Automated Round-Robin Distribution:**
+  - Configurable distribution rules assigning incoming leads across eligible sales representatives based on weighted capacity, daily/weekly quotas, or geographic territory.
+  - Real-time salesperson workload meters showing active, won, and lost lead counts.
+
+### 5. Branded Quotation Generation Engine ([`CrmQuotationModal.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/crm/CrmLeadsPage.tsx), [`quotationPdf.ts`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/lib/quotationPdf.ts), [`quotation_pdf.py`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/backend/app/crm/quotation_pdf.py))
+- **Multi-Item Quotation Builder:**
+  - Fast line-item entry with Product Master typeahead lookup, unit rates, quantity, discount %, HSN tax calculation (CGST/SGST/IGST), and total value.
+  - Configurable commercial terms: payment terms, delivery period, warranty terms, and validity date.
+- **High-Fidelity PDF Generation:**
+  - Clean A4 formatted quotation PDF featuring official corporate branding, buyer/consignee details, itemized table, total in words, bank account details for wire transfers, and authorized signatory footer.
+
+### 6. Workforce Recurring Tasks Scheduling Engine ([`RecurringTasksTab.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/tasks/RecurringTasksTab.tsx), [`RecurringScheduleModal.tsx`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/frontend/src/pages/tasks/RecurringScheduleModal.tsx), [`recurring_worker.py`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/backend/app/tasks/recurring_worker.py))
+- **Recurring Schedule Management:**
+  - Created dedicated **Recurring** sub-tab in Work Management (`/tasks`).
+  - Modal supporting Daily, Weekly (day-of-week selection), Monthly (day-of-month), and Custom interval schedules with start/end date bounds.
+- **Automated Next-Run Task Spawning:**
+  - Server worker calculates next occurrence timestamps and automatically provisions active task tickets into the assigned user's queue.
+  - Archive, pause, resume, and edit controls with full audit trail.
 
 ## [Release 2026-10-21] — Inhyma Product Sync Receiver Adapter & Auto-Provisioning (Yinglima -> Inhyma)
 

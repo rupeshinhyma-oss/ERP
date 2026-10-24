@@ -23,6 +23,12 @@
    - An invalid or mistyped revision identifier exists in the database `alembic_version` table.
    - Run Runbook **RB-03** below to re-align the revision pointer with the actual applied migration state.
 
+### Scenario D: Multiple Head Revisions Halting Deployment Startup
+1. If deployment startup halts with exit code 255 and log:
+   `FAILED: Multiple head revisions are present for given argument 'head'; please specify a specific target revision, '<branchname>@head' to narrow to a specific head, or 'heads' for all heads`
+   - Two or more migration files were committed with parallel branch points.
+   - Execute Runbook **RB-04** below to merge the branches into a single linear head.
+
 ---
 
 ## 2. Standard Operating Procedures (Runbooks)
@@ -50,7 +56,31 @@ When the database `alembic_version` table points to an unknown revision:
 4. Re-run migration verification:
    ```bash
    python -m alembic current
-   python -m alembic upgrade head
+   python -m alembic upgrade heads
    ```
-5. Confirm all pending migrations apply linearly to `head`.
+5. Confirm all pending migrations apply linearly to `heads`.
+
+### RB-04: Resolving Divergent Migration Heads (Merge Migration)
+When Alembic detects multiple unmerged leaf revisions:
+1. Inspect the conflicting heads:
+   ```bash
+   cd Inhyma_ERP/backend
+   python -m alembic heads
+   ```
+2. Generate an explicit merge migration revision:
+   ```bash
+   python -m alembic merge heads -m "merge_divergent_heads"
+   ```
+3. Inspect the newly created migration in `backend/alembic/versions/` and ensure `down_revision = ('rev1', 'rev2')`.
+4. Apply the merge migration:
+   ```bash
+   python -m alembic upgrade heads
+   ```
+5. Verify that `python -m alembic heads` returns strictly 1 head.
+6. Run the automated migration head test:
+   ```bash
+   python -m pytest tests/test_migrations_match_models.py::test_single_migration_head -v
+   ```
+7. Commit the new merge migration file and push to Git to enable clean production deployment.
+
 

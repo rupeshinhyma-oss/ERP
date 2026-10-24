@@ -167,7 +167,7 @@ async def create_product(
             "product_code": product.product_code,
             "product_name": product.product_name,
             "category": getattr(product, "category_id", None) and str(product.category_id),
-            "is_active": product.is_active,
+            "is_active": getattr(product, "is_active", True),
             "version": getattr(product, "version", 1),
         },
     )
@@ -448,7 +448,7 @@ async def update_product(
             "product_code": product.product_code,
             "product_name": product.product_name,
             "category": getattr(product, "category_id", None) and str(product.category_id),
-            "is_active": product.is_active,
+            "is_active": getattr(product, "is_active", True),
             "version": getattr(product, "version", 1),
         },
     )

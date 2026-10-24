@@ -44,6 +44,10 @@
    - 8.23. [Sales: Proforma Invoices (PI) & Extended Commercial Terms](#823-sales-proforma-invoices-pi--extended-commercial-terms)
    - 8.24. [Database-Driven Status Rules & Dynamic Workflow Engine](#824-database-driven-status-rules--dynamic-workflow-engine)
    - 8.25. [Sales: Sales Order Execution, Gate Pass Logistics & Discount Ledger](#825-sales-sales-order-execution-gate-pass-logistics--discount-ledger)
+   - 8.26. [CRM: Customer Relationship Management Full Suite, Quotations & Task Synchronization](#826-crm-customer-relationship-management-full-suite-leads-pipelines-distribution-timeline--branded-quotations-engine)
+   - 8.27. [Workforce: Recurring Tasks Scheduling Engine & Automated Worker](#827-workforce-recurring-tasks-scheduling-engine--automated-spawning-worker)
+   - 8.28. [Product Sync Adapter & Dynamic Relational Provisioning Engine](#828-product-sync-adapter--dynamic-relational-provisioning-engine-yinglima---inhyma)
+   - 8.29. [Communication: Internal Feed & Broadcast Announcements Engine](#829-communication-internal-feed--broadcast-announcements-engine)
 
 9. [Real-Time WebSocket & Event Synchronization](#9-real-time-websocket--event-synchronization)
 10. [Multi-Tier Caching Engine](#10-multi-tier-caching-engine)
@@ -115,7 +119,7 @@
 
 ### Backend Stack
 - **Framework**: FastAPI (Python 3.11+) with Uvicorn ASGI server.
-- **ORM & Database**: SQLAlchemy 2.0 Async (`asyncpg` for PostgreSQL, `aiosqlite` for local dev) with Alembic migration versioning.
+- **ORM & Database**: SQLAlchemy 2.0 Async (`asyncpg` for PostgreSQL, `aiosqlite` for local dev) with Alembic migration versioning, strict single-head linear history enforcement (`tests/test_migrations_match_models.py`), idempotent DDL guards (`sa.inspect`), and container startup resilience (`alembic upgrade heads`).
 - **Data Validation**: Pydantic v2 schemas for high-throughput serialization.
 - **Authentication**: Argon2id password hashing (`argon2-cffi`) and PyJWT (HMAC-SHA256).
 - **Caching**: Dual-backend (`InMemoryCacheBackend` with LRU eviction and Redis client).
@@ -378,12 +382,24 @@ A user may be assigned any number of Roles simultaneously (`POST /users/{id}/rol
   - **Agent Types:** Multi-tier agent classifications and commission brackets.
 
 ### 8.5. Product Catalog & Dynamic Specification Builder
-- **Endpoints:** `GET /products`, `POST /products`, `PATCH /products/{id}`, `POST /products/{id}/specs`, `GET /products/{id}/datasheet-pdf`, `GET /masters/products/machine-spares/universal-view`, `GET /masters/products/package-dimensions`.
+- **Endpoints:** `GET /products`, `POST /products`, `PATCH /products/{id}`, `POST /products/{id}/specs`, `GET /products/{id}/datasheet-pdf`, `GET /masters/products/machine-spares/universal-view`, `POST /masters/products/machine-spares/map`, `POST /masters/products/machine-spares/unmap`, `GET /masters/products/package-dimensions`.
 - **Features:** Dynamic JSON specification builder allowing arbitrary technical specifications (e.g. Dimensions, Voltage, Speed, Material). Includes multi-image upload, supplier association, and ReportLab PDF datasheet generation.
 - **Master Multi-View Navigation Strip (`master-view-nav`):**
   - **`📦 Product Master` (`catalog`):** Main product catalog grid featuring column pinning, inline stock inspection, and bulk activation/deactivation.
   - **`⚙️ Machine-Spares Universal View` (`universal-view`):** Machine-wise spare parts breakdown showing all linked spare parts, codes, stock levels, and compatibility notes with a dedicated link modal (`/masters/products/machine-spares/universal-view`).
   - **`📐 Dimensions & Weights Report` (`dimensions-report`):** Package-level breakdown for multi-box products, displaying Length, Width, Height, CBM, Net Weight, and Gross Weight with direct CSV and XLSX export triggers.
+- **Dedicated Machine Spare Parts Management Interface:**
+  - Provides a dedicated 2-tab view:
+    - **`Selected (<count>)`**: Shows spare parts mapped to the current machine with quick `Remove` unlinking.
+    - **`All Spare Parts (<count>)`**: Global catalog of spare parts with search, pagination, and `+ Add` / `✓ Added` actions.
+  - Full 11-column data table layout: `#`, `PART NO.`, `ITEM CODE`, `PRODUCT NAME`, `BRAND`, `CATEGORY`, `SUB CATEGORY`, `OEM COMPATIBILITY`, `PRICE (INR)`, `SPECIFICATION`, `ACTION`.
+  - Supports multi-machine relationships: machines can share identical standard spares (e.g. standard bearings, belts) or maintain exclusive machine-specific spare parts.
+- **SideDrawer UI Architecture:**
+  - Upgraded with `headerActions` slot: `Edit Product` button is placed at the top-right header of `SideDrawer.tsx` alongside the close button.
+  - Eliminated bottom fixed button row to allow clean, unobstructed scrolling of product attributes and media.
+  - Embedded dedicated **Spare Parts** section for Machine products displaying mapped spares count, item preview, and a direct `Manage Spare Parts →` shortcut.
+- **Master Catalog Deletion Safety:**
+  - Row-level `Delete` action button removed from the Product Master list view (`ProductListPage.tsx`) to guard against accidental deletion of core catalog records.
 - **Real-Time Duplicate Prevention Guard (`ProductNameSuggestions`):**
   - Intercepts operator input in real-time, executing trigram/substring match queries against existing product catalog names to prevent creating duplicate SKU entries.
 - **Dimensional CBM Auto-Calculation:**
@@ -880,6 +896,9 @@ A user may be assigned any number of Roles simultaneously (`POST /users/{id}/rol
   - Datalist supplier lookup (`<datalist id="local-supplier-options">`) enforcing selection from known suppliers.
   - UOM badge display pulled dynamically from `/masters/uom`.
   - A4 Local Purchase Order PDF generation with company header, party details, and tax breakdowns.
+  - **Unit Landing Rate (INR) (VB) Standardization:** Column header in both the UI table grid and generated PDF is standardized to `Unit Landing Rate (INR) (VB)` to emphasize Value-Based expense allocation.
+  - **Horizontal Side Scrollbar:** Added side scrollbar overflow styling on the local purchase data table and item breakdown panels to ensure clean presentation without vertical or horizontal clipping.
+  - **Confirmed Order Deletion Protection:** In `LocalPurchasePage.tsx`, purchase orders in `Confirmed` status strictly omit the `Delete` option from the row action menu (`⋮`). The backend endpoint `DELETE /api/v1/purchase/local-orders/{id}` verifies status and returns `400 Bad Request` if deletion of a confirmed order is attempted, preserving financial and inventory integrity.
 
 ### 8.22. Purchase: Import Purchase Consignments & Customs Landing Matrix
 - **Files:** `backend/app/purchase/import_routes.py`, `backend/app/purchase/models.py`, `backend/app/purchase/schemas.py`, `backend/app/purchase/costing.py`, `frontend/src/pages/purchase/ImportPurchasePage.tsx`, `frontend/src/lib/purchaseApi.ts`, `frontend/src/lib/importPurchasePdf.ts`.
@@ -948,6 +967,11 @@ A user may be assigned any number of Roles simultaneously (`POST /users/{id}/rol
   - Extended commercial terms: Payment Terms, Delivery Type (Godown/Door), Delivery Charge (To Pay/Paid), Third-Party Delivery.
   - Address routing: Billing Address and Shipping Address snapshotting with GSTIN details.
   - Sequential PI numbering rules (`proforma.numbering` group in `option_lists`).
+  - **Expected Delivery Date (`expected_delivery_date`):** Dedicated scheduling field defaulting to the current date and strictly validating that only present and future dates are selectable (`min={todayIso}`).
+  - **Connected Company & Address Automation:** Selecting a company in Billing or Shipping fields automatically loads and displays the company's full address card (address lines, city, state, pin, phone, email, and GSTIN).
+  - **Slide-Over "Add Company" Drawer (`AddCompanyDrawer.tsx`):** `+ Add` button next to company selectors triggers a right-side drawer to register a new company (Customer/Supplier/Both) with instant selection into the active form upon save.
+  - **Slide-Over "Edit Address" Drawer (`EditAddressDrawer.tsx`):** `Edit` button on Billing and Shipping address cards opens a slide-over drawer to edit and override address fields directly for the proforma document without mutating the master company record.
+  - **Side Scrollbar Support:** Enhanced horizontal and vertical overflow handling on tables and modal forms.
 
 ### 8.24. Database-Driven Status Rules & Dynamic Workflow Engine
 - **Files:** `backend/app/common/workflow.py`, `backend/alembic/versions/k1a2b3c4d5e8_seed_proforma_rules.py`, `backend/alembic/versions/m1a2b3c4d5ea_seed_purchase_rules.py`, `frontend/src/lib/workflowRules.ts`.
@@ -991,6 +1015,71 @@ A user may be assigned any number of Roles simultaneously (`POST /users/{id}/rol
   - **Proof of Delivery (LR Upload):** Transporter Lorry Receipt (LR) number with multi-photo attachment; marks order lifecycle as `Dispatched`.
 - **Discount Payment Ledger (Under-Invoicing Tracking):**
   - Tracks cash discounts and under-invoiced amounts (`discount_amount`, `paid_discount`, `due_discount`) linked to each SO reference, providing accounts oversight and settlement controls.
+
+### 8.26. CRM: Customer Relationship Management Full Suite (Leads, Pipelines, Distribution, Timeline & Branded Quotations Engine)
+- **Backend Architecture & Files:** `backend/app/crm/models.py`, `backend/app/crm/schemas.py`, `backend/app/crm/routes.py`, `backend/app/crm/service.py`, `backend/app/crm/quotation_service.py`, `backend/app/crm/distribution_service.py`.
+- **Frontend Architecture & Files:** `frontend/src/pages/crm/LeadListPage.tsx`, `frontend/src/pages/crm/LeadKanbanPage.tsx`, `frontend/src/pages/crm/LeadDetailPage.tsx`, `frontend/src/pages/crm/LeadImportModal.tsx`, `frontend/src/pages/crm/PipelineSettingsPage.tsx`, `frontend/src/pages/crm/DistributionSettingsPage.tsx`, `frontend/src/pages/crm/QuotationBuilderPage.tsx`, `frontend/src/pages/crm/QuotationViewPage.tsx`.
+- **Database Schema Models:**
+  - `Lead`: Core CRM prospective customer model (`id`, `lead_code`, `company_name`, `contact_name`, `email`, `phone`, `source_id`, `priority`, `business_type`, `stage_id`, `assigned_to_user_id`, `company_id`, `expected_revenue`, `closing_date`, `status`, `notes`, `created_at`, `updated_at`).
+  - `PipelineStage`: Configurable lifecycle stages (`id`, `name`, `code`, `order_index`, `color`, `is_won_stage`, `is_lost_stage`, `sla_hours`).
+  - `LeadActivity`: 360° audit timeline records (`id`, `lead_id`, `activity_type` [CALL, MEETING, EMAIL, NOTE, STAGE_CHANGE, QUOTE_SENT, TASK_CREATED], `title`, `description`, `performed_by_user_id`, `created_at`).
+  - `LeadDistributionRule`: Round-robin and capacity-based sales allotment rules (`id`, `name`, `criteria_json`, `salesperson_user_ids`, `last_assigned_user_id`, `is_active`).
+  - `CrmQuotation` & `CrmQuotationItem`: Branded quotation engine with header pricing, tax schemes, delivery terms, validity windows, and line items.
+- **Core Functional Capabilities:**
+  - **Dynamic Pipeline Stages:** Customizable pipeline workflow stages allowing management to adjust deal progression gates, SLA escalation thresholds, and winning/losing outcomes.
+  - **Interactive Drag-and-Drop Kanban:** Smooth drag-and-drop board allowing sales representatives to transition deals between stages with live stage sum valuations and count badges.
+  - **Bulk CSV/Excel Import Wizard:** Robust wizard supporting header fuzzy matching, custom column mapping, preview parsing, duplicate detection by phone/email/company name, and rollback-safe batch insertion.
+  - **Round-Robin Lead Distribution Engine:** Automated assignment daemon that fairly routes incoming leads across qualified sales team members based on territory, source, or rotation index.
+  - **360° Lead Activity Timeline:** Chronological timeline consolidating notes, stage progression logs, call summaries, quotation dispatches, and linked tasks.
+  - **Company Master Conversion:** 1-click seamless conversion of qualified leads into official `Company` records within the B2B directory, linking existing contacts and past activity.
+  - **Workforce Task Synchronization:** Scheduling follow-up reminders automatically spawns assigned tickets in the enterprise Workforce Task module with bidirectional linkbacks.
+  - **Branded ReportLab Quotation PDF:** Server-side PDF engine producing formatted A4 quotations with company branding, tax breakdown, terms & conditions, and authorized signature blocks.
+
+### 8.27. Workforce: Recurring Tasks Scheduling Engine & Automated Spawning Worker
+- **Backend Architecture & Files:** `backend/app/tasks/recurring_models.py`, `backend/app/tasks/recurring_schemas.py`, `backend/app/tasks/recurring_routes.py`, `backend/app/tasks/recurring_service.py`, `backend/app/tasks/recurring_worker.py`.
+- **Frontend Architecture & Files:** `frontend/src/pages/tasks/TasksPage.tsx` (Sub-tab "Recurring Tasks"), `frontend/src/components/tasks/RecurringScheduleModal.tsx`, `frontend/src/lib/taskApi.ts`.
+- **Database Schema Models:**
+  - `RecurringTaskSchedule`: Master schedule template (`id`, `title`, `description`, `recurrence_type` [DAILY, WEEKLY, MONTHLY, CUSTOM_CRON], `recurrence_interval`, `days_of_week`, `day_of_month`, `cron_expression`, `priority`, `department_id`, `assignee_user_ids`, `watcher_user_ids`, `label_ids`, `checklist_template_json`, `start_date`, `end_date`, `last_generated_at`, `next_run_at`, `status` [ACTIVE, PAUSED, COMPLETED, ARCHIVED], `created_by_user_id`).
+- **Core Functional Capabilities:**
+  - **Unified Tasks Sub-Tab:** Embedded as a dedicated sub-view in `/tasks`, displaying active, paused, and upcoming recurring task schedules with cadence badges and next execution clocks.
+  - **Schedule Creator Modal:** Intuitive modal allowing operators to define task templates with title, description, priority, assignees, subtask checklist blueprints, and cadence rules (Daily, Weekly on specific days, Monthly on specific day of month, or custom Cron).
+  - **Background Daemon Worker (`recurring_worker.py`):** Asynchronous worker checking pending schedules against `next_run_at <= utcnow()`, executing transactional task instantiation, applying subtasks/watchers, computing the subsequent `next_run_at` timestamp, and updating schedule metadata without race conditions.
+  - **Manual Trigger Override:** 1-click "Run Now" action permitting supervisors to spawn an immediate task instance outside regular schedule windows.
+  - **Lifecycle Management:** Dedicated controls to pause, resume, edit, or archive schedules with complete audit trail logging.
+
+### 8.28. Product Sync Adapter & Dynamic Relational Provisioning Engine (Yinglima -> Inhyma)
+- **Backend Architecture & Files:** `backend/app/products/sync_adapter.py`, `backend/app/products/routes.py`, `backend/app/products/service.py`.
+- **Core Functional Capabilities:**
+  - **Cross-ERP Product Sync Adapter:** Connects Yinglima (China Sourcing) to Inhyma (India Distribution), orchestrating catalog synchronization over authenticated HTTP API channels.
+  - **Dynamic Dependency Auto-Provisioning:** If an incoming product references a Category, Subcategory, Brand, UOM, or Tax rate that does not yet exist in the destination ERP, the adapter dynamically creates the missing entity in the local masters before persisting the product, preventing foreign key integrity violations.
+  - **Pagination & Query Normalization:** Enforces standard `limit` parameter handling and newest-first sorting (`created_at DESC`) to ensure deterministic catalog views.
+  - **WebSocket Fanout:** Emits real-time `PRODUCT_SYNCED` notifications to connected UI sessions upon ingestion, automatically refreshing product lookup caches.
+
+### 8.29. Communication: Internal Feed & Broadcast Announcements Engine
+- **Files:** `backend/app/feed/routes.py`, `backend/app/feed/models.py`, `backend/app/feed/schemas.py`, `backend/app/feed/service.py`, `frontend/src/pages/feed/FeedPage.tsx`, `frontend/src/pages/feed/FeedComposer.tsx`, `frontend/src/pages/feed/FeedPostCard.tsx`, `frontend/src/pages/feed/FeedEditModal.tsx`, `frontend/src/lib/feedApi.ts`, `frontend/src/styles/feed.css`.
+- **Database Architecture:**
+  - `feed_posts`: Primary post entity with `title`, `content`, `post_type` (`announcement`, `general`, `alert`), `is_pinned`, `author_id`, `created_at`, `updated_at`, `deleted_at`.
+  - `feed_post_departments`: Relational targeting junction table linking posts to specific department IDs.
+  - `feed_post_recipients`: Direct recipient targeting junction table linking confidential broadcasts to individual user IDs.
+  - `feed_post_comments`: Comment entity supporting threaded discussions under posts with author reference, content, and soft deletion.
+  - `feed_post_reactions`: Reaction entity capturing user emoji reactions (`like`, `love`, `celebrate`, `rocket`, `insightful`, `clap`) ensuring 1 reaction type per user per post.
+  - `feed_post_reads`: Read-receipt tracking recording user viewing timestamps for compliance and broadcast visibility confirmation.
+- **Backend Endpoints (`/api/v1/feed`):**
+  - `GET /posts`: List scoped feed posts with pagination, search, post type filter, and department visibility checks.
+  - `POST /posts`: Create a new feed post or broadcast with targeted departments/recipients and pin status.
+  - `GET /posts/{id}`: Detailed post record, comments, reaction aggregations, and viewer status.
+  - `PUT /posts/{id}`: Edit post content (creator or administrator only).
+  - `DELETE /posts/{id}`: Soft-delete post.
+  - `POST /posts/{id}/pin`: Toggle post pinned status (administrators and managers).
+  - `POST /posts/{id}/comments`: Post a comment on a feed entry.
+  - `DELETE /comments/{comment_id}`: Remove comment.
+  - `POST /posts/{id}/reactions`: Toggle emoji reaction on a post.
+  - `POST /posts/{id}/mark-read`: Record user read receipt.
+- **Frontend Architecture & UX:**
+  - Accessible via the `/feed` route and the topbar/sidebar navigation.
+  - **Feed Composer (`FeedComposer.tsx`):** WYSIWYG post composer with announcement priority toggles, department multi-select dropdown, and validation.
+  - **Feed Timeline & Post Cards (`FeedPostCard.tsx`):** Render author avatars, department badges, pinned visual ribbons, emoji reaction picker popover, reaction counters, and expandable comment threads.
+  - **Interaction Privacy & RBAC:** Enforces granular view and interaction permissions so confidential and department-specific broadcasts are isolated strictly to authorized personnel.
 
 ---
 
@@ -1301,7 +1390,26 @@ A user may be assigned any number of Roles simultaneously (`POST /users/{id}/rol
 | **Federation** | `POST` | `/api/v1/federation/token` | Exchange SSO ticket for local JWT session pair | Public (Ticket Validated) |
 | **Federation** | `GET` | `/api/v1/health/federation` | Run live diagnostics & latency ping against ERP_Main central registry | Super Admin / Authenticated |
 | **Organizations** | `GET` | `/api/v1/organizations/public` | Fetch public organization name and logo for login page | Public |
-| **Organizations** | `GET` | `/api/v1/organizations/logo` | Stream high-resolution database-persisted logo image with version hashing (`?v={sha1}`) | Public |
+| **Purchase: Import** | `GET` | `/api/v1/purchase/import-orders/{id}/bill-file` | Stream or download original uploaded bill file with Bearer or query token (`?token=`) | `purchase.import.view` |
+| **CRM: Leads** | `GET` | `/api/v1/crm/leads` | List CRM leads with search, source, status, assignment & stage filters | `crm.view` |
+| **CRM: Leads** | `POST` | `/api/v1/crm/leads` | Create new CRM lead with contact info and stage | `crm.create` |
+| **CRM: Leads** | `GET` | `/api/v1/crm/leads/{id}` | Inspect CRM lead details and requirements | `crm.view` |
+| **CRM: Leads** | `PATCH` | `/api/v1/crm/leads/{id}` | Update CRM lead details, notes & fields | `crm.update` |
+| **CRM: Leads** | `PATCH` | `/api/v1/crm/leads/{id}/stage` | Advance or update lead pipeline stage (Kanban drag-and-drop) | `crm.update` |
+| **CRM: Leads** | `GET` | `/api/v1/crm/leads/{id}/timeline` | 360-degree chronological lead activity timeline | `crm.view` |
+| **CRM: Leads** | `POST` | `/api/v1/crm/leads/{id}/convert-company` | Convert lead into official B2B Company record | `company.create` |
+| **CRM: Import** | `POST` | `/api/v1/crm/import` | Bulk import leads from CSV/Excel with column mapping & deduplication | `crm.import` |
+| **CRM: Pipeline** | `GET/POST`| `/api/v1/crm/pipeline` | Manage CRM pipeline stages, ordering, and SLA limits | `crm.pipeline.manage` |
+| **CRM: Distribution**| `GET/POST`| `/api/v1/crm/distribution` | Manage round-robin lead distribution rules across sales team | `crm.distribution.manage` |
+| **CRM: Quotation** | `GET` | `/api/v1/crm/quotations` | List CRM sales quotations with status & client filters | `crm.quotation.view` |
+| **CRM: Quotation** | `POST` | `/api/v1/crm/quotations` | Create branded sales quotation with itemized terms | `crm.quotation.create` |
+| **CRM: Quotation** | `GET` | `/api/v1/crm/quotations/{id}/pdf` | Stream or download branded ReportLab Quotation PDF | `crm.quotation.view` |
+| **Workforce: Recurring**| `GET` | `/api/v1/tasks/recurring-schedules` | List recurring task schedules with status and cadence filters | `task.view` |
+| **Workforce: Recurring**| `POST` | `/api/v1/tasks/recurring-schedules` | Create recurring task template with cron/interval cadence | `task.create` |
+| **Workforce: Recurring**| `PATCH`| `/api/v1/tasks/recurring-schedules/{id}` | Update schedule recurrence pattern, assignees, or priority | `task.update` |
+| **Workforce: Recurring**| `PATCH`| `/api/v1/tasks/recurring-schedules/{id}/status` | Pause, resume, or archive recurring schedule | `task.update` |
+| **Workforce: Recurring**| `POST` | `/api/v1/tasks/recurring-schedules/{id}/trigger` | Manually spawn next task instance immediately | `task.create` |
+| **Product: Sync** | `POST` | `/api/v1/products/sync-yinglima` | Trigger outbound product catalog synchronization from Yinglima to Inhyma | `product.manage` |
 
 ---
 

@@ -132,6 +132,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             await conn.execute(text("ALTER TABLE hrms_expenses ADD COLUMN IF NOT EXISTS reimbursed_by UUID REFERENCES users(id) ON DELETE SET NULL;"))
             await conn.execute(text("ALTER TABLE hrms_expenses ADD COLUMN IF NOT EXISTS reimbursement_notes TEXT;"))
             await conn.execute(text("ALTER TABLE hrms_expenses ADD COLUMN IF NOT EXISTS receipt_filename VARCHAR(255);"))
+            await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS has_login BOOLEAN DEFAULT false;"))
             from app.users.models import User
             from app.sales.models import DiscountPayment
             from app.suppliers.models import Supplier, SupplierContact

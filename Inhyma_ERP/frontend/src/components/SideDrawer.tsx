@@ -27,6 +27,7 @@ export interface SideDrawerProps {
   onClose: () => void;
   onEdit?: () => void;
   editLabel?: string;
+  headerActions?: ReactNode;
   width?: string | number;
   maxWidth?: string | number;
   className?: string;
@@ -41,6 +42,7 @@ export function SideDrawer({
   onClose,
   onEdit,
   editLabel = "✏️ Edit",
+  headerActions,
   width,
   maxWidth,
   className,
@@ -91,7 +93,8 @@ export function SideDrawer({
             )}
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-            {onEdit && (
+            {headerActions}
+            {!headerActions && onEdit && (
               <button
                 type="button"
                 className="btn btn-primary"

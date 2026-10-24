@@ -4,6 +4,7 @@ import { BrowserRouter } from "react-router-dom";
 import { ProformaInvoicesPage } from "../ProformaInvoicesPage";
 import { NAV_SECTIONS } from "@/lib/nav";
 import { apiGet, apiPost, apiPatch, apiDelete } from "@/lib/api";
+import { formatDDMMYYYY } from "@/components/DatePicker";
 
 // Mock AppShell
 vi.mock("@/components/AppShell", () => ({
@@ -132,7 +133,25 @@ function fakeApiGet(url: string) {
   if (url.startsWith("/masters/lead-sources")) return Promise.resolve({ data: [{ name: "Website" }, { name: "IndiaMART" }] });
   if (url.startsWith("/masters/additional-charges")) return Promise.resolve({ data: [{ name: "Transport Charges" }, { name: "Packing & Forwarding" }] });
   if (url.startsWith("/masters/products")) return Promise.resolve({ data: CATALOG });
-  if (url.startsWith("/companies/lookup")) return Promise.resolve({ data: [] });
+  if (url.startsWith("/companies/lookup")) {
+    return Promise.resolve({
+      data: [
+        {
+          id: "comp-1",
+          company_name: "BUILDMART SOLUTIONS",
+          company_type: "B2C",
+          tax_id_number: "24AOIPK4534K1ZU",
+          address: "PLOT NO 200, WARD 4A",
+          area: "ADIPUR",
+          city_name: "ADIPUR",
+          district: "Kachchh",
+          state_name: "Gujarat",
+          pincode: "370205",
+          contact_calling_number: "9825840850",
+        },
+      ],
+    });
+  }
   return Promise.resolve({ data: [] });
 }
 
@@ -656,6 +675,21 @@ describe("Add Proforma Invoice: defaults, rules and saving", () => {
     expect(apiPost).not.toHaveBeenCalled();
   });
 
+  it("defaults Expected Delivery Date to today and restricts picker to today and future dates", async () => {
+    renderAdd();
+    await screen.findByDisplayValue("Godown");
+    const input = screen.getByLabelText("Expected Delivery Date") as HTMLInputElement;
+    expect(input.value).toBe(formatDDMMYYYY(new Date()));
+
+    fireEvent.click(input);
+    const dropdown = screen.getByTestId("datepicker-dropdown");
+    expect(dropdown).toBeTruthy();
+
+    // Previous month navigation is disabled because past dates are disallowed
+    const prevBtn = screen.getByRole("button", { name: /previous month/i }) as HTMLButtonElement;
+    expect(prevBtn.disabled).toBe(true);
+  });
+
   it("warns when a unit price is below the product's minimum price", async () => {
     renderAdd();
     fireEvent.change(screen.getByLabelText("Warehouse"), { target: { value: "Mumbai" } });
@@ -841,4 +875,102 @@ describe("Proforma list: workflow actions follow the database rules and the user
     expect(body.company_name).toBe("R K Engineering Pvt Ltd");
     expect(apiPost).not.toHaveBeenCalled();
   });
+
+  it("populates connected company, billing address, and shipping address details when a company is selected", async () => {
+    renderAdd();
+    await screen.findByDisplayValue("Godown");
+
+    // Initially shows input placeholders and + Add buttons
+    expect(screen.getByPlaceholderText("Enter Customer Name")).toBeTruthy();
+    expect(screen.getAllByPlaceholderText("Enter Address").length).toBe(2);
+    expect(screen.getAllByRole("button", { name: "+ Add" }).length).toBe(3);
+
+    // Type to search company
+    const input = screen.getByPlaceholderText("Enter Customer Name");
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: "BUILDMART" } });
+    const option = await screen.findByRole("option", { name: "BUILDMART SOLUTIONS" });
+    fireEvent.click(option);
+
+    // Connected Company card details
+    expect(screen.getByText("Bussiness Type:")).toBeTruthy();
+    expect(screen.getByText("B2C")).toBeTruthy();
+    expect(screen.getAllByText("24AOIPK4534K1ZU").length).toBeGreaterThanOrEqual(1);
+
+    // Connected Billing Address card details
+    expect(screen.getByText("PLOT NO 200, WARD 4A, ADIPUR - 370205")).toBeTruthy();
+
+    // Connected Shipping Address card details
+    expect(screen.getByText(/PLOT NO 200, WARD 4A, ADIPUR, Kachchh, Gujarat - 370205/)).toBeTruthy();
+
+    // Phone & GST numbers displayed
+    expect(screen.getAllByText("9825840850").length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("opens Add Company drawer on clicking + Add, submits a new company, and saves it in Proforma only", async () => {
+    renderAdd();
+    await screen.findByDisplayValue("Godown");
+
+    // Click "+ Add" on the company card (the first + Add button)
+    const addButtons = screen.getAllByRole("button", { name: "+ Add" });
+    fireEvent.click(addButtons[0]);
+
+    // Drawer should open
+    expect(await screen.findByRole("heading", { name: "Add Company" })).toBeTruthy();
+
+    // Fill drawer fields
+    fireEvent.change(screen.getByLabelText(/Company Name/), { target: { value: "NEW TECH ENTERPRISES" } });
+    fireEvent.change(screen.getByLabelText(/GST No Of Company/), { target: { value: "24AAAAA0000A1Z5" } });
+    fireEvent.change(screen.getByLabelText(/State/), { target: { value: "1" } });
+
+    // Submit drawer form
+    fireEvent.click(screen.getByTestId("btn-drawer-submit-company"));
+
+    // Verify it is saved in Proforma only (NOT posted to /companies)
+    expect(apiPost).not.toHaveBeenCalledWith("/companies", expect.anything());
+
+    // Verify company, billing, and shipping details populated in Proforma Invoice
+    expect(await screen.findByDisplayValue("NEW TECH ENTERPRISES")).toBeTruthy();
+    expect(screen.getAllByText("24AAAAA0000A1Z5").length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("opens Edit Address drawer on clicking edit button in Billing Address card, pre-fills fields, and updates address on submit", async () => {
+    renderAdd();
+    await screen.findByDisplayValue("Godown");
+
+    // Select company to populate cards
+    const input = screen.getByPlaceholderText("Enter Customer Name");
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: "BUILDMART" } });
+    const option = await screen.findByRole("option", { name: "BUILDMART SOLUTIONS" });
+    fireEvent.click(option);
+
+    // Click edit button in Billing Address card
+    const editBillingBtn = await screen.findByTestId("btn-edit-billing-address");
+    expect(editBillingBtn).toBeTruthy();
+    fireEvent.click(editBillingBtn);
+
+    // Edit Address drawer should open
+    expect(await screen.findByRole("heading", { name: "Edit Address" })).toBeTruthy();
+
+    // Verify fields are prefilled
+    expect((screen.getByTestId("input-edit-company-name") as HTMLInputElement).value).toBe("BUILDMART SOLUTIONS");
+    expect((screen.getByTestId("input-edit-gst-no") as HTMLInputElement).value).toBe("24AOIPK4534K1ZU");
+
+    // Edit address and contact details
+    fireEvent.change(screen.getByTestId("input-edit-address"), { target: { value: "SUITE 101, TECH PARK" } });
+    fireEvent.change(screen.getByTestId("input-edit-pincode"), { target: { value: "370201" } });
+    fireEvent.change(screen.getByTestId("input-edit-contact-person"), { target: { value: "John Doe" } });
+    fireEvent.change(screen.getByTestId("input-edit-contact-number"), { target: { value: "9876543210" } });
+
+    // Submit drawer
+    fireEvent.click(screen.getByTestId("btn-submit-edit-address"));
+
+    // Verify drawer closed and updated values are displayed
+    expect(screen.queryByRole("heading", { name: "Edit Address" })).toBeNull();
+    expect(await screen.findByText(/SUITE 101, TECH PARK/)).toBeTruthy();
+    expect(screen.getByText("John Doe")).toBeTruthy();
+    expect(screen.getAllByText("9876543210").length).toBeGreaterThanOrEqual(1);
+  });
 });
+

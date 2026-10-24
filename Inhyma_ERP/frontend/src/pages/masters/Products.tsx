@@ -35,7 +35,7 @@ import {
   ImpExpDropdown,
   BulkActionsDropdown,
 } from "@/components/ImportWizard";
-import { apiDelete, apiGet, apiPatch, apiPost, downloadExport } from "@/lib/api";
+import { apiGet, apiPatch, apiPost, downloadExport } from "@/lib/api";
 import { useLookup } from "@/lib/lookups";
 import { useLiveModule } from "@/lib/live/useLive";
 import type {
@@ -44,6 +44,7 @@ import type {
   PaginationMeta,
   Product,
   ProductCategory,
+  ProductDimensionRow,
   ProductSubCategory,
   Tax,
   Uom,
@@ -555,52 +556,34 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
   const taxes = useLookup<Tax>("/masters/taxes", 250, true);
 
   const allBrands = useMemo(() => {
-    const list = [...brands.items];
-    const fallback = [
+    if (brands.items.length > 0) return brands.items;
+    return [
       { id: "brand-yinglima", name: "Yinglima" },
       { id: "brand-inhyma", name: "Inhyma" },
       { id: "brand-garuda", name: "Garuda" },
       { id: "brand-delta", name: "Delta" },
-    ];
-    for (const fb of fallback) {
-      if (!list.some((b) => b.id === fb.id || b.name?.toLowerCase() === fb.name.toLowerCase())) {
-        list.push(fb as Brand);
-      }
-    }
-    return list;
+    ] as Brand[];
   }, [brands.items]);
 
   const allCategories = useMemo(() => {
-    const list = [...categories.items];
-    const fallback = [
+    if (categories.items.length > 0) return categories.items;
+    return [
       { id: "cat-machines", name: "Machines" },
       { id: "cat-spares", name: "Spares" },
       { id: "cat-consumables", name: "Consumables" },
       { id: "cat-packaging", name: "Packaging Material" },
-    ];
-    for (const fb of fallback) {
-      if (!list.some((c) => c.id === fb.id || c.name?.toLowerCase() === fb.name.toLowerCase())) {
-        list.push(fb as ProductCategory);
-      }
-    }
-    return list;
+    ] as ProductCategory[];
   }, [categories.items]);
 
   const allSubCategories = useMemo(() => {
-    const list = [...subCategories.items];
-    const fallback = [
+    if (subCategories.items.length > 0) return subCategories.items;
+    return [
       { id: "sub-misc", name: "Miscellaneous", category_id: "cat-machines" },
       { id: "sub-vacuum", name: "Vacuum Sealer Machine", category_id: "cat-machines" },
       { id: "sub-capping", name: "Capping Machine", category_id: "cat-machines" },
       { id: "sub-tube-sealer", name: "Tube Sealer Machine", category_id: "cat-machines" },
       { id: "sub-banding-spares", name: "Spares For Banding Machine", category_id: "cat-spares" },
-    ];
-    for (const fb of fallback) {
-      if (!list.some((sc) => sc.id === fb.id || sc.name?.toLowerCase() === fb.name.toLowerCase())) {
-        list.push(fb as ProductSubCategory);
-      }
-    }
-    return list;
+    ] as ProductSubCategory[];
   }, [subCategories.items]);
 
   const allUoms = useMemo(() => {
@@ -702,6 +685,17 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
   // Drawer details
   const [drawerProduct, setDrawerProduct] = useState<Product | null>(null);
 
+  // Machine Spares Page View ("Spare Parts of <Machine>")
+  const [selectedMachineForSpares, setSelectedMachineForSpares] = useState<Product | null>(null);
+  const [activeSparesTab, setActiveSparesTab] = useState<"selected" | "all">("selected");
+  const [selectedSpareRowIds, setSelectedSpareRowIds] = useState<string[]>([]);
+  const [sparesSearchTerm, setSparesSearchTerm] = useState("");
+  const [sparesPerPage, setSparesPerPage] = useState<number>(10);
+  const [sparesCurrentPage, setSparesCurrentPage] = useState<number>(1);
+  const [machineSparesLinkedIds, setMachineSparesLinkedIds] = useState<string[]>([]);
+  const [machineSparesUniversalMap, setMachineSparesUniversalMap] = useState<Record<string, string[]>>({});
+  const [spareActionLoading, setSpareActionLoading] = useState(false);
+
 
 
   // Add / Edit Form State
@@ -727,14 +721,11 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const filteredSubCategories = useMemo(() => {
-    if (!formState.category_id) return allSubCategories;
-    const matched = allSubCategories.filter((sc) => sc.category_id === formState.category_id);
-    return matched.length > 0 ? matched : allSubCategories;
+    if (!formState.category_id) return [];
+    return allSubCategories.filter((sc) => sc.category_id === formState.category_id);
   }, [allSubCategories, formState.category_id]);
 
-  const machineProducts = useMemo(() => {
-    return products.filter((p) => (p.product_type || "Machine") !== "Spare Part");
-  }, [products]);
+
 
   // Multi-package calculations
   const isMultiPackage = useMemo(() => {
@@ -788,9 +779,27 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
     }
   }, [isTestMode]);
 
+  const loadUniversalSparesMap = useCallback(async () => {
+    try {
+      const res = await apiGet<any[]>("/masters/products/machine-spares/universal-view");
+      if (res?.data && Array.isArray(res.data)) {
+        const map: Record<string, string[]> = {};
+        for (const item of res.data) {
+          if (item.machine_id && Array.isArray(item.spares)) {
+            map[String(item.machine_id)] = item.spares.map((s: any) => String(s.spare_part_id));
+          }
+        }
+        setMachineSparesUniversalMap(map);
+      }
+    } catch (err) {
+      console.warn("Universal view fetch error:", err);
+    }
+  }, []);
+
   useEffect(() => {
     loadProducts();
-  }, [loadProducts, liveReloadToken]);
+    loadUniversalSparesMap();
+  }, [loadProducts, loadUniversalSparesMap, liveReloadToken]);
 
   // Deep-link universal search support `?id=`
   const deepLinkProductId = searchParams.get("id");
@@ -1020,31 +1029,185 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
     }
   };
 
+  // Machine Spares Actions & Filtering
+  const handleOpenMachineSpares = async (machine: Product) => {
+    setSelectedMachineForSpares(machine);
+    setActiveSparesTab("selected");
+    setSelectedSpareRowIds([]);
+    setSparesSearchTerm("");
+    setSparesCurrentPage(1);
+
+    const initialLinked = products
+      .filter((p) => {
+        const isSpare =
+          (p.product_type || "").trim().toLowerCase() === "spare part" ||
+          (!p.product_type && p.category_id === "cat-spares");
+        if (!isSpare) return false;
+        const machineIds = p.applicable_machine_ids || [];
+        return machineIds.map(String).includes(String(machine.id));
+      })
+      .map((p) => String(p.id));
+
+    setMachineSparesLinkedIds(initialLinked);
+
+    try {
+      const res = await apiGet<any[]>("/masters/products/machine-spares/universal-view");
+      if (res?.data && Array.isArray(res.data)) {
+        const found = res.data.find((item: any) => String(item.machine_id) === String(machine.id));
+        if (found && Array.isArray(found.spares)) {
+          const apiLinkedIds = found.spares.map((s: any) => String(s.spare_part_id));
+          setMachineSparesLinkedIds((prev) => Array.from(new Set([...prev, ...apiLinkedIds])));
+        }
+      }
+    } catch (err) {
+      console.warn("Universal view spares fetch:", err);
+    }
+  };
+
+  const allSpareProducts = useMemo(() => {
+    return products.filter((p) => {
+      const isSpare =
+        (p.product_type || "").trim().toLowerCase() === "spare part" ||
+        (!p.product_type && p.category_id === "cat-spares");
+      return isSpare;
+    });
+  }, [products]);
+
+  const selectedSpareProducts = useMemo(() => {
+    return allSpareProducts.filter((p) => machineSparesLinkedIds.includes(String(p.id)));
+  }, [allSpareProducts, machineSparesLinkedIds]);
+
+  const currentSparesList = useMemo(() => {
+    const base = activeSparesTab === "selected" ? selectedSpareProducts : allSpareProducts;
+    if (!sparesSearchTerm.trim()) return base;
+    const term = sparesSearchTerm.trim().toLowerCase();
+    return base.filter((p) => {
+      const name = (p.product_name_tally || p.product_name || "").toLowerCase();
+      const code = (p.product_code || "").toLowerCase();
+      const brand = (brands.items.find((b) => b.id === p.brand_id)?.name || "").toLowerCase();
+      const sub = (subCategories.items.find((sc) => sc.id === p.sub_category_id)?.name || "").toLowerCase();
+      const hsn = (p.hsn_number || PRODUCT_HSN_MAP[p.product_name_tally || p.product_name || ""] || "").toLowerCase();
+      return (
+        name.includes(term) ||
+        code.includes(term) ||
+        brand.includes(term) ||
+        sub.includes(term) ||
+        hsn.includes(term)
+      );
+    });
+  }, [activeSparesTab, selectedSpareProducts, allSpareProducts, sparesSearchTerm, brands.items, subCategories.items]);
+
+  const paginatedSpares = useMemo(() => {
+    const start = (sparesCurrentPage - 1) * sparesPerPage;
+    return currentSparesList.slice(start, start + sparesPerPage);
+  }, [currentSparesList, sparesCurrentPage, sparesPerPage]);
+
+  const totalSparesCount = currentSparesList.length;
+  const totalSparesPages = Math.ceil(totalSparesCount / sparesPerPage) || 1;
+
+  const handleAddSelectedSpares = async () => {
+    if (!selectedMachineForSpares || selectedSpareRowIds.length === 0) return;
+    setSpareActionLoading(true);
+    try {
+      await Promise.all(
+        selectedSpareRowIds.map((spareId) =>
+          apiPost("/masters/products/machine-spares/map", {
+            machine_id: selectedMachineForSpares.id,
+            spare_part_id: spareId,
+          })
+        )
+      );
+      const newLinked = Array.from(new Set([...machineSparesLinkedIds, ...selectedSpareRowIds]));
+      setMachineSparesLinkedIds(newLinked);
+      setMachineSparesUniversalMap((prev) => ({ ...prev, [String(selectedMachineForSpares.id)]: newLinked }));
+      setProducts((prev) =>
+        prev.map((p) => {
+          if (selectedSpareRowIds.includes(String(p.id))) {
+            const current = p.applicable_machine_ids ? [...p.applicable_machine_ids] : [];
+            if (!current.map(String).includes(String(selectedMachineForSpares.id))) {
+              current.push(String(selectedMachineForSpares.id));
+            }
+            return { ...p, applicable_machine_ids: current };
+          }
+          return p;
+        })
+      );
+      setSelectedSpareRowIds([]);
+      setActiveSparesTab("selected");
+      setSparesCurrentPage(1);
+    } catch (err: any) {
+      console.error("Failed to map spare parts:", err);
+      alert(err.message || "Failed to link selected spare parts.");
+    } finally {
+      setSpareActionLoading(false);
+    }
+  };
+
+  const handleRemoveSelectedSpares = async () => {
+    if (!selectedMachineForSpares || selectedSpareRowIds.length === 0) return;
+    if (!confirm(`Are you sure you want to remove ${selectedSpareRowIds.length} spare part(s) from this machine?`)) return;
+    setSpareActionLoading(true);
+    try {
+      await Promise.all(
+        selectedSpareRowIds.map((spareId) =>
+          apiPost("/masters/products/machine-spares/unmap", {
+            machine_id: selectedMachineForSpares.id,
+            spare_part_id: spareId,
+          })
+        )
+      );
+      const newLinked = machineSparesLinkedIds.filter((id) => !selectedSpareRowIds.includes(String(id)));
+      setMachineSparesLinkedIds(newLinked);
+      setMachineSparesUniversalMap((prev) => ({ ...prev, [String(selectedMachineForSpares.id)]: newLinked }));
+      setProducts((prev) =>
+        prev.map((p) => {
+          if (selectedSpareRowIds.includes(String(p.id)) && p.applicable_machine_ids) {
+            return {
+              ...p,
+              applicable_machine_ids: p.applicable_machine_ids.filter(
+                (mid) => String(mid) !== String(selectedMachineForSpares.id)
+              ),
+            };
+          }
+          return p;
+        })
+      );
+      setSelectedSpareRowIds([]);
+    } catch (err: any) {
+      console.error("Failed to remove spare parts:", err);
+      alert(err.message || "Failed to remove selected spare parts.");
+    } finally {
+      setSpareActionLoading(false);
+    }
+  };
+
   // Open Create Form
   const handleOpenCreate = () => {
     setEditingProduct(null);
     const defaultTax = findTaxByHsnNumber("8422.30.00") || allTaxes[0];
+    const initialCatId = allCategories[0]?.id || "";
+    const matchingSubs = allSubCategories.filter((sc) => sc.category_id === initialCatId);
     setFormState({
       product_type: "Machine",
       applicable_machine_ids: [],
       product_name_tally: "",
       product_name_invoice: "",
       product_code: "",
-      brand_id: brands.items[0]?.id || "",
-      category_id: categories.items[0]?.id || "",
-      sub_category_id: subCategories.items[0]?.id || "",
+      brand_id: allBrands[0]?.id || "",
+      category_id: initialCatId,
+      sub_category_id: matchingSubs[0]?.id || "",
       hsn_id: defaultTax?.id || "",
       gst_percent: defaultTax ? String(defaultTax.gst_percent) : "18",
       import_duty: defaultTax ? String(defaultTax.import_duty_percent) : "7.5",
-      uom_id: uoms.items[0]?.id || "uom-nos",
+      uom_id: allUoms[0]?.id || "",
       packaging_quantity: "1",
-      packaging_net_weight: "",
-      packaging_gross_weight: "0",
+      packaging_net_weight: "1",
+      packaging_gross_weight: "1",
       standard_price: "",
       length_cm: "",
       width_cm: "",
       height_cm: "",
-      packaging_unit_cbm: "0",
+      packaging_unit_cbm: "",
       image_url: "",
       specification: "",
       status: "active",
@@ -1178,11 +1341,37 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
     if (!formState.category_id) {
       errs.category_id = "Please select a Category.";
     }
+    if (!formState.sub_category_id) {
+      errs.sub_category_id = "Please select a Sub Category.";
+    } else if (formState.category_id) {
+      const selectedSub = allSubCategories.find((sc) => sc.id === formState.sub_category_id);
+      if (selectedSub && selectedSub.category_id !== formState.category_id) {
+        errs.sub_category_id = "The specified sub-category does not belong to the specified category.";
+      }
+    }
     if (!formState.hsn_id) {
       errs.hsn_id = "Please select an HSN Code.";
     }
     if (!formState.uom_id) {
       errs.uom_id = "Please select a UOM.";
+    }
+    const grossWt = isMultiPackage
+      ? parseFloat(packageTotals.gross)
+      : parseFloat(formState.packaging_gross_weight || "0");
+    if (!grossWt || grossWt <= 0) {
+      errs.packaging_gross_weight = "Packaging Gross Weight must be greater than 0 kg.";
+    }
+
+    // Auto-calculate CBM if dimensions are present
+    let finalCbm = isMultiPackage
+      ? parseFloat(packageTotals.cbm)
+      : parseFloat(formState.packaging_unit_cbm || "0");
+    if ((!finalCbm || finalCbm <= 0) && formState.length_cm && formState.width_cm && formState.height_cm) {
+      const computed = computeCbm(formState.length_cm, formState.width_cm, formState.height_cm);
+      finalCbm = parseFloat(computed) || 0;
+    }
+    if (!finalCbm || finalCbm <= 0) {
+      errs.packaging_unit_cbm = "Please enter Length, Width, and Height to compute Packaging Unit CBM.";
     }
 
     if (Object.keys(errs).length > 0) {
@@ -1192,11 +1381,12 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
 
     setFormSubmitting(true);
     try {
+      const pCode = formState.product_code?.trim();
       const payload: Partial<Product> = {
         product_name_tally: formState.product_name_tally.trim(),
         product_name: formState.product_name_tally.trim(),
         product_name_invoice: formState.product_name_invoice?.trim() || undefined,
-        product_code: formState.product_code?.trim() || "-",
+        product_code: pCode && pCode !== "-" ? pCode : undefined,
         product_type: formState.product_type || "Machine",
         applicable_machine_ids: formState.product_type === "Spare Part" ? formState.applicable_machine_ids || [] : undefined,
         brand_id: formState.brand_id || undefined,
@@ -1206,11 +1396,11 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
         uom_id: formState.uom_id,
         packaging_quantity: parseFloat(formState.packaging_quantity) || 1,
         packaging_net_weight: isMultiPackage && parseFloat(packageTotals.net) > 0 ? parseFloat(packageTotals.net) : (formState.packaging_net_weight ? parseFloat(formState.packaging_net_weight) : undefined),
-        packaging_gross_weight: isMultiPackage && parseFloat(packageTotals.gross) > 0 ? parseFloat(packageTotals.gross) : (parseFloat(formState.packaging_gross_weight) || 0),
+        packaging_gross_weight: grossWt,
         length_cm: formState.length_cm ? parseFloat(formState.length_cm) : undefined,
         width_cm: formState.width_cm ? parseFloat(formState.width_cm) : undefined,
         height_cm: formState.height_cm ? parseFloat(formState.height_cm) : undefined,
-        packaging_unit_cbm: isMultiPackage && parseFloat(packageTotals.cbm) > 0 ? parseFloat(packageTotals.cbm) : (parseFloat(formState.packaging_unit_cbm) || 0),
+        packaging_unit_cbm: finalCbm,
         standard_price: parseFloat(formState.standard_price) || 0,
         specification: formState.specification || undefined,
         image_url: formState.image_url || undefined,
@@ -1232,22 +1422,14 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
       };
 
       if (editingProduct) {
-        try {
-          await apiPatch(`/masters/products/${editingProduct.id}`, payload);
-        } catch (err) {
-          console.warn("API update fallback:", err);
-        }
+        await apiPatch(`/masters/products/${editingProduct.id}`, payload);
         setProducts((prev) =>
           prev.map((item) => (item.id === editingProduct.id ? { ...item, ...payload } : item))
         );
       } else {
-        const newId = `prd-${Date.now()}`;
-        try {
-          await apiPost("/masters/products", payload);
-        } catch (err) {
-          console.warn("API create fallback:", err);
-        }
-        setProducts((prev) => [{ id: newId, ...payload } as Product, ...prev]);
+        const res = await apiPost<any>("/masters/products", payload);
+        const createdProduct = res?.data || ({ id: `prd-${Date.now()}`, ...payload } as Product);
+        setProducts((prev) => [createdProduct, ...prev]);
       }
 
       setIsFormOpen(false);
@@ -1255,7 +1437,8 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
         navigate("/product/list");
       }
     } catch (err: any) {
-      setErrorMessageBanner(err.message || "Failed to save product.");
+      console.error("Failed to save product:", err);
+      setErrorMessageBanner(err.message || "Failed to save product. Please check required fields.");
     } finally {
       setFormSubmitting(false);
     }
@@ -1311,28 +1494,6 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
     }
   };
 
-  const handleDeleteProduct = async (p: Product) => {
-    if ((p.current_stock ?? 0) > 0) {
-      alert("Stock exists");
-      setErrorMessageBanner("Stock exists");
-      return;
-    }
-    if (!confirm(`Are you sure you want to delete product "${p.product_name_tally || p.product_name}"?`)) return;
-    try {
-      await apiDelete(`/masters/products/${p.id}`);
-      setProducts((prev) => prev.filter((item) => item.id !== p.id));
-    } catch (err: any) {
-      const msg = err.message || "";
-      if (msg.includes("Stock exists") || (err.details && JSON.stringify(err.details).includes("Stock exists"))) {
-        alert("Stock exists");
-        setErrorMessageBanner("Stock exists");
-      } else {
-        alert(msg || "Failed to delete product.");
-        setErrorMessageBanner(msg);
-      }
-    }
-  };
-
   // Full-page Add/Edit Form view
   if (isFormOpen) {
     return (
@@ -1380,80 +1541,13 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
                     className="pm-form-input"
                     value={formState.product_type || "Machine"}
                     onChange={(e) => setFormState({ ...formState, product_type: e.target.value })}
-                    style={{ fontWeight: 600, color: formState.product_type === "Spare Part" ? "#d97706" : "#2563eb" }}
                   >
-                    <option value="Machine">⚙️ Machine</option>
-                    <option value="Spare Part">🔧 Spare Part</option>
+                    <option value="Machine">Machine</option>
+                    <option value="Spare Part">Spare Part</option>
                   </select>
                 </div>
               </div>
 
-              {/* Applicable Machines Mapping (when Spare Part is selected) */}
-              {formState.product_type === "Spare Part" && (
-                <div
-                  style={{
-                    background: "#fffbeb",
-                    border: "1px solid #fde68a",
-                    borderRadius: "6px",
-                    padding: "14px 18px",
-                    marginBottom: "18px",
-                  }}
-                >
-                  <label style={{ display: "block", fontSize: "13px", fontWeight: 700, color: "#92400e", marginBottom: "6px" }}>
-                    Applicable Machines (Map this Spare Part to Machines)
-                  </label>
-                  <div
-                    style={{
-                      display: "flex",
-                      flexWrap: "wrap",
-                      gap: "8px",
-                      maxHeight: "150px",
-                      overflowY: "auto",
-                      padding: "8px",
-                      background: "#ffffff",
-                      border: "1px solid #cbd5e1",
-                      borderRadius: "4px",
-                    }}
-                  >
-                    {machineProducts.length === 0 ? (
-                      <span style={{ fontSize: "12.5px", color: "#64748b" }}>No machines created yet.</span>
-                    ) : (
-                      machineProducts.map((m) => {
-                        const isChecked = (formState.applicable_machine_ids || []).includes(m.id);
-                        return (
-                          <label
-                            key={m.id}
-                            style={{
-                              display: "inline-flex",
-                              alignItems: "center",
-                              gap: "6px",
-                              fontSize: "12.5px",
-                              background: isChecked ? "#fef3c7" : "#f8fafc",
-                              padding: "4px 8px",
-                              borderRadius: "4px",
-                              border: "1px solid #e2e8f0",
-                              cursor: "pointer",
-                            }}
-                          >
-                            <input
-                              type="checkbox"
-                              checked={isChecked}
-                              onChange={(e) => {
-                                const current = formState.applicable_machine_ids || [];
-                                const updated = e.target.checked
-                                  ? [...current, m.id]
-                                  : current.filter((id: string) => id !== m.id);
-                                setFormState({ ...formState, applicable_machine_ids: updated });
-                              }}
-                            />
-                            <span>{m.product_name_tally || m.product_name}</span>
-                          </label>
-                        );
-                      })
-                    )}
-                  </div>
-                </div>
-              )}
 
               {/* Row 1: Product Name (As Per Tally) *, Product Name (As Per Invoice), Product Code */}
               <div className="pm-grid-3">
@@ -1520,7 +1614,17 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
                   label="Category *"
                   required
                   value={formState.category_id || ""}
-                  onChange={(v) => setFormState({ ...formState, category_id: v })}
+                  onChange={(v) => {
+                    setFormState((prev) => {
+                      const validSubs = allSubCategories.filter((sc) => sc.category_id === v);
+                      const keepSub = validSubs.some((sc) => sc.id === prev.sub_category_id);
+                      return {
+                        ...prev,
+                        category_id: v,
+                        sub_category_id: keepSub ? prev.sub_category_id : (validSubs[0]?.id || ""),
+                      };
+                    });
+                  }}
                   errorMessage={formErrors.category_id}
                 >
                   <option value="">Select</option>
@@ -1537,7 +1641,13 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
                   onChange={(v) => setFormState({ ...formState, sub_category_id: v })}
                   errorMessage={formErrors.sub_category_id}
                 >
-                  <option value="">Select</option>
+                  <option value="">
+                    {!formState.category_id
+                      ? "Select Category First"
+                      : filteredSubCategories.length === 0
+                      ? "No Sub-Categories Available"
+                      : "Select Sub Category"}
+                  </option>
                   {filteredSubCategories.map((sc) => (
                     <option key={sc.id} value={sc.id}>{sc.name}</option>
                   ))}
@@ -2067,6 +2177,685 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
             </form>
           </div>
         </div>
+      </AppShell>
+    );
+  }
+
+  const renderProductDetailDrawer = () => {
+    if (!drawerProduct) return null;
+
+    const isMachine =
+      (drawerProduct.product_type || "").trim().toLowerCase() === "machine" ||
+      (!drawerProduct.product_type && drawerProduct.category_id !== "cat-spares");
+    const isSpare =
+      (drawerProduct.product_type || "").trim().toLowerCase() === "spare part" ||
+      (!drawerProduct.product_type && drawerProduct.category_id === "cat-spares");
+
+    const midStr = String(drawerProduct.id);
+    const mappedSpareIds = machineSparesUniversalMap[midStr] || [];
+    const drawerSelectedSpares = products.filter((p) => {
+      const pIsSpare =
+        (p.product_type || "").trim().toLowerCase() === "spare part" ||
+        (!p.product_type && p.category_id === "cat-spares");
+      if (!pIsSpare) return false;
+      const pIdStr = String(p.id);
+      const applicableIds = (p.applicable_machine_ids || []).map(String);
+      return mappedSpareIds.includes(pIdStr) || applicableIds.includes(midStr);
+    });
+
+    const drawerApplicableMachines = products.filter((p) => {
+      const pIsMachine =
+        (p.product_type || "").trim().toLowerCase() === "machine" ||
+        (!p.product_type && p.category_id !== "cat-spares");
+      if (!pIsMachine) return false;
+      const mIdStr = String(p.id);
+      const mSpares = machineSparesUniversalMap[mIdStr] || [];
+      const inApplicable = (drawerProduct.applicable_machine_ids || []).map(String).includes(mIdStr);
+      return inApplicable || mSpares.includes(String(drawerProduct.id));
+    });
+
+    return (
+      <SideDrawer
+        open={Boolean(drawerProduct)}
+        onClose={() => setDrawerProduct(null)}
+        title="Product Details"
+        subtitle={drawerProduct.product_name_tally || drawerProduct.product_name || ""}
+        maxWidth="min(900px, 95vw)"
+        headerActions={
+          <button
+            type="button"
+            className="pm-btn-add"
+            style={{ fontSize: "13px", padding: "7px 16px", fontWeight: 600 }}
+            onClick={() => {
+              const prod = drawerProduct;
+              setDrawerProduct(null);
+              handleOpenEdit(prod);
+            }}
+          >
+            Edit Product
+          </button>
+        }
+      >
+        <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+          {/* Product Image Preview if available */}
+          {(drawerProduct.image_url || (drawerProduct.images && drawerProduct.images[0])) && (
+            <div style={{ display: "flex", justifyContent: "center", padding: "12px", background: "#f8fafc", borderRadius: "6px", border: "1px solid #e2e8f0" }}>
+              <img
+                src={drawerProduct.image_url || (drawerProduct.images && drawerProduct.images[0]) || undefined}
+                alt={drawerProduct.product_name_tally || "Product"}
+                style={{ maxHeight: "160px", maxWidth: "100%", objectFit: "contain", borderRadius: "4px" }}
+              />
+            </div>
+          )}
+
+          <div style={{ background: "#f8fafc", padding: "16px", borderRadius: "6px", border: "1px solid #e2e8f0" }}>
+            <h4 style={{ margin: "0 0 10px", fontSize: "14px", color: "#1e293b", borderBottom: "1px solid #e2e8f0", paddingBottom: "6px" }}>
+              Identity &amp; Classification
+            </h4>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px 16px", fontSize: "13px" }}>
+              <div><strong>Product Name (Tally):</strong> {drawerProduct.product_name_tally || "—"}</div>
+              <div><strong>Product Name (Invoice):</strong> {drawerProduct.product_name_invoice || "—"}</div>
+              <div><strong>Product Code:</strong> {drawerProduct.product_code || "—"}</div>
+              <div><strong>Product Type:</strong> {drawerProduct.product_type || "Machine"}</div>
+              <div><strong>Brand:</strong> {brands.items.find((b) => b.id === drawerProduct.brand_id)?.name || "Yinglima"}</div>
+              <div><strong>Category:</strong> {categories.items.find((c) => c.id === drawerProduct.category_id)?.name || "Machines"}</div>
+              <div><strong>Sub Category:</strong> {subCategories.items.find((sc) => sc.id === drawerProduct.sub_category_id)?.name || "Miscellaneous"}</div>
+              <div><strong>HSN Code:</strong> {drawerProduct.hsn_number || PRODUCT_HSN_MAP[drawerProduct.product_name_tally || ""] || "8422.30.00"}</div>
+              <div><strong>GST %:</strong> {drawerProduct.gst_percent != null ? `${drawerProduct.gst_percent}%` : "18%"}</div>
+              <div><strong>Import Duty:</strong> {drawerProduct.import_duty_percent != null ? `${drawerProduct.import_duty_percent}%` : "7.5%"}</div>
+              <div><strong>UOM:</strong> {uoms.items.find((u) => u.id === drawerProduct.uom_id)?.code || "NOS"}</div>
+            </div>
+          </div>
+
+          <div style={{ background: "#f8fafc", padding: "16px", borderRadius: "6px", border: "1px solid #e2e8f0" }}>
+            <h4 style={{ margin: "0 0 10px", fontSize: "14px", color: "#1e293b", borderBottom: "1px solid #e2e8f0", paddingBottom: "6px" }}>
+              Packaging &amp; Pricing
+            </h4>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px 16px", fontSize: "13px" }}>
+              <div><strong>Packaging Quantity:</strong> {drawerProduct.packaging_quantity ?? 1}</div>
+              <div><strong>Packaging Net Weight:</strong> {drawerProduct.packaging_net_weight != null ? `${drawerProduct.packaging_net_weight} kg` : "—"}</div>
+              <div><strong>Packaging Gross Weight:</strong> {drawerProduct.packaging_gross_weight ?? 0} kg</div>
+              <div><strong>Min. Price Without GST:</strong> {drawerProduct.standard_price ? formatIndianCurrency(drawerProduct.standard_price) : "—"}</div>
+            </div>
+          </div>
+
+          <div style={{ background: "#f8fafc", padding: "16px", borderRadius: "6px", border: "1px solid #e2e8f0" }}>
+            <h4 style={{ margin: "0 0 10px", fontSize: "14px", color: "#1e293b", borderBottom: "1px solid #e2e8f0", paddingBottom: "6px" }}>
+              Dimensions For CBM
+            </h4>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: "8px", fontSize: "13px" }}>
+              <div><strong>Length:</strong> {drawerProduct.length_cm ?? drawerProduct.length ?? "—"} cm</div>
+              <div><strong>Width:</strong> {drawerProduct.width_cm ?? drawerProduct.width ?? "—"} cm</div>
+              <div><strong>Height:</strong> {drawerProduct.height_cm ?? drawerProduct.height ?? "—"} cm</div>
+              <div><strong>CBM:</strong> {drawerProduct.packaging_unit_cbm ?? drawerProduct.cbm ?? "—"}</div>
+            </div>
+          </div>
+
+          {((drawerProduct.packages && drawerProduct.packages.length > 0) || (drawerProduct.dimensions_rows && drawerProduct.dimensions_rows.length > 0)) && (
+            <div style={{ background: "#f8fafc", padding: "16px", borderRadius: "6px", border: "1px solid #e2e8f0" }}>
+              <h4 style={{ margin: "0 0 10px", fontSize: "14px", color: "#1e293b", borderBottom: "1px solid #e2e8f0", paddingBottom: "6px" }}>
+                Multi-Package Dimensions ({(drawerProduct.packages || drawerProduct.dimensions_rows || []).length} Packages)
+              </h4>
+              <table style={{ width: "100%", fontSize: "12.5px", borderCollapse: "collapse" }}>
+                <thead>
+                  <tr style={{ background: "#edf2f7", textAlign: "left" }}>
+                    <th style={{ padding: "6px 8px" }}>Box</th>
+                    <th style={{ padding: "6px 8px" }}>Dimensions (L×W×H)</th>
+                    <th style={{ padding: "6px 8px" }}>CBM</th>
+                    <th style={{ padding: "6px 8px" }}>Net Wt</th>
+                    <th style={{ padding: "6px 8px" }}>Gross Wt</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(drawerProduct.packages || drawerProduct.dimensions_rows || []).map((pkg: ProductDimensionRow, idx: number) => (
+                    <tr key={idx} style={{ borderBottom: "1px solid #e2e8f0" }}>
+                      <td style={{ padding: "6px 8px" }}>{pkg.title || `Box ${idx + 1}`}</td>
+                      <td style={{ padding: "6px 8px" }}>{pkg.length_cm || pkg.length || 0} × {pkg.width_cm || pkg.width || 0} × {pkg.height_cm || pkg.height || 0} cm</td>
+                      <td style={{ padding: "6px 8px" }}>{pkg.cbm || 0}</td>
+                      <td style={{ padding: "6px 8px" }}>{pkg.net_weight != null ? `${pkg.net_weight} kg` : "—"}</td>
+                      <td style={{ padding: "6px 8px" }}>{pkg.gross_weight != null ? `${pkg.gross_weight} kg` : "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {drawerProduct.specification && (
+            <div style={{ background: "#ffffff", padding: "16px", borderRadius: "6px", border: "1px solid #e2e8f0" }}>
+              <h4 style={{ margin: "0 0 6px", fontSize: "14px", color: "#1e293b" }}>Specification</h4>
+              <p style={{ margin: 0, fontSize: "13px", color: "#475569", whiteSpace: "pre-wrap" }}>
+                {drawerProduct.specification}
+              </p>
+            </div>
+          )}
+
+          {/* Selected Spare Parts Section for Machine products */}
+          {isMachine && (
+            <div style={{ background: "#f8fafc", padding: "16px", borderRadius: "6px", border: "1px solid #e2e8f0" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "10px", borderBottom: "1px solid #e2e8f0", paddingBottom: "8px", flexWrap: "wrap", gap: "8px" }}>
+                <h4 style={{ margin: 0, fontSize: "14px", color: "#1e293b", display: "flex", alignItems: "center", gap: "8px" }}>
+                  <span>Spare Parts</span>
+                  <span
+                    style={{
+                      fontSize: "12px",
+                      background: drawerSelectedSpares.length > 0 ? "#e0f2fe" : "#f1f5f9",
+                      color: drawerSelectedSpares.length > 0 ? "#0061f2" : "#64748b",
+                      padding: "2px 8px",
+                      borderRadius: "10px",
+                      fontWeight: 600,
+                    }}
+                  >
+                    {drawerSelectedSpares.length} Selected
+                  </span>
+                </h4>
+                <button
+                  type="button"
+                  style={{
+                    background: "none",
+                    border: "none",
+                    color: "#0061f2",
+                    fontSize: "13px",
+                    fontWeight: 600,
+                    cursor: "pointer",
+                    padding: "2px 6px",
+                  }}
+                  onClick={() => {
+                    const machine = drawerProduct;
+                    setDrawerProduct(null);
+                    handleOpenMachineSpares(machine);
+                  }}
+                  title={`Manage spare parts of ${drawerProduct.product_name_tally || drawerProduct.product_name || "Machine"}`}
+                >
+                  Manage Spare Parts →
+                </button>
+              </div>
+
+              {drawerSelectedSpares.length === 0 ? (
+                <div style={{ fontSize: "13px", color: "#64748b", padding: "10px 0", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "10px" }}>
+                  <span>No spare parts currently selected for this machine.</span>
+                  <button
+                    type="button"
+                    style={{
+                      background: "#0061f2",
+                      color: "#ffffff",
+                      border: "none",
+                      padding: "6px 14px",
+                      borderRadius: "4px",
+                      fontSize: "12.5px",
+                      fontWeight: 600,
+                      cursor: "pointer",
+                    }}
+                    onClick={() => {
+                      const machine = drawerProduct;
+                      setDrawerProduct(null);
+                      handleOpenMachineSpares(machine);
+                    }}
+                  >
+                    + Select Spare Parts
+                  </button>
+                </div>
+              ) : (
+                <div style={{ overflowX: "auto" }}>
+                  <table style={{ width: "100%", fontSize: "12.5px", borderCollapse: "collapse" }}>
+                    <thead>
+                      <tr style={{ background: "#edf2f7", textAlign: "left", color: "#475569" }}>
+                        <th style={{ padding: "8px 10px", fontWeight: 600 }}>Product Name (As Per Tally)</th>
+                        <th style={{ padding: "8px 10px", fontWeight: 600 }}>Product Code</th>
+                        <th style={{ padding: "8px 10px", fontWeight: 600 }}>Brand</th>
+                        <th style={{ padding: "8px 10px", fontWeight: 600 }}>Sub Cate.</th>
+                        <th style={{ padding: "8px 10px", fontWeight: 600, textAlign: "right" }}>Min. Price</th>
+                        <th style={{ padding: "8px 10px", fontWeight: 600, textAlign: "center" }}>HSN</th>
+                        <th style={{ padding: "8px 10px", fontWeight: 600, textAlign: "center" }}>UOM</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {drawerSelectedSpares.map((sp) => {
+                        const brandName = brands.items.find((b) => b.id === sp.brand_id)?.name || "—";
+                        const subCatName = subCategories.items.find((sc) => sc.id === sp.sub_category_id)?.name || "—";
+                        const uomName = uoms.items.find((u) => u.id === sp.uom_id)?.code || "NOS";
+                        const hsn = sp.hsn_number || PRODUCT_HSN_MAP[sp.product_name_tally || sp.product_name || ""] || "—";
+                        const displayName = sp.product_name_tally || sp.product_name || "—";
+                        return (
+                          <tr key={sp.id} style={{ borderBottom: "1px solid #e2e8f0" }}>
+                            <td style={{ padding: "8px 10px" }}>
+                              <button
+                                type="button"
+                                style={{
+                                  background: "none",
+                                  border: "none",
+                                  padding: 0,
+                                  color: "#0061f2",
+                                  fontWeight: 500,
+                                  cursor: "pointer",
+                                  textAlign: "left",
+                                  font: "inherit",
+                                }}
+                                onClick={() => setDrawerProduct(sp)}
+                                title="Click to view details"
+                              >
+                                {displayName}
+                              </button>
+                            </td>
+                            <td style={{ padding: "8px 10px", color: "#64748b" }}>{sp.product_code || "—"}</td>
+                            <td style={{ padding: "8px 10px", color: "#334155" }}>{brandName}</td>
+                            <td style={{ padding: "8px 10px", color: "#334155" }}>{subCatName}</td>
+                            <td style={{ padding: "8px 10px", textAlign: "right", color: "#1e293b", fontVariantNumeric: "tabular-nums" }}>
+                              {sp.standard_price ? formatIndianCurrency(sp.standard_price) : "—"}
+                            </td>
+                            <td style={{ padding: "8px 10px", textAlign: "center", color: "#64748b" }}>{hsn}</td>
+                            <td style={{ padding: "8px 10px", textAlign: "center", color: "#64748b" }}>{uomName}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Applicable Machines Section for Spare Part products */}
+          {isSpare && (
+            <div style={{ background: "#f8fafc", padding: "16px", borderRadius: "6px", border: "1px solid #e2e8f0" }}>
+              <h4 style={{ margin: "0 0 10px", fontSize: "14px", color: "#1e293b", borderBottom: "1px solid #e2e8f0", paddingBottom: "8px" }}>
+                <span>Applicable Machines</span>
+                <span
+                  style={{
+                    fontSize: "12px",
+                    background: drawerApplicableMachines.length > 0 ? "#e0f2fe" : "#f1f5f9",
+                    color: drawerApplicableMachines.length > 0 ? "#0061f2" : "#64748b",
+                    padding: "2px 8px",
+                    borderRadius: "10px",
+                    fontWeight: 600,
+                    marginLeft: "8px",
+                  }}
+                >
+                  {drawerApplicableMachines.length} Machine(s)
+                </span>
+              </h4>
+
+              {drawerApplicableMachines.length === 0 ? (
+                <div style={{ fontSize: "13px", color: "#64748b", padding: "6px 0" }}>
+                  Not currently mapped to any machine.
+                </div>
+              ) : (
+                <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
+                  {drawerApplicableMachines.map((m) => {
+                    const mName = m.product_name_tally || m.product_name || "Machine";
+                    return (
+                      <button
+                        key={m.id}
+                        type="button"
+                        style={{
+                          background: "#ffffff",
+                          border: "1px solid #cbd5e1",
+                          borderRadius: "4px",
+                          padding: "5px 12px",
+                          fontSize: "12.5px",
+                          color: "#0061f2",
+                          fontWeight: 500,
+                          cursor: "pointer",
+                        }}
+                        onClick={() => setDrawerProduct(m)}
+                        title={`View ${mName}`}
+                      >
+                        {mName}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </SideDrawer>
+    );
+  };
+
+  // Machine Spares Page View ("Spare Parts of <Machine>")
+  if (selectedMachineForSpares) {
+    const machineName =
+      selectedMachineForSpares.product_name_tally ||
+      selectedMachineForSpares.product_name ||
+      "Machine";
+    const isAllPageSelected =
+      paginatedSpares.length > 0 &&
+      paginatedSpares.every((p) => selectedSpareRowIds.includes(String(p.id)));
+
+    const handleToggleSelectAllSpares = () => {
+      if (isAllPageSelected) {
+        const pageIds = paginatedSpares.map((p) => String(p.id));
+        setSelectedSpareRowIds((prev) => prev.filter((id) => !pageIds.includes(id)));
+      } else {
+        const pageIds = paginatedSpares.map((p) => String(p.id));
+        setSelectedSpareRowIds((prev) => Array.from(new Set([...prev, ...pageIds])));
+      }
+    };
+
+    const handleToggleSpareRow = (spareId: string) => {
+      setSelectedSpareRowIds((prev) =>
+        prev.includes(spareId) ? prev.filter((id) => id !== spareId) : [...prev, spareId]
+      );
+    };
+
+    const startIndex = (sparesCurrentPage - 1) * sparesPerPage;
+    const endIndex = Math.min(startIndex + sparesPerPage, totalSparesCount);
+
+    return (
+      <AppShell activeKey="masters-products" pageClassName="page-product-master">
+        <main className="page pm-spares-page" data-testid="machine-spares-page">
+          {/* Breadcrumb Trail */}
+          <div style={{ marginBottom: "12px", display: "flex", alignItems: "center", gap: "12px" }}>
+            <Breadcrumb trail={["Inventory", "Product Master", `Spare Parts of ${machineName}`]} />
+            <button
+              type="button"
+              className="btn btn-secondary"
+              data-testid="back-to-products-btn"
+              onClick={() => {
+                setSelectedMachineForSpares(null);
+                setSelectedSpareRowIds([]);
+              }}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "4px",
+                background: "transparent",
+                border: "none",
+                color: "#0061f2",
+                fontWeight: 600,
+                fontSize: "13px",
+                cursor: "pointer",
+                padding: "2px 6px",
+                marginLeft: "auto",
+              }}
+            >
+              ← Back to Product Master
+            </button>
+          </div>
+
+          {/* Topbar: Title and Action Button */}
+          <div className="pm-spares-topbar">
+            <h1 className="pm-spares-title" data-testid="machine-spares-title">
+              Spare Parts of {machineName}
+            </h1>
+            <div>
+              {activeSparesTab === "selected" ? (
+                <button
+                  type="button"
+                  className="pm-spares-action-btn"
+                  data-testid="remove-spares-btn"
+                  disabled={selectedSpareRowIds.length === 0 || spareActionLoading}
+                  onClick={handleRemoveSelectedSpares}
+                  style={{
+                    backgroundColor: selectedSpareRowIds.length === 0 ? "#94a3b8" : "#0061f2",
+                    borderColor: selectedSpareRowIds.length === 0 ? "#94a3b8" : "#0061f2",
+                  }}
+                  title={
+                    selectedSpareRowIds.length === 0
+                      ? "Select one or more spare parts below to remove"
+                      : `Remove ${selectedSpareRowIds.length} selected spare part(s)`
+                  }
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="3 6 5 6 21 6"></polyline>
+                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                  </svg>
+                  {spareActionLoading ? "PROCESSING..." : "REMOVE DATA"}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="pm-spares-action-btn"
+                  data-testid="select-spares-btn"
+                  disabled={selectedSpareRowIds.length === 0 || spareActionLoading}
+                  onClick={handleAddSelectedSpares}
+                  style={{
+                    backgroundColor: selectedSpareRowIds.length === 0 ? "#94a3b8" : "#0061f2",
+                    borderColor: selectedSpareRowIds.length === 0 ? "#94a3b8" : "#0061f2",
+                  }}
+                  title={
+                    selectedSpareRowIds.length === 0
+                      ? "Select one or more spare parts below to link"
+                      : `Link ${selectedSpareRowIds.length} selected spare part(s) to this machine`
+                  }
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="20 6 9 17 4 12"></polyline>
+                  </svg>
+                  {spareActionLoading ? "PROCESSING..." : "SELECT DATA"}
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Card containing Tabs, Search/Pagination controls, and Table */}
+          <div className="pm-spares-card">
+            {/* Tabs */}
+            <div className="pm-spares-tabs">
+              <button
+                type="button"
+                className={`pm-spares-tab-btn ${activeSparesTab === "selected" ? "active" : ""}`}
+                data-testid="spares-tab-selected"
+                onClick={() => {
+                  setActiveSparesTab("selected");
+                  setSelectedSpareRowIds([]);
+                  setSparesCurrentPage(1);
+                }}
+              >
+                Selected ({selectedSpareProducts.length})
+              </button>
+              <button
+                type="button"
+                className={`pm-spares-tab-btn ${activeSparesTab === "all" ? "active" : ""}`}
+                data-testid="spares-tab-all"
+                onClick={() => {
+                  setActiveSparesTab("all");
+                  setSelectedSpareRowIds([]);
+                  setSparesCurrentPage(1);
+                }}
+              >
+                All Spare Parts ({allSpareProducts.length})
+              </button>
+            </div>
+
+            {/* Toolbar: Items per page & Search */}
+            <div className="pm-spares-toolbar">
+              <div style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "13px", color: "#64748b" }}>
+                <select
+                  value={sparesPerPage}
+                  onChange={(e) => {
+                    setSparesPerPage(Number(e.target.value));
+                    setSparesCurrentPage(1);
+                  }}
+                  aria-label="Items per page"
+                  style={{
+                    padding: "5px 10px",
+                    border: "1px solid #cbd5e1",
+                    borderRadius: "4px",
+                    fontSize: "13px",
+                    color: "#334155",
+                    backgroundColor: "#ffffff",
+                    cursor: "pointer",
+                  }}
+                >
+                  <option value={10}>10 items/page</option>
+                  <option value={20}>20 items/page</option>
+                  <option value={50}>50 items/page</option>
+                  <option value={100}>100 items/page</option>
+                </select>
+              </div>
+
+              <div style={{ position: "relative" }}>
+                <input
+                  type="text"
+                  placeholder="Search..."
+                  aria-label="Search spare parts"
+                  value={sparesSearchTerm}
+                  onChange={(e) => {
+                    setSparesSearchTerm(e.target.value);
+                    setSparesCurrentPage(1);
+                  }}
+                  style={{
+                    padding: "6px 12px 6px 32px",
+                    fontSize: "13px",
+                    border: "1px solid #cbd5e1",
+                    borderRadius: "4px",
+                    width: "220px",
+                    outline: "none",
+                    color: "#1e293b",
+                  }}
+                />
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="#94a3b8"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  style={{ position: "absolute", left: "10px", top: "50%", transform: "translateY(-50%)", pointerEvents: "none" }}
+                >
+                  <circle cx="11" cy="11" r="8"></circle>
+                  <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                </svg>
+              </div>
+            </div>
+
+            {/* Table */}
+            <div className="pm-spares-table-wrapper">
+              <table className="pm-spares-table">
+                <thead>
+                  <tr>
+                    <th style={{ width: "40px", textAlign: "center" }}>
+                      <input
+                        type="checkbox"
+                        aria-label="Select all spares on current page"
+                        checked={isAllPageSelected}
+                        onChange={handleToggleSelectAllSpares}
+                        style={{ cursor: "pointer" }}
+                      />
+                    </th>
+                    <th style={{ minWidth: "220px", textAlign: "left" }}>Product Name (As Per Tally)</th>
+                    <th style={{ minWidth: "120px", textAlign: "left" }}>Product Code</th>
+                    <th style={{ minWidth: "110px", textAlign: "left" }}>Brand</th>
+                    <th style={{ minWidth: "130px", textAlign: "left" }}>Sub Cate.</th>
+                    <th style={{ minWidth: "140px", textAlign: "right" }}>Min. Price Without GST</th>
+                    <th style={{ minWidth: "90px", textAlign: "center" }}>HSN</th>
+                    <th style={{ minWidth: "80px", textAlign: "center" }}>UOM</th>
+                    <th style={{ minWidth: "90px", textAlign: "center" }}>Pack. Qty</th>
+                    <th style={{ minWidth: "120px", textAlign: "center" }}>Pack. Gross Weight</th>
+                    <th style={{ minWidth: "110px", textAlign: "center" }}>Pack. Unit CBM</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {paginatedSpares.length === 0 ? (
+                    <tr>
+                      <td colSpan={11} style={{ textAlign: "center", padding: "40px 16px", color: "#64748b" }}>
+                        {activeSparesTab === "selected"
+                          ? "No spare parts are linked to this machine yet. Click on 'All Spare Parts' to select and link spare parts."
+                          : "No spare parts found matching your criteria."}
+                      </td>
+                    </tr>
+                  ) : (
+                    paginatedSpares.map((sp) => {
+                      const spIdStr = String(sp.id);
+                      const isChecked = selectedSpareRowIds.includes(spIdStr);
+                      const brandName = brands.items.find((b) => b.id === sp.brand_id)?.name || "—";
+                      const subCatName = subCategories.items.find((sc) => sc.id === sp.sub_category_id)?.name || "—";
+                      const uomName = uoms.items.find((u) => u.id === sp.uom_id)?.code || "NOS";
+                      const hsn = sp.hsn_number || PRODUCT_HSN_MAP[sp.product_name_tally || sp.product_name || ""] || "—";
+                      const displayName = sp.product_name_tally || sp.product_name || "—";
+
+                      return (
+                        <tr key={sp.id} style={{ backgroundColor: isChecked ? "#f0f7ff" : undefined }}>
+                          <td style={{ textAlign: "center" }}>
+                            <input
+                              type="checkbox"
+                              aria-label={`Select ${displayName}`}
+                              checked={isChecked}
+                              onChange={() => handleToggleSpareRow(spIdStr)}
+                              style={{ cursor: "pointer" }}
+                            />
+                          </td>
+                          <td>
+                            <button
+                              type="button"
+                              className="pm-spares-link"
+                              style={{ background: "none", border: "none", padding: 0, textAlign: "left", font: "inherit" }}
+                              onClick={() => setDrawerProduct(sp)}
+                              title="Click to view details"
+                            >
+                              {displayName}
+                            </button>
+                          </td>
+                          <td>{sp.product_code || "—"}</td>
+                          <td>{brandName}</td>
+                          <td>{subCatName}</td>
+                          <td style={{ textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
+                            {sp.standard_price ? formatIndianCurrency(sp.standard_price) : "—"}
+                          </td>
+                          <td style={{ textAlign: "center" }}>{hsn}</td>
+                          <td style={{ textAlign: "center" }}>{uomName}</td>
+                          <td style={{ textAlign: "center" }}>{sp.packaging_quantity ?? 1}</td>
+                          <td style={{ textAlign: "center" }}>
+                            {sp.packaging_gross_weight != null ? `${sp.packaging_gross_weight} kg` : "—"}
+                          </td>
+                          <td style={{ textAlign: "center" }}>{sp.packaging_unit_cbm != null ? sp.packaging_unit_cbm : (sp.cbm != null ? sp.cbm : "—")}</td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Pagination footer */}
+            <div className="pm-spares-pagination">
+              <div>
+                Showing {totalSparesCount > 0 ? startIndex + 1 : 0} to {endIndex} of {totalSparesCount} entries
+              </div>
+              <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
+                <button
+                  type="button"
+                  className="pm-spares-page-btn"
+                  disabled={sparesCurrentPage <= 1}
+                  onClick={() => setSparesCurrentPage((p) => Math.max(1, p - 1))}
+                >
+                  Previous
+                </button>
+                <span
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    minWidth: "28px",
+                    height: "28px",
+                    background: "#0061f2",
+                    color: "#ffffff",
+                    borderRadius: "4px",
+                    fontSize: "12.5px",
+                    fontWeight: 600,
+                  }}
+                >
+                  {sparesCurrentPage}
+                </span>
+                <button
+                  type="button"
+                  className="pm-spares-page-btn"
+                  disabled={sparesCurrentPage >= totalSparesPages}
+                  onClick={() => setSparesCurrentPage((p) => Math.min(totalSparesPages, p + 1))}
+                >
+                  Next
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Side Drawer for spare product details */}
+          {renderProductDetailDrawer()}
+        </main>
       </AppShell>
     );
   }
@@ -2610,21 +3399,48 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
                                       {srNo}
                                     </td>
                                   );
-                                case 2:
+                                case 2: {
+                                  const isSpare =
+                                    (p.product_type || "").trim().toLowerCase() === "spare part" ||
+                                    (!p.product_type && p.category_id === "cat-spares");
                                   return (
                                     <td key="cell-2" style={{ minWidth: "220px", ...getFreezeStyle(2, false) }}>
-                                      <a
-                                        href="#detail"
-                                        className="pm-link-product"
-                                        onClick={(e) => {
-                                          e.preventDefault();
-                                          setDrawerProduct(p);
-                                        }}
-                                      >
-                                        {name}
-                                      </a>
+                                      <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: "4px" }}>
+                                        <a
+                                          href="#detail"
+                                          className="pm-link-product"
+                                          onClick={(e) => {
+                                            e.preventDefault();
+                                            setDrawerProduct(p);
+                                          }}
+                                        >
+                                          {name}
+                                        </a>
+                                        {isSpare ? (
+                                          <span
+                                            className="pm-type-badge pm-type-spare"
+                                            data-testid={`badge-spare-${p.id}`}
+                                          >
+                                            Spare Part
+                                          </span>
+                                        ) : (
+                                          <button
+                                            type="button"
+                                            className="pm-type-badge pm-type-machine"
+                                            data-testid={`badge-machine-${p.id}`}
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              handleOpenMachineSpares(p);
+                                            }}
+                                            title={`View Spare Parts of ${name}`}
+                                          >
+                                            Machine
+                                          </button>
+                                        )}
+                                      </div>
                                     </td>
                                   );
+                                }
                                 case 3:
                                   return (
                                     <td key="cell-3" style={{ minWidth: "120px", ...getFreezeStyle(3, false) }}>
@@ -2681,8 +3497,8 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
                                   );
                                 case 12:
                                   return (
-                                    <td key="cell-12" className="actions" style={{ width: "95px", minWidth: "95px", textAlign: "center", ...getFreezeStyle(12, false) }}>
-                                      <div style={{ display: "inline-flex", gap: "6px", alignItems: "center" }}>
+                                    <td key="cell-12" className="actions" style={{ width: "70px", minWidth: "70px", textAlign: "center", ...getFreezeStyle(12, false) }}>
+                                      <div style={{ display: "inline-flex", gap: "6px", alignItems: "center", justifyContent: "center" }}>
                                         <button
                                           type="button"
                                           className="btn"
@@ -2713,38 +3529,6 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
                                           >
                                             <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
                                             <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
-                                          </svg>
-                                        </button>
-                                        <button
-                                          type="button"
-                                          className="btn"
-                                          style={{
-                                            background: "#ef4444",
-                                            color: "#ffffff",
-                                            padding: "6px 8px",
-                                            borderRadius: "4px",
-                                            border: "none",
-                                            cursor: "pointer",
-                                            display: "inline-flex",
-                                            alignItems: "center",
-                                            justifyContent: "center",
-                                          }}
-                                          onClick={() => handleDeleteProduct(p)}
-                                          title={(p.current_stock ?? 0) > 0 ? "Stock exists - cannot delete" : "Delete Product"}
-                                          aria-label={`Delete ${name}`}
-                                        >
-                                          <svg
-                                            width="14"
-                                            height="14"
-                                            viewBox="0 0 24 24"
-                                            fill="none"
-                                            stroke="currentColor"
-                                            strokeWidth="2"
-                                            strokeLinecap="round"
-                                            strokeLinejoin="round"
-                                          >
-                                            <polyline points="3 6 5 6 21 6" />
-                                            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
                                           </svg>
                                         </button>
                                       </div>
@@ -2778,133 +3562,7 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
 
 
         {/* 6. SideDrawer for Viewing Product Details */}
-        <SideDrawer
-          open={Boolean(drawerProduct)}
-          onClose={() => setDrawerProduct(null)}
-          title="Product Details"
-          subtitle={drawerProduct ? drawerProduct.product_name_tally || drawerProduct.product_name || "" : ""}
-          maxWidth="min(900px, 95vw)"
-        >
-          {drawerProduct && (
-            <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-              {/* Product Image Preview if available */}
-              {(drawerProduct.image_url || (drawerProduct.images && drawerProduct.images[0])) && (
-                <div style={{ display: "flex", justifyContent: "center", padding: "12px", background: "#f8fafc", borderRadius: "6px", border: "1px solid #e2e8f0" }}>
-                  <img
-                    src={drawerProduct.image_url || (drawerProduct.images && drawerProduct.images[0]) || undefined}
-                    alt={drawerProduct.product_name_tally || "Product"}
-                    style={{ maxHeight: "160px", maxWidth: "100%", objectFit: "contain", borderRadius: "4px" }}
-                  />
-                </div>
-              )}
-
-              <div style={{ background: "#f8fafc", padding: "16px", borderRadius: "6px", border: "1px solid #e2e8f0" }}>
-                <h4 style={{ margin: "0 0 10px", fontSize: "14px", color: "#1e293b", borderBottom: "1px solid #e2e8f0", paddingBottom: "6px" }}>
-                  Identity &amp; Classification
-                </h4>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px 16px", fontSize: "13px" }}>
-                  <div><strong>Product Name (Tally):</strong> {drawerProduct.product_name_tally || "—"}</div>
-                  <div><strong>Product Name (Invoice):</strong> {drawerProduct.product_name_invoice || "—"}</div>
-                  <div><strong>Product Code:</strong> {drawerProduct.product_code || "—"}</div>
-                  <div><strong>Product Type:</strong> <span style={{ fontWeight: 600, color: drawerProduct.product_type === "Spare Part" ? "#d97706" : "#2563eb" }}>{drawerProduct.product_type || "Machine"}</span></div>
-                  <div><strong>Brand:</strong> {brands.items.find((b) => b.id === drawerProduct.brand_id)?.name || "Yinglima"}</div>
-                  <div><strong>Category:</strong> {categories.items.find((c) => c.id === drawerProduct.category_id)?.name || "Machines"}</div>
-                  <div><strong>Sub Category:</strong> {subCategories.items.find((sc) => sc.id === drawerProduct.sub_category_id)?.name || "Miscellaneous"}</div>
-                  <div><strong>HSN Code:</strong> {drawerProduct.hsn_number || PRODUCT_HSN_MAP[drawerProduct.product_name_tally || ""] || "8422.30.00"}</div>
-                  <div><strong>GST %:</strong> {drawerProduct.gst_percent != null ? `${drawerProduct.gst_percent}%` : "18%"}</div>
-                  <div><strong>Import Duty:</strong> {drawerProduct.import_duty_percent != null ? `${drawerProduct.import_duty_percent}%` : "7.5%"}</div>
-                  <div><strong>UOM:</strong> {uoms.items.find((u) => u.id === drawerProduct.uom_id)?.code || "NOS"}</div>
-                </div>
-              </div>
-
-              <div style={{ background: "#f8fafc", padding: "16px", borderRadius: "6px", border: "1px solid #e2e8f0" }}>
-                <h4 style={{ margin: "0 0 10px", fontSize: "14px", color: "#1e293b", borderBottom: "1px solid #e2e8f0", paddingBottom: "6px" }}>
-                  Packaging &amp; Pricing
-                </h4>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px 16px", fontSize: "13px" }}>
-                  <div><strong>Packaging Quantity:</strong> {drawerProduct.packaging_quantity ?? 1}</div>
-                  <div><strong>Packaging Net Weight:</strong> {drawerProduct.packaging_net_weight != null ? `${drawerProduct.packaging_net_weight} kg` : "—"}</div>
-                  <div><strong>Packaging Gross Weight:</strong> {drawerProduct.packaging_gross_weight ?? 0} kg</div>
-                  <div><strong>Min. Price Without GST:</strong> {drawerProduct.standard_price ? formatIndianCurrency(drawerProduct.standard_price) : "—"}</div>
-                </div>
-              </div>
-
-              <div style={{ background: "#f8fafc", padding: "16px", borderRadius: "6px", border: "1px solid #e2e8f0" }}>
-                <h4 style={{ margin: "0 0 10px", fontSize: "14px", color: "#1e293b", borderBottom: "1px solid #e2e8f0", paddingBottom: "6px" }}>
-                  Dimensions For CBM
-                </h4>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: "8px", fontSize: "13px" }}>
-                  <div><strong>Length:</strong> {drawerProduct.length_cm ?? drawerProduct.length ?? "—"} cm</div>
-                  <div><strong>Width:</strong> {drawerProduct.width_cm ?? drawerProduct.width ?? "—"} cm</div>
-                  <div><strong>Height:</strong> {drawerProduct.height_cm ?? drawerProduct.height ?? "—"} cm</div>
-                  <div><strong>Packaging Unit CBM:</strong> {drawerProduct.packaging_unit_cbm ?? 0}</div>
-                </div>
-              </div>
-
-              {drawerProduct.dimensions_rows && drawerProduct.dimensions_rows.length > 0 && (
-                <div style={{ background: "#f8fafc", padding: "16px", borderRadius: "6px", border: "1px solid #e2e8f0" }}>
-                  <h4 style={{ margin: "0 0 10px", fontSize: "14px", color: "#1e293b", borderBottom: "1px solid #e2e8f0", paddingBottom: "6px" }}>
-                    Package Dimensions &amp; Weights
-                  </h4>
-                  <table style={{ width: "100%", fontSize: "12.5px", borderCollapse: "collapse" }}>
-                    <thead>
-                      <tr style={{ background: "#f1f5f9", textAlign: "left" }}>
-                        <th style={{ padding: "6px 8px" }}>#</th>
-                        <th style={{ padding: "6px 8px" }}>Package (Box)</th>
-                        <th style={{ padding: "6px 8px" }}>Description</th>
-                        <th style={{ padding: "6px 8px" }}>L (cm)</th>
-                        <th style={{ padding: "6px 8px" }}>W (cm)</th>
-                        <th style={{ padding: "6px 8px" }}>H (cm)</th>
-                        <th style={{ padding: "6px 8px" }}>CBM</th>
-                        <th style={{ padding: "6px 8px" }}>Net Wt (kg)</th>
-                        <th style={{ padding: "6px 8px" }}>Gross Wt (kg)</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {drawerProduct.dimensions_rows.map((row, idx) => (
-                        <tr key={row.id || idx} style={{ borderBottom: "1px solid #e2e8f0" }}>
-                          <td style={{ padding: "6px 8px", color: "#64748b" }}>{idx + 1}</td>
-                          <td style={{ padding: "6px 8px", fontWeight: 600, color: "#0061f2" }}>{row.package_name || "—"}</td>
-                          <td style={{ padding: "6px 8px" }}>{row.title || "—"}</td>
-                          <td style={{ padding: "6px 8px" }}>{row.length ?? "—"}</td>
-                          <td style={{ padding: "6px 8px" }}>{row.width ?? "—"}</td>
-                          <td style={{ padding: "6px 8px" }}>{row.height ?? "—"}</td>
-                          <td style={{ padding: "6px 8px", fontWeight: 600 }}>{row.cbm ?? "—"}</td>
-                          <td style={{ padding: "6px 8px" }}>{row.net_weight != null ? row.net_weight : "—"}</td>
-                          <td style={{ padding: "6px 8px", fontWeight: 600, color: "#166534" }}>{row.gross_weight != null ? row.gross_weight : "—"}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-
-              {drawerProduct.specification && (
-                <div style={{ background: "#ffffff", padding: "16px", borderRadius: "6px", border: "1px solid #e2e8f0" }}>
-                  <h4 style={{ margin: "0 0 6px", fontSize: "14px", color: "#1e293b" }}>Specification</h4>
-                  <p style={{ margin: 0, fontSize: "13px", color: "#475569", whiteSpace: "pre-wrap" }}>
-                    {drawerProduct.specification}
-                  </p>
-                </div>
-              )}
-
-              <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "12px", borderTop: "1px solid #e2e8f0", paddingTop: "14px" }}>
-                <button
-                  type="button"
-                  className="pm-btn-add"
-                  style={{ fontSize: "13px", padding: "8px 16px" }}
-                  onClick={() => {
-                    const prod = drawerProduct;
-                    setDrawerProduct(null);
-                    handleOpenEdit(prod);
-                  }}
-                >
-                  Edit Product
-                </button>
-              </div>
-            </div>
-          )}
-        </SideDrawer>
+        {renderProductDetailDrawer()}
 
       </main>
     </AppShell>

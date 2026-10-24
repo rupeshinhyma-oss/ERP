@@ -31,7 +31,22 @@ def admin_headers() -> dict[str, str]:
 
 
 @pytest.fixture
-def manager_headers() -> dict[str, str]:
+async def manager_headers() -> dict[str, str]:
+    from app.database.engine import get_sessionmaker
+    from app.users.models import User, UserStatus
+    async with get_sessionmaker()() as session:
+        u = await session.get(User, MANAGER_ID)
+        if not u:
+            u = User(
+                id=MANAGER_ID,
+                username="mgr_crm_reports_test",
+                email="mgr_reports_test@example.com",
+                display_name="Reports Test Manager",
+                status=UserStatus.ACTIVE,
+                is_active=True,
+            )
+            session.add(u)
+            await session.commit()
     token = create_access_token(
         MANAGER_ID,
         permissions=["crm.leads.view", "crm.leads.manage"],
@@ -40,7 +55,22 @@ def manager_headers() -> dict[str, str]:
 
 
 @pytest.fixture
-def rep_headers() -> dict[str, str]:
+async def rep_headers() -> dict[str, str]:
+    from app.database.engine import get_sessionmaker
+    from app.users.models import User, UserStatus
+    async with get_sessionmaker()() as session:
+        u = await session.get(User, REP_A_ID)
+        if not u:
+            u = User(
+                id=REP_A_ID,
+                username="rep_crm_reports_test",
+                email="rep_reports_test@example.com",
+                display_name="Reports Test Rep",
+                status=UserStatus.ACTIVE,
+                is_active=True,
+            )
+            session.add(u)
+            await session.commit()
     token = create_access_token(
         REP_A_ID,
         permissions=["crm.leads.view"],

@@ -14,10 +14,12 @@ import { useNavigate, useParams } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
 import { Breadcrumb } from "@/components/Breadcrumb";
 import { DateRangePicker } from "@/components/DateRangePicker";
-import { DatePicker } from "@/components/DatePicker";
+import { DatePicker, formatDDMMYYYY } from "@/components/DatePicker";
 import { Combobox } from "@/components/Combobox";
 import { ClientNameAutocomplete, type CompanyAutocompleteItem } from "@/components/ClientNameAutocomplete";
 import { Pagination } from "@/components/Pagination";
+import { AddCompanyDrawer } from "@/components/AddCompanyDrawer";
+import { EditAddressDrawer, type EditAddressData } from "@/components/EditAddressDrawer";
 import { SideDrawer, DetailFieldGrid } from "@/components/SideDrawer";
 import { SortHeader } from "@/components/SortHeader";
 import { apiDelete, apiGet, apiPatch, apiPost, errorMessage as apiErrorText } from "@/lib/api";
@@ -38,7 +40,7 @@ const PROFORMA_OPTION_GROUPS = [
 type StatusTab = { key: string; label: string; cardLabel: string; badge: string; actionLabel?: string; actionColor?: string };
 type CatalogProduct = { product_name: string; hsn: string; rate: number; gst_percent: number; min_price: number; available_stock?: number };
 
-const todayDDMMYYYY = () => new Date().toLocaleDateString("en-GB").split("/").join("-");
+const todayDDMMYYYY = () => formatDDMMYYYY(new Date());
 
 /** A blank PI form; default values (payment terms, transport, ...) come from the `proforma.defaults` option group. */
 function emptyFormState(defaults: Record<string, string>, salesPerson: string) {
@@ -343,6 +345,10 @@ export function ProformaInvoicesPage({
   }, []);
 
   const [formState, setFormState] = useState<FormState>(() => emptyFormState({}, ""));
+  const [selectedCompany, setSelectedCompany] = useState<CompanyAutocompleteItem | null>(null);
+  const [isAddCompanyDrawerOpen, setIsAddCompanyDrawerOpen] = useState(false);
+  const [isEditAddressDrawerOpen, setIsEditAddressDrawerOpen] = useState(false);
+  const [editingAddressType, setEditingAddressType] = useState<"Billing" | "Shipping">("Billing");
 
   useEffect(() => {
     if (loggedInUserName) {
@@ -709,6 +715,7 @@ export function ProformaInvoicesPage({
     setErrorMessage(null);
     setFormErrors({});
     setEditingId(null);
+    setSelectedCompany(null);
     setFormState(emptyFormState(DEFAULTS, loggedInUserName));
     setFormLineItems(emptyChargeRows());
     setIsFormOpen(true);
@@ -718,6 +725,38 @@ export function ProformaInvoicesPage({
     setErrorMessage(null);
     setFormErrors({});
     setEditingId(p.id);
+    if (p.company_name) {
+      void apiGet<any[]>(`/companies/lookup?q=${encodeURIComponent(p.company_name)}`)
+        .then((res) => {
+          const match = (res?.data || []).find(
+            (c: any) => c.company_name?.toLowerCase() === p.company_name?.toLowerCase()
+          ) || (res?.data || [])[0];
+          if (match) {
+            setSelectedCompany(match);
+          } else {
+            setSelectedCompany({
+              id: p.id ? `proforma-company-${p.id}` : `proforma-company-${Date.now()}`,
+              company_name: p.company_name,
+              city_name: p.city,
+              state_name: p.state,
+              company_type: "B2C",
+              tax_id_number: "-",
+            });
+          }
+        })
+        .catch(() => {
+          setSelectedCompany({
+            id: p.id ? `proforma-company-${p.id}` : `proforma-company-${Date.now()}`,
+            company_name: p.company_name,
+            city_name: p.city,
+            state_name: p.state,
+            company_type: "B2C",
+            tax_id_number: "-",
+          });
+        });
+    } else {
+      setSelectedCompany(null);
+    }
     if (p.status) {
       sessionStorage.setItem("proforma_active_tab", p.status);
       setActiveTabState(p.status);
@@ -780,19 +819,104 @@ export function ProformaInvoicesPage({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [routeId]);
 
-  const handleSelectCompany = (c: CompanyAutocompleteItem) => {
-    const place = [c.address, c.area, c.city_name, c.state_name].filter(Boolean).join(", ");
-    const shipping = [place, c.pincode].filter(Boolean).join(" - ");
-    const contact = [c.contact_full_name, c.contact_calling_number].filter(Boolean).join(" ");
-    const billing = [shipping, contact, c.tax_id_number ? `GST: ${c.tax_id_number}` : ""].filter(Boolean).join(" | ");
+  const handleSelectCompany = (c: any) => {
+    setSelectedCompany(c);
+
+    const cityName = c.city_name || c.city || "";
+    const stateName = c.state_name || c.state || "";
+
+    const billingParts = Array.from(new Set([c.address, c.area, cityName].filter(Boolean)));
+    const billing = billingParts.join(", ") + (c.pincode ? ` - ${c.pincode}` : "");
+
+    const shippingParts = Array.from(new Set([c.address, c.area, cityName, c.district, stateName].filter(Boolean)));
+    const shipping = shippingParts.join(", ") + (c.pincode ? ` - ${c.pincode}` : "");
+
     setFormState((prev) => ({
       ...prev,
       company_name: c.company_name,
-      city: c.city_name || "",
-      state: c.state_name || "",
+      city: cityName,
+      state: stateName,
       billing_address: billing,
       shipping_address: shipping,
     }));
+  };
+
+  const handleOpenEditAddress = (type: "Billing" | "Shipping") => {
+    setEditingAddressType(type);
+    setIsEditAddressDrawerOpen(true);
+  };
+
+  const editAddressInitialData = useMemo(() => {
+    if (editingAddressType === "Billing") {
+      const pinMatch = formState.billing_address ? formState.billing_address.match(/\b\d{6}\b/) : null;
+      return {
+        company_name: selectedCompany?.company_name || formState.company_name || "",
+        tax_id_number:
+          selectedCompany?.tax_id_number && selectedCompany.tax_id_number !== "-"
+            ? selectedCompany.tax_id_number
+            : "",
+        address: selectedCompany?.address || formState.billing_address || "",
+        state: selectedCompany?.state_name || formState.state || "",
+        city: selectedCompany?.city_name || formState.city || "",
+        pincode: selectedCompany?.pincode || (pinMatch ? pinMatch[0] : "") || "",
+        contact_person: selectedCompany?.contact_full_name || "-",
+        contact_number:
+          selectedCompany?.contact_calling_number ||
+          selectedCompany?.contact_whatsapp_number ||
+          "",
+      };
+    } else {
+      const pinMatch = formState.shipping_address ? formState.shipping_address.match(/\b\d{6}\b/) : null;
+      return {
+        company_name: selectedCompany?.company_name || formState.company_name || "",
+        tax_id_number:
+          selectedCompany?.tax_id_number && selectedCompany.tax_id_number !== "-"
+            ? selectedCompany.tax_id_number
+            : "",
+        address: formState.shipping_address || selectedCompany?.address || "",
+        state: selectedCompany?.state_name || formState.state || "",
+        city: selectedCompany?.city_name || formState.city || "",
+        pincode: (pinMatch ? pinMatch[0] : "") || selectedCompany?.pincode || "",
+        contact_person: selectedCompany?.contact_full_name || "-",
+        contact_number:
+          selectedCompany?.contact_calling_number ||
+          selectedCompany?.contact_whatsapp_number ||
+          "",
+      };
+    }
+  }, [editingAddressType, selectedCompany, formState]);
+
+  const handleSaveAddress = (data: EditAddressData) => {
+    if (editingAddressType === "Billing") {
+      setFormState((prev) => ({
+        ...prev,
+        company_name: data.company_name || prev.company_name,
+        city: data.city || prev.city,
+        state: data.state || prev.state,
+        billing_address: data.formatted_address,
+      }));
+      setSelectedCompany((prev) => {
+        const baseId = prev?.id || (editingId ? `proforma-company-${editingId}` : `proforma-company-${Date.now()}`);
+        return {
+          ...(prev || {}),
+          id: baseId,
+          company_name: data.company_name,
+          tax_id_number: data.tax_id_number,
+          address: data.address,
+          city_name: data.city,
+          state_name: data.state,
+          pincode: data.pincode,
+          contact_full_name: data.contact_person,
+          contact_calling_number: data.contact_number,
+        };
+      });
+    } else {
+      setFormState((prev) => ({
+        ...prev,
+        shipping_address: data.formatted_address,
+      }));
+    }
+    setIsEditAddressDrawerOpen(false);
   };
 
   // ---- workflow actions (rules come from the database) ----
@@ -849,6 +973,7 @@ export function ProformaInvoicesPage({
 
   const handleBack = () => {
     setIsFormOpen(false);
+    setSelectedCompany(null);
     navigate("/proforma-invoice/list");
   };
 
@@ -1036,6 +1161,7 @@ export function ProformaInvoicesPage({
                     placeholder="DD-MM-YYYY"
                     value={formState.expected_delivery_date}
                     onChange={(val) => setFormState({ ...formState, expected_delivery_date: val })}
+                    minDate="today"
                   />
                   {fieldError("expected_delivery_date")}
                 </div>
@@ -1193,7 +1319,10 @@ export function ProformaInvoicesPage({
                   <ClientNameAutocomplete
                     id="pi-company"
                     value={formState.company_name}
-                    onChange={(val) => setFormState((prev) => ({ ...prev, company_name: val }))}
+                    onChange={(val) => {
+                      setFormState((prev) => ({ ...prev, company_name: val }));
+                      if (!val.trim()) setSelectedCompany(null);
+                    }}
                     onSelectCompany={handleSelectCompany}
                     placeholder="Enter Customer Name"
                     className=""
@@ -1203,21 +1332,104 @@ export function ProformaInvoicesPage({
                   <button
                     type="button"
                     title="Clear"
-                    onClick={() => setFormState({ ...formState, company_name: "", city: "", state: "", billing_address: "", shipping_address: "" })}
-                    style={{ width: "34px", height: "34px", background: "#ef4444", color: "#ffffff", border: "none", borderTopRightRadius: "4px", borderBottomRightRadius: "4px", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "14px" }}
+                    onClick={() => {
+                      setSelectedCompany(null);
+                      setFormState((prev) => ({
+                        ...prev,
+                        company_name: "",
+                        city: "",
+                        state: "",
+                        billing_address: "",
+                        shipping_address: "",
+                      }));
+                    }}
+                    style={{ width: "34px", height: "34px", background: "#dc2626", color: "#ffffff", border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
                   >
-                    🗑️
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="3 6 5 6 21 6" />
+                      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                    </svg>
+                  </button>
+                  <button
+                    type="button"
+                    title="Add Company"
+                    onClick={() => setIsAddCompanyDrawerOpen(true)}
+                    style={{
+                      height: "34px",
+                      padding: "0 14px",
+                      background: "#0061f2",
+                      color: "#ffffff",
+                      border: "none",
+                      borderTopRightRadius: "4px",
+                      borderBottomRightRadius: "4px",
+                      fontWeight: 600,
+                      fontSize: "13px",
+                      cursor: "pointer",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    + Add
                   </button>
                 </div>
+
+                {selectedCompany && (
+                  <div style={{ marginTop: "12px", fontSize: "12px", lineHeight: "1.6", color: "#1e293b" }}>
+                    <div style={{ fontWeight: 700, fontSize: "13px", color: "#0f172a", marginBottom: "4px" }}>
+                      {selectedCompany.company_name}
+                    </div>
+                    <div>
+                      <strong style={{ fontWeight: 700 }}>Bussiness Type:</strong>{" "}
+                      <span style={{ color: "#334155" }}>{selectedCompany.company_type || "B2C"}</span>
+                    </div>
+                    <div>
+                      <strong style={{ fontWeight: 700 }}>Gst No:</strong>{" "}
+                      <span style={{ color: "#334155" }}>{selectedCompany.tax_id_number || "-"}</span>
+                    </div>
+                  </div>
+                )}
                 {formErrors.company_name && <span style={{ color: "#ef4444", fontSize: "11.5px", marginTop: "4px", display: "block" }}>{formErrors.company_name}</span>}
               </div>
 
               {/* Billing Address Card */}
               <div style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "6px", padding: "14px 16px", boxShadow: "0 1px 2px rgba(0,0,0,0.02)" }}>
-                <label style={{ fontSize: "12px", fontWeight: 600, color: "#1e293b", marginBottom: "8px", display: "block" }}>
-                  Billing Address <span style={{ color: "#ef4444" }}>*</span>
-                </label>
-                <div style={{ display: "flex", gap: "0px", alignItems: "center" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
+                  <label style={{ fontSize: "12px", fontWeight: 600, color: "#1e293b", margin: 0, display: "block" }}>
+                    Billing Address <span style={{ color: "#ef4444" }}>*</span>
+                  </label>
+                  {selectedCompany && formState.billing_address && (
+                    <button
+                      type="button"
+                      title="Edit Billing Address"
+                      aria-label="Edit Billing Address"
+                      data-testid="btn-edit-billing-address"
+                      onClick={() => handleOpenEditAddress("Billing")}
+                      style={{
+                        width: "28px",
+                        height: "28px",
+                        background: "#ffffff",
+                        border: "1px solid #cbd5e1",
+                        borderRadius: "4px",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        cursor: "pointer",
+                      }}
+                    >
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#475569" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                        <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                      </svg>
+                    </button>
+                  )}
+                </div>
+
+                <div
+                  style={{
+                    display: !selectedCompany || !formState.billing_address ? "flex" : "none",
+                    gap: "0px",
+                    alignItems: "center",
+                  }}
+                >
                   <input
                     type="text"
                     placeholder="Enter Address"
@@ -1228,12 +1440,69 @@ export function ProformaInvoicesPage({
                   <button
                     type="button"
                     title="Clear"
-                    onClick={() => setFormState({ ...formState, billing_address: "" })}
-                    style={{ width: "34px", height: "34px", background: "#ef4444", color: "#ffffff", border: "none", borderTopRightRadius: "4px", borderBottomRightRadius: "4px", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "14px" }}
+                    onClick={() => {
+                      setFormState({ ...formState, billing_address: "" });
+                    }}
+                    style={{ width: "34px", height: "34px", background: "#dc2626", color: "#ffffff", border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
                   >
-                    🗑️
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="3 6 5 6 21 6" />
+                      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                    </svg>
+                  </button>
+                  <button
+                    type="button"
+                    title="Add Address"
+                    onClick={() => {
+                      if (!formState.billing_address && selectedCompany?.address) {
+                        setFormState((prev) => ({ ...prev, billing_address: selectedCompany.address || "" }));
+                      }
+                    }}
+                    style={{
+                      height: "34px",
+                      padding: "0 14px",
+                      background: "#0061f2",
+                      color: "#ffffff",
+                      border: "none",
+                      borderTopRightRadius: "4px",
+                      borderBottomRightRadius: "4px",
+                      fontWeight: 600,
+                      fontSize: "13px",
+                      cursor: "pointer",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    + Add
                   </button>
                 </div>
+
+                {selectedCompany && formState.billing_address && (
+                  <div style={{ marginTop: "10px", fontSize: "12px", lineHeight: "1.6", color: "#1e293b" }}>
+                    <div style={{ fontWeight: 700, fontSize: "13px", color: "#0f172a", marginBottom: "4px" }}>
+                      {selectedCompany.company_name}
+                    </div>
+                    <div>
+                      <strong style={{ fontWeight: 700 }}>Address:</strong>{" "}
+                      <span style={{ color: "#334155" }}>{formState.billing_address}</span>
+                    </div>
+                    <div>
+                      <strong style={{ fontWeight: 700 }}>Phone:</strong>{" "}
+                      <span style={{ color: "#334155" }}>{selectedCompany.contact_calling_number || selectedCompany.contact_whatsapp_number || "-"}</span>
+                    </div>
+                    <div>
+                      <strong style={{ fontWeight: 700 }}>GST No:</strong>{" "}
+                      <span style={{ color: "#334155" }}>{selectedCompany.tax_id_number || "-"}</span>
+                    </div>
+                    <div>
+                      <strong style={{ fontWeight: 700 }}>Contact Person:</strong>{" "}
+                      <span style={{ color: "#334155" }}>{selectedCompany.contact_full_name || "-"}</span>
+                    </div>
+                    <div>
+                      <strong style={{ fontWeight: 700 }}>Contact No:</strong>{" "}
+                      <span style={{ color: "#334155" }}>{selectedCompany.contact_calling_number || selectedCompany.contact_whatsapp_number || "-"}</span>
+                    </div>
+                  </div>
+                )}
                 {fieldError("billing_address")}
               </div>
 
@@ -1254,11 +1523,85 @@ export function ProformaInvoicesPage({
                     type="button"
                     title="Clear"
                     onClick={() => setFormState({ ...formState, shipping_address: "" })}
-                    style={{ width: "34px", height: "34px", background: "#ef4444", color: "#ffffff", border: "none", borderTopRightRadius: "4px", borderBottomRightRadius: "4px", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "14px" }}
+                    style={{ width: "34px", height: "34px", background: "#dc2626", color: "#ffffff", border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
                   >
-                    🗑️
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="3 6 5 6 21 6" />
+                      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                    </svg>
+                  </button>
+                  <button
+                    type="button"
+                    title="Add Address"
+                    onClick={() => {
+                      if (!formState.shipping_address && formState.billing_address) {
+                        setFormState((prev) => ({ ...prev, shipping_address: prev.billing_address }));
+                      }
+                    }}
+                    style={{
+                      height: "34px",
+                      padding: "0 14px",
+                      background: "#0061f2",
+                      color: "#ffffff",
+                      border: "none",
+                      borderTopRightRadius: "4px",
+                      borderBottomRightRadius: "4px",
+                      fontWeight: 600,
+                      fontSize: "13px",
+                      cursor: "pointer",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    + Add
                   </button>
                 </div>
+
+                {selectedCompany && formState.shipping_address && (
+                  <div style={{ marginTop: "10px" }}>
+                    <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: "4px" }}>
+                      <button
+                        type="button"
+                        title="Edit Shipping Address"
+                        aria-label="Edit Shipping Address"
+                        data-testid="btn-edit-shipping-address"
+                        onClick={() => handleOpenEditAddress("Shipping")}
+                        style={{
+                          width: "28px",
+                          height: "28px",
+                          background: "#ffffff",
+                          border: "1px solid #cbd5e1",
+                          borderRadius: "4px",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          cursor: "pointer",
+                        }}
+                      >
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#475569" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                          <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                        </svg>
+                      </button>
+                    </div>
+                    <div style={{ fontSize: "12px", lineHeight: "1.6", color: "#1e293b" }}>
+                      <div style={{ fontWeight: 700, fontSize: "13px", color: "#0f172a", marginBottom: "4px" }}>
+                        {selectedCompany.company_name}
+                      </div>
+                      <div>
+                        <strong style={{ fontWeight: 700 }}>Address:</strong>{" "}
+                        <span style={{ color: "#334155", whiteSpace: "pre-line" }}>{formState.shipping_address}</span>
+                      </div>
+                      <div>
+                        <strong style={{ fontWeight: 700 }}>Phone:</strong>{" "}
+                        <span style={{ color: "#334155" }}>{selectedCompany.contact_calling_number || selectedCompany.contact_whatsapp_number || "-"}</span>
+                      </div>
+                      <div>
+                        <strong style={{ fontWeight: 700 }}>GST No:</strong>{" "}
+                        <span style={{ color: "#334155" }}>{selectedCompany.tax_id_number || "-"}</span>
+                      </div>
+                    </div>
+                  </div>
+                )}
                 {fieldError("shipping_address")}
               </div>
             </div>
@@ -1591,6 +1934,21 @@ export function ProformaInvoicesPage({
             </div>
           </form>
         </main>
+        <AddCompanyDrawer
+          isOpen={isAddCompanyDrawerOpen}
+          onClose={() => setIsAddCompanyDrawerOpen(false)}
+          onSuccess={(newCompany) => {
+            handleSelectCompany(newCompany);
+            setIsAddCompanyDrawerOpen(false);
+          }}
+        />
+        <EditAddressDrawer
+          isOpen={isEditAddressDrawerOpen}
+          onClose={() => setIsEditAddressDrawerOpen(false)}
+          addressType={editingAddressType}
+          initialData={editAddressInitialData}
+          onSave={handleSaveAddress}
+        />
       </AppShell>
     );
   }
