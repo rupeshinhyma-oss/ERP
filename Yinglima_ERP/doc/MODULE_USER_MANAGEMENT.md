@@ -80,3 +80,6 @@ $$\text{Effective Permissions} = \left( \bigcup_{r \in \text{ActiveRoles}} \text
    - In a multi-ERP setup, user accounts synchronized via Central Control Plane (`ERP_Main`) must preserve their central UUIDs and emails. Local edits must not disconnect federation identifiers.
 3. **Soft-Delete Cascade Safety:**
    - Deleting a Role does NOT hard-delete `RolePermission` or `UserRole` rows. Soft-deleted roles have `deleted_at IS NOT NULL` and are excluded from effective permission resolution until purged.
+4. **Dynamic Central Control Plane Linkage:**
+   - Central user management navigation (`centralUsersUrl`) derives its host strictly from the active ERP registry via `getEcosystemErps()`, eliminating hardcoded local development hostnames or ports.
+

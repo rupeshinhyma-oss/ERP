@@ -2,7 +2,47 @@
 
 **System:** Inhyma_ERP (India Distribution)  
 **Scope:** Functional updates, schema migrations, UI hardening, and bug fixes.
+## [Release 2026-10-26] — Dynamic Organization Company Logo, Product Category Rewiring, Migration Idempotency, and Multi-ERP Identity Alignment
+
+### 1. Dynamic Organization Company Logo in AppShell Sidebar (`AppShell.tsx`, `brand.ts`)
+- **Restored Dynamic Logo Resolution:** Replaced static hardcoded fallback `/logo.png` in the sidebar header with dynamic resolution via `resolveBrandInfo()`.
+- **ERP Settings Synchronization:** Subscribed `Sidebar` to `subscribeBrandLogo(setBrandLogo)` so any logo uploaded and saved in **ERP Settings &rarr; Organization** (`logo_data` / `logo_url`) immediately updates the sidebar header across all active tabs in real time without requiring a page refresh.
+- **Graceful Image Fallback:** Rendered with `resolveImageUrl(brandLogo) || "/logo.png"` with an `onError` fallback ensuring robust rendering across development, local storage, and remote environments.
+
+### 2. Product Master: Rewired Product Type to Category & SideDrawer Cleanup (`Products.tsx`)
+- **Category Badge Rewiring:** Replaced hardcoded "Machine" / "Spare Part" type badges in the product catalog table with the dynamic **Category** (`getCategoryNameForProduct(p)`).
+- **Machine Spares Viewer Integration:** Retained click action for machine-type categories to open the dedicated machine spare parts viewer and compatibility matrix.
+- **SideDrawer Deduplication:** Removed redundant duplicate Category row in the Identity & Classification grid of the product details side-drawer.
+
+### 3. Proforma Invoices: Add Company Drawer TypeScript Build Fixes (`AddCompanyDrawer.tsx`)
+- **Unused Identifier Cleanup:** Cleaned up unused `apiPost` import to resolve strict TypeScript `TS6133` compilation errors.
+- **Saving Lifecycle Wiring:** Connected `setSaving(true)` and `setSaving(false)` with `try / finally` in `handleSubmit` ensuring the submit button displays `"Saving..."` and disables during submission.
+
+### 4. Database Migrations: Render Idempotency Guarding (`s4d5e6f7a8b9`, `t5e6f7a8b9c0`)
+- **Eliminated `DuplicateTable` Startup Crash:** Added `sa.inspect(bind)` and `if not insp.has_table(...)` guards to `s4d5e6f7a8b9_create_feed_post_departments_table.py`.
+- **Feed Interactions Idempotency:** Added table and index existence guards for `feed_post_comments`, `feed_post_reactions`, and `feed_post_reads` in `t5e6f7a8b9c0_create_feed_interactions_and_tracking_tables.py`.
+
+### 5. Notification Engine: Unread Count Endpoint (`notifications/routes.py`)
+- **Added `GET /api/v1/notifications/unread-count`:** Implemented lightweight unread count endpoint querying `count_unread_for_user(user_id)` to satisfy the frontend notification bell background poller without 404 errors.
+- **HTTP Method Support:** Supported both `PATCH` and `POST` on `/api/v1/notifications/{id}/read`.
+
+### 6. Profile Synchronization & Multi-ERP Identity Alignment (`auth.ts`, `AppShell.tsx`, `erp_keys.py`)
+- **Throttled Profile Sync:** Added `Auth.shouldSyncProfile()` (60-second cooldown) and `Auth.markProfileSynced()` to resolve runtime `TypeError`.
+- **Inhyma ERP Identity:** Corrected `<EcosystemSwitcher currentKey="inhyma" />` and `enforceCentralLanding("inhyma")` in Inhyma AppShell.
+- **Federation Key Matching:** Removed redundant `str()` calls in `erp_keys.py` and hardened case/separator matching with ERP_Main.
+
+### 7. Product Master: Floating Duplicate Name Suggestion Overlay (`Products.tsx`)
+- **Non-Disruptive Floating Overlay:** Transformed the inline warning banner into a floating dropdown popover positioned directly below the Product Name input (`absolute left-0 right-0 top-full mt-1 z-30`).
+- **Real-Time Similarity Feedback:** Displays real-time matching percentage chips (e.g. `95% match`), product code, and item name with click-to-inspect link without displacing form fields or shifting modal layout.
+
+### 8. Verification & Test Suite
+- Frontend builds passing cleanly via `npx tsc -b` (0 errors, 0 warnings across `Inhyma_ERP/frontend`, `Yinglima_ERP/frontend`, and `ERP_Main/frontend`).
+- Backend unit test suites passing for ERP key matching (`test_erp_key_matching.py`), landing decision routing (`test_landing_decision.py`), and spoke access propagation (`test_grant_access_reaches_spokes.py`).
+
+---
+
 ## [Release 2026-10-23] — Proforma Invoice Address Drawers & Future Dates, Local Purchase Safety & Landing Rate (VB), and Feed & Broadcast Ecosystem Integration
+
 
 ### 1. Proforma Invoices: Connected Address Cards, Drawers & Future Date Constraints
 - **Expected Delivery Date (`expected_delivery_date`):**

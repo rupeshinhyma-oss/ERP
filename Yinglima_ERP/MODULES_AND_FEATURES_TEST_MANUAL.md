@@ -46,6 +46,16 @@
 30. [USER MANAGEMENT: Positions Module](#30-user-management-positions-module)
 31. [USER MANAGEMENT: Organization Chart Module](#31-user-management-organization-chart-module)
 32. [AI Subagent Autonomous Testing Prompt Template](#32-ai-subagent-autonomous-testing-prompt-template)
+33. [Universal Import & Deduplication Test Suite (`testingimportfile/`)](#33-universal-import--deduplication-test-suite-testingimportfile)
+34. [Local Purchases & Domestic Procurement Engine (`/purchase/local`)](#34-local-purchases--domestic-procurement-engine-purchaselocal)
+35. [Sale Process & Export Trade Documents Engine (`/sale/process`)](#35-sale-process--export-trade-documents-engine-saleprocess)
+36. [Notification & Automation Rules System (`/settings/notifications`)](#36-notification--automation-rules-system-settingsnotifications)
+37. [Shipment Planning Master Grid & Formula Engine (`/planning`)](#37-shipment-planning-master-grid--formula-engine-planning)
+38. [Stock Movement (Inward & Outward Register & Live Inventory Ledger) (`/inventory/stock-movements`)](#38-stock-movement-inward--outward-register--live-inventory-ledger-inventorystock-movements)
+39. [Multi-Tier Planning & Sales Hierarchy Extraction Engine (`/sale/process/new`)](#39-multi-tier-planning--sales-hierarchy-extraction-engine-saleprocessnew)
+40. [Module-by-Module RBAC & Dynamic Permission Enforcement (Part 1)](#40-module-by-module-rbac--dynamic-permission-enforcement-part-1)
+41. [Cross-ERP Product Master Lifecycle & Inactivation Synchronization (`/masters/products`)](#41-cross-erp-product-master-lifecycle--inactivation-synchronization-mastersproducts)
+42. [MULTI-ERP FEDERATION: Ecosystem SSO Bridge, Canonical Keys & Dynamic Registry Routing](#42-multi-erp-federation-ecosystem-sso-bridge-canonical-keys--dynamic-registry-routing)
 
 ---
 
@@ -2256,4 +2266,31 @@ A standardized suite of 8 production-grade Excel (`.xlsx`) files is maintained d
 | **TC-SYNC-05** | Reverse Inactivation Immunity | Set a product to Inactive directly in Inhyma ERP. | The product becomes inactive in Inhyma, but Yinglima's product remains Active. Zero reverse sync occurs. |
 
 ---
-*End of Master Features & Testing Specification Manual. Maintained for Yinglima Enterprise ERP.*
+
+## 42. MULTI-ERP FEDERATION: Ecosystem SSO Bridge, Canonical Keys & Dynamic Registry Routing
+
+### 42.1. Module Overview & Architectural Specification
+- **Component File Map:**
+  - Backend: `app/federation/erp_keys.py`, `app/auth/routes.py`
+  - Frontend: `frontend/src/lib/ssoBridge.ts`, `frontend/src/pages/Login.tsx`, `frontend/src/pages/Users.tsx`
+- **Canonical ERP Key Normalization:**
+  - `canonical_erp_key(raw)` strips hyphens, underscores, whitespace, and `erp` suffixes (e.g. `yinglima-erp` $\rightarrow$ `yinglima`).
+  - Ensures seamless key matching between ERP_Main registry (`allowed_erps`) and spoke authorization policies without false 403 Forbidden errors.
+- **SSO Handover Resilience & Session Preservation:**
+  - If incoming SSO handover returns HTTP 401 due to a local account error in this ERP (e.g. "No account exists for you in this ERP", "Account is deleted or disabled"), the central ecosystem cookie is explicitly PRESERVED.
+  - The user remains logged in centrally and can freely access other permitted ERPs without global logout.
+- **Dynamic Control Plane Routing:**
+  - All redirection and dashboard fallbacks dynamically query `controlPlaneUrl(central)` from the ERP registry (`getEcosystemErps()`). Hardcoded port numbers (e.g. `http://localhost:5170`) are eliminated.
+  - Users with no access or redirected after denial land on the control plane with explicit `sso_error=no_access` and `sso_reason` parameters.
+
+### 42.2. Test Cases & Verification Matrix
+
+| Test ID | Test Scenario | Steps | Expected Result |
+| :--- | :--- | :--- | :--- |
+| **TC-SSO-01** | Canonical Key Matching | In ERP_Main, configure user access with `yinglima` or `yinglima-erp`. Authenticate via SSO handover into Yinglima. | Backend `erp_keys.py` canonicalizes key; user receives spoke token pair; lands on Yinglima dashboard. |
+| **TC-SSO-02** | Local Account Problem Does Not Kill Central Session | In Yinglima, deactivate the local user account while keeping central user active. Attempt SSO into Yinglima. | Yinglima refuses access with 401/403 and displays informative denial banner. Central session cookie is retained; switching to Inhyma or Control Plane remains authenticated. |
+| **TC-SSO-03** | Dynamic Control Plane Re-Routing | Attempt to open Yinglima with an account that only has access to Inhyma. | System redirects to the central control plane / dashboard with `sso_error=no_access` and `sso_reason` explaining the denial; zero hardcoded localhost:5170 redirects. |
+| **TC-SSO-04** | Central Users Link Resolution | Navigate to `/users` in Yinglima. Inspect Central Users button link. | Target URL dynamically matches configured control-plane host from registry without fallback port assumptions. |
+
+---
+*End of Master Features & Testing Specification Manual. Maintained for Yinglima Enterprise ERP. Last updated: October 2026 (Section 42: Multi-ERP Ecosystem SSO Bridge, Canonical ERP Keys, Dynamic Registry Routing, and Central Session Resilience).*

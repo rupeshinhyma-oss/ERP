@@ -66,6 +66,12 @@
 55. [PAYMENTS: Customer & Supplier Payments Engine, Cash Flow, and Technician Payment Handover](#55-payments-customer--supplier-payments-engine-cash-flow-and-technician-payment-handover)
 56. [CRM: Customer Relationship Management Full Suite (Leads, Pipeline, Distribution, Quotations)](#56-crm-customer-relationship-management-full-suite)
 57. [WORKFORCE: Recurring Tasks Scheduling Engine](#57-workforce-recurring-tasks-scheduling-engine)
+58. [PROFORMA INVOICES: Connected Address Automation, Expected Delivery Date Future Validation, and Slide-Over Add Company & Edit Address Drawers](#58-proforma-invoices-connected-address-automation-expected-delivery-date-future-validation-and-slide-over-add-company--edit-address-drawers)
+59. [LOCAL PURCHASE: Unit Landing Rate (INR) (VB) Renaming, Side Scrollbar, and Confirmed Order Delete Protection](#59-local-purchase-unit-landing-rate-inr-vb-renaming-side-scrollbar-and-confirmed-order-delete-protection)
+60. [FEED & BROADCAST: Enterprise Timeline, Department & Role Scoping, Interaction Privacy & Reactions](#60-feed--broadcast-enterprise-timeline-department--role-scoping-interaction-privacy--reactions)
+61. [DYNAMIC BRAND LOGO: Real-Time Sidebar Branding from ERP Organization Settings](#61-dynamic-brand-logo-real-time-sidebar-branding-from-erp-organization-settings)
+62. [PRODUCT MASTER: Category Display Rewiring, Machine Spares Linkage, and Floating Duplicate Overlay Dropdown](#62-product-master-category-display-rewiring-machine-spares-linkage-and-floating-duplicate-overlay-dropdown)
+63. [PLATFORM STABILITY: Database Migration Idempotency, Notification Polling Engine, and Multi-ERP Identity Hardening](#63-platform-stability-database-migration-idempotency-notification-polling-engine-and-multi-erp-identity-hardening)
 
 ---
 
@@ -378,7 +384,7 @@ Manage complete vendor team directory:
 4. **PRODUCT CODE:** Unique SKU / Item code.
 5. **PRODUCT NAME (TALLY):** Official internal accounting name with real-time duplicate suggestions guard.
 6. **INVOICE NAME:** Commercial description used on billing documents.
-7. **CATEGORY / SUB-CATEGORY:** Hierarchy badges.
+7. **CATEGORY / SUB-CATEGORY:** Dynamic Category badge (`getCategoryNameForProduct(p)`) with secondary Sub-Category chip. For products categorized under machines, the category badge is interactive (`cursor-pointer`) and directly launches the dedicated Machine Spares management drawer.
 8. **BRAND:** Manufacturer brand name.
 9. **HSN / SAC:** Customs code with VAT Refund rate indicator.
 10. **PRIMARY UOM:** Base unit (e.g. PCS, SET, KG).
@@ -394,8 +400,10 @@ Manage complete vendor team directory:
 - **Header Actions Positioning:**
   - The `Edit Product` action button is positioned at the top-right header of `SideDrawer.tsx` within the dedicated `headerActions` slot, adjacent to the close button (`✕`).
   - The bottom fixed footer button row has been eliminated, ensuring uninterrupted scrolling of product specifications, dimensions, and photo galleries down to the viewport base.
+- **Identity & Classification Grid Deduplication:**
+  - Standardized single-row rendering for Category and Sub-Category, eliminating redundant duplicate Category entries.
 - **Dedicated Machine Spare Parts Section:**
-  - For products identified as `Machine` (`product_type == "Machine"`), the drawer includes an interactive **Spare Parts** section.
+  - For products identified as `Machine` (`product_type == "Machine"` or categorized under machines), the drawer includes an interactive **Spare Parts** section.
   - Displays total count of currently mapped compatible spare parts.
   - Lists mapped spares with Part Code, Name, and Brand badges.
   - Features a prominent `Manage Spare Parts →` button that directly opens the dedicated Machine Spares management interface for that machine.
@@ -404,6 +412,7 @@ Manage complete vendor team directory:
 - **Basic Details:**
   - **Product Code**: Auto-generated or manual SKU.
   - **Product Name (Tally / Internal)** (*Required*): Primary product title.
+  - **Floating Duplicate Name Suggestion Overlay:** As the operator types, a floating overlay dropdown (`absolute left-0 right-0 top-full mt-1 z-30`) renders beneath the input displaying real-time similarity matches (e.g. `95% match`) with existing catalog products and a 1-click preview link, preventing duplicate entries without disrupting the form layout.
   - **Product Name (Invoice / Export)**: Commercial description.
   - **Barcode / EAN / UPC**: Barcode number.
 - **Classification & Taxonomy:**
@@ -990,10 +999,16 @@ Manage complete vendor team directory:
 ### 21.1. ERP Settings (`/organization`)
 - **Single-Tenant Corporate Profile Fields:**
   - Company Legal Name, Trade Name, Official Email, Phone, Website.
+  - **Company Logo Upload (`logo_data` / `logo_url`):** Supports PNG/JPEG base64 and Supabase cloud URL storage.
   - Tax Registration Number (GST / PAN / VAT / TIN).
   - Operating Timezone, Base Currency, Business Hours.
   - Registered Head Office Address, City, State, Country, Postal Code.
-- **Actions:** `Edit Organization`, `Save Changes`, `Cancel`. Automatically updates brand name across sidebar.
+- **Actions:** `Edit Organization`, `Save Changes`, `Cancel`.
+- **Real-Time Dynamic Sidebar Branding:**
+  - Automatically pushes uploaded company logo and brand name across the entire application shell via `resolveBrandInfo()` and `subscribeBrandLogo()`.
+  - AppShell sidebar header immediately extracts the organization logo (`resolveImageUrl(brandLogo)`) with fallback to `/logo.png`.
+  - Multiple browser tabs receive real-time updates via local event subscription without requiring page refresh.
+
 
 ### 21.2. Organization List (`/masters/company-list`)
 - Multi-company entity catalog for group enterprises.
@@ -2815,6 +2830,7 @@ Positioned directly underneath the collapsible filter panel, these three metric 
 3. **Slide-Over "Add Company" Drawer (`AddCompanyDrawer.tsx`):**
    - Clickable `+ Add` button placed adjacent to company selection.
    - Opens right-side slide-over drawer allowing operators to quickly register a new company (Customer/Supplier/Both) with contact, tax, and address fields.
+   - Form submission lifecycle is strictly guarded with `saving` state (`setSaving(true)` with `try / finally { setSaving(false) }`), disabling double-clicks and rendering `"Saving..."` on the action button while creating the company.
    - Automatically selects the newly created company in the Proforma invoice upon save without requiring a page reload.
 4. **Slide-Over "Edit Address" Drawer (`EditAddressDrawer.tsx`):**
    - Clickable `Edit` action button inside both the Billing and Shipping address preview cards.
@@ -2895,6 +2911,86 @@ Positioned directly underneath the collapsible filter panel, these three metric 
 - [ ] Verify read status is recorded in `feed_post_reads` when an operator views a broadcast.
 
 ---
-*End of Master Features & Testing Specification Manual. Maintained for Inhyma Solutions Enterprise ERP. Last updated: October 2026 (Sections 58-60: Proforma Invoices Address Automation & Future Date Constraints, Local Purchase Landing Rate VB & Delete Safety, Feed & Broadcast Module, CRM Full Suite, Workforce Recurring Tasks, Import Purchase Real Uploaded Invoice File Viewer, Universal Header Geometry & Sacing, Global 35px Header Action Button, Universal Filter-Above-KPI Placement Hierarchy, Minimalist Header Cleanups on Trash/Audit, Payments Module, Universal Filter Button UI Standardization, Session-Scoped Tokens, Masters Status Toggles, Company Profile Intelligence, Cascading Geography, Autocomplete Suppression, Wheel Lockout, HRMS Suite, Local & Import Purchase, Proforma Invoices Commercial Terms, Database Workflow Rules, Attendance Calendar, Payroll Excel Export).*
+
+## 61. DYNAMIC BRAND LOGO: Real-Time Sidebar Branding from ERP Organization Settings
+
+### Overview & Route Mapping
+- **Primary Routes:** `/organization` (ERP Settings), Global AppShell Sidebar (`AppShell.tsx`).
+- **Primary Permissions:** `organization.manage`, Public Authenticated.
+- **Purpose:** Seamless corporate white-labeling and visual personalization. Eliminates hardcoded placeholder branding (`/logo.png`) by dynamically resolving the active organization's uploaded company logo in the sidebar header with real-time multi-tab propagation.
+
+### Key Visual & Functional Components
+1. **Dynamic Brand Logo Resolution (`brand.ts` & `AppShell.tsx`):**
+   - On application mount, `AppShell` queries `resolveBrandInfo()` to fetch the active organization profile.
+   - Extracts `logo_data` (Base64 data URI) or `logo_url` (Supabase storage URL).
+   - Sidebar header renders `<img src={resolveImageUrl(brandLogo) || "/logo.png"} alt="IHM Logo" ... />`.
+   - Built-in `onError` event handler: if an image URL fails to load or network error occurs, it gracefully falls back to `/logo.png` with zero visual breakage.
+2. **Real-Time Cross-Tab Subscription (`subscribeBrandLogo`):**
+   - Whenever an administrator uploads and saves a new company logo in **ERP Settings &rarr; Organization**, `setBrandLogo()` emits a localized window event (`ihm_brand_logo_changed`).
+   - The AppShell sidebar listens to this event via `subscribeBrandLogo(setBrandLogo)`, immediately updating the logo in the sidebar header across all active browser windows and tabs without requiring an application reload.
+
+### QA Verification Test Cases
+- [ ] Verify that opening any ERP page renders the active organization's custom company logo in the sidebar header.
+- [ ] Verify that navigating to `/organization`, uploading a new company logo, and clicking `Save Changes` immediately updates the sidebar header logo in real-time.
+- [ ] Verify that if an invalid or unreachable image URL is returned, the sidebar logo falls back gracefully to `/logo.png`.
+- [ ] Verify that opening a second browser tab and changing the logo in the first tab updates the second tab's sidebar header immediately.
+
+---
+
+## 62. PRODUCT MASTER: Category Display Rewiring, Machine Spares Linkage, and Floating Duplicate Overlay Dropdown
+
+### Overview & Route Mapping
+- **Primary Routes:** `/masters/products` (Product Master Catalog), `/masters/products/machine-spares/:machineId`.
+- **Primary Permissions:** `product.view`, `product.create`, `product.update`, `product.delete`.
+- **Purpose:** High-precision taxonomy representation in the master catalog, direct machine-to-spare navigation, deduplicated drawer specifications, and non-disruptive floating duplicate warnings.
+
+### Key Visual & Functional Components
+1. **Dynamic Category Column Rewiring (`Products.tsx`):**
+   - Catalog table category column displays the real-time **Category** name (`getCategoryNameForProduct(p)`) rather than hardcoded machine/spare badges.
+   - Preserves intelligent machine detection: for products whose category represents machinery, the badge renders with interactive cursor styling (`cursor-pointer`) and click-to-view machine spare parts compatibility matrix.
+2. **SideDrawer Specification Deduplication:**
+   - Identity & Classification section in `Product View SideDrawer` cleanly renders a single unified Category and Sub-Category row, eliminating duplicate field rendering.
+3. **Floating Duplicate Name Suggestion Dropdown:**
+   - Transformed previously disruptive inline warning blocks into a sleek floating dropdown popover (`absolute left-0 right-0 top-full mt-1 z-30`).
+   - Renders directly beneath the Product Name input during typing with matching score badges (e.g. `95% match`) and 1-click preview link to inspect existing records.
+
+### QA Verification Test Cases
+- [ ] Verify navigating to `/masters/products` displays the actual category name in the CATEGORY column for each product.
+- [ ] Verify clicking on a machine category badge opens the dedicated Machine Spare Parts viewer.
+- [ ] Verify opening the Product View SideDrawer displays exactly one Category and Sub-Category specification row.
+- [ ] Verify creating a new product and typing a name similar to an existing product displays a floating dropdown overlay with similarity percentage, without shifting or distorting adjacent form fields.
+
+---
+
+## 63. PLATFORM STABILITY: Database Migration Idempotency, Notification Polling Engine, and Multi-ERP Identity Hardening
+
+### Overview & Route Mapping
+- **Primary Routes:** Topbar Notification Bell (`/api/v1/notifications/unread-count`), Central SSO Handover (`/auth/sso-handover`), Alembic Migrations (`backend/alembic`).
+- **Primary Permissions:** System / Multi-ERP Ecosystem.
+- **Purpose:** Production startup resilience on cloud hosting (Render), background notification poller stability, and robust SSO identity federation across ERP spokes.
+
+### Key Visual & Functional Components
+1. **Idempotent Alembic Migrations (`s4d5e6f7a8b9`, `t5e6f7a8b9c0`):**
+   - Wrapped DDL executions with `sa.inspect(bind)` and `if not insp.has_table(...)` guards.
+   - Prevents `psycopg2.errors.DuplicateTable: relation "feed_post_departments" already exists` crashes during Render zero-downtime rolling deploys.
+2. **Notification Unread Count Poller (`/notifications/unread-count`):**
+   - High-efficiency `GET /api/v1/notifications/unread-count` endpoint executing indexed SQL count for the authenticated user.
+   - Satisfies frontend topbar notification poller, eliminating repeated HTTP 404 console errors.
+   - Supports both `PATCH` and `POST` methods on `/api/v1/notifications/{id}/read`.
+3. **Throttled Profile Sync & Ecosystem Key Hardening:**
+   - Implemented `Auth.shouldSyncProfile()` with 60-second cooldown in `auth.ts`, eliminating `TypeError: Auth.shouldSyncProfile is not a function`.
+   - Standardized canonical ERP key matching in `erp_keys.py`, cleanly normalizing `inhyma-erp` and `inhyma` without spurious authorization denials.
+   - Secured `<EcosystemSwitcher currentKey="inhyma" />` and `enforceCentralLanding("inhyma")` in Inhyma AppShell.
+
+### QA Verification Test Cases
+- [ ] Verify running database migrations on an existing production database succeeds without `DuplicateTable` exceptions.
+- [ ] Verify the browser developer console shows zero 404 errors during topbar notification bell background polling.
+- [ ] Verify marking a notification as read via both PATCH and POST returns HTTP 200.
+- [ ] Verify loading the application mount executes `Auth.shouldSyncProfile()` cleanly without JavaScript console errors.
+- [ ] Verify switching between ERPs in the Ecosystem Switcher navigates seamlessly without session loss.
+
+---
+*End of Master Features & Testing Specification Manual. Maintained for Inhyma Solutions Enterprise ERP. Last updated: October 2026 (Sections 61-63: Dynamic Organization Company Logo in AppShell Sidebar, Product Master Category Rewiring & Machine Spares Linkage, Floating Duplicate Name Overlay, Migration Idempotency, Notification Unread Count Poller, and Multi-ERP Identity Hardening).*
+
 
 

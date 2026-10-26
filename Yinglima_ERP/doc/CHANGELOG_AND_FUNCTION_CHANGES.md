@@ -3,6 +3,21 @@
 **System:** Yinglima_ERP (China Procurement)  
 **Scope:** Functional updates, schema changes, UI hardening, and bug fixes.
 
+## [Release 2026-10-26] — Ecosystem SSO Bridge, Canonical ERP Key Normalization & Central Session Resilience
+
+### 1. Canonical ERP Key Normalization (`app/federation/erp_keys.py`)
+- **Key Normalization Engine:** Standardized `canonical_erp_key(raw)` to strip hyphens, underscores, spaces, and `erp` suffixes (e.g. `yinglima-erp` $\rightarrow$ `yinglima`).
+- **Access Evaluation Hardening:** Aligned `erp_access_matches(allowed_erps, target)` and `describe_denial()` with ERP_Main control-plane registry, removing redundant `str()` conversions and preventing false-positive access denials during single-sign-on (SSO) handover.
+
+### 2. Central Session Resilience & Account Error Isolation (`ssoBridge.ts`, `Login.tsx`)
+- **Central Session Protection on Local Account Issues:** If SSO handover returns HTTP 401 due to a local account problem in this specific ERP ("No account exists for you", "account is not active", "must explicitly grant access"), the central ecosystem cookie is retained rather than deleted. The user remains logged in centrally and can access other permitted ERPs without global session disruption.
+- **Dynamic Control Plane Routing:** Replaced hardcoded fallback URL (`http://localhost:5170/dashboard`) with `controlPlaneUrl(central)` dynamically loaded from the ERP registry. If a user is not permitted on this spoke, they are re-routed to their designated ERP or central dashboard with `sso_error` and detailed `sso_reason` parameters.
+
+### 3. User Management Control Plane Alignment (`Users.tsx`)
+- Standardized `centralUsersUrl` to resolve the control plane host strictly from the active ERP registry (`getEcosystemErps()`), eliminating hardcoded local development ports.
+
+---
+
 ## [Release 2026-10-23] — Local Purchase Consignment Supplier Filtering & Shipment Planning All Entities Navigation Fix
 
 ### 1. Shipment Planning "All Entities" Sheet Navigation & Tab Switching Hardening

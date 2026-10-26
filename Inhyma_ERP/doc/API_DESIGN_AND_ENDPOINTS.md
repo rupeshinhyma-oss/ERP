@@ -260,4 +260,30 @@ Machine-to-machine internal service endpoints invoked by `ERP_Main` over authent
 > - Standard spare parts can be linked to multiple machines concurrently (shared spares).
 > - Unlinking a spare part from one machine does not sever relationships with any other machine.
 
+---
+
+## 16. In-App Notification Engine & Polling Endpoints (`/notifications`)
+
+| Method | Endpoint URI | Description | Permission Gate |
+| :--- | :--- | :--- | :--- |
+| `GET` | `/api/v1/notifications` | List notifications for the authenticated user with pagination and filter | Authenticated |
+| `GET` | `/api/v1/notifications/unread-count` | Ultra-lightweight endpoint returning `{ unread_count: int }` for header bell badge poller | Authenticated |
+| `PATCH` | `/api/v1/notifications/{id}/read` | Mark a specific notification as read | Authenticated |
+| `POST` | `/api/v1/notifications/{id}/read` | Idempotent POST alias for marking notification as read | Authenticated |
+| `POST` | `/api/v1/notifications/read-all` | Mark all unread notifications as read for current user | Authenticated |
+
+---
+
+## 17. Multi-ERP Federation & Ecosystem SSO Handover (`/auth/sso-handover`)
+
+| Method | Endpoint URI | Description | Permission Gate |
+| :--- | :--- | :--- | :--- |
+| `POST` | `/api/v1/auth/sso-handover` | Exchange central ecosystem session token for spoke JWT token pair | Public / Central Token |
+| `GET` | `/api/v1/auth/verify-session` | Validate session token, profile claims, and ecosystem access permissions | Authenticated |
+
+> **Canonical ERP Key Matching Engine (`erp_keys.py`):**
+> - Normalizes keys via lowercase, alphanumeric stripping (e.g. `inhyma-erp` $\rightarrow$ `inhyma`).
+> - Prevents access denial from casing or suffix differences between ERP_Main registry and spoke apps.
+
+
 

@@ -621,3 +621,18 @@ When pulling latest changes or switching branches, execute the following to veri
 - **Vertical Headline Lock**: Every `<th>` element (`Sr. No.`, `Product Name & Code`, `Category & Brand`, `Best Price`, `Primary Supplier`, `Actions`) maintains `position: sticky; top: 0; zIndex: 10/25` with `boxShadow: 0 2px 3px rgba(0,0,0,0.06)` and `borderBottom: 2px solid #cbd5e1`.
 - **Horizontal Sticky `Sr. No.`**: First column (`Sr. No.`) is locked with `position: sticky; left: 0; zIndex: 25` (header) and `zIndex: 5` (body row) ensuring it remains visible when horizontally panning wide screens.
 - **Zero Layout Distortion**: Preserves existing hover pre-fetching (200ms), 0ms sub-table drawer expansion, inline quick pricing, and pagination.
+
+---
+
+## 22. Canonical ERP Key Normalization & Dynamic Registry Host Routing (Oct 26, 2026)
+
+### A. Canonical ERP Key Normalization (`app/federation/erp_keys.py`)
+- Standardized key matching via `canonical_erp_key(raw)` which strips hyphens, underscores, whitespace, and trailing `erp` suffixes (e.g. `yinglima-erp` $\rightarrow$ `yinglima`, `Inhyma_ERP` $\rightarrow$ `inhyma`).
+- Aligns access evaluations in `erp_access_matches(allowed_erps, target)` across all spokes and ERP_Main control plane. Eliminates spurious 403 Forbidden errors when registry entries or user claims vary in casing or formatting.
+- `describe_denial()` provides clear, deterministic diagnostic explanations when access is legitimately rejected.
+
+### B. SSO Handover Resilience & Session Preservation (`ssoBridge.ts`, `Login.tsx`)
+- **Fault-Isolated Session Handling:** If incoming SSO handover returns HTTP 401 due to a local spoke account issue ("No account exists for you in this ERP", "Account is deleted or disabled"), the central ecosystem cookie is explicitly preserved. The user remains logged in centrally and can seamlessly access other permitted ERPs without global logout.
+- **Dynamic Registry Routing:** Eliminated all hardcoded localhost port assumptions (e.g. `http://localhost:5170/dashboard`). All redirection and dashboard fallbacks dynamically query `controlPlaneUrl(central)` from the ERP registry (`getEcosystemErps()`).
+- Users redirected after denial land on the control plane with explicit `sso_error=no_access` and `sso_reason` query parameters for immediate administrative remediation.
+
