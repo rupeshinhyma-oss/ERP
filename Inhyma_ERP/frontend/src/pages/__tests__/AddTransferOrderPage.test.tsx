@@ -219,4 +219,43 @@ describe("AddTransferOrderPage", () => {
 
     expect(screen.getByText(/Goods will sit in transit stock until marked received/i)).toBeTruthy();
   });
+
+  it("increments transfer quantity on scroll up and decrements on scroll down one by one", async () => {
+    render(
+      <BrowserRouter>
+        <AddTransferOrderPage />
+      </BrowserRouter>
+    );
+
+    fireEvent.change(screen.getByLabelText(/From Warehouse/i), { target: { value: "Mumbai" } });
+    fireEvent.change(screen.getByLabelText(/To Warehouse/i), { target: { value: "Ahmedabad" } });
+
+    const searchInput = screen.getByPlaceholderText("Enter Product Name / Model No");
+    fireEvent.change(searchInput, { target: { value: "DBF900L" } });
+
+    await waitFor(() => {
+      expect(screen.getByText(/DBF900L Band Sealer/)).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByText(/DBF900L Band Sealer/));
+
+    const qtyInput = document.querySelector(".table-qty-input") as HTMLInputElement;
+    expect(qtyInput.value).toBe("1");
+
+    // Scroll up -> increments from 1 to 2
+    fireEvent.wheel(qtyInput, { deltaY: -100 });
+    expect(qtyInput.value).toBe("2");
+
+    // Scroll down -> decrements from 2 to 1
+    fireEvent.wheel(qtyInput, { deltaY: 100 });
+    expect(qtyInput.value).toBe("1");
+
+    // Scroll down again -> stays at 1 (minimum)
+    fireEvent.wheel(qtyInput, { deltaY: 100 });
+    expect(qtyInput.value).toBe("1");
+
+    // Verify unit price has placeholder="0.00"
+    const priceInput = document.querySelector(".table-price-input") as HTMLInputElement;
+    expect(priceInput.getAttribute("placeholder")).toBe("0.00");
+  });
 });

@@ -187,4 +187,48 @@ describe("AddAdjustmentOrderPage", () => {
     expect(InventoryApi.createStockAdjustment).toHaveBeenCalledTimes(1);
     expect(localStorage.getItem("local_stock_adjustments")).toBeNull();
   });
+
+  it("accepts arbitrary unit price (e.g. 30) and quantity (e.g. 2) and correctly computes totals", async () => {
+    await fillValidForm();
+
+    const qtyInput = document.querySelector('input[type="number"][style*="text-align: center"]') as HTMLInputElement;
+    const priceInput = document.querySelector('input[type="number"][style*="text-align: right"]') as HTMLInputElement;
+
+    expect(qtyInput).toBeTruthy();
+    expect(priceInput).toBeTruthy();
+
+    // Verify step="any" and placeholder="0.00" on unit price
+    expect(priceInput.getAttribute("step")).toBe("any");
+    expect(priceInput.getAttribute("placeholder")).toBe("0.00");
+    expect(qtyInput.getAttribute("step")).toBe("any");
+
+    // Change quantity to 2 and unit price to 30
+    fireEvent.change(qtyInput, { target: { value: "2" } });
+    fireEvent.change(priceInput, { target: { value: "30" } });
+
+    expect(qtyInput.value).toBe("2");
+    expect(priceInput.value).toBe("30");
+
+    // Total price in row and Grand Total in footer should both be 60.00
+    expect(screen.getAllByText("₹ 60.00").length).toBe(2);
+  });
+
+  it("increments quantity on scroll up and decrements on scroll down one by one", async () => {
+    await fillValidForm();
+
+    const qtyInput = document.querySelector('input[type="number"][style*="text-align: center"]') as HTMLInputElement;
+    expect(qtyInput.value).toBe("1");
+
+    // Scroll up -> increments from 1 to 2
+    fireEvent.wheel(qtyInput, { deltaY: -100 });
+    expect(qtyInput.value).toBe("2");
+
+    // Scroll down -> decrements from 2 to 1
+    fireEvent.wheel(qtyInput, { deltaY: 100 });
+    expect(qtyInput.value).toBe("1");
+
+    // Scroll down again -> does not drop below 1
+    fireEvent.wheel(qtyInput, { deltaY: 100 });
+    expect(qtyInput.value).toBe("1");
+  });
 });

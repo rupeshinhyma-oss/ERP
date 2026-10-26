@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
+import { ScrollableNumberInput } from "@/components/ScrollableNumberInput";
 import { InventoryApi } from "@/lib/api";
 import { INITIAL_STOCK_ITEMS, ProductStockItem } from "@/pages/ProductStockPage";
 import "@/styles/stockTransfer.css";
@@ -34,8 +35,8 @@ export interface SelectedTransferProduct {
   hsn_code: string;
   gst_rate: string;
   available_qty: number;
-  transfer_qty: number;
-  unit_price: number;
+  transfer_qty: number | string;
+  unit_price: number | string;
   total_price: number;
   uom: string;
 }
@@ -140,11 +141,13 @@ export function AddTransferOrderPage() {
         // Increment quantity if available
         const updated = [...prev];
         const item = updated[existingIdx];
-        const newQty = item.transfer_qty + 1;
+        const currentQty = parseFloat(String(item.transfer_qty)) || 0;
+        const newQty = currentQty + 1;
+        const currentPrice = parseFloat(String(item.unit_price)) || 0;
         updated[existingIdx] = {
           ...item,
           transfer_qty: newQty,
-          total_price: newQty * item.unit_price,
+          total_price: Math.round(newQty * currentPrice * 100) / 100,
         };
         return updated;
       }
@@ -163,8 +166,8 @@ export function AddTransferOrderPage() {
           gst_rate: product.gst_rate || "18%",
           available_qty: product.available_in_warehouse,
           transfer_qty: 1,
-          unit_price: unitPrice,
-          total_price: unitPrice,
+          unit_price: unitPrice ? unitPrice : "",
+          total_price: unitPrice || 0,
           uom: product.uom || "SET",
         },
       ];
@@ -176,30 +179,36 @@ export function AddTransferOrderPage() {
   };
 
   // Handle updating transfer quantity
-  const handleUpdateQty = (index: number, newQty: number) => {
-    if (newQty < 1 || isNaN(newQty)) newQty = 1;
+  const handleUpdateQty = (index: number, val: string | number) => {
     setSelectedProducts((prev) => {
       const updated = [...prev];
       const item = updated[index];
+      const parsedQty = parseFloat(String(val));
+      const qtyNum = isNaN(parsedQty) ? 0 : parsedQty;
+      const parsedPrice = parseFloat(String(item.unit_price));
+      const priceNum = isNaN(parsedPrice) ? 0 : parsedPrice;
       updated[index] = {
         ...item,
-        transfer_qty: newQty,
-        total_price: newQty * item.unit_price,
+        transfer_qty: val,
+        total_price: Math.round(qtyNum * priceNum * 100) / 100,
       };
       return updated;
     });
   };
 
   // Handle updating unit price
-  const handleUpdatePrice = (index: number, newPrice: number) => {
-    if (newPrice < 0 || isNaN(newPrice)) newPrice = 0;
+  const handleUpdatePrice = (index: number, val: string | number) => {
     setSelectedProducts((prev) => {
       const updated = [...prev];
       const item = updated[index];
+      const parsedPrice = parseFloat(String(val));
+      const priceNum = isNaN(parsedPrice) ? 0 : parsedPrice;
+      const parsedQty = parseFloat(String(item.transfer_qty));
+      const qtyNum = isNaN(parsedQty) ? 0 : parsedQty;
       updated[index] = {
         ...item,
-        unit_price: newPrice,
-        total_price: item.transfer_qty * newPrice,
+        unit_price: val,
+        total_price: Math.round(qtyNum * priceNum * 100) / 100,
       };
       return updated;
     });
@@ -212,7 +221,11 @@ export function AddTransferOrderPage() {
 
   // Calculate Grand Total
   const grandTotal = useMemo(() => {
-    return selectedProducts.reduce((sum, item) => sum + item.total_price, 0);
+    return selectedProducts.reduce((sum, item) => {
+      const q = parseFloat(String(item.transfer_qty)) || 0;
+      const u = parseFloat(String(item.unit_price)) || 0;
+      return sum + Math.round(q * u * 100) / 100;
+    }, 0);
   }, [selectedProducts]);
 
   // Form submission
@@ -240,12 +253,25 @@ export function AddTransferOrderPage() {
       return;
     }
 
+    for (const p of selectedProducts) {
+      const q = parseFloat(String(p.transfer_qty));
+      if (isNaN(q) || q <= 0) {
+        setErrorMessage(`Please enter a valid transfer quantity for ${p.product_name}.`);
+        return;
+      }
+      const u = parseFloat(String(p.unit_price));
+      if (isNaN(u) || u < 0) {
+        setErrorMessage(`Please enter a valid unit price for ${p.product_name}.`);
+        return;
+      }
+    }
+
     // Negative Stock Lock in Physical Warehouses:
     // Negative stock is allowed in Transit and Ordered warehouses,
     // but must strictly block saving any Stock Transfer that drives a physical warehouse stock negative.
     const isFromPhysical = !fromWarehouse.toLowerCase().includes("transit") && !fromWarehouse.toLowerCase().includes("ordered");
     if (isFromPhysical) {
-      const exceededItem = selectedProducts.find((p) => p.transfer_qty > p.available_qty);
+      const exceededItem = selectedProducts.find((p) => (parseFloat(String(p.transfer_qty)) || 0) > p.available_qty);
       if (exceededItem) {
         setErrorMessage(
           `Insufficient physical stock: Quantity for "${exceededItem.product_name}" (${exceededItem.transfer_qty}) exceeds available physical balance of ${exceededItem.available_qty} in ${fromWarehouse}. Physical warehouse stock cannot be negative.`
@@ -270,15 +296,19 @@ export function AddTransferOrderPage() {
         added_by: "Akshata Wadekar",
         status: "Received",
         remarks: remark || undefined,
-        items: selectedProducts.map((p) => ({
-          product_name: p.product_name,
-          product_code: p.product_code || undefined,
-          category: p.category || "Machines",
-          quantity: p.transfer_qty,
-          uom: p.uom || "SET",
-          rate: p.unit_price,
-          amount: p.total_price,
-        })),
+        items: selectedProducts.map((p) => {
+          const q = parseFloat(String(p.transfer_qty)) || 1;
+          const r = parseFloat(String(p.unit_price)) || 0;
+          return {
+            product_name: p.product_name,
+            product_code: p.product_code || undefined,
+            category: p.category || "Machines",
+            quantity: q,
+            uom: p.uom || "SET",
+            rate: r,
+            amount: Math.round(q * r * 100) / 100,
+          };
+        }),
       };
 
       try {
@@ -589,23 +619,23 @@ export function AddTransferOrderPage() {
                       {p.available_qty} {p.uom}
                     </td>
                     <td style={{ textAlign: "center" }}>
-                      <input
-                        type="number"
-                        min="1"
-                        max={p.available_qty > 0 ? p.available_qty : undefined}
+                      <ScrollableNumberInput
+                        minVal={1}
+                        maxVal={p.available_qty > 0 ? p.available_qty : undefined}
+                        stepVal={1}
                         className="table-qty-input"
                         value={p.transfer_qty}
-                        onChange={(e) => handleUpdateQty(idx, parseInt(e.target.value, 10) || 1)}
+                        onChange={(e) => handleUpdateQty(idx, e.target.value)}
                       />
                     </td>
                     <td style={{ textAlign: "right" }}>
-                      <input
-                        type="number"
-                        min="0"
-                        step="100"
+                      <ScrollableNumberInput
+                        minVal={0}
+                        stepVal={1}
+                        placeholder="0.00"
                         className="table-price-input"
                         value={p.unit_price}
-                        onChange={(e) => handleUpdatePrice(idx, parseFloat(e.target.value) || 0)}
+                        onChange={(e) => handleUpdatePrice(idx, e.target.value)}
                       />
                     </td>
                     <td style={{ textAlign: "right", fontWeight: 700, color: "#0f172a" }}>

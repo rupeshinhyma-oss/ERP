@@ -2,6 +2,7 @@ import React, { useState, useMemo, useEffect } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
 import { ClientNameAutocomplete } from "@/components/ClientNameAutocomplete";
+import { ScrollableNumberInput } from "@/components/ScrollableNumberInput";
 import { InventoryApi } from "@/lib/api";
 import { INITIAL_STOCK_ITEMS, ProductStockItem } from "@/pages/ProductStockPage";
 import "@/styles/stockAdjustment.css";
@@ -35,8 +36,8 @@ interface SelectedAdjustmentProduct {
   hsn_code: string;
   gst_rate: string;
   available_qty: number;
-  qty: number;
-  unit_price: number;
+  qty: number | string;
+  unit_price: number | string;
   total_price: number;
   uom: string;
 }
@@ -132,11 +133,13 @@ export function AddAdjustmentOrderPage() {
         // Increment quantity
         const updated = [...prev];
         const item = updated[existingIdx];
-        const newQty = item.qty + 1;
+        const currentQty = parseFloat(String(item.qty)) || 0;
+        const newQty = currentQty + 1;
+        const currentPrice = parseFloat(String(item.unit_price)) || 0;
         updated[existingIdx] = {
           ...item,
           qty: newQty,
-          total_price: newQty * item.unit_price,
+          total_price: Math.round(newQty * currentPrice * 100) / 100,
         };
         return updated;
       }
@@ -154,8 +157,8 @@ export function AddAdjustmentOrderPage() {
           gst_rate: product.gst_rate || "18%",
           available_qty: product.available_in_warehouse,
           qty: 1,
-          unit_price: unitPrice,
-          total_price: unitPrice,
+          unit_price: unitPrice ? unitPrice : "",
+          total_price: unitPrice || 0,
           uom: product.uom || "SET",
         },
       ];
@@ -166,30 +169,36 @@ export function AddAdjustmentOrderPage() {
   };
 
   // Handle updating quantity
-  const handleUpdateQty = (index: number, newQty: number) => {
-    if (newQty < 1 || isNaN(newQty)) newQty = 1;
+  const handleUpdateQty = (index: number, val: string | number) => {
     setSelectedProducts((prev) => {
       const updated = [...prev];
       const item = updated[index];
+      const parsedQty = parseFloat(String(val));
+      const qtyNum = isNaN(parsedQty) ? 0 : parsedQty;
+      const parsedPrice = parseFloat(String(item.unit_price));
+      const priceNum = isNaN(parsedPrice) ? 0 : parsedPrice;
       updated[index] = {
         ...item,
-        qty: newQty,
-        total_price: newQty * item.unit_price,
+        qty: val,
+        total_price: Math.round(qtyNum * priceNum * 100) / 100,
       };
       return updated;
     });
   };
 
   // Handle updating unit price
-  const handleUpdatePrice = (index: number, newPrice: number) => {
-    if (newPrice < 0 || isNaN(newPrice)) newPrice = 0;
+  const handleUpdatePrice = (index: number, val: string | number) => {
     setSelectedProducts((prev) => {
       const updated = [...prev];
       const item = updated[index];
+      const parsedPrice = parseFloat(String(val));
+      const priceNum = isNaN(parsedPrice) ? 0 : parsedPrice;
+      const parsedQty = parseFloat(String(item.qty));
+      const qtyNum = isNaN(parsedQty) ? 0 : parsedQty;
       updated[index] = {
         ...item,
-        unit_price: newPrice,
-        total_price: item.qty * newPrice,
+        unit_price: val,
+        total_price: Math.round(qtyNum * priceNum * 100) / 100,
       };
       return updated;
     });
@@ -202,7 +211,11 @@ export function AddAdjustmentOrderPage() {
 
   // Calculate Grand Total
   const grandTotal = useMemo(() => {
-    return selectedProducts.reduce((sum, item) => sum + item.total_price, 0);
+    return selectedProducts.reduce((sum, item) => {
+      const q = parseFloat(String(item.qty)) || 0;
+      const u = parseFloat(String(item.unit_price)) || 0;
+      return sum + Math.round(q * u * 100) / 100;
+    }, 0);
   }, [selectedProducts]);
 
   // Form submission
@@ -225,6 +238,19 @@ export function AddAdjustmentOrderPage() {
       return;
     }
 
+    for (const p of selectedProducts) {
+      const q = parseFloat(String(p.qty));
+      if (isNaN(q) || q <= 0) {
+        setErrorMessage(`Please enter a valid quantity for ${p.product_name}.`);
+        return;
+      }
+      const u = parseFloat(String(p.unit_price));
+      if (isNaN(u) || u < 0) {
+        setErrorMessage(`Please enter a valid unit price for ${p.product_name}.`);
+        return;
+      }
+    }
+
     setSubmitting(true);
     try {
       const payload = {
@@ -236,17 +262,21 @@ export function AddAdjustmentOrderPage() {
         purpose,
         remarks: remark || undefined,
         total_amount: grandTotal,
-        items: selectedProducts.map((p) => ({
-          product_name: p.product_name,
-          product_code: p.product_code || undefined,
-          category: p.category || "Machines",
-          hsn_code: p.hsn_code || "84224000",
-          gst_rate: p.gst_rate || "18%",
-          qty: p.qty,
-          uom: p.uom || "SET",
-          rate: p.unit_price,
-          amount: p.total_price,
-        })),
+        items: selectedProducts.map((p) => {
+          const q = parseFloat(String(p.qty)) || 1;
+          const r = parseFloat(String(p.unit_price)) || 0;
+          return {
+            product_name: p.product_name,
+            product_code: p.product_code || undefined,
+            category: p.category || "Machines",
+            hsn_code: p.hsn_code || "84224000",
+            gst_rate: p.gst_rate || "18%",
+            qty: q,
+            uom: p.uom || "SET",
+            rate: r,
+            amount: Math.round(q * r * 100) / 100,
+          };
+        }),
       };
 
       // The server records the adjustment AND applies it to the stock in one go. If it refuses (for example "not
@@ -513,9 +543,9 @@ export function AddAdjustmentOrderPage() {
                         {p.available_qty} {p.uom}
                       </td>
                       <td style={{ textAlign: "center" }}>
-                        <input
-                          type="number"
-                          min="1"
+                        <ScrollableNumberInput
+                          minVal={1}
+                          stepVal={1}
                           style={{
                             width: "70px",
                             height: "32px",
@@ -527,14 +557,14 @@ export function AddAdjustmentOrderPage() {
                             fontWeight: 600,
                           }}
                           value={p.qty}
-                          onChange={(e) => handleUpdateQty(idx, parseInt(e.target.value, 10) || 1)}
+                          onChange={(e) => handleUpdateQty(idx, e.target.value)}
                         />
                       </td>
                       <td style={{ textAlign: "right" }}>
-                        <input
-                          type="number"
-                          min="0"
-                          step="100"
+                        <ScrollableNumberInput
+                          minVal={0}
+                          stepVal={1}
+                          placeholder="0.00"
                           style={{
                             width: "115px",
                             height: "32px",
@@ -545,7 +575,7 @@ export function AddAdjustmentOrderPage() {
                             fontSize: "13px",
                           }}
                           value={p.unit_price}
-                          onChange={(e) => handleUpdatePrice(idx, parseFloat(e.target.value) || 0)}
+                          onChange={(e) => handleUpdatePrice(idx, e.target.value)}
                         />
                       </td>
                       <td style={{ textAlign: "right", fontWeight: 700, color: "#0f172a" }}>

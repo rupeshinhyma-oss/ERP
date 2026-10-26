@@ -34,10 +34,10 @@ export function Combobox({
 
   const prevValueRef = useRef(value);
 
-  // Clean options to eliminate any dummy 'Select' placeholders from the dropdown menu
+  // Clean options to eliminate invalid dummy placeholders
   const cleanOptions = useMemo(() => {
     return options.filter(
-      (opt) => opt && opt.trim() && opt !== "Select" && opt !== "-- Select Charge --"
+      (opt) => opt && opt.trim() && opt !== "-- Select Charge --"
     );
   }, [options]);
 
@@ -90,8 +90,9 @@ export function Combobox({
   }, [isOpen]);
 
   const handleSelect = (opt: string) => {
-    onChange(opt);
-    setQuery(opt);
+    const selectedVal = opt === "Select" ? "" : opt;
+    onChange(selectedVal);
+    setQuery(selectedVal);
     setIsTyping(false);
     setIsOpen(false);
   };
@@ -260,7 +261,7 @@ export function Combobox({
             </div>
           ) : (
             filteredOptions.map((opt, idx) => {
-              const isSelected = opt === value;
+              const isSelected = opt === value || (opt === "Select" && (!value || value === "Select"));
               const isHighlighted = idx === highlightedIndex;
 
               return (

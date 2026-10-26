@@ -127,8 +127,19 @@ function fakeApiGet(url: string) {
   }
   if (url.startsWith("/proforma-invoice/list")) return Promise.resolve({ data: LIST_RESPONSE });
   if (url.startsWith("/companies/sales-persons")) return Promise.resolve({ data: [{ id: "u1", full_name: "Dhairya Shah", username: "dhairya" }] });
-  if (url.startsWith("/masters/warehouses")) return Promise.resolve({ data: [{ name: "Mumbai" }, { name: "Ahmedabad" }] });
-  if (url.startsWith("/masters/payment-terms")) return Promise.resolve({ data: [{ name: "100% Advance" }, { name: "7 Days Credit" }] });
+  if (url.startsWith("/masters/payment-terms")) {
+    return Promise.resolve({
+      data: [
+        { name: "100% Advance" },
+        { name: "15 Days Credit" },
+        { name: "21 Days Credit" },
+        { name: "30 Days Credit" },
+        { name: "7 Days Credit" },
+        { name: "Full Credit" },
+        { name: "Partial Credit" },
+      ],
+    });
+  }
   if (url.startsWith("/masters/transports")) return Promise.resolve({ data: [{ name: "Not Sure" }, { name: "Self Pick-up" }, { name: "VRL" }] });
   if (url.startsWith("/masters/lead-sources")) return Promise.resolve({ data: [{ name: "Website" }, { name: "IndiaMART" }] });
   if (url.startsWith("/masters/additional-charges")) return Promise.resolve({ data: [{ name: "Transport Charges" }, { name: "Packing & Forwarding" }] });
@@ -379,12 +390,12 @@ describe("Add Proforma Invoice Form (/proforma-invoice/add & /proforma-invoice/a
     const dropdown = screen.getByTestId("datepicker-dropdown");
     expect(dropdown).toBeTruthy();
 
-    // Select date 24
-    const day24Btn = screen.getByRole("button", { name: "24" });
-    fireEvent.click(day24Btn);
+    // Select date 27 (future day compliant with minDate="today")
+    const day27Btn = within(dropdown).getAllByRole("button", { name: "27" }).find((b) => !b.hasAttribute("disabled"))!;
+    fireEvent.click(day27Btn);
 
     // Expect input value updated
-    expect((expDateInput as HTMLInputElement).value).toMatch(/^24-\d{2}-\d{4}$/);
+    expect((expDateInput as HTMLInputElement).value).toMatch(/^27-\d{2}-\d{4}$/);
     expect(screen.queryByTestId("datepicker-dropdown")).toBeNull();
   });
 
@@ -414,6 +425,46 @@ describe("Add Proforma Invoice Form (/proforma-invoice/add & /proforma-invoice/a
     const ptInput = screen.getByLabelText("Payment Terms");
     fireEvent.change(ptInput, { target: { value: "70% Advance, 30% on Dispatch" } });
     expect((ptInput as HTMLInputElement).value).toBe("70% Advance, 30% on Dispatch");
+  });
+
+  it("renders Payment Terms dropdown with exactly the allowed options from legacy ERP screenshot", async () => {
+    render(
+      <BrowserRouter>
+        <ProformaInvoicesPage defaultAdd={true} />
+      </BrowserRouter>
+    );
+
+    // Check default is 100% Advance
+    const ptInput = screen.getByLabelText("Payment Terms");
+    expect((ptInput as HTMLInputElement).value).toBe("100% Advance");
+
+    const ptToggle = screen.getByRole("button", { name: /toggle payment terms options/i });
+    fireEvent.click(ptToggle);
+
+    const expectedTerms = [
+      "Select",
+      "100% Advance",
+      "15 Days Credit",
+      "21 Days Credit",
+      "30 Days Credit",
+      "7 Days Credit",
+      "Full Credit",
+      "Partial Credit",
+    ];
+
+    const optionsContainer = screen.getByTestId("combobox-options");
+    for (const term of expectedTerms) {
+      expect(within(optionsContainer).getByText(term)).toBeTruthy();
+    }
+
+    // Select 15 Days Credit
+    fireEvent.click(within(optionsContainer).getByText("15 Days Credit"));
+    expect((ptInput as HTMLInputElement).value).toBe("15 Days Credit");
+
+    // Click toggle again and select 'Select' to clear back to empty
+    fireEvent.click(ptToggle);
+    fireEvent.click(within(screen.getByTestId("combobox-options")).getByText("Select"));
+    expect((ptInput as HTMLInputElement).value).toBe("");
   });
 
   it("renders combobox dropdowns with gray placeholders like Enter Destination and excludes 'Select' from dropdown options", async () => {
@@ -481,6 +532,11 @@ describe("Add Proforma Invoice Form (/proforma-invoice/add & /proforma-invoice/a
     fireEvent.change(screen.getByLabelText("Warehouse"), { target: { value: "Mumbai" } });
 
     const searchInput = await screen.findByPlaceholderText("Enter Product Name / Model No");
+    // Clicking or focusing opens the dropdown with available quantity
+    fireEvent.focus(searchInput);
+    expect(await screen.findByText("Continuous Band Sealer")).toBeTruthy();
+    expect(screen.getByText(/\(Available Qty:/)).toBeTruthy();
+
     fireEvent.change(searchInput, { target: { value: "Band" } });
 
     // Suggestion dropdown appears (data came from /masters/products)
@@ -637,6 +693,7 @@ describe("Add Proforma Invoice: defaults, rules and saving", () => {
     expect((screen.getByLabelText("Delivery Type") as HTMLInputElement).value).toBe("Godown");
     expect((screen.getByLabelText("Delivery Charge") as HTMLInputElement).value).toBe("To Pay");
     expect((screen.getByLabelText("Third Party Delivery") as HTMLInputElement).value).toBe("No");
+    expect((screen.getByPlaceholderText("Pay within 7 days") as HTMLTextAreaElement).value).toBe("");
   });
 
   it("hides destination, delivery type and delivery charge when the transport is Self Pick-up", async () => {
@@ -649,6 +706,12 @@ describe("Add Proforma Invoice: defaults, rules and saving", () => {
     expect(screen.queryByLabelText("Delivery Type")).toBeNull();
     expect(screen.queryByLabelText("Delivery Charge")).toBeNull();
     expect(screen.queryByPlaceholderText("Enter Destination")).toBeNull();
+
+    // Restores when switching back to another transport
+    fireEvent.change(screen.getByLabelText("Transport Name"), { target: { value: "Not Sure" } });
+    expect(screen.getByLabelText("Delivery Type")).toBeTruthy();
+    expect(screen.getByLabelText("Delivery Charge")).toBeTruthy();
+    expect(screen.getByPlaceholderText("Enter Destination")).toBeTruthy();
   });
 
   it("shows an error for each missing required field", async () => {
@@ -733,6 +796,7 @@ describe("Add Proforma Invoice: defaults, rules and saving", () => {
     fireEvent.change(shipping, { target: { value: "2 Shipping Rd" } });
     fireEvent.change(await screen.findByPlaceholderText("Enter Product Name / Model No"), { target: { value: "Band" } });
     fireEvent.click(await screen.findByText("Continuous Band Sealer"));
+    fireEvent.change(screen.getByPlaceholderText("Pay within 7 days"), { target: { value: "Pay within 7 days" } });
 
     fireEvent.click(screen.getByRole("button", { name: /^submit$/i }));
 
@@ -1048,7 +1112,33 @@ describe("Proforma list: workflow actions follow the database rules and the user
     expect(screen.queryByRole("heading", { name: "Add Address" })).toBeNull();
     expect(await screen.findByText(/SECTOR 18, MIDC/)).toBeTruthy();
   });
+
+  it("allows removing all line items including the very last one", async () => {
+    renderAdd();
+    await screen.findByDisplayValue("Godown");
+
+    // Initially there are 2 charge rows with Remove Row buttons
+    let removeButtons = screen.getAllByRole("button", { name: "✕" });
+    expect(removeButtons.length).toBe(2);
+
+    // Remove the first one
+    fireEvent.click(removeButtons[0]);
+    removeButtons = screen.getAllByRole("button", { name: "✕" });
+    expect(removeButtons.length).toBe(1);
+
+    // Remove the last remaining one
+    fireEvent.click(removeButtons[0]);
+    expect(screen.queryByRole("button", { name: "✕" })).toBeNull();
+
+    // Verify the empty state placeholder appears
+    expect(screen.getByText(/No items added. Use the product search above or click "\+ Add Product Row"./)).toBeTruthy();
+
+    // Verify adding a product row works after clearing
+    fireEvent.click(screen.getByRole("button", { name: "+ Add Product Row" }));
+    expect(screen.getAllByRole("button", { name: "✕" }).length).toBe(1);
+  });
 });
+
 
 
 

@@ -1,16 +1,18 @@
 services:
-  # -----------------------------------------------------------------------------
-  # ERP_Main Backend (Global Control Plane API)
-  # -----------------------------------------------------------------------------
+  # =============================================================================
+  # 1. ERP_Main (Global Control Plane)
+  # =============================================================================
   - type: web
     name: erp-main-backend
     env: python
-    rootDir: backend
+    rootDir: ERP_Main/backend
     plan: starter
     buildCommand: pip install -r requirements.txt
-    startCommand: python server.py --no-reload --workers 4
+    startCommand: python server.py --no-reload --workers 2
     healthCheckPath: /api/v1/health/live
     envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.0
       - key: ENVIRONMENT
         value: production
       - key: DEBUG
@@ -35,21 +37,24 @@ services:
         sync: false
       - key: INHYMA_API_URL
         sync: false
+      - key: YINGLIMA_FRONTEND_URL
+        sync: false   # public Yinglima website, e.g. https://yinglima-erp-frontend.onrender.com  (where people are sent for Yinglima)
+      - key: INHYMA_FRONTEND_URL
+        sync: false   # public Inhyma website, e.g. https://inhyma-erp-frontend.onrender.com  (where people are sent for Inhyma)
 
-  # -----------------------------------------------------------------------------
-  # ERP_Main Frontend (Global Dashboard Static Site)
-  # -----------------------------------------------------------------------------
   - type: web
     name: erp-main-frontend
     env: static
-    rootDir: frontend
-    buildCommand: npm ci && npm run build
+    rootDir: ERP_Main/frontend
+    buildCommand: npm install && npm run build
     staticPublishPath: dist
     routes:
       - type: rewrite
         source: /*
         destination: /index.html
     envVars:
+      - key: NODE_VERSION
+        value: 20
       - key: VITE_API_ORIGIN
         sync: false
       - key: VITE_CONTROL_PLANE_URL
@@ -62,3 +67,171 @@ services:
         sync: false
       - key: VITE_INHYMA_URL
         sync: false
+      - key: VITE_CONTROL_PLANE_API_URL
+        sync: false
+      - key: VITE_YINGLIMA_API_URL
+        sync: false
+      - key: VITE_INHYMA_API_URL
+        sync: false
+
+  # =============================================================================
+  # 2. Yinglima ERP (China Procurement)
+  # =============================================================================
+  - type: web
+    name: yinglima-erp-backend
+    env: python
+    rootDir: Yinglima_ERP/backend
+    plan: starter
+    buildCommand: pip install -r requirements.txt
+    startCommand: python server.py --no-reload --workers 2
+    healthCheckPath: /api/v1/health/live
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.0
+      - key: ENVIRONMENT
+        value: production
+      - key: DEBUG
+        value: false
+      - key: HOST
+        value: 0.0.0.0
+      - key: CORS_ALLOWED_ORIGINS
+        sync: false
+      - key: BACKEND_URL
+        sync: false
+      - key: FRONTEND_URL
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: DIRECT_URL
+        sync: false
+      - key: JWT_SECRET_KEY
+        generateValue: true
+      - key: MEMBER_PASSWORD_ENCRYPTION_KEY
+        generateValue: true
+      - key: ERP_MAIN_SERVICE_CREDENTIAL
+        sync: false
+      - key: ERP_MAIN_URL
+        sync: false   # public ERP_Main backend URL, e.g. https://erp-main-backend.onrender.com  (REQUIRED on Render)
+      - key: ERP_MAIN_API_BASE_URL
+        sync: false   # e.g. https://erp-main-backend.onrender.com/api/v1
+      - key: ERP_MAIN_ISSUER
+        sync: false
+      - key: ERP_MAIN_JWKS_URL
+        sync: false
+      - key: PEER_ERP_ENDPOINTS
+        sync: false
+      - key: SSO_HANDOVER_VERIFY_TIMEOUT_SECONDS
+        value: 40   # lets a sleeping free-tier ERP_Main wake up
+      - key: AUTH_USE_SECURE_COOKIES
+        value: true
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: GEMINI_API_KEY_1
+        sync: false
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        sync: false
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
+
+  - type: web
+    name: yinglima-erp-frontend
+    env: static
+    rootDir: Yinglima_ERP/frontend
+    buildCommand: npm install && npm run build
+    staticPublishPath: dist
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    envVars:
+      - key: NODE_VERSION
+        value: 20
+      - key: VITE_API_ORIGIN
+        sync: false
+      - key: VITE_CONTROL_PLANE_URL
+        sync: false
+      - key: VITE_CENTRAL_AUTH_API
+        sync: false
+      - key: VITE_COOKIE_DOMAIN
+        sync: false
+      - key: VITE_INHYMA_URL
+        sync: false   # public Inhyma website + /dashboard, e.g. https://<name>.onrender.com/dashboard
+
+  # =============================================================================
+  # 3. Inhyma ERP (India Distribution)
+  # =============================================================================
+  - type: web
+    name: inhyma-erp-backend
+    env: python
+    rootDir: Inhyma_ERP/backend
+    plan: starter
+    buildCommand: pip install -r requirements.txt
+    startCommand: python server.py --no-reload --workers 2
+    healthCheckPath: /api/v1/health/live
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.0
+      - key: ENVIRONMENT
+        value: production
+      - key: DEBUG
+        value: false
+      - key: HOST
+        value: 0.0.0.0
+      - key: CORS_ALLOWED_ORIGINS
+        sync: false
+      - key: BACKEND_URL
+        sync: false
+      - key: FRONTEND_URL
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: DIRECT_URL
+        sync: false
+      - key: JWT_SECRET_KEY
+        generateValue: true
+      - key: MEMBER_PASSWORD_ENCRYPTION_KEY
+        generateValue: true
+      - key: ERP_MAIN_SERVICE_CREDENTIAL
+        sync: false
+      - key: ERP_MAIN_URL
+        sync: false   # public ERP_Main backend URL, e.g. https://erp-main-backend.onrender.com  (REQUIRED on Render)
+      - key: ERP_MAIN_API_BASE_URL
+        sync: false   # e.g. https://erp-main-backend.onrender.com/api/v1
+      - key: ERP_MAIN_ISSUER
+        sync: false
+      - key: ERP_MAIN_JWKS_URL
+        sync: false
+      - key: PEER_ERP_ENDPOINTS
+        sync: false
+      - key: SSO_HANDOVER_VERIFY_TIMEOUT_SECONDS
+        value: 40   # lets a sleeping free-tier ERP_Main wake up
+      - key: AUTH_USE_SECURE_COOKIES
+        value: true
+
+  - type: web
+    name: inhyma-erp-frontend
+    env: static
+    rootDir: Inhyma_ERP/frontend
+    buildCommand: npm install && npm run build
+    staticPublishPath: dist
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    envVars:
+      - key: NODE_VERSION
+        value: 20
+      - key: VITE_API_ORIGIN
+        sync: false
+      - key: VITE_CONTROL_PLANE_URL
+        sync: false
+      - key: VITE_CENTRAL_AUTH_API
+        sync: false
+      - key: VITE_COOKIE_DOMAIN
+        sync: false
+      - key: VITE_YINGLIMA_URL
+        sync: false   # public Yinglima website + /dashboard, e.g. https://<name>.onrender.com/dashboard

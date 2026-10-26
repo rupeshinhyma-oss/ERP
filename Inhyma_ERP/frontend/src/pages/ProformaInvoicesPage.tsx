@@ -9,7 +9,7 @@
  * KPI summary cards, and SideDrawer details view.
  */
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
 import { Breadcrumb } from "@/components/Breadcrumb";
@@ -38,7 +38,7 @@ const PROFORMA_OPTION_GROUPS = [
 ] as const;
 
 type StatusTab = { key: string; label: string; cardLabel: string; badge: string; actionLabel?: string; actionColor?: string };
-type CatalogProduct = { product_name: string; hsn: string; rate: number; gst_percent: number; min_price: number; available_stock?: number };
+type CatalogProduct = { product_name: string; product_code?: string; hsn: string; rate: number; gst_percent: number; min_price: number; available_stock?: number };
 
 const todayDDMMYYYY = () => formatDDMMYYYY(new Date());
 
@@ -48,7 +48,7 @@ function emptyFormState(defaults: Record<string, string>, salesPerson: string) {
     proforma_date: todayDDMMYYYY(),
     expected_delivery_date: todayDDMMYYYY(),
     warehouse: "",
-    payment_terms: defaults.payment_terms || "",
+    payment_terms: defaults.payment_terms || "100% Advance",
     sales_person: salesPerson,
     transport_name: defaults.transport_name || "",
     third_party_delivery: defaults.third_party_delivery || "",
@@ -64,7 +64,7 @@ function emptyFormState(defaults: Record<string, string>, salesPerson: string) {
     product_search: "",
     additional_charges_enabled: true,
     third_party_invoice_file: "",
-    terms_and_conditions: defaults.terms_and_conditions || "",
+    terms_and_conditions: "",
     remarks: "",
   };
 }
@@ -273,8 +273,20 @@ export function ProformaInvoicesPage({
   const DELIVERY_TYPE_OPTIONS = useMemo(() => (optionGroups["delivery.type"] || []).map((o) => o.value), [optionGroups]);
   const DELIVERY_CHARGE_OPTIONS = useMemo(() => (optionGroups["delivery.charge"] || []).map((o) => o.value), [optionGroups]);
   const WAREHOUSE_OPTIONS = useMasterNames("/masters/warehouses");
-  const PAYMENT_TERM_OPTIONS = useMasterNames("/masters/payment-terms");
-  const TRANSPORT_NAME_OPTIONS = useMasterNames("/masters/transports");
+  // Dynamically extract Payment Terms directly from Master Data (/masters/payment-terms)
+  const masterPaymentTerms = useMasterNames("/masters/payment-terms");
+  const PAYMENT_TERM_OPTIONS = useMemo(
+    () => ["Select", ...masterPaymentTerms.filter((x) => x !== "Select")],
+    [masterPaymentTerms]
+  );
+  const masterTransports = useMasterNames("/masters/transports");
+  const TRANSPORT_NAME_OPTIONS = useMemo(() => {
+    const list = [...masterTransports];
+    if (!list.some((t) => t.toLowerCase().replace(/[\s-_]/g, "") === "selfpickup")) {
+      list.push("Self Pick-up");
+    }
+    return list;
+  }, [masterTransports]);
   const LEAD_SOURCE_OPTIONS = useMasterNames("/masters/lead-sources");
   const ADDITIONAL_CHARGE_TYPES = useMasterNames("/masters/additional-charges");
   const DEFAULTS = useMemo(
@@ -381,23 +393,66 @@ export function ProformaInvoicesPage({
     if (editingId) return;
     setFormState((prev) => ({
       ...prev,
-      payment_terms: prev.payment_terms || DEFAULTS.payment_terms || "",
+      payment_terms: prev.payment_terms || DEFAULTS.payment_terms || "100% Advance",
       transport_name: prev.transport_name || DEFAULTS.transport_name || "",
       delivery_type: prev.delivery_type || DEFAULTS.delivery_type || "",
       delivery_charge: prev.delivery_charge || DEFAULTS.delivery_charge || "",
       third_party_delivery: prev.third_party_delivery || DEFAULTS.third_party_delivery || "",
-      terms_and_conditions: prev.terms_and_conditions || DEFAULTS.terms_and_conditions || "",
     }));
   }, [DEFAULTS, editingId]);
 
-  const selfPickup = !!selfPickupTransport && formState.transport_name === selfPickupTransport;
+  const selfPickup = useMemo(() => {
+    const name = formState.transport_name?.trim() || "";
+    if (!name) return false;
+    if (selfPickupTransport && name.toLowerCase() === selfPickupTransport.trim().toLowerCase()) {
+      return true;
+    }
+    const clean = name.toLowerCase().replace(/[\s-_]/g, "");
+    return clean === "selfpickup";
+  }, [formState.transport_name, selfPickupTransport]);
   const belowMinCount = formLineItems.filter(
     (it) => !it.is_additional_charge && it.min_price && (parseFloat(String(it.unit_price)) || 0) < it.min_price
   ).length;
   const fieldError = (key: string) =>
     formErrors[key] ? <span style={{ color: "#ef4444", fontSize: "11.5px", marginTop: "4px", display: "block" }}>{formErrors[key]}</span> : null;
   const productSearchSeq = useRef(0);
+  const productSearchContainerRef = useRef<HTMLDivElement>(null);
   const [productSearchMatches, setProductSearchMatches] = useState<CatalogProduct[]>([]);
+  const [isProductSearchOpen, setIsProductSearchOpen] = useState(false);
+  const [stockCatalogMap, setStockCatalogMap] = useState<Record<string, any>>({});
+
+  useEffect(() => {
+    void apiGet<{ items: any[] } | any[]>("/inventory/product-stock?limit=500")
+      .then((res) => {
+        const raw = res?.data;
+        const items: any[] = Array.isArray(raw) ? raw : (raw && Array.isArray(raw.items) ? raw.items : []);
+        const map: Record<string, any> = {};
+        for (const it of items) {
+          if (it.product_code && it.product_code !== "-") map[it.product_code.toLowerCase().trim()] = it;
+          if (it.product_name_tally) map[it.product_name_tally.toLowerCase().trim()] = it;
+          if (it.product_name) map[it.product_name.toLowerCase().trim()] = it;
+        }
+        setStockCatalogMap(map);
+      })
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (
+        productSearchContainerRef.current &&
+        !productSearchContainerRef.current.contains(e.target as Node)
+      ) {
+        setIsProductSearchOpen(false);
+      }
+    }
+    if (isProductSearchOpen) {
+      document.addEventListener("mousedown", handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, [isProductSearchOpen]);
 
   const loadProformas = async () => {
     setLoading(true);
@@ -686,40 +741,71 @@ export function ProformaInvoicesPage({
   };
 
   const handleDeleteLineItem = (index: number) => {
-    if (formLineItems.length <= 1) return;
     setFormLineItems((prev) => prev.filter((_, i) => i !== index));
   };
 
-  const handleProductSearchChange = (query: string) => {
-    setFormState((prev) => ({ ...prev, product_search: query }));
-    if (!query.trim()) {
-      setProductSearchMatches([]);
-      return;
+  const getWarehouseStock = useCallback((prod: any, wh: string): number => {
+    if (!wh) return 0;
+    const w = wh.toLowerCase().trim();
+    const code = (prod.product_code || "").toLowerCase().trim();
+    const name = (prod.product_name || prod.product_name_tally || "").toLowerCase().trim();
+    const stockRow = (code && stockCatalogMap[code]) || (name && stockCatalogMap[name]);
+    if (stockRow) {
+      if (w.includes("mumbai")) return Number(stockRow.mumbai || 0);
+      if (w.includes("ahmedabad")) return Number(stockRow.ahmedabad || 0);
+      if (w.includes("indore")) return Number(stockRow.indore || 0);
+      return Number(stockRow.total_qty || 0);
     }
+    return Number(prod.current_stock ?? prod.available_stock ?? 0);
+  }, [stockCatalogMap]);
+
+  const loadProductMatches = useCallback((queryStr: string, currentWarehouse: string) => {
     const seq = ++productSearchSeq.current;
-    void apiGet<any[]>(`/masters/products?page=1&page_size=10&status=active&search=${encodeURIComponent(query.trim())}`)
+    const trimmed = queryStr.trim();
+    const searchParam = trimmed ? `&search=${encodeURIComponent(trimmed)}` : "";
+    const url = `/masters/products?page=1&page_size=250&status=active${searchParam}`;
+
+    void apiGet<{ items: any[] } | any[]>(url)
       .then((res) => {
         if (seq !== productSearchSeq.current) return;
-        setProductSearchMatches(
-          (res?.data || []).map((p) => ({
-            product_name: p.product_name,
-            hsn: p.hsn_number || "",
+        const raw = res?.data;
+        const list: any[] = Array.isArray(raw) ? raw : (raw && Array.isArray(raw.items) ? raw.items : []);
+        const mapped: CatalogProduct[] = list.map((p) => {
+          const avail = getWarehouseStock(p, currentWarehouse);
+          return {
+            product_name: p.product_name || p.product_name_tally || "",
+            product_code: p.product_code || "",
+            hsn: p.hsn_number || p.hsn_code || "",
             rate: Number(p.standard_price) || 0,
             min_price: Number(p.minimum_price || p.min_price || p.standard_price) || 0,
-            gst_percent: Number(p.gst_percent) || 0,
-            available_stock: p.current_stock !== undefined ? Number(p.current_stock) : undefined,
-          }))
-        );
+            gst_percent: Number(p.gst_percent ?? p.gst_rate ?? 0),
+            available_stock: avail,
+          };
+        });
+        setProductSearchMatches(mapped);
       })
       .catch(() => {
         if (seq === productSearchSeq.current) setProductSearchMatches([]);
       });
+  }, [getWarehouseStock]);
+
+  const handleProductSearchFocusOrClick = () => {
+    if (!formState.warehouse) return;
+    setIsProductSearchOpen(true);
+    loadProductMatches(formState.product_search, formState.warehouse);
+  };
+
+  const handleProductSearchChange = (query: string) => {
+    setFormState((prev) => ({ ...prev, product_search: query }));
+    if (!formState.warehouse) return;
+    setIsProductSearchOpen(true);
+    loadProductMatches(query, formState.warehouse);
   };
 
   const handleSelectProductMatch = (prod: CatalogProduct) => {
     handleAddProductItem(prod);
     setFormState((prev) => ({ ...prev, product_search: "" }));
-    setProductSearchMatches([]);
+    setIsProductSearchOpen(false);
   };
 
   const handleOpenCreate = () => {
@@ -1216,7 +1302,12 @@ export function ProformaInvoicesPage({
                   <Combobox
                     ariaLabel="Warehouse"
                     value={formState.warehouse}
-                    onChange={(val) => setFormState({ ...formState, warehouse: val })}
+                    onChange={(val) => {
+                      setFormState({ ...formState, warehouse: val });
+                      if (val && isProductSearchOpen) {
+                        loadProductMatches(formState.product_search, val);
+                      }
+                    }}
                     options={WAREHOUSE_OPTIONS}
                     placeholder="Select Warehouse"
                   />
@@ -1246,7 +1337,7 @@ export function ProformaInvoicesPage({
                     value={formState.payment_terms}
                     onChange={(val) => setFormState({ ...formState, payment_terms: val })}
                     options={PAYMENT_TERM_OPTIONS}
-                    placeholder="Select Payment Terms"
+                    placeholder="Select"
                   />
                   {fieldError("payment_terms")}
                 </div>
@@ -1372,10 +1463,9 @@ export function ProformaInvoicesPage({
                       />
                       {fieldError("delivery_charge")}
                     </div>
+                    <div />
                   </>
                 )}
-
-                <div />
               </div>
             </div>
 
@@ -1690,29 +1780,88 @@ export function ProformaInvoicesPage({
               <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: "8px" }}>
                 PRODUCT SEARCH
               </div>
-              <div style={{ position: "relative" }}>
+              <div style={{ position: "relative" }} ref={productSearchContainerRef}>
                 <input
                   type="text"
                   placeholder={formState.warehouse ? "Enter Product Name / Model No" : "Select a warehouse first"}
                   disabled={!formState.warehouse}
                   value={formState.product_search}
+                  onClick={handleProductSearchFocusOrClick}
+                  onFocus={handleProductSearchFocusOrClick}
                   onChange={(e) => handleProductSearchChange(e.target.value)}
-                  style={{ width: "100%", height: "36px", border: "1px solid #cbd5e1", borderRadius: "4px", padding: "0 12px", fontSize: "13.5px", outline: "none" }}
+                  style={{
+                    width: "100%",
+                    height: "36px",
+                    border: "1px solid #cbd5e1",
+                    borderRadius: "4px",
+                    padding: "0 12px",
+                    fontSize: "13.5px",
+                    outline: "none",
+                    background: !formState.warehouse ? "#f8fafc" : "#ffffff",
+                    cursor: !formState.warehouse ? "not-allowed" : "text",
+                  }}
                 />
-                {productSearchMatches.length > 0 && (
-                  <div style={{ position: "absolute", top: "100%", left: 0, right: 0, background: "#ffffff", border: "1px solid #cbd5e1", borderTop: "none", borderRadius: "0 0 4px 4px", zIndex: 50, maxHeight: "200px", overflowY: "auto", boxShadow: "0 4px 12px rgba(0,0,0,0.1)" }}>
-                    {productSearchMatches.map((prod, idx) => (
-                      <div
-                        key={idx}
-                        onClick={() => handleSelectProductMatch(prod)}
-                        style={{ padding: "8px 12px", cursor: "pointer", fontSize: "13px", borderBottom: "1px solid #f1f5f9", display: "flex", justifyContent: "space-between" }}
-                        onMouseEnter={(e) => (e.currentTarget.style.background = "#f8fafc")}
-                        onMouseLeave={(e) => (e.currentTarget.style.background = "#ffffff")}
-                      >
-                        <strong>{prod.product_name}</strong>
-                        <span style={{ color: "#64748b" }}>HSN: {prod.hsn} | Rate: ₹{prod.rate}</span>
+                {isProductSearchOpen && formState.warehouse && (
+                  <div
+                    style={{
+                      position: "absolute",
+                      top: "100%",
+                      left: 0,
+                      right: 0,
+                      background: "#ffffff",
+                      border: "1px solid #cbd5e1",
+                      borderTop: "none",
+                      borderRadius: "0 0 4px 4px",
+                      zIndex: 50,
+                      maxHeight: "240px",
+                      overflowY: "auto",
+                      boxShadow: "0 4px 14px rgba(0,0,0,0.12)",
+                    }}
+                  >
+                    {productSearchMatches.length === 0 ? (
+                      <div style={{ padding: "10px 14px", fontSize: "13px", color: "#94a3b8", fontStyle: "italic" }}>
+                        No matching products found for {formState.warehouse}
                       </div>
-                    ))}
+                    ) : (
+                      productSearchMatches.map((prod, idx) => {
+                        const availQty = prod.available_stock ?? 0;
+                        const codeStr = prod.product_code ? `Code: "${prod.product_code}"` : 'Code: " "';
+                        return (
+                          <div
+                            key={`${prod.product_name}-${idx}`}
+                            onClick={() => handleSelectProductMatch(prod)}
+                            style={{
+                              padding: "8px 14px",
+                              cursor: "pointer",
+                              fontSize: "13px",
+                              color: "#1e293b",
+                              borderBottom: idx < productSearchMatches.length - 1 ? "1px solid #f1f5f9" : "none",
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "space-between",
+                              gap: "8px",
+                            }}
+                            onMouseEnter={(e) => (e.currentTarget.style.background = "#f8fafc")}
+                            onMouseLeave={(e) => (e.currentTarget.style.background = "#ffffff")}
+                          >
+                            <span>
+                              <strong style={{ fontWeight: 600 }}>{prod.product_name}</strong>
+                              {" | "}
+                              <span style={{ color: "#475569" }}>{codeStr}</span>
+                              {" | "}
+                              <span style={{ color: availQty > 0 ? "#0284c7" : "#64748b" }}>
+                                (Available Qty: {availQty} )
+                              </span>
+                            </span>
+                            {prod.rate ? (
+                              <span style={{ color: "#64748b", fontSize: "12px", whiteSpace: "nowrap" }}>
+                                ₹{prod.rate}
+                              </span>
+                            ) : null}
+                          </div>
+                        );
+                      })
+                    )}
                   </div>
                 )}
               </div>
@@ -1758,7 +1907,14 @@ export function ProformaInvoicesPage({
                     </tr>
                   </thead>
                   <tbody>
-                    {formLineItems.map((row, idx) => (
+                    {formLineItems.length === 0 ? (
+                      <tr>
+                        <td colSpan={10} style={{ textAlign: "center", padding: "18px", color: "#94a3b8", fontSize: "12.5px" }}>
+                          No items added. Use the product search above or click "+ Add Product Row".
+                        </td>
+                      </tr>
+                    ) : (
+                      formLineItems.map((row, idx) => (
                       <tr key={row.id || idx} style={{ background: row.is_additional_charge ? "#fcfdfe" : "#ffffff" }}>
                         <td style={{ padding: "6px 8px", borderBottom: "1px solid #e2e8f0" }}>
                           {row.is_additional_charge ? (
@@ -1865,7 +2021,7 @@ export function ProformaInvoicesPage({
                           </button>
                         </td>
                       </tr>
-                    ))}
+                    )))}
                   </tbody>
                 </table>
 
@@ -1922,6 +2078,7 @@ export function ProformaInvoicesPage({
                   </label>
                   <textarea
                     rows={4}
+                    placeholder={DEFAULTS.terms_and_conditions || "Make all cheque payable to USER"}
                     value={formState.terms_and_conditions}
                     onChange={(e) => setFormState({ ...formState, terms_and_conditions: e.target.value })}
                     style={{ width: "100%", padding: "10px", border: "1px solid #cbd5e1", borderRadius: "4px", fontSize: "13px", resize: "vertical", outline: "none", color: "#334155" }}

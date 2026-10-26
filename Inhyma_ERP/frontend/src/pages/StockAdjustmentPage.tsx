@@ -2,6 +2,7 @@ import { useState, useMemo, useCallback, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
 import { SideDrawer, DetailFieldGrid } from "@/components/SideDrawer";
+import { ScrollableNumberInput } from "@/components/ScrollableNumberInput";
 import { DateRangePicker } from "@/components/DateRangePicker";
 import { Pagination } from "@/components/Pagination";
 import { SortHeader } from "@/components/SortHeader";
@@ -1502,12 +1503,12 @@ export function StockAdjustmentPage({
                     <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px" }}>
                       Quantity
                     </label>
-                    <input
-                      type="number"
-                      min={1}
+                    <ScrollableNumberInput
+                      minVal={1}
+                      stepVal={1}
                       className="adjustment-filter-input"
                       value={newQty}
-                      onChange={(e) => setNewQty(Number(e.target.value))}
+                      onChange={(e) => setNewQty(Number(e.target.value) || 1)}
                     />
                   </div>
 
@@ -1515,12 +1516,13 @@ export function StockAdjustmentPage({
                     <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px" }}>
                       Rate (₹)
                     </label>
-                    <input
-                      type="number"
-                      min={0}
+                    <ScrollableNumberInput
+                      minVal={0}
+                      stepVal={1}
+                      placeholder="0.00"
                       className="adjustment-filter-input"
-                      value={newRate}
-                      onChange={(e) => setNewRate(Number(e.target.value))}
+                      value={newRate || ""}
+                      onChange={(e) => setNewRate(Number(e.target.value) || 0)}
                     />
                   </div>
                 </div>
