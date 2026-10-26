@@ -16,9 +16,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link, Navigate, useLocation, useNavigate } from "react-router-dom";
-import { API_BASE, apiGet, apiPatch, apiPost } from "@/lib/api";
+import { API_BASE, apiGet, apiPost } from "@/lib/api";
 import { Auth, initials, roleLabel } from "@/lib/auth";
-import { liveClient } from "@/lib/live/liveClient";
 import { useAuth } from "@/lib/hooks";
 import {
   NAV_ITEMS_BY_KEY,
@@ -26,32 +25,28 @@ import {
   PAGE_TITLES,
   DEFAULT_BRAND_NAME,
 } from "@/lib/nav";
-import {
-  getCachedBrandLogo,
-  getCachedBrandName,
-  resolveBrandInfo,
-  resolveImageUrl,
-  subscribeBrandLogo,
-  subscribeBrandName,
-} from "@/lib/brand";
+import { getCachedBrandName, resolveBrandName, subscribeBrandName } from "@/lib/brand";
 import { ICONS, IconBell, IconChevronDown, IconChevronRight } from "./icons";
 import { EcosystemSwitcher } from "./EcosystemSwitcher";
-import { processIncomingSsoHandover, routeForCentralSession } from "@/lib/ssoBridge";
-import { getEcosystemCookie, globalEcosystemLogout, initEcosystemSessionWatcher, isExplicitlyLoggedOut, setEcosystemCookie, verifyCentralEcosystemSession } from "@/lib/ecosystemSession";
+import { enforceCentralLanding, processIncomingSsoHandover } from "@/lib/ssoBridge";
+import { globalEcosystemLogout, initEcosystemSessionWatcher, isExplicitlyLoggedOut } from "@/lib/ecosystemSession";
 
 import { ErrorBanner } from "./ui";
 import type { Profile } from "@/types";
-import { tasksApi } from "@/lib/tasksApi";
 
 const NAV_SCROLL_KEY = "erp_sidebar_nav_scroll";
 
 /* ------------------------------------------------------------------ */
+/* ------------------------------------------------------------------ */
 /* Notifications                                                      */
 /* ------------------------------------------------------------------ */
 
-interface InAppNotification {
+interface NotificationItem {
   id: string;
+  user_id: string;
+  sender_id?: string | null;
   type: string;
+  module?: string | null;
   title: string;
   message: string;
   link?: string | null;
@@ -59,178 +54,80 @@ interface InAppNotification {
   created_at: string;
 }
 
-type NotificationCategory = "all" | "deadlines" | "escalations" | "team";
-
-function getNotificationCategoryMeta(n: InAppNotification) {
-  const type = (n.type || "").toLowerCase();
-  const title = (n.title || "").toLowerCase();
-
-  const isOverdue = type.includes("overdue") || title.includes("overdue");
-  const isDeadlineToday = type.includes("deadline_today") || title.includes("due today");
-  const isDeadlineSoon = type.includes("approaching") || title.includes("due tomorrow") || title.includes("due soon");
-  const isEscalation = type.includes("escalat") || title.includes("escalat");
-  const isDeadline = isOverdue || isDeadlineToday || isDeadlineSoon || type.includes("deadline") || title.includes("deadline");
-  const isMention = type.includes("mention") || title.includes("mention");
-  const isAssigned = type.includes("assigned") || title.includes("assigned");
-  const isSubtask = type.includes("subtask") || title.includes("subtask");
-  const isHold = type.includes("hold") || title.includes("hold");
-  const isCompleted = type.includes("completed") || title.includes("completed") || type.includes("done");
-
-  const isTeam = isMention || isAssigned || isSubtask || type.includes("watcher") || isHold || isCompleted || (!isDeadline && !isEscalation);
-
-  let badgeLabel = "TASK";
-  let badgeBg = "#f1f5f9";
-  let badgeColor = "#475569";
-  let badgeBorder = "#cbd5e1";
-
-  if (type.includes("feed")) {
-    if (type.includes("comment")) {
-      badgeLabel = "💬 FEED COMMENT";
-    } else if (type.includes("discussion")) {
-      badgeLabel = "👥 FEED REPLY";
-    } else {
-      badgeLabel = "📢 ANNOUNCEMENT";
-    }
-    badgeBg = "#eff6ff";
-    badgeColor = "#1d4ed8";
-    badgeBorder = "#bfdbfe";
-  } else if (isOverdue) {
-    badgeLabel = "⚠️ OVERDUE";
-    badgeBg = "#fef2f2";
-    badgeColor = "#dc2626";
-    badgeBorder = "#fecaca";
-  } else if (isDeadlineToday) {
-    badgeLabel = "📅 DUE TODAY";
-    badgeBg = "#fffbeb";
-    badgeColor = "#d97706";
-    badgeBorder = "#fde68a";
-  } else if (isDeadlineSoon) {
-    badgeLabel = "⏰ DUE SOON";
-    badgeBg = "#fef3c7";
-    badgeColor = "#b45309";
-    badgeBorder = "#fcd34d";
-  } else if (isEscalation) {
-    badgeLabel = "⚡ ESCALATION";
-    badgeBg = "#fff1f2";
-    badgeColor = "#e11d48";
-    badgeBorder = "#fecdd3";
-  } else if (isMention) {
-    badgeLabel = "💬 MENTION";
-    badgeBg = "#f5f3ff";
-    badgeColor = "#7c3aed";
-    badgeBorder = "#ddd6fe";
-  } else if (isAssigned) {
-    badgeLabel = "👤 ASSIGNED";
-    badgeBg = "#eff6ff";
-    badgeColor = "#2563eb";
-    badgeBorder = "#bfdbfe";
-  } else if (isCompleted) {
-    badgeLabel = "✓ DONE";
-    badgeBg = "#f0fdf4";
-    badgeColor = "#16a34a";
-    badgeBorder = "#bbf7d0";
-  } else if (isHold) {
-    badgeLabel = "⏸️ ON HOLD";
-    badgeBg = "#fff7ed";
-    badgeColor = "#ea580c";
-    badgeBorder = "#fed7aa";
-  }
-
-  return {
-    isDeadline,
-    isEscalation,
-    isTeam,
-    badgeLabel,
-    badgeBg,
-    badgeColor,
-    badgeBorder,
-  };
-}
-
 function formatRelativeTime(dateStr: string): string {
-  if (!dateStr) return "";
   try {
-    const date = new Date(dateStr);
-    const now = new Date();
-    const diffMs = now.getTime() - date.getTime();
-    if (diffMs < 0) return "just now";
-    const diffSec = Math.floor(diffMs / 1000);
-    if (diffSec < 60) return "just now";
-    const diffMin = Math.floor(diffSec / 60);
-    if (diffMin < 60) return `${diffMin}m ago`;
-    const diffHours = Math.floor(diffMin / 60);
-    if (diffHours < 24) return `${diffHours}h ago`;
-    const diffDays = Math.floor(diffHours / 24);
-    if (diffDays === 1) return "yesterday";
-    if (diffDays < 7) return `${diffDays}d ago`;
-    return date.toLocaleDateString([], { month: "short", day: "numeric" });
+    const diff = Math.floor((Date.now() - new Date(dateStr).getTime()) / 1000);
+    if (diff < 60) return "Just now";
+    if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+    if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+    return `${Math.floor(diff / 86400)}d ago`;
   } catch {
     return "";
   }
 }
 
+function getNotificationIcon(type: string, module?: string | null): string {
+  if (type === "shipment_requirement_raised") return "📦";
+  if (type === "shipment_status_ordered") return "🔵";
+  if (type === "sale_process_created" || module === "sales") return "💼";
+  if (type === "local_purchase_created" || module === "purchases") return "🛒";
+  if (type === "inquiry_created" || module === "inquiries") return "📩";
+  return "🔔";
+}
+
+function cleanNotificationTitle(text: string): string {
+  if (!text) return "";
+  return text.replace(/^[\p{Extended_Pictographic}\uFE0F\u200D\s]+/u, "").trim();
+}
+
 function NotificationBell() {
   const [open, setOpen] = useState(false);
-  const [notifications, setNotifications] = useState<InAppNotification[]>([]);
-  const [unreadCount, setUnreadCount] = useState(0);
-  const [activeCategory, setActiveCategory] = useState<NotificationCategory>("all");
-  const [isChecking, setIsChecking] = useState(false);
+  const [notifications, setNotifications] = useState<NotificationItem[]>([]);
+  const [unreadCount, setUnreadCount] = useState<number>(0);
+  const [loading, setLoading] = useState(false);
   const wrapperRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
 
-  const loadNotifications = useCallback(async () => {
+  // Periodic poll for unread notification count
+  const pollUnreadCount = useCallback(async () => {
     try {
-      const res = await apiGet<{ items: InAppNotification[]; unread_count: number }>("/notifications?limit=40");
-      if (res.data) {
-        setNotifications(res.data.items || []);
-        setUnreadCount(res.data.unread_count ?? 0);
+      const res = await apiGet<{ unread_count: number }>("/notifications/unread-count");
+      if (res && res.data && typeof res.data.unread_count === "number") {
+        setUnreadCount(res.data.unread_count);
       }
     } catch {
-      // Non-fatal
+      /* ignore background poll errors */
     }
   }, []);
 
-  const handleSyncDeadlines = useCallback(async () => {
-    setIsChecking(true);
+  useEffect(() => {
+    void pollUnreadCount();
+    const interval = setInterval(pollUnreadCount, 30000);
+    return () => clearInterval(interval);
+  }, [pollUnreadCount]);
+
+  // Load full notification list when opened
+  const loadNotifications = useCallback(async () => {
+    setLoading(true);
     try {
-      await tasksApi.checkTaskDeadlines();
-      await loadNotifications();
+      const res = await apiGet<NotificationItem[]>("/notifications?limit=30");
+      const list = Array.isArray(res.data) ? res.data : (res.data as any)?.data || [];
+      setNotifications(list);
     } catch {
-      // Non-fatal
+      /* best effort */
     } finally {
-      setIsChecking(false);
+      setLoading(false);
     }
-  }, [loadNotifications]);
+  }, []);
 
   useEffect(() => {
-    loadNotifications();
-    // Run deadline checks for current user on mount
-    tasksApi.checkTaskDeadlines().then(() => loadNotifications()).catch(() => { });
-  }, [loadNotifications]);
-
-  // Live WebSocket updates
-  useEffect(() => {
-    const user = Auth.getProfile();
-    if (user?.id) {
-      liveClient.subscribe(`user:${user.id}`);
+    if (open) {
+      void loadNotifications();
+      void pollUnreadCount();
     }
-    liveClient.subscribe("notifications");
+  }, [open, loadNotifications, pollUnreadCount]);
 
-    const unsub = liveClient.onEvent((event) => {
-      if (
-        event.event_type === "NOTIFICATION_RECEIVED" ||
-        event.event_type.startsWith("TASK_")
-      ) {
-        loadNotifications();
-      }
-    });
-
-    return () => {
-      unsub();
-    };
-  }, [loadNotifications]);
-
-  // Any click outside the bell closes the dropdown.
+  // Close dropdown on click outside
   useEffect(() => {
     if (!open) return;
     const onDocClick = (e: MouseEvent) => {
@@ -242,74 +139,41 @@ function NotificationBell() {
     return () => document.removeEventListener("click", onDocClick);
   }, [open]);
 
-  const handleNotificationClick = async (n: InAppNotification) => {
-    if (!n.is_read) {
-      apiPatch(`/notifications/${n.id}/read`).catch(() => { });
-      setNotifications((prev) =>
-        prev.map((item) => (item.id === n.id ? { ...item, is_read: true } : item))
-      );
-      setUnreadCount((prev) => Math.max(0, prev - 1));
-    }
-    setOpen(false);
-    if (n.link) {
-      navigate(n.link);
-    }
-  };
-
-  const handleMarkAllRead = async () => {
+  const handleMarkAllRead = async (e: React.MouseEvent) => {
+    e.stopPropagation();
     try {
-      await apiPost("/notifications/read-all");
-      setNotifications((prev) => prev.map((item) => ({ ...item, is_read: true })));
+      await apiPost("/notifications/read-all", {});
+      setNotifications((prev) => prev.map((n) => ({ ...n, is_read: true })));
       setUnreadCount(0);
     } catch {
-      // Non-fatal
+      /* best effort */
     }
   };
 
-  // Enriched notifications with category tags
-  const enrichedNotifications = useMemo(() => {
-    return notifications.map((n) => ({
-      ...n,
-      meta: getNotificationCategoryMeta(n),
-    }));
-  }, [notifications]);
-
-  const filteredNotifications = useMemo(() => {
-    if (activeCategory === "deadlines") {
-      return enrichedNotifications.filter((n) => n.meta.isDeadline);
+  const handleItemClick = async (notif: NotificationItem) => {
+    if (!notif.is_read) {
+      try {
+        await apiPost(`/notifications/${notif.id}/read`, {});
+        setNotifications((prev) =>
+          prev.map((n) => (n.id === notif.id ? { ...n, is_read: true } : n))
+        );
+        setUnreadCount((c) => Math.max(0, c - 1));
+      } catch {
+        /* best effort */
+      }
     }
-    if (activeCategory === "escalations") {
-      return enrichedNotifications.filter((n) => n.meta.isEscalation);
+    setOpen(false);
+    if (notif.link) {
+      navigate(notif.link);
     }
-    if (activeCategory === "team") {
-      return enrichedNotifications.filter((n) => n.meta.isTeam);
-    }
-    return enrichedNotifications;
-  }, [enrichedNotifications, activeCategory]);
-
-  const categoryCounts = useMemo(() => {
-    let deadlines = 0;
-    let escalations = 0;
-    let team = 0;
-    for (const n of enrichedNotifications) {
-      if (n.meta.isDeadline) deadlines++;
-      if (n.meta.isEscalation) escalations++;
-      if (n.meta.isTeam) team++;
-    }
-    return {
-      all: enrichedNotifications.length,
-      deadlines,
-      escalations,
-      team,
-    };
-  }, [enrichedNotifications]);
+  };
 
   return (
     <div style={{ position: "relative" }} ref={wrapperRef}>
       <button
         className="icon-btn"
         title="Notifications"
-        style={{ position: "relative", cursor: "pointer" }}
+        style={{ position: "relative", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
         onClick={(e) => {
           e.stopPropagation();
           setOpen((v) => !v);
@@ -319,339 +183,231 @@ function NotificationBell() {
         {unreadCount > 0 && (
           <span
             style={{
-              display: "inline-block",
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
               position: "absolute",
-              top: "-2px",
-              right: "-2px",
-              background: "#dc2626",
+              top: "-3px",
+              right: "-3px",
+              background: "#ef4444",
               color: "#ffffff",
-              fontSize: "10px",
+              fontSize: "10.5px",
               fontWeight: 800,
               padding: "1px 5px",
               borderRadius: "10px",
-              minWidth: "16px",
-              textAlign: "center",
+              minWidth: "18px",
+              height: "18px",
+              boxShadow: "0 2px 5px rgba(239,68,68,0.4)",
               border: "2px solid #ffffff",
+              lineHeight: 1,
             }}
           >
             {unreadCount > 99 ? "99+" : unreadCount}
           </span>
         )}
       </button>
-      <div
-        style={{
-          display: open ? "block" : "none",
-          position: "absolute",
-          right: 0,
-          top: "42px",
-          width: "420px",
-          maxWidth: "calc(100vw - 24px)",
-          background: "#ffffff",
-          border: "1px solid #cbd5e1",
-          borderRadius: "12px",
-          boxShadow: "0 16px 36px rgba(15, 23, 42, 0.16)",
-          zIndex: 99999,
-          overflow: "hidden",
-        }}
-      >
-        {/* Header */}
+
+      {open && (
         <div
           style={{
-            padding: "12px 16px",
-            borderBottom: "1px solid #e2e8f0",
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            background: "#f8fafc",
+            position: "absolute",
+            right: 0,
+            top: "42px",
+            width: "380px",
+            background: "#ffffff",
+            border: "1px solid #cbd5e1",
+            borderRadius: "12px",
+            boxShadow: "0 14px 34px rgba(0,0,0,0.18)",
+            zIndex: 99999,
+            overflow: "hidden",
+            animation: "fadeIn 0.15s ease",
           }}
         >
-          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-            <span style={{ color: "#0f172a", fontWeight: 700, fontSize: "14px" }}>Notifications</span>
-            {unreadCount > 0 && (
-              <span
-                style={{
-                  fontSize: "11px",
-                  background: "#fee2e2",
-                  color: "#dc2626",
-                  padding: "1px 7px",
-                  fontWeight: 700,
-                  borderRadius: "10px",
-                }}
-              >
-                {unreadCount} unread
-              </span>
-            )}
-          </div>
-          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-            <button
-              type="button"
-              onClick={handleSyncDeadlines}
-              disabled={isChecking}
-              title="Check deadlines for tasks and escalations assigned to you"
-              style={{
-                background: "transparent",
-                border: "none",
-                color: isChecking ? "#94a3b8" : "#2563eb",
-                fontSize: "11px",
-                fontWeight: 600,
-                cursor: isChecking ? "wait" : "pointer",
-                padding: "3px 6px",
-                borderRadius: "4px",
-                display: "flex",
-                alignItems: "center",
-                gap: "4px",
-              }}
-            >
-              <span style={{ display: "inline-block", transform: isChecking ? "rotate(180deg)" : "none", transition: "transform 0.5s ease" }}>
-                🔄
-              </span>
-              {isChecking ? "Checking..." : "Sync"}
-            </button>
+          {/* Header */}
+          <div
+            style={{
+              padding: "12px 16px",
+              borderBottom: "1px solid #e2e8f0",
+              fontWeight: 700,
+              fontSize: "13.5px",
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              background: "#f8fafc",
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              <span style={{ color: "#1e293b" }}>Notifications</span>
+              {unreadCount > 0 && (
+                <span
+                  style={{
+                    fontSize: "11px",
+                    background: "#fee2e2",
+                    color: "#dc2626",
+                    padding: "2px 8px",
+                    fontWeight: 700,
+                    borderRadius: "10px",
+                  }}
+                >
+                  {unreadCount} unread
+                </span>
+              )}
+            </div>
             {unreadCount > 0 && (
               <button
                 type="button"
                 onClick={handleMarkAllRead}
                 style={{
-                  background: "transparent",
+                  background: "none",
                   border: "none",
-                  color: "#64748b",
-                  fontSize: "11px",
+                  color: "#2563eb",
+                  fontSize: "12px",
                   fontWeight: 600,
                   cursor: "pointer",
-                  padding: "3px 6px",
+                  padding: "2px 6px",
                 }}
               >
                 Mark all read
               </button>
             )}
           </div>
-        </div>
 
-        {/* Category Tabs */}
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: "4px",
-            padding: "8px 12px",
-            background: "#ffffff",
-            borderBottom: "1px solid #f1f5f9",
-            overflowX: "auto",
-          }}
-        >
-          <button
-            type="button"
-            onClick={() => setActiveCategory("all")}
-            style={{
-              padding: "4px 10px",
-              borderRadius: "6px",
-              border: activeCategory === "all" ? "1px solid #2563eb" : "1px solid #e2e8f0",
-              background: activeCategory === "all" ? "#eff6ff" : "#ffffff",
-              color: activeCategory === "all" ? "#1d4ed8" : "#64748b",
-              fontSize: "11.5px",
-              fontWeight: 600,
-              cursor: "pointer",
-              whiteSpace: "nowrap",
-            }}
-          >
-            All ({categoryCounts.all})
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveCategory("deadlines")}
-            style={{
-              padding: "4px 10px",
-              borderRadius: "6px",
-              border: activeCategory === "deadlines" ? "1px solid #d97706" : "1px solid #e2e8f0",
-              background: activeCategory === "deadlines" ? "#fffbeb" : "#ffffff",
-              color: activeCategory === "deadlines" ? "#b45309" : "#64748b",
-              fontSize: "11.5px",
-              fontWeight: 600,
-              cursor: "pointer",
-              whiteSpace: "nowrap",
-            }}
-          >
-            ⏰ Deadlines ({categoryCounts.deadlines})
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveCategory("escalations")}
-            style={{
-              padding: "4px 10px",
-              borderRadius: "6px",
-              border: activeCategory === "escalations" ? "1px solid #e11d48" : "1px solid #e2e8f0",
-              background: activeCategory === "escalations" ? "#fff1f2" : "#ffffff",
-              color: activeCategory === "escalations" ? "#be123c" : "#64748b",
-              fontSize: "11.5px",
-              fontWeight: 600,
-              cursor: "pointer",
-              whiteSpace: "nowrap",
-            }}
-          >
-            ⚡ Escalations ({categoryCounts.escalations})
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveCategory("team")}
-            style={{
-              padding: "4px 10px",
-              borderRadius: "6px",
-              border: activeCategory === "team" ? "1px solid #7c3aed" : "1px solid #e2e8f0",
-              background: activeCategory === "team" ? "#f5f3ff" : "#ffffff",
-              color: activeCategory === "team" ? "#6d28d9" : "#64748b",
-              fontSize: "11.5px",
-              fontWeight: 600,
-              cursor: "pointer",
-              whiteSpace: "nowrap",
-            }}
-          >
-            👤 Team ({categoryCounts.team})
-          </button>
-        </div>
-
-        {/* Notifications List */}
-        <div style={{ maxHeight: "380px", overflowY: "auto" }}>
-          {filteredNotifications.length === 0 ? (
-            <div style={{ padding: "36px 20px", textAlign: "center", color: "#64748b", fontSize: "13px" }}>
-              <div style={{ fontSize: "24px", marginBottom: "8px" }}>
-                {activeCategory === "deadlines" ? "⏰" : activeCategory === "escalations" ? "⚡" : activeCategory === "team" ? "👥" : "🔔"}
+          {/* List */}
+          <div style={{ maxHeight: "360px", overflowY: "auto" }}>
+            {loading && notifications.length === 0 ? (
+              <div style={{ padding: "28px", textAlign: "center", color: "#64748b", fontSize: "13px" }}>
+                Loading alerts...
               </div>
-              <div style={{ fontWeight: 600, color: "#334155" }}>
-                {activeCategory === "deadlines"
-                  ? "No task deadlines"
-                  : activeCategory === "escalations"
-                    ? "No escalation notifications"
-                    : activeCategory === "team"
-                      ? "No team activity"
-                      : "No notifications yet"}
+            ) : notifications.length === 0 ? (
+              <div style={{ padding: "36px 20px", textAlign: "center", color: "#64748b", fontSize: "13px" }}>
+                <div style={{ fontSize: "28px", marginBottom: "8px" }}>🎉</div>
+                <div style={{ fontWeight: 600, color: "#1e293b", marginBottom: "4px" }}>You're all caught up!</div>
+                <div style={{ fontSize: "12px", color: "#94a3b8" }}>No unread notifications at the moment.</div>
               </div>
-              <div style={{ fontSize: "12px", color: "#94a3b8", marginTop: "4px" }}>
-                {activeCategory === "deadlines"
-                  ? "Approaching or overdue tasks assigned to you will appear here."
-                  : activeCategory === "escalations"
-                    ? "Escalations assigned to you will trigger alerts here."
-                    : "You are all caught up!"}
-              </div>
-            </div>
-          ) : (
-            filteredNotifications.map((n) => (
-              <div
-                key={n.id}
-                style={{
-                  padding: "11px 14px",
-                  borderBottom: "1px solid #f1f5f9",
-                  cursor: "pointer",
-                  background: n.is_read ? "#ffffff" : "#f8faff",
-                  transition: "background 0.15s ease",
-                  display: "flex",
-                  gap: "10px",
-                  alignItems: "flex-start",
-                }}
-                onMouseOver={(e) => {
-                  e.currentTarget.style.background = "#f1f5f9";
-                }}
-                onMouseOut={(e) => {
-                  e.currentTarget.style.background = n.is_read ? "#ffffff" : "#f8faff";
-                }}
-                onClick={() => handleNotificationClick(n)}
-              >
-                {/* Unread indicator */}
-                <div style={{ paddingTop: "4px", width: "8px", flexShrink: 0 }}>
-                  {!n.is_read ? (
-                    <span
-                      style={{
-                        width: "8px",
-                        height: "8px",
-                        borderRadius: "50%",
-                        background: "#2563eb",
-                        display: "inline-block",
-                      }}
-                    />
-                  ) : (
-                    <span
-                      style={{
-                        width: "6px",
-                        height: "6px",
-                        borderRadius: "50%",
-                        background: "#cbd5e1",
-                        display: "inline-block",
-                      }}
-                    />
-                  )}
-                </div>
-
-                {/* Content */}
-                <div style={{ flex: 1, minWidth: 0 }}>
+            ) : (
+              notifications.map((n) => {
+                const icon = getNotificationIcon(n.type, n.module);
+                return (
                   <div
+                    key={n.id}
+                    onClick={() => void handleItemClick(n)}
                     style={{
+                      padding: "12px 16px",
+                      borderBottom: "1px solid #f1f5f9",
+                      cursor: "pointer",
+                      background: n.is_read ? "#ffffff" : "#f0f7ff",
+                      transition: "background 0.15s ease",
                       display: "flex",
-                      alignItems: "center",
-                      justifyContent: "space-between",
-                      gap: "8px",
-                      marginBottom: "3px",
+                      gap: "12px",
+                      alignItems: "flex-start",
+                      position: "relative",
+                    }}
+                    onMouseOver={(e) => {
+                      e.currentTarget.style.background = n.is_read ? "#f8fafc" : "#e0f2fe";
+                    }}
+                    onMouseOut={(e) => {
+                      e.currentTarget.style.background = n.is_read ? "#ffffff" : "#f0f7ff";
                     }}
                   >
-                    <div style={{ display: "flex", alignItems: "center", gap: "6px", overflow: "hidden" }}>
-                      <span
-                        style={{
-                          fontSize: "10px",
-                          fontWeight: 700,
-                          padding: "1.5px 5px",
-                          borderRadius: "4px",
-                          background: n.meta.badgeBg,
-                          color: n.meta.badgeColor,
-                          border: `1px solid ${n.meta.badgeBorder}`,
-                          whiteSpace: "nowrap",
-                        }}
-                      >
-                        {n.meta.badgeLabel}
-                      </span>
-                      <span
-                        style={{
-                          fontSize: "12.5px",
-                          fontWeight: n.is_read ? 600 : 700,
-                          color: n.is_read ? "#334155" : "#0f172a",
-                          overflow: "hidden",
-                          textOverflow: "ellipsis",
-                          whiteSpace: "nowrap",
-                        }}
-                        title={n.title}
-                      >
-                        {n.title}
-                      </span>
-                    </div>
-                    <span
+                    <div
                       style={{
-                        fontSize: "10.5px",
-                        color: "#94a3b8",
-                        fontWeight: 400,
-                        whiteSpace: "nowrap",
+                        width: "36px",
+                        height: "36px",
+                        borderRadius: "8px",
+                        background: n.is_read ? "#f1f5f9" : "#eff6ff",
+                        border: n.is_read ? "1px solid #e2e8f0" : "1px solid #bfdbfe",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        fontSize: "17px",
                         flexShrink: 0,
                       }}
                     >
-                      {formatRelativeTime(n.created_at)}
-                    </span>
+                      {icon}
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div
+                        style={{
+                          fontSize: "13px",
+                          fontWeight: n.is_read ? 600 : 700,
+                          color: "#0f172a",
+                          marginBottom: "2px",
+                          display: "flex",
+                          justifyContent: "space-between",
+                          alignItems: "baseline",
+                        }}
+                      >
+                        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          {cleanNotificationTitle(n.title)}
+                        </span>
+                        <span style={{ fontSize: "11px", color: "#94a3b8", fontWeight: 400, flexShrink: 0, marginLeft: "8px" }}>
+                          {formatRelativeTime(n.created_at)}
+                        </span>
+                      </div>
+                      <div
+                        style={{
+                          fontSize: "12px",
+                          color: "#475569",
+                          lineHeight: "1.4",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          display: "-webkit-box",
+                          WebkitLineClamp: 2,
+                          WebkitBoxOrient: "vertical",
+                        }}
+                      >
+                        {n.message}
+                      </div>
+                    </div>
+                    {!n.is_read && (
+                      <span
+                        style={{
+                          width: "8px",
+                          height: "8px",
+                          borderRadius: "50%",
+                          background: "#2563eb",
+                          flexShrink: 0,
+                          marginTop: "6px",
+                        }}
+                        title="Unread"
+                      />
+                    )}
                   </div>
-                  <div
-                    style={{
-                      fontSize: "12px",
-                      color: "#475569",
-                      lineHeight: "1.4",
-                      wordBreak: "break-word",
-                    }}
-                  >
-                    {n.message}
-                  </div>
-                </div>
-              </div>
-            ))
-          )}
+                );
+              })
+            )}
+          </div>
+
+          {/* Footer */}
+          <div
+            style={{
+              padding: "10px 16px",
+              background: "#f8fafc",
+              borderTop: "1px solid #e2e8f0",
+              textAlign: "center",
+            }}
+          >
+            <Link
+              to="/notification-settings"
+              onClick={() => setOpen(false)}
+              style={{
+                fontSize: "12px",
+                color: "#2563eb",
+                fontWeight: 600,
+                textDecoration: "none",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "4px",
+              }}
+            >
+              ⚙️ Configure Notification Rules & Alerts
+            </Link>
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }
-
 
 /* ------------------------------------------------------------------ */
 /* Forced password change                                             */
@@ -862,14 +618,12 @@ function ForcePasswordChangeModal({ onDone }: { onDone: () => void }) {
 
 function Sidebar({
   activeKey,
-  brandName,
-  brandLogo,
+  brandName: _brandName,
   collapsed,
   onToggleSidebar,
 }: {
   activeKey: string;
   brandName: string;
-  brandLogo?: string | null;
   collapsed: boolean;
   onToggleSidebar: () => void;
 }) {
@@ -994,17 +748,8 @@ function Sidebar({
         }}
       >
         {!collapsed && (
-          <Link to="/dashboard" style={{ display: "inline-flex", alignItems: "center", textDecoration: "none", cursor: "pointer", maxHeight: "44px" }}>
-            <img
-              src={resolveImageUrl(brandLogo) || "/logo.png"}
-              alt={`${brandName || "ERP"} Logo`}
-              onError={(e) => {
-                if (e.currentTarget.src !== window.location.origin + "/logo.png") {
-                  e.currentTarget.src = "/logo.png";
-                }
-              }}
-              style={{ maxHeight: "38px", maxWidth: "160px", width: "auto", objectFit: "contain" }}
-            />
+          <Link to="/dashboard" style={{ display: "inline-flex", alignItems: "center", textDecoration: "none", cursor: "pointer" }}>
+            <img src="/logo.png" alt="IHM Logo" style={{ height: "38px", width: "auto", objectFit: "contain" }} />
           </Link>
         )}
         <button
@@ -1106,6 +851,15 @@ function Sidebar({
                                 background: isChildActive ? "#e0edff" : "transparent",
                                 transition: "all 0.12s ease",
                               }}
+                              onClick={() => {
+                                if (isChildActive) {
+                                  window.dispatchEvent(
+                                    new CustomEvent("erp:nav-active-click", {
+                                      detail: { key: child.key, path: child.path },
+                                    })
+                                  );
+                                }
+                              }}
                             >
                               <span>{child.label}</span>
                             </Link>
@@ -1118,17 +872,22 @@ function Sidebar({
               }
 
               const Icon = ICONS[item.icon];
-              const isItemActive =
-                item.key === activeKey ||
-                (item.key === "purchase-suppliers" && activeKey === "suppliers") ||
-                (item.key === "suppliers" && activeKey === "purchase-suppliers");
-
+              const isItemActive = item.key === activeKey;
               return (
                 <Link
                   key={item.key}
                   to={item.path || "#"}
                   className={`nav-item ${isItemActive ? "active" : ""}`}
                   title={collapsed ? item.label : undefined}
+                  onClick={() => {
+                    if (isItemActive) {
+                      window.dispatchEvent(
+                        new CustomEvent("erp:nav-active-click", {
+                          detail: { key: item.key, path: item.path },
+                        })
+                      );
+                    }
+                  }}
                 >
                   <Icon />
                   <span className="nav-label">{item.label}</span>
@@ -1193,7 +952,7 @@ function Topbar() {
     }
   }
 
-  function handleEditProfile() {
+  function handleProfile() {
     setProfileOpen(false);
     navigate("/profile");
   }
@@ -1379,10 +1138,10 @@ function Topbar() {
 
             <div style={{ width: "100%", height: "1px", background: "#f1f5f9", margin: "2px 0 6px 0" }} />
 
-            {/* Edit Profile */}
+            {/* Profile */}
             <button
               type="button"
-              onClick={handleEditProfile}
+              onClick={handleProfile}
               style={{
                 width: "100%",
                 padding: "9px 16px",
@@ -1402,10 +1161,10 @@ function Topbar() {
               onMouseLeave={(e) => (e.currentTarget.style.background = "none")}
             >
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: "#64748b" }}>
-                <path d="M12 20h9"></path>
-                <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
+                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+                <circle cx="12" cy="7" r="4" />
               </svg>
-              Edit Profile
+              Profile
             </button>
 
             {/* Sign Out */}
@@ -1460,7 +1219,6 @@ export function AppShell({ activeKey, children, pageClassName }: AppShellProps) 
   const location = useLocation();
   const navigate = useNavigate();
   const [brandName, setBrandName] = useState(() => getCachedBrandName());
-  const [brandLogo, setBrandLogo] = useState<string | null>(() => getCachedBrandLogo());
   const [passwordModalDismissed, setPasswordModalDismissed] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(
     () => localStorage.getItem("erp_sidebar_collapsed") === "true"
@@ -1477,10 +1235,13 @@ export function AppShell({ activeKey, children, pageClassName }: AppShellProps) 
   const loggedIn = Auth.isLoggedIn();
 
   useEffect(() => {
-    if (!loggedIn) return;
+    if (!loggedIn || !Auth.shouldSyncProfile()) return;
     apiGet<Profile>("/auth/profile")
       .then((res) => {
-        if (res && res.data) Auth.updateProfile(res.data);
+        if (res && res.data) {
+          Auth.updateProfile(res.data);
+          Auth.markProfileSynced();
+        }
       })
       .catch(() => {
         /* profile refresh fallback */
@@ -1488,16 +1249,12 @@ export function AppShell({ activeKey, children, pageClassName }: AppShellProps) 
   }, [loggedIn]);
 
   useEffect(() => subscribeBrandName(setBrandName), []);
-  useEffect(() => subscribeBrandLogo(setBrandLogo), []);
 
   useEffect(() => {
     let cancelled = false;
     if (!loggedIn) return;
-    resolveBrandInfo().then((info) => {
-      if (!cancelled) {
-        setBrandName(info.name);
-        setBrandLogo(info.logoUrl);
-      }
+    resolveBrandName().then((name) => {
+      if (!cancelled) setBrandName(name);
     });
     return () => {
       cancelled = true;
@@ -1505,8 +1262,9 @@ export function AppShell({ activeKey, children, pageClassName }: AppShellProps) 
   }, [loggedIn]);
 
   useEffect(() => {
-    const titlePrefix = PAGE_TITLES[activeKey] || "ERP";
-    document.title = `${titlePrefix} — ${brandName || DEFAULT_BRAND_NAME}`;
+    const pageLabel = NAV_ITEMS_BY_KEY[activeKey]?.label || PAGE_TITLES[activeKey] || "Dashboard";
+    const companyName = (brandName || DEFAULT_BRAND_NAME).trim();
+    document.title = `${pageLabel} - ${companyName}`;
   }, [activeKey, brandName]);
 
   const handlePasswordDone = useCallback(() => {
@@ -1524,66 +1282,64 @@ export function AppShell({ activeKey, children, pageClassName }: AppShellProps) 
     return cleanup;
   }, [loggedIn, navigate]);
 
+  // Whether an automatic-login mechanism might still resolve before we
+  // should give up and bounce to /login. This covers two cases:
+  //  1. A legacy `sso_handover` token is present in the URL right now.
+  //  2. `processIncomingSsoHandover()` hasn't reported its result yet
+  //     for THIS mount -- e.g. it found a still-valid ecosystem cookie
+  //     and is in the middle of exchanging it. Gating on "has it
+  //     settled" rather than only "is the query param present right
+  //     now" is what closes the original race: previously, a mount
+  //     with no `sso_handover` param in the URL (or one already
+  //     stripped by an earlier effect) fell straight through to the
+  //     /login redirect even while an auto-login was genuinely still
+  //     in flight, logging out users -- including Super Admins -- who
+  //     had a perfectly valid session about to be established.
+  const [ssoCheckPending, setSsoCheckPending] = useState(
+    () => !loggedIn && typeof window !== "undefined" && new URLSearchParams(window.location.search).has("sso_handover")
+  );
+
   useEffect(() => {
-    if (!loggedIn) {
-      processIncomingSsoHandover().then((result) => {
-        // Only a genuine fresh auto-login (a real state change) warrants a
-        // reload. "already-logged-in" means Auth was already logged in by
-        // the time this ran (e.g. AppShell remounting on a route change
-        // right after a previous reload) -- reloading again here would
-        // just repeat the same effect on the next mount, forever.
-        if (result === "logged-in") {
-          window.location.reload();
-        }
-      });
-    } else {
+    if (loggedIn) {
       const currentSid = Auth.getSessionId();
       if (isExplicitlyLoggedOut(currentSid || undefined)) {
         Auth.clear();
         navigate("/login", { replace: true });
         return;
       }
-      const cookie = getEcosystemCookie();
-
-      if (cookie?.session_id) {
-        const allowed = (cookie.allowed_erps || []).map((k) => String(k).toLowerCase());
-        const role = cookie.role?.toLowerCase();
-        const hasErpAccess = role === "super_admin" || allowed.includes("*") || allowed.includes("inhyma");
-        if (!hasErpAccess) {
-          verifyCentralEcosystemSession(cookie.session_id)
-            .then((res) => {
-              if (res.active && res.session) {
-                const liveAllowed = (res.session.allowed_erps || []).map((k) => String(k).toLowerCase());
-                if (liveAllowed.includes("*") || liveAllowed.includes("inhyma")) {
-                  setEcosystemCookie({
-                    ...cookie,
-                    allowed_erps: res.session.allowed_erps,
-                  });
-                  return;
-                }
-              }
-              Auth.clear();
-              const route = routeForCentralSession("inhyma", res.session || cookie);
-              if (route.kind === "redirect" && typeof window !== "undefined") {
-                window.location.replace(route.url);
-              }
-            })
-            .catch(() => {
-              // Maintain local session if central re-verification network is unreachable
-            });
-        }
-      }
+      setSsoCheckPending(false);
+      // Where this person may be is ERP_Main's live decision (grants / revokes made after sign-in apply here): one ERP -> that
+      // ERP only, no ERP -> the dashboard, several -> this ERP if it is one of them. Fail-open and throttled.
+      void enforceCentralLanding("inhyma");
+      return;
     }
+    let cancelled = false;
+    setSsoCheckPending(true);
+    processIncomingSsoHandover().then((result) => {
+      if (cancelled) return;
+      // Only a genuine fresh auto-login (a real state change) warrants a
+      // reload. "already-logged-in" means Auth was already logged in by
+      // the time this ran (e.g. AppShell remounting on a route change
+      // right after a previous reload) -- reloading again here would
+      // just repeat the same effect on the next mount, forever.
+      if (result === "logged-in") {
+        window.location.reload();
+        return; // leave ssoCheckPending true through the reload -- no flash to /login in the interim
+      }
+      setSsoCheckPending(false);
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [loggedIn]);
 
-  const hasSsoHandover = typeof window !== "undefined" && new URLSearchParams(window.location.search).has("sso_handover");
   if (!loggedIn) {
-    if (hasSsoHandover) {
+    if (ssoCheckPending) {
       return (
         <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "#f8fafc" }}>
           <div style={{ textAlign: "center" }}>
             <div style={{ width: 36, height: 36, margin: "0 auto 16px", border: "3px solid #e2e8f0", borderTopColor: "#0284c7", borderRadius: "50%", animation: "spin 0.8s linear infinite" }} />
-            <div style={{ fontSize: 14, color: "#64748b", fontWeight: 500 }}>Authorizing Super Admin Single Sign-On...</div>
+            <div style={{ fontSize: 14, color: "#64748b", fontWeight: 500 }}>Checking your session…</div>
           </div>
         </div>
       );
@@ -1610,7 +1366,7 @@ export function AppShell({ activeKey, children, pageClassName }: AppShellProps) 
     <div
       className={`app-shell ${sidebarCollapsed ? "sidebar-collapsed" : ""} ${pageClassName || ""}`.trim()}
     >
-      <Sidebar activeKey={activeKey} brandName={brandName} brandLogo={brandLogo} collapsed={sidebarCollapsed} onToggleSidebar={toggleSidebar} />
+      <Sidebar activeKey={activeKey} brandName={brandName} collapsed={sidebarCollapsed} onToggleSidebar={toggleSidebar} />
       <div className="main-column">
         <Topbar />
         {children}

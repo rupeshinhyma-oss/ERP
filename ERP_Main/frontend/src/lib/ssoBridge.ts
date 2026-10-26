@@ -38,6 +38,36 @@ const isLocalhost = (hostname: string) =>
   hostname === "0.0.0.0" ||
   hostname.endsWith(".local");
 
+/** What ERP_Main decided about where a person belongs (see backend global_auth/landing.py). */
+export interface LandingErp {
+  key: string;
+  name: string;
+  url?: string | null;
+}
+export interface Landing {
+  mode: "admin" | "dashboard" | "single" | "multi";
+  target: LandingErp | null;
+  erps: LandingErp[];
+  control_plane_url?: string | null;
+}
+
+/**
+ * ERP_Main's own LIVE decision for the signed-in session (null when it cannot be had: local standalone session,
+ * network trouble, older server). Also refreshes the shared cookie's ERP list, which the ERP switcher reads.
+ */
+export async function fetchLanding(): Promise<Landing | null> {
+  const sid = Auth.getSessionId() || getEcosystemCookie()?.session_id;
+  if (!sid || sid.startsWith("ihm-sess-") || sid.startsWith("loc-")) return null;
+  const live = await verifyCentralEcosystemSession(sid);
+  const session = live.session as unknown as { allowed_erps?: string[]; landing?: Landing | null } | undefined;
+  if (!session) return null;
+  const cookie = getEcosystemCookie();
+  if (cookie && Array.isArray(session.allowed_erps)) {
+    setEcosystemCookie({ ...cookie, allowed_erps: session.allowed_erps } as EcosystemSessionData);
+  }
+  return session.landing ?? null;
+}
+
 export interface EcosystemErpEntry {
   key: string;
   id: string;

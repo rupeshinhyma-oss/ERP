@@ -518,9 +518,9 @@ export function UsersPage() {
     if (eligibleUsers.length === 0) {
       alert(
         "None of the selected accounts can be deactivated.\n\n" +
-          (isSelfSelected ? "• You cannot deactivate your own account.\n" : "") +
-          (hasSuperAdmin ? "• Super Administrator accounts cannot be deactivated.\n" : "") +
-          "• Accounts already inactive cannot be deactivated again."
+        (isSelfSelected ? "• You cannot deactivate your own account.\n" : "") +
+        (hasSuperAdmin ? "• Super Administrator accounts cannot be deactivated.\n" : "") +
+        "• Accounts already inactive cannot be deactivated again."
       );
       return;
     }
@@ -680,7 +680,7 @@ export function UsersPage() {
           setEditUserRoles(res.data.roles);
         }
       })
-      .catch(() => {});
+      .catch(() => { });
   }
 
   async function handleDepartmentChange(roleId: string) {
@@ -829,7 +829,7 @@ export function UsersPage() {
           );
           apiGet<PositionAssignment[]>(`/positions/holders-for-user/${editForm.id}`)
             .then((r) => setViewPositions(r.data || []))
-            .catch(() => {});
+            .catch(() => { });
         }
       } else {
         reload();
@@ -1006,7 +1006,7 @@ export function UsersPage() {
 
   const canManage = hasPermission("user.action") || isSuperAdmin;
   const controlPlane = getEcosystemErps().find((e) => e.key === "control-plane");
-  const controlPlaneHost = controlPlane?.hostUrl || "http://localhost:5170/dashboard";
+  const controlPlaneHost = controlPlane?.hostUrl || ""; // configured / from the ERP registry -- never a guessed address
   const centralUsersUrl = createSsoHandoverUrl(controlPlaneHost, "/access/users");
 
   return (

@@ -33,6 +33,7 @@ from app.erp_registry.models import ErpInstance, ErpStatus
 from app.global_audit.models import AuditActorType, AuditEventType
 from app.global_audit.repository import GlobalAuditRepository
 from app.global_audit.service import GlobalAuditService
+from app.global_auth.landing import attach_landing
 from app.global_auth.models import GlobalSession, GlobalUserCredential
 from app.global_auth.security import create_global_access_token, hash_password, verify_password
 from app.global_auth.session_ops import ensure_admin_mirror_user, parse_session_id
@@ -349,7 +350,7 @@ async def establish_ecosystem_session(
         live_name = (live.get("display_name") or "").strip().lower()
         if email_clean and live_email != email_clean and live_name not in search_keys:
             raise _unauthorized()
-        return build_success_response(_public(live), request_id=_request_id(request))
+        return build_success_response(await attach_landing(db, _public(live)), request_id=_request_id(request))
 
     # --- B. Password login.
     is_super_admin = False
@@ -475,7 +476,7 @@ async def establish_ecosystem_session(
     except Exception:
         pass
 
-    return build_success_response(session_data, request_id=_request_id(request))
+    return build_success_response(await attach_landing(db, session_data), request_id=_request_id(request))
 
 
 @router.get("/{session_id}", summary="Validate ecosystem session status")
@@ -501,11 +502,11 @@ async def get_ecosystem_session(
     try:
         live = await _resolve_live_session(db, session_id, now)
         if live is not None:
-            return build_success_response(_public(live), request_id=rid)
+            return build_success_response(await attach_landing(db, _public(live)), request_id=rid)
     except Exception as exc:
         logger.warning("Database unavailable during session verification (%s)", exc)
         if cached is not None and not cached.get("revoked_at") and not _cached_session_expired(cached, now):
-            return build_success_response(_public(cached), request_id=rid)
+            return build_success_response(await attach_landing(db, _public(cached)), request_id=rid)
         return build_success_response(
             {"active": False, "session_id": session_id, "notFound": True, "revoked": False, "transient_error": True},
             request_id=rid,

@@ -26,6 +26,16 @@ from app.erp_registry.repository import ErpInstanceRepository, ErpModuleReposito
 from app.erp_registry.schemas import ErpInstanceCreate, ErpInstanceUpdate, ErpModuleCreate
 
 
+def _landing_registry_changed() -> None:
+    """The registry drives every person's landing decision: drop the cached copy so a change applies at once."""
+    try:
+        from app.global_auth.landing import invalidate_landing_registry_cache
+
+        invalidate_landing_registry_cache()
+    except Exception:  # noqa: BLE001 -- the cache simply expires on its own
+        pass
+
+
 class ErpRegistryService:
     """Orchestrates ERP instance registration, lookup, and lifecycle."""
 
@@ -56,7 +66,9 @@ class ErpRegistryService:
             environment=payload.environment,
             version=payload.version,
         )
-        return await self.instance_repository.create(erp_instance)
+        created = await self.instance_repository.create(erp_instance)
+        _landing_registry_changed()
+        return created
 
     async def get(self, erp_id: uuid.UUID) -> ErpInstance:
         """Fetch a single ERP instance by internal id, or raise 404."""
@@ -92,6 +104,7 @@ class ErpRegistryService:
         for field, value in updates.items():
             setattr(erp_instance, field, value)
         await self.instance_repository.create(erp_instance)  # flush + refresh
+        _landing_registry_changed()
         return erp_instance
 
     async def change_status(self, erp_id: uuid.UUID, new_status: ErpStatus) -> ErpInstance:
@@ -99,6 +112,7 @@ class ErpRegistryService:
         erp_instance = await self.get(erp_id)
         erp_instance.status = new_status
         await self.instance_repository.create(erp_instance)  # flush + refresh
+        _landing_registry_changed()
         return erp_instance
 
     async def decommission(self, erp_id: uuid.UUID) -> ErpInstance:

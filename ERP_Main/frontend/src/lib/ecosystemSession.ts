@@ -291,10 +291,14 @@ export async function verifyCentralEcosystemSession(sessionId: string): Promise<
     return { active: true, revoked: false };
   }
 
+  // A slow control plane must never freeze sign-in: give up after 6 s (fail-open, like any other network failure).
+  const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
+  const timer = controller ? setTimeout(() => controller.abort(), 6000) : null;
   try {
     const res = await fetch(`${CENTRAL_AUTH_API}/${sessionId}`, {
       method: "GET",
       headers: { "Content-Type": "application/json" },
+      signal: controller?.signal,
     });
 
     if (!res.ok) {
@@ -312,6 +316,8 @@ export async function verifyCentralEcosystemSession(sessionId: string): Promise<
   } catch {
     // Central auth API offline / network failure -> maintain current session
     return { active: true, revoked: false };
+  } finally {
+    if (timer) clearTimeout(timer);
   }
 }
 

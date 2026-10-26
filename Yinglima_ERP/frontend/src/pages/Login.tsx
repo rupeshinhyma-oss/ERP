@@ -7,7 +7,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link, Navigate, useNavigate } from "react-router-dom";
 import { apiGet, apiPost } from "@/lib/api";
 import { Auth } from "@/lib/auth";
-import { createSsoHandoverUrlFromSession, processIncomingSsoHandover, routeForCentralSession } from "@/lib/ssoBridge";
+import { controlPlaneUrl, createSsoHandoverUrlFromSession, processIncomingSsoHandover, routeForCentralSession } from "@/lib/ssoBridge";
 import { setBrandName } from "@/lib/brand";
 import { ErrorBanner } from "@/components/ui";
 import type { Profile, TokenPair } from "@/types";
@@ -191,8 +191,12 @@ export function LoginPage() {
           return;
         }
         if (route.kind === "none") {
-          const host = window.location.hostname || "localhost";
-          window.location.href = createSsoHandoverUrlFromSession(`http://${host}:5170/dashboard`, central);
+          // No ERP access (or no known address for where they belong): the ERP Dashboard -- never a guessed address.
+          const dashboard = controlPlaneUrl(central);
+          if (!dashboard) {
+            throw new Error("This account cannot open this ERP, and the ERP Dashboard address is not configured. Please contact your administrator.");
+          }
+          window.location.href = createSsoHandoverUrlFromSession(dashboard, central);
           return;
         }
         // This ERP is allowed.  If the local password did not match (for example a password change that has

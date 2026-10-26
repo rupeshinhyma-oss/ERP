@@ -331,6 +331,7 @@ async def sso_handover_login(
     import json
     import time
     from app.core.exceptions import ForbiddenException
+    from app.federation.erp_keys import describe_denial, erp_access_matches
 
     # 1. Decode token
     try:
@@ -361,8 +362,10 @@ async def sso_handover_login(
     }
     my_erp_keys = {k for k in my_erp_keys if k}
     allowed_erps = [str(k).lower() for k in (token_data.get("allowed_erps") or ["*"])]
-    if "*" not in allowed_erps and not my_erp_keys.intersection(allowed_erps):
-        raise ForbiddenException(f"User '{req_email}' is not authorized to access this ERP.")
+    if not erp_access_matches(my_erp_keys, allowed_erps):
+        raise ForbiddenException(
+            f"User '{req_email}' is not authorized to access this ERP. " + describe_denial(my_erp_keys, allowed_erps)
+        )
 
     # Central verification: the handover token is built in the browser, so it proves nothing by itself.
     # ERP_Main (the authority on who may use which ERP) must confirm the central session.
@@ -389,8 +392,10 @@ async def sso_handover_login(
             raise UnauthorizedException("Identity mismatch in SSO session.")
         central_allowed = [str(k).lower() for k in (central.get("allowed_erps") or [])]
         central_role = str(central.get("role") or "").lower()
-        if central_role != "super_admin" and "*" not in central_allowed and not my_erp_keys.intersection(central_allowed):
-            raise ForbiddenException(f"User '{req_email}' is not authorized to access this ERP.")
+        if central_role != "super_admin" and not erp_access_matches(my_erp_keys, central_allowed):
+            raise ForbiddenException(
+                f"User '{req_email}' is not authorized to access this ERP. " + describe_denial(my_erp_keys, central_allowed)
+            )
 
     # The central session this handover verified (None when central verification is switched off: then the tokens
     # get a local-only session id instead of an unverified central one).

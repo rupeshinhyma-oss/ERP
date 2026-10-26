@@ -22,7 +22,7 @@ import {
   NAV_SECTIONS,
   PAGE_TITLES,
 } from "@/lib/nav";
-import { processIncomingSsoHandover, resolveSingleErpDirectUrl } from "@/lib/ssoBridge";
+import { createSsoHandoverUrl, fetchLanding, processIncomingSsoHandover, resolveSingleErpDirectUrl } from "@/lib/ssoBridge";
 import { getEcosystemCookie, isExplicitlyLoggedOut, setEcosystemCookie } from "@/lib/ecosystemSession";
 
 
@@ -61,60 +61,91 @@ export function AppShell({
   const activeMemberships = (memberships || []).filter((m) => m.status === "ACTIVE");
 
 
+  // Where a person belongs is ERP_Main's decision (landing), fetched live: no ERP -> stay on this dashboard, exactly one ERP -> straight
+  // into that ERP, several ERPs (or a platform admin) -> stay here and switch from the dashboard. Addresses come from the ERP registry,
+  // never from hard-coded ports. If the decision cannot be had, the memberships are used as before; and the person is never left on
+  // a spinner: after 8 s the dashboard is shown whatever happened.
+  const [landingDecision, setLandingDecision] = useState<"pending" | "redirect" | "stay">("pending");
+  const activeMembershipCount = activeMemberships.length;
   useEffect(() => {
-    if (!sessionLoading && isLoggedIn && userType === "global_user" && activeMemberships.length === 1) {
-      if (typeof window !== "undefined") {
-        const urlParams = new URLSearchParams(window.location.search);
-        if (urlParams.has("sso_error")) {
+    if (sessionLoading || !isLoggedIn || userType !== "global_user") return;
+    if (typeof window !== "undefined" && new URLSearchParams(window.location.search).has("sso_error")) {
+      setLandingDecision("stay");
+      return;
+    }
+    let cancelled = false;
+    const safety = setTimeout(() => {
+      if (!cancelled) setLandingDecision((d) => (d === "pending" ? "stay" : d));
+    }, 8000);
+
+    const launch = (erpKey: string, url: string) => {
+      const redirectKey = `erp_redirect_${erpKey}`;
+      try {
+        // loop guard: never bounce to the same ERP twice within 10 s (it just sent the person back)
+        const last = Number(sessionStorage.getItem(redirectKey) || 0);
+        if (Date.now() - last < 10000) {
+          setLandingDecision("stay");
+          return;
+        }
+        sessionStorage.setItem(redirectKey, String(Date.now()));
+      } catch {
+        /* storage unavailable: go anyway */
+      }
+      const cookie = getEcosystemCookie();
+      if (cookie) setEcosystemCookie({ ...cookie, allowed_erps: [erpKey, "control-plane"] });
+      setLandingDecision("redirect");
+      window.location.assign(
+        createSsoHandoverUrl(url, undefined, {
+          email: userEmail,
+          user: userDisplayName,
+          role: userRole || undefined,
+          session_id: Auth.getSessionId() || undefined,
+          allowed_erps: [erpKey],
+        }),
+      );
+    };
+
+    (async () => {
+      const landing = await fetchLanding();
+      if (cancelled) return;
+      if (landing) {
+        if (landing.mode === "single" && landing.target?.url) {
+          launch(landing.target.key, landing.target.url);
+          return;
+        }
+        if (landing.mode !== "single") {
+          setLandingDecision("stay");
           return;
         }
       }
-
-      const singleMem = activeMemberships[0];
-      const rawKey = (
-        singleMem.erp_key ||
-        (singleMem as any).erp_display_name ||
-        singleMem.erp_name ||
-        ""
-      ).toLowerCase().trim();
-      const cleanKey = rawKey.includes("yinglima")
-        ? "yinglima"
-        : rawKey.includes("inhyma")
-        ? "inhyma"
-        : rawKey;
-
-      if (cleanKey) {
-        if (typeof sessionStorage !== "undefined") {
-          const redirectKey = `erp_redirect_${cleanKey}`;
-          const lastRedirect = Number(sessionStorage.getItem(redirectKey) || 0);
-          const now = Date.now();
-          if (now - lastRedirect < 10000) {
-            return;
-          }
-          sessionStorage.setItem(redirectKey, String(now));
-        }
-
-        const currentCookie = getEcosystemCookie();
-        if (currentCookie) {
-          setEcosystemCookie({
-            ...currentCookie,
-            allowed_erps: [cleanKey, "control-plane"],
-          });
-        }
-
-        const directUrl = resolveSingleErpDirectUrl(singleMem, {
-          email: userEmail,
-          display_name: userDisplayName,
-          role: userRole || undefined,
-          session_id: Auth.getSessionId() || undefined,
-          allowed_erps: [cleanKey],
-        });
+      // The decision is not available (older server, network): fall back to the memberships.
+      if (activeMembershipCount === 1) {
+        const singleMem = activeMemberships[0];
+        const rawKey = (singleMem.erp_key || (singleMem as any).erp_display_name || singleMem.erp_name || "").toLowerCase().trim();
+        const cleanKey = rawKey.includes("yinglima") ? "yinglima" : rawKey.includes("inhyma") ? "inhyma" : rawKey;
+        const directUrl = cleanKey
+          ? resolveSingleErpDirectUrl(singleMem, {
+            email: userEmail,
+            display_name: userDisplayName,
+            role: userRole || undefined,
+            session_id: Auth.getSessionId() || undefined,
+            allowed_erps: [cleanKey],
+          })
+          : null;
         if (directUrl) {
-          window.location.assign(directUrl);
+          launch(cleanKey, directUrl);
+          return;
         }
       }
-    }
-  }, [sessionLoading, isLoggedIn, userType, activeMemberships, userEmail, userDisplayName, userRole]);
+      setLandingDecision("stay");
+    })();
+
+    return () => {
+      cancelled = true;
+      clearTimeout(safety);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionLoading, isLoggedIn, userType, activeMembershipCount, userEmail, userDisplayName, userRole]);
 
   // Mobile drawer state
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
@@ -221,9 +252,56 @@ export function AppShell({
     return <Navigate to={`/login?redirect=${encodeURIComponent(location.pathname)}`} replace />;
   }
 
+  // The ERP refused the sign-in: say so (with the ERP's own reason) instead of spinning forever.
+  const ssoParams = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : new URLSearchParams();
+  const ssoError = ssoParams.get("sso_error");
+  if (isLoggedIn && !sessionLoading && userType === "global_user" && ssoError) {
+    const erpName = ssoParams.get("sso_erp") || "your ERP";
+    const reason = (ssoParams.get("sso_reason") || "").trim();
+    const retry = () => {
+      try {
+        Object.keys(sessionStorage)
+          .filter((k) => k.startsWith("erp_redirect_"))
+          .forEach((k) => sessionStorage.removeItem(k));
+      } catch {
+        /* storage unavailable: the retry still works */
+      }
+      window.location.assign("/dashboard");
+    };
+    return (
+      <div role="alert" style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "#f8fafc", padding: 24 }}>
+        <div style={{ maxWidth: 520, background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, padding: 28, boxShadow: "0 1px 3px rgba(15,23,42,.08)" }}>
+          <div style={{ fontSize: 18, fontWeight: 700, color: "#0f172a", marginBottom: 8 }}>We could not open {erpName}</div>
+          <div style={{ fontSize: 14, color: "#475569", marginBottom: 12 }}>
+            You are signed in, but {erpName} did not accept the sign-in.
+            {reason ? " Reason given by the ERP:" : " Please ask an administrator to check your access."}
+          </div>
+          {reason && (
+            <div style={{ fontSize: 13, color: "#b91c1c", background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 8, padding: "10px 12px", marginBottom: 16, wordBreak: "break-word" }}>
+              {reason}
+            </div>
+          )}
+          <div style={{ display: "flex", gap: 10 }}>
+            <button type="button" onClick={retry} style={{ padding: "8px 16px", borderRadius: 8, border: "none", background: "#0061f2", color: "#fff", fontWeight: 600, cursor: "pointer" }}>
+              Try again
+            </button>
+            <button type="button" onClick={handleLogout} style={{ padding: "8px 16px", borderRadius: 8, border: "1px solid #cbd5e1", background: "#fff", color: "#334155", fontWeight: 600, cursor: "pointer" }}>
+              Sign out
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   // Single ERP Access Enforcement:
   // If user only has access to 1 ERP, redirect directly to that ERP instead of showing ERP Dashboard
-  if (isLoggedIn && !sessionLoading && userType === "global_user" && activeMemberships.length === 1) {
+  if (
+    isLoggedIn &&
+    !sessionLoading &&
+    userType === "global_user" &&
+    (landingDecision === "redirect" || (landingDecision === "pending" && activeMembershipCount === 1))
+  ) {
     return (
       <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "#f8fafc" }}>
         <div style={{ textAlign: "center" }}>

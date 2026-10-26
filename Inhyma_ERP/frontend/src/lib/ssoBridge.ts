@@ -55,14 +55,14 @@ export const getEcosystemErps = (): EcosystemErpEntry[] => {
     (typeof window !== "undefined" && window.location.origin
       ? `${window.location.origin}/dashboard`
       : isLocal
-      ? `http://${host}:5174/dashboard`
-      : "#");
+        ? `http://${host}:5174/dashboard`
+        : "#");
   const inhymaApi =
     import.meta.env.VITE_API_ORIGIN
       ? `${import.meta.env.VITE_API_ORIGIN.replace(/\/+$/, "")}/api/v1`
       : isLocal
-      ? `http://${host}:8002/api/v1`
-      : undefined;
+        ? `http://${host}:8002/api/v1`
+        : undefined;
 
   return [
     { key: "control-plane", id: "control-plane", name: "ERP Dashboard", hostUrl: controlPlaneHost, apiUrl: controlPlaneApi, badge: "Control Plane" },
@@ -114,6 +114,19 @@ export function createSsoHandoverUrl(targetBaseUrl: string, targetPath?: string)
   }
 }
 
+/** What ERP_Main decided about where a person belongs (see ERP_Main global_auth/landing.py). */
+export interface LandingErp {
+  key: string;
+  name: string;
+  url?: string | null;
+}
+export interface Landing {
+  mode: "admin" | "dashboard" | "single" | "multi";
+  target: LandingErp | null;
+  erps: LandingErp[];
+  control_plane_url?: string | null;
+}
+
 /** The parts of a central (ERP_Main) session that routing needs. */
 export interface CentralSessionLike {
   session_id?: string;
@@ -121,6 +134,21 @@ export interface CentralSessionLike {
   display_name?: string;
   role?: string;
   allowed_erps?: string[];
+  landing?: Landing | null;
+}
+
+/** The ERP Dashboard's address: from ERP_Main's decision, else this app's configuration. Never a guessed port. */
+export function controlPlaneUrl(s?: CentralSessionLike | null): string {
+  return s?.landing?.control_plane_url || getEcosystemErps().find((e) => e.key === "control-plane")?.hostUrl || "";
+}
+
+/** An ERP's dashboard address: from ERP_Main's registry (via the decision), else this app's configuration. */
+export function erpUrlFor(key: string, s?: CentralSessionLike | null): string {
+  const k = key.toLowerCase();
+  const fromLanding = s?.landing?.erps?.find((e) => e.key.toLowerCase() === k)?.url || (s?.landing?.target?.key?.toLowerCase() === k ? s.landing.target.url : "");
+  const fromConfig = getEcosystemErps().find((e) => e.key.toLowerCase() === k)?.hostUrl;
+  const url = fromLanding || fromConfig || "";
+  return url === "#" ? "" : url;
 }
 
 /**
@@ -159,20 +187,85 @@ export type CentralRoute =
  *  - Two or more ERPs granted (not this one)      -> the ERP Dashboard, where the switcher lets them choose.
  *  - Nothing granted                              -> no access.
  */
-export function routeForCentralSession(thisErpKey: string, s: CentralSessionLike): CentralRoute {
-  const allowed = (s.allowed_erps || []).map((k) => String(k).toLowerCase());
-  if (allowed.includes("*") || allowed.includes(thisErpKey.toLowerCase())) return { kind: "stay" };
-  const erps = getEcosystemErps();
-  const real = allowed.filter((k) => k !== "control-plane");
-  const target =
-    real.length === 1
-      ? erps.find((e) => e.key === real[0])
-      : erps.find((e) => e.key === "control-plane");
-  if (!target || !target.hostUrl || target.hostUrl === "#") {
-    const host = typeof window !== "undefined" && window.location.hostname ? window.location.hostname : "localhost";
-    return { kind: "redirect", url: createSsoHandoverUrlFromSession(`http://${host}:5170/dashboard`, s) };
+export function routeForCentralSession(
+  thisErpKey: string,
+  s: CentralSessionLike,
+  dashboardQuery?: Record<string, string>,
+): CentralRoute {
+  const here = thisErpKey.toLowerCase();
+  /** Hand over to `url`; the extra query (an error to show) is only added when the destination is the dashboard. */
+  const go = (url: string, toDashboard: boolean): CentralRoute => {
+    if (!url) return { kind: "none" };
+    let target = url;
+    if (toDashboard && dashboardQuery) {
+      try {
+        const u = new URL(url, window.location.origin);
+        Object.entries(dashboardQuery).forEach(([k, v]) => u.searchParams.set(k, v));
+        target = u.toString();
+      } catch {
+        /* keep the plain address */
+      }
+    }
+    return { kind: "redirect", url: createSsoHandoverUrlFromSession(target, s) };
+  };
+
+  // 1. ERP_Main's own decision wins (it knows the live grants and the registry addresses).
+  const L = s.landing;
+  if (L && typeof L.mode === "string") {
+    if (L.mode === "admin") return { kind: "stay" };
+    const mine = (L.erps || []).some((e) => e.key.toLowerCase() === here);
+    if (L.mode === "multi") return mine ? { kind: "stay" } : go(controlPlaneUrl(s), true);
+    if (L.mode === "single") {
+      if (mine) return { kind: "stay" };
+      return go(L.target?.url || (L.target ? erpUrlFor(L.target.key, s) : ""), false);
+    }
+    return go(controlPlaneUrl(s), true); // "dashboard": no ERP access
   }
-  return { kind: "redirect", url: createSsoHandoverUrlFromSession(target.hostUrl, s) };
+
+  // 2. Older ERP_Main without a decision: same rules from the list of allowed ERPs.
+  const allowed = (s.allowed_erps || []).map((k) => String(k).toLowerCase());
+  if (allowed.includes("*") || allowed.includes(here)) return { kind: "stay" };
+  const real = allowed.filter((k) => k !== "control-plane");
+  if (real.length === 1) return go(erpUrlFor(real[0], s), false);
+  return go(controlPlaneUrl(s), true);
+}
+
+/**
+ * Re-checks, with ERP_Main, that this person may be in THIS ERP right now, and moves them to where they belong if not
+ * (grants and revokes made after sign-in take effect). Throttled to once per 30 s per session and fail-open: if ERP_Main
+ * cannot be reached nothing changes -- the ERP's own backend still refuses anyone not allowed.
+ */
+export async function enforceCentralLanding(thisErpKey: string): Promise<"ok" | "redirected" | "unverified"> {
+  const cookie = getEcosystemCookie();
+  const sid = cookie?.session_id;
+  if (!sid || sid.startsWith("ihm-sess-") || sid.startsWith("loc-")) return "unverified";
+  const stamp = `ihm_landing_ok_${sid}`;
+  try {
+    const last = Number(sessionStorage.getItem(stamp) || 0);
+    if (last && Date.now() - last < 30_000) return "ok";
+  } catch {
+    /* storage unavailable: just check */
+  }
+  const live = await verifyCentralEcosystemSession(sid);
+  if (!live.session) return "unverified";
+  const session = live.session as unknown as CentralSessionLike;
+  // the shared cookie's list feeds the ERP switcher: keep it equal to ERP_Main's live answer (grants / revokes since sign-in)
+  if (Array.isArray(session.allowed_erps) && JSON.stringify(session.allowed_erps) !== JSON.stringify(cookie?.allowed_erps)) {
+    setEcosystemCookie({ ...cookie, allowed_erps: session.allowed_erps } as EcosystemSessionData);
+  }
+  const route = routeForCentralSession(thisErpKey, { ...session, session_id: sid, email: session.email || cookie?.email });
+  if (route.kind === "redirect" && typeof window !== "undefined") {
+    if (Array.isArray(session.allowed_erps)) setEcosystemCookie({ ...cookie, allowed_erps: session.allowed_erps } as EcosystemSessionData);
+    Auth.clear();
+    window.location.replace(route.url);
+    return "redirected";
+  }
+  try {
+    sessionStorage.setItem(stamp, String(Date.now()));
+  } catch {
+    /* ignore */
+  }
+  return "ok";
 }
 
 /**
@@ -294,6 +387,29 @@ async function runIncomingSsoHandover(): Promise<HandoverResult> {
     allowedErps = cookieSession.allowed_erps || ["*"];
   }
 
+  // 1b. The cookie / ticket only CARRY the session id. What the person may use right now is asked of ERP_Main (it may have
+  //     changed since the cookie was written: a grant, a revoke, a suspended ERP). If ERP_Main cannot be reached the
+  //     cookie's list is used instead, so a short outage never locks anyone out.
+  let landing: Landing | null = null;
+  if (targetSessionId && !targetSessionId.startsWith("ihm-sess-") && !targetSessionId.startsWith("loc-")) {
+    const live = await verifyCentralEcosystemSession(targetSessionId);
+    if (live.revoked === true) {
+      clearEcosystemCookie(targetSessionId);
+      try {
+        sessionStorage.setItem("ihm_login_notice", "Your session has ended. Please sign in again.");
+      } catch {
+        /* storage unavailable: the login page simply shows no notice */
+      }
+      return "not-logged-in";
+    }
+    if (live.session) {
+      const liveSession = live.session as unknown as CentralSessionLike;
+      if (Array.isArray(liveSession.allowed_erps)) allowedErps = liveSession.allowed_erps;
+      if (liveSession.role) targetRole = liveSession.role as typeof targetRole;
+      landing = liveSession.landing ?? null;
+    }
+  }
+
   // 2. Check if user has permission to access Inhyma ERP
   const hasAccess =
     targetRole === "super_admin" ||
@@ -308,6 +424,7 @@ async function runIncomingSsoHandover(): Promise<HandoverResult> {
       role: targetRole,
       email: targetEmail,
       allowed_erps: allowedErps,
+      landing,
     };
     const route = routeForCentralSession("inhyma", centralSession);
     if (route.kind === "redirect" && typeof window !== "undefined") {
@@ -410,10 +527,16 @@ async function runIncomingSsoHandover(): Promise<HandoverResult> {
     console.warn("Automatic sign-in failed:", status, err);
     const transient = status === undefined || status >= 500;
     if (!transient) Auth.clear();
+    const failureReason = String((err as { message?: string })?.message || "").trim();
+    // A 401 about THIS ERP's own account ("No account exists for you", "deleted or disabled") does not mean the CENTRAL session is
+    // gone: the person is still signed in centrally, so their shared cookie must NOT be thrown away (that would sign them out of
+    // every ERP). Any other 401 still ends that central session, as before.
+    const accountProblem = /no account exists|deleted or disabled in this erp|account is not active|must explicitly grant access/i.test(failureReason);
+    const centralSessionEnded = status === 401 && !accountProblem;
 
     let notice: string;
     if (transient) notice = "The sign-in service is temporarily unavailable. Please try again in a moment.";
-    else if (status === 401) notice = "Your session has ended. Please sign in again.";
+    else if (status === 401) notice = centralSessionEnded ? "Your session has ended. Please sign in again." : failureReason || "Sign-in was refused. Please sign in again.";
     else if (status === 403) notice = "You do not have access to this ERP.";
     else {
       const reason = String(err?.message || "").trim();
@@ -424,30 +547,33 @@ async function runIncomingSsoHandover(): Promise<HandoverResult> {
     } catch {
       /* storage unavailable: the login page simply shows no notice */
     }
-    if (status === 401) clearEcosystemCookie(targetSessionId); // that central session is gone: do not try it again
+    if (status === 401 && centralSessionEnded) clearEcosystemCookie(targetSessionId); // that central session is gone: do not try it again
 
-    // Only a clear "no access to THIS ERP" re-routes the person to an ERP they CAN use; every other failure stays
-    // here, on the login page, with the reason shown.
+    // Only a clear "no access to THIS ERP" re-routes the person; every other failure stays here, on the login page, with
+    // the reason shown. Where they belong is ERP_Main's decision (their one ERP, or the dashboard) -- never a guess.
     if (status === 403 && typeof window !== "undefined") {
       const centralCookie = getEcosystemCookie();
-      const effectiveAllowed = (centralCookie?.allowed_erps || allowedErps || []).map((k) => String(k).toLowerCase());
-      const realAllowed = effectiveAllowed.filter((k) => k !== "control-plane" && k !== "*" && k !== "inhyma");
-      const centralSession: CentralSessionLike = {
+      let centralSession: CentralSessionLike = {
         session_id: centralCookie?.session_id || targetSessionId,
         role: centralCookie?.role || targetRole,
         email: centralCookie?.email || targetEmail,
         allowed_erps: centralCookie?.allowed_erps || allowedErps,
       };
-      const erps = getEcosystemErps();
-      const peer = realAllowed.length === 1 ? erps.find((e) => e.key === realAllowed[0]) : undefined;
-      const control = erps.find((e) => e.key === "control-plane");
-      const destination = peer?.hostUrl || control?.hostUrl;
-      if (destination) {
-        const sep = destination.includes("?") ? "&" : "?";
-        window.location.replace(
-          createSsoHandoverUrlFromSession(peer ? destination : `${destination}${sep}sso_error=no_access`, centralSession),
-        );
+      try {
+        const sid = centralSession.session_id;
+        if (sid && !sid.startsWith("ihm-sess-") && !sid.startsWith("loc-")) {
+          const live = await verifyCentralEcosystemSession(sid);
+          if (live.session) centralSession = { ...centralSession, ...(live.session as unknown as CentralSessionLike) };
+        }
+      } catch {
+        /* use the cookie's view */
       }
+      const route = routeForCentralSession("inhyma", centralSession, {
+        sso_error: "no_access",
+        sso_erp: "inhyma",
+        sso_reason: failureReason.slice(0, 400),
+      });
+      if (route.kind === "redirect") window.location.replace(route.url);
     }
     return "not-logged-in";
   }

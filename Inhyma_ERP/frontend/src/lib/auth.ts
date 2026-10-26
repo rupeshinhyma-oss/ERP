@@ -28,7 +28,18 @@ function notify(profile: Profile | null): void {
   listeners.forEach((listener) => listener(profile));
 }
 
+let lastProfileSyncTime = 0;
+
 export const Auth = {
+  /** Check if profile sync is needed (throttled to at most once per 60 seconds). */
+  shouldSyncProfile(): boolean {
+    return Date.now() - lastProfileSyncTime > 60000;
+  },
+
+  markProfileSynced(): void {
+    lastProfileSyncTime = Date.now();
+  },
+
   /** Subscribe to profile/permission changes. Returns an unsubscribe fn. */
   subscribe(listener: Listener): () => void {
     listeners.add(listener);

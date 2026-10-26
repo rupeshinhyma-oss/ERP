@@ -39,7 +39,20 @@ async def get_my_notifications(
     return build_success_response(data=data, request_id=getattr(request.state, "request_id", "-"))
 
 
+@router.get("/unread-count", summary="Get unread notification count")
+async def get_unread_count(
+    request: Request,
+    current_user: CurrentUser = Depends(get_current_user),
+    service: NotificationService = Depends(get_notification_service),
+) -> dict:
+    count = await service.repository.count_unread_for_user(current_user.id)
+    return build_success_response(
+        data={"unread_count": count}, request_id=getattr(request.state, "request_id", "-")
+    )
+
+
 @router.patch("/{id}/read", summary="Mark single notification as read")
+@router.post("/{id}/read", summary="Mark single notification as read via POST")
 async def mark_notification_read(
     id: uuid.UUID,
     request: Request,

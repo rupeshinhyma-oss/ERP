@@ -3,6 +3,33 @@
 **System:** ERP_Main Control Plane  
 **Scope:** Chronological engineering changes, function updates, UI hardening, and bug fixes.
 
+## [Release 2026-10-24b] — One server-made decision for where a signed-in person belongs
+
+**Rules (any login page, localhost or hosted, current or future ERPs):** no ERP access -> the ERP Dashboard; exactly one ERP -> that ERP only;
+two or more -> may switch between exactly those; platform admins -> every ERP.
+
+- **Backend `app/global_auth/landing.py`:** `compute_landing()` (pure) + `attach_landing()`. Every `/global/ecosystem-session/*` answer (establish, refresh,
+  verify) now carries `landing = {mode: admin|dashboard|single|multi, target, erps[], control_plane_url}`. Addresses come from the ERP registry
+  (`erp_instances.base_url`, ACTIVE ERPs only) and this app's `FRONTEND_URL` -- nothing hard-coded. The registry is read through a 30 s in-process cache
+  (invalidated when an ERP is registered / edited / its status changes) with the last good copy as fallback if the database hiccups.
+- **Front end `AppShell.tsx`:** follows the decision (`fetchLanding()` in `lib/ssoBridge.ts`); falls back to the memberships if it cannot be had; never leaves
+  the person on a spinner (dashboard after 8 s); 10 s loop guard. `lib/ecosystemSession.ts`: 6 s limit on the live check (fail-open).
+- Tests: `backend/tests/test_landing_decision.py`, `frontend/src/tests/AppShell.test.tsx`.
+
+---
+
+## [Release 2026-10-24] — A refused ERP sign-in is explained, not an endless spinner
+
+- **Bug:** a single-ERP Global User whose ERP answered the automatic sign-in with "no access" came back to `/dashboard?sso_error=no_access`, where
+  `AppShell` stopped redirecting but still drew the "Redirecting directly to your authorized ERP application..." spinner forever.
+- **Fix (`frontend/src/components/AppShell.tsx`):** with `sso_error` present the page shows "We could not open <ERP>", the reason the ERP gave
+  (`sso_reason`), and **Try again** (clears the redirect guard and reloads the dashboard) / **Sign out** buttons.
+- **Verified:** granting an ERP in User & Access is reflected in `/global/ecosystem-session/{id}` at once, even for a session opened before the grant
+  (`backend/tests/test_grant_access_reaches_spokes.py`). The refusal came from the spoke's key comparison, fixed in Inhyma and Yinglima.
+- Tests: `frontend/src/tests/AppShell.test.tsx`.
+
+---
+
 ## [Release 2026-10-19] — Universal Network Status Notifier (Offline/Online Toast & Status Indicator)
 
 ### 1. Global Network Status Listener (`NetworkStatusNotifier.tsx`)
