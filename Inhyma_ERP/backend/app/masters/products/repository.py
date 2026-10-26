@@ -235,16 +235,38 @@ class ProductRepository(BaseRepository[Product]):
         return bool(result.scalar())
 
     def _apply_dynamic_filters(self, stmt, filters):
-        """Apply dynamic filters, matching organization_id against column and JSON array, and scoping to Yinglima sync."""
+        """Apply dynamic filters, matching organization_id against column and JSON array, and scoping to Inhyma products and Yinglima sync."""
         if filters and hasattr(filters, "exact"):
-            from sqlalchemy import cast, or_, select, String
+            from sqlalchemy import and_, cast, or_, select, String
             from app.integration.sync_models import SyncedEntityMapping
 
             synced_from = filters.exact.get("synced_from")
             org_val = filters.exact.get("organization_id")
 
-            if str(synced_from).lower() == "yinglima" or str(org_val).lower() == "85c12bcb-10a1-4b1f-92ed-6ca72ac1b3b5":
-                # Strictly scope to products synced from Yinglima, excluding local INH- domestic spare parts
+            if org_val and str(org_val).lower() == "85c12bcb-10a1-4b1f-92ed-6ca72ac1b3b5":
+                # Allow all products synced from Yinglima, PLUS products natively belonging to Inhyma (excluding legacy INH- domestic spare parts)
+                inhyma_org_uuid = uuid.UUID("85c12bcb-10a1-4b1f-92ed-6ca72ac1b3b5")
+                stmt = stmt.where(
+                    or_(
+                        Product.id.in_(
+                            select(SyncedEntityMapping.local_entity_id).where(
+                                SyncedEntityMapping.source_erp_id == "yinglima",
+                                SyncedEntityMapping.entity_type == "product",
+                            )
+                        ),
+                        and_(
+                            or_(
+                                Product.organization_id == inhyma_org_uuid,
+                                cast(Product.organization_ids, String).like(f"%{org_val}%"),
+                            ),
+                            or_(
+                                Product.product_code.is_(None),
+                                ~Product.product_code.ilike("INH-%"),
+                            ),
+                        ),
+                    )
+                )
+            elif synced_from and str(synced_from).lower() == "yinglima":
                 stmt = stmt.where(
                     Product.id.in_(
                         select(SyncedEntityMapping.local_entity_id).where(

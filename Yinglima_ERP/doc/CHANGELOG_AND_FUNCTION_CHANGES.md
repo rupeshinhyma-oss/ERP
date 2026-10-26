@@ -195,7 +195,7 @@
 ### 2. Zero-Data-Loss Protection & Strict Organization Scoping
 - **Safe Isolation & Preservation of Non-Inhyma and Local Products:**
   - Preserved Darsh Impex (652 items), FNB Solution (769 items), and native domestic Indian spare parts (`INH-xxxxx`, 935 items) in Inhyma ERP's database with zero deletions or schema corruption.
-  - Inhyma ERP Product Master frontend (`/product/list`) now strictly queries with `synced_from=yinglima&organization_id=85c12bcb-10a1-4b1f-92ed-6ca72ac1b3b5`, filtering out Darsh Impex, FNB Solution, and domestic `INH-` spare parts, so only the 873 products originating from Yinglima are displayed.
+  - Inhyma ERP Product Master frontend (`/product/list`) and backend repository now query with `organization_id=85c12bcb-10a1-4b1f-92ed-6ca72ac1b3b5`, supporting both Yinglima-synced products and newly added native Inhyma products while filtering out Darsh Impex, FNB Solution, and legacy domestic `INH-` spare parts.
   - **Strict One-Way Lifecycle:**
     - Deactivating a product in Yinglima automatically deactivates it in Inhyma.
     - Deleting a product in Yinglima soft-deletes it in Inhyma (`deleted_at` timestamp recorded).
