@@ -2264,6 +2264,7 @@ A standardized suite of 8 production-grade Excel (`.xlsx`) files is maintained d
 | **TC-SYNC-03** | Product Re-activation Sync | Re-activate the inactive product in Yinglima (`status = "active"`). | Yinglima sends `product.updated` (`is_active = True`). Inhyma sets `status = 'ACTIVE'`. Product moves back from Inhyma's `Inactive` tab to `Active` tab. |
 | **TC-SYNC-04** | Product Deletion Removal | Delete a product in Yinglima (`DELETE /api/v1/masters/products/{id}`). | Yinglima sends `product.deleted`. Inhyma soft-deletes the product (`deleted_at` set). Product is removed from both Active and Inactive views in Inhyma. |
 | **TC-SYNC-05** | Reverse Inactivation Immunity | Set a product to Inactive directly in Inhyma ERP. | The product becomes inactive in Inhyma, but Yinglima's product remains Active. Zero reverse sync occurs. |
+| **TC-SYNC-06** | Dual-Mode Catalog Coexistence | Add a product manually in Inhyma via `+ New Product` while synced products exist. | Manual product appears immediately in Inhyma Product Master. Both synced and manually created products display, paginate, and are selectable across all downstream modules without query blockade. |
 
 ---
 

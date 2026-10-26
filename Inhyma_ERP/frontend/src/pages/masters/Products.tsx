@@ -981,7 +981,7 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
   const loadProducts = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await apiGet<Product[]>("/masters/products?limit=5000&organization_id=85c12bcb-10a1-4b1f-92ed-6ca72ac1b3b5&sort_by=created_at&sort_order=desc");
+      const res = await apiGet<Product[]>("/masters/products?limit=5000&sort_by=created_at&sort_order=desc");
       if (res?.data && Array.isArray(res.data)) {
         if (isTestMode) {
           const apiList = res.data;
@@ -1065,18 +1065,6 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
   // Filtered & Sorted items
   const filteredProducts = useMemo(() => {
     return products.filter((p) => {
-      // Scope strictly to Inhyma organization in runtime mode (exclude Darsh Impex, FNB Solution, untagged non-Inhyma items)
-      const inhymaOrgId = "85c12bcb-10a1-4b1f-92ed-6ca72ac1b3b5";
-      const orgId = p.organization_id;
-      const orgIds = Array.isArray(p.organization_ids) ? p.organization_ids : [];
-      const belongsToInhyma = orgId === inhymaOrgId || orgIds.includes(inhymaOrgId);
-      if (!isTestMode && !belongsToInhyma) return false;
-
-      // Exclude native Inhyma domestic spare parts (INH-xxxxx) and unmapped local items
-      if (p.product_code && p.product_code.toUpperCase().startsWith("INH-")) {
-        return false;
-      }
-
       // Status Tab filter
       const itemStatus = (p.status || "active").toLowerCase();
       if (activeTab === "Active" && itemStatus !== "active") return false;

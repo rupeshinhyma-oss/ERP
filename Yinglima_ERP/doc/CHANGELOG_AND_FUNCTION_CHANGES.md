@@ -3,6 +3,18 @@
 **System:** Yinglima_ERP (China Procurement)  
 **Scope:** Functional updates, schema changes, UI hardening, and bug fixes.
 
+## [Release 2026-10-26] — Product Master Dual-Mode Coexistence (Synced from Yinglima & Manually Added in Inhyma)
+
+### 1. Unified Catalog Loading & De-Scoping Restrictive Query Blocks
+- **Problem & Root Cause:**
+  - Inhyma Product Master was artificially filtering products by requiring presence in `SyncedEntityMapping` or matching a hardcoded Inhyma organization UUID (`85c12bcb-10a1-4b1f-92ed-6ca72ac1b3b5`), and discarding non-matching codes in the frontend table.
+  - This blocked newly added manual products from appearing or updating the record count.
+- **Resolution:**
+  - Reverted restrictive dynamic filtering in repository and frontend to standard catalog query without hardcoded UUID or sync subquery constraints.
+  - Enabled seamless dual-mode coexistence: items synced from Yinglima and items manually created/imported in Inhyma are stored as standard records in `products` and load side-by-side with full pagination, search, sorting, and downstream ERP transactions support.
+
+---
+
 ## [Release 2026-10-26] — Ecosystem SSO Bridge, Canonical ERP Key Normalization & Central Session Resilience
 
 ### 1. Canonical ERP Key Normalization (`app/federation/erp_keys.py`)

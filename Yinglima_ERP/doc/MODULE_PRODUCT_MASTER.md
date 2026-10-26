@@ -64,6 +64,15 @@ Products support flexible organizational scoping via database fields:
 
 ---
 
+## 4.0. Dual-Mode Coexistence: Synced Products & Manually Added Products
+
+The Product Master seamlessly supports both ingestion channels:
+* **Synced Products (from Yinglima):** Machinery, tools, and procurement items synced from Yinglima via event-driven synchronization (`product.created`, `product.updated`, `product.deactivated`).
+* **Manually Created Products (in Inhyma):** Local spare parts, custom modifications, and domestic items added directly via the `+ New Product` modal or Excel import.
+* **Unified Querying:** Product queries operate directly against the unified `products` table without restrictive sync-mapping subqueries or hardcoded UUID blockades, ensuring newly added items appear immediately alongside synced catalog items.
+
+---
+
 ## 4.1. Status Management & High-Speed Bulk Operations
 
 * **Dedicated Bulk Status Endpoints:**
