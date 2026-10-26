@@ -23,6 +23,7 @@ import { EditAddressDrawer, type EditAddressData } from "@/components/EditAddres
 import { SideDrawer, DetailFieldGrid } from "@/components/SideDrawer";
 import { SortHeader } from "@/components/SortHeader";
 import { apiDelete, apiGet, apiPatch, apiPost, errorMessage as apiErrorText } from "@/lib/api";
+import { toast } from "@/lib/toast";
 import { useAuth } from "@/lib/hooks";
 import { useOptions, useMasterNames } from "@/lib/options";
 import type { PaginationMeta, ProformaInvoice, ProformaStatusRules, ProformaTabCounts } from "@/types";
@@ -39,6 +40,94 @@ const PROFORMA_OPTION_GROUPS = [
 
 type StatusTab = { key: string; label: string; cardLabel: string; badge: string; actionLabel?: string; actionColor?: string };
 type CatalogProduct = { product_name: string; product_code?: string; hsn: string; rate: number; gst_percent: number; min_price: number; available_stock?: number };
+
+const PRODUCT_HSN_MAP: Record<string, string> = {
+  "ISL150 Rotary PFS 4 Stations": "8422.30.00",
+  "DZ800 Double Face Shaping Vacuum Machine 10Kgs": "8422.30.00",
+  "Sensor (Banding)": "8422.90.90",
+  "ISL250 Rotary PFS 8 Head With Zipper & Nitrogen": "8423.30.00",
+  "XLSG36100 Capping Machine": "8423.30.00",
+  "Automatic Tube Filling & Sealing Machine": "8423.30.00",
+  "Semi Automatic MAP (Vacuum + 2 Gases) Tray/Cup Sealing Machine": "8423.30.00",
+  "Cup Filler 16LTR": "8422.30.00",
+  "AF1000T Auto Auger Filler Conveyor 30LTR": "8422.30.00",
+  "PFFS200 Pneumatic 4 Side Sealer 240mm PLC": "8422.40.00",
+  "PFFS1000 Pneumatic Centre Sealer 420mm PLC": "8422.40.00",
+  "GF100FD Granular Filler Double Head FFS": "8422.40.00",
+};
+
+export function getAutoHsnForProduct(p?: any): string {
+  if (!p) return "";
+  const directHsn = (p.hsn || p.hsn_number || p.hsn_code || "").toString().trim();
+  if (directHsn && directHsn !== "—") return directHsn;
+  const barcode = (p.barcode || "").toString().trim();
+  if (barcode && /\d/.test(barcode)) return barcode;
+  const name = (p.product_name || p.product_name_tally || "").toString().trim();
+  if (PRODUCT_HSN_MAP[name]) return PRODUCT_HSN_MAP[name];
+  const lower = name.toLowerCase();
+  if (lower.includes("spare") || lower.includes("part") || lower.includes("sensor") || lower.includes("block") || lower.includes("relay") || lower.includes("motor")) {
+    return "8422.90.90";
+  }
+  if (lower.includes("sealer") || lower.includes("band") || lower.includes("vacuum") || lower.includes("filler") || lower.includes("machine")) {
+    return "8422.30.00";
+  }
+  return name ? "8422.30.00" : "";
+}
+
+export function normalizeHsn(hsn?: string | null): string {
+  if (!hsn) return "";
+  return hsn.replace(/[^0-9a-zA-Z]/g, "").toLowerCase();
+}
+
+export function resolveGstPercent(hsnCode?: string | null, customMap?: Record<string, number>): number {
+  if (!hsnCode) return 18;
+  const clean = hsnCode.trim();
+  const norm = normalizeHsn(clean);
+
+  // 1. Database Taxes Master match
+  if (customMap) {
+    if (customMap[clean] !== undefined) return customMap[clean];
+    if (customMap[norm] !== undefined) return customMap[norm];
+    for (const [k, v] of Object.entries(customMap)) {
+      const kNorm = normalizeHsn(k);
+      if (kNorm && (norm === kNorm || norm.startsWith(kNorm) || kNorm.startsWith(norm))) {
+        return v;
+      }
+    }
+  }
+
+  // 2. Standard HSN mapping defaults
+  const KNOWN_HSN_GST: Record<string, number> = {
+    "996511": 18, // Transport
+    "996713": 18, // Packing & Forwarding
+    "8422": 18,
+    "84223000": 18,
+    "8422.30.00": 18,
+    "84229090": 18,
+    "8422.90.90": 18,
+    "8423": 18,
+    "8427": 18,
+    "8428": 18,
+    "8443": 18,
+    "8431": 18,
+    "9612": 18,
+    "9987": 18,
+    "8479": 18,
+    "8474": 18,
+  };
+
+  if (KNOWN_HSN_GST[clean] !== undefined) return KNOWN_HSN_GST[clean];
+  if (KNOWN_HSN_GST[norm] !== undefined) return KNOWN_HSN_GST[norm];
+
+  const prefix4 = norm.slice(0, 4);
+  if (KNOWN_HSN_GST[prefix4] !== undefined) return KNOWN_HSN_GST[prefix4];
+
+  return 18;
+}
+
+export const DEFAULT_TERMS_AND_CONDITIONS = `1. Transport Charges: To Pay.
+2. Payment Terms: 100% Before Dispatch.
+3. Order once confirmed, cannot be cancelled.`;
 
 const todayDDMMYYYY = () => formatDDMMYYYY(new Date());
 
@@ -64,7 +153,7 @@ function emptyFormState(defaults: Record<string, string>, salesPerson: string) {
     product_search: "",
     additional_charges_enabled: true,
     third_party_invoice_file: "",
-    terms_and_conditions: "",
+    terms_and_conditions: DEFAULT_TERMS_AND_CONDITIONS,
     remarks: "",
   };
 }
@@ -90,8 +179,8 @@ function emptyChargeRows(): any[] {
     {
       id: `charge-2-${Date.now()}`,
       is_additional_charge: true,
-      charge_type: "Packing & Forwarding",
-      product_name: "Packing & Forwarding",
+      charge_type: "Packing & Forwarding Charges",
+      product_name: "Packing & Forwarding Charges",
       hsn: "996713",
       quantity: 1,
       unit_price: "",
@@ -112,7 +201,7 @@ function priceLine(line: any) {
   const up = parseFloat(String(line.unit_price)) || 0;
   const ud = parseFloat(String(line.unit_discount)) || 0;
   const gstPct = parseFloat(String(line.gst_percent)) || 0;
-  const taxable = Math.max(0, up - ud) * q;
+  const taxable = (up - ud) * q;
   const gstAmt = (taxable * gstPct) / 100;
   return { taxable_amount: round2(taxable), gst_amount: round2(gstAmt), total: round2(taxable + gstAmt) };
 }
@@ -398,6 +487,7 @@ export function ProformaInvoicesPage({
       delivery_type: prev.delivery_type || DEFAULTS.delivery_type || "",
       delivery_charge: prev.delivery_charge || DEFAULTS.delivery_charge || "",
       third_party_delivery: prev.third_party_delivery || DEFAULTS.third_party_delivery || "",
+      terms_and_conditions: prev.terms_and_conditions || DEFAULT_TERMS_AND_CONDITIONS,
     }));
   }, [DEFAULTS, editingId]);
 
@@ -413,6 +503,13 @@ export function ProformaInvoicesPage({
   const belowMinCount = formLineItems.filter(
     (it) => !it.is_additional_charge && it.min_price && (parseFloat(String(it.unit_price)) || 0) < it.min_price
   ).length;
+  const exceededStockItems = formLineItems.filter(
+    (it) =>
+      !it.is_additional_charge &&
+      it.available_stock !== undefined &&
+      it.available_stock !== null &&
+      (parseFloat(String(it.quantity)) || 0) > Number(it.available_stock)
+  );
   const fieldError = (key: string) =>
     formErrors[key] ? <span style={{ color: "#ef4444", fontSize: "11.5px", marginTop: "4px", display: "block" }}>{formErrors[key]}</span> : null;
   const productSearchSeq = useRef(0);
@@ -420,6 +517,27 @@ export function ProformaInvoicesPage({
   const [productSearchMatches, setProductSearchMatches] = useState<CatalogProduct[]>([]);
   const [isProductSearchOpen, setIsProductSearchOpen] = useState(false);
   const [stockCatalogMap, setStockCatalogMap] = useState<Record<string, any>>({});
+
+  const [taxesMap, setTaxesMap] = useState<Record<string, number>>({});
+
+  useEffect(() => {
+    void apiGet<{ items: any[] } | any[]>("/masters/taxes?page_size=500&status=active")
+      .then((res) => {
+        const raw = res?.data;
+        const items: any[] = Array.isArray(raw) ? raw : (raw && Array.isArray(raw.items) ? raw.items : []);
+        const map: Record<string, number> = {};
+        for (const t of items) {
+          if (t && t.hsn_number && t.gst_percent !== undefined) {
+            const hsn = String(t.hsn_number).trim();
+            const pct = Number(t.gst_percent) || 0;
+            map[hsn] = pct;
+            map[normalizeHsn(hsn)] = pct;
+          }
+        }
+        setTaxesMap(map);
+      })
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     void apiGet<{ items: any[] } | any[]>("/inventory/product-stock?limit=500")
@@ -653,7 +771,11 @@ export function ProformaInvoicesPage({
     let totalTax = 0;
     let totalWithTax = 0;
 
-    for (const item of formLineItems) {
+    const activeItems = formLineItems.filter(
+      (item) => !item.is_additional_charge || formState.additional_charges_enabled
+    );
+
+    for (const item of activeItems) {
       const q = parseFloat(String(item.quantity)) || 0;
       const up = parseFloat(String(item.unit_price)) || 0;
       const ud = parseFloat(String(item.unit_discount)) || 0;
@@ -670,28 +792,60 @@ export function ProformaInvoicesPage({
     }
 
     return {
-      totalQty,
+      totalQty: Math.round(totalQty * 100) / 100,
       totalBasic: Math.round(totalBasic * 100) / 100,
       totalDiscount: Math.round(totalDiscount * 100) / 100,
       totalTaxable: Math.round(totalTaxable * 100) / 100,
       totalTax: Math.round(totalTax * 100) / 100,
       totalWithTax: Math.round(totalWithTax * 100) / 100,
     };
-  }, [formLineItems]);
+  }, [formLineItems, formState.additional_charges_enabled]);
 
   const handleUpdateLineItem = (index: number, field: string, value: any) => {
     setFormLineItems((prev) => {
       const next = [...prev];
       const target = { ...next[index], [field]: value };
 
+      if (field === "hsn") {
+        target.hsn = value;
+        target.gst_percent = resolveGstPercent(value, taxesMap);
+      }
+
       if (field === "charge_type") {
         target.product_name = value === "-- Select Charge --" ? "" : value;
+        const lower = (value || "").toLowerCase();
+        if (lower.includes("transport")) {
+          target.hsn = "996511";
+          target.gst_percent = resolveGstPercent("996511", taxesMap);
+        } else if (lower.includes("packing") || lower.includes("forwarding")) {
+          target.hsn = "996713";
+          target.gst_percent = resolveGstPercent("996713", taxesMap);
+        } else if (value && value !== "-- Select Charge --") {
+          target.gst_percent = resolveGstPercent(target.hsn, taxesMap);
+        }
+      }
+
+      if (field === "product_name") {
+        target.product_name = value;
+        const match = productSearchMatches.find(
+          (m) => (m.product_name || "").toLowerCase() === (value || "").toLowerCase()
+        );
+        if (match) {
+          target.hsn = match.hsn || getAutoHsnForProduct(match);
+          target.gst_percent = Number(match.gst_percent ?? resolveGstPercent(target.hsn, taxesMap));
+          if (match.rate && !target.unit_price) target.unit_price = match.rate;
+          if (match.available_stock !== undefined) target.available_stock = match.available_stock;
+          if (match.min_price !== undefined) target.min_price = match.min_price;
+        } else if (value) {
+          if (!target.hsn) target.hsn = getAutoHsnForProduct({ product_name: value });
+          target.gst_percent = resolveGstPercent(target.hsn, taxesMap);
+        }
       }
 
       const q = parseFloat(String(target.quantity)) || 0;
       const up = parseFloat(String(target.unit_price)) || 0;
       const ud = parseFloat(String(target.unit_discount)) || 0;
-      const taxable = Math.max(0, up - ud) * q;
+      const taxable = (up - ud) * q;
       const gstPct = parseFloat(String(target.gst_percent)) || 0;
       const gstAmt = (taxable * gstPct) / 100;
       const tot = taxable + gstAmt;
@@ -706,16 +860,21 @@ export function ProformaInvoicesPage({
   };
 
   const handleAddProductItem = (prod?: { product_name: string; hsn?: string; rate?: number; gst_percent?: number; min_price?: number; available_stock?: number }) => {
+    const pName = prod?.product_name || "";
+    const autoHsn = getAutoHsnForProduct(prod);
+    const gstVal = prod?.gst_percent !== undefined && prod?.gst_percent !== null && Number(prod.gst_percent) > 0
+      ? Number(prod.gst_percent)
+      : resolveGstPercent(autoHsn, taxesMap);
     const base = {
       id: "prod-" + Date.now() + Math.random().toString(36).substring(2, 5),
       is_additional_charge: false,
       charge_type: "",
-      product_name: prod?.product_name || "",
-      hsn: prod?.hsn || "",
+      product_name: pName,
+      hsn: autoHsn,
       quantity: 1,
       unit_price: prod?.rate ?? "",
       unit_discount: 0,
-      gst_percent: prod?.gst_percent ?? 0,
+      gst_percent: gstVal,
       min_price: prod?.min_price,
       available_stock: prod?.available_stock,
     };
@@ -733,7 +892,7 @@ export function ProformaInvoicesPage({
       unit_price: "",
       unit_discount: "",
       taxable_amount: 0,
-      gst_percent: "",
+      gst_percent: 18,
       gst_amount: 0,
       total: 0,
     };
@@ -772,13 +931,18 @@ export function ProformaInvoicesPage({
         const list: any[] = Array.isArray(raw) ? raw : (raw && Array.isArray(raw.items) ? raw.items : []);
         const mapped: CatalogProduct[] = list.map((p) => {
           const avail = getWarehouseStock(p, currentWarehouse);
+          const pName = p.product_name || p.product_name_tally || "";
+          const autoHsn = getAutoHsnForProduct(p);
+          const gstVal = p.gst_percent !== undefined && p.gst_percent !== null && Number(p.gst_percent) > 0
+            ? Number(p.gst_percent)
+            : resolveGstPercent(autoHsn, taxesMap);
           return {
-            product_name: p.product_name || p.product_name_tally || "",
+            product_name: pName,
             product_code: p.product_code || "",
-            hsn: p.hsn_number || p.hsn_code || "",
+            hsn: autoHsn,
             rate: Number(p.standard_price) || 0,
             min_price: Number(p.minimum_price || p.min_price || p.standard_price) || 0,
-            gst_percent: Number(p.gst_percent ?? p.gst_rate ?? 0),
+            gst_percent: gstVal,
             available_stock: avail,
           };
         });
@@ -1156,7 +1320,10 @@ export function ProformaInvoicesPage({
     }
 
     const validItems = formLineItems.filter(
-      (it) => it.product_name.trim() && it.product_name !== "-- Select Charge --"
+      (it) =>
+        (!it.is_additional_charge || formState.additional_charges_enabled) &&
+        it.product_name.trim() &&
+        it.product_name !== "-- Select Charge --"
     );
     if (validItems.length === 0) {
       errs.items = "Please add at least one product or additional charge item.";
@@ -1271,6 +1438,33 @@ export function ProformaInvoicesPage({
           {belowMinCount > 0 && (
             <div style={{ padding: "10px 16px", backgroundColor: "#fef3c7", border: "1px solid #fcd34d", borderRadius: "6px", color: "#92400e", fontSize: "13px", marginBottom: "16px" }}>
               ⚠ {belowMinCount} item(s) priced below the minimum price. This invoice will need admin approval.
+            </div>
+          )}
+
+          {exceededStockItems.length > 0 && (
+            <div
+              data-testid="alert-exceeded-stock"
+              role="alert"
+              style={{
+                padding: "10px 16px",
+                backgroundColor: "#fee2e2",
+                border: "1px solid #fca5a5",
+                borderRadius: "6px",
+                color: "#991b1b",
+                fontSize: "13px",
+                marginBottom: "16px",
+                display: "flex",
+                alignItems: "center",
+                gap: "8px",
+                fontWeight: 500,
+              }}
+            >
+              <span style={{ fontSize: "15px" }}>⚠️</span>
+              <span>
+                {exceededStockItems.length === 1
+                  ? `Warning: Quantity for "${exceededStockItems[0].product_name}" (${exceededStockItems[0].quantity}) exceeds available stock (${exceededStockItems[0].available_stock}).`
+                  : `Warning: ${exceededStockItems.length} item(s) have quantity exceeding available stock.`}
+              </span>
             </div>
           )}
 
@@ -1869,20 +2063,37 @@ export function ProformaInvoicesPage({
 
             {/* Section 4: PRODUCT ITEM Table Card */}
             <div style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "6px", padding: "16px 20px", marginBottom: "16px", boxShadow: "0 1px 2px rgba(0,0,0,0.02)" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
+              <div style={{ marginBottom: "12px" }}>
                 <div style={{ fontSize: "12px", fontWeight: 700, color: "#334155", textTransform: "uppercase", letterSpacing: "0.5px" }}>
                   PRODUCT ITEM
                 </div>
-                <label style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "12.5px", fontWeight: 600, color: "#1e293b", cursor: "pointer" }}>
-                  <input
-                    type="checkbox"
-                    checked={formState.additional_charges_enabled}
-                    onChange={(e) => setFormState({ ...formState, additional_charges_enabled: e.target.checked })}
-                    style={{ cursor: "pointer", accentColor: "#0061f2", width: "15px", height: "15px" }}
-                  />
-                  Additional Charges
-                </label>
               </div>
+
+              {exceededStockItems.length > 0 && (
+                <div
+                  style={{
+                    padding: "8px 12px",
+                    backgroundColor: "#fef2f2",
+                    border: "1px solid #fecaca",
+                    borderRadius: "4px",
+                    color: "#b91c1c",
+                    fontSize: "12px",
+                    fontWeight: 600,
+                    marginBottom: "10px",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "6px",
+                  }}
+                >
+                  <span>⚠️</span>
+                  <span>
+                    Quantity exceeds available stock for:{" "}
+                    {exceededStockItems
+                      .map((it) => `${it.product_name || "Product"} (Entered: ${it.quantity}, Available: ${it.available_stock})`)
+                      .join("; ")}
+                  </span>
+                </div>
+              )}
 
               {formErrors.items && (
                 <div style={{ color: "#ef4444", fontSize: "12px", marginBottom: "8px" }}>
@@ -1914,136 +2125,372 @@ export function ProformaInvoicesPage({
                         </td>
                       </tr>
                     ) : (
-                      formLineItems.map((row, idx) => (
-                      <tr key={row.id || idx} style={{ background: row.is_additional_charge ? "#fcfdfe" : "#ffffff" }}>
-                        <td style={{ padding: "6px 8px", borderBottom: "1px solid #e2e8f0" }}>
-                          {row.is_additional_charge ? (
-                            <Combobox
-                              ariaLabel="Additional Charge Type"
-                              value={row.charge_type || ""}
-                              onChange={(val) => handleUpdateLineItem(idx, "charge_type", val)}
-                              options={ADDITIONAL_CHARGE_TYPES}
-                              placeholder="Select Charge"
-                              inputStyle={{ height: "32px", fontSize: "12.5px" }}
-                            />
-                          ) : (
-                            <input
-                              type="text"
-                              placeholder="Product Name"
-                              value={row.product_name}
-                              onChange={(e) => handleUpdateLineItem(idx, "product_name", e.target.value)}
-                              style={{ width: "100%", height: "32px", border: "1px solid #cbd5e1", borderRadius: "3px", padding: "0 8px", fontSize: "12.5px" }}
-                            />
-                          )}
-                        </td>
-                        <td style={{ padding: "6px 8px", borderBottom: "1px solid #e2e8f0" }}>
-                          <input
-                            type="text"
-                            placeholder="HSN"
-                            value={row.hsn}
-                            onChange={(e) => handleUpdateLineItem(idx, "hsn", e.target.value)}
-                            style={{ width: "100%", height: "32px", border: "1px solid #cbd5e1", borderRadius: "3px", padding: "0 6px", fontSize: "12.5px" }}
-                          />
-                        </td>
-                        <td style={{ padding: "6px 8px", borderBottom: "1px solid #e2e8f0" }}>
-                          <input
-                            type="number"
-                            step="any"
-                            value={row.quantity}
-                            onChange={(e) => handleUpdateLineItem(idx, "quantity", e.target.value)}
-                            style={{ width: "100%", height: "32px", border: "1px solid #cbd5e1", borderRadius: "3px", padding: "0 6px", fontSize: "12.5px" }}
-                          />
-                          {!row.is_additional_charge && row.available_stock !== undefined && (
-                            <div style={{ fontSize: "11px", color: Number(row.available_stock) > 0 ? "#0284c7" : "#ef4444", marginTop: "2px", fontWeight: 500 }}>
-                              Stock: {row.available_stock}
-                            </div>
-                          )}
-                        </td>
-                        <td style={{ padding: "6px 8px", borderBottom: "1px solid #e2e8f0" }}>
-                          <input
-                            type="number"
-                            step="any"
-                            value={row.unit_price}
-                            onChange={(e) => handleUpdateLineItem(idx, "unit_price", e.target.value)}
-                            style={{ width: "100%", height: "32px", border: "1px solid #cbd5e1", borderRadius: "3px", padding: "0 6px", fontSize: "12.5px" }}
-                          />
-                          {!row.is_additional_charge && row.min_price > 0 && (parseFloat(String(row.unit_price)) || 0) < row.min_price && (
-                            <div style={{ color: "#b45309", fontSize: "11px", marginTop: "2px" }}>Below min ₹{row.min_price}</div>
-                          )}
-                        </td>
-                        <td style={{ padding: "6px 8px", borderBottom: "1px solid #e2e8f0" }}>
-                          <div style={{ display: "flex", alignItems: "center", border: "1px solid #cbd5e1", borderRadius: "3px", overflow: "hidden" }}>
-                            <span style={{ background: "#f1f5f9", padding: "0 6px", fontSize: "12px", color: "#64748b", height: "30px", display: "flex", alignItems: "center" }}>₹</span>
-                            <input
-                              type="number"
-                              step="any"
-                              value={row.unit_discount}
-                              onChange={(e) => handleUpdateLineItem(idx, "unit_discount", e.target.value)}
-                              style={{ width: "100%", height: "30px", border: "none", padding: "0 6px", fontSize: "12.5px", outline: "none" }}
-                            />
-                          </div>
-                        </td>
-                        <td style={{ padding: "6px 8px", borderBottom: "1px solid #e2e8f0" }}>
-                          <div style={{ height: "32px", border: "1px solid #e2e8f0", background: "#f8fafc", borderRadius: "3px", display: "flex", alignItems: "center", padding: "0 8px", fontSize: "12.5px", color: "#1e293b", fontWeight: 600 }}>
-                            {row.taxable_amount ? row.taxable_amount.toFixed(2) : "0.00"}
-                          </div>
-                        </td>
-                        <td style={{ padding: "6px 8px", borderBottom: "1px solid #e2e8f0" }}>
-                          <div style={{ display: "flex", alignItems: "center", border: "1px solid #cbd5e1", borderRadius: "3px", overflow: "hidden" }}>
-                            <input
-                              type="number"
-                              step="any"
-                              value={row.gst_percent}
-                              onChange={(e) => handleUpdateLineItem(idx, "gst_percent", e.target.value)}
-                              style={{ width: "100%", height: "30px", border: "none", padding: "0 6px", fontSize: "12.5px", outline: "none" }}
-                            />
-                            <span style={{ background: "#f1f5f9", padding: "0 5px", fontSize: "12px", color: "#64748b", height: "30px", display: "flex", alignItems: "center" }}>%</span>
-                          </div>
-                        </td>
-                        <td style={{ padding: "6px 8px", borderBottom: "1px solid #e2e8f0" }}>
-                          <div style={{ height: "32px", border: "1px solid #e2e8f0", background: "#f8fafc", borderRadius: "3px", display: "flex", alignItems: "center", padding: "0 8px", fontSize: "12.5px", color: "#1e293b", fontWeight: 600 }}>
-                            {row.gst_amount ? row.gst_amount.toFixed(2) : "0.00"}
-                          </div>
-                        </td>
-                        <td style={{ padding: "6px 8px", borderBottom: "1px solid #e2e8f0" }}>
-                          <div style={{ height: "32px", border: "1px solid #e2e8f0", background: "#f8fafc", borderRadius: "3px", display: "flex", alignItems: "center", padding: "0 8px", fontSize: "12.5px", color: "#1e293b", fontWeight: 600 }}>
-                            {row.total ? row.total.toFixed(2) : "0.00"}
-                          </div>
-                        </td>
-                        <td style={{ padding: "6px 4px", borderBottom: "1px solid #e2e8f0", textAlign: "center" }}>
-                          <button
-                            type="button"
-                            onClick={() => handleDeleteLineItem(idx)}
-                            style={{ background: "none", border: "none", color: "#ef4444", cursor: "pointer", fontWeight: 700, fontSize: "14px" }}
-                            title="Remove Row"
-                          >
-                            ✕
-                          </button>
-                        </td>
-                      </tr>
-                    )))}
-                  </tbody>
-                </table>
+                      <>
+                        {/* 1. Product Rows */}
+                        {formLineItems
+                          .map((row, idx) => ({ row, idx }))
+                          .filter(({ row }) => !row.is_additional_charge)
+                          .map(({ row, idx }) => (
+                            <tr key={row.id || idx} style={{ background: "#ffffff" }}>
+                              <td style={{ padding: "6px 8px", borderBottom: "1px solid #e2e8f0" }}>
+                                <input
+                                  type="text"
+                                  placeholder="Product Name"
+                                  value={row.product_name}
+                                  readOnly={Boolean(row.product_name && row.hsn)}
+                                  onChange={(e) => handleUpdateLineItem(idx, "product_name", e.target.value)}
+                                  style={{
+                                    width: "100%",
+                                    height: "32px",
+                                    border: row.product_name ? "none" : "1px solid #cbd5e1",
+                                    borderRadius: "3px",
+                                    padding: "0 6px",
+                                    fontSize: "12.5px",
+                                    background: "transparent",
+                                    color: "#1e293b",
+                                    fontWeight: 500,
+                                    outline: "none",
+                                    cursor: row.product_name && row.hsn ? "default" : "text",
+                                  }}
+                                />
+                              </td>
+                              <td style={{ padding: "6px 8px", borderBottom: "1px solid #e2e8f0" }}>
+                                <input
+                                  type="text"
+                                  readOnly
+                                  tabIndex={-1}
+                                  placeholder="HSN"
+                                  value={row.hsn}
+                                  style={{
+                                    width: "100%",
+                                    height: "32px",
+                                    border: "1px solid #cbd5e1",
+                                    borderRadius: "3px",
+                                    padding: "0 6px",
+                                    fontSize: "12.5px",
+                                    background: "#f8fafc",
+                                    color: "#334155",
+                                    fontWeight: 500,
+                                    cursor: "default",
+                                    outline: "none",
+                                  }}
+                                />
+                              </td>
+                              <td style={{ padding: "6px 8px", borderBottom: "1px solid #e2e8f0" }}>
+                                {(() => {
+                                  const isExceeded =
+                                    row.available_stock !== undefined &&
+                                    row.available_stock !== null &&
+                                    (parseFloat(String(row.quantity)) || 0) > Number(row.available_stock);
+                                  return (
+                                    <>
+                                      <input
+                                        type="number"
+                                        step="any"
+                                        value={row.quantity}
+                                        onChange={(e) => handleUpdateLineItem(idx, "quantity", e.target.value)}
+                                        onBlur={() => {
+                                          const qVal = parseFloat(String(row.quantity)) || 0;
+                                          if (
+                                            row.available_stock !== undefined &&
+                                            row.available_stock !== null &&
+                                            qVal > Number(row.available_stock)
+                                          ) {
+                                            toast(
+                                              `Quantity for "${row.product_name || "Product"}" (${row.quantity}) exceeds available stock (${row.available_stock})!`,
+                                              "warning"
+                                            );
+                                          }
+                                        }}
+                                        aria-label={isExceeded ? `Quantity for ${row.product_name || "item"} exceeds available stock` : undefined}
+                                        style={{
+                                          width: "100%",
+                                          height: "32px",
+                                          border: isExceeded ? "1.5px solid #ef4444" : "1px solid #cbd5e1",
+                                          borderRadius: "3px",
+                                          padding: "0 6px",
+                                          fontSize: "12.5px",
+                                          background: isExceeded ? "#fef2f2" : "#ffffff",
+                                          color: isExceeded ? "#b91c1c" : "#1e293b",
+                                          fontWeight: isExceeded ? 600 : 400,
+                                          outline: isExceeded ? "2px solid rgba(239, 68, 68, 0.2)" : "none",
+                                        }}
+                                      />
+                                      {row.available_stock !== undefined && (
+                                        <div
+                                          style={{
+                                            fontSize: "11px",
+                                            color: isExceeded ? "#dc2626" : Number(row.available_stock) > 0 ? "#64748b" : "#ef4444",
+                                            marginTop: "2px",
+                                            fontWeight: isExceeded ? 600 : 500,
+                                            display: "flex",
+                                            alignItems: "center",
+                                            gap: "4px",
+                                            flexWrap: "wrap",
+                                          }}
+                                        >
+                                          <span>Qty: {row.available_stock}</span>
+                                          {isExceeded && (
+                                            <span
+                                              style={{
+                                                color: "#dc2626",
+                                                fontWeight: 700,
+                                                background: "#fee2e2",
+                                                padding: "1px 4px",
+                                                borderRadius: "3px",
+                                                fontSize: "10px",
+                                                lineHeight: "1.2",
+                                              }}
+                                            >
+                                              ⚠️ Exceeds Available!
+                                            </span>
+                                          )}
+                                        </div>
+                                      )}
+                                    </>
+                                  );
+                                })()}
+                              </td>
+                              <td style={{ padding: "6px 8px", borderBottom: "1px solid #e2e8f0" }}>
+                                <input
+                                  type="number"
+                                  step="any"
+                                  placeholder="0.00"
+                                  value={row.unit_price}
+                                  onChange={(e) => handleUpdateLineItem(idx, "unit_price", e.target.value)}
+                                  style={{ width: "100%", height: "32px", border: "1px solid #cbd5e1", borderRadius: "3px", padding: "0 6px", fontSize: "12.5px", background: "#ffffff" }}
+                                />
+                                {row.min_price > 0 && (parseFloat(String(row.unit_price)) || 0) < row.min_price && (
+                                  <div style={{ color: "#b45309", fontSize: "11px", marginTop: "2px" }}>Below min ₹{row.min_price}</div>
+                                )}
+                              </td>
+                              <td style={{ padding: "6px 8px", borderBottom: "1px solid #e2e8f0" }}>
+                                <div style={{ display: "flex", alignItems: "center", border: "1px solid #cbd5e1", borderRadius: "3px", overflow: "hidden", background: "#ffffff" }}>
+                                  <span style={{ background: "#f1f5f9", padding: "0 6px", fontSize: "12px", color: "#64748b", height: "30px", display: "flex", alignItems: "center" }}>₹</span>
+                                  <input
+                                    type="number"
+                                    step="any"
+                                    placeholder="0.00"
+                                    value={row.unit_discount || ""}
+                                    onChange={(e) => handleUpdateLineItem(idx, "unit_discount", e.target.value)}
+                                    style={{ width: "100%", height: "30px", border: "none", padding: "0 6px", fontSize: "12.5px", outline: "none", background: "#ffffff" }}
+                                  />
+                                </div>
+                              </td>
+                              <td style={{ padding: "6px 8px", borderBottom: "1px solid #e2e8f0" }}>
+                                <div style={{ height: "32px", border: "1px solid #cbd5e1", background: "#f8fafc", borderRadius: "3px", display: "flex", alignItems: "center", padding: "0 8px", fontSize: "12.5px", color: "#1e293b", fontWeight: 600, cursor: "default", userSelect: "none" }}>
+                                  {(Number(row.taxable_amount) || 0).toFixed(2)}
+                                </div>
+                              </td>
+                              <td style={{ padding: "6px 8px", borderBottom: "1px solid #e2e8f0" }}>
+                                <div style={{ display: "flex", alignItems: "center", border: "1px solid #cbd5e1", borderRadius: "3px", overflow: "hidden", background: "#f8fafc" }}>
+                                  <input
+                                    type="number"
+                                    step="any"
+                                    readOnly
+                                    tabIndex={-1}
+                                    value={row.gst_percent}
+                                    onChange={(e) => handleUpdateLineItem(idx, "gst_percent", e.target.value)}
+                                    style={{ width: "100%", height: "30px", border: "none", padding: "0 6px", fontSize: "12.5px", outline: "none", background: "#f8fafc", color: "#334155", cursor: "default" }}
+                                  />
+                                  <span style={{ background: "#f1f5f9", padding: "0 5px", fontSize: "12px", color: "#64748b", height: "30px", display: "flex", alignItems: "center" }}>%</span>
+                                </div>
+                              </td>
+                              <td style={{ padding: "6px 8px", borderBottom: "1px solid #e2e8f0" }}>
+                                <div style={{ height: "32px", border: "1px solid #cbd5e1", background: "#f8fafc", borderRadius: "3px", display: "flex", alignItems: "center", padding: "0 8px", fontSize: "12.5px", color: "#1e293b", fontWeight: 600, cursor: "default", userSelect: "none" }}>
+                                  {(Number(row.gst_amount) || 0).toFixed(2)}
+                                </div>
+                              </td>
+                              <td style={{ padding: "6px 8px", borderBottom: "1px solid #e2e8f0" }}>
+                                <div style={{ height: "32px", border: "1px solid #cbd5e1", background: "#f8fafc", borderRadius: "3px", display: "flex", alignItems: "center", padding: "0 8px", fontSize: "12.5px", color: "#1e293b", fontWeight: 600, cursor: "default", userSelect: "none" }}>
+                                  {(Number(row.total) || 0).toFixed(2)}
+                                </div>
+                              </td>
+                              <td style={{ padding: "6px 4px", borderBottom: "1px solid #e2e8f0", textAlign: "center" }}>
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteLineItem(idx)}
+                                  style={{ background: "none", border: "none", color: "#ef4444", cursor: "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center", padding: "4px" }}
+                                  title="Remove Row"
+                                  aria-label="✕"
+                                >
+                                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                    <polyline points="3 6 5 6 21 6" />
+                                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                                  </svg>
+                                  <span style={{ position: "absolute", width: "1px", height: "1px", overflow: "hidden", clip: "rect(0,0,0,0)" }}>✕</span>
+                                </button>
+                              </td>
+                            </tr>
+                          ))}
 
-                {/* Table Summary Bar matching Screenshot 2 */}
-                <div
-                  style={{
-                    background: "#cbd5e1",
-                    padding: "9px 16px",
-                    display: "flex",
-                    justifyContent: "space-around",
-                    alignItems: "center",
-                    fontWeight: 700,
-                    fontSize: "12.5px",
-                    color: "#1e293b",
-                    borderTop: "1px solid #94a3b8",
-                  }}
-                >
-                  <span>{totals.totalQty} (Quantity)</span>
-                  <span>{totals.totalTaxable.toFixed(2)} (Taxable)</span>
-                  <span>{totals.totalTax.toFixed(2)} (TAX)</span>
-                  <span>{totals.totalWithTax.toFixed(2)} (Total)</span>
-                </div>
+                        {/* 2. Additional Charges Section Checkbox Row */}
+                        <tr>
+                          <td colSpan={10} style={{ padding: "10px 12px", background: "#ffffff", borderBottom: "1px solid #e2e8f0" }}>
+                            <label style={{ display: "inline-flex", alignItems: "center", gap: "8px", fontSize: "13px", fontWeight: 700, color: "#0f172a", cursor: "pointer" }}>
+                              <input
+                                type="checkbox"
+                                data-testid="checkbox-additional-charges"
+                                checked={formState.additional_charges_enabled}
+                                onChange={(e) => setFormState({ ...formState, additional_charges_enabled: e.target.checked })}
+                                style={{ cursor: "pointer", accentColor: "#0061f2", width: "16px", height: "16px" }}
+                              />
+                              Additional Charges
+                            </label>
+                          </td>
+                        </tr>
+
+                        {/* 3. Additional Charge Rows (rendered only when enabled) */}
+                        {formState.additional_charges_enabled &&
+                          formLineItems
+                            .map((row, idx) => ({ row, idx }))
+                            .filter(({ row }) => row.is_additional_charge)
+                            .map(({ row, idx }) => (
+                              <tr key={row.id || idx} style={{ background: "#fcfdfe" }}>
+                                <td style={{ padding: "6px 8px", borderBottom: "1px solid #e2e8f0" }}>
+                                  <Combobox
+                                    ariaLabel="Additional Charge Type"
+                                    value={row.charge_type || ""}
+                                    onChange={(val) => handleUpdateLineItem(idx, "charge_type", val)}
+                                    options={ADDITIONAL_CHARGE_TYPES}
+                                    placeholder="Select Charge"
+                                    inputStyle={{ height: "32px", fontSize: "12.5px" }}
+                                    placement="up"
+                                  />
+                                </td>
+                                <td style={{ padding: "6px 8px", borderBottom: "1px solid #e2e8f0" }}>
+                                  <input
+                                    type="text"
+                                    readOnly
+                                    tabIndex={-1}
+                                    placeholder="HSN"
+                                    value={row.hsn}
+                                    style={{
+                                      width: "100%",
+                                      height: "32px",
+                                      border: "1px solid #cbd5e1",
+                                      borderRadius: "3px",
+                                      padding: "0 6px",
+                                      fontSize: "12.5px",
+                                      background: "#f8fafc",
+                                      color: "#334155",
+                                      fontWeight: 500,
+                                      cursor: "default",
+                                      outline: "none",
+                                    }}
+                                  />
+                                </td>
+                                <td style={{ padding: "6px 8px", borderBottom: "1px solid #e2e8f0" }}>
+                                  <input
+                                    type="number"
+                                    step="any"
+                                    value={row.quantity}
+                                    onChange={(e) => handleUpdateLineItem(idx, "quantity", e.target.value)}
+                                    style={{ width: "100%", height: "32px", border: "1px solid #cbd5e1", borderRadius: "3px", padding: "0 6px", fontSize: "12.5px", background: "#ffffff" }}
+                                  />
+                                </td>
+                                <td style={{ padding: "6px 8px", borderBottom: "1px solid #e2e8f0" }}>
+                                  <input
+                                    type="number"
+                                    step="any"
+                                    placeholder="0.00"
+                                    value={row.unit_price}
+                                    onChange={(e) => handleUpdateLineItem(idx, "unit_price", e.target.value)}
+                                    style={{ width: "100%", height: "32px", border: "1px solid #cbd5e1", borderRadius: "3px", padding: "0 6px", fontSize: "12.5px", background: "#ffffff" }}
+                                  />
+                                </td>
+                                <td style={{ padding: "6px 8px", borderBottom: "1px solid #e2e8f0" }}>
+                                  <div style={{ display: "flex", alignItems: "center", border: "1px solid #cbd5e1", borderRadius: "3px", overflow: "hidden", background: "#ffffff" }}>
+                                    <span style={{ background: "#f1f5f9", padding: "0 6px", fontSize: "12px", color: "#64748b", height: "30px", display: "flex", alignItems: "center" }}>₹</span>
+                                    <input
+                                      type="number"
+                                      step="any"
+                                      placeholder="0.00"
+                                      value={row.unit_discount || ""}
+                                      onChange={(e) => handleUpdateLineItem(idx, "unit_discount", e.target.value)}
+                                      style={{ width: "100%", height: "30px", border: "none", padding: "0 6px", fontSize: "12.5px", outline: "none", background: "#ffffff" }}
+                                    />
+                                  </div>
+                                </td>
+                                <td style={{ padding: "6px 8px", borderBottom: "1px solid #e2e8f0" }}>
+                                  <div style={{ height: "32px", border: "1px solid #cbd5e1", background: "#f8fafc", borderRadius: "3px", display: "flex", alignItems: "center", padding: "0 8px", fontSize: "12.5px", color: "#1e293b", fontWeight: 600, cursor: "default", userSelect: "none" }}>
+                                    {(Number(row.taxable_amount) || 0).toFixed(2)}
+                                  </div>
+                                </td>
+                                <td style={{ padding: "6px 8px", borderBottom: "1px solid #e2e8f0" }}>
+                                  <div style={{ display: "flex", alignItems: "center", border: "1px solid #cbd5e1", borderRadius: "3px", overflow: "hidden", background: "#f8fafc" }}>
+                                    <input
+                                      type="number"
+                                      step="any"
+                                      readOnly
+                                      tabIndex={-1}
+                                      value={row.gst_percent}
+                                      onChange={(e) => handleUpdateLineItem(idx, "gst_percent", e.target.value)}
+                                      style={{ width: "100%", height: "30px", border: "none", padding: "0 6px", fontSize: "12.5px", outline: "none", background: "#f8fafc", color: "#334155", cursor: "default" }}
+                                    />
+                                    <span style={{ background: "#f1f5f9", padding: "0 5px", fontSize: "12px", color: "#64748b", height: "30px", display: "flex", alignItems: "center" }}>%</span>
+                                  </div>
+                                </td>
+                                <td style={{ padding: "6px 8px", borderBottom: "1px solid #e2e8f0" }}>
+                                  <div style={{ height: "32px", border: "1px solid #cbd5e1", background: "#f8fafc", borderRadius: "3px", display: "flex", alignItems: "center", padding: "0 8px", fontSize: "12.5px", color: "#1e293b", fontWeight: 600, cursor: "default", userSelect: "none" }}>
+                                    {(Number(row.gst_amount) || 0).toFixed(2)}
+                                  </div>
+                                </td>
+                                <td style={{ padding: "6px 8px", borderBottom: "1px solid #e2e8f0" }}>
+                                  <div style={{ height: "32px", border: "1px solid #cbd5e1", background: "#f8fafc", borderRadius: "3px", display: "flex", alignItems: "center", padding: "0 8px", fontSize: "12.5px", color: "#1e293b", fontWeight: 600, cursor: "default", userSelect: "none" }}>
+                                    {(Number(row.total) || 0).toFixed(2)}
+                                  </div>
+                                </td>
+                                <td style={{ padding: "6px 4px", borderBottom: "1px solid #e2e8f0", textAlign: "center" }}>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDeleteLineItem(idx)}
+                                    style={{ background: "none", border: "none", color: "#ef4444", cursor: "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center", padding: "4px" }}
+                                    title="Remove Row"
+                                    aria-label="✕"
+                                  >
+                                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                      <polyline points="3 6 5 6 21 6" />
+                                      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                                    </svg>
+                                    <span style={{ position: "absolute", width: "1px", height: "1px", overflow: "hidden", clip: "rect(0,0,0,0)" }}>✕</span>
+                                  </button>
+                                </td>
+                              </tr>
+                            ))}
+                      </>
+                    )}
+                  </tbody>
+                  {/* Table Summary Bar matching Screenshot 1 & 2 */}
+                  <tfoot>
+                    <tr
+                      style={{
+                        background: "#cbd5e1",
+                        borderTop: "1px solid #94a3b8",
+                        fontWeight: 700,
+                        fontSize: "12.5px",
+                        color: "#1e293b",
+                      }}
+                    >
+                      <td colSpan={2} style={{ padding: "9px 10px", borderBottom: "none" }} />
+                      <td style={{ padding: "9px 8px", borderBottom: "none", color: "#0f172a", fontWeight: 800 }}>
+                        {totals.totalQty.toFixed(2)}
+                      </td>
+                      <td colSpan={2} style={{ padding: "9px 8px", borderBottom: "none" }} />
+                      <td style={{ padding: "9px 8px", borderBottom: "none", color: "#16a34a", fontWeight: 800 }}>
+                        {formatIndianCurrency(totals.totalTaxable)}
+                      </td>
+                      <td style={{ padding: "9px 8px", borderBottom: "none" }} />
+                      <td style={{ padding: "9px 8px", borderBottom: "none", color: "#ef4444", fontWeight: 800 }}>
+                        {formatIndianCurrency(totals.totalTax)}
+                      </td>
+                      <td style={{ padding: "9px 8px", borderBottom: "none", color: "#0f172a", fontWeight: 800 }}>
+                        {formatIndianCurrency(totals.totalWithTax)}
+                      </td>
+                      <td style={{ padding: "9px 6px", borderBottom: "none" }} />
+                    </tr>
+                  </tfoot>
+                </table>
               </div>
 
               <div style={{ display: "flex", gap: "10px", marginTop: "12px" }}>
@@ -2078,7 +2525,7 @@ export function ProformaInvoicesPage({
                   </label>
                   <textarea
                     rows={4}
-                    placeholder={DEFAULTS.terms_and_conditions || "Make all cheque payable to USER"}
+                    placeholder={DEFAULTS.terms_and_conditions || DEFAULT_TERMS_AND_CONDITIONS}
                     value={formState.terms_and_conditions}
                     onChange={(e) => setFormState({ ...formState, terms_and_conditions: e.target.value })}
                     style={{ width: "100%", padding: "10px", border: "1px solid #cbd5e1", borderRadius: "4px", fontSize: "13px", resize: "vertical", outline: "none", color: "#334155" }}

@@ -52,8 +52,12 @@ export function numOrNull(value: string | undefined): number | null {
 
 /** Converts numeric currency amounts to standard Indian English words (e.g., "Zero Rupees Only", "Two Lakh Seventy One Thousand Rupees Only") */
 export function numberToIndianWords(amount: number): string {
-  if (!Number.isFinite(amount) || amount <= 0) {
+  if (!Number.isFinite(amount) || amount === 0) {
     return "Zero Rupees Only";
+  }
+
+  if (amount < 0) {
+    return `Minus ${numberToIndianWords(Math.abs(amount))}`;
   }
 
   const ones = [
@@ -84,11 +88,13 @@ export function numberToIndianWords(amount: number): string {
     return res;
   }
 
-  const rounded = Math.round(amount);
-  let crore = Math.floor(rounded / 10000000);
-  let lakh = Math.floor((rounded % 10000000) / 100000);
-  let thousand = Math.floor((rounded % 100000) / 1000);
-  let hundred = rounded % 1000;
+  const integerPart = Math.floor(amount);
+  const paise = Math.round((amount - integerPart) * 100);
+
+  let crore = Math.floor(integerPart / 10000000);
+  let lakh = Math.floor((integerPart % 10000000) / 100000);
+  let thousand = Math.floor((integerPart % 100000) / 1000);
+  let hundred = integerPart % 1000;
 
   const parts: string[] = [];
   if (crore) parts.push(convertThreeDigits(crore) + " Crore");
@@ -96,6 +102,17 @@ export function numberToIndianWords(amount: number): string {
   if (thousand) parts.push(convertTwoDigits(thousand) + " Thousand");
   if (hundred) parts.push(convertThreeDigits(hundred));
 
-  return (parts.join(" ") || "Zero") + " Rupees Only";
+  const rupeesStr = parts.join(" ");
+
+  if (integerPart > 0 && paise > 0) {
+    return `${rupeesStr} Rupees And ${convertTwoDigits(paise)} Paise Only`;
+  }
+  if (integerPart > 0) {
+    return `${rupeesStr} Rupees Only`;
+  }
+  if (paise > 0) {
+    return `${convertTwoDigits(paise)} Paise Only`;
+  }
+  return "Zero Rupees Only";
 }
 

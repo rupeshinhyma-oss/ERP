@@ -134,4 +134,26 @@ describe("Combobox Component (Write + Dropdown)", () => {
     fireEvent.mouseDown(screen.getByTestId("outside-area"));
     expect(screen.queryByTestId("combobox-options")).toBeNull();
   });
+
+  it("renders upward with bottom positioning when placement='up'", () => {
+    render(
+      <Combobox
+        value=""
+        onChange={() => {}}
+        options={sampleOptions}
+        ariaLabel="Charge Type"
+        placement="up"
+      />
+    );
+
+    const toggleBtn = screen.getByRole("button", { name: /toggle charge type options/i });
+    fireEvent.click(toggleBtn);
+
+    const optionsMenu = screen.getByTestId("combobox-options");
+    expect(optionsMenu).toBeTruthy();
+    expect(optionsMenu.style.position).toBe("fixed");
+    expect(optionsMenu.style.top).toBe("auto");
+    expect(optionsMenu.style.bottom).toBeDefined();
+  });
 });
+

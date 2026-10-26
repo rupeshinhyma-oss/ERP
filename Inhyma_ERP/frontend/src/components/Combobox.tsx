@@ -1,16 +1,18 @@
-import React, { useState, useRef, useEffect, useMemo } from "react";
+import React, { useState, useRef, useEffect, useLayoutEffect, useMemo, useCallback } from "react";
+import { createPortal } from "react-dom";
 
 export interface ComboboxProps {
   id?: string;
   value: string;
   onChange: (value: string) => void;
-  options: string[];
+  options: string[] | readonly string[];
   placeholder?: string;
   ariaLabel?: string;
   disabled?: boolean;
   style?: React.CSSProperties;
   inputStyle?: React.CSSProperties;
   required?: boolean;
+  placement?: "up" | "down" | "auto";
 }
 
 export function Combobox({
@@ -24,6 +26,7 @@ export function Combobox({
   style,
   inputStyle,
   required,
+  placement = "auto",
 }: ComboboxProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [highlightedIndex, setHighlightedIndex] = useState(-1);
@@ -31,8 +34,63 @@ export function Combobox({
   const [query, setQuery] = useState("");
   const containerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
 
   const prevValueRef = useRef(value);
+
+  // Position calculation for portal/dropdown
+  const [coords, setCoords] = useState<{
+    left: number;
+    width: number;
+    top?: number;
+    bottom?: number;
+    isUp: boolean;
+  }>({
+    left: 0,
+    width: 0,
+    isUp: placement === "up",
+  });
+
+  const updatePosition = useCallback(() => {
+    if (!containerRef.current) return;
+    const rect = containerRef.current.getBoundingClientRect();
+    const isUp =
+      placement === "up" ||
+      (placement === "auto" && window.innerHeight - rect.bottom < 220 && rect.top > window.innerHeight - rect.bottom);
+
+    if (isUp) {
+      setCoords({
+        left: rect.left,
+        width: rect.width,
+        bottom: window.innerHeight - rect.top + 2,
+        isUp: true,
+      });
+    } else {
+      setCoords({
+        left: rect.left,
+        width: rect.width,
+        top: rect.bottom + 2,
+        isUp: false,
+      });
+    }
+  }, [placement]);
+
+  useLayoutEffect(() => {
+    if (isOpen) {
+      updatePosition();
+    }
+  }, [isOpen, updatePosition]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    updatePosition();
+    window.addEventListener("scroll", updatePosition, true);
+    window.addEventListener("resize", updatePosition);
+    return () => {
+      window.removeEventListener("scroll", updatePosition, true);
+      window.removeEventListener("resize", updatePosition);
+    };
+  }, [isOpen, updatePosition]);
 
   // Clean options to eliminate invalid dummy placeholders
   const cleanOptions = useMemo(() => {
@@ -76,7 +134,12 @@ export function Combobox({
   // Click outside listener
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+      const target = e.target as Node;
+      if (
+        containerRef.current &&
+        !containerRef.current.contains(target) &&
+        (!menuRef.current || !menuRef.current.contains(target))
+      ) {
         setIsOpen(false);
         setIsTyping(false);
       }
@@ -104,6 +167,7 @@ export function Combobox({
     setIsTyping(true);
     setIsOpen(true);
     setHighlightedIndex(0);
+    updatePosition();
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -114,6 +178,7 @@ export function Combobox({
       if (!isOpen) {
         setIsOpen(true);
         setHighlightedIndex(0);
+        updatePosition();
       } else {
         setHighlightedIndex((prev) =>
           prev < filteredOptions.length - 1 ? prev + 1 : 0
@@ -158,6 +223,7 @@ export function Combobox({
           if (!disabled) {
             setIsTyping(false);
             setIsOpen(true);
+            updatePosition();
           }
         }}
         onChange={handleInputChange}
@@ -191,7 +257,11 @@ export function Combobox({
           e.stopPropagation();
           if (!disabled) {
             setIsTyping(false);
-            setIsOpen((prev) => !prev);
+            setIsOpen((prev) => {
+              const next = !prev;
+              if (next) updatePosition();
+              return next;
+            });
             if (!isOpen) {
               inputRef.current?.focus();
             }
@@ -231,74 +301,100 @@ export function Combobox({
       </button>
 
       {/* Options Dropdown Menu */}
-      {isOpen && (
-        <div
-          data-testid="combobox-options"
-          style={{
-            position: "absolute",
-            top: "calc(100% + 2px)",
-            left: 0,
-            right: 0,
-            zIndex: 1000,
-            background: "#ffffff",
-            border: "1px solid #cbd5e1",
-            borderRadius: "4px",
-            boxShadow: "0 4px 14px rgba(0, 0, 0, 0.12)",
-            maxHeight: "220px",
-            overflowY: "auto",
-          }}
-        >
-          {filteredOptions.length === 0 ? (
-            <div
-              style={{
-                padding: "8px 12px",
-                fontSize: "12.5px",
-                color: "#94a3b8",
-                fontStyle: "italic",
-              }}
-            >
-              No matching options
-            </div>
-          ) : (
-            filteredOptions.map((opt, idx) => {
-              const isSelected = opt === value || (opt === "Select" && (!value || value === "Select"));
-              const isHighlighted = idx === highlightedIndex;
+      {isOpen &&
+        typeof document !== "undefined" &&
+        createPortal(
+          <div
+            ref={menuRef}
+            data-testid="combobox-options"
+            style={{
+              position: "fixed",
+              left: coords.left > 0 ? coords.left : (containerRef.current?.getBoundingClientRect().left ?? 0),
+              width:
+                coords.width > 0
+                  ? coords.width
+                  : (containerRef.current?.offsetWidth || "200px"),
+              minWidth: "160px",
+              ...(coords.isUp
+                ? {
+                    bottom:
+                      coords.bottom ??
+                      (containerRef.current
+                        ? window.innerHeight - containerRef.current.getBoundingClientRect().top + 2
+                        : 0),
+                    top: "auto",
+                    boxShadow: "0 -4px 14px rgba(0, 0, 0, 0.12)",
+                  }
+                : {
+                    top:
+                      coords.top ??
+                      (containerRef.current
+                        ? containerRef.current.getBoundingClientRect().bottom + 2
+                        : 0),
+                    bottom: "auto",
+                    boxShadow: "0 4px 14px rgba(0, 0, 0, 0.12)",
+                  }),
+              zIndex: 99999,
+              background: "#ffffff",
+              border: "1px solid #cbd5e1",
+              borderRadius: "4px",
+              maxHeight: "220px",
+              overflowY: "auto",
+              boxSizing: "border-box",
+            }}
+          >
+            {filteredOptions.length === 0 ? (
+              <div
+                style={{
+                  padding: "8px 12px",
+                  fontSize: "12.5px",
+                  color: "#94a3b8",
+                  fontStyle: "italic",
+                }}
+              >
+                No matching options
+              </div>
+            ) : (
+              filteredOptions.map((opt, idx) => {
+                const isSelected = opt === value || (opt === "Select" && (!value || value === "Select"));
+                const isHighlighted = idx === highlightedIndex;
 
-              return (
-                <div
-                  key={`${opt}-${idx}`}
-                  onClick={() => handleSelect(opt)}
-                  onMouseEnter={() => setHighlightedIndex(idx)}
-                  style={{
-                    padding: "8px 12px",
-                    fontSize: "13px",
-                    cursor: "pointer",
-                    color: isSelected ? "#0061f2" : "#1e293b",
-                    fontWeight: isSelected ? 600 : 400,
-                    background: isSelected
-                      ? "#eff6ff"
-                      : isHighlighted
-                      ? "#f8fafc"
-                      : "#ffffff",
-                    borderBottom:
-                      idx < filteredOptions.length - 1
-                        ? "1px solid #f1f5f9"
-                        : "none",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                  }}
-                >
-                  <span>{opt}</span>
-                  {isSelected && (
-                    <span style={{ color: "#0061f2", fontSize: "12px" }}>✓</span>
-                  )}
-                </div>
-              );
-            })
-          )}
-        </div>
-      )}
+                return (
+                  <div
+                    key={`${opt}-${idx}`}
+                    onClick={() => handleSelect(opt)}
+                    onMouseEnter={() => setHighlightedIndex(idx)}
+                    style={{
+                      padding: "8px 12px",
+                      fontSize: "13px",
+                      cursor: "pointer",
+                      color: isSelected ? "#0061f2" : "#1e293b",
+                      fontWeight: isSelected ? 600 : 400,
+                      background: isSelected
+                        ? "#eff6ff"
+                        : isHighlighted
+                        ? "#f8fafc"
+                        : "#ffffff",
+                      borderBottom:
+                        idx < filteredOptions.length - 1
+                          ? "1px solid #f1f5f9"
+                          : "none",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                    }}
+                  >
+                    <span>{opt}</span>
+                    {isSelected && (
+                      <span style={{ color: "#0061f2", fontSize: "12px" }}>✓</span>
+                    )}
+                  </div>
+                );
+              })
+            )}
+          </div>,
+          document.body
+        )}
     </div>
   );
 }

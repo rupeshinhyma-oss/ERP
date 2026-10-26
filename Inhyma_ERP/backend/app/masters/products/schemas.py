@@ -236,12 +236,18 @@ class ProductRead(BaseModel):
     @computed_field
     @property
     def hsn_number(self) -> str | None:
-        return self.hsn.hsn_number if self.hsn else None
+        if self.hsn and self.hsn.hsn_number:
+            return self.hsn.hsn_number
+        if self.barcode and any(c.isdigit() for c in self.barcode):
+            return self.barcode
+        return None
 
     @computed_field
     @property
     def gst_percent(self) -> float | None:
-        return float(self.hsn.gst_percent) if self.hsn else None
+        if self.hsn and self.hsn.gst_percent is not None:
+            return float(self.hsn.gst_percent)
+        return 18.0
 
     @computed_field
     @property

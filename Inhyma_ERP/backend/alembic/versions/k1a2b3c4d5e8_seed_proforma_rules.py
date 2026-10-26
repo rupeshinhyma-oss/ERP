@@ -44,7 +44,7 @@ DEFAULTS = [
     ("delivery_charge", "To Pay"),
     ("third_party_delivery", "No"),
     ("self_pickup_transport", "Self Pick-up"),
-    ("terms_and_conditions", "Make all cheque payable to USER"),
+    ("terms_and_conditions", "1. Transport Charges: To Pay.\n2. Payment Terms: 100% Before Dispatch.\n3. Order once confirmed, cannot be cancelled."),
 ]
 NUMBERING = [("prefix", "PI-"), ("width", "5")]
 SPEC_OPTIONS = {

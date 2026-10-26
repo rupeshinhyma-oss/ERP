@@ -118,7 +118,10 @@ const LIST_RESPONSE = {
   status_rules: STATUS_RULES,
 };
 
-const CATALOG = [{ product_name: "Continuous Band Sealer", hsn_number: "84223000", gst_percent: 18, standard_price: 25000 }];
+const CATALOG = [
+  { product_name: "Continuous Band Sealer", hsn_number: "84223000", gst_percent: 18, standard_price: 25000 },
+  { product_name: "JD spares", barcode: "8422.90.90", standard_price: 0, available_stock: 108 },
+];
 
 function fakeApiGet(url: string) {
   if (url.startsWith("/masters/options/lookup")) {
@@ -141,6 +144,18 @@ function fakeApiGet(url: string) {
     });
   }
   if (url.startsWith("/masters/transports")) return Promise.resolve({ data: [{ name: "Not Sure" }, { name: "Self Pick-up" }, { name: "VRL" }] });
+  if (url.startsWith("/masters/taxes")) {
+    return Promise.resolve({
+      data: [
+        { hsn_number: "8422.90.90", gst_percent: 18.0 },
+        { hsn_number: "84223000", gst_percent: 18.0 },
+        { hsn_number: "8422.30.00", gst_percent: 18.0 },
+        { hsn_number: "996511", gst_percent: 18.0 },
+        { hsn_number: "996713", gst_percent: 18.0 },
+        { hsn_number: "8419.89.90", gst_percent: 12.0 },
+      ],
+    });
+  }
   if (url.startsWith("/masters/lead-sources")) return Promise.resolve({ data: [{ name: "Website" }, { name: "IndiaMART" }] });
   if (url.startsWith("/masters/additional-charges")) return Promise.resolve({ data: [{ name: "Transport Charges" }, { name: "Packing & Forwarding" }] });
   if (url.startsWith("/masters/products")) return Promise.resolve({ data: CATALOG });
@@ -535,7 +550,7 @@ describe("Add Proforma Invoice Form (/proforma-invoice/add & /proforma-invoice/a
     // Clicking or focusing opens the dropdown with available quantity
     fireEvent.focus(searchInput);
     expect(await screen.findByText("Continuous Band Sealer")).toBeTruthy();
-    expect(screen.getByText(/\(Available Qty:/)).toBeTruthy();
+    expect(screen.getAllByText(/\(Available Qty:/).length).toBeGreaterThanOrEqual(1);
 
     fireEvent.change(searchInput, { target: { value: "Band" } });
 
@@ -688,12 +703,14 @@ describe("Add Proforma Invoice: defaults, rules and saving", () => {
 
   it("pre-fills payment terms, transport, delivery type/charge and third-party from the database defaults", async () => {
     renderAdd();
-    await waitFor(() => expect((screen.getByLabelText("Payment Terms") as HTMLInputElement).value).toBe("100% Advance"));
-    expect((screen.getByLabelText("Transport Name") as HTMLInputElement).value).toBe("Not Sure");
+    await waitFor(() => expect((screen.getByLabelText("Transport Name") as HTMLInputElement).value).toBe("Not Sure"));
+    expect((screen.getByLabelText("Payment Terms") as HTMLInputElement).value).toBe("100% Advance");
     expect((screen.getByLabelText("Delivery Type") as HTMLInputElement).value).toBe("Godown");
     expect((screen.getByLabelText("Delivery Charge") as HTMLInputElement).value).toBe("To Pay");
     expect((screen.getByLabelText("Third Party Delivery") as HTMLInputElement).value).toBe("No");
-    expect((screen.getByPlaceholderText("Pay within 7 days") as HTMLTextAreaElement).value).toBe("");
+    expect((screen.getByPlaceholderText("Pay within 7 days") as HTMLTextAreaElement).value).toContain("1. Transport Charges: To Pay.");
+    expect((screen.getByPlaceholderText("Pay within 7 days") as HTMLTextAreaElement).value).toContain("2. Payment Terms: 100% Before Dispatch.");
+    expect((screen.getByPlaceholderText("Pay within 7 days") as HTMLTextAreaElement).value).toContain("3. Order once confirmed, cannot be cancelled.");
   });
 
   it("hides destination, delivery type and delivery charge when the transport is Self Pick-up", async () => {
@@ -1137,7 +1154,207 @@ describe("Proforma list: workflow actions follow the database rules and the user
     fireEvent.click(screen.getByRole("button", { name: "+ Add Product Row" }));
     expect(screen.getAllByRole("button", { name: "✕" }).length).toBe(1);
   });
+
+  it("calculates product items, additional charges, and totals matching reference formulas", async () => {
+    renderAdd();
+    await screen.findByDisplayValue("Godown");
+
+    // Add first product row: qty 1, price 6, discount 0, GST 18% -> taxable 6.00, gst 1.08, total 7.08
+    fireEvent.click(screen.getByRole("button", { name: "+ Add Product Row" }));
+    const productInputs = screen.getAllByPlaceholderText("Product Name");
+    expect(productInputs.length).toBe(1);
+
+    const productRow = productInputs[0].closest("tr") as HTMLElement;
+    const [pQty, pPrice, , pGst] = within(productRow).getAllByRole("spinbutton") as HTMLInputElement[];
+    fireEvent.change(pQty, { target: { value: "1" } });
+    fireEvent.change(pPrice, { target: { value: "6" } });
+    fireEvent.change(pGst, { target: { value: "18" } });
+
+    expect(within(productRow).getByText("6.00")).toBeTruthy();
+    expect(within(productRow).getByText("1.08")).toBeTruthy();
+    expect(within(productRow).getByText("7.08")).toBeTruthy();
+
+    // Verify charge rows: Transport Charges (price 8) and Packing & Forwarding (price 8)
+    const transportRow = screen.getByDisplayValue("Transport Charges").closest("tr") as HTMLElement;
+    const [tQty, tPrice] = within(transportRow).getAllByRole("spinbutton") as HTMLInputElement[];
+    fireEvent.change(tQty, { target: { value: "1" } });
+    fireEvent.change(tPrice, { target: { value: "8" } });
+
+    expect(within(transportRow).getByText("8.00")).toBeTruthy();
+    expect(within(transportRow).getByText("1.44")).toBeTruthy();
+    expect(within(transportRow).getByText("9.44")).toBeTruthy();
+
+    const packingRow = screen.getByDisplayValue("Packing & Forwarding Charges").closest("tr") as HTMLElement;
+    const [pkgQty, pkgPrice] = within(packingRow).getAllByRole("spinbutton") as HTMLInputElement[];
+    fireEvent.change(pkgQty, { target: { value: "1" } });
+    fireEvent.change(pkgPrice, { target: { value: "8" } });
+
+    expect(within(packingRow).getByText("8.00")).toBeTruthy();
+    expect(within(packingRow).getByText("1.44")).toBeTruthy();
+    expect(within(packingRow).getByText("9.44")).toBeTruthy();
+
+    // Totals with additional charges enabled:
+    // Qty: 1 + 1 + 1 = 3.00, Taxable: 6 + 8 + 8 = 22.00, Tax: 1.08 + 1.44 + 1.44 = 3.96, Total: 7.08 + 9.44 + 9.44 = 25.96
+    expect(screen.getByText("3.00")).toBeTruthy();
+    expect(screen.getAllByText(/22\.00/).length).toBeGreaterThanOrEqual(2);
+    expect(screen.getAllByText(/3\.96/).length).toBeGreaterThanOrEqual(2);
+    expect(screen.getAllByText(/25\.96/).length).toBeGreaterThanOrEqual(2);
+    expect(screen.getByText(/Twenty Five Rupees And Ninety Six Paise Only/)).toBeTruthy();
+
+    // Now uncheck Additional Charges:
+    const checkbox = screen.getByTestId("checkbox-additional-charges");
+    fireEvent.click(checkbox);
+
+    // Charge rows are now hidden, and totals recalculate for product row only:
+    // Qty: 1.00, Taxable: 6.00, Tax: 1.08, Total: 7.08
+    expect(screen.queryByDisplayValue("Transport Charges")).toBeNull();
+    expect(screen.getByText("1.00")).toBeTruthy();
+    expect(screen.getAllByText(/6\.00/).length).toBeGreaterThanOrEqual(2);
+    expect(screen.getAllByText(/1\.08/).length).toBeGreaterThanOrEqual(2);
+    expect(screen.getAllByText(/7\.08/).length).toBeGreaterThanOrEqual(2);
+    expect(screen.getByText(/Seven Rupees And Eight Paise Only/)).toBeTruthy();
+  });
+
+  it("locks grey fields (HSN, GST, Taxable, GST Amt, Total) and computes exact negative scenario from reference screenshot", async () => {
+    renderAdd();
+    await screen.findByDisplayValue("Godown");
+
+    // Add row 1: DBF900L Band Sealer MSV (Qty 1, Price 6, Discount 5000, GST 18%)
+    fireEvent.click(screen.getByRole("button", { name: "+ Add Product Row" }));
+    const productInputs = screen.getAllByPlaceholderText("Product Name");
+    const row1 = productInputs[0].closest("tr") as HTMLElement;
+
+    // Verify HSN is readonly with grey background
+    const hsn1 = within(row1).getByPlaceholderText("HSN") as HTMLInputElement;
+    expect(hsn1.readOnly).toBe(true);
+    expect(hsn1.style.background).toBe("rgb(248, 250, 252)");
+
+    // Verify inputs Qty, Price, Discount are editable with white backgrounds
+    const [q1, p1, d1, gst1] = within(row1).getAllByRole("spinbutton") as HTMLInputElement[];
+    expect(q1.style.background).toBe("rgb(255, 255, 255)");
+    expect(p1.style.background).toBe("rgb(255, 255, 255)");
+    expect(d1.style.background).toBe("rgb(255, 255, 255)");
+    expect(gst1.readOnly).toBe(true);
+
+    fireEvent.change(q1, { target: { value: "1" } });
+    fireEvent.change(p1, { target: { value: "6" } });
+    fireEvent.change(d1, { target: { value: "5000" } });
+    // taxable = (6 - 5000) * 1 = -4994.00, gstAmt = -898.92, total = -5892.92
+    expect(within(row1).getByText("-4994.00")).toBeTruthy();
+    expect(within(row1).getByText("-898.92")).toBeTruthy();
+    expect(within(row1).getByText("-5892.92")).toBeTruthy();
+
+    // Add row 2: Qty 1, Price 8, Discount 6000, GST 18%
+    fireEvent.click(screen.getByRole("button", { name: "+ Add Product Row" }));
+    const allProdInputs = screen.getAllByPlaceholderText("Product Name");
+    const row2 = allProdInputs[0].closest("tr") as HTMLElement;
+    const [q2, p2, d2] = within(row2).getAllByRole("spinbutton") as HTMLInputElement[];
+    fireEvent.change(q2, { target: { value: "1" } });
+    fireEvent.change(p2, { target: { value: "8" } });
+    fireEvent.change(d2, { target: { value: "6000" } });
+    // taxable = (8 - 6000) * 1 = -5992.00, gstAmt = -1078.56, total = -7070.56
+    expect(within(row2).getByText("-5992.00")).toBeTruthy();
+    expect(within(row2).getByText("-1078.56")).toBeTruthy();
+    expect(within(row2).getByText("-7070.56")).toBeTruthy();
+
+    // Verify additional charges: Transport (price 8, discount 850, qty 0) and Packing (price 8, discount 520, qty 0)
+    const transportRow = screen.getByDisplayValue("Transport Charges").closest("tr") as HTMLElement;
+    const [tQty, tPrice, tDiscount] = within(transportRow).getAllByRole("spinbutton") as HTMLInputElement[];
+    fireEvent.change(tQty, { target: { value: "0" } });
+    fireEvent.change(tPrice, { target: { value: "8" } });
+    fireEvent.change(tDiscount, { target: { value: "850" } });
+
+    const packingRow = screen.getByDisplayValue("Packing & Forwarding Charges").closest("tr") as HTMLElement;
+    const [pkgQty, pkgPrice, pkgDiscount] = within(packingRow).getAllByRole("spinbutton") as HTMLInputElement[];
+    fireEvent.change(pkgQty, { target: { value: "0" } });
+    fireEvent.change(pkgPrice, { target: { value: "8" } });
+    fireEvent.change(pkgDiscount, { target: { value: "520" } });
+
+    // Verify Totals matching reference Screenshot 3:
+    // Basic: 6*1 + 8*1 = 14.00
+    // Discount: 5000*1 + 6000*1 = 11,000.00
+    // Taxable: -4994 + -5992 = -10,986.00
+    // Tax: -898.92 + -1078.56 = -1,977.48
+    // Total Including Tax: -12,963.48
+    expect(screen.getByText("2.00")).toBeTruthy();
+    expect(screen.getAllByText(/14\.00/).length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText(/11,000\.00/).length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText(/10,986\.00/).length).toBeGreaterThanOrEqual(2);
+    expect(screen.getAllByText(/1,977\.48/).length).toBeGreaterThanOrEqual(2);
+    expect(screen.getAllByText(/12,963\.48/).length).toBeGreaterThanOrEqual(2);
+
+    // Negative Amount in Words correctly handled without "Undefined"
+    expect(screen.getByText(/Minus Twelve Thousand Nine Hundred Sixty Three Rupees And Forty Eight Paise Only/)).toBeTruthy();
+  });
+
+  it("automatically populates HSN code based on selected product (e.g. JD spares)", async () => {
+    renderAdd();
+    await screen.findByDisplayValue("Godown");
+
+    // Select warehouse Mumbai so product search is active
+    fireEvent.change(screen.getByLabelText("Warehouse"), { target: { value: "Mumbai" } });
+
+    // Focus product search and search for "JD spares"
+    const searchInput = await screen.findByPlaceholderText("Enter Product Name / Model No");
+    fireEvent.focus(searchInput);
+    fireEvent.change(searchInput, { target: { value: "JD" } });
+
+    // Click on "JD spares" in dropdown
+    const match = await screen.findByText("JD spares");
+    fireEvent.click(match);
+
+    // Find row with JD spares
+    const jdRow = (await screen.findByDisplayValue("JD spares")).closest("tr") as HTMLElement;
+    const hsnInput = within(jdRow).getByPlaceholderText("HSN") as HTMLInputElement;
+
+    // HSN must NOT be blank; it must be automatically populated with 8422.90.90
+    expect(hsnInput.value).toBe("8422.90.90");
+    expect(hsnInput.readOnly).toBe(true);
+    expect(hsnInput.style.background).toBe("rgb(248, 250, 252)");
+
+    // GST % must be automatically populated based on HSN code (18%)
+    const gstInput = within(jdRow).getByDisplayValue("18") as HTMLInputElement;
+    expect(gstInput.value).toBe("18");
+    expect(gstInput.readOnly).toBe(true);
+  });
+
+  it("shows alerts when quantity is more than available stock (e.g. JD spares qty 200 > available 108)", async () => {
+    renderAdd();
+    await screen.findByDisplayValue("Godown");
+
+    // Select warehouse Mumbai so product search is active
+    fireEvent.change(screen.getByLabelText("Warehouse"), { target: { value: "Mumbai" } });
+
+    // Focus product search and search for "JD spares"
+    const searchInput = await screen.findByPlaceholderText("Enter Product Name / Model No");
+    fireEvent.focus(searchInput);
+    fireEvent.change(searchInput, { target: { value: "JD" } });
+
+    // Click on "JD spares" in dropdown
+    const match = await screen.findByText("JD spares");
+    fireEvent.click(match);
+
+    // Find row with JD spares
+    const jdRow = (await screen.findByDisplayValue("JD spares")).closest("tr") as HTMLElement;
+    const qtyInput = within(jdRow).getByDisplayValue("1") as HTMLInputElement;
+
+    // Available stock should be 108
+    expect(within(jdRow).getByText(/Qty:\s*108/)).toBeTruthy();
+    expect(screen.queryByText(/Exceeds available/i)).toBeNull();
+
+    // Now change quantity to 200 (which exceeds available stock 108)
+    fireEvent.change(qtyInput, { target: { value: "200" } });
+
+    // Row shows visual alert
+    expect(within(jdRow).getByText(/Exceeds Available!/i)).toBeTruthy();
+    expect(qtyInput.style.border).toContain("rgb(239, 68, 68)");
+
+    // Top alert banner and Section 4 alert are displayed
+    expect(screen.getByTestId("alert-exceeded-stock")).toBeTruthy();
+    expect(screen.getByText(/Quantity for "JD spares" \(200\) exceeds available stock \(108\)/i)).toBeTruthy();
+  });
 });
+
 
 
 

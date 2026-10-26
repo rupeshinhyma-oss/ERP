@@ -1695,6 +1695,7 @@ export function SaleProcessFormPage() {
                             options={ADDITIONAL_CHARGE_TYPES}
                             placeholder="-- Select Charge --"
                             inputStyle={{ height: "32px", fontSize: "12.5px" }}
+                            placement="up"
                           />
                         ) : (
                           <input
