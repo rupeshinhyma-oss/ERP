@@ -21,12 +21,31 @@ Validates:
 import uuid
 from datetime import date, datetime, timedelta, timezone
 import pytest
-from httpx import AsyncClient
+import pytest_asyncio
+from httpx import ASGITransport, AsyncClient
 from sqlalchemy import delete, select
 
+from app.auth.security import create_access_token
 from app.database.engine import get_sessionmaker
 from app.hrms.models import HrmsLeaveRequest, HrmsLeaveAdjustment
 from app.users.models import User
+
+
+@pytest_asyncio.fixture
+async def client():
+    from app.main import create_application
+
+    sessionmaker = get_sessionmaker()
+    async with sessionmaker() as session:
+        user = (await session.execute(select(User).where(User.email == "qa_super_admin@inhyma.test"))).scalars().first()
+        token = create_access_token(user.id, permissions=["*"]).token
+        default_headers = {"Authorization": f"Bearer {token}"}
+
+    app = create_application()
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://testserver", headers=default_headers) as ac:
+        async with app.router.lifespan_context(app):
+            yield ac
 
 
 @pytest.mark.asyncio

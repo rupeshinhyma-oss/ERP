@@ -280,7 +280,7 @@ class RoleRepository(BaseRepository[Role]):
                 assignment_in_effect,
             )
         )
-        if (await self.session.execute(stmt_super_admin)).scalar_one_or_none() is not None:
+        if (await self.session.execute(stmt_super_admin)).scalars().first() is not None:
             all_perms_stmt = select(Permission.code)
             res = await self.session.execute(all_perms_stmt)
             perms = set(res.scalars().all())
@@ -311,6 +311,8 @@ class RoleRepository(BaseRepository[Role]):
 
         # Combine: (Role Permissions + User Grants) - User Denies
         effective = (role_perms | user_grants) - user_denies
+        for d in user_denies:
+            effective.add(f"deny:{d}")
         return effective
 
     async def get_effective_permissions_breakdown_for_user(self, user_id: uuid.UUID) -> dict:

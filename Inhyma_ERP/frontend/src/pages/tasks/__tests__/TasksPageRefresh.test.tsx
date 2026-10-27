@@ -16,6 +16,7 @@ vi.mock("@/lib/tasksApi", () => ({
     getAvailableAssignees: vi.fn().mockResolvedValue([
       { id: "u-1", name: "Admin", department: "Management", email: "admin@example.com" },
     ]),
+    fetchTaskDepartments: vi.fn().mockResolvedValue([]),
     fetchLabels: vi.fn().mockResolvedValue([]),
     fetchSavedFilters: vi.fn().mockResolvedValue([]),
     fetchSprints: vi.fn().mockResolvedValue([]),

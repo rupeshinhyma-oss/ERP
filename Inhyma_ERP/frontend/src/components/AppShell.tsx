@@ -37,6 +37,8 @@ import { ICONS, IconBell, IconChevronDown, IconChevronRight } from "./icons";
 import { EcosystemSwitcher } from "./EcosystemSwitcher";
 import { enforceCentralLanding, processIncomingSsoHandover } from "@/lib/ssoBridge";
 import { globalEcosystemLogout, initEcosystemSessionWatcher, isExplicitlyLoggedOut } from "@/lib/ecosystemSession";
+import { liveClient } from "@/lib/live/liveClient";
+import { userChannel, type LiveEvent } from "@/lib/live/liveEvent";
 
 import { ErrorBanner } from "./ui";
 import type { Profile } from "@/types";
@@ -48,7 +50,7 @@ const NAV_SCROLL_KEY = "erp_sidebar_nav_scroll";
 /* Notifications                                                      */
 /* ------------------------------------------------------------------ */
 
-interface NotificationItem {
+export interface NotificationItem {
   id: string;
   user_id: string;
   sender_id?: string | null;
@@ -59,6 +61,12 @@ interface NotificationItem {
   link?: string | null;
   is_read: boolean;
   created_at: string;
+}
+
+export interface NotificationApiResponse {
+  items?: NotificationItem[];
+  data?: NotificationItem[];
+  unread_count?: number;
 }
 
 function formatRelativeTime(dateStr: string): string {
@@ -87,13 +95,16 @@ function cleanNotificationTitle(text: string): string {
   return text.replace(/^[\p{Extended_Pictographic}\uFE0F\u200D\s]+/u, "").trim();
 }
 
-function NotificationBell() {
+export function NotificationBell() {
   const [open, setOpen] = useState(false);
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [unreadCount, setUnreadCount] = useState<number>(0);
   const [loading, setLoading] = useState(false);
   const wrapperRef = useRef<HTMLDivElement>(null);
+  const seenNotifIdsRef = useRef<Set<string>>(new Set());
   const navigate = useNavigate();
+  const { profile } = useAuth();
+  const userId = profile?.id;
 
   // Periodic poll for unread notification count
   const pollUnreadCount = useCallback(async () => {
@@ -117,15 +128,87 @@ function NotificationBell() {
   const loadNotifications = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await apiGet<NotificationItem[]>("/notifications?limit=30");
-      const list = Array.isArray(res.data) ? res.data : (res.data as any)?.data || [];
+      const res = await apiGet<NotificationItem[] | NotificationApiResponse>("/notifications?limit=30");
+      let list: NotificationItem[] = [];
+      if (Array.isArray(res.data)) {
+        list = res.data;
+      } else if (res.data && typeof res.data === "object") {
+        if (Array.isArray(res.data.items)) {
+          list = res.data.items;
+        } else if (Array.isArray(res.data.data)) {
+          list = res.data.data;
+        }
+        if (typeof res.data.unread_count === "number") {
+          setUnreadCount(res.data.unread_count);
+        }
+      }
+      list.forEach((item) => {
+        if (item?.id) {
+          seenNotifIdsRef.current.add(String(item.id));
+        }
+      });
       setNotifications(list);
     } catch {
-      /* best effort */
+      /* best effort -- do not crash, keep UI usable */
     } finally {
       setLoading(false);
     }
   }, []);
+
+  // Live WebSocket subscription per authenticated user
+  useEffect(() => {
+    if (!userId) {
+      seenNotifIdsRef.current.clear();
+      setNotifications([]);
+      setUnreadCount(0);
+      return;
+    }
+
+    const channel = userChannel(userId);
+    liveClient.subscribe(channel);
+
+    const unsubscribe = liveClient.onEvent((event: LiveEvent) => {
+      try {
+        if (!event || event.event_type !== "NOTIFICATION_RECEIVED") return;
+        const changes = (event.changes && typeof event.changes === "object") ? event.changes : {};
+        const notifId = String(changes.id || event.entity_id || "");
+        if (!notifId) return;
+
+        // Prevent duplicate addition and duplicate unread count increments
+        if (seenNotifIdsRef.current.has(notifId)) {
+          return;
+        }
+        seenNotifIdsRef.current.add(notifId);
+
+        const newNotif: NotificationItem = {
+          id: notifId,
+          user_id: userId,
+          type: typeof changes.type === "string" ? changes.type : "notification",
+          title: typeof changes.title === "string" ? changes.title : "Notification",
+          message: typeof changes.message === "string" ? changes.message : "",
+          link: typeof changes.link === "string" ? changes.link : null,
+          is_read: false,
+          created_at: typeof changes.created_at === "string" ? changes.created_at : new Date().toISOString(),
+        };
+
+        setNotifications((prev) => {
+          if (prev.some((n) => n.id === newNotif.id)) {
+            return prev;
+          }
+          return [newNotif, ...prev];
+        });
+
+        setUnreadCount((c) => c + 1);
+      } catch (err) {
+        console.warn("[NotificationBell] Error handling live notification event:", err);
+      }
+    });
+
+    return () => {
+      liveClient.unsubscribe(channel);
+      unsubscribe();
+    };
+  }, [userId]);
 
   useEffect(() => {
     if (open) {

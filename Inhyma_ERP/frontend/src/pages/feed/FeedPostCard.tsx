@@ -13,6 +13,7 @@ import { errorMessage } from "@/lib/api";
 
 interface FeedPostCardProps {
   post: FeedPost;
+  isHighlighted?: boolean;
   canEdit: boolean;
   canDelete: boolean;
   onEdit: (post: FeedPost) => void;
@@ -21,6 +22,7 @@ interface FeedPostCardProps {
 
 export function FeedPostCard({
   post,
+  isHighlighted,
   canEdit,
   canDelete,
   onEdit,
@@ -217,7 +219,8 @@ export function FeedPostCard({
 
   return (
     <article
-      className={`feed-post-card ${!isRead && post.status === "PUBLISHED" ? "feed-post-unread" : ""}`}
+      id={`feed-post-${post.id}`}
+      className={`feed-post-card ${!isRead && post.status === "PUBLISHED" ? "feed-post-unread" : ""} ${isHighlighted ? "feed-post-highlighted" : ""}`}
       data-testid={`feed-post-card-${post.id}`}
     >
       <div className="feed-post-card-header">
@@ -249,6 +252,20 @@ export function FeedPostCard({
               {!isRead && post.status === "PUBLISHED" && (
                 <span className="feed-badge feed-badge-unread" data-testid="unread-badge">
                   🔵 Unread
+                </span>
+              )}
+              {isHighlighted && (
+                <span
+                  className="feed-badge feed-badge-highlighted"
+                  data-testid="highlighted-badge"
+                  style={{
+                    background: "#eff6ff",
+                    color: "#1d4ed8",
+                    border: "1px solid #bfdbfe",
+                    fontWeight: 700,
+                  }}
+                >
+                  🎯 Linked
                 </span>
               )}
             </div>

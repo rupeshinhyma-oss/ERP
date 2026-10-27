@@ -56,14 +56,19 @@ def get_leave_service(db: AsyncSession = Depends(get_db_session)) -> HrmsLeaveSe
     return HrmsLeaveService(db)
 
 
-from app.hrms.rbac import HrmsUserContext, get_hrms_user_context
+from app.hrms.models import HrmsLeaveRequest
+from app.hrms.rbac import (
+    HrmsUserContext,
+    get_hrms_user_context,
+    verify_approval_authorization,
+)
 
 
 async def get_current_user_context(
     ctx: HrmsUserContext = Depends(get_hrms_user_context),
 ) -> tuple[uuid.UUID, bool]:
     ctx.require_module_access("leave")
-    return ctx.user_id, ctx.is_admin or ctx.is_hr
+    return ctx.user_id, ctx.is_admin or (ctx.is_hr and "hrms.manage" in ctx.permissions)
 
 
 # ===========================================================================
@@ -71,7 +76,11 @@ async def get_current_user_context(
 # ===========================================================================
 
 @router.get("/types")
-async def list_leave_types(service: HrmsLeaveService = Depends(get_leave_service)):
+async def list_leave_types(
+    service: HrmsLeaveService = Depends(get_leave_service),
+    ctx: HrmsUserContext = Depends(get_hrms_user_context),
+):
+    ctx.require_module_access("leave")
     leaves = await service.list_leave_types()
     return build_success_response(
         data=[LeaveTypeRead.model_validate(l).model_dump(mode="json") for l in leaves],
@@ -122,7 +131,9 @@ async def create_leave_type(
 async def get_leave_type(
     leave_type_id: uuid.UUID,
     service: HrmsLeaveService = Depends(get_leave_service),
+    ctx: HrmsUserContext = Depends(get_hrms_user_context),
 ):
+    ctx.require_module_access("leave")
     lt = await service.get_leave_type(leave_type_id)
     return build_success_response(
         data=LeaveTypeRead.model_validate(lt).model_dump(mode="json"),
@@ -191,7 +202,11 @@ async def delete_leave_type(
 # ===========================================================================
 
 @router.get("/plans")
-async def list_leave_plans(service: HrmsLeaveService = Depends(get_leave_service)):
+async def list_leave_plans(
+    service: HrmsLeaveService = Depends(get_leave_service),
+    ctx: HrmsUserContext = Depends(get_hrms_user_context),
+):
+    ctx.require_module_access("leave")
     plans = await service.list_leave_plans()
     return build_success_response(
         data=[p.model_dump(mode="json") for p in plans],
@@ -205,7 +220,12 @@ async def create_leave_plan(
     service: HrmsLeaveService = Depends(get_leave_service),
     ctx: tuple[uuid.UUID, bool] = Depends(get_current_user_context),
 ):
-    user_id, _ = ctx
+    user_id, is_admin = ctx
+    if not is_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Permission denied. Only HR administrators can manage Leave Plans.",
+        )
     plan = await service.create_leave_plan(payload, user_id=user_id)
     return build_success_response(
         data=plan.model_dump(mode="json"),
@@ -217,7 +237,9 @@ async def create_leave_plan(
 async def get_leave_plan(
     plan_id: uuid.UUID,
     service: HrmsLeaveService = Depends(get_leave_service),
+    ctx: HrmsUserContext = Depends(get_hrms_user_context),
 ):
+    ctx.require_module_access("leave")
     plan = await service.get_leave_plan(plan_id)
     return build_success_response(
         data=plan.model_dump(mode="json"),
@@ -232,7 +254,12 @@ async def update_leave_plan(
     service: HrmsLeaveService = Depends(get_leave_service),
     ctx: tuple[uuid.UUID, bool] = Depends(get_current_user_context),
 ):
-    user_id, _ = ctx
+    user_id, is_admin = ctx
+    if not is_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Permission denied. Only HR administrators can manage Leave Plans.",
+        )
     plan = await service.update_leave_plan(plan_id, payload, user_id=user_id)
     return build_success_response(
         data=plan.model_dump(mode="json"),
@@ -245,7 +272,14 @@ async def set_leave_plan_status(
     plan_id: uuid.UUID,
     payload: LeavePlanStatusUpdate,
     service: HrmsLeaveService = Depends(get_leave_service),
+    ctx: tuple[uuid.UUID, bool] = Depends(get_current_user_context),
 ):
+    _, is_admin = ctx
+    if not is_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Permission denied. Only HR administrators can manage Leave Plans.",
+        )
     plan = await service.set_leave_plan_status(plan_id, payload.is_active)
     return build_success_response(
         data=plan.model_dump(mode="json"),
@@ -257,7 +291,14 @@ async def set_leave_plan_status(
 async def delete_leave_plan(
     plan_id: uuid.UUID,
     service: HrmsLeaveService = Depends(get_leave_service),
+    ctx: tuple[uuid.UUID, bool] = Depends(get_current_user_context),
 ):
+    _, is_admin = ctx
+    if not is_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Permission denied. Only HR administrators can manage Leave Plans.",
+        )
     await service.delete_leave_plan(plan_id)
     return build_success_response(data=None, message="Leave plan deleted successfully.")
 
@@ -270,7 +311,9 @@ async def delete_leave_plan(
 async def list_holidays(
     branch: Optional[str] = Query(default=None),
     service: HrmsLeaveService = Depends(get_leave_service),
+    ctx: HrmsUserContext = Depends(get_hrms_user_context),
 ):
+    ctx.require_module_access("leave")
     holidays = await service.list_holidays(branch=branch)
     return build_success_response(
         data=[h.model_dump(mode="json") for h in holidays],
@@ -284,7 +327,12 @@ async def create_holiday(
     service: HrmsLeaveService = Depends(get_leave_service),
     ctx: tuple[uuid.UUID, bool] = Depends(get_current_user_context),
 ):
-    user_id, _ = ctx
+    user_id, is_admin = ctx
+    if not is_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Permission denied. Only HR administrators can manage Holidays.",
+        )
     holiday = await service.create_holiday(payload, user_id=user_id)
     return build_success_response(
         data=holiday.model_dump(mode="json"),
@@ -296,7 +344,9 @@ async def create_holiday(
 async def get_holiday(
     holiday_id: uuid.UUID,
     service: HrmsLeaveService = Depends(get_leave_service),
+    ctx: HrmsUserContext = Depends(get_hrms_user_context),
 ):
+    ctx.require_module_access("leave")
     holiday = await service.get_holiday(holiday_id)
     return build_success_response(
         data=holiday.model_dump(mode="json"),
@@ -311,7 +361,12 @@ async def update_holiday(
     service: HrmsLeaveService = Depends(get_leave_service),
     ctx: tuple[uuid.UUID, bool] = Depends(get_current_user_context),
 ):
-    user_id, _ = ctx
+    user_id, is_admin = ctx
+    if not is_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Permission denied. Only HR administrators can manage Holidays.",
+        )
     holiday = await service.update_holiday(holiday_id, payload, user_id=user_id)
     return build_success_response(
         data=holiday.model_dump(mode="json"),
@@ -323,7 +378,14 @@ async def update_holiday(
 async def delete_holiday(
     holiday_id: uuid.UUID,
     service: HrmsLeaveService = Depends(get_leave_service),
+    ctx: tuple[uuid.UUID, bool] = Depends(get_current_user_context),
 ):
+    _, is_admin = ctx
+    if not is_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Permission denied. Only HR administrators can manage Holidays.",
+        )
     await service.delete_holiday(holiday_id)
     return build_success_response(data=None, message="Holiday deleted successfully.")
 
@@ -654,47 +716,104 @@ async def list_leave_approvals(
 
 
 @router.patch("/approvals/{request_id}/approve")
+@router.post("/approvals/{request_id}/approve")
 async def approve_leave_request(
     request_id: uuid.UUID,
     payload: LeaveApprovalAction = LeaveApprovalAction(),
     reviewer_id: Optional[uuid.UUID] = None,
     service: HrmsLeaveService = Depends(get_leave_service),
-    ctx: tuple[uuid.UUID, bool] = Depends(get_current_user_context),
+    ctx: HrmsUserContext = Depends(get_hrms_user_context),
+    db: AsyncSession = Depends(get_db_session),
 ):
-    ctx_reviewer_id, is_admin = ctx
-    effective_reviewer = reviewer_id or ctx_reviewer_id
-    effective_is_admin = is_admin if not reviewer_id else None
-    req = await service.approve_leave_request(
+    ctx.require_module_access("leave")
+    req = await db.scalar(select(HrmsLeaveRequest).where(HrmsLeaveRequest.id == request_id))
+    if not req:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Leave request not found.")
+
+    if req.approval_status != "PENDING":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Leave request is already {req.approval_status}.",
+        )
+
+    effective_reviewer = reviewer_id or ctx.user_id
+    effective_is_admin = ctx.is_admin and (reviewer_id is None or reviewer_id == ctx.user_id)
+
+    # Check self-approval for effective reviewer
+    if effective_reviewer == req.employee_id and not effective_is_admin:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Self-approval is not permitted. Employees cannot approve their own leave request.",
+        )
+
+    if reviewer_id is None:
+        await verify_approval_authorization(
+            db=db,
+            ctx=ctx,
+            target_employee_id=req.employee_id,
+            module_name="leave",
+            action_label="approve",
+        )
+
+    approved = await service.approve_leave_request(
         request_id,
         reviewer_id=effective_reviewer,
         remarks=payload.approval_remarks,
-        is_admin=effective_is_admin,
+        is_admin=ctx.is_admin,
     )
     return build_success_response(
-        data=req.model_dump(mode="json"),
+        data=approved.model_dump(mode="json"),
         message="Leave request approved successfully.",
     )
 
 
 @router.patch("/approvals/{request_id}/reject")
+@router.post("/approvals/{request_id}/reject")
 async def reject_leave_request(
     request_id: uuid.UUID,
     payload: LeaveApprovalAction = LeaveApprovalAction(),
     reviewer_id: Optional[uuid.UUID] = None,
     service: HrmsLeaveService = Depends(get_leave_service),
-    ctx: tuple[uuid.UUID, bool] = Depends(get_current_user_context),
+    ctx: HrmsUserContext = Depends(get_hrms_user_context),
+    db: AsyncSession = Depends(get_db_session),
 ):
-    ctx_reviewer_id, is_admin = ctx
-    effective_reviewer = reviewer_id or ctx_reviewer_id
-    effective_is_admin = is_admin if not reviewer_id else None
-    req = await service.reject_leave_request(
+    ctx.require_module_access("leave")
+    req = await db.scalar(select(HrmsLeaveRequest).where(HrmsLeaveRequest.id == request_id))
+    if not req:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Leave request not found.")
+
+    if req.approval_status != "PENDING":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Leave request is already {req.approval_status}.",
+        )
+
+    effective_reviewer = reviewer_id or ctx.user_id
+    effective_is_admin = ctx.is_admin and (reviewer_id is None or reviewer_id == ctx.user_id)
+
+    if effective_reviewer == req.employee_id and not effective_is_admin:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Self-approval is not permitted. Employees cannot reject their own leave request.",
+        )
+
+    if reviewer_id is None:
+        await verify_approval_authorization(
+            db=db,
+            ctx=ctx,
+            target_employee_id=req.employee_id,
+            module_name="leave",
+            action_label="reject",
+        )
+
+    rejected = await service.reject_leave_request(
         request_id,
         reviewer_id=effective_reviewer,
         remarks=payload.approval_remarks,
-        is_admin=effective_is_admin,
+        is_admin=ctx.is_admin,
     )
     return build_success_response(
-        data=req.model_dump(mode="json"),
+        data=rejected.model_dump(mode="json"),
         message="Leave request rejected successfully.",
     )
 

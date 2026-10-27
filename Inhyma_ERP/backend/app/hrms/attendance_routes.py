@@ -56,11 +56,13 @@ def get_attendance_service(db: AsyncSession = Depends(get_db_session)) -> HrmsAt
     return HrmsAttendanceService(db)
 
 
+from app.hrms.models import HrmsAttendanceRegularization
 from app.hrms.rbac import (
     HrmsUserContext,
     get_hrms_user_context,
     resolve_hrms_employee,
     resolve_hrms_employee_or_404,
+    verify_approval_authorization,
 )
 
 
@@ -76,7 +78,11 @@ async def get_current_employee_id(
 # ===========================================================================
 
 @router.get("/policy")
-async def get_policy(service: HrmsAttendanceService = Depends(get_attendance_service)):
+async def get_policy(
+    service: HrmsAttendanceService = Depends(get_attendance_service),
+    ctx: HrmsUserContext = Depends(get_hrms_user_context),
+):
+    ctx.require_module_access("attendance")
     policy = await service.get_policy()
     return build_success_response(
         data=AttendancePolicyRead.model_validate(policy).model_dump(mode="json"),
@@ -88,7 +94,14 @@ async def get_policy(service: HrmsAttendanceService = Depends(get_attendance_ser
 async def update_policy(
     payload: AttendancePolicyUpdate,
     service: HrmsAttendanceService = Depends(get_attendance_service),
+    ctx: HrmsUserContext = Depends(get_hrms_user_context),
 ):
+    ctx.require_module_access("attendance")
+    if not (ctx.is_admin or (ctx.is_hr and "hrms.manage" in ctx.permissions)):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Permission denied. Only Admin or HR with setup permissions can update attendance policy.",
+        )
     policy = await service.update_policy(payload)
     return build_success_response(
         data=AttendancePolicyRead.model_validate(policy).model_dump(mode="json"),
@@ -333,10 +346,29 @@ async def approve_regularization(
     payload: Optional[RegularizationApprovalAction] = None,
     ctx: HrmsUserContext = Depends(get_hrms_user_context),
     service: HrmsAttendanceService = Depends(get_attendance_service),
+    db: AsyncSession = Depends(get_db_session),
 ):
     ctx.require_module_access("attendance")
-    if not (ctx.is_admin or ctx.is_hr or ctx.is_manager):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Permission denied. You cannot approve attendance regularizations.")
+    res = await db.execute(
+        select(HrmsAttendanceRegularization).where(HrmsAttendanceRegularization.id == request_id)
+    )
+    reg_req = res.scalar_one_or_none()
+    if not reg_req:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Regularization request {request_id} not found.")
+
+    if reg_req.status != "PENDING":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Attendance regularization request is already {reg_req.status}.",
+        )
+
+    await verify_approval_authorization(
+        db=db,
+        ctx=ctx,
+        target_employee_id=reg_req.employee_id,
+        module_name="attendance",
+        action_label="approve",
+    )
 
     record = await service.approve_regularization(request_id, ctx.user_id, payload=payload)
     return build_success_response(
@@ -352,10 +384,29 @@ async def reject_regularization(
     payload: Optional[RegularizationRejectAction] = None,
     ctx: HrmsUserContext = Depends(get_hrms_user_context),
     service: HrmsAttendanceService = Depends(get_attendance_service),
+    db: AsyncSession = Depends(get_db_session),
 ):
     ctx.require_module_access("attendance")
-    if not (ctx.is_admin or ctx.is_hr or ctx.is_manager):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Permission denied. You cannot reject attendance regularizations.")
+    res = await db.execute(
+        select(HrmsAttendanceRegularization).where(HrmsAttendanceRegularization.id == request_id)
+    )
+    reg_req = res.scalar_one_or_none()
+    if not reg_req:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Regularization request {request_id} not found.")
+
+    if reg_req.status != "PENDING":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Attendance regularization request is already {reg_req.status}.",
+        )
+
+    await verify_approval_authorization(
+        db=db,
+        ctx=ctx,
+        target_employee_id=reg_req.employee_id,
+        module_name="attendance",
+        action_label="reject",
+    )
 
     record = await service.reject_regularization(request_id, ctx.user_id, payload=payload)
     return build_success_response(

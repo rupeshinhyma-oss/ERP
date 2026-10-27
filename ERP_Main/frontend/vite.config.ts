@@ -17,6 +17,15 @@ export default defineConfig({
         target: process.env.VITE_API_PROXY_TARGET || "http://127.0.0.1:8000",
         changeOrigin: true,
         ws: true,
+        configure: (proxy) => {
+          proxy.on("error", (err: any) => {
+            const code = err?.code;
+            if (code === "ECONNRESET" || code === "ECONNREFUSED" || err?.message?.includes("socket hang up")) {
+              return;
+            }
+            console.warn("[vite] api proxy error:", err?.message || err);
+          });
+        },
       },
     },
   },

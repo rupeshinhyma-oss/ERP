@@ -8,6 +8,9 @@ Provides an ``httpx.AsyncClient`` bound directly to the FastAPI ASGI app
 from __future__ import annotations
 
 from collections.abc import AsyncGenerator
+import os
+from dotenv import load_dotenv
+load_dotenv(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".env")), override=True)
 
 import pytest
 import pytest_asyncio

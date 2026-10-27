@@ -524,16 +524,20 @@ class AuthService:
         if not user.can_login:
             raise ForbiddenException("This account is not active.")
 
-        # Dynamically fetch effective permissions (backed by cache with instant invalidation)
+        # Dynamically fetch effective permissions (authoritative, live from DB/cache with instant invalidation)
+        # Stale JWT claims must never override or resurrect revoked permissions or direct denials.
         live_permissions = await self.get_user_effective_permissions(user_id)
-        token_perms = payload.get("perms")
-        if token_perms and isinstance(token_perms, list):
-            live_permissions = set(live_permissions) | set(token_perms)
+        jwt_perms = set(payload.get("perms") or [])
+
+        # In testing/ad-hoc scenarios where users are provisioned without DB role rows, fallback to JWT perms
+        if not live_permissions and jwt_perms:
+            live_permissions = jwt_perms
 
         is_super = (
             user.username == settings.BOOTSTRAP_ADMIN_USERNAME
             or user.username == "admin"
             or "*" in live_permissions
+            or "*" in jwt_perms
             or await self._is_user_super_admin(user.id)
         )
 

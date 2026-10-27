@@ -2294,4 +2294,32 @@ A standardized suite of 8 production-grade Excel (`.xlsx`) files is maintained d
 | **TC-SSO-04** | Central Users Link Resolution | Navigate to `/users` in Yinglima. Inspect Central Users button link. | Target URL dynamically matches configured control-plane host from registry without fallback port assumptions. |
 
 ---
-*End of Master Features & Testing Specification Manual. Maintained for Yinglima Enterprise ERP. Last updated: October 2026 (Section 42: Multi-ERP Ecosystem SSO Bridge, Canonical ERP Keys, Dynamic Registry Routing, and Central Session Resilience).*
+
+## 43. RUNNER PROCESS SUPERVISION: Port Pre-Flight Hygiene, Fast-Fail Health Checks & Scoped Hot Reload
+
+### 43.1. Module Overview & Architectural Specification
+- **Component File Map:**
+  - Root Runner: `run_all.py`
+  - Backend Bootstrap: `run.bat`
+  - Frontend Proxy: `frontend/vite.config.ts`
+- **Port Conflict Hygiene & Orphan Reclaiming:**
+  - Automated TCP port scanning via `netstat -ano -p tcp` detects orphaned background processes occupying ports (5170, 5173, 5174, 8000, 8001, 8002).
+  - Stale process trees are terminated before new instances are spawned, preventing `[Errno 10048]` socket address collision crashes.
+- **Fast-Fail Health Probing:**
+  - `wait_for_backend_health` checks child process status (`proc.poll()`) on every polling cycle, failing immediately upon unexpected crashes instead of blocking for the full timeout.
+- **Scoped WatchFiles Hot Reload:**
+  - Restricts backend file watching strictly to the `app` package directory (`--reload-dir app`), eliminating restart storms caused by caches, tests, migrations, or temporary file writes.
+- **Vite Proxy Disconnect Shield:**
+  - Catches transient `ECONNRESET`, `ECONNREFUSED`, and `socket hang up` notices in the Vite HTTP/WS proxy during backend reload/restart, suppressing terminal pollution.
+
+### 43.2. Test Cases & Verification Matrix
+
+| Test ID | Test Scenario | Steps | Expected Result |
+| :--- | :--- | :--- | :--- |
+| **TC-RUN-01** | Clean Ecosystem Startup | Launch `python run_all.py` from root workspace. | All 3 backends and all 3 frontends start in order; health endpoints return HTTP 200; all 6 services report healthy. |
+| **TC-RUN-02** | Scoped Reload Immunity | Modify a non-app file (e.g. `.pytest_cache`, documentation, or test file). | Backend server continues running without triggering a WatchFiles server restart. |
+| **TC-RUN-03** | Immediate Exit on Crash | Force an early backend crash (e.g. invalid port configuration). | Runner immediately reports process exit code and terminates wait cycle without hanging for 180 seconds. |
+| **TC-RUN-04** | Graceful Multi-Service Shutdown | Send SIGINT (`Ctrl+C`) to the running master runner. | All 6 services and child process trees terminate cleanly without leaving orphaned listening sockets. |
+
+---
+*End of Master Features & Testing Specification Manual. Maintained for Yinglima Enterprise ERP. Last updated: October 2026 (Sections 42-43: Multi-ERP Ecosystem SSO Bridge, Canonical ERP Keys, Dynamic Registry Routing, Central Session Resilience, Master Runner Process Supervision, and Scoped Reload).*

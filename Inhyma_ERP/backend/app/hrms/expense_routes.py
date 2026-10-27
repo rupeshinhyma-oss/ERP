@@ -28,7 +28,12 @@ from app.common.storage import save_uploaded_file
 from app.core.responses import build_success_response
 from app.database.session import get_db_session
 from app.hrms.expense_service import HrmsExpenseService
-from app.hrms.rbac import HrmsUserContext, get_hrms_user_context
+from app.hrms.models import HrmsExpense
+from app.hrms.rbac import (
+    HrmsUserContext,
+    get_hrms_user_context,
+    verify_approval_authorization,
+)
 from app.hrms.schemas import (
     ExpenseCreate,
     ExpenseRead,
@@ -260,19 +265,35 @@ async def approve_expense(
     expense_id: uuid.UUID,
     service: HrmsExpenseService = Depends(get_expense_service),
     ctx: HrmsUserContext = Depends(get_hrms_user_context),
+    db: AsyncSession = Depends(get_db_session),
 ):
     ctx.require_module_access("expenses")
-    is_approver = ctx.is_admin or ctx.is_hr or ctx.is_manager
-    allowed_ids = None if (ctx.is_admin or ctx.is_hr) else ctx.managed_employee_ids
+    exp = await db.get(HrmsExpense, expense_id)
+    if not exp or getattr(exp, "deleted_at", None) is not None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Expense claim {expense_id} not found.")
 
-    exp = await service.approve_expense(
+    if exp.status != "PENDING":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Expense claim cannot be approved. Current status is {exp.status}.",
+        )
+
+    await verify_approval_authorization(
+        db=db,
+        ctx=ctx,
+        target_employee_id=exp.employee_id,
+        module_name="expenses",
+        action_label="approve",
+    )
+
+    exp_approved = await service.approve_expense(
         expense_id=expense_id,
         reviewer_id=ctx.user_id,
-        is_admin=ctx.is_admin or ctx.is_hr,
-        is_approver=is_approver,
-        allowed_employee_ids=allowed_ids,
+        is_admin=ctx.is_admin,
+        is_approver=True,
+        allowed_employee_ids=None,
     )
-    dto = service.to_read_dto(exp)
+    dto = service.to_read_dto(exp_approved)
     return build_success_response(
         data=dto.model_dump(mode="json"),
         message="Expense claim approved successfully.",
@@ -289,20 +310,36 @@ async def reject_expense(
     payload: ExpenseRejectPayload,
     service: HrmsExpenseService = Depends(get_expense_service),
     ctx: HrmsUserContext = Depends(get_hrms_user_context),
+    db: AsyncSession = Depends(get_db_session),
 ):
     ctx.require_module_access("expenses")
-    is_approver = ctx.is_admin or ctx.is_hr or ctx.is_manager
-    allowed_ids = None if (ctx.is_admin or ctx.is_hr) else ctx.managed_employee_ids
+    exp = await db.get(HrmsExpense, expense_id)
+    if not exp or getattr(exp, "deleted_at", None) is not None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Expense claim {expense_id} not found.")
 
-    exp = await service.reject_expense(
+    if exp.status != "PENDING":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Expense claim cannot be rejected. Current status is {exp.status}.",
+        )
+
+    await verify_approval_authorization(
+        db=db,
+        ctx=ctx,
+        target_employee_id=exp.employee_id,
+        module_name="expenses",
+        action_label="reject",
+    )
+
+    exp_rejected = await service.reject_expense(
         expense_id=expense_id,
         reviewer_id=ctx.user_id,
-        is_admin=ctx.is_admin or ctx.is_hr,
+        is_admin=ctx.is_admin,
         rejection_reason=payload.rejection_reason,
-        is_approver=is_approver,
-        allowed_employee_ids=allowed_ids,
+        is_approver=True,
+        allowed_employee_ids=None,
     )
-    dto = service.to_read_dto(exp)
+    dto = service.to_read_dto(exp_rejected)
     return build_success_response(
         data=dto.model_dump(mode="json"),
         message="Expense claim rejected successfully.",
@@ -319,21 +356,32 @@ async def reimburse_expense(
     payload: ExpenseReimbursePayload = ExpenseReimbursePayload(),
     service: HrmsExpenseService = Depends(get_expense_service),
     ctx: HrmsUserContext = Depends(get_hrms_user_context),
+    db: AsyncSession = Depends(get_db_session),
 ):
     ctx.require_module_access("expenses")
-    if not (ctx.is_admin or ctx.is_hr):
+    if not (ctx.is_admin or (ctx.is_hr and ("hrms.approve" in ctx.permissions or "hrms.manage" in ctx.permissions))):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only Admin or HR can mark expenses as reimbursed.",
+            detail="Only Admin or HR with approval permissions can mark expenses as reimbursed.",
         )
 
-    exp = await service.reimburse_expense(
+    exp = await db.get(HrmsExpense, expense_id)
+    if not exp or getattr(exp, "deleted_at", None) is not None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Expense claim {expense_id} not found.")
+
+    if exp.status != "APPROVED":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Only approved expenses can be reimbursed. Current status is {exp.status}.",
+        )
+
+    exp_reimbursed = await service.reimburse_expense(
         expense_id=expense_id,
         user_id=ctx.user_id,
         is_admin=True,
         notes=payload.notes,
     )
-    dto = service.to_read_dto(exp)
+    dto = service.to_read_dto(exp_reimbursed)
     return build_success_response(
         data=dto.model_dump(mode="json"),
         message="Expense claim marked as reimbursed successfully.",

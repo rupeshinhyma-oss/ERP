@@ -356,11 +356,13 @@ BOOTSTRAP_PERMISSIONS: list[tuple[str, str, str, str, str, str]] = [
     ("planning.colorstatusgreen.edit", "planning", "planning", "update", "ALL", "Set a cell's status color to Green (Purchased), independent of planning.cell.edit."),
     # Standalone Task Module
     ("task.view", "task", "tasks", "view", "ALL", "View own assigned and created tasks; access Work Management."),
+    ("task.create", "task", "tasks", "create", "ALL", "Create new standalone workforce tasks, sprints, templates, and recurring schedules."),
     ("task.department_view", "task", "tasks", "view", "DEPARTMENT", "View all tasks belonging to user's department(s)."),
     ("task.organization_view", "task", "tasks", "view", "ALL", "View organization-wide tasks across all departments."),
     ("task.assign", "task", "tasks", "manage", "ALL", "Assign tasks to any user in the organization."),
     ("task.escalate", "task", "tasks", "action", "ALL", "Manually escalate tasks to managers or candidate users."),
     ("task.manage", "task", "tasks", "manage", "ALL", "Full task management: edit, delete, or change status of any task."),
+    ("task.delete", "task", "tasks", "delete", "ALL", "Delete tasks and recurring task schedules."),
     # Inquiries & Quotations (Sale > Inquiries)
     ("inquiry.view", "inquiry", "inquiries", "view", "ALL", "View inquiries and consignment lists."),
     ("inquiry.create", "inquiry", "inquiries", "create", "ALL", "Create new inquiries and consignments."),

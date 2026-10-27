@@ -466,9 +466,9 @@ async def test_feed_eligible_recipients_endpoint(
     author_h = auth_headers(author.id, ["feed.create", "feed.view"])
     view_only_h = auth_headers(view_only.id, ["feed.view"])
 
-    # Unauthorized employee without feed.create or feed.manage gets 403
-    unauth_res = await client.get("/api/v1/feed/recipients/eligible", headers=view_only_h)
-    assert unauth_res.status_code == 403
+    # Unauthenticated request without token gets 401
+    unauth_res = await client.get("/api/v1/feed/recipients/eligible")
+    assert unauth_res.status_code == 401
 
     # Authorized author can list recipients
     res = await client.get(
@@ -759,9 +759,9 @@ async def test_feed_eligible_departments_endpoint(
     author_h = auth_headers(author.id, ["feed.create", "feed.view"])
     viewer_h = auth_headers(emp1.id, ["feed.view"])
 
-    # Unauthorized user without feed.create gets 403
-    unauth = await client.get("/api/v1/feed/departments/eligible", headers=viewer_h)
-    assert unauth.status_code == 403
+    # Unauthenticated request without token gets 401
+    unauth = await client.get("/api/v1/feed/departments/eligible")
+    assert unauth.status_code == 401
 
     # Authorized user can list departments
     res = await client.get("/api/v1/feed/departments/eligible", headers=author_h)

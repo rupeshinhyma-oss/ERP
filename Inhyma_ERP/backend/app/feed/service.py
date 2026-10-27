@@ -20,6 +20,9 @@ from app.auth.service import CurrentUser
 from app.core.exceptions import BadRequestException, ForbiddenException, NotFoundException, ValidationException
 from app.feed.models import (
     FeedAudienceType,
+    FeedConversation,
+    FeedConversationParticipant,
+    FeedDirectMessage,
     FeedPost,
     FeedPostComment,
     FeedPostDepartment,
@@ -30,6 +33,14 @@ from app.feed.models import (
     FeedReactionType,
 )
 from app.feed.schemas import (
+    ConversationCreate,
+    ConversationListResponse,
+    ConversationParticipantRead,
+    ConversationRead,
+    DirectMessageCreate,
+    DirectMessageListResponse,
+    DirectMessageRead,
+    DirectMessageUpdate,
     EligibleDepartmentRead,
     EligibleRecipientRead,
     FeedAuthorRead,
@@ -1185,4 +1196,477 @@ class FeedService:
             total_readers=len(readers),
             readers=readers,
         )
+
+    # ==========================================================================
+    # Employee-to-Employee Direct Messaging Service Methods
+    # ==========================================================================
+
+    async def _get_users_department_map(self, user_ids: Sequence[uuid.UUID]) -> dict[uuid.UUID, str]:
+        """Fetch primary department names for the given users."""
+        if not user_ids:
+            return {}
+        clean_ids = [uid for uid in user_ids if uid is not None]
+        if not clean_ids:
+            return {}
+        role_stmt = (
+            select(UserRole.user_id, Role.name, UserRole.is_primary)
+            .join(Role, (Role.id == UserRole.role_id) & (Role.deleted_at.is_(None)))
+            .where(
+                UserRole.user_id.in_(clean_ids),
+                UserRole.status == RoleAssignmentStatus.ACTIVE,
+            )
+            .order_by(UserRole.is_primary.desc())
+        )
+        role_res = await self.session.execute(role_stmt)
+        user_dept_map: dict[uuid.UUID, str] = {}
+        for uid, rname, is_pri in role_res.all():
+            if uid not in user_dept_map or is_pri:
+                user_dept_map[uid] = rname
+        return user_dept_map
+
+    async def _build_conversation_read(
+        self, conv: FeedConversation, current_user_id: uuid.UUID
+    ) -> ConversationRead:
+        """Convert a FeedConversation model into a ConversationRead schema."""
+        user_ids = [p.user_id for p in (conv.participants or [])]
+        dept_map = await self._get_users_department_map(user_ids)
+
+        part_reads: list[ConversationParticipantRead] = []
+        other_read: ConversationParticipantRead | None = None
+        my_unread = 0
+
+        for p in (conv.participants or []):
+            u = p.user
+            pread = ConversationParticipantRead(
+                user_id=p.user_id,
+                display_name=u.display_name if u else None,
+                full_name=u.full_name if u else "Unknown Employee",
+                email=u.email if u else None,
+                employee_code=u.employee_code if u else None,
+                department_name=dept_map.get(p.user_id),
+                profile_picture_url=u.profile_picture_url if u else None,
+                last_read_at=p.last_read_at,
+                unread_count=p.unread_count,
+            )
+            part_reads.append(pread)
+            if p.user_id != current_user_id:
+                other_read = pread
+            else:
+                my_unread = p.unread_count
+
+        return ConversationRead(
+            id=conv.id,
+            participants=part_reads,
+            other_participant=other_read,
+            last_message_at=conv.last_message_at,
+            last_message_preview=conv.last_message_preview,
+            last_message_sender_id=conv.last_message_sender_id,
+            unread_count=my_unread,
+            created_at=conv.created_at,
+            updated_at=conv.updated_at,
+        )
+
+    async def get_or_create_conversation(
+        self, actor: CurrentUser, recipient_id: uuid.UUID
+    ) -> ConversationRead:
+        """
+        Start or retrieve a direct conversation between actor and recipient.
+        Strictly enforces that self-conversations are prohibited and recipient must be an active employee.
+        """
+        if actor.id == recipient_id:
+            raise BadRequestException("Cannot start a conversation with yourself.")
+
+        recip_stmt = select(User).where(
+            User.id == recipient_id,
+            User.deleted_at.is_(None),
+            User.status == UserStatus.ACTIVE,
+        )
+        recip_res = await self.session.execute(recip_stmt)
+        recipient = recip_res.scalar_one_or_none()
+        if not recipient:
+            raise NotFoundException("Recipient employee not found or inactive.")
+
+        # Find existing conversation with both participants
+        p1 = select(FeedConversationParticipant.conversation_id).where(
+            FeedConversationParticipant.user_id == actor.id
+        )
+        p2 = select(FeedConversationParticipant.conversation_id).where(
+            FeedConversationParticipant.user_id == recipient_id
+        )
+
+        conv_stmt = (
+            select(FeedConversation)
+            .where(
+                FeedConversation.id.in_(p1),
+                FeedConversation.id.in_(p2),
+                FeedConversation.deleted_at.is_(None),
+            )
+            .options(
+                selectinload(FeedConversation.participants).selectinload(FeedConversationParticipant.user),
+            )
+        )
+        conv_res = await self.session.execute(conv_stmt)
+        conv = conv_res.scalar_one_or_none()
+
+        if conv is not None:
+            return await self._build_conversation_read(conv, actor.id)
+
+        # Create new conversation
+        now_utc = datetime.now(timezone.utc)
+        new_conv = FeedConversation(
+            id=uuid.uuid4(),
+            last_message_at=None,
+            last_message_preview=None,
+            last_message_sender_id=None,
+            created_at=now_utc,
+            updated_at=now_utc,
+        )
+        self.session.add(new_conv)
+        await self.session.flush()
+
+        part_actor = FeedConversationParticipant(
+            conversation_id=new_conv.id,
+            user_id=actor.id,
+            unread_count=0,
+            created_at=now_utc,
+        )
+        part_recip = FeedConversationParticipant(
+            conversation_id=new_conv.id,
+            user_id=recipient_id,
+            unread_count=0,
+            created_at=now_utc,
+        )
+        self.session.add(part_actor)
+        self.session.add(part_recip)
+        await self.session.commit()
+
+        # Reload with relationships
+        reload_stmt = (
+            select(FeedConversation)
+            .where(FeedConversation.id == new_conv.id)
+            .options(
+                selectinload(FeedConversation.participants).selectinload(FeedConversationParticipant.user),
+            )
+        )
+        reload_res = await self.session.execute(reload_stmt)
+        loaded = reload_res.scalar_one()
+        return await self._build_conversation_read(loaded, actor.id)
+
+    async def list_conversations(self, actor: CurrentUser) -> ConversationListResponse:
+        """
+        List all direct conversations for the current employee.
+        Private conversations are strictly confined to participants; other users and admins cannot view.
+        """
+        stmt = (
+            select(FeedConversation)
+            .join(FeedConversationParticipant, FeedConversationParticipant.conversation_id == FeedConversation.id)
+            .where(
+                FeedConversation.deleted_at.is_(None),
+                FeedConversationParticipant.user_id == actor.id,
+            )
+            .order_by(FeedConversation.last_message_at.desc().nullslast(), FeedConversation.created_at.desc())
+            .options(
+                selectinload(FeedConversation.participants).selectinload(FeedConversationParticipant.user),
+            )
+        )
+        res = await self.session.execute(stmt)
+        convs = list(res.scalars().all())
+
+        items = [await self._build_conversation_read(c, actor.id) for c in convs]
+        return ConversationListResponse(items=items, total=len(items))
+
+    async def get_conversation(
+        self, actor: CurrentUser, conversation_id: uuid.UUID
+    ) -> ConversationRead:
+        """
+        Get details of a specific conversation, strictly verifying participant membership.
+        """
+        stmt = (
+            select(FeedConversation)
+            .where(
+                FeedConversation.id == conversation_id,
+                FeedConversation.deleted_at.is_(None),
+            )
+            .options(
+                selectinload(FeedConversation.participants).selectinload(FeedConversationParticipant.user),
+            )
+        )
+        res = await self.session.execute(stmt)
+        conv = res.scalar_one_or_none()
+
+        if not conv:
+            raise NotFoundException("Conversation not found.")
+
+        is_participant = any(p.user_id == actor.id for p in (conv.participants or []))
+        if not is_participant:
+            raise ForbiddenException("You do not have access to this conversation.")
+
+        return await self._build_conversation_read(conv, actor.id)
+
+    async def list_messages(
+        self, actor: CurrentUser, conversation_id: uuid.UUID, limit: int = 100
+    ) -> DirectMessageListResponse:
+        """
+        List messages in a conversation.
+        Verifies participant membership and automatically clears unread count for current user.
+        """
+        # Verify access
+        part_stmt = select(FeedConversationParticipant).where(
+            FeedConversationParticipant.conversation_id == conversation_id,
+            FeedConversationParticipant.user_id == actor.id,
+        )
+        part_res = await self.session.execute(part_stmt)
+        participant = part_res.scalar_one_or_none()
+
+        if not participant:
+            raise ForbiddenException("You do not have access to this conversation.")
+
+        # Mark read
+        now_utc = datetime.now(timezone.utc)
+        participant.unread_count = 0
+        participant.last_read_at = now_utc
+        await self.session.commit()
+
+        # Query messages
+        msg_stmt = (
+            select(FeedDirectMessage)
+            .where(
+                FeedDirectMessage.conversation_id == conversation_id,
+                FeedDirectMessage.deleted_at.is_(None),
+            )
+            .order_by(FeedDirectMessage.created_at.asc())
+            .limit(limit)
+            .options(selectinload(FeedDirectMessage.sender))
+        )
+        msg_res = await self.session.execute(msg_stmt)
+        messages = list(msg_res.scalars().all())
+
+        items = [
+            DirectMessageRead(
+                id=m.id,
+                conversation_id=m.conversation_id,
+                sender_id=m.sender_id,
+                sender=FeedAuthorRead(
+                    id=m.sender.id,
+                    display_name=m.sender.display_name,
+                    full_name=m.sender.full_name,
+                    email=m.sender.email,
+                    employee_code=m.sender.employee_code,
+                    profile_picture_url=m.sender.profile_picture_url,
+                ),
+                content=m.content,
+                is_sender=(m.sender_id == actor.id),
+                is_edited=(m.updated_at is not None and m.created_at is not None and m.updated_at > m.created_at),
+                created_at=m.created_at,
+                updated_at=m.updated_at,
+            )
+            for m in messages
+        ]
+        return DirectMessageListResponse(items=items, total=len(items))
+
+    async def send_message(
+        self, actor: CurrentUser, conversation_id: uuid.UUID, data: DirectMessageCreate
+    ) -> DirectMessageRead:
+        """
+        Send a private message to a conversation.
+        Updates unread counter and notifies other participant via system notification.
+        """
+        # Verify participant
+        conv_stmt = (
+            select(FeedConversation)
+            .where(
+                FeedConversation.id == conversation_id,
+                FeedConversation.deleted_at.is_(None),
+            )
+            .options(
+                selectinload(FeedConversation.participants),
+            )
+        )
+        conv_res = await self.session.execute(conv_stmt)
+        conv = conv_res.scalar_one_or_none()
+
+        if not conv:
+            raise NotFoundException("Conversation not found.")
+
+        is_participant = any(p.user_id == actor.id for p in (conv.participants or []))
+        if not is_participant:
+            raise ForbiddenException("You do not have access to this conversation.")
+
+        clean_content = data.content.strip()
+        if not clean_content:
+            raise ValidationException("Message content cannot be empty.")
+
+        now_utc = datetime.now(timezone.utc)
+        message = FeedDirectMessage(
+            id=uuid.uuid4(),
+            conversation_id=conversation_id,
+            sender_id=actor.id,
+            content=clean_content,
+            created_at=now_utc,
+        )
+        self.session.add(message)
+
+        # Update conversation preview and participant unread counts
+        conv.last_message_at = now_utc
+        conv.last_message_preview = clean_content[:150]
+        conv.last_message_sender_id = actor.id
+        conv.updated_at = now_utc
+
+        recipient_ids_to_notify: list[uuid.UUID] = []
+        for p in conv.participants:
+            if p.user_id != actor.id:
+                p.unread_count += 1
+                recipient_ids_to_notify.append(p.user_id)
+
+        await self.session.commit()
+
+        # Send notification to intended recipient(s) without leaking message content
+        notif_service = NotificationService(NotificationRepository(self.session))
+        sender_name = (
+            getattr(actor, "display_name", None)
+            or getattr(actor, "full_name", None)
+            or getattr(actor, "username", "A colleague")
+        )
+        conv_link = f"/feed?tab=messages&conversation_id={conversation_id}"
+
+        for r_id in recipient_ids_to_notify:
+            try:
+                await notif_service.notify_user(
+                    user_id=r_id,
+                    type="feed_message",
+                    title=f"New message from {sender_name}",
+                    message=f"{sender_name} sent you a private message.",
+                    link=conv_link,
+                )
+            except Exception:
+                pass
+
+        await self.session.commit()
+
+        # Reload with sender
+        m_stmt = (
+            select(FeedDirectMessage)
+            .where(FeedDirectMessage.id == message.id)
+            .options(selectinload(FeedDirectMessage.sender))
+        )
+        m_res = await self.session.execute(m_stmt)
+        m_loaded = m_res.scalar_one()
+
+        return DirectMessageRead(
+            id=m_loaded.id,
+            conversation_id=m_loaded.conversation_id,
+            sender_id=m_loaded.sender_id,
+            sender=FeedAuthorRead(
+                id=m_loaded.sender.id,
+                display_name=m_loaded.sender.display_name,
+                full_name=m_loaded.sender.full_name,
+                email=m_loaded.sender.email,
+                employee_code=m_loaded.sender.employee_code,
+                profile_picture_url=m_loaded.sender.profile_picture_url,
+            ),
+            content=m_loaded.content,
+            is_sender=True,
+            is_edited=False,
+            created_at=m_loaded.created_at,
+            updated_at=m_loaded.updated_at,
+        )
+
+    async def update_message(
+        self, actor: CurrentUser, message_id: uuid.UUID, data: DirectMessageUpdate
+    ) -> DirectMessageRead:
+        """
+        Edit an existing message. Strictly verifies that only the sender can edit.
+        """
+        stmt = (
+            select(FeedDirectMessage)
+            .where(FeedDirectMessage.id == message_id, FeedDirectMessage.deleted_at.is_(None))
+            .options(selectinload(FeedDirectMessage.sender))
+        )
+        res = await self.session.execute(stmt)
+        msg = res.scalar_one_or_none()
+
+        if not msg:
+            raise NotFoundException("Message not found.")
+
+        if msg.sender_id != actor.id:
+            raise ForbiddenException("Only the sender can edit this message.")
+
+        clean_content = data.content.strip()
+        if not clean_content:
+            raise ValidationException("Message content cannot be empty.")
+
+        msg.content = clean_content
+        msg.updated_at = datetime.now(timezone.utc)
+        await self.session.commit()
+
+        return DirectMessageRead(
+            id=msg.id,
+            conversation_id=msg.conversation_id,
+            sender_id=msg.sender_id,
+            sender=FeedAuthorRead(
+                id=msg.sender.id,
+                display_name=msg.sender.display_name,
+                full_name=msg.sender.full_name,
+                email=msg.sender.email,
+                employee_code=msg.sender.employee_code,
+                profile_picture_url=msg.sender.profile_picture_url,
+            ),
+            content=msg.content,
+            is_sender=True,
+            is_edited=True,
+            created_at=msg.created_at,
+            updated_at=msg.updated_at,
+        )
+
+    async def delete_message(self, actor: CurrentUser, message_id: uuid.UUID) -> None:
+        """
+        Soft-delete a message. Strictly verifies that only the sender can delete.
+        """
+        stmt = (
+            select(FeedDirectMessage)
+            .where(FeedDirectMessage.id == message_id, FeedDirectMessage.deleted_at.is_(None))
+        )
+        res = await self.session.execute(stmt)
+        msg = res.scalar_one_or_none()
+
+        if not msg:
+            raise NotFoundException("Message not found.")
+
+        if msg.sender_id != actor.id:
+            raise ForbiddenException("Only the sender can delete this message.")
+
+        msg.deleted_at = datetime.now(timezone.utc)
+        await self.session.commit()
+
+    async def mark_conversation_read(
+        self, actor: CurrentUser, conversation_id: uuid.UUID
+    ) -> None:
+        """Mark a conversation as read and reset its unread counter for the current user."""
+        stmt = select(FeedConversationParticipant).where(
+            FeedConversationParticipant.conversation_id == conversation_id,
+            FeedConversationParticipant.user_id == actor.id,
+        )
+        res = await self.session.execute(stmt)
+        participant = res.scalar_one_or_none()
+
+        if not participant:
+            raise ForbiddenException("You do not have access to this conversation.")
+
+        participant.unread_count = 0
+        participant.last_read_at = datetime.now(timezone.utc)
+        await self.session.commit()
+
+    async def get_unread_messages_count(self, actor: CurrentUser) -> int:
+        """Return the sum of unread direct messages across all conversations for the user."""
+        stmt = (
+            select(func.coalesce(func.sum(FeedConversationParticipant.unread_count), 0))
+            .join(FeedConversation, FeedConversation.id == FeedConversationParticipant.conversation_id)
+            .where(
+                FeedConversationParticipant.user_id == actor.id,
+                FeedConversation.deleted_at.is_(None),
+            )
+        )
+        res = await self.session.execute(stmt)
+        count = res.scalar() or 0
+        return int(count)
 

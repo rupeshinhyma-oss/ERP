@@ -53,6 +53,15 @@ vi.mock("@/lib/feedApi", () => ({
     toggleReaction: vi.fn(),
     markAsRead: vi.fn(),
     getReadership: vi.fn(),
+    listConversations: vi.fn().mockResolvedValue({ data: { items: [], total: 0 } }),
+    getUnreadDirectMessagesCount: vi.fn().mockResolvedValue({ data: { unread_count: 0 } }),
+    startConversation: vi.fn(),
+    getConversation: vi.fn(),
+    listMessages: vi.fn().mockResolvedValue({ data: { items: [], total: 0 } }),
+    sendMessage: vi.fn(),
+    updateMessage: vi.fn(),
+    deleteMessage: vi.fn(),
+    markConversationRead: vi.fn().mockResolvedValue({ data: { is_read: true } }),
   },
 }));
 
@@ -196,7 +205,7 @@ describe("Feed & Broadcast Messaging — Phase 2 & 3 Frontend Tests", () => {
       expect(feedItem?.path).toBe("/feed");
       expect(feedItem?.label).toBe("Feed");
       expect(feedItem?.icon).toBe("messageSquare");
-      expect(feedItem?.permission).toBe("feed.view");
+      expect(feedItem?.permission).toBeUndefined();
     });
 
     it("ensures PAGE_TITLES registers feed with descriptive title", () => {
@@ -809,11 +818,11 @@ describe("Feed & Broadcast Messaging — Phase 2 & 3 Frontend Tests", () => {
       expect(screen.queryByTestId("delete-post-post-2")).toBeNull();
     });
 
-    it("hides composer from users who lack publishing permissions", async () => {
+    it("allows ordinary users without feed.create or feed.manage to see composer and publish", async () => {
       mockAuthState = {
-        profile: { id: "user-viewonly", display_name: "View Only", email: "view@example.com" },
+        profile: { id: "user-ordinary", display_name: "Ordinary Employee", email: "emp@example.com" },
         isSuperAdmin: false,
-        hasPermission: (perm: string) => perm === "feed.view",
+        hasPermission: () => false,
       };
 
       render(
@@ -826,8 +835,8 @@ describe("Feed & Broadcast Messaging — Phase 2 & 3 Frontend Tests", () => {
         expect(screen.getByText("Company Townhall Q4")).toBeDefined();
       });
 
-      expect(screen.queryByTestId("feed-composer")).toBeNull();
-      expect(screen.queryByTestId("new-broadcast-btn")).toBeNull();
+      // Ordinary employee CAN see the composer (open access for all authenticated employees)
+      expect(screen.getByTestId("feed-composer")).toBeDefined();
     });
 
     it("opens Edit modal and submits update", async () => {
@@ -899,6 +908,95 @@ describe("Feed & Broadcast Messaging — Phase 2 & 3 Frontend Tests", () => {
       await waitFor(() => {
         expect(feedApi.deletePost).toHaveBeenCalledWith("post-1");
         expect(mockToast).toHaveBeenCalledWith("Announcement deleted successfully.", "success");
+      });
+    });
+  });
+
+  describe("9. Deep-Link Resolution (/feed?post_id={id})", () => {
+    it("highlights post if already present on current page", async () => {
+      render(
+        <MemoryRouter initialEntries={["/feed?post_id=post-1"]}>
+          <FeedPage />
+        </MemoryRouter>
+      );
+
+      await waitFor(() => {
+        const card = screen.getByTestId("feed-post-card-post-1");
+        expect(card).toBeDefined();
+        expect(card.className).toContain("feed-post-highlighted");
+        expect(screen.getByTestId("highlighted-badge")).toBeDefined();
+      });
+    });
+
+    it("fetches single post by ID when not on current page and highlights it", async () => {
+      const remotePost: FeedPost = {
+        id: "post-remote-99",
+        author_id: "user-author-1",
+        author: {
+          id: "user-author-1",
+          display_name: "Author User",
+          email: "author@example.com",
+        },
+        title: "Remote Deep-Linked Announcement",
+        content: "Content from page 3 of announcements.",
+        audience_type: "ALL",
+        status: "PUBLISHED",
+        published_at: "2026-10-20T10:00:00Z",
+        created_at: "2026-10-20T10:00:00Z",
+        updated_at: "2026-10-20T10:00:00Z",
+        targeted_departments: [],
+        recipients: [],
+        is_author: true,
+      };
+
+      (feedApi.getPost as any).mockResolvedValueOnce({ data: remotePost });
+
+      render(
+        <MemoryRouter initialEntries={["/feed?post_id=post-remote-99"]}>
+          <FeedPage />
+        </MemoryRouter>
+      );
+
+      await waitFor(() => {
+        expect(feedApi.getPost).toHaveBeenCalledWith("post-remote-99");
+        const card = screen.getByTestId("feed-post-card-post-remote-99");
+        expect(card).toBeDefined();
+        expect(card.className).toContain("feed-post-highlighted");
+        expect(screen.getByText("Remote Deep-Linked Announcement")).toBeDefined();
+      });
+    });
+
+    it("displays error toast when target announcement is forbidden (403)", async () => {
+      const error403 = new Error("Forbidden");
+      (error403 as any).status = 403;
+      (feedApi.getPost as any).mockRejectedValueOnce(error403);
+
+      render(
+        <MemoryRouter initialEntries={["/feed?post_id=forbidden-post"]}>
+          <FeedPage />
+        </MemoryRouter>
+      );
+
+      await waitFor(() => {
+        expect(feedApi.getPost).toHaveBeenCalledWith("forbidden-post");
+        expect(mockToast).toHaveBeenCalledWith("You do not have permission to view this announcement.", "error");
+      });
+    });
+
+    it("displays error toast when target announcement is not found (404)", async () => {
+      const error404 = new Error("Not Found");
+      (error404 as any).status = 404;
+      (feedApi.getPost as any).mockRejectedValueOnce(error404);
+
+      render(
+        <MemoryRouter initialEntries={["/feed?post_id=nonexistent-post"]}>
+          <FeedPage />
+        </MemoryRouter>
+      );
+
+      await waitFor(() => {
+        expect(feedApi.getPost).toHaveBeenCalledWith("nonexistent-post");
+        expect(mockToast).toHaveBeenCalledWith("The requested announcement could not be found or has been removed.", "error");
       });
     });
   });

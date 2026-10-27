@@ -327,6 +327,8 @@ export interface TaskSummary {
   depends_on_task_ids?: string[];
   recurring_schedule_id?: string | null;
   recurrence_period?: string | null;
+  department_id?: string | null;
+  department_name?: string | null;
 }
 
 export interface TaskDetail {
@@ -368,6 +370,8 @@ export interface TaskDetail {
   progress_percent?: number;
   recurring_schedule_id?: string | null;
   recurrence_period?: string | null;
+  department_id?: string | null;
+  department_name?: string | null;
 }
 
 export interface TaskEscalateCandidate {

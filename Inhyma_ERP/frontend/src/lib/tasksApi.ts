@@ -357,31 +357,36 @@ export async function checkTaskDeadlines(): Promise<{ notifications_sent: number
   return res.data || { notifications_sent: 0 };
 }
 
+export interface TaskDepartment {
+  id: string;
+  name: string;
+  code?: string | null;
+  is_managed: boolean;
+}
+
+export async function fetchTaskDepartments(): Promise<TaskDepartment[]> {
+  try {
+    const res = await apiGet<TaskDepartment[]>("/tasks/departments");
+    return res.data || [];
+  } catch (err) {
+    console.error("Failed to fetch task departments", err);
+    return [];
+  }
+}
+
 export async function getAvailableAssignees(): Promise<AvailableUser[]> {
   try {
-    const res = await apiGet<any>("/users?page_size=200");
+    const res = await apiGet<any>("/tasks/assignees");
     const items = res.data?.items || res.data || [];
-    const SYSTEM_SECURITY_ROLES = new Set(["super_admin", "admin", "user", "staff"]);
-    return items.map((u: any) => {
-      const nonSystemRoles = (u.roles || []).filter(
-        (r: string) => !SYSTEM_SECURITY_ROLES.has(r.toLowerCase())
-      );
-      let dept = u.position_name || "";
-      if (!dept && nonSystemRoles.length > 0) {
-        dept = nonSystemRoles[0];
-      }
-      if (!dept && (u.roles || []).includes("super_admin")) {
-        dept = "Management";
-      }
-      return {
-        id: u.id,
-        full_name: u.full_name || u.display_name || u.username || "Team Member",
-        username: u.username,
-        email: u.email,
-        department: dept || "General",
-        roles: u.roles || [],
-      };
-    });
+    return items.map((u: any) => ({
+      id: u.id,
+      full_name: u.full_name || u.display_name || u.username || "Team Member",
+      username: u.username,
+      email: u.email,
+      department: u.department || "General",
+      department_id: u.department_id,
+      roles: u.roles || [],
+    }));
   } catch (err) {
     console.error("Failed to load available assignees", err);
     return [];
@@ -718,6 +723,7 @@ export const tasksApi = {
   checkExpiredHolds,
   checkTaskDeadlines,
   getAvailableAssignees,
+  fetchTaskDepartments,
   fetchLabels,
   createLabel,
   fetchSprints,

@@ -328,10 +328,10 @@ async def calculate_monthly_payroll(
 ):
     """Admin/HR: Calculate and save monthly payroll snapshot for all eligible employees."""
     ctx.require_module_access("payroll")
-    if not (ctx.is_admin or ctx.is_hr):
+    if not ctx.can_configure_salary():
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Permission denied. Only Admin or HR can calculate monthly payroll.",
+            detail="Permission denied. Salary configuration rights required to calculate monthly payroll.",
         )
 
     raw_month = (payload.payroll_month if payload and payload.payroll_month else None) or payroll_month

@@ -23,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.core.exceptions import BadRequestException, ConflictException, NotFoundException
+from app.hrms.notifications import notify_asset_assigned
 from app.hrms.models import (
     HrmsAsset,
     HrmsAssetAssignment,
@@ -891,6 +892,14 @@ class HrmsAssetService:
         )
         self.db.add(history)
 
+        await self.db.flush()
+        await notify_asset_assigned(
+            self.db,
+            employee_id=employee.id,
+            asset_name=asset.name,
+            asset_code=asset.asset_code,
+            actor_id=actor_id,
+        )
         await self.db.commit()
         return await self.get_asset(asset.id)
 

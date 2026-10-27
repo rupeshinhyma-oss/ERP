@@ -77,6 +77,19 @@ async def test_hrms_expense_full_workflow(client: AsyncClient):
             status=UserStatus.ACTIVE,
         )
         session.add(emp_b)
+
+        from app.rbac.models import Role, UserRole, RoleAssignmentType, RoleAssignmentStatus
+        super_role = (await session.execute(select(Role).where(Role.name == "super_admin"))).scalars().first()
+        if super_role:
+            session.add(
+                UserRole(
+                    user_id=admin_id,
+                    role_id=super_role.id,
+                    assignment_type=RoleAssignmentType.PRIMARY,
+                    status=RoleAssignmentStatus.ACTIVE,
+                )
+            )
+
         await session.commit()
 
     admin_token = create_access_token(admin_id, permissions=["*"]).token
@@ -289,13 +302,12 @@ async def test_hrms_expense_full_workflow(client: AsyncClient):
         exp_3_id = res_3.json()["data"]["id"]
         created_expense_ids.append(exp_3_id)
 
-        # Employee A (no approval permissions) attempts to approve -> 403 Forbidden
+        # Employee A attempts self-approval -> 400 Bad Request
         res_unauth_appr_a = await client.post(f"/api/v1/hrms/expenses/{exp_3_id}/approve", headers=emp_a_headers)
-        assert res_unauth_appr_a.status_code == 403, "Non-approver employee must return 403 Forbidden"
-        assert "permission" in res_unauth_appr_a.text.lower()
-        assert "cannot approve their own" not in res_unauth_appr_a.text.lower()
+        assert res_unauth_appr_a.status_code == 400, "Self-approval must return 400 Bad Request"
+        assert "self-approval" in res_unauth_appr_a.text.lower()
 
-        # Employee B (no approval permissions) attempts to approve -> 403 Forbidden
+        # Employee B (no approval permissions) attempts to approve Employee A's expense -> 403 Forbidden
         res_unauth_appr_b = await client.post(f"/api/v1/hrms/expenses/{exp_3_id}/approve", headers=emp_b_headers)
         assert res_unauth_appr_b.status_code == 403, "Non-approver employee must return 403 Forbidden"
 
@@ -334,5 +346,6 @@ async def test_hrms_expense_full_workflow(client: AsyncClient):
         async with sessionmaker() as session:
             for eid in created_expense_ids:
                 await session.execute(delete(HrmsExpense).where(HrmsExpense.id == uuid.UUID(eid)))
+            await session.execute(delete(UserRole).where(UserRole.user_id.in_([admin_id, emp_a_id, emp_b_id])))
             await session.execute(delete(User).where(User.id.in_([admin_id, emp_a_id, emp_b_id])))
             await session.commit()

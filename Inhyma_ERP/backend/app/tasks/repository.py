@@ -53,6 +53,134 @@ class TaskRepository(BaseRepository[Task]):
     def __init__(self, session: AsyncSession) -> None:
         super().__init__(session, Task)
 
+    async def get_user_managed_department_ids(self, user_id: uuid.UUID) -> set[uuid.UUID]:
+        """Fetch IDs of departments this user is explicitly authorized to manage via active DepartmentLeadershipAssignment."""
+        from app.org_structure.models import OrgRecordStatus
+        managed_stmt = select(DepartmentLeadershipAssignment.department_id).where(
+            DepartmentLeadershipAssignment.employee_id == user_id,
+            DepartmentLeadershipAssignment.status == OrgRecordStatus.ACTIVE,
+        )
+        managed_res = await self.session.execute(managed_stmt)
+        return set(managed_res.scalars().all())
+
+    async def get_user_assigned_department_ids(self, user_id: uuid.UUID) -> set[uuid.UUID]:
+        """Fetch IDs of departments this user is assigned to via UserRole (excluding system roles)."""
+        from app.rbac.models import Role, RoleAssignmentStatus
+        role_stmt = (
+            select(UserRole.role_id)
+            .join(Role, UserRole.role_id == Role.id)
+            .where(
+                UserRole.user_id == user_id,
+                or_(UserRole.status == RoleAssignmentStatus.ACTIVE, UserRole.status.is_(None)),
+                Role.name.notin_(["super_admin", "user"]),
+            )
+        )
+        role_res = await self.session.execute(role_stmt)
+        return set(role_res.scalars().all())
+
+    async def get_user_permitted_department_ids(self, user_id: uuid.UUID) -> set[uuid.UUID]:
+        managed = await self.get_user_managed_department_ids(user_id)
+        assigned = await self.get_user_assigned_department_ids(user_id)
+        return managed | assigned
+
+    async def resolve_tasks_departments(
+        self, task_ids: list[uuid.UUID]
+    ) -> dict[uuid.UUID, tuple[uuid.UUID | None, str | None]]:
+        """
+        Deterministically resolve (department_id, department_name) for tasks.
+        Assignee leadership/role takes highest precedence, followed by creator leadership/role.
+        """
+        if not task_ids:
+            return {}
+        from sqlalchemy import text
+        sql = """
+        WITH task_users AS (
+            SELECT t.id as task_id, ta.user_id,
+                   CASE WHEN ta.assignment_role = 'ASSIGNEE' THEN 1 ELSE 2 END as priority
+            FROM tasks t
+            JOIN task_assignees ta ON t.id = ta.task_id
+            WHERE t.id = ANY(:task_ids)
+            UNION ALL
+            SELECT t.id as task_id, t.created_by as user_id, 3 as priority
+            FROM tasks t
+            WHERE t.id = ANY(:task_ids) AND t.created_by IS NOT NULL
+        ),
+        user_dept AS (
+            SELECT dla.employee_id as user_id, dla.department_id, r.name as dept_name, 1 as dept_rank
+            FROM department_leadership_assignments dla
+            JOIN roles r ON dla.department_id = r.id
+            WHERE dla.status = 'ACTIVE'
+            UNION ALL
+            SELECT ur.user_id, ur.role_id as department_id, r.name as dept_name, 2 as dept_rank
+            FROM user_roles ur
+            JOIN roles r ON ur.role_id = r.id
+            WHERE (ur.status = 'ACTIVE' OR ur.status IS NULL)
+              AND r.name NOT IN ('super_admin', 'user')
+        )
+        SELECT DISTINCT ON (tu.task_id)
+            tu.task_id, ud.department_id, ud.dept_name
+        FROM task_users tu
+        JOIN user_dept ud ON tu.user_id = ud.user_id
+        ORDER BY tu.task_id, tu.priority ASC, ud.dept_rank ASC
+        """
+        res = await self.session.execute(text(sql), {"task_ids": [str(tid) for tid in task_ids]})
+        result: dict[uuid.UUID, tuple[uuid.UUID | None, str | None]] = {}
+        for row in res.fetchall():
+            result[uuid.UUID(str(row[0]))] = (uuid.UUID(str(row[1])) if row[1] else None, row[2])
+        return result
+
+    async def get_task_department(self, task_id: uuid.UUID) -> tuple[uuid.UUID | None, str | None]:
+        res = await self.resolve_tasks_departments([task_id])
+        return res.get(task_id, (None, None))
+
+    async def get_user_primary_department_id(self, user_id: uuid.UUID) -> uuid.UUID | None:
+        """Resolve a user's primary/default department deterministically according to leadership and role assignments."""
+        from sqlalchemy import case
+        from app.org_structure.models import LeadershipType, OrgRecordStatus
+        from app.rbac.models import RoleAssignmentStatus, RoleAssignmentType
+
+        # 1. Active leadership assignments ordered by leadership precedence
+        lead_stmt = (
+            select(DepartmentLeadershipAssignment.department_id)
+            .where(
+                DepartmentLeadershipAssignment.employee_id == user_id,
+                DepartmentLeadershipAssignment.status == OrgRecordStatus.ACTIVE,
+            )
+            .order_by(
+                case(
+                    (DepartmentLeadershipAssignment.leadership_type == LeadershipType.PRIMARY_MANAGER, 1),
+                    (DepartmentLeadershipAssignment.leadership_type == LeadershipType.DEPARTMENT_HEAD, 2),
+                    (DepartmentLeadershipAssignment.leadership_type == LeadershipType.ACTING_MANAGER, 3),
+                    (DepartmentLeadershipAssignment.leadership_type == LeadershipType.ASSISTANT_MANAGER, 4),
+                    else_=5,
+                ),
+                DepartmentLeadershipAssignment.department_id,
+            )
+        )
+        lead_res = await self.session.execute(lead_stmt)
+        dept = lead_res.scalars().first()
+        if dept:
+            return dept
+
+        # 2. Active UserRole assignments ordered by is_primary, PRIMARY assignment_type, then role_id
+        role_stmt = (
+            select(UserRole.role_id)
+            .where(
+                UserRole.user_id == user_id,
+                UserRole.status == RoleAssignmentStatus.ACTIVE,
+            )
+            .order_by(
+                UserRole.is_primary.desc(),
+                case(
+                    (UserRole.assignment_type == RoleAssignmentType.PRIMARY, 1),
+                    else_=2,
+                ),
+                UserRole.role_id,
+            )
+        )
+        role_res = await self.session.execute(role_stmt)
+        return role_res.scalars().first()
+
     async def list_tasks(
         self,
         *,
@@ -76,16 +204,38 @@ class TaskRepository(BaseRepository[Task]):
         page: int = 1,
         page_size: int = 50,
     ) -> tuple[list[Task], int]:
-        """List tasks applying visibility rules, filters, and pagination."""
+        """List tasks applying authoritative visibility rules, filters, and pagination."""
         base_query = select(Task).where(Task.deleted_at.is_(None))
 
-        # --- Visibility Logic ---
+        # --- Authoritative Role & Scope Determination ---
         can_view_org = (
             "task.organization_view" in user_permissions
             or "task.manage" in user_permissions
             or "super_admin" in user_permissions
+            or "*" in user_permissions
         )
-        can_view_dept = "task.department_view" in user_permissions or can_view_org
+        managed_dept_ids = await self.get_user_managed_department_ids(current_user_id)
+        assigned_dept_ids = await self.get_user_assigned_department_ids(current_user_id)
+        is_dept_manager = bool(managed_dept_ids)
+
+        def get_dept_task_condition(dept_ids: list[uuid.UUID]):
+            dept_users_subq = select(UserRole.user_id).where(UserRole.role_id.in_(dept_ids))
+            lead_users_subq = select(DepartmentLeadershipAssignment.employee_id).where(
+                DepartmentLeadershipAssignment.department_id.in_(dept_ids),
+                DepartmentLeadershipAssignment.status == "ACTIVE",
+            )
+            all_dept_users = dept_users_subq.union(lead_users_subq)
+            return or_(
+                Task.created_by.in_(all_dept_users),
+                Task.id.in_(
+                    select(TaskAssignee.task_id).where(TaskAssignee.user_id.in_(all_dept_users))
+                ),
+            )
+
+        own_task_condition = or_(
+            Task.created_by == current_user_id,
+            Task.id.in_(select(TaskAssignee.task_id).where(TaskAssignee.user_id == current_user_id)),
+        )
 
         target_depts: list[uuid.UUID] = []
         if department_id:
@@ -93,103 +243,43 @@ class TaskRepository(BaseRepository[Task]):
         if department_ids:
             target_depts.extend(department_ids)
 
-        if target_depts:
-            target_users_subq = select(UserRole.user_id).where(UserRole.role_id.in_(target_depts))
-            base_query = base_query.where(
-                or_(
-                    Task.created_by.in_(target_users_subq),
-                    Task.id.in_(
-                        select(TaskAssignee.task_id).where(TaskAssignee.user_id.in_(target_users_subq))
-                    ),
-                )
-            )
-        elif view_mode == "my":
-            base_query = base_query.where(
-                or_(
-                    Task.created_by == current_user_id,
-                    Task.id.in_(
-                        select(TaskAssignee.task_id).where(TaskAssignee.user_id == current_user_id)
-                    ),
-                )
-            )
-        elif view_mode == "department":
-            if can_view_org:
-                # Super Admin or users with organization view can view any department tasks
-                pass
+        if can_view_org:
+            # 1. Super Admin: full cross-department view
+            if target_depts:
+                base_query = base_query.where(get_dept_task_condition(target_depts))
+            elif view_mode == "my":
+                base_query = base_query.where(own_task_condition)
+        elif is_dept_manager:
+            # 2. Department Manager: restricted strictly to managed departments
+            if target_depts:
+                unauthorized = [d for d in target_depts if d not in managed_dept_ids]
+                if unauthorized:
+                    # Direct API access to unauthorized department denied
+                    base_query = base_query.where(Task.id.is_(None))
+                else:
+                    base_query = base_query.where(get_dept_task_condition(target_depts))
+            elif view_mode == "my":
+                base_query = base_query.where(own_task_condition)
+            elif view_mode == "department":
+                base_query = base_query.where(get_dept_task_condition(list(managed_dept_ids)))
             else:
-                # Department manager or department member scoping
-                managed_depts_subq = select(DepartmentLeadershipAssignment.department_id).where(
-                    DepartmentLeadershipAssignment.employee_id == current_user_id
-                )
-                user_depts_subq = select(UserRole.role_id).where(UserRole.user_id == current_user_id)
-                combined_depts_subq = select(UserRole.role_id).where(
-                    or_(
-                        UserRole.role_id.in_(user_depts_subq),
-                        UserRole.role_id.in_(managed_depts_subq),
-                    )
-                )
-                dept_users_subq = select(UserRole.user_id).where(UserRole.role_id.in_(combined_depts_subq))
+                # "all", kanban, calendar: managed department tasks OR own tasks
                 base_query = base_query.where(
                     or_(
-                        Task.created_by == current_user_id,
-                        Task.created_by.in_(dept_users_subq),
-                        Task.id.in_(
-                            select(TaskAssignee.task_id).where(
-                                or_(
-                                    TaskAssignee.user_id == current_user_id,
-                                    TaskAssignee.user_id.in_(dept_users_subq),
-                                )
-                            )
-                        ),
-                    )
-                )
-        elif view_mode == "organization":
-            if not can_view_org:
-                user_depts_subq = select(UserRole.role_id).where(UserRole.user_id == current_user_id)
-                dept_users_subq = select(UserRole.user_id).where(UserRole.role_id.in_(user_depts_subq))
-                base_query = base_query.where(
-                    or_(
-                        Task.created_by == current_user_id,
-                        Task.created_by.in_(dept_users_subq),
-                        Task.id.in_(
-                            select(TaskAssignee.task_id).where(
-                                or_(
-                                    TaskAssignee.user_id == current_user_id,
-                                    TaskAssignee.user_id.in_(dept_users_subq),
-                                )
-                            )
-                        ),
+                        get_dept_task_condition(list(managed_dept_ids)),
+                        own_task_condition,
                     )
                 )
         else:
-            # Default / kanban / calendar
-            if not can_view_org:
-                if can_view_dept:
-                    user_depts_subq = select(UserRole.role_id).where(UserRole.user_id == current_user_id)
-                    dept_users_subq = select(UserRole.user_id).where(UserRole.role_id.in_(user_depts_subq))
-                    base_query = base_query.where(
-                        or_(
-                            Task.created_by == current_user_id,
-                            Task.created_by.in_(dept_users_subq),
-                            Task.id.in_(
-                                select(TaskAssignee.task_id).where(
-                                    or_(
-                                        TaskAssignee.user_id == current_user_id,
-                                        TaskAssignee.user_id.in_(dept_users_subq),
-                                    )
-                                )
-                            ),
-                        )
-                    )
+            # 3. Employee: access ONLY tasks they created, are assigned to, or are permitted under sharing rules.
+            # Department view/filter cannot grant additional task access.
+            base_query = base_query.where(own_task_condition)
+            if target_depts:
+                unauthorized = [d for d in target_depts if d not in assigned_dept_ids]
+                if unauthorized:
+                    base_query = base_query.where(Task.id.is_(None))
                 else:
-                    base_query = base_query.where(
-                        or_(
-                            Task.created_by == current_user_id,
-                            Task.id.in_(
-                                select(TaskAssignee.task_id).where(TaskAssignee.user_id == current_user_id)
-                            ),
-                        )
-                    )
+                    base_query = base_query.where(get_dept_task_condition(target_depts))
 
         # --- Additional Filters ---
         if status is not None:
@@ -411,10 +501,17 @@ class TaskRepository(BaseRepository[Task]):
             self.session.add(sub_a)
 
         await self.session.flush()
-        return sub
+        return (await self.get_subtask_by_id(sub.id)) or sub
 
     async def get_subtask_by_id(self, subtask_id: uuid.UUID) -> TaskSubtask | None:
-        stmt = select(TaskSubtask).where(TaskSubtask.id == subtask_id)
+        stmt = (
+            select(TaskSubtask)
+            .options(
+                selectinload(TaskSubtask.assignees).selectinload(TaskSubtaskAssignee.user),
+                selectinload(TaskSubtask.assignee),
+            )
+            .where(TaskSubtask.id == subtask_id)
+        )
         res = await self.session.execute(stmt)
         return res.scalar_one_or_none()
 
@@ -474,7 +571,7 @@ class TaskRepository(BaseRepository[Task]):
                     self.session.add(new_sa)
 
         await self.session.flush()
-        return subtask
+        return (await self.get_subtask_by_id(subtask.id)) or subtask
 
     async def delete_subtask(self, subtask: TaskSubtask) -> None:
         await self.session.delete(subtask)

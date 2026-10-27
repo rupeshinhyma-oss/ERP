@@ -37,6 +37,7 @@ export const MODULE_NAMES: Record<string, string> = {
   trash: "Trash",
   roles_permissions: "Departments & Permissions",
   hrms: "HRMS & Workforce",
+  task: "Tasks & Work Management",
 };
 
 const ACTION_LABELS: Record<string, string> = {
@@ -72,6 +73,14 @@ const FULL_CODE_LABELS: Record<string, string> = {
   "buyer.currentstatus": "Current Status",
   "buyer.potential": "Potential",
   "buyer.clientgrade": "Client Grade",
+  "task.view": "View Tasks",
+  "task.create": "Create Tasks",
+  "task.department_view": "Department View",
+  "task.organization_view": "Organization View",
+  "task.assign": "Assign Tasks",
+  "task.escalate": "Escalate Tasks",
+  "task.manage": "Manage All Tasks",
+  "task.delete": "Delete Tasks",
 };
 
 /** "product.create" -> "Create"; unknown actions fall back to the raw code. */

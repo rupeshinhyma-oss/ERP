@@ -15,6 +15,10 @@ import type {
   FeedReactionSummary,
   FeedReactionType,
   FeedReadershipResponse,
+  Conversation,
+  ConversationListResponse,
+  DirectMessage,
+  DirectMessageListResponse,
 } from "@/types/feed";
 
 export const feedApi = {
@@ -126,4 +130,74 @@ export const feedApi = {
   async getReadership(postId: string) {
     return apiGet<FeedReadershipResponse>(`/feed/posts/${postId}/readership`);
   },
+
+  /* -------------------------------------------------------------------------- */
+  /* Direct Messaging / Conversations                                            */
+  /* -------------------------------------------------------------------------- */
+
+  /**
+   * List 1-to-1 conversations for the authenticated employee.
+   */
+  async listConversations(page: number = 1, pageSize: number = 50) {
+    return apiGet<ConversationListResponse>(`/feed/conversations?page=${page}&page_size=${pageSize}`);
+  },
+
+  /**
+   * Get total unread direct message count for badge indicator.
+   */
+  async getUnreadDirectMessagesCount() {
+    return apiGet<{ unread_count: number }>("/feed/conversations/unread-count");
+  },
+
+  /**
+   * Get or start a conversation with a specific employee.
+   */
+  async startConversation(recipientId: string) {
+    return apiPost<Conversation>("/feed/conversations", { recipient_id: recipientId });
+  },
+
+  /**
+   * Fetch conversation details by ID.
+   */
+  async getConversation(conversationId: string) {
+    return apiGet<Conversation>(`/feed/conversations/${conversationId}`);
+  },
+
+  /**
+   * List messages in a conversation.
+   */
+  async listMessages(conversationId: string, page: number = 1, pageSize: number = 50) {
+    return apiGet<DirectMessageListResponse>(
+      `/feed/conversations/${conversationId}/messages?page=${page}&page_size=${pageSize}`
+    );
+  },
+
+  /**
+   * Send a private direct message.
+   */
+  async sendMessage(conversationId: string, content: string) {
+    return apiPost<DirectMessage>(`/feed/conversations/${conversationId}/messages`, { content });
+  },
+
+  /**
+   * Edit own private message.
+   */
+  async updateMessage(messageId: string, content: string) {
+    return apiPatch<DirectMessage>(`/feed/messages/${messageId}`, { content });
+  },
+
+  /**
+   * Delete own private message.
+   */
+  async deleteMessage(messageId: string) {
+    return apiDelete<{ id: string; deleted: boolean }>(`/feed/messages/${messageId}`);
+  },
+
+  /**
+   * Mark conversation as read.
+   */
+  async markConversationRead(conversationId: string) {
+    return apiPost<{ is_read: boolean }>(`/feed/conversations/${conversationId}/read`, {});
+  },
 };
+

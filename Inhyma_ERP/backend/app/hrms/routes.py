@@ -52,12 +52,33 @@ def get_hrms_setup_service(db: AsyncSession = Depends(get_db_session)) -> HrmsSe
     return HrmsSetupService(db)
 
 
+def require_setup_read(ctx: HrmsUserContext = Depends(get_hrms_user_context)) -> HrmsUserContext:
+    if not (ctx.is_admin or (ctx.is_hr and ("hrms.manage" in ctx.permissions or "hrms.view" in ctx.permissions or "hrms.setup" in ctx.permissions))):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Permission denied. You do not have access to view HRMS Setup configuration.",
+        )
+    return ctx
+
+
+def require_setup_manage(ctx: HrmsUserContext = Depends(get_hrms_user_context)) -> HrmsUserContext:
+    if not (ctx.is_admin or (ctx.is_hr and "hrms.manage" in ctx.permissions)):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Permission denied. Administrative or explicitly delegated setup permissions required.",
+        )
+    return ctx
+
+
 # ===========================================================================
 # Office Locations (Geo Fencing)
 # ===========================================================================
 
 @router.get("/locations")
-async def list_locations(service: HrmsSetupService = Depends(get_hrms_setup_service)):
+async def list_locations(
+    service: HrmsSetupService = Depends(get_hrms_setup_service),
+    ctx: HrmsUserContext = Depends(require_setup_read),
+):
     locations = await service.list_locations()
     return build_success_response(
         data=[loc.model_dump(mode="json") for loc in locations],
@@ -69,6 +90,7 @@ async def list_locations(service: HrmsSetupService = Depends(get_hrms_setup_serv
 async def create_location(
     payload: LocationCreate,
     service: HrmsSetupService = Depends(get_hrms_setup_service),
+    ctx: HrmsUserContext = Depends(require_setup_manage),
 ):
     loc = await service.create_location(payload)
     return build_success_response(
@@ -81,6 +103,7 @@ async def create_location(
 async def get_location(
     location_id: uuid.UUID,
     service: HrmsSetupService = Depends(get_hrms_setup_service),
+    ctx: HrmsUserContext = Depends(require_setup_read),
 ):
     loc = await service.get_location(location_id)
     return build_success_response(
@@ -94,6 +117,7 @@ async def update_location(
     location_id: uuid.UUID,
     payload: LocationUpdate,
     service: HrmsSetupService = Depends(get_hrms_setup_service),
+    ctx: HrmsUserContext = Depends(require_setup_manage),
 ):
     loc = await service.update_location(location_id, payload)
     return build_success_response(
@@ -107,6 +131,7 @@ async def set_location_status(
     location_id: uuid.UUID,
     payload: LocationStatusUpdate,
     service: HrmsSetupService = Depends(get_hrms_setup_service),
+    ctx: HrmsUserContext = Depends(require_setup_manage),
 ):
     loc = await service.set_location_status(location_id, payload.is_active)
     return build_success_response(
@@ -119,6 +144,7 @@ async def set_location_status(
 async def delete_location(
     location_id: uuid.UUID,
     service: HrmsSetupService = Depends(get_hrms_setup_service),
+    ctx: HrmsUserContext = Depends(require_setup_manage),
 ):
     await service.delete_location(location_id)
     return build_success_response(
@@ -132,7 +158,10 @@ async def delete_location(
 # ===========================================================================
 
 @router.get("/leave-types")
-async def list_leave_types(service: HrmsSetupService = Depends(get_hrms_setup_service)):
+async def list_leave_types(
+    service: HrmsSetupService = Depends(get_hrms_setup_service),
+    ctx: HrmsUserContext = Depends(require_setup_read),
+):
     leaves = await service.list_leave_types()
     return build_success_response(
         data=[LeaveTypeRead.model_validate(l).model_dump(mode="json") for l in leaves],
@@ -144,6 +173,7 @@ async def list_leave_types(service: HrmsSetupService = Depends(get_hrms_setup_se
 async def create_leave_type(
     payload: LeaveTypeCreate,
     service: HrmsSetupService = Depends(get_hrms_setup_service),
+    ctx: HrmsUserContext = Depends(require_setup_manage),
 ):
     leave = await service.create_leave_type(payload)
     return build_success_response(
@@ -156,6 +186,7 @@ async def create_leave_type(
 async def get_leave_type(
     leave_type_id: uuid.UUID,
     service: HrmsSetupService = Depends(get_hrms_setup_service),
+    ctx: HrmsUserContext = Depends(require_setup_read),
 ):
     leave = await service.get_leave_type(leave_type_id)
     return build_success_response(
@@ -169,6 +200,7 @@ async def update_leave_type(
     leave_type_id: uuid.UUID,
     payload: LeaveTypeUpdate,
     service: HrmsSetupService = Depends(get_hrms_setup_service),
+    ctx: HrmsUserContext = Depends(require_setup_manage),
 ):
     leave = await service.update_leave_type(leave_type_id, payload)
     return build_success_response(
@@ -182,6 +214,7 @@ async def set_leave_type_status(
     leave_type_id: uuid.UUID,
     payload: LeaveTypeStatusUpdate,
     service: HrmsSetupService = Depends(get_hrms_setup_service),
+    ctx: HrmsUserContext = Depends(require_setup_manage),
 ):
     leave = await service.set_leave_type_status(leave_type_id, payload.is_active)
     return build_success_response(
@@ -194,6 +227,7 @@ async def set_leave_type_status(
 async def delete_leave_type(
     leave_type_id: uuid.UUID,
     service: HrmsSetupService = Depends(get_hrms_setup_service),
+    ctx: HrmsUserContext = Depends(require_setup_manage),
 ):
     await service.delete_leave_type(leave_type_id)
     return build_success_response(
@@ -207,7 +241,10 @@ async def delete_leave_type(
 # ===========================================================================
 
 @router.get("/expense-categories")
-async def list_expense_categories(service: HrmsSetupService = Depends(get_hrms_setup_service)):
+async def list_expense_categories(
+    service: HrmsSetupService = Depends(get_hrms_setup_service),
+    ctx: HrmsUserContext = Depends(require_setup_read),
+):
     cats = await service.list_expense_categories()
     return build_success_response(
         data=[ExpenseCategoryRead.model_validate(c).model_dump(mode="json") for c in cats],
@@ -219,6 +256,7 @@ async def list_expense_categories(service: HrmsSetupService = Depends(get_hrms_s
 async def create_expense_category(
     payload: ExpenseCategoryCreate,
     service: HrmsSetupService = Depends(get_hrms_setup_service),
+    ctx: HrmsUserContext = Depends(require_setup_manage),
 ):
     cat = await service.create_expense_category(payload)
     return build_success_response(
@@ -231,6 +269,7 @@ async def create_expense_category(
 async def get_expense_category(
     category_id: uuid.UUID,
     service: HrmsSetupService = Depends(get_hrms_setup_service),
+    ctx: HrmsUserContext = Depends(require_setup_read),
 ):
     cat = await service.get_expense_category(category_id)
     return build_success_response(
@@ -244,6 +283,7 @@ async def update_expense_category(
     category_id: uuid.UUID,
     payload: ExpenseCategoryUpdate,
     service: HrmsSetupService = Depends(get_hrms_setup_service),
+    ctx: HrmsUserContext = Depends(require_setup_manage),
 ):
     cat = await service.update_expense_category(category_id, payload)
     return build_success_response(
@@ -257,6 +297,7 @@ async def set_expense_category_status(
     category_id: uuid.UUID,
     payload: ExpenseCategoryStatusUpdate,
     service: HrmsSetupService = Depends(get_hrms_setup_service),
+    ctx: HrmsUserContext = Depends(require_setup_manage),
 ):
     cat = await service.set_expense_category_status(category_id, payload.is_active)
     return build_success_response(
@@ -269,6 +310,7 @@ async def set_expense_category_status(
 async def delete_expense_category(
     category_id: uuid.UUID,
     service: HrmsSetupService = Depends(get_hrms_setup_service),
+    ctx: HrmsUserContext = Depends(require_setup_manage),
 ):
     await service.delete_expense_category(category_id)
     return build_success_response(
@@ -282,7 +324,10 @@ async def delete_expense_category(
 # ===========================================================================
 
 @router.get("/expense-settings")
-async def get_expense_settings(service: HrmsSetupService = Depends(get_hrms_setup_service)):
+async def get_expense_settings(
+    service: HrmsSetupService = Depends(get_hrms_setup_service),
+    ctx: HrmsUserContext = Depends(require_setup_read),
+):
     settings = await service.get_expense_settings()
     return build_success_response(
         data=ExpenseSettingsRead.model_validate(settings).model_dump(mode="json"),
@@ -294,6 +339,7 @@ async def get_expense_settings(service: HrmsSetupService = Depends(get_hrms_setu
 async def update_expense_settings(
     payload: ExpenseSettingsUpdate,
     service: HrmsSetupService = Depends(get_hrms_setup_service),
+    ctx: HrmsUserContext = Depends(require_setup_manage),
 ):
     settings = await service.update_expense_settings(payload)
     return build_success_response(
@@ -327,15 +373,10 @@ async def get_all_tracking_settings(
 @router.put("/tracking-settings/org-default")
 async def update_org_tracking_settings(
     payload: TrackingSettingsUpdate,
-    ctx: HrmsUserContext = Depends(get_hrms_user_context),
+    ctx: HrmsUserContext = Depends(require_setup_manage),
     service: HrmsSetupService = Depends(get_hrms_setup_service),
 ):
     """Update organization default tracking settings (Admin/HR only)."""
-    if not (ctx.is_admin or ctx.is_hr):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Permission denied. Only Admin and HR can update organization tracking settings.",
-        )
     updated = await service.update_org_tracking_settings(payload, user_id=ctx.user_id)
     return build_success_response(
         data=updated.model_dump(mode="json"),
@@ -370,18 +411,13 @@ async def get_employee_tracking_settings(
 async def update_employee_tracking_settings(
     employee_id: uuid.UUID,
     payload: TrackingSettingsUpdate,
-    ctx: HrmsUserContext = Depends(get_hrms_user_context),
+    ctx: HrmsUserContext = Depends(require_setup_manage),
     service: HrmsSetupService = Depends(get_hrms_setup_service),
 ):
     """
     Set employee-specific tracking settings override.
-    Restricted strictly to Admin and HR. Employees cannot modify their own or peers' settings.
+    Restricted strictly to Admin and HR with manage rights.
     """
-    if not (ctx.is_admin or ctx.is_hr):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Permission denied. Only Admin and HR can configure employee tracking settings.",
-        )
     res = await service.update_employee_tracking_settings(employee_id, payload, user_id=ctx.user_id)
     return build_success_response(
         data=res.model_dump(mode="json"),
@@ -392,18 +428,13 @@ async def update_employee_tracking_settings(
 @router.delete("/tracking-settings/employee/{employee_id}")
 async def delete_employee_tracking_settings(
     employee_id: uuid.UUID,
-    ctx: HrmsUserContext = Depends(get_hrms_user_context),
+    ctx: HrmsUserContext = Depends(require_setup_manage),
     service: HrmsSetupService = Depends(get_hrms_setup_service),
 ):
     """
     Remove employee-specific override so employee inherits organization defaults again.
-    Restricted strictly to Admin and HR.
+    Restricted strictly to Admin and HR with manage rights.
     """
-    if not (ctx.is_admin or ctx.is_hr):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Permission denied. Only Admin and HR can clear employee tracking overrides.",
-        )
     res = await service.delete_employee_tracking_settings(employee_id)
     return build_success_response(
         data=res.model_dump(mode="json"),
@@ -437,15 +468,10 @@ async def list_detailed_tracking_employees(
 async def update_employee_detailed_tracking(
     employee_id: uuid.UUID,
     payload: DetailedTrackingEmployeeUpdate,
-    ctx: HrmsUserContext = Depends(get_hrms_user_context),
+    ctx: HrmsUserContext = Depends(require_setup_manage),
     service: HrmsSetupService = Depends(get_hrms_setup_service),
 ):
     """Update detailed tracking toggle (OFF/ON) and interval for an employee."""
-    if not (ctx.is_admin or ctx.is_hr):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Permission denied. Only Admin and HR can configure detailed tracking.",
-        )
     item = await service.update_employee_detailed_tracking(employee_id, payload, user_id=ctx.user_id)
     return build_success_response(
         data=item.model_dump(mode="json"),
@@ -475,15 +501,10 @@ async def list_return_timer_employees(
 async def update_employee_return_timer(
     employee_id: uuid.UUID,
     payload: ReturnTimerEmployeeUpdate,
-    ctx: HrmsUserContext = Depends(get_hrms_user_context),
+    ctx: HrmsUserContext = Depends(require_setup_manage),
     service: HrmsSetupService = Depends(get_hrms_setup_service),
 ):
     """Update return timer override or revert to organization default for an employee."""
-    if not (ctx.is_admin or ctx.is_hr):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Permission denied. Only Admin and HR can configure return timer overrides.",
-        )
     item = await service.update_employee_return_timer(employee_id, payload, user_id=ctx.user_id)
     return build_success_response(
         data=item.model_dump(mode="json"),

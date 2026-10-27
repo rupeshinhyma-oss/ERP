@@ -3,6 +3,17 @@
 **System:** Yinglima_ERP (China Procurement)  
 **Scope:** Functional updates, schema changes, UI hardening, and bug fixes.
 
+## [Release 2026-10-27] — Master Runner Resilience, Vite Proxy Error Handling & Scoped Hot Reload
+
+### 1. Scoped WatchFiles Hot Reload (`run.bat`, `run_all.py`)
+- **Restricted Reload Directory:** Configured Uvicorn startup `--reload-dir app` to watch strictly application code changes, preventing spurious full server reloads from tests, caches, `.pytest_cache`, logs, or temporary files.
+- **Fast Startup & Readiness Checks:** Verified `/api/v1/health/live` probe compatibility and added bounded retries with instant crash detection to prevent prolonged wait times.
+
+### 2. Vite WebSocket & API Proxy Resilience (`vite.config.ts`)
+- **Suppressed Transient Socket Disconnects:** Added a proxy error handler to ignore transient `ECONNRESET`, `ECONNREFUSED`, and `socket hang up` notices when the backend is reloading or restarting during local development.
+
+---
+
 ## [Release 2026-10-26] — Product Master Dual-Mode Coexistence (Synced from Yinglima & Manually Added in Inhyma)
 
 ### 1. Unified Catalog Loading & De-Scoping Restrictive Query Blocks

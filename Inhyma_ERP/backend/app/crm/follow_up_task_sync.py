@@ -23,6 +23,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.crm.models import CrmActivity, CrmFollowUp, CrmLead
 from app.database.base import _utcnow
+from app.notifications.repository import NotificationRepository
+from app.notifications.service import NotificationService
 from app.tasks.models import Task, TaskAssignee, TaskComment, TaskPriority, TaskStatus
 
 logger = logging.getLogger(__name__)
@@ -90,6 +92,9 @@ async def sync_follow_up_to_task(
     due_date_val = follow_up.due_at.date() if follow_up.due_at else None
     target_assignee_id = follow_up.assigned_to or lead.assigned_to or actor_id
 
+    is_new_task = False
+    is_reassigned = False
+
     if task:
         # Update existing task without overwriting unrelated fields modified by users
         task.title = f"CRM Follow-up — {lead.name}"
@@ -134,6 +139,7 @@ async def sync_follow_up_to_task(
                     assignment_role="ASSIGNEE",
                 )
                 session.add(new_a)
+                is_reassigned = True
     else:
         # Create brand-new Task
         task = Task(
@@ -158,6 +164,38 @@ async def sync_follow_up_to_task(
             )
             session.add(assignee)
             await session.flush()
+        is_new_task = True
+
+    # Stored & Real-Time Notification for assigned salesperson (isolated optional side effect)
+    if (is_new_task or is_reassigned) and target_assignee_id and follow_up.status == "pending":
+        if target_assignee_id != actor_id:
+            # Ensure core CRM changes (Task & TaskAssignee) are cleanly flushed before savepoint
+            await session.flush()
+            try:
+                async with session.begin_nested():
+                    notif_repo = NotificationRepository(session)
+                    notif_service = NotificationService(notif_repo)
+                    task_link = f"/tasks?id={task.id}"
+
+                    already_notified = await notif_service.has_recent_notification(
+                        user_id=target_assignee_id,
+                        type="task_assigned",
+                        link=task_link,
+                        within_hours=24,
+                    )
+                    if not already_notified:
+                        await notif_service.notify_user(
+                            user_id=target_assignee_id,
+                            type="task_assigned",
+                            title="Task Assigned",
+                            message=f"You have been assigned to task: {task.title}",
+                            link=task_link,
+                        )
+            except Exception:
+                logger.exception(
+                    "Failed to create CRM follow-up task assignment notification (rolled back savepoint).",
+                    extra={"task_id": str(task.id), "user_id": str(target_assignee_id)},
+                )
 
     return task
 

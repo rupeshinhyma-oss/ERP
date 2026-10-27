@@ -32,6 +32,8 @@ class UserMiniRead(BaseModel):
     username: str | None = None
     email: str | None = None
     profile_picture_url: str | None = None
+    department: str | None = None
+    department_id: uuid.UUID | None = None
 
 
 # --- Assignees ---
@@ -611,6 +613,8 @@ class TaskSummaryRead(BaseModel):
     escalation_count: int = 0
     attachment_count: int = 0
     voice_note_count: int = 0
+    department_id: uuid.UUID | None = None
+    department_name: str | None = None
 
 
 class TaskRead(BaseModel):
@@ -653,6 +657,24 @@ class TaskRead(BaseModel):
     reactions: list[TaskReactionSummary] = []
     child_tasks: list[TaskSummaryRead] = []
     progress_percent: int = 0
+    department_id: uuid.UUID | None = None
+    department_name: str | None = None
+
+
+class TaskDepartmentRead(BaseModel):
+    id: uuid.UUID
+    name: str
+    code: str | None = None
+    is_managed: bool = False
+
+
+class TaskAssigneeOptionRead(BaseModel):
+    id: uuid.UUID
+    full_name: str | None = None
+    username: str | None = None
+    email: str | None = None
+    department: str | None = None
+    department_id: uuid.UUID | None = None
 
 
 class TaskListResponse(BaseModel):
