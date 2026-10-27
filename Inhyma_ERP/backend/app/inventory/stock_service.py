@@ -70,12 +70,7 @@ async def get_warehouse(db: AsyncSession, name: str) -> Warehouse:
 
 
 def is_physical(warehouse: Warehouse) -> bool:
-    """Physical warehouses are the main primary ones; transit / ordered warehouses point at a main warehouse."""
-    if hasattr(warehouse, "is_primary") and warehouse.is_primary is not None:
-        if warehouse.is_primary is True:
-            return True
-        if warehouse.is_primary is False:
-            return False
+    """Physical warehouses are the main ones; transit / ordered warehouses point at a main warehouse."""
     if warehouse.main_warehouse_id is not None:
         return False
     w_name = (warehouse.name or "").strip().lower()

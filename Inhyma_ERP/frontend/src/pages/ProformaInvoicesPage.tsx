@@ -418,6 +418,28 @@ export function ProformaInvoicesPage({
   // Drawer detail state
   const [selectedProforma, setSelectedProforma] = useState<ProformaInvoice | null>(null);
   const [openActionId, setOpenActionId] = useState<string | null>(null);
+  const [actionMenuPos, setActionMenuPos] = useState<{
+    top?: number;
+    bottom?: number;
+    right: number;
+    openUpward: boolean;
+  } | null>(null);
+
+  useEffect(() => {
+    if (!openActionId) return;
+    const handleClose = () => {
+      setOpenActionId(null);
+      setActionMenuPos(null);
+    };
+    window.addEventListener("click", handleClose);
+    window.addEventListener("scroll", handleClose, { capture: true, passive: true });
+    window.addEventListener("resize", handleClose, { passive: true });
+    return () => {
+      window.removeEventListener("click", handleClose);
+      window.removeEventListener("scroll", handleClose, { capture: true });
+      window.removeEventListener("resize", handleClose);
+    };
+  }, [openActionId]);
 
   const [isFormOpen, setIsFormOpen] = useState(defaultAdd);
   const [formSubmitting, setFormSubmitting] = useState(false);
@@ -1272,6 +1294,7 @@ export function ProformaInvoicesPage({
 
   const startTransition = (p: ProformaInvoice, target: string) => {
     setOpenActionId(null);
+    setActionMenuPos(null);
     if ((rulesFor(p)?.reason_required_to || []).includes(target)) {
       setReasonText("");
       setReasonDialog({ pi: p, target });
@@ -1282,6 +1305,7 @@ export function ProformaInvoicesPage({
 
   const handleDeleteProforma = async (p: ProformaInvoice) => {
     setOpenActionId(null);
+    setActionMenuPos(null);
     if (!window.confirm(`Delete proforma ${p.proforma_no}?`)) return;
     try {
       setErrorMessage(null);
@@ -3179,7 +3203,23 @@ export function ProformaInvoicesPage({
                           type="button"
                           onClick={(e) => {
                             e.stopPropagation();
-                            setOpenActionId(openActionId === p.id ? null : p.id);
+                            if (openActionId === p.id) {
+                              setOpenActionId(null);
+                              setActionMenuPos(null);
+                            } else {
+                              const rect = e.currentTarget.getBoundingClientRect ? e.currentTarget.getBoundingClientRect() : { top: 0, bottom: 0, left: 0, right: 0 };
+                              const innerH = typeof window !== "undefined" ? window.innerHeight : 800;
+                              const innerW = typeof window !== "undefined" ? window.innerWidth : 1200;
+                              const spaceBelow = innerH - (rect.bottom || 0);
+                              const openUpward = spaceBelow < 260 || (idx > 0 && paginatedItems.length <= 3) || (paginatedItems.length >= 4 && idx >= paginatedItems.length - 2);
+                              setActionMenuPos({
+                                openUpward,
+                                top: openUpward ? undefined : (rect.bottom || 0) + 4,
+                                bottom: openUpward ? Math.max(0, innerH - (rect.top || 0) + 4) : undefined,
+                                right: Math.max(12, innerW - (rect.right || 0)),
+                              });
+                              setOpenActionId(p.id);
+                            }
                           }}
                           style={{
                             background: "none",
@@ -3194,22 +3234,20 @@ export function ProformaInvoicesPage({
                         >
                           ⋮
                         </button>
-                        {openActionId === p.id && (() => {
-                          const openUpward = paginatedItems.length >= 3 && idx >= paginatedItems.length - (paginatedItems.length >= 4 ? 2 : 1);
-                          return (
+                        {openActionId === p.id && actionMenuPos && (
                           <div
                             onClick={(e) => e.stopPropagation()}
                             style={{
-                              position: "absolute",
-                              right: "10px",
-                              top: openUpward ? "auto" : "34px",
-                              bottom: openUpward ? "34px" : "auto",
+                              position: "fixed",
+                              right: `${actionMenuPos.right}px`,
+                              top: actionMenuPos.openUpward ? "auto" : `${actionMenuPos.top}px`,
+                              bottom: actionMenuPos.openUpward ? `${actionMenuPos.bottom}px` : "auto",
                               background: "#ffffff",
                               border: "1px solid #cbd5e1",
                               borderRadius: "6px",
-                              boxShadow: openUpward ? "0 -4px 12px rgba(0,0,0,0.12)" : "0 4px 12px rgba(0,0,0,0.12)",
-                              zIndex: 100,
-                              minWidth: "140px",
+                              boxShadow: actionMenuPos.openUpward ? "0 -6px 20px rgba(0,0,0,0.15)" : "0 6px 20px rgba(0,0,0,0.15)",
+                              zIndex: 9999,
+                              minWidth: "150px",
                               textAlign: "left",
                               overflow: "hidden",
                             }}
@@ -3219,6 +3257,7 @@ export function ProformaInvoicesPage({
                               onClick={() => {
                                 window.open(`/proforma-invoice/download-proforma-invoice/${p.id}`, "_blank");
                                 setOpenActionId(null);
+                                setActionMenuPos(null);
                               }}
                               style={{
                                 width: "100%",
@@ -3243,6 +3282,7 @@ export function ProformaInvoicesPage({
                               onClick={() => {
                                 setSelectedProforma(p);
                                 setOpenActionId(null);
+                                setActionMenuPos(null);
                               }}
                               style={{
                                 width: "100%",
@@ -3268,6 +3308,7 @@ export function ProformaInvoicesPage({
                                 color="#2563eb"
                                 onClick={() => {
                                   setOpenActionId(null);
+                                  setActionMenuPos(null);
                                   handleOpenEdit(p);
                                 }}
                               />
@@ -3283,14 +3324,25 @@ export function ProformaInvoicesPage({
                                   key={target}
                                   label={label}
                                   color={target === "confirmed" ? "#16a34a" : tab?.actionColor}
-                                  onClick={() => startTransition(p, target)}
+                                  onClick={() => {
+                                    setActionMenuPos(null);
+                                    startTransition(p, target);
+                                  }}
                                 />
                               );
                             })}
-                            {canDelete(p) && <ActionMenuItem label="🗑️ Delete" color="#dc2626" onClick={() => void handleDeleteProforma(p)} />}
+                            {canDelete(p) && (
+                              <ActionMenuItem
+                                label="🗑️ Delete"
+                                color="#dc2626"
+                                onClick={() => {
+                                  setActionMenuPos(null);
+                                  void handleDeleteProforma(p);
+                                }}
+                              />
+                            )}
                           </div>
-                          );
-                        })()}
+                        )}
                       </td>
                     </tr>
                   ))

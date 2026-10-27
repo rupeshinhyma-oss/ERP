@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useMemo } from "react";
+import React, { useState, useRef, useEffect, useMemo } from "react";
 
 export interface DateRangePickerProps {
   value: string; // "MM/DD/YYYY - MM/DD/YYYY"
@@ -7,6 +7,9 @@ export interface DateRangePickerProps {
   placeholder?: string;
   id?: string;
   className?: string;
+  style?: React.CSSProperties;
+  align?: "left" | "right";
+  "data-testid"?: string;
 }
 
 const MONTH_NAMES = [
@@ -31,20 +34,38 @@ function formatMDY(d: Date): string {
   return `${mm}/${dd}/${yyyy}`;
 }
 
-function parseMDY(s: string): Date | null {
-  const parts = s.trim().split("/");
-  if (parts.length !== 3) return null;
-  const m = parseInt(parts[0], 10) - 1;
-  const d = parseInt(parts[1], 10);
-  const y = parseInt(parts[2], 10);
-  if (isNaN(m) || isNaN(d) || isNaN(y)) return null;
-  return new Date(y, m, d);
+function parseAnyDate(s: string): Date | null {
+  if (!s) return null;
+  const str = s.trim();
+  if (str.includes("/")) {
+    const parts = str.split("/");
+    if (parts.length === 3) {
+      const m = parseInt(parts[0], 10) - 1;
+      const d = parseInt(parts[1], 10);
+      const y = parseInt(parts[2], 10);
+      if (!isNaN(m) && !isNaN(d) && !isNaN(y)) return new Date(y, m, d);
+    }
+  }
+  if (str.includes("-")) {
+    const parts = str.split("-");
+    if (parts.length === 3) {
+      if (parts[0].length === 4) {
+        // YYYY-MM-DD
+        return new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
+      } else {
+        // DD-MM-YYYY
+        return new Date(parseInt(parts[2], 10), parseInt(parts[1], 10) - 1, parseInt(parts[0], 10));
+      }
+    }
+  }
+  const fallback = new Date(str);
+  return isNaN(fallback.getTime()) ? null : fallback;
 }
 
 function parseRange(rangeStr: string): { start: Date | null; end: Date | null } {
-  if (!rangeStr.includes("-")) return { start: null, end: null };
+  if (!rangeStr || !rangeStr.includes("-")) return { start: null, end: null };
   const [s1, s2] = rangeStr.split("-").map((s) => s.trim());
-  return { start: parseMDY(s1), end: parseMDY(s2) };
+  return { start: parseAnyDate(s1), end: parseAnyDate(s2) };
 }
 
 function isSameDay(d1: Date | null, d2: Date | null): boolean {
@@ -71,24 +92,50 @@ export function DateRangePicker({
   placeholder = "MM/DD/YYYY - MM/DD/YYYY",
   id,
   className = "adjustment-filter-input",
+  style,
+  align = "left",
+  "data-testid": dataTestId,
 }: DateRangePickerProps) {
   const [isOpen, setIsOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // Reference base date (September 19, 2026 matching the ERP system)
-  const baseDate = useMemo(() => new Date(2026, 8, 19), []);
+  // Reference base date (current date)
+  const baseDate = useMemo(() => new Date(), []);
 
   const parsed = useMemo(() => parseRange(value), [value]);
-  const [draftStart, setDraftStart] = useState<Date | null>(parsed.start || new Date(2026, 7, 21));
-  const [draftEnd, setDraftEnd] = useState<Date | null>(parsed.end || new Date(2026, 8, 19));
+
+  const defaultRange = useMemo(() => {
+    const end = new Date(baseDate);
+    const start = new Date(baseDate);
+    start.setDate(start.getDate() - 29);
+    return { start, end };
+  }, [baseDate]);
+
+  const [draftStart, setDraftStart] = useState<Date | null>(() => parsed.start || defaultRange.start);
+  const [draftEnd, setDraftEnd] = useState<Date | null>(() => parsed.end || defaultRange.end);
   const [activePreset, setActivePreset] = useState<string>("Last 30 Days");
 
-  // Navigation months
-  // Left calendar = August 2026 (7), Right calendar = September 2026 (8)
-  const [leftMonth, setLeftMonth] = useState<number>(7);
-  const [leftYear, setLeftYear] = useState<number>(2026);
-  const [rightMonth, setRightMonth] = useState<number>(8);
-  const [rightYear, setRightYear] = useState<number>(2026);
+  // Navigation months:
+  // Right calendar = current/end month, Left calendar = preceding month
+  const [rightMonth, setRightMonth] = useState<number>(() => {
+    const d = parsed.end || defaultRange.end;
+    return d.getMonth();
+  });
+  const [rightYear, setRightYear] = useState<number>(() => {
+    const d = parsed.end || defaultRange.end;
+    return d.getFullYear();
+  });
+  const [leftMonth, setLeftMonth] = useState<number>(() => {
+    const d = parsed.end || defaultRange.end;
+    const m = d.getMonth();
+    return m === 0 ? 11 : m - 1;
+  });
+  const [leftYear, setLeftYear] = useState<number>(() => {
+    const d = parsed.end || defaultRange.end;
+    const m = d.getMonth();
+    const y = d.getFullYear();
+    return m === 0 ? y - 1 : y;
+  });
 
   // Sync draft state with external value changes
   useEffect(() => {
@@ -96,6 +143,12 @@ export function DateRangePicker({
     if (p.start && p.end) {
       setDraftStart(p.start);
       setDraftEnd(p.end);
+      const rm = p.end.getMonth();
+      const ry = p.end.getFullYear();
+      setRightMonth(rm);
+      setRightYear(ry);
+      setLeftMonth(rm === 0 ? 11 : rm - 1);
+      setLeftYear(rm === 0 ? ry - 1 : ry);
     }
   }, [value]);
 
@@ -162,9 +215,11 @@ export function DateRangePicker({
     } else if (preset === "Last 7 Days") {
       start = new Date(baseDate);
       start.setDate(start.getDate() - 6);
+      end = new Date(baseDate);
     } else if (preset === "Last 30 Days") {
-      start = new Date(2026, 7, 21); // Aug 21, 2026
-      end = new Date(2026, 8, 19);   // Sep 19, 2026
+      start = new Date(baseDate);
+      start.setDate(start.getDate() - 29);
+      end = new Date(baseDate);
     } else if (preset === "This Month") {
       start = new Date(baseDate.getFullYear(), baseDate.getMonth(), 1);
       end = new Date(baseDate.getFullYear(), baseDate.getMonth() + 1, 0);
@@ -178,10 +233,13 @@ export function DateRangePicker({
 
     setDraftStart(start);
     setDraftEnd(end);
-    setLeftMonth(start.getMonth());
-    setLeftYear(start.getFullYear());
-    setRightMonth(end.getMonth());
-    setRightYear(end.getFullYear());
+
+    const rm = end.getMonth();
+    const ry = end.getFullYear();
+    setRightMonth(rm);
+    setRightYear(ry);
+    setLeftMonth(rm === 0 ? 11 : rm - 1);
+    setLeftYear(rm === 0 ? ry - 1 : ry);
   };
 
   // Day click handler
@@ -221,6 +279,7 @@ export function DateRangePicker({
     setDraftEnd(null);
     setActivePreset("Custom Range");
     onChange("");
+    if (onApply) onApply("");
     setIsOpen(false);
   };
 
@@ -285,12 +344,16 @@ export function DateRangePicker({
         onFocus={() => setIsOpen(true)}
         placeholder={placeholder}
         readOnly
-        style={{ cursor: "pointer" }}
-        data-testid="date-range-input"
+        style={{ cursor: "pointer", ...style }}
+        data-testid={dataTestId || (id ? `date-range-input-${id}` : "date-range-input")}
       />
 
       {isOpen && (
-        <div className="date-range-popover" data-testid="date-range-popover">
+        <div
+          className="date-range-popover"
+          data-testid="date-range-popover"
+          style={align === "right" ? { left: "auto", right: 0 } : undefined}
+        >
           <div className="date-range-body">
             {/* Left Sidebar Presets */}
             <div className="date-range-sidebar">
@@ -336,7 +399,7 @@ export function DateRangePicker({
                       value={leftYear}
                       onChange={(e) => setLeftYear(Number(e.target.value))}
                     >
-                      {[2024, 2025, 2026, 2027, 2028].map((y) => (
+                      {[2020, 2021, 2022, 2023, 2024, 2025, 2026, 2027, 2028, 2029, 2030].map((y) => (
                         <option key={y} value={y}>
                           {y}
                         </option>
@@ -398,7 +461,7 @@ export function DateRangePicker({
                       value={rightYear}
                       onChange={(e) => setRightYear(Number(e.target.value))}
                     >
-                      {[2024, 2025, 2026, 2027, 2028].map((y) => (
+                      {[2020, 2021, 2022, 2023, 2024, 2025, 2026, 2027, 2028, 2029, 2030].map((y) => (
                         <option key={y} value={y}>
                           {y}
                         </option>

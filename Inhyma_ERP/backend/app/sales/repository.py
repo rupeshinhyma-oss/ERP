@@ -206,9 +206,16 @@ class SaleRepository:
         currency: str | None = None,
         date_from: date | None = None,
         date_to: date | None = None,
+        warehouses: list[str] | None = None,
+        exclude_statuses: list[str] | None = None,
+        including_gst: bool = True,
     ) -> SaleSummaryMetrics:
         """Compute aggregate metrics for top KPI cards."""
         conditions: list[Any] = [SaleOrder.deleted_at.is_(None)]
+        if warehouses is not None:
+            conditions.append(SaleOrder.warehouse.in_(warehouses))
+        if exclude_statuses:
+            conditions.append(SaleOrder.status.notin_(exclude_statuses))
         if organization_id:
             conditions.append(SaleOrder.organization_id == organization_id)
         if buyer_id:
@@ -216,15 +223,21 @@ class SaleRepository:
         if currency:
             conditions.append(SaleOrder.currency == currency)
         if date_from:
-            conditions.append(SaleOrder.order_date >= date_from)
+            conditions.append(SaleOrder.order_date >= str(date_from))
         if date_to:
-            conditions.append(SaleOrder.order_date <= date_to)
+            conditions.append(SaleOrder.order_date <= str(date_to))
+
+        amount_expr = (
+            func.coalesce(SaleOrder.amount_inc_gst, SaleOrder.total_amount, 0.0)
+            if including_gst
+            else func.coalesce(SaleOrder.total_basic, SaleOrder.total_amount, 0.0)
+        )
 
         q = (
             select(
                 SaleOrder.status,
                 func.count(SaleOrder.id).label("count"),
-                func.coalesce(func.sum(SaleOrder.total_amount), 0.0).label("amount"),
+                func.coalesce(func.sum(amount_expr), 0.0).label("amount"),
             )
             .where(and_(*conditions))
             .group_by(SaleOrder.status)
@@ -246,7 +259,7 @@ class SaleRepository:
             all_count += cnt
             all_amount += amt
 
-            if st in ("admin_approved", "acc_confirmed", "gatepass_created", "dispatched", "lr"):
+            if st in ("sales_confirmed", "admin_approved", "acc_confirmed", "gatepass_created", "dispatched", "lr"):
                 admin_to_lr_count += cnt
                 admin_to_lr_amount += amt
 

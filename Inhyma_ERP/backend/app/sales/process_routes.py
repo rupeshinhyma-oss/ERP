@@ -142,6 +142,7 @@ async def list_sale_orders(
     delivery_date_to: str | None = Query(default=None),
     state: str | None = Query(default=None),
     dispatch: str | None = Query(default=None),
+    including_gst: bool = Query(default=True),
     service: SaleService = Depends(get_sale_service),
     current_user: CurrentUser = Depends(get_current_user),
 ) -> dict:
@@ -171,6 +172,16 @@ async def list_sale_orders(
 
     items = [SaleOrderResponse.model_validate(r).model_dump() for r in records]
 
+    metrics = await service.repo.get_metrics(
+        **visibility,
+        organization_id=organization_id,
+        buyer_id=buyer_id,
+        currency=currency,
+        date_from=date_from,
+        date_to=date_to,
+        including_gst=including_gst,
+    )
+
     return build_success_response(
         data={
             "items": items,
@@ -179,6 +190,7 @@ async def list_sale_orders(
             "page_size": page_size,
             "total_pages": (total + page_size - 1) // page_size if total > 0 else 1,
             "status_rules": await service.load_status_rules(),
+            "metrics": metrics.model_dump(),
         },
         request_id=req_id,
     )

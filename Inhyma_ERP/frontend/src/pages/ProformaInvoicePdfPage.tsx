@@ -1,8 +1,14 @@
 import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { generateProformaInvoicePdf } from "@/lib/proformaInvoicePdf";
-import type { ProformaInvoice } from "@/types";
+import type { ProformaInvoice, Organization } from "@/types";
 import { apiGet } from "@/lib/api";
+import {
+  getCachedBrandLogo,
+  getCachedOrganizationProfile,
+  fetchOrganizationProfile,
+} from "@/lib/brand";
+import { INHYMA_LOGO_BASE64 } from "@/lib/inhymaLogoBase64";
 
 export function ProformaInvoicePdfPage() {
   const { id } = useParams<{ id: string }>();
@@ -10,6 +16,8 @@ export function ProformaInvoicePdfPage() {
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const [liveItem, setLiveItem] = useState<ProformaInvoice | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [orgProfile, setOrgProfile] = useState<Organization | null>(() => getCachedOrganizationProfile());
+  const [brandLogo, setBrandLogoState] = useState<string | null>(() => getCachedBrandLogo() || INHYMA_LOGO_BASE64);
 
   // Load the proforma invoice from the API
   useEffect(() => {
@@ -29,6 +37,25 @@ export function ProformaInvoicePdfPage() {
       cancelled = true;
     };
   }, [id]);
+
+  // Load latest organization profile and logo from ERP settings
+  useEffect(() => {
+    let cancelled = false;
+    fetchOrganizationProfile()
+      .then((profile) => {
+        if (!cancelled && profile) {
+          setOrgProfile(profile);
+          const logo = profile.logo_data || profile.logo_url || null;
+          if (logo) {
+            setBrandLogoState(logo);
+          }
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const currentItem = liveItem;
   const piNo = currentItem?.proforma_no || "";
@@ -57,10 +84,13 @@ export function ProformaInvoicePdfPage() {
 
   useEffect(() => {
     if (currentItem) {
+      const activeLogo = brandLogo || getCachedBrandLogo() || INHYMA_LOGO_BASE64;
       const doc = generateProformaInvoicePdf(currentItem, {
         saveFile: false,
         openInNewTab: false,
         bankDetails: bankDetails || undefined,
+        logoUrl: activeLogo,
+        orgProfile: orgProfile || undefined,
       });
       const blob = doc.output("blob");
       const url = URL.createObjectURL(blob);
@@ -73,14 +103,17 @@ export function ProformaInvoicePdfPage() {
         URL.revokeObjectURL(url);
       };
     }
-  }, [currentItem, piNo, bankDetails]);
+  }, [currentItem, piNo, bankDetails, brandLogo, orgProfile]);
 
   const handleDownload = () => {
     if (currentItem) {
+      const activeLogo = brandLogo || getCachedBrandLogo() || INHYMA_LOGO_BASE64;
       generateProformaInvoicePdf(currentItem, {
         saveFile: true,
         openInNewTab: false,
         bankDetails: bankDetails || undefined,
+        logoUrl: activeLogo,
+        orgProfile: orgProfile || undefined,
       });
     }
   };

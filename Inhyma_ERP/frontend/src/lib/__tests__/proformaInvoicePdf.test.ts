@@ -38,5 +38,49 @@ describe("proformaInvoicePdf", () => {
       expect(doc).toBeDefined();
       expect(doc.output("datauristring")).toContain("data:application/pdf");
     });
+
+    it("takes the company logo from ERP settings options and renders it with addImage", () => {
+      const item = PROFORMA_FIXTURE_ITEMS[0];
+      const doc = new jsPDF();
+      const addImageSpy = vi.spyOn(doc, "addImage").mockImplementation(() => doc);
+
+      const customLogo = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+
+      generateProformaInvoicePdf(item, {
+        doc,
+        logoUrl: customLogo,
+        orgProfile: {
+          company_name: "Inhyma Solutions LLP",
+          address: "Office No 421, Supremus-II, Road No-22, Wagle Estate",
+          city: "Thane",
+          state: "Maharashtra",
+          postal_code: "400604",
+          gst_number: "27AAKFI9869H1ZL",
+          email: "payment.darsh@gmail.com",
+          phone: "+91 96532 61742",
+        },
+      });
+
+      expect(addImageSpy).toHaveBeenCalledWith(
+        customLogo,
+        "PNG",
+        expect.any(Number),
+        expect.any(Number),
+        expect.any(Number),
+        expect.any(Number),
+        undefined,
+        "FAST"
+      );
+    });
+
+    it("falls back to default INHYMA_LOGO_BASE64 when custom logoUrl is omitted", () => {
+      const item = PROFORMA_FIXTURE_ITEMS[0];
+      const doc = new jsPDF();
+      const addImageSpy = vi.spyOn(doc, "addImage").mockImplementation(() => doc);
+
+      generateProformaInvoicePdf(item, { doc });
+
+      expect(addImageSpy).toHaveBeenCalled();
+    });
   });
 });

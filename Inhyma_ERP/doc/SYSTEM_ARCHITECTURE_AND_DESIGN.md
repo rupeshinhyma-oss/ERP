@@ -151,7 +151,28 @@ flowchart TD
 - **Dynamic Dependency Auto-Provisioning:** If an incoming product references a Category, Subcategory, Brand, UOM, or Tax rate not yet present in Inhyma, the adapter automatically provisions the relational master record before inserting the product, ensuring zero foreign key collisions.
 - **Deterministic Pagination & Real-Time Broadcast:** Enforces standard `limit` parameter handling, newest-first sorting (`created_at DESC`), and WebSocket push event dispatching (`PRODUCT_SYNCED`) to notify all active client sessions.
 
-### 2.7 Machine-Spares Compatibility & Component Association Architecture
+### 2.13 Sales Process & Sales Order Lifecycle Architecture (`/sales/process`)
+- **Add & Edit Sales Order Engine (`SaleProcessForm.tsx`):**
+  - **Proforma Invoice Parity:** Built with strict feature and design parity with `ProformaInvoicesPage.tsx`, ensuring uniform commercial terms, drawer modals, calculation standards, and entity resolution.
+  - **Dynamic Masters Integration:** Utilizes `useMasterNames` to dynamically pull active master lists from `/masters/warehouses`, `/masters/payment-terms`, `/masters/transports`, and `/masters/additional-charges`, seamlessly merging them with standard operational fallbacks.
+  - **Slide-Over Drawers:**
+    - `AddCompanyDrawer`: Integrated alongside `ClientNameAutocomplete` to rapidly register new B2B client profiles without navigating away.
+    - `EditAddressDrawer`: Integrated into Billing and Shipping address cards to customize dispatch addresses non-destructively for the order.
+  - **Warehouse-Aware Stock Protection & Real-Time Alerts:**
+    - Queries `/inventory/product-stock?limit=500` for the selected warehouse (`mumbai`, `ahmedabad`, `indore`).
+    - If user enters quantity exceeding available stock: displays prominent top banner (`data-testid="alert-exceeded-stock"`), in-table warning alert, red input border, red warning badge (`Qty: ... ⚠️ Exceeds Available!`), and blur toast warnings.
+  - **Grey-Locked Calculation Cells (`#f8fafc`):**
+    - Line-item HSN, Taxable Amount, GST %, GST Amount, and Total are readOnly, styled with grey locked styling, dynamically computed as `(unit_price - unit_discount) * quantity`.
+  - **Combobox Upward Placement (`placement="up"`):**
+    - Combobox dropdowns within table rows open upward, eliminating overflow clipping and scrollbar issues in tables.
+  - **Self-Pickup Automation:**
+    - Automatically hides Row 3 (Destination, Delivery Type, Delivery Charge) when Transport Name is `Self Pickup` / `Self Pick-up` and relaxes delivery validations.
+  - **Default Status Invariant:**
+    - Newly created sales orders default to `status: "pending"`.
+  - **Payload & Schema Harmonization:**
+    - Dual field synchronization (`buyer_name` + `company_name`, `transport_name` + `transporter_name`, `expected_delivery_date` + `delivery_date`, `city`, and `state`) ensures 100% interoperability with backend Pydantic models.
+
+### 2.14 Machine-Spares Compatibility & Component Association Architecture
 - **Domain Modeling:** Products are classified by `product_type` (`Machine` vs. `Spare Part`).
 - **Relational Mapping (`product_machine_spares`):**
   - High-performance relational join table (`machine_id`, `spare_part_id`, `remarks`, `created_at`) backed by composite uniqueness constraints.

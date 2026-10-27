@@ -19,12 +19,15 @@ vi.mock("@/lib/api", () => ({
     },
   }),
   apiDelete: vi.fn(),
+  apiPatch: vi.fn().mockResolvedValue({ data: { success: true } }),
+  toQueryString: vi.fn((_params?: any) => ""),
   errorMessage: vi.fn((err: any) => err?.message || "Error"),
 }));
 
 describe("SaleProcessListPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    sessionStorage.clear();
   });
 
   afterEach(() => {
@@ -121,7 +124,7 @@ describe("SaleProcessListPage", () => {
     expect(screen.getByRole("button", { name: "Close" })).toBeTruthy();
   });
 
-  it("renders Edit, SO Files, and Delete in action menu and opens Sales Details modal when clicking SO Files", async () => {
+  it("renders Edit, SO Files, and Delete in action menu and opens Upload Files drawer when clicking SO Files", async () => {
     render(
       <BrowserRouter>
         <SaleProcessListPage />
@@ -140,10 +143,19 @@ describe("SaleProcessListPage", () => {
     expect(soFilesBtn).toBeTruthy();
     expect(deleteBtn).toBeTruthy();
 
+    // Verify non-pending actions are NOT rendered when status is Pending
+    expect(screen.queryByRole("button", { name: /Print SO \(Pricing\)/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Warehouse SO \(No Pricing\)/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Gate Pass PDF/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Download Gate Pass/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Send LR to Client/i })).toBeNull();
+
     fireEvent.click(soFilesBtn);
     await waitFor(() => {
-      expect(document.body.innerHTML).toContain("Sales Details");
-      expect(document.body.innerHTML).toContain("Bill To");
+      expect(screen.getByText("Upload Files")).toBeTruthy();
+      expect(screen.getByText("Check All Upload Files")).toBeTruthy();
+      expect(screen.getByText("PO File")).toBeTruthy();
+      expect(screen.getByTestId("btn-submit-upload-files")).toBeTruthy();
     });
   });
 
@@ -203,7 +215,7 @@ describe("SaleProcessListPage", () => {
     expect(screen.getAllByText(/Remark :/i).length).toBeGreaterThan(0);
   });
 
-  it("toggles the collapsible filter panel when clicking the filter button", () => {
+  it("toggles the collapsible filter panel and renders all 13 filter controls matching screenshot", () => {
     render(
       <BrowserRouter>
         <SaleProcessListPage />
@@ -216,11 +228,523 @@ describe("SaleProcessListPage", () => {
     fireEvent.click(filterBtn);
     const panel = screen.getByTestId("sale-process-filter-panel");
     expect(panel).toBeTruthy();
-    expect(within(panel).getByText("Order Date From")).toBeTruthy();
-    expect(within(panel).getByText("Warehouse")).toBeTruthy();
-    expect(within(panel).getByText("Sales Person")).toBeTruthy();
 
+    // Row 1 - 6 Date inputs
+    expect(within(panel).getByText("Order Date From")).toBeTruthy();
+    expect(within(panel).getByTestId("filter-order-date-from")).toBeTruthy();
+    expect(within(panel).getByText("Order Date To")).toBeTruthy();
+    expect(within(panel).getByTestId("filter-order-date-to")).toBeTruthy();
+    expect(within(panel).getByText("Invoice Date From")).toBeTruthy();
+    expect(within(panel).getByTestId("filter-invoice-date-from")).toBeTruthy();
+    expect(within(panel).getByText("Invoice Date To")).toBeTruthy();
+    expect(within(panel).getByTestId("filter-invoice-date-to")).toBeTruthy();
+    expect(within(panel).getByText("Exp. Delivery From")).toBeTruthy();
+    expect(within(panel).getByTestId("filter-exp-date-from")).toBeTruthy();
+    expect(within(panel).getByText("Exp. Delivery To")).toBeTruthy();
+    expect(within(panel).getByTestId("filter-exp-date-to")).toBeTruthy();
+
+    // Row 2 - State, Dispatch, Warehouse, Sales Person (dropdown), Company, Third Party
+    expect(within(panel).getByText("State")).toBeTruthy();
+    expect(within(panel).getByText("Dispatch")).toBeTruthy();
+    const dispatchSelect = within(panel).getByTestId("filter-dispatch") as HTMLSelectElement;
+    expect(dispatchSelect).toBeTruthy();
+    expect(Array.from(dispatchSelect.options).map((o) => o.text)).toEqual(["All", "Yes", "No"]);
+    expect(within(panel).getByText("Warehouse")).toBeTruthy();
+    expect(within(panel).getByTestId("filter-warehouse")).toBeTruthy();
+    expect(within(panel).getByText("Sales Person")).toBeTruthy();
+    expect(within(panel).getByTestId("filter-sales-person")).toBeTruthy();
+    expect(within(panel).getByText("Company")).toBeTruthy();
+    expect(within(panel).getByTestId("filter-company")).toBeTruthy();
+    expect(within(panel).getByText("Third Party")).toBeTruthy();
+    expect(within(panel).getByTestId("filter-third-party")).toBeTruthy();
+
+    // Row 3 - PO, Reset, Search
+    expect(within(panel).getByText("PO")).toBeTruthy();
+    expect(within(panel).getByTestId("filter-po")).toBeTruthy();
+    expect(within(panel).getByTestId("btn-filter-reset")).toBeTruthy();
+    expect(within(panel).getByTestId("btn-filter-search")).toBeTruthy();
+
+    // Closes on clicking toggle again
     fireEvent.click(filterBtn);
     expect(screen.queryByTestId("sale-process-filter-panel")).toBeNull();
+  });
+
+  it("renders Sales Person as a dropdown with options and filters orders when applied", async () => {
+    render(
+      <BrowserRouter>
+        <SaleProcessListPage />
+      </BrowserRouter>
+    );
+
+    const filterBtn = screen.getByTestId("btn-toggle-filter");
+    fireEvent.click(filterBtn);
+
+    const salesPersonSelect = screen.getByTestId("filter-sales-person") as HTMLSelectElement;
+    expect(salesPersonSelect).toBeTruthy();
+    expect(salesPersonSelect.tagName).toBe("SELECT");
+
+    // Check that options include All, Admin, Dhairya Shah
+    const optionTexts = Array.from(salesPersonSelect.options).map((opt) => opt.text);
+    expect(optionTexts).toContain("All");
+    expect(optionTexts).toContain("Admin");
+    expect(optionTexts).toContain("Dhairya Shah");
+
+    // Select Admin
+    fireEvent.change(salesPersonSelect, { target: { value: "Admin" } });
+    expect(salesPersonSelect.value).toBe("Admin");
+
+    // Click Search button
+    const searchBtn = screen.getByTestId("btn-filter-search");
+    fireEvent.click(searchBtn);
+
+    // Click Reset button to clear filter
+    const resetBtn = screen.getByTestId("btn-filter-reset");
+    fireEvent.click(resetBtn);
+    expect(salesPersonSelect.value).toBe("");
+  });
+
+  it("filters orders by Warehouse and Company and resets filters cleanly", () => {
+    render(
+      <BrowserRouter>
+        <SaleProcessListPage />
+      </BrowserRouter>
+    );
+
+    const filterBtn = screen.getByTestId("btn-toggle-filter");
+    fireEvent.click(filterBtn);
+
+    const warehouseSelect = screen.getByTestId("filter-warehouse") as HTMLSelectElement;
+    const companyInput = screen.getByTestId("filter-company") as HTMLInputElement;
+
+    fireEvent.change(warehouseSelect, { target: { value: "Mumbai" } });
+    fireEvent.change(companyInput, { target: { value: "Om Polymer" } });
+
+    expect(warehouseSelect.value).toBe("Mumbai");
+    expect(companyInput.value).toBe("Om Polymer");
+
+    const searchBtn = screen.getByTestId("btn-filter-search");
+    fireEvent.click(searchBtn);
+
+    const resetBtn = screen.getByTestId("btn-filter-reset");
+    fireEvent.click(resetBtn);
+
+    expect(warehouseSelect.value).toBe("");
+    expect(companyInput.value).toBe("");
+  });
+
+  it("renders Edit, SO Files, Cancel, and Delete in action menu when order status is Sales Confirmed and excludes downstream actions", () => {
+    render(
+      <BrowserRouter>
+        <SaleProcessListPage />
+      </BrowserRouter>
+    );
+
+    // Filter to Sales Confirmed tab
+    const salesConfirmedTab = screen.getByRole("button", { name: /Sales Confirmed/i });
+    fireEvent.click(salesConfirmedTab);
+
+    const kebabBtns = screen.getAllByRole("button", { name: "⋮" });
+    expect(kebabBtns.length).toBeGreaterThan(0);
+
+    fireEvent.click(kebabBtns[0]);
+    expect(screen.getByRole("button", { name: /Edit/i })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /SO Files/i })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /^Cancel$/i })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Delete/i })).toBeTruthy();
+
+    // Verify downstream actions are NOT rendered
+    expect(screen.queryByRole("button", { name: /Print SO \(Pricing\)/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Warehouse SO \(No Pricing\)/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Gate Pass PDF/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Download Gate Pass/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Send LR to Client/i })).toBeNull();
+  });
+
+  it("directly moves order to cancelled status and switches active tab to Cancelled when clicking Cancel in action menu", async () => {
+    const { apiPatch } = await import("@/lib/api");
+    render(
+      <BrowserRouter>
+        <SaleProcessListPage />
+      </BrowserRouter>
+    );
+
+    // Switch to Sales Confirmed tab
+    const salesConfirmedTab = screen.getByRole("button", { name: /Sales Confirmed/i });
+    fireEvent.click(salesConfirmedTab);
+
+    const kebabBtns = screen.getAllByRole("button", { name: "⋮" });
+    fireEvent.click(kebabBtns[0]);
+
+    const cancelBtn = screen.getByTestId("btn-action-cancel");
+    fireEvent.click(cancelBtn);
+
+    await waitFor(() => {
+      expect(apiPatch).toHaveBeenCalledWith(
+        expect.stringMatching(/\/sales\/orders\/.*\/status/),
+        expect.objectContaining({ status: "cancelled" })
+      );
+    });
+  });
+
+  it("renders SO Files, Cancel, and Delete in action menu for Admin Approved orders", async () => {
+    const { apiGet } = await import("@/lib/api");
+    (apiGet as any).mockImplementation((url: string) => {
+      if (url.includes("/sales/orders")) {
+        return Promise.resolve({
+          data: {
+            items: [
+              {
+                id: "ord-admin-app",
+                order_no: "SO-ADM-01",
+                status: "admin_approved",
+                company_name: "Acme Corp",
+                customer_name: "John Doe",
+                total_amount: 50000,
+                amount_inc_gst: 59000,
+                order_date: "25-10-2026",
+                warehouse: "Main Warehouse",
+              },
+            ],
+            total: 1,
+          },
+        });
+      }
+      return Promise.resolve({ data: [] });
+    });
+
+    render(
+      <BrowserRouter>
+        <SaleProcessListPage />
+      </BrowserRouter>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("SO-ADM-01")).toBeTruthy();
+    });
+
+    const kebab = screen.getByRole("button", { name: "⋮" });
+    fireEvent.click(kebab);
+
+    expect(screen.getByTestId("btn-action-so-files")).toBeTruthy();
+    expect(screen.getByTestId("btn-action-cancel")).toBeTruthy();
+    expect(screen.getByTestId("btn-action-delete")).toBeTruthy();
+
+    expect(screen.queryByTestId("btn-action-edit")).toBeNull();
+    expect(screen.queryByTestId("btn-action-duplicate")).toBeNull();
+    expect(screen.queryByTestId("btn-action-download-gatepass")).toBeNull();
+  });
+
+  it("renders SO Files and Delete in action menu for Acc Confirmed orders", async () => {
+    const { apiGet } = await import("@/lib/api");
+    (apiGet as any).mockImplementation((url: string) => {
+      if (url.includes("/sales/orders")) {
+        return Promise.resolve({
+          data: {
+            items: [
+              {
+                id: "ord-acc-conf",
+                order_no: "SO-ACC-01",
+                status: "acc_confirmed",
+                company_name: "Acme Corp",
+                customer_name: "John Doe",
+                total_amount: 50000,
+                amount_inc_gst: 59000,
+                order_date: "25-10-2026",
+                warehouse: "Main Warehouse",
+              },
+            ],
+            total: 1,
+          },
+        });
+      }
+      return Promise.resolve({ data: [] });
+    });
+
+    render(
+      <BrowserRouter>
+        <SaleProcessListPage />
+      </BrowserRouter>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("SO-ACC-01")).toBeTruthy();
+    });
+
+    const kebab = screen.getByRole("button", { name: "⋮" });
+    fireEvent.click(kebab);
+
+    expect(screen.getByTestId("btn-action-so-files")).toBeTruthy();
+    expect(screen.getByTestId("btn-action-delete")).toBeTruthy();
+
+    expect(screen.queryByTestId("btn-action-edit")).toBeNull();
+    expect(screen.queryByTestId("btn-action-cancel")).toBeNull();
+    expect(screen.queryByTestId("btn-action-duplicate")).toBeNull();
+    expect(screen.queryByTestId("btn-action-download-gatepass")).toBeNull();
+  });
+
+  it("renders Download Gatepass, SO Files, and Delete in action menu for Gatepass Created and Dispatched orders", async () => {
+    const { apiGet } = await import("@/lib/api");
+    (apiGet as any).mockImplementation((url: string) => {
+      if (url.includes("/sales/orders")) {
+        return Promise.resolve({
+          data: {
+            items: [
+              {
+                id: "ord-gp-1",
+                order_no: "SO-GP-01",
+                status: "gatepass_created",
+                company_name: "Acme Corp",
+                customer_name: "John Doe",
+                total_amount: 50000,
+                amount_inc_gst: 59000,
+                order_date: "25-10-2026",
+                warehouse: "Main Warehouse",
+              },
+            ],
+            total: 1,
+          },
+        });
+      }
+      return Promise.resolve({ data: [] });
+    });
+
+    render(
+      <BrowserRouter>
+        <SaleProcessListPage />
+      </BrowserRouter>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("SO-GP-01")).toBeTruthy();
+    });
+
+    const kebab = screen.getByRole("button", { name: "⋮" });
+    fireEvent.click(kebab);
+
+    expect(screen.getByTestId("btn-action-download-gatepass")).toBeTruthy();
+    expect(screen.getByTestId("btn-action-so-files")).toBeTruthy();
+    expect(screen.getByTestId("btn-action-delete")).toBeTruthy();
+
+    expect(screen.queryByTestId("btn-action-edit")).toBeNull();
+    expect(screen.queryByTestId("btn-action-cancel")).toBeNull();
+    expect(screen.queryByTestId("btn-action-duplicate")).toBeNull();
+  });
+
+  it("renders SO Files, Cancel, and Delete in action menu for Gatepass Cancelled orders", async () => {
+    const { apiGet } = await import("@/lib/api");
+    (apiGet as any).mockImplementation((url: string) => {
+      if (url.includes("/sales/orders")) {
+        return Promise.resolve({
+          data: {
+            items: [
+              {
+                id: "ord-gpc-1",
+                order_no: "SO-GPC-01",
+                status: "gatepass_cancelled",
+                company_name: "Acme Corp",
+                customer_name: "John Doe",
+                total_amount: 50000,
+                amount_inc_gst: 59000,
+                order_date: "25-10-2026",
+                warehouse: "Main Warehouse",
+              },
+            ],
+            total: 1,
+          },
+        });
+      }
+      return Promise.resolve({ data: [] });
+    });
+
+    render(
+      <BrowserRouter>
+        <SaleProcessListPage />
+      </BrowserRouter>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("SO-GPC-01")).toBeTruthy();
+    });
+
+    const kebab = screen.getByRole("button", { name: "⋮" });
+    fireEvent.click(kebab);
+
+    expect(screen.getByTestId("btn-action-so-files")).toBeTruthy();
+    expect(screen.getByTestId("btn-action-cancel")).toBeTruthy();
+    expect(screen.getByTestId("btn-action-delete")).toBeTruthy();
+
+    expect(screen.queryByTestId("btn-action-edit")).toBeNull();
+    expect(screen.queryByTestId("btn-action-duplicate")).toBeNull();
+    expect(screen.queryByTestId("btn-action-download-gatepass")).toBeNull();
+  });
+
+  it("renders Duplicate, Download Gatepass, and Delete in action menu for LR orders", async () => {
+    const { apiGet } = await import("@/lib/api");
+    (apiGet as any).mockImplementation((url: string) => {
+      if (url.includes("/sales/orders")) {
+        return Promise.resolve({
+          data: {
+            items: [
+              {
+                id: "ord-lr-1",
+                order_no: "SO-LR-01",
+                status: "lr",
+                company_name: "Acme Corp",
+                customer_name: "John Doe",
+                total_amount: 50000,
+                amount_inc_gst: 59000,
+                order_date: "25-10-2026",
+                warehouse: "Main Warehouse",
+              },
+            ],
+            total: 1,
+          },
+        });
+      }
+      return Promise.resolve({ data: [] });
+    });
+
+    render(
+      <BrowserRouter>
+        <SaleProcessListPage />
+      </BrowserRouter>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("SO-LR-01")).toBeTruthy();
+    });
+
+    const kebab = screen.getByRole("button", { name: "⋮" });
+    fireEvent.click(kebab);
+
+    expect(screen.getByTestId("btn-action-duplicate")).toBeTruthy();
+    expect(screen.getByTestId("btn-action-download-gatepass")).toBeTruthy();
+    expect(screen.getByTestId("btn-action-delete")).toBeTruthy();
+
+    expect(screen.queryByTestId("btn-action-edit")).toBeNull();
+    expect(screen.queryByTestId("btn-action-so-files")).toBeNull();
+    expect(screen.queryByTestId("btn-action-cancel")).toBeNull();
+  });
+
+  it("renders only Delete in action menu for Cancelled orders", async () => {
+    const { apiGet } = await import("@/lib/api");
+    (apiGet as any).mockImplementation((url: string) => {
+      if (url.includes("/sales/orders")) {
+        return Promise.resolve({
+          data: {
+            items: [
+              {
+                id: "ord-canc-1",
+                order_no: "SO-CANC-01",
+                status: "cancelled",
+                company_name: "Acme Corp",
+                customer_name: "John Doe",
+                total_amount: 50000,
+                amount_inc_gst: 59000,
+                order_date: "25-10-2026",
+                warehouse: "Main Warehouse",
+              },
+            ],
+            total: 1,
+          },
+        });
+      }
+      return Promise.resolve({ data: [] });
+    });
+
+    render(
+      <BrowserRouter>
+        <SaleProcessListPage />
+      </BrowserRouter>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("SO-CANC-01")).toBeTruthy();
+    });
+
+    const kebab = screen.getByRole("button", { name: "⋮" });
+    fireEvent.click(kebab);
+
+    expect(screen.getByTestId("btn-action-delete")).toBeTruthy();
+
+    expect(screen.queryByTestId("btn-action-edit")).toBeNull();
+    expect(screen.queryByTestId("btn-action-duplicate")).toBeNull();
+    expect(screen.queryByTestId("btn-action-download-gatepass")).toBeNull();
+    expect(screen.queryByTestId("btn-action-so-files")).toBeNull();
+    expect(screen.queryByTestId("btn-action-cancel")).toBeNull();
+  });
+
+  it("allows deleting uploaded file and attached PO from the SO files drawer", async () => {
+    const { apiGet, apiPatch } = await import("@/lib/api");
+    (apiGet as any).mockImplementation((url: string) => {
+      if (url.includes("/sales/orders")) {
+        return Promise.resolve({
+          data: {
+            items: [
+              {
+                id: "ord-files-1",
+                order_no: "SO-FILES-01",
+                status: "pending",
+                company_name: "Acme Corp",
+                customer_name: "John Doe",
+                po: "Yes",
+                po_file: "Customer_PO_123.pdf",
+                files: [
+                  { name: "Order_Spec.pdf", size: "150 KB" },
+                  { name: "Customer_PO_123.pdf", size: "200 KB" },
+                ],
+                total_amount: 50000,
+                amount_inc_gst: 59000,
+                order_date: "25-10-2026",
+                warehouse: "Main Warehouse",
+              },
+            ],
+            total: 1,
+          },
+        });
+      }
+      return Promise.resolve({ data: [] });
+    });
+
+    render(
+      <BrowserRouter>
+        <SaleProcessListPage />
+      </BrowserRouter>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("SO-FILES-01")).toBeTruthy();
+    });
+
+    const kebab = screen.getByRole("button", { name: "⋮" });
+    fireEvent.click(kebab);
+
+    const soFilesBtn = screen.getByTestId("btn-action-so-files");
+    fireEvent.click(soFilesBtn);
+
+    // Open Check All Upload Files section
+    const checkAllBtn = screen.getByTestId("btn-check-all-upload-files");
+    fireEvent.click(checkAllBtn);
+
+    // Both files should be listed with delete buttons
+    expect(screen.getByText(/Order_Spec\.pdf/)).toBeTruthy();
+    const deleteFile0 = screen.getByTestId("btn-delete-file-0");
+    fireEvent.click(deleteFile0);
+
+    await waitFor(() => {
+      expect(screen.queryByText(/Order_Spec\.pdf/)).toBeNull();
+    });
+
+    // Delete existing PO file
+    const deletePoBtn = screen.getByTestId("btn-delete-po-file");
+    fireEvent.click(deletePoBtn);
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("btn-delete-po-file")).toBeNull();
+      expect(apiPatch).toHaveBeenCalledWith(
+        expect.stringMatching(/\/sales\/orders\/ord-files-1/),
+        expect.objectContaining({ po: "No" })
+      );
+    });
   });
 });

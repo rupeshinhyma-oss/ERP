@@ -1126,7 +1126,7 @@ export function StockAdjustmentPage({
                         </button>
 
                         {openActionMenuId === item.id && (() => {
-                          const openUpward = paginatedItems.length >= 3 && idx >= paginatedItems.length - (paginatedItems.length >= 4 ? 2 : 1);
+                          const openUpward = (idx > 0 && paginatedItems.length <= 3) || (paginatedItems.length >= 4 && idx >= paginatedItems.length - 2);
                           return (
                           <div
                             className={`adjustment-action-menu ${openUpward ? "open-upward" : ""}`}

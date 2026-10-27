@@ -2669,11 +2669,16 @@ tbody tr {
   border-color: #2563eb;
 }
 
+.date-range-container {
+  position: relative;
+  width: 100%;
+}
+
 .date-range-popover {
   position: absolute;
   top: 44px;
   left: 0;
-  z-index: 100;
+  z-index: 1050;
   background: #ffffff;
   border: 1px solid #cbd5e1;
   border-radius: 8px;

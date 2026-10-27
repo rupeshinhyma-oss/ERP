@@ -1,5 +1,5 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { BrowserRouter } from "react-router-dom";
+import { BrowserRouter, MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SaleProcessFormPage } from "../sales/SaleProcessForm";
 
@@ -11,12 +11,44 @@ vi.mock("@/components/AppShell", () => ({
 }));
 
 // Mock api calls
-vi.mock("@/lib/api", () => ({
-  apiGet: vi.fn().mockResolvedValue({ data: null }),
-  apiPost: vi.fn().mockResolvedValue({ data: { id: "so-new-123" } }),
-  apiPatch: vi.fn().mockResolvedValue({ data: { id: "so-new-123" } }),
-  errorMessage: vi.fn((err) => String(err)),
-}));
+vi.mock("@/lib/api", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/api")>();
+  return {
+    ...actual,
+    apiGet: vi.fn().mockImplementation((url: string) => {
+      if (typeof url === "string" && url.includes("/masters/products")) {
+        return Promise.resolve({
+          data: {
+            items: [
+              {
+                product_name: "Continuous Band Sealer",
+                product_code: "CBS-01",
+                hsn: "84223000",
+                standard_price: 25000,
+                gst_percent: 18,
+                minimum_price: 22000,
+                available_stock: 10,
+              },
+              {
+                product_name: "Induction Cap Sealing Machine",
+                product_code: "ICSM-01",
+                hsn: "84223000",
+                standard_price: 72203,
+                gst_percent: 18,
+                minimum_price: 68000,
+                available_stock: 5,
+              },
+            ],
+          },
+        });
+      }
+      return Promise.resolve({ data: null });
+    }),
+    apiPost: vi.fn().mockResolvedValue({ data: { id: "so-new-123" } }),
+    apiPatch: vi.fn().mockResolvedValue({ data: { id: "so-new-123" } }),
+    errorMessage: vi.fn((err) => String(err)),
+  };
+});
 
 // Mock toast
 vi.mock("@/lib/toast", () => ({
@@ -162,6 +194,51 @@ describe("SaleProcessFormPage (/sale-order/addedit & /sales/process/add)", () =>
       expect(screen.getByText("Company is required")).toBeTruthy();
       expect(screen.getByText("Billing Address is required")).toBeTruthy();
       expect(screen.getByText("Shipping Address is required")).toBeTruthy();
+    });
+  });
+
+  it("loads source order details and sets duplicate header title in duplicate mode", async () => {
+    const { apiGet } = await import("@/lib/api");
+    (apiGet as any).mockImplementation((url: string) => {
+      if (typeof url === "string" && url.includes("/sales/orders/source-order-1")) {
+        return Promise.resolve({
+          data: {
+            id: "source-order-1",
+            order_no: "SO-OLD-999",
+            warehouse: "Primary Godown",
+            payment_terms: "Immediate",
+            sales_person: "Admin",
+            transport_name: "Safe Express",
+            delivery_type: "Door Delivery",
+            delivery_charge: "Paid",
+            company_name: "Acme Corp",
+            customer_name: "John Doe",
+            shipping_address: "123 Street",
+            billing_address: "123 Street",
+            status: "pending",
+            items: [
+              {
+                item_name: "Continuous Band Sealer",
+                hsn: "84223000",
+                quantity: 2,
+                rate: 25000,
+                amount: 50000,
+              },
+            ],
+          },
+        });
+      }
+      return Promise.resolve({ data: { items: [] } });
+    });
+
+    render(
+      <MemoryRouter initialEntries={["/sales/process/add?duplicate_id=source-order-1"]}>
+        <SaleProcessFormPage />
+      </MemoryRouter>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "Add Sales Order (Duplicate)" })).toBeTruthy();
     });
   });
 });

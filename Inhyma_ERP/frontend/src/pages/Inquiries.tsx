@@ -2974,7 +2974,7 @@ function ItemsView({
 
                               {/* Click-away backdrop to close menu when clicking anywhere */}
                               {isActionOpen && (() => {
-                                const openUpward = filteredQuotations.length >= 3 && idx >= filteredQuotations.length - (filteredQuotations.length >= 4 ? 2 : 1);
+                                const openUpward = (idx > 0 && filteredQuotations.length <= 3) || (filteredQuotations.length >= 4 && idx >= filteredQuotations.length - 2);
                                 return (
                                 <>
                                   <div

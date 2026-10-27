@@ -438,13 +438,28 @@ export function DiscountPaymentsPage({
   const [settleDate, setSettleDate] = useState<string>("22-09-2026");
   const [settleRemarks, setSettleRemarks] = useState<string>("");
   const [openActionId, setOpenActionId] = useState<string | null>(null);
+  const [actionMenuPos, setActionMenuPos] = useState<{
+    top?: number;
+    bottom?: number;
+    right: number;
+    openUpward: boolean;
+  } | null>(null);
 
-  // Close kebab menu on outside click
+  // Close kebab menu on outside click, window scroll, or window resize
   useEffect(() => {
     if (!openActionId) return;
-    const handleOutside = () => setOpenActionId(null);
-    document.addEventListener("click", handleOutside);
-    return () => document.removeEventListener("click", handleOutside);
+    const handleClose = () => {
+      setOpenActionId(null);
+      setActionMenuPos(null);
+    };
+    window.addEventListener("click", handleClose);
+    window.addEventListener("scroll", handleClose, { capture: true, passive: true });
+    window.addEventListener("resize", handleClose, { passive: true });
+    return () => {
+      window.removeEventListener("click", handleClose);
+      window.removeEventListener("scroll", handleClose, { capture: true });
+      window.removeEventListener("resize", handleClose);
+    };
   }, [openActionId]);
 
   // Close Adjust Discount drawer on Escape key
@@ -1764,7 +1779,23 @@ export function DiscountPaymentsPage({
                             data-testid={`action-btn-${o.id}`}
                             onClick={(e) => {
                               e.stopPropagation();
-                              setOpenActionId(openActionId === o.id ? null : o.id);
+                              if (openActionId === o.id) {
+                                setOpenActionId(null);
+                                setActionMenuPos(null);
+                              } else {
+                                const rect = e.currentTarget.getBoundingClientRect ? e.currentTarget.getBoundingClientRect() : { top: 0, bottom: 0, left: 0, right: 0 };
+                                const innerH = typeof window !== "undefined" ? window.innerHeight : 800;
+                                const innerW = typeof window !== "undefined" ? window.innerWidth : 1200;
+                                const spaceBelow = innerH - (rect.bottom || 0);
+                                const openUpward = spaceBelow < 260 || (idx > 0 && paginatedOrders.length <= 3) || (paginatedOrders.length >= 4 && idx >= paginatedOrders.length - 2);
+                                setActionMenuPos({
+                                  openUpward,
+                                  top: openUpward ? undefined : (rect.bottom || 0) + 4,
+                                  bottom: openUpward ? Math.max(0, innerH - (rect.top || 0) + 4) : undefined,
+                                  right: Math.max(12, innerW - (rect.right || 0)),
+                                });
+                                setOpenActionId(o.id);
+                              }
                             }}
                             style={{
                               background: openActionId === o.id ? "#ffffff" : "transparent",
@@ -1799,21 +1830,19 @@ export function DiscountPaymentsPage({
                             ⋮
                           </button>
 
-                          {openActionId === o.id && (() => {
-                            const openUpward = paginatedOrders.length >= 3 && idx >= paginatedOrders.length - (paginatedOrders.length >= 4 ? 2 : 1);
-                            return (
+                          {openActionId === o.id && actionMenuPos && (
                             <div
                               onClick={(e) => e.stopPropagation()}
                               style={{
-                                position: "absolute",
-                                right: 0,
-                                top: openUpward ? "auto" : "calc(100% + 2px)",
-                                bottom: openUpward ? "calc(100% + 2px)" : "auto",
+                                position: "fixed",
+                                right: `${actionMenuPos.right}px`,
+                                top: actionMenuPos.openUpward ? "auto" : `${actionMenuPos.top}px`,
+                                bottom: actionMenuPos.openUpward ? `${actionMenuPos.bottom}px` : "auto",
                                 background: "#ffffff",
                                 border: "1px solid #cbd5e1",
                                 borderRadius: "4px",
-                                boxShadow: openUpward ? "0 -4px 14px rgba(0,0,0,0.12)" : "0 4px 14px rgba(0,0,0,0.12)",
-                                zIndex: 200,
+                                boxShadow: actionMenuPos.openUpward ? "0 -6px 20px rgba(0,0,0,0.15)" : "0 6px 20px rgba(0,0,0,0.15)",
+                                zIndex: 9999,
                                 minWidth: "155px",
                                 textAlign: "left",
                                 overflow: "hidden",
@@ -1828,6 +1857,7 @@ export function DiscountPaymentsPage({
                                   setSettleDate("22-09-2026");
                                   setSettleRemarks("");
                                   setOpenActionId(null);
+                                  setActionMenuPos(null);
                                 }}
                                 style={{
                                   width: "100%",
@@ -1868,6 +1898,7 @@ export function DiscountPaymentsPage({
                                 onClick={() => {
                                   setListPaymentsOrder(o);
                                   setOpenActionId(null);
+                                  setActionMenuPos(null);
                                 }}
                                 style={{
                                   width: "100%",
@@ -1909,8 +1940,7 @@ export function DiscountPaymentsPage({
                                 <span>List Payments</span>
                               </button>
                             </div>
-                            );
-                          })()}
+                          )}
                         </div>
                       </td>
                     </tr>

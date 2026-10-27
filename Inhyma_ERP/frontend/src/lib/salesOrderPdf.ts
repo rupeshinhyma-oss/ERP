@@ -1,6 +1,8 @@
 import jsPDF from "jspdf";
 import type { SaleOrder, SaleOrderItem } from "@/types/saleProcess";
-import { getCachedBrandName } from "@/lib/brand";
+import type { Organization } from "@/types";
+import { getCachedBrandName, getCachedBrandLogo, getCachedOrganizationProfile } from "@/lib/brand";
+import { INHYMA_LOGO_BASE64 } from "@/lib/inhymaLogoBase64";
 
 /**
  * Format currency matching legacy ERP Sales Order PDF:
@@ -31,6 +33,8 @@ export interface SalesOrderPdfOptions {
   doc?: jsPDF;
   hidePricing?: boolean; // When true: Warehouse Packing Copy without rates or totals
   bankDetails?: BankDetails;
+  logoUrl?: string | null;
+  orgProfile?: Partial<Organization> | null;
 }
 
 /**
@@ -95,42 +99,131 @@ export function generateSalesOrderPdf(
   const companyBoxHeight = 32;
   doc.rect(margin, currentY, contentWidth, companyBoxHeight);
 
-  // Left Brand Block
-  const brandX = margin + 5;
-  const brandName = getCachedBrandName();
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(16);
-  doc.setTextColor(0, 97, 242); // Brand accent blue
-  doc.text(brandName.toUpperCase(), brandX, currentY + 11);
-  doc.setFontSize(10);
-  doc.text("SOLUTIONS LLP  ▶", brandX, currentY + 16.5);
-  doc.setFontSize(6.5);
-  doc.setTextColor(220, 38, 38); // Tagline red
-  doc.text("YOUR INDUSTRIAL HYPER MARKET", brandX, currentY + 21);
+  // Retrieve logo and organization details from options / ERP Settings cache
+  const logoData = options?.logoUrl ?? getCachedBrandLogo() ?? INHYMA_LOGO_BASE64;
+  const orgProfile = options?.orgProfile ?? getCachedOrganizationProfile();
+  const brandName = (orgProfile?.company_name || getCachedBrandName()).trim();
 
-  // Right Company Info Block
-  const compInfoX = margin + 68;
+  // Left: Render Company Logo image from ERP Settings
+  let logoRendered = false;
+  if (logoData && typeof logoData === "string" && logoData.trim()) {
+    try {
+      let imgType = "PNG";
+      if (
+        logoData.startsWith("data:image/jpeg") ||
+        logoData.startsWith("data:image/jpg") ||
+        /\.jpe?g($|\?)/i.test(logoData)
+      ) {
+        imgType = "JPEG";
+      } else if (
+        logoData.startsWith("data:image/webp") ||
+        /\.webp($|\?)/i.test(logoData)
+      ) {
+        imgType = "WEBP";
+      }
+
+      let renderW = 50;
+      let renderH = 24;
+
+      try {
+        const props = doc.getImageProperties(logoData);
+        if (props && props.width > 0 && props.height > 0) {
+          const aspect = props.width / props.height;
+          const maxW = 52;
+          const maxH = 25;
+          if (aspect > maxW / maxH) {
+            renderW = maxW;
+            renderH = Math.max(10, Math.min(maxH, maxW / aspect));
+          } else {
+            renderH = maxH;
+            renderW = Math.max(15, Math.min(maxW, maxH * aspect));
+          }
+        }
+      } catch {
+        renderW = 50;
+        renderH = 24;
+      }
+
+      const renderY = currentY + (companyBoxHeight - renderH) / 2;
+      const renderX = margin + 4;
+
+      doc.addImage(logoData, imgType, renderX, renderY, renderW, renderH, undefined, "FAST");
+      logoRendered = true;
+    } catch {
+      if (logoData !== INHYMA_LOGO_BASE64) {
+        try {
+          const renderW = 48;
+          const renderH = 22;
+          const renderY = currentY + (companyBoxHeight - renderH) / 2;
+          const renderX = margin + 4;
+          doc.addImage(INHYMA_LOGO_BASE64, "PNG", renderX, renderY, renderW, renderH, undefined, "FAST");
+          logoRendered = true;
+        } catch {
+          logoRendered = false;
+        }
+      }
+    }
+  }
+
+  // Graceful fallback brand text if image cannot be rendered
+  if (!logoRendered) {
+    const brandX = margin + 4;
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(13);
+    doc.setTextColor(0, 97, 242);
+    doc.text(brandName.toUpperCase(), brandX, currentY + 12);
+    doc.setFontSize(7.5);
+    doc.setTextColor(220, 38, 38);
+    doc.text("YOUR INDUSTRIAL HYPER MARKET", brandX, currentY + 18);
+  }
+
+  // Right: Company Info Block from ERP Settings
+  const compInfoX = margin + 58;
+  const maxCompWidth = contentWidth - 60; // 126mm width
   doc.setTextColor(0, 0, 0);
-  doc.setFontSize(8.5);
-  doc.setFont("helvetica", "bold");
-  doc.text(brandName.toUpperCase(), compInfoX, currentY + 6.5);
 
+  // 1. Company Name
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(9);
+  doc.text(brandName.toUpperCase(), compInfoX, currentY + 6);
+
+  // 2. Address Lines
+  const rawAddress =
+    orgProfile?.address?.trim() ||
+    "4th Floor, Office No 421, Supremus -II, Road No- 22, Near Passport Office, Wagle Estate";
   doc.setFont("helvetica", "normal");
   doc.setFontSize(7.5);
-  doc.text(
-    "4th Floor, Office No 421, Supremus -II,Road No- 22, Near Passport Office, Wagle",
-    compInfoX,
-    currentY + 10.5
-  );
-  doc.text("Estate", compInfoX, currentY + 14);
-  doc.text("Thane , Maharashtra - 400604", compInfoX, currentY + 17.5);
-  doc.text(
-    "Email: payment.darsh@gmail.com, Phone: 9653261742",
-    compInfoX,
-    currentY + 21
-  );
+
+  const addrLines = doc.splitTextToSize(rawAddress, maxCompWidth);
+  const displayAddrLines = addrLines.slice(0, 2);
+  let compLineY = currentY + 10;
+  displayAddrLines.forEach((line: string) => {
+    doc.text(line, compInfoX, compLineY);
+    compLineY += 3.6;
+  });
+
+  // 3. City, State, Postal Code
+  const cityStateParts = [orgProfile?.city?.trim(), orgProfile?.state?.trim()].filter(Boolean);
+  const zip = orgProfile?.postal_code?.trim();
+  const cityLine = cityStateParts.length
+    ? cityStateParts.join(", ") + (zip ? ` - ${zip}` : "")
+    : "Thane, Maharashtra - 400604";
+  doc.text(cityLine, compInfoX, compLineY);
+  compLineY += 3.6;
+
+  // 4. Contact Details (Email & Phone)
+  const orgEmail = orgProfile?.email?.trim() || "payment.darsh@gmail.com";
+  const orgPhone = orgProfile?.phone?.trim() || "+91 96532 61742";
+  const contactParts = [orgEmail ? `Email: ${orgEmail}` : "", orgPhone ? `Phone: ${orgPhone}` : ""].filter(Boolean);
+  if (contactParts.length > 0) {
+    doc.text(contactParts.join(", "), compInfoX, compLineY);
+    compLineY += 3.6;
+  }
+
+  // 5. GST Number
+  const orgGst = orgProfile?.gst_number?.trim() || "27AAKFI9869H1ZL";
   doc.setFont("helvetica", "bold");
-  doc.text("GST No: 27AAKFI9869H1ZL", compInfoX, currentY + 25);
+  doc.text(`GST No: ${orgGst}`, compInfoX, compLineY);
 
   currentY += companyBoxHeight;
 

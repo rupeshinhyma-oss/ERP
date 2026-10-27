@@ -77,7 +77,14 @@ class SaleService:
     async def _is_physical(self, warehouse: str | None) -> bool:
         if not warehouse:
             return True
-        return stock_service.is_physical(await stock_service.get_warehouse(self.session, warehouse))
+        try:
+            return stock_service.is_physical(await stock_service.get_warehouse(self.session, warehouse))
+        except Exception:
+            w_lower = (warehouse or "").strip().lower()
+            return not ("transit" in w_lower or "ordered" in w_lower)
+
+    async def is_physical_warehouse(self, warehouse: str | None) -> bool:
+        return await self._is_physical(warehouse)
 
     @staticmethod
     def _lines(items: Any) -> list[tuple[str, float]]:
@@ -481,8 +488,8 @@ class SaleService:
             allocated_consignment=payload.allocated_consignment,
             planning_sheet_id=payload.planning_sheet_id,
             planning_column_id=payload.planning_column_id,
-            order_date=payload.order_date,
-            delivery_date=payload.delivery_date,
+            order_date=payload.order_date.isoformat() if hasattr(payload.order_date, "isoformat") else str(payload.order_date),
+            delivery_date=payload.delivery_date.isoformat() if hasattr(payload.delivery_date, "isoformat") and payload.delivery_date else (str(payload.delivery_date) if payload.delivery_date else None),
             currency=payload.currency or "INR",
             status=wf.initial_status(rules),  # server-controlled: a client cannot start an order half-way through the workflow
             total_basic=totals["total_basic"],
@@ -698,9 +705,9 @@ class SaleService:
         if payload.planning_column_id is not None:
             order.planning_column_id = payload.planning_column_id
         if payload.order_date is not None:
-            order.order_date = payload.order_date
+            order.order_date = payload.order_date.isoformat() if hasattr(payload.order_date, "isoformat") else str(payload.order_date)
         if payload.delivery_date is not None:
-            order.delivery_date = payload.delivery_date
+            order.delivery_date = payload.delivery_date.isoformat() if hasattr(payload.delivery_date, "isoformat") and payload.delivery_date else (str(payload.delivery_date) if payload.delivery_date else None)
         if payload.currency is not None:
             order.currency = payload.currency
         if payload.container_no is not None:

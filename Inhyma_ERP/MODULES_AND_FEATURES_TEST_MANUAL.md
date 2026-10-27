@@ -72,6 +72,10 @@
 61. [DYNAMIC BRAND LOGO: Real-Time Sidebar Branding from ERP Organization Settings](#61-dynamic-brand-logo-real-time-sidebar-branding-from-erp-organization-settings)
 62. [PRODUCT MASTER: Category Display Rewiring, Machine Spares Linkage, and Floating Duplicate Overlay Dropdown](#62-product-master-category-display-rewiring-machine-spares-linkage-and-floating-duplicate-overlay-dropdown)
 63. [PLATFORM STABILITY: Database Migration Idempotency, Notification Polling Engine, and Multi-ERP Identity Hardening](#63-platform-stability-database-migration-idempotency-notification-polling-engine-and-multi-erp-identity-hardening)
+64. [SALE: Sales Process Add New Form (Full Parity with Proforma, Dynamic Masters, Exceeded Stock Alerts, Grey-Locked Cells & Drawers)](#64-sale-sales-process-add-new-form-full-parity-with-proforma-dynamic-masters-exceeded-stock-alerts-grey-locked-cells--drawers)
+65. [SALE: Sales Process Live KPI Metrics & Status Tabs Dynamic Calculation Engine](#65-sale-sales-process-live-kpi-metrics--status-tabs-dynamic-calculation-engine)
+66. [SALE: Sales Process 9-Status Action Menu Matrix, LR Duplicate, Direct Cancellation & SO Files Deletion](#66-sale-sales-process-9-status-action-menu-matrix-lr-duplicate-direct-cancellation--so-files-deletion)
+67. [SALE PROCESS: Collapsible Filter Panel 13-Field Grid & Dropdown Sales Person Selection](#67-sale-process-collapsible-filter-panel-13-field-grid--dropdown-sales-person-selection)
 
 ---
 
@@ -104,6 +108,12 @@
 | **INVENTORY** | Buyer Types | `/masters/buyer-types` | `masters-buyer-types` | `idCard` | `buyertype.view` |
 | **SALE** | Inquiries | `/inquiries` | `inquiries` | `fileText` | Public Authenticated / `inquiry.view` |
 | **SALE** | Proforma Invoices | `/proforma-invoice/list` | `proforma` | `fileText` | `sale.pi.view` |
+| **SALE** | Sales Process | `/sales/process` | `sale-process` | `shoppingCart` | `saleorder.view` |
+| **SALE** | Add Sales Order | `/sales/process/add` | `sale-process-add` | `plusCircle` | `saleorder.create` |
+| **SALE** | Discount Payments | `/discount-payments` | `discount-payments` | `creditCard` | `saleorder.view` |
+| **CRM** | Leads & Pipelines | `/crm/leads` | `crm-leads` | `users` | `crm.view` |
+| **CRM** | Sales Quotations | `/crm/quotations` | `crm-quotations` | `fileText` | `crm.quotation.view` |
+| **COMMUNICATION** | Feed & Announcements | `/feed` | `feed` | `messageSquare` | Authenticated |
 | **PURCHASE** | Local Purchase | `/purchase/localpurchase` | `local-purchases` | `shoppingBag` | `purchase.view` |
 | **PURCHASE** | Import Purchase | `/purchase/importpurchase` | `import-purchases` | `ship` | `purchase.view` |
 | **PURCHASE** | Purchase Suppliers | `/purchase/suppliers` | `purchase-suppliers` | `factory` | `supplier.view` |
@@ -2990,7 +3000,247 @@ Positioned directly underneath the collapsible filter panel, these three metric 
 - [ ] Verify switching between ERPs in the Ecosystem Switcher navigates seamlessly without session loss.
 
 ---
-*End of Master Features & Testing Specification Manual. Maintained for Inhyma Solutions Enterprise ERP. Last updated: October 2026 (Sections 61-63: Dynamic Organization Company Logo in AppShell Sidebar, Product Master Category Rewiring & Machine Spares Linkage, Floating Duplicate Name Overlay, Migration Idempotency, Notification Unread Count Poller, and Multi-ERP Identity Hardening).*
+
+## 64. SALE: Sales Process Add New Form (Full Parity with Proforma, Dynamic Masters, Exceeded Stock Alerts, Grey-Locked Cells & Drawers)
+
+### Overview & Route Mapping
+- **Primary Routes:** `/sales/process/add` (Add Sales Order), `/sales/process/edit/:id` (Edit Sales Order), `/sale-order/add`, `/sale-order/addedit`, `/sale-order/addedit/:id`.
+- **Primary Permissions:** `saleorder.view`, `saleorder.create`, `saleorder.update`.
+- **Purpose:** Full feature alignment between Sales Process Add New and Proforma Invoices Add New. Real-time warehouse-aware stock checks, automated tax calculation, entity drawers, grey locked calculation cells, standardized commercial terms, and default status `pending`.
+
+### Key Visual & Functional Components
+1. **General Details Card (4-Column Grid):**
+   - **Row 1:** Warehouse * (Combobox with dynamic DB master lookup `/masters/warehouses`), Expected Delivery Date (DatePicker with `minDate="today"` and past-date validation), Payment Terms * (Combobox `/masters/payment-terms`), Sales Person * (Combobox populated with dynamic team members and logged-in user).
+   - **Row 2:** Transport Name * (Combobox `/masters/transports`), Third Party Delivery * (Combobox `Yes`/`No` with optional attachment upload when `Yes`), PO (Client Purchase Order `Yes`/`No` with file upload).
+   - **Row 3:** Transport Destination (text input), Delivery Type * (Combobox), Delivery Charge * (Combobox). Automatically hidden when Transport Name is `Self Pickup` / `Self Pick-up`.
+   - **Container / Consignment Allocation:** Appears dynamically when warehouse is `Transit` or `Ordered` (e.g. `Mumbai Transit`), pre-loading available consignments.
+2. **3 Entity Cards (Company, Billing Address, Shipping Address):**
+   - **Company Card:** `ClientNameAutocomplete` with real-time company search, clear (trash) button, `+ Add` button opening `AddCompanyDrawer`, and detailed info card displaying Company Name, Business Type (`B2B`/`B2C`), and GST No.
+   - **Billing Address Card:** Formatted address card with pencil edit button opening `EditAddressDrawer` in edit mode; or text input with clear and `+ Add` button opening `EditAddressDrawer` in add mode.
+   - **Shipping Address Card:** Formatted address card with pencil edit button opening `EditAddressDrawer`; or text input with clear and `+ Add` button opening `EditAddressDrawer` in add mode.
+3. **Product Search Card:**
+   - Real-time stock catalog lookup (`/inventory/product-stock?limit=500`) specific to the selected warehouse (`mumbai`, `ahmedabad`, `indore`, etc.).
+   - Displays Product Name, Product Code, Available Qty, and Standard Price.
+   - Auto-resolves HSN via `getAutoHsnForProduct()` and tax rate via `resolveGstPercent()` from `/masters/taxes`.
+   - Selecting a product adds it to the item table directly above additional charges.
+4. **Product Item Table Card:**
+   - **Grey Locked Calculated Cells (`#f8fafc`):** ReadOnly cells for HSN, Taxable Amount, GST %, GST Amount, and Total, dynamically computed using `(unit_price - unit_discount) * quantity`.
+   - **Stock Exceeded Alerts & Highlighting:** Top warning banner (`data-testid="alert-exceeded-stock"`), in-table warning banner, red border & background on Qty input, `Qty: ... ⚠️ Exceeds Available!` red badge, and blur toast alerts.
+   - **Serial Number Modal:** `🔢 S/N` button on each product row opening modal to record comma/line-separated serial numbers.
+   - **Additional Charges:** `[✓] Additional Charges` checkbox (`data-testid="checkbox-additional-charges"`) with standard default rows (Transport Charges HSN 996511 and Packing & Forwarding HSN 996713) and upward-opening Comboboxes (`placement="up"`).
+   - **Table Summary Bar (`<tfoot>`):** Total Qty, Total Taxable (green), Total Tax (red), and Total With Tax (bold).
+   - `+ Add Product Row` and `+ Add Charge Row` buttons.
+5. **Bottom Section & Totals Summary:**
+   - **Terms and Conditions:** Pre-filled with standard 3 terms (1. Transport Charges: To Pay. 2. Payment Terms: 100% Before Dispatch. 3. Order once confirmed, cannot be cancelled.).
+   - Remarks and Booking Remarks textareas.
+   - **Totals Breakdown Card:** Total Basic, Total Discount, Total Taxable Amount, Total Tax, Total Including Tax, and Indian currency words (e.g. `Amount In Words: ... Rupees Only`).
+   - **Submit Action:** Blue button validating all required fields, ensuring unit discount does not exceed unit price, and assigning default status `"pending"`. Synchronizes payload with `buyer_name`, `company_name`, `transport_name`, `transporter_name`, `expected_delivery_date`, `delivery_date`, `city`, and `state`.
+
+### QA Verification Test Cases
+- [ ] Verify navigating to `/sales/process/add` renders the Add Sales Order form with header, `← BACK` button, and `Submit` button.
+- [ ] Verify Warehouse, Payment Terms, Transport Name, Delivery Type, Delivery Charge, and Additional Charge dropdowns populate dynamically from database masters (`/masters/*`) and option lookup endpoints without hardcoded static lists.
+- [ ] Verify selecting `Self Pickup` as Transport Name hides Row 3 (Destination, Delivery Type, Delivery Charge) and bypasses validation for delivery type and charge.
+- [ ] Verify searching for a company via `ClientNameAutocomplete` populates Company, Billing Address, and Shipping Address cards with business type and GST details.
+- [ ] Verify clicking the pencil edit button on Billing or Shipping Address opens `EditAddressDrawer` and updates the formatted address upon save.
+- [ ] Verify searching a product in Product Search filters by name and displays real-time available stock for the selected warehouse.
+- [ ] Verify selecting a product populates the table row with auto-resolved HSN, standard price, and GST %, and locks HSN, Taxable Amount, GST %, GST Amount, and Total cells as readOnly.
+- [ ] Verify entering a quantity greater than available stock displays the top alert banner, red Qty input border, red badge, and blur toast warning.
+- [ ] Verify toggling `Additional Charges` checkbox hides/shows additional charge rows and dynamically recalculates summary totals.
+- [ ] Verify clicking `Submit` without filling required fields highlights missing fields in red with descriptive error messages.
+- [ ] Verify successfully submitting a new order assigns `status: "pending"` by default and redirects to `/sales/process`.
+- [ ] Verify `order_date` and `delivery_date` are sent and parsed as standard ISO string dates (`YYYY-MM-DD`) ensuring compatibility with PostgreSQL `asyncpg` `VARCHAR(50)` columns.
+- [ ] Verify order creation foreign keys (`buyer_id`, `created_by_id`, `organization_id`) link cleanly without metadata table registration errors (`NoReferencedTableError`).
+- [ ] Verify the stock enforcement rule from `Sales & PI Process.docx`: Ordered and Transit warehouses permit negative stock during order generation, whereas physical warehouses (e.g. Mumbai, Ahmedabad, Indore) strictly block orders that exceed available stock with an informative HTTP 409 Conflict toast (`Not enough stock of '...' in ...`).
+
+---
+
+## 65. SALE: Sales Process Live KPI Metrics & Status Tabs Dynamic Calculation Engine
+
+### Overview & Route Mapping
+- **Primary Route:** `/sales/process` (Sales Order List / Sales Process).
+- **Primary Permissions:** `saleorder.view`.
+- **Purpose:** Provide live, real-time KPI metrics and status tab counts reflecting the actual sales orders in the database. Resolves previous static/zero counts and amounts, ensuring accurate financial overview and instant status breakdown.
+
+### Key Visual & Functional Components
+1. **Top 6 KPI Summary Cards:**
+   - **ALL:** Total count and sum of all active, non-deleted sales orders (`₹ [Amount] ([Count])`).
+   - **ADMIN CONFIRMED TO LR:** Total count and sum of orders in progress across statuses `sales_confirmed`, `admin_approved`, `acc_confirmed`, `gatepass_created`, `dispatched`, and `lr`.
+   - **PENDING:** Count and amount of newly generated orders awaiting initial sales confirmation.
+   - **ADMIN APPROVED:** Count and amount of orders approved by management awaiting accounting confirmation.
+   - **LR:** Count and amount of orders that have received Lorry Receipt (LR) tracking.
+   - **CANCELLED:** Count and amount of cancelled orders.
+2. **Interactive Filtering on KPI Cards:**
+   - Clicking on any KPI card activates it as the active filter, dynamically narrowing the orders table to matching records with visual active card highlight (`border: 2px solid #0061f2`).
+3. **10 Status Tabs with Dynamic Badges:**
+   - Tabs: `All`, `Pending`, `Sales Confirmed`, `Admin Approved`, `Acc. Confirmed`, `Gatepass Created`, `Dispatched`, `Gatepass Cancelled`, `LR`, `Cancelled`.
+   - Each tab renders a badge with the exact count of orders matching that status.
+   - Clicking a status tab filters the orders list and persists the selected tab in `sessionStorage("sales_process_active_tab")`.
+4. **Including GST Toggle:**
+   - Switch toggle in the header (`Including GST`).
+   - When enabled (default): Amounts display GST-inclusive figures (`amount_inc_gst` / `total_amount`) and the table header displays `Amount (Inc.GST)`.
+   - When disabled: Amounts display basic figures (`total_basic`) and the table header switches to `Amount (Ex.GST)`.
+   - Flips both KPI card amounts and table column amounts dynamically.
+5. **Dual-Tier Resilient Architecture:**
+   - **Backend Aggregation:** `GET /api/v1/sales/orders` calculates full-database aggregates via `SaleRepository.get_metrics(...)` with role visibility constraints (`warehouses`, `exclude_statuses`).
+   - **Frontend Fallback:** If offline or during initial data streaming, `computeMetricsFromOrders(orderList, incGst)` dynamically computes metrics from loaded records to prevent displaying zero values.
+6. **Action Menu Stage Isolation for Pending Orders:**
+   - When order status is `pending`, clicking the 3-dots (`⋮`) action button displays **only** three actions: `Edit`, `SO Files`, and `Delete`.
+   - Actions for downstream stages (`Print SO (Pricing)`, `Warehouse SO (No Pricing)`, `Gate Pass PDF`, `Download Gate Pass`, and `Send LR to Client`) are suppressed until the order moves beyond the pending stage.
+7. **"Upload Files" Slide-Over Drawer on SO Files Action:**
+   - Clicking `SO Files` opens the dedicated `<SideDrawer width="400px">` titled **"Upload Files"**.
+   - Contains top green action banner **`Check All Upload Files`** (`#dcfce7`) with info badge `ⓘ` allowing users to preview all existing order attachments.
+   - Contains **PO File** form field with native file chooser.
+   - Pinned full-width blue **Submit** button (`#0061f2`) saving the file, updating local state with PO attachment indicators, and showing a success toast.
+8. **Action Menu Stage Isolation for Sales Confirmed Orders:**
+   - When order status is `sales_confirmed`, clicking the 3-dots (`⋮`) action menu displays **only** four actions:
+     * `Edit`: Navigates to `/sales/process/edit/:id` for modifying the sales order.
+     * `SO Files`: Opens the "Upload Files" slide-over drawer for PO attachments.
+     * `Cancel`: Prompts confirmation and directly cancels the order, moving it to the Cancelled status.
+     * `Delete`: Prompts confirmation and deletes the order.
+   - Downstream actions (`Print SO (Pricing)`, `Warehouse SO (No Pricing)`, `Gate Pass PDF`, `Download Gate Pass`, and `Send LR to Client`) are suppressed until the order moves to downstream stages (`admin_approved` and beyond).
+9. **Direct Status Transition on Cancel Action:**
+   - Clicking **Cancel** on a `Sales Confirmed` order transitions its status immediately to `cancelled` via `PATCH /sales/orders/{id}/status`.
+   - Directly navigates to the **Cancelled** tab (`setActiveTab("cancelled")`), displaying the newly cancelled order in the Cancelled list.
+   - Dynamically updates tab badges and KPI cards (`sales_confirmed` count decrements by 1; `cancelled` count increments by 1).
+
+### QA Verification Test Cases
+- [ ] Verify navigating to `/sales/process` displays the Top 6 KPI summary cards (`ALL`, `ADMIN CONFIRMED TO LR`, `PENDING`, `ADMIN APPROVED`, `LR`, `CANCELLED`) with positive counts and amounts corresponding to existing database orders.
+- [ ] Verify the 10 status tabs display badges with accurate counts matching the number of orders in each respective status.
+- [ ] Verify clicking the `PENDING` KPI card or `Pending` tab filters the table rows to show only orders with status `pending`.
+- [ ] Verify clicking the `ADMIN CONFIRMED TO LR` KPI card filters the table rows to show orders in intermediate statuses (`sales_confirmed`, `admin_approved`, `acc_confirmed`, `gatepass_created`, `dispatched`, `lr`).
+- [ ] Verify toggling the `Including GST` switch toggles the table column header between `Amount (Inc.GST)` and `Amount (Ex.GST)`.
+- [ ] Verify toggling `Including GST` updates KPI card amounts between GST-inclusive totals and basic totals.
+- [ ] Verify clicking the 3-dots (`⋮`) action menu on an order with status `Pending` displays **only** `Edit`, `SO Files`, and `Delete`, and does not display Print SO, Warehouse SO, Gate Pass, or LR options.
+- [ ] Verify clicking `SO Files` opens the "Upload Files" slide-over drawer with "Check All Upload Files", "PO File" input, and full-width "Submit" button matching `erp.inhymasolutions.com/sale-order/list`.
+- [ ] Verify selecting a file and clicking "Submit" saves the PO file, displays a success toast notification, and closes the drawer.
+- [ ] Verify clicking the 3-dots (`⋮`) action menu on an order with status `Sales Confirmed` displays **only** `Edit`, `SO Files`, `Cancel`, and `Delete`.
+- [ ] Verify that `Print SO (Pricing)`, `Warehouse SO (No Pricing)`, `Gate Pass PDF`, `Download Gate Pass`, and `Send LR to Client` do NOT appear for `Sales Confirmed` orders.
+- [ ] Verify clicking `Cancel` on a `Sales Confirmed` order confirms with prompt, sets order status to `cancelled`, and directly switches active tab to `Cancelled`.
+- [ ] Verify the `Sales Confirmed` count decrements and the `Cancelled` count increments by 1 after cancellation.
+- [ ] Verify automated backend pytest test `test_list_sale_orders_metrics_calculation` passes.
+- [ ] Verify Vitest frontend test suite `SaleProcessListPage.test.tsx` passes with 100% success rate (12/12 passing).
+
+---
+
+## 66. SALE: Sales Process 9-Status Action Menu Matrix, LR Duplicate, Direct Cancellation & SO Files Deletion
+
+- **Primary Route:** `/sales/process` (Sales Order List / Sales Process).
+- **Form Route:** `/sales/process/add` & `/sales/process/edit/:id`.
+- **Purpose:** Strict enforcement of user-defined action menu capabilities across all 9 workflow statuses, seamless duplicate order generation on LR stage, direct cancellation workflow, and file removal in the SO Files drawer.
+
+### Feature Specifications
+1. **Status-Specific Action Menu Matrix:**
+   - **Pending (`pending`):**
+     * `Edit`: Navigates to `/sales/process/edit/:id`.
+     * `SO Files`: Opens "Upload Files" slide-over drawer with file delete options.
+     * `Delete`: Prompts confirmation and deletes order.
+   - **Sales Confirmed (`sales_confirmed`):**
+     * `Edit`: Navigates to `/sales/process/edit/:id`.
+     * `SO Files`: Opens "Upload Files" slide-over drawer with file delete options.
+     * `Cancel`: Prompts confirmation and directly transitions status to `cancelled`.
+     * `Delete`: Prompts confirmation and deletes order.
+   - **Admin Approved (`admin_approved`):**
+     * `SO Files`: Opens "Upload Files" slide-over drawer with file delete options.
+     * `Cancel`: Prompts confirmation and directly transitions status to `cancelled`.
+     * `Delete`: Prompts confirmation and deletes order.
+   - **Acc Confirmed (`acc_confirmed`):**
+     * `SO Files`: Opens "Upload Files" slide-over drawer with file delete options.
+     * `Delete`: Prompts confirmation and deletes order.
+   - **Gatepass Created (`gatepass_created`):**
+     * `Download Gatepass`: Downloads Gatepass PDF for the order.
+     * `SO Files`: Opens "Upload Files" slide-over drawer with file delete options.
+     * `Delete`: Prompts confirmation and deletes order.
+   - **Dispatched (`dispatched`):**
+     * `Download Gatepass`: Downloads Gatepass PDF for the order.
+     * `SO Files`: Opens "Upload Files" slide-over drawer with file delete options.
+     * `Delete`: Prompts confirmation and deletes order.
+   - **Gatepass Cancelled (`gatepass_cancelled`):**
+     * `SO Files`: Opens "Upload Files" slide-over drawer with file delete options.
+     * `Cancel`: Prompts confirmation and directly transitions status to `cancelled`.
+     * `Delete`: Prompts confirmation and deletes order.
+   - **LR (`lr`):**
+     * `Duplicate`: Navigates to `/sales/process/add?duplicate_id=:id` prefilling order details into a fresh `pending` order.
+     * `Download Gatepass`: Downloads Gatepass PDF.
+     * `Delete`: Prompts confirmation and deletes order.
+   - **Cancelled (`cancelled`):**
+     * `Delete`: Prompts confirmation and deletes order.
+2. **Direct Cancel Action Behavior:**
+   - On statuses with `Cancel` in the action menu (`sales_confirmed`, `admin_approved`, `gatepass_cancelled`), clicking **Cancel** directly changes the record's status to `cancelled` and immediately moves user view to the `Cancelled` tab.
+3. **LR Duplicate Order Workflow:**
+   - Clicking **Duplicate** on an LR order navigates to `/sales/process/add?duplicate_id=:id`.
+   - `SaleProcessForm.tsx` prefills customer details, warehouse, payment terms, transport settings, additional charges, and items table from the source order.
+   - Clears `order_no` and sets header to `"Add Sales Order (Duplicate)"`.
+4. **SO Files Drawer File Deletion:**
+   - Clicking **Delete** on any file in the uploaded files list removes that file attachment.
+   - Clicking **Delete** on the existing attached PO file clears the PO attachment, unlinks `po_file`/`po_attachment`, and resets `po` to `"No"`.
+
+### QA Verification Test Cases
+- [ ] Verify clicking `⋮` on `Admin Approved` order displays **only** `SO Files`, `Cancel`, and `Delete`.
+- [ ] Verify clicking `⋮` on `Acc Confirmed` order displays **only** `SO Files` and `Delete`.
+- [ ] Verify clicking `⋮` on `Gatepass Created` order displays **only** `Download Gatepass`, `SO Files`, and `Delete`.
+- [ ] Verify clicking `⋮` on `Dispatched` order displays **only** `Download Gatepass`, `SO Files`, and `Delete`.
+- [ ] Verify clicking `⋮` on `Gatepass Cancelled` order displays **only** `SO Files`, `Cancel`, and `Delete`.
+- [ ] Verify clicking `⋮` on `LR` order displays **only** `Duplicate`, `Download Gatepass`, and `Delete`.
+- [ ] Verify clicking `⋮` on `Cancelled` order displays **only** `Delete`.
+- [ ] Verify clicking `Duplicate` on an LR order navigates to `/sales/process/add?duplicate_id=...` and displays `"Add Sales Order (Duplicate)"`.
+- [ ] Verify clicking `Cancel` on an `Admin Approved` or `Gatepass Cancelled` order changes status to `cancelled` and switches active tab to `Cancelled`.
+- [ ] Verify deleting a file in the SO Files drawer removes it from the list.
+- [ ] Verify deleting the PO file in the SO Files drawer unlinks the PO attachment and updates status.
+- [ ] Verify all 28 Vitest tests in `SaleProcessListPage.test.tsx` and `SaleProcessFormPage.test.tsx` pass.
+- [ ] Verify all 18 backend pytest tests in `test_sale_order_workflow.py` pass.
+
+
+---
+
+## 67. SALE PROCESS: Collapsible Filter Panel 13-Field Grid & Dropdown Sales Person Selection
+
+### Module Identification & Location
+- **Module Name:** Sales Process Filter Panel (13 Fields with Dynamic Sales Person Dropdown)
+- **Routes:** `/sales/process`
+- **Files:**
+  - Frontend List View: `frontend/src/pages/sales/SaleProcessList.tsx`
+  - Stylesheet: `frontend/src/index.css`
+  - Test Suite: `frontend/src/pages/__tests__/SaleProcessListPage.test.tsx`
+
+### Feature Overview & Visual Design
+1. **13-Field 6-Column Grid Layout (`data-testid="sale-process-filter-panel"`):**
+   - **Row 1 (Date Inputs):**
+     - `Order Date From` (type date)
+     - `Order Date To` (type date)
+     - `Invoice Date From` (type date)
+     - `Invoice Date To` (type date)
+     - `Exp. Delivery From` (type date)
+     - `Exp. Delivery To` (type date)
+   - **Row 2 (Selection & Filter Criteria):**
+     - `State`: `<select>` with all 36 Indian States and Union Territories.
+     - `Dispatch`: `<select data-testid="filter-dispatch">` with options: All / Yes / No.
+     - `Warehouse`: `<select>` with options: All / Mumbai / Mumbai Transit / Ahmedabad / Indore (merged dynamically with existing order data).
+     - `Sales Person`: `<select data-testid="filter-sales-person">` populated dynamically from user records and active orders (`All`, `Admin`, `Dhairya Shah`, etc.).
+     - `Company`: `<input data-testid="filter-company">` client/company name text search.
+     - `Third Party`: `<select>` with options: All / Yes / No.
+   - **Row 3 (Action Row):**
+     - `PO`: `<select>` with options: All / Yes / No.
+     - Right-aligned Action Buttons: `Reset` (`#64748b`) & `Search` (`#f59e0b`).
+2. **Sales Person Dropdown Specification:**
+   - Dropdown selection eliminates freehand typos.
+   - Dynamically combines active users with distinct `sales_person` values from loaded order records.
+   - Selecting a sales person filters orders on clicking Search.
+3. **Reset & Search Behavior:**
+   - `Search` applies active filter criteria across dates, warehouse, sales person, company, third party, dispatch, and PO.
+   - `Reset` clears all 13 filter fields and reloads complete, unfiltered order records.
+
+### QA Verification Test Cases
+- [ ] Verify clicking the Filter button toggles the collapsible filter panel.
+- [ ] Verify the panel displays all 13 fields across 3 rows matching the reference layout.
+- [ ] Verify Row 1 contains 6 date inputs: Order Date From, Order Date To, Invoice Date From, Invoice Date To, Exp. Delivery From, and Exp. Delivery To.
+- [ ] Verify Row 2 contains State, Dispatch Status, Warehouse, Sales Person (dropdown), Company, and Third Party.
+- [ ] Verify Sales Person is a `<select>` dropdown containing All, Admin, Dhairya Shah, and dynamically populated sales representatives.
+- [ ] Verify selecting a Sales Person and clicking Search filters the orders table to orders matching that sales person.
+- [ ] Verify clicking "Reset" clears all 13 filter inputs and reloads all unfiltered orders.
+- [ ] Verify Row 3 contains PO filter and right-aligned Reset and Search buttons.
+
+---
+*End of Master Features & Testing Specification Manual. Maintained for Inhyma Solutions Enterprise ERP. Last updated: October 2026 (Sections 61-67: Dynamic Organization Company Logo, Product Master Category Rewiring & Floating Duplicate Overlay, Platform Migration Idempotency, Sales Process Add New Form Full Parity with Proforma, Sales Process Live KPI Metrics & Status Tabs Dynamic Calculation Engine, Sales Process Sales Confirmed Action Menu Stage Isolation & Direct Cancellation, Sales Process 9-Status Action Menu Matrix, LR Duplicate, Direct Cancellation & SO Files Deletion, and Sales Process 13-Field Filter Panel & Sales Person Dropdown).*
 
 
 

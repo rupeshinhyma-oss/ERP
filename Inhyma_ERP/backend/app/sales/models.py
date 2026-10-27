@@ -35,6 +35,12 @@ from app.database.base import (
     VersionMixin,
 )
 
+# Ensure referenced foreign key tables are registered in Base.metadata
+import app.buyers.models  # noqa: F401
+import app.masters.company_list.models  # noqa: F401
+import app.planning.models  # noqa: F401
+import app.users.models  # noqa: F401
+
 
 class ProformaInvoice(Base, UUIDPrimaryKeyMixin, TimestampMixin, VersionMixin, SoftDeleteMixin):
     """

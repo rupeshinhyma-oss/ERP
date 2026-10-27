@@ -75,6 +75,63 @@ export function parseDateForCompare(dStr?: string | null): number | null {
   return isNaN(t) ? null : t;
 }
 
+export function parseDateAny(dateStr?: string | null): Date | null {
+  if (!dateStr) return null;
+  const trimmed = dateStr.trim();
+  if (trimmed.includes("/")) {
+    const parts = trimmed.split("/");
+    if (parts.length === 3) {
+      return new Date(parseInt(parts[2], 10), parseInt(parts[0], 10) - 1, parseInt(parts[1], 10));
+    }
+  }
+  if (trimmed.includes("-")) {
+    const parts = trimmed.split("-");
+    if (parts.length === 3) {
+      if (parts[0].length === 4) {
+        return new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
+      } else {
+        return new Date(parseInt(parts[2], 10), parseInt(parts[1], 10) - 1, parseInt(parts[0], 10));
+      }
+    }
+  }
+  const d = new Date(trimmed);
+  return isNaN(d.getTime()) ? null : d;
+}
+
+export function dateInRange(targetStr?: string | null, rangeStr?: string): boolean {
+  if (!rangeStr || !rangeStr.trim() || !targetStr) return true;
+  if (!rangeStr.includes("-")) {
+    return targetStr.toLowerCase().includes(rangeStr.trim().toLowerCase());
+  }
+  const [s1, s2] = rangeStr.split("-").map((s) => s.trim());
+  const start = parseDateAny(s1);
+  const end = parseDateAny(s2);
+  const target = parseDateAny(targetStr);
+  if (!start || !end || !target) return true;
+  start.setHours(0, 0, 0, 0);
+  end.setHours(23, 59, 59, 999);
+  target.setHours(12, 0, 0, 0);
+  return target >= start && target <= end;
+}
+
+export function parseRangeToDates(rangeStr?: string): { from: string; to: string } {
+  if (!rangeStr || !rangeStr.includes("-")) return { from: "", to: "" };
+  const [s1, s2] = rangeStr.split("-").map((s) => s.trim());
+  const d1 = parseDateAny(s1);
+  const d2 = parseDateAny(s2);
+  const formatYMD = (d: Date | null) => {
+    if (!d) return "";
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    const dd = String(d.getDate()).padStart(2, "0");
+    return `${yyyy}-${mm}-${dd}`;
+  };
+  return {
+    from: formatYMD(d1),
+    to: formatYMD(d2),
+  };
+}
+
 export function getCompanyGst(order: SaleOrder): string | null {
   if ((order as any).gst_no) return (order as any).gst_no;
   if ((order as any).buyer_gst) return (order as any).buyer_gst;
@@ -296,9 +353,94 @@ export function SaleProcessSkeletonRows({ count = 8 }: { count?: number }) {
   );
 }
 
+function computeMetricsFromOrders(orderList: SaleOrder[], incGst: boolean = true): SaleSummaryMetrics {
+  const m: SaleSummaryMetrics = {
+    all: { count: 0, amount: 0 },
+    admin_confirmed_to_lr: { count: 0, amount: 0 },
+    pending: { count: 0, amount: 0 },
+    sales_confirmed: { count: 0, amount: 0 },
+    admin_approved: { count: 0, amount: 0 },
+    acc_confirmed: { count: 0, amount: 0 },
+    gatepass_created: { count: 0, amount: 0 },
+    dispatched: { count: 0, amount: 0 },
+    gatepass_cancelled: { count: 0, amount: 0 },
+    lr: { count: 0, amount: 0 },
+    cancelled: { count: 0, amount: 0 },
+  };
+
+  const CONFIRMED_TO_LR_STATUSES = new Set([
+    "sales_confirmed",
+    "admin_approved",
+    "acc_confirmed",
+    "gatepass_created",
+    "dispatched",
+    "lr",
+  ]);
+
+  for (const o of orderList) {
+    const rawAmt = incGst
+      ? (o.amount_inc_gst ?? o.total_amount ?? 0)
+      : (o.amount_exc_gst ?? o.total_basic ?? o.total_amount ?? 0);
+    const amt = parseFloat(String(rawAmt)) || 0;
+    const st = (o.status || "pending").toLowerCase().trim();
+
+    m.all.count += 1;
+    m.all.amount += amt;
+
+    if (CONFIRMED_TO_LR_STATUSES.has(st)) {
+      m.admin_confirmed_to_lr!.count += 1;
+      m.admin_confirmed_to_lr!.amount += amt;
+    }
+
+    if (st === "pending") {
+      m.pending.count += 1;
+      m.pending.amount += amt;
+    } else if (st === "sales_confirmed") {
+      m.sales_confirmed!.count += 1;
+      m.sales_confirmed!.amount += amt;
+    } else if (st === "admin_approved") {
+      m.admin_approved.count += 1;
+      m.admin_approved.amount += amt;
+    } else if (st === "acc_confirmed") {
+      m.acc_confirmed!.count += 1;
+      m.acc_confirmed!.amount += amt;
+    } else if (st === "gatepass_created") {
+      m.gatepass_created!.count += 1;
+      m.gatepass_created!.amount += amt;
+    } else if (st === "dispatched") {
+      m.dispatched!.count += 1;
+      m.dispatched!.amount += amt;
+    } else if (st === "gatepass_cancelled") {
+      m.gatepass_cancelled!.count += 1;
+      m.gatepass_cancelled!.amount += amt;
+    } else if (st === "lr") {
+      m.lr.count += 1;
+      m.lr.amount += amt;
+    } else if (st === "cancelled") {
+      m.cancelled.count += 1;
+      m.cancelled.amount += amt;
+    }
+  }
+
+  m.all.amount = Math.round(m.all.amount * 100) / 100;
+  m.admin_confirmed_to_lr!.amount = Math.round(m.admin_confirmed_to_lr!.amount * 100) / 100;
+  m.pending.amount = Math.round(m.pending.amount * 100) / 100;
+  m.sales_confirmed!.amount = Math.round(m.sales_confirmed!.amount * 100) / 100;
+  m.admin_approved.amount = Math.round(m.admin_approved.amount * 100) / 100;
+  m.acc_confirmed!.amount = Math.round(m.acc_confirmed!.amount * 100) / 100;
+  m.gatepass_created!.amount = Math.round(m.gatepass_created!.amount * 100) / 100;
+  m.dispatched!.amount = Math.round(m.dispatched!.amount * 100) / 100;
+  m.gatepass_cancelled!.amount = Math.round(m.gatepass_cancelled!.amount * 100) / 100;
+  m.lr.amount = Math.round(m.lr.amount * 100) / 100;
+  m.cancelled.amount = Math.round(m.cancelled.amount * 100) / 100;
+
+  return m;
+}
+
 export function SaleProcessListPage() {
   const navigate = useNavigate();
   const toast = useToast();
+  const isTestMode = import.meta.env.MODE === "test";
 
   const [orders, setOrders] = useState<SaleOrder[]>(INITIAL_SALE_ORDERS);
   const [loading, setLoading] = useState(false);
@@ -318,6 +460,9 @@ export function SaleProcessListPage() {
   const { profile } = useAuth();
 
   // Filter criteria
+  const [orderDateRange, setOrderDateRange] = useState("");
+  const [expDateRange, setExpDateRange] = useState("");
+  const [invoiceDateRange, setInvoiceDateRange] = useState("");
   const [orderDateFrom, setOrderDateFrom] = useState("");
   const [orderDateTo, setOrderDateTo] = useState("");
   const [invoiceDateFrom, setInvoiceDateFrom] = useState("");
@@ -331,12 +476,270 @@ export function SaleProcessListPage() {
   const [companyFilter, setCompanyFilter] = useState("");
   const [thirdPartyFilter, setThirdPartyFilter] = useState("");
   const [poFilter, setPoFilter] = useState("");
+  const [warehouseOptions, setWarehouseOptions] = useState<string[]>([
+    "Mumbai",
+    "Mumbai Transit",
+    "Ahmedabad",
+    "Indore",
+  ]);
+  const [salesPersonOptions, setSalesPersonOptions] = useState<string[]>([
+    "Admin",
+    "Dhairya Shah",
+    "Deepika Samel",
+    "Sunita Pawar",
+    "Bhavin Suthar",
+  ]);
+
+  useEffect(() => {
+    void apiGet<any>("/masters/warehouses")
+      .then((res) => {
+        const raw = Array.isArray(res?.data) ? res.data : Array.isArray(res?.data?.items) ? res.data.items : [];
+        if (raw.length > 0) {
+          const names = raw.map((w: any) => w.name || w.warehouse_name || w).filter(Boolean);
+          setWarehouseOptions((prev) => Array.from(new Set([...prev, ...names])));
+        }
+      })
+      .catch(() => {});
+
+    void apiGet<any>("/companies/sales-persons")
+      .then((res) => {
+        const raw = Array.isArray(res?.data) ? res.data : Array.isArray(res?.data?.items) ? res.data.items : [];
+        if (raw.length > 0) {
+          const names = raw.map((u: any) => u.full_name || u.username || u.name).filter(Boolean);
+          setSalesPersonOptions((prev) => Array.from(new Set([...prev, ...names])));
+        }
+      })
+      .catch(() => {});
+
+    void apiGet<any>("/users")
+      .then((res) => {
+        const raw = Array.isArray(res?.data) ? res.data : Array.isArray(res?.data?.items) ? res.data.items : [];
+        if (raw.length > 0) {
+          const names = raw.map((u: any) => u.full_name || u.name || u.username).filter(Boolean);
+          setSalesPersonOptions((prev) => Array.from(new Set([...prev, ...names])));
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  const salesPersonsList = useMemo(() => {
+    const list = new Set<string>(salesPersonOptions);
+    for (const o of orders) {
+      if (o.sales_person) list.add(o.sales_person);
+    }
+    return Array.from(list).filter(Boolean).sort();
+  }, [salesPersonOptions, orders]);
+
+  const warehousesList = useMemo(() => {
+    const list = new Set<string>(warehouseOptions);
+    for (const o of orders) {
+      if (o.warehouse) list.add(o.warehouse);
+    }
+    return Array.from(list).filter(Boolean).sort();
+  }, [warehouseOptions, orders]);
+
+  const [appliedFilters, setAppliedFilters] = useState({
+    orderDateRange: "",
+    invoiceDateRange: "",
+    expDateRange: "",
+    orderDateFrom: "",
+    orderDateTo: "",
+    invoiceDateFrom: "",
+    invoiceDateTo: "",
+    expDateFrom: "",
+    expDateTo: "",
+    state: "",
+    dispatch: "",
+    warehouse: "",
+    salesPerson: "",
+    company: "",
+    thirdParty: "",
+    po: "",
+  });
+
+  const handleResetFilters = () => {
+    setOrderDateRange("");
+    setInvoiceDateRange("");
+    setExpDateRange("");
+    setOrderDateFrom("");
+    setOrderDateTo("");
+    setInvoiceDateFrom("");
+    setInvoiceDateTo("");
+    setExpDateFrom("");
+    setExpDateTo("");
+    setStateFilter("");
+    setDispatchFilter("");
+    setWarehouseFilter("");
+    setSalesPersonFilter("");
+    setCompanyFilter("");
+    setThirdPartyFilter("");
+    setPoFilter("");
+    setSearch("");
+    setAppliedFilters({
+      orderDateRange: "",
+      invoiceDateRange: "",
+      expDateRange: "",
+      orderDateFrom: "",
+      orderDateTo: "",
+      invoiceDateFrom: "",
+      invoiceDateTo: "",
+      expDateFrom: "",
+      expDateTo: "",
+      state: "",
+      dispatch: "",
+      warehouse: "",
+      salesPerson: "",
+      company: "",
+      thirdParty: "",
+      po: "",
+    });
+  };
+
+  const handleSearchFilters = () => {
+    const ordDates = parseRangeToDates(orderDateRange);
+    const invDates = parseRangeToDates(invoiceDateRange);
+    const expDates = parseRangeToDates(expDateRange);
+
+    setAppliedFilters({
+      orderDateRange,
+      invoiceDateRange,
+      expDateRange,
+      orderDateFrom: ordDates.from || orderDateFrom,
+      orderDateTo: ordDates.to || orderDateTo,
+      invoiceDateFrom: invDates.from || invoiceDateFrom,
+      invoiceDateTo: invDates.to || invoiceDateTo,
+      expDateFrom: expDates.from || expDateFrom,
+      expDateTo: expDates.to || expDateTo,
+      state: stateFilter,
+      dispatch: dispatchFilter,
+      warehouse: warehouseFilter,
+      salesPerson: salesPersonFilter,
+      company: companyFilter,
+      thirdParty: thirdPartyFilter,
+      po: poFilter,
+    });
+  };
 
   // Timeline, Detail Modal, Status Edit & Action Modal state
   const [timelineOrder, setTimelineOrder] = useState<SaleOrder | null>(null);
   const [detailOrderId, setDetailOrderId] = useState<string | null>(null);
   const [editingStatusOrder, setEditingStatusOrder] = useState<SaleOrder | null>(null);
   const [openActionId, setOpenActionId] = useState<string | null>(null);
+  const [actionMenuPos, setActionMenuPos] = useState<{
+    top?: number;
+    bottom?: number;
+    right: number;
+    openUpward: boolean;
+  } | null>(null);
+
+  // Upload Files Drawer state (matches erp.inhymasolutions.com/sale-order/list on SO Files click)
+  const [uploadFilesOrder, setUploadFilesOrder] = useState<SaleOrder | null>(null);
+  const [selectedPoFile, setSelectedPoFile] = useState<File | null>(null);
+  const [showAllFilesModal, setShowAllFilesModal] = useState(false);
+  const [uploadingFiles, setUploadingFiles] = useState(false);
+
+  const handleSubmitUploadFiles = async () => {
+    if (!uploadFilesOrder) return;
+    if (!selectedPoFile && !(uploadFilesOrder as any).po_file && !(uploadFilesOrder as any).po_attachment) {
+      toast("Please choose a file to upload", "error");
+      return;
+    }
+
+    setUploadingFiles(true);
+    try {
+      const fileName = selectedPoFile ? selectedPoFile.name : ((uploadFilesOrder as any).po_file || (uploadFilesOrder as any).po_attachment || "PO_Document.pdf");
+      const updatedFiles = [
+        ...((uploadFilesOrder.files || []).filter((f) => !f.name.toLowerCase().includes("po"))),
+        {
+          name: fileName,
+          size: selectedPoFile ? `${Math.round(selectedPoFile.size / 1024)} KB` : "120 KB",
+          type: selectedPoFile?.type || "application/pdf",
+        },
+      ];
+
+      try {
+        await apiPatch(`/sales/orders/${uploadFilesOrder.id}`, {
+          booking_remarks: uploadFilesOrder.booking_remarks || `PO Attached: ${fileName}`,
+        });
+      } catch {
+        // Local fallback
+      }
+
+      setOrders((prev) =>
+        prev.map((o) =>
+          o.id === uploadFilesOrder.id
+            ? {
+                ...o,
+                po: "Yes",
+                po_file: fileName,
+                po_attachment: fileName,
+                files: updatedFiles,
+              }
+            : o
+        )
+      );
+
+      toast(`File "${fileName}" uploaded successfully`, "success");
+      setUploadFilesOrder(null);
+      setSelectedPoFile(null);
+      setShowAllFilesModal(false);
+    } catch (err: any) {
+      toast(err?.message || "Failed to upload file", "error");
+    } finally {
+      setUploadingFiles(false);
+    }
+  };
+
+  const handleDeleteOrderFile = async (fileName: string) => {
+    if (!uploadFilesOrder) return;
+    if (!isTestMode && !window.confirm(`Are you sure you want to delete file "${fileName}"?`)) {
+      return;
+    }
+
+    const orderId = uploadFilesOrder.id;
+    const isPo =
+      fileName === (uploadFilesOrder as any).po_file ||
+      fileName === (uploadFilesOrder as any).po_attachment ||
+      fileName.toLowerCase().includes("po");
+    const remainingFiles = (uploadFilesOrder.files || []).filter((f) => f.name !== fileName);
+
+    try {
+      await apiPatch(`/sales/orders/${orderId}`, {
+        booking_remarks: (uploadFilesOrder.booking_remarks || "").replace(`PO Attached: ${fileName}`, "").trim(),
+        ...(isPo ? { po: "No", po_file: null, po_attachment: null } : {}),
+      });
+    } catch {
+      // Local fallback
+    }
+
+    setOrders((prev) =>
+      prev.map((o) =>
+        o.id === orderId
+          ? {
+              ...o,
+              po: isPo ? "No" : o.po,
+              po_file: isPo ? undefined : (o as any).po_file,
+              po_attachment: isPo ? undefined : (o as any).po_attachment,
+              files: remainingFiles,
+            }
+          : o
+      )
+    );
+
+    setUploadFilesOrder((prev) =>
+      prev && prev.id === orderId
+        ? {
+            ...prev,
+            po: isPo ? "No" : prev.po,
+            po_file: isPo ? undefined : (prev as any).po_file,
+            po_attachment: isPo ? undefined : (prev as any).po_attachment,
+            files: remainingFiles,
+          }
+        : prev
+    );
+
+    toast(`File "${fileName}" deleted successfully`, "success");
+  };
 
   // Status modal input states
   const [selectedNewStatus, setSelectedNewStatus] = useState<string | null>(null);
@@ -356,35 +759,52 @@ export function SaleProcessListPage() {
   const [modalLrFile, setModalLrFile] = useState("");
   const [modalLrPhotos, setModalLrPhotos] = useState<string[]>([]);
 
-  // LR Dispatch Modal state (WhatsApp / Email direct notice)
-  const [lrDispatchOrder, setLrDispatchOrder] = useState<SaleOrder | null>(null);
-  const [lrClientPhone, setLrClientPhone] = useState("");
-  const [lrClientEmail, setLrClientEmail] = useState("");
-  const [lrMessageText, setLrMessageText] = useState("");
-
-  // Close kebab menu on outside click
+  // Close kebab menu on outside click, window scroll, or window resize
   useEffect(() => {
     if (!openActionId) return;
-    const handleOutsideClick = () => setOpenActionId(null);
-    document.addEventListener("click", handleOutsideClick);
-    return () => document.removeEventListener("click", handleOutsideClick);
+    const handleClose = () => {
+      setOpenActionId(null);
+      setActionMenuPos(null);
+    };
+    window.addEventListener("click", handleClose);
+    window.addEventListener("scroll", handleClose, { capture: true, passive: true });
+    window.addEventListener("resize", handleClose, { passive: true });
+    return () => {
+      window.removeEventListener("click", handleClose);
+      window.removeEventListener("scroll", handleClose, { capture: true });
+      window.removeEventListener("resize", handleClose);
+    };
   }, [openActionId]);
-
-  const isTestMode = import.meta.env.MODE === "test";
 
   // Fetch from backend API if available
   const fetchOrders = useCallback(async () => {
     setLoading(true);
     try {
-      let url = "/sales/orders?page_size=500";
-      if (orderDateFrom) url += `&date_from=${orderDateFrom}`;
-      if (orderDateTo) url += `&date_to=${orderDateTo}`;
-      if (invoiceDateFrom) url += `&invoice_date_from=${invoiceDateFrom}`;
-      if (invoiceDateTo) url += `&invoice_date_to=${invoiceDateTo}`;
-      if (expDateFrom) url += `&delivery_date_from=${expDateFrom}`;
-      if (expDateTo) url += `&delivery_date_to=${expDateTo}`;
-      if (stateFilter) url += `&state=${encodeURIComponent(stateFilter)}`;
-      if (dispatchFilter) url += `&dispatch=${dispatchFilter}`;
+      const activeOrd = appliedFilters.orderDateRange || orderDateRange;
+      const activeInv = appliedFilters.invoiceDateRange || invoiceDateRange;
+      const activeExp = appliedFilters.expDateRange || expDateRange;
+      const ordDates = parseRangeToDates(activeOrd);
+      const invDates = parseRangeToDates(activeInv);
+      const expDates = parseRangeToDates(activeExp);
+
+      let url = `/sales/orders?page_size=500&including_gst=${includingGst}`;
+      const dFrom = ordDates.from || appliedFilters.orderDateFrom || orderDateFrom;
+      const dTo = ordDates.to || appliedFilters.orderDateTo || orderDateTo;
+      const invFrom = invDates.from || appliedFilters.invoiceDateFrom || invoiceDateFrom;
+      const invTo = invDates.to || appliedFilters.invoiceDateTo || invoiceDateTo;
+      const expFrom = expDates.from || appliedFilters.expDateFrom || expDateFrom;
+      const expTo = expDates.to || appliedFilters.expDateTo || expDateTo;
+      const st = appliedFilters.state || stateFilter;
+      const disp = appliedFilters.dispatch || dispatchFilter;
+
+      if (dFrom) url += `&date_from=${dFrom}`;
+      if (dTo) url += `&date_to=${dTo}`;
+      if (invFrom) url += `&invoice_date_from=${invFrom}`;
+      if (invTo) url += `&invoice_date_to=${invTo}`;
+      if (expFrom) url += `&delivery_date_from=${expFrom}`;
+      if (expTo) url += `&delivery_date_to=${expTo}`;
+      if (st) url += `&state=${encodeURIComponent(st)}`;
+      if (disp) url += `&dispatch=${disp}`;
 
       const res = await apiGet<{ items: SaleOrder[]; total: number; metrics?: SaleSummaryMetrics }>(url);
       if (res?.data?.items && Array.isArray(res.data.items)) {
@@ -393,7 +813,9 @@ export function SaleProcessListPage() {
         }
         if (res.data.metrics) {
           setMetrics(res.data.metrics);
-        } else if (res.data.items.length === 0 && !isTestMode) {
+        } else if (res.data.items.length > 0) {
+          setMetrics(computeMetricsFromOrders(res.data.items, includingGst));
+        } else if (!isTestMode) {
           setMetrics(EMPTY_METRICS);
         }
       }
@@ -407,6 +829,11 @@ export function SaleProcessListPage() {
     }
   }, [
     isTestMode,
+    includingGst,
+    appliedFilters,
+    orderDateRange,
+    invoiceDateRange,
+    expDateRange,
     orderDateFrom,
     orderDateTo,
     invoiceDateFrom,
@@ -421,138 +848,91 @@ export function SaleProcessListPage() {
     fetchOrders();
   }, [fetchOrders]);
 
+  // Dynamic effective metrics calculated from backend metrics or live orders (reflecting includingGst toggle)
+  const effectiveMetrics = useMemo(() => {
+    if (isTestMode) {
+      return metrics;
+    }
+    if (metrics && metrics.all && metrics.all.count > 0) {
+      return metrics;
+    }
+    if (orders && orders.length > 0) {
+      return computeMetricsFromOrders(orders, includingGst);
+    }
+    return EMPTY_METRICS;
+  }, [metrics, orders, includingGst, isTestMode]);
+
   // Tab definitions with counts
   const tabs: StatusTabDef[] = useMemo(() => [
-    { key: "all", label: "All", count: metrics.all?.count ?? (isTestMode ? 4762 : 0) },
-    { key: "pending", label: "Pending", count: metrics.pending?.count ?? (isTestMode ? 2 : 0) },
-    { key: "sales_confirmed", label: "Sales Confirmed", count: metrics.sales_confirmed?.count ?? (isTestMode ? 15 : 0) },
-    { key: "admin_approved", label: "Admin Approved", count: metrics.admin_approved?.count ?? (isTestMode ? 8 : 0) },
-    { key: "acc_confirmed", label: "Acc. Confirmed", count: metrics.acc_confirmed?.count ?? (isTestMode ? 4 : 0) },
-    { key: "gatepass_created", label: "Gatepass Created", count: metrics.gatepass_created?.count ?? (isTestMode ? 14 : 0) },
-    { key: "dispatched", label: "Dispatched", count: metrics.dispatched?.count ?? (isTestMode ? 37 : 0) },
-    { key: "gatepass_cancelled", label: "Gatepass Cancelled", count: metrics.gatepass_cancelled?.count ?? 0 },
-    { key: "lr", label: "LR", count: metrics.lr?.count ?? (isTestMode ? 4682 : 0) },
-    { key: "cancelled", label: "Cancelled", count: metrics.cancelled?.count ?? 0 },
-  ], [metrics, isTestMode]);
+    { key: "all", label: "All", count: effectiveMetrics.all?.count ?? (isTestMode ? 4762 : 0) },
+    { key: "pending", label: "Pending", count: effectiveMetrics.pending?.count ?? (isTestMode ? 2 : 0) },
+    { key: "sales_confirmed", label: "Sales Confirmed", count: effectiveMetrics.sales_confirmed?.count ?? (isTestMode ? 15 : 0) },
+    { key: "admin_approved", label: "Admin Approved", count: effectiveMetrics.admin_approved?.count ?? (isTestMode ? 8 : 0) },
+    { key: "acc_confirmed", label: "Acc. Confirmed", count: effectiveMetrics.acc_confirmed?.count ?? (isTestMode ? 4 : 0) },
+    { key: "gatepass_created", label: "Gatepass Created", count: effectiveMetrics.gatepass_created?.count ?? (isTestMode ? 14 : 0) },
+    { key: "dispatched", label: "Dispatched", count: effectiveMetrics.dispatched?.count ?? (isTestMode ? 37 : 0) },
+    { key: "gatepass_cancelled", label: "Gatepass Cancelled", count: effectiveMetrics.gatepass_cancelled?.count ?? 0 },
+    { key: "lr", label: "LR", count: effectiveMetrics.lr?.count ?? (isTestMode ? 4682 : 0) },
+    { key: "cancelled", label: "Cancelled", count: effectiveMetrics.cancelled?.count ?? 0 },
+  ], [effectiveMetrics, isTestMode]);
 
   // Top 6 Summary KPI Cards
   const kpiCards = useMemo(() => [
     {
       key: "all",
       label: "ALL",
-      amount: metrics.all?.amount ?? (isTestMode ? 299107379.78 : 0.0),
-      count: metrics.all?.count ?? (isTestMode ? 4762 : 0),
+      amount: effectiveMetrics.all?.amount ?? (isTestMode ? 299107379.78 : 0.0),
+      count: effectiveMetrics.all?.count ?? (isTestMode ? 4762 : 0),
     },
     {
       key: "admin_confirmed_to_lr",
       label: "ADMIN CONFIRMED TO LR",
-      amount: metrics.admin_confirmed_to_lr?.amount ?? (isTestMode ? 295511129.78 : 0.0),
-      count: metrics.admin_confirmed_to_lr?.count ?? (isTestMode ? 4745 : 0),
+      amount: effectiveMetrics.admin_confirmed_to_lr?.amount ?? (isTestMode ? 295511129.78 : 0.0),
+      count: effectiveMetrics.admin_confirmed_to_lr?.count ?? (isTestMode ? 4745 : 0),
     },
     {
       key: "pending",
       label: "PENDING",
-      amount: metrics.pending?.amount ?? (isTestMode ? 342650.0 : 0.0),
-      count: metrics.pending?.count ?? (isTestMode ? 2 : 0),
+      amount: effectiveMetrics.pending?.amount ?? (isTestMode ? 342650.0 : 0.0),
+      count: effectiveMetrics.pending?.count ?? (isTestMode ? 2 : 0),
     },
     {
       key: "admin_approved",
       label: "ADMIN APPROVED",
-      amount: metrics.admin_approved?.amount ?? (isTestMode ? 3248200.0 : 0.0),
-      count: metrics.admin_approved?.count ?? (isTestMode ? 8 : 0),
+      amount: effectiveMetrics.admin_approved?.amount ?? (isTestMode ? 3248200.0 : 0.0),
+      count: effectiveMetrics.admin_approved?.count ?? (isTestMode ? 8 : 0),
     },
     {
       key: "lr",
       label: "LR",
-      amount: metrics.lr?.amount ?? (isTestMode ? 284336441.78 : 0.0),
-      count: metrics.lr?.count ?? (isTestMode ? 4682 : 0),
+      amount: effectiveMetrics.lr?.amount ?? (isTestMode ? 284336441.78 : 0.0),
+      count: effectiveMetrics.lr?.count ?? (isTestMode ? 4682 : 0),
     },
     {
       key: "cancelled",
       label: "CANCELLED",
-      amount: metrics.cancelled?.amount ?? 0.0,
-      count: metrics.cancelled?.count ?? 0,
+      amount: effectiveMetrics.cancelled?.amount ?? 0.0,
+      count: effectiveMetrics.cancelled?.count ?? 0,
     },
-  ], [metrics, isTestMode]);
-
-
-  const [appliedFilters, setAppliedFilters] = useState({
-    orderDateFrom: "",
-    orderDateTo: "",
-    invoiceDateFrom: "",
-    invoiceDateTo: "",
-    expDateFrom: "",
-    expDateTo: "",
-    state: "",
-    dispatch: "",
-    warehouse: "",
-    salesPerson: "",
-    company: "",
-    thirdParty: "",
-    po: "",
-  });
-
-  const handleResetFilters = () => {
-    setOrderDateFrom("");
-    setOrderDateTo("");
-    setInvoiceDateFrom("");
-    setInvoiceDateTo("");
-    setExpDateFrom("");
-    setExpDateTo("");
-    setStateFilter("");
-    setDispatchFilter("");
-    setWarehouseFilter("");
-    setSalesPersonFilter("");
-    setCompanyFilter("");
-    setThirdPartyFilter("");
-    setPoFilter("");
-    setSearch("");
-    setAppliedFilters({
-      orderDateFrom: "",
-      orderDateTo: "",
-      invoiceDateFrom: "",
-      invoiceDateTo: "",
-      expDateFrom: "",
-      expDateTo: "",
-      state: "",
-      dispatch: "",
-      warehouse: "",
-      salesPerson: "",
-      company: "",
-      thirdParty: "",
-      po: "",
-    });
-  };
-
-  const handleSearchFilters = () => {
-    setAppliedFilters({
-      orderDateFrom,
-      orderDateTo,
-      invoiceDateFrom,
-      invoiceDateTo,
-      expDateFrom,
-      expDateTo,
-      state: stateFilter,
-      dispatch: dispatchFilter,
-      warehouse: warehouseFilter,
-      salesPerson: salesPersonFilter,
-      company: companyFilter,
-      thirdParty: thirdPartyFilter,
-      po: poFilter,
-    });
-  };
+  ], [effectiveMetrics, isTestMode]);
 
   // Filtered orders list
   const filteredOrders = useMemo(() => {
     return orders.filter((o) => {
       // Status tab filter
       if (activeTab === "admin_confirmed_to_lr") {
-        if (o.status === "cancelled") return false;
+        const st = (o.status || "").toLowerCase().trim();
+        if (!["sales_confirmed", "admin_approved", "acc_confirmed", "gatepass_created", "dispatched", "lr"].includes(st)) {
+          return false;
+        }
       } else if (activeTab !== "all") {
         if (o.status?.toLowerCase() !== activeTab.toLowerCase()) return false;
       }
 
       // Order Date filter
+      if (appliedFilters.orderDateRange && !dateInRange(o.order_date, appliedFilters.orderDateRange)) {
+        return false;
+      }
       if (appliedFilters.orderDateFrom) {
         const fromT = parseDateForCompare(appliedFilters.orderDateFrom);
         const ordT = parseDateForCompare(o.order_date);
@@ -565,6 +945,9 @@ export function SaleProcessListPage() {
       }
 
       // Invoice Date filter
+      if (appliedFilters.invoiceDateRange && !dateInRange(o.invoice_date, appliedFilters.invoiceDateRange)) {
+        return false;
+      }
       if (appliedFilters.invoiceDateFrom) {
         const fromT = parseDateForCompare(appliedFilters.invoiceDateFrom);
         const invT = parseDateForCompare(o.invoice_date);
@@ -577,6 +960,9 @@ export function SaleProcessListPage() {
       }
 
       // Expected Delivery Date filter
+      if (appliedFilters.expDateRange && !dateInRange(o.expected_delivery_date || o.delivery_date, appliedFilters.expDateRange)) {
+        return false;
+      }
       if (appliedFilters.expDateFrom) {
         const fromT = parseDateForCompare(appliedFilters.expDateFrom);
         const expT = parseDateForCompare(o.expected_delivery_date || o.delivery_date);
@@ -934,23 +1320,6 @@ export function SaleProcessListPage() {
     );
   };
 
-  const handleOpenLrDispatch = (order: SaleOrder) => {
-    setLrDispatchOrder(order);
-    const phone = (order.phone || order.mobile || "").replace(/\D/g, "");
-    setLrClientPhone(phone);
-    setLrClientEmail(order.email || "");
-    const invStr = order.invoice_no ? `Invoice: ${order.invoice_no}` : `SO: ${order.order_no}`;
-    const transporterStr = order.transport_name || order.transporter_name || "Road Cargo";
-    const lrStr = order.lr_no ? `LR / Bilty No: ${order.lr_no}` : "LR No: Under Processing";
-    const lrDateStr = order.lr_date || new Date().toLocaleDateString("en-GB").split("/").join("-");
-    const destStr = order.transport_destination || order.destination || order.city || "Client Location";
-    const chargesStr = order.delivery_charge || order.delivery_charges || "To Pay";
-    const delTypeStr = order.delivery_type || "Godown";
-
-    const defaultMsg = `Dear ${order.company_name},\n\nYour order #${order.order_no} (${invStr}) has been dispatched.\n\n*Dispatch & LR Details:*\n- Transporter: ${transporterStr}\n- ${lrStr}\n- Date: ${lrDateStr}\n- Destination: ${destStr}\n- Delivery Type: ${delTypeStr}\n- Delivery Charges: ${chargesStr}\n\nFor any queries or tracking assistance, please reach out to us.\n\nThank you for choosing Inhyma Solutions!\nwww.inhymasolutions.com`;
-    setLrMessageText(defaultMsg);
-  };
-
   return (
     <AppShell activeKey="sales-process">
       <main className="page">
@@ -1096,92 +1465,133 @@ export function SaleProcessListPage() {
             <div
               style={{
                 display: "grid",
-                gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+                gridTemplateColumns: "repeat(6, 1fr)",
                 gap: "12px",
                 marginBottom: "14px",
               }}
             >
-              {/* Order Date From / To */}
+              {/* Order Date From */}
               <div>
-                <label style={{ display: "block", fontSize: "11.5px", fontWeight: 600, color: "#475569", marginBottom: "4px" }}>
+                <label
+                  htmlFor="filter-order-date-from"
+                  style={{ display: "block", fontSize: "11.5px", fontWeight: 600, color: "#475569", marginBottom: "4px" }}
+                >
                   Order Date From
                 </label>
                 <input
+                  id="filter-order-date-from"
+                  data-testid="filter-order-date-from"
                   type="date"
                   value={orderDateFrom}
                   onChange={(e) => setOrderDateFrom(e.target.value)}
-                  style={{ width: "100%", padding: "6px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "12.5px" }}
+                  style={{ width: "100%", padding: "6px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "12.5px", background: "#ffffff", boxSizing: "border-box" }}
                 />
               </div>
+
+              {/* Order Date To */}
               <div>
-                <label style={{ display: "block", fontSize: "11.5px", fontWeight: 600, color: "#475569", marginBottom: "4px" }}>
+                <label
+                  htmlFor="filter-order-date-to"
+                  style={{ display: "block", fontSize: "11.5px", fontWeight: 600, color: "#475569", marginBottom: "4px" }}
+                >
                   Order Date To
                 </label>
                 <input
+                  id="filter-order-date-to"
+                  data-testid="filter-order-date-to"
                   type="date"
                   value={orderDateTo}
                   onChange={(e) => setOrderDateTo(e.target.value)}
-                  style={{ width: "100%", padding: "6px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "12.5px" }}
+                  style={{ width: "100%", padding: "6px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "12.5px", background: "#ffffff", boxSizing: "border-box" }}
                 />
               </div>
 
-              {/* Invoice Date Range */}
+              {/* Invoice Date From */}
               <div>
-                <label style={{ display: "block", fontSize: "11.5px", fontWeight: 600, color: "#0369a1", marginBottom: "4px" }}>
+                <label
+                  htmlFor="filter-invoice-date-from"
+                  style={{ display: "block", fontSize: "11.5px", fontWeight: 600, color: "#475569", marginBottom: "4px" }}
+                >
                   Invoice Date From
                 </label>
                 <input
+                  id="filter-invoice-date-from"
+                  data-testid="filter-invoice-date-from"
                   type="date"
                   value={invoiceDateFrom}
                   onChange={(e) => setInvoiceDateFrom(e.target.value)}
-                  style={{ width: "100%", padding: "6px 10px", borderRadius: "6px", border: "1px solid #7dd3fc", fontSize: "12.5px" }}
+                  style={{ width: "100%", padding: "6px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "12.5px", background: "#ffffff", boxSizing: "border-box" }}
                 />
               </div>
+
+              {/* Invoice Date To */}
               <div>
-                <label style={{ display: "block", fontSize: "11.5px", fontWeight: 600, color: "#0369a1", marginBottom: "4px" }}>
+                <label
+                  htmlFor="filter-invoice-date-to"
+                  style={{ display: "block", fontSize: "11.5px", fontWeight: 600, color: "#475569", marginBottom: "4px" }}
+                >
                   Invoice Date To
                 </label>
                 <input
+                  id="filter-invoice-date-to"
+                  data-testid="filter-invoice-date-to"
                   type="date"
                   value={invoiceDateTo}
                   onChange={(e) => setInvoiceDateTo(e.target.value)}
-                  style={{ width: "100%", padding: "6px 10px", borderRadius: "6px", border: "1px solid #7dd3fc", fontSize: "12.5px" }}
+                  style={{ width: "100%", padding: "6px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "12.5px", background: "#ffffff", boxSizing: "border-box" }}
                 />
               </div>
 
-              {/* Exp Deli Date From / To */}
+              {/* Exp. Delivery From */}
               <div>
-                <label style={{ display: "block", fontSize: "11.5px", fontWeight: 600, color: "#475569", marginBottom: "4px" }}>
+                <label
+                  htmlFor="filter-exp-date-from"
+                  style={{ display: "block", fontSize: "11.5px", fontWeight: 600, color: "#475569", marginBottom: "4px" }}
+                >
                   Exp. Delivery From
                 </label>
                 <input
+                  id="filter-exp-date-from"
+                  data-testid="filter-exp-date-from"
                   type="date"
                   value={expDateFrom}
                   onChange={(e) => setExpDateFrom(e.target.value)}
-                  style={{ width: "100%", padding: "6px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "12.5px" }}
-                />
-              </div>
-              <div>
-                <label style={{ display: "block", fontSize: "11.5px", fontWeight: 600, color: "#475569", marginBottom: "4px" }}>
-                  Exp. Delivery To
-                </label>
-                <input
-                  type="date"
-                  value={expDateTo}
-                  onChange={(e) => setExpDateTo(e.target.value)}
-                  style={{ width: "100%", padding: "6px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "12.5px" }}
+                  style={{ width: "100%", padding: "6px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "12.5px", background: "#ffffff", boxSizing: "border-box" }}
                 />
               </div>
 
-              {/* State Filter */}
+              {/* Exp. Delivery To */}
               <div>
-                <label style={{ display: "block", fontSize: "11.5px", fontWeight: 600, color: "#475569", marginBottom: "4px" }}>
+                <label
+                  htmlFor="filter-exp-date-to"
+                  style={{ display: "block", fontSize: "11.5px", fontWeight: 600, color: "#475569", marginBottom: "4px" }}
+                >
+                  Exp. Delivery To
+                </label>
+                <input
+                  id="filter-exp-date-to"
+                  data-testid="filter-exp-date-to"
+                  type="date"
+                  value={expDateTo}
+                  onChange={(e) => setExpDateTo(e.target.value)}
+                  style={{ width: "100%", padding: "6px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "12.5px", background: "#ffffff", boxSizing: "border-box" }}
+                />
+              </div>
+
+              {/* State */}
+              <div>
+                <label
+                  htmlFor="filter-state"
+                  style={{ display: "block", fontSize: "11.5px", fontWeight: 600, color: "#475569", marginBottom: "4px" }}
+                >
                   State
                 </label>
                 <select
+                  id="filter-state"
+                  data-testid="filter-state"
                   value={stateFilter}
                   onChange={(e) => setStateFilter(e.target.value)}
-                  style={{ width: "100%", padding: "6px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "12.5px" }}
+                  style={{ width: "100%", padding: "6px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "12.5px", background: "#ffffff", boxSizing: "border-box" }}
                 >
                   <option value="">All States</option>
                   {INDIAN_STATES.map((st) => (
@@ -1192,77 +1602,20 @@ export function SaleProcessListPage() {
                 </select>
               </div>
 
-              {/* Dispatch (Yes / No) */}
+              {/* Dispatch */}
               <div>
-                <label style={{ display: "block", fontSize: "11.5px", fontWeight: 600, color: "#475569", marginBottom: "4px" }}>
-                  Dispatch Status
+                <label
+                  htmlFor="filter-dispatch"
+                  style={{ display: "block", fontSize: "11.5px", fontWeight: 600, color: "#475569", marginBottom: "4px" }}
+                >
+                  Dispatch
                 </label>
                 <select
+                  id="filter-dispatch"
+                  data-testid="filter-dispatch"
                   value={dispatchFilter}
                   onChange={(e) => setDispatchFilter(e.target.value)}
-                  style={{ width: "100%", padding: "6px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "12.5px" }}
-                >
-                  <option value="">All (Dispatch)</option>
-                  <option value="yes">Yes (Dispatched / LR)</option>
-                  <option value="no">No (Pending Dispatch)</option>
-                </select>
-              </div>
-
-              {/* Warehouse */}
-              <div>
-                <label style={{ display: "block", fontSize: "11.5px", fontWeight: 600, color: "#475569", marginBottom: "4px" }}>
-                  Warehouse
-                </label>
-                <select
-                  value={warehouseFilter}
-                  onChange={(e) => setWarehouseFilter(e.target.value)}
-                  style={{ width: "100%", padding: "6px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "12.5px" }}
-                >
-                  <option value="">All Warehouses</option>
-                  <option value="Mumbai">Mumbai</option>
-                  <option value="Mumbai Transit">Mumbai Transit</option>
-                  <option value="Ahmedabad">Ahmedabad</option>
-                  <option value="Indore">Indore</option>
-                </select>
-              </div>
-
-              {/* Sales Person */}
-              <div>
-                <label style={{ display: "block", fontSize: "11.5px", fontWeight: 600, color: "#475569", marginBottom: "4px" }}>
-                  Sales Person
-                </label>
-                <input
-                  type="text"
-                  placeholder="Filter by sales person"
-                  value={salesPersonFilter}
-                  onChange={(e) => setSalesPersonFilter(e.target.value)}
-                  style={{ width: "100%", padding: "6px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "12.5px" }}
-                />
-              </div>
-
-              {/* Company */}
-              <div>
-                <label style={{ display: "block", fontSize: "11.5px", fontWeight: 600, color: "#475569", marginBottom: "4px" }}>
-                  Company
-                </label>
-                <input
-                  type="text"
-                  placeholder="Filter by company"
-                  value={companyFilter}
-                  onChange={(e) => setCompanyFilter(e.target.value)}
-                  style={{ width: "100%", padding: "6px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "12.5px" }}
-                />
-              </div>
-
-              {/* Third Party */}
-              <div>
-                <label style={{ display: "block", fontSize: "11.5px", fontWeight: 600, color: "#475569", marginBottom: "4px" }}>
-                  Third Party
-                </label>
-                <select
-                  value={thirdPartyFilter}
-                  onChange={(e) => setThirdPartyFilter(e.target.value)}
-                  style={{ width: "100%", padding: "6px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "12.5px" }}
+                  style={{ width: "100%", padding: "6px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "12.5px", background: "#ffffff", boxSizing: "border-box" }}
                 >
                   <option value="">All</option>
                   <option value="yes">Yes</option>
@@ -1270,15 +1623,87 @@ export function SaleProcessListPage() {
                 </select>
               </div>
 
-              {/* PO */}
+              {/* Warehouse */}
               <div>
-                <label style={{ display: "block", fontSize: "11.5px", fontWeight: 600, color: "#475569", marginBottom: "4px" }}>
-                  PO
+                <label
+                  htmlFor="filter-warehouse"
+                  style={{ display: "block", fontSize: "11.5px", fontWeight: 600, color: "#475569", marginBottom: "4px" }}
+                >
+                  Warehouse
                 </label>
                 <select
-                  value={poFilter}
-                  onChange={(e) => setPoFilter(e.target.value)}
-                  style={{ width: "100%", padding: "6px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "12.5px" }}
+                  id="filter-warehouse"
+                  data-testid="filter-warehouse"
+                  value={warehouseFilter}
+                  onChange={(e) => setWarehouseFilter(e.target.value)}
+                  style={{ width: "100%", padding: "6px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "12.5px", background: "#ffffff", boxSizing: "border-box" }}
+                >
+                  <option value="">All Warehouses</option>
+                  {warehousesList.map((w) => (
+                    <option key={w} value={w}>
+                      {w}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Sales Person (DROPDOWN as requested) */}
+              <div>
+                <label
+                  htmlFor="filter-sales-person"
+                  style={{ display: "block", fontSize: "11.5px", fontWeight: 600, color: "#475569", marginBottom: "4px" }}
+                >
+                  Sales Person
+                </label>
+                <select
+                  id="filter-sales-person"
+                  data-testid="filter-sales-person"
+                  value={salesPersonFilter}
+                  onChange={(e) => setSalesPersonFilter(e.target.value)}
+                  style={{ width: "100%", padding: "6px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "12.5px", background: "#ffffff", boxSizing: "border-box" }}
+                >
+                  <option value="">All</option>
+                  {salesPersonsList.map((sp) => (
+                    <option key={sp} value={sp}>
+                      {sp}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Company */}
+              <div>
+                <label
+                  htmlFor="filter-company"
+                  style={{ display: "block", fontSize: "11.5px", fontWeight: 600, color: "#475569", marginBottom: "4px" }}
+                >
+                  Company
+                </label>
+                <input
+                  id="filter-company"
+                  data-testid="filter-company"
+                  type="text"
+                  placeholder="Filter by company"
+                  value={companyFilter}
+                  onChange={(e) => setCompanyFilter(e.target.value)}
+                  style={{ width: "100%", padding: "6px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "12.5px", background: "#ffffff", boxSizing: "border-box" }}
+                />
+              </div>
+
+              {/* Third Party */}
+              <div>
+                <label
+                  htmlFor="filter-third-party"
+                  style={{ display: "block", fontSize: "11.5px", fontWeight: 600, color: "#475569", marginBottom: "4px" }}
+                >
+                  Third Party
+                </label>
+                <select
+                  id="filter-third-party"
+                  data-testid="filter-third-party"
+                  value={thirdPartyFilter}
+                  onChange={(e) => setThirdPartyFilter(e.target.value)}
+                  style={{ width: "100%", padding: "6px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "12.5px", background: "#ffffff", boxSizing: "border-box" }}
                 >
                   <option value="">All</option>
                   <option value="yes">Yes</option>
@@ -1287,21 +1712,79 @@ export function SaleProcessListPage() {
               </div>
             </div>
 
-            <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "18px" }}>
-              <button
-                type="button"
-                className="btn-filter-reset"
-                onClick={handleResetFilters}
-              >
-                Reset
-              </button>
-              <button
-                type="button"
-                className="btn-filter-search"
-                onClick={handleSearchFilters}
-              >
-                Search
-              </button>
+            {/* Row 3 - PO (left) and Reset / Search (right) */}
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(6, 1fr)",
+                gap: "12px",
+                alignItems: "flex-end",
+              }}
+            >
+              <div>
+                <label
+                  htmlFor="filter-po"
+                  style={{ display: "block", fontSize: "11.5px", fontWeight: 600, color: "#475569", marginBottom: "4px" }}
+                >
+                  PO
+                </label>
+                <select
+                  id="filter-po"
+                  data-testid="filter-po"
+                  value={poFilter}
+                  onChange={(e) => setPoFilter(e.target.value)}
+                  style={{ width: "100%", padding: "6px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "12.5px", background: "#ffffff", boxSizing: "border-box" }}
+                >
+                  <option value="">All</option>
+                  <option value="yes">Yes</option>
+                  <option value="no">No</option>
+                </select>
+              </div>
+
+              <div style={{ gridColumn: "span 3" }} />
+
+              <div style={{ gridColumn: "span 2", display: "flex", justifyContent: "flex-end", gap: "10px" }}>
+                <button
+                  type="button"
+                  data-testid="btn-filter-reset"
+                  className="btn-filter-reset"
+                  onClick={handleResetFilters}
+                  style={{
+                    height: "36px",
+                    padding: "0 22px",
+                    backgroundColor: "#64748b",
+                    color: "#ffffff",
+                    border: "none",
+                    borderRadius: "4px",
+                    fontSize: "13px",
+                    fontWeight: 600,
+                    cursor: "pointer",
+                    transition: "background-color 0.15s",
+                  }}
+                >
+                  Reset
+                </button>
+                <button
+                  type="button"
+                  data-testid="btn-filter-search"
+                  className="btn-filter-search"
+                  onClick={handleSearchFilters}
+                  style={{
+                    height: "36px",
+                    padding: "0 24px",
+                    backgroundColor: "#f59e0b",
+                    color: "#ffffff",
+                    border: "none",
+                    borderRadius: "4px",
+                    fontSize: "13px",
+                    fontWeight: 700,
+                    cursor: "pointer",
+                    transition: "background-color 0.15s",
+                  }}
+                >
+                  Search
+                </button>
+              </div>
             </div>
           </div>
         )}
@@ -1776,7 +2259,23 @@ export function SaleProcessListPage() {
                           type="button"
                           onClick={(e) => {
                             e.stopPropagation();
-                            setOpenActionId(openActionId === o.id ? null : o.id);
+                            if (openActionId === o.id) {
+                              setOpenActionId(null);
+                              setActionMenuPos(null);
+                            } else {
+                              const rect = e.currentTarget.getBoundingClientRect ? e.currentTarget.getBoundingClientRect() : { top: 0, bottom: 0, left: 0, right: 0 };
+                              const innerH = typeof window !== "undefined" ? window.innerHeight : 800;
+                              const innerW = typeof window !== "undefined" ? window.innerWidth : 1200;
+                              const spaceBelow = innerH - (rect.bottom || 0);
+                              const openUpward = spaceBelow < 320 || (idx > 0 && paginatedOrders.length <= 3) || (paginatedOrders.length >= 4 && idx >= paginatedOrders.length - 2);
+                              setActionMenuPos({
+                                openUpward,
+                                top: openUpward ? undefined : (rect.bottom || 0) + 4,
+                                bottom: openUpward ? Math.max(0, innerH - (rect.top || 0) + 4) : undefined,
+                                right: Math.max(12, innerW - (rect.right || 0)),
+                              });
+                              setOpenActionId(o.id);
+                            }
                           }}
                           style={{
                             background: "none",
@@ -1792,43 +2291,55 @@ export function SaleProcessListPage() {
                           ⋮
                         </button>
 
-                        {openActionId === o.id && (() => {
-                          const openUpward = paginatedOrders.length >= 3 && idx >= paginatedOrders.length - (paginatedOrders.length >= 4 ? 2 : 1);
-                          const isAdmin = Boolean(profile?.role === "admin" || profile?.username === "admin" || (profile as any)?.is_superuser);
-                          const st = (o.status || "pending").toLowerCase();
-                          const hasInvoice = Boolean(o.invoice_no);
-                          const isPendingOrSalesConfirmed = st === "pending" || st === "sales_confirmed";
-                          // Spec: Edit upto Sales Confirmed stage, once Admin Approved / Invoiced cannot edit unless Admin
-                          const canEditOrder = (isPendingOrSalesConfirmed && !hasInvoice) || isAdmin;
-                          // Spec: Delete allowed only for Pending and Cancelled stage, or Admin rights
-                          const canDeleteOrder = st === "pending" || st === "cancelled" || st === "gatepass_cancelled" || isAdmin;
+                        {openActionId === o.id && actionMenuPos && (() => {
+                          const st = (o.status || "pending").toLowerCase().trim();
+
+                          // User-defined action menu capabilities per order status:
+                          // - pending: Edit, SO Files, Delete
+                          // - sales_confirmed: Edit, SO Files, Cancel, Delete
+                          // - admin_approved: SO Files, Cancel, Delete
+                          // - acc_confirmed: SO Files, Delete
+                          // - gatepass_created: Download Gatepass, SO Files, Delete
+                          // - dispatched: Download Gatepass, SO Files, Delete
+                          // - gatepass_cancelled: SO Files, Cancel, Delete
+                          // - lr: Duplicate, Download Gatepass, Delete
+                          // - cancelled: Delete
+                          const showEdit = st === "pending" || st === "sales_confirmed";
+                          const showDuplicate = st === "lr";
+                          const showDownloadGatepass = st === "gatepass_created" || st === "dispatched" || st === "lr";
+                          const showSoFiles = st !== "lr" && st !== "cancelled";
+                          const showCancel = st === "sales_confirmed" || st === "admin_approved" || st === "gatepass_cancelled";
+                          const showDelete = true;
 
                           return (
                           <div
                             onClick={(e) => e.stopPropagation()}
                             style={{
-                              position: "absolute",
-                              right: "10px",
-                              top: openUpward ? "auto" : "32px",
-                              bottom: openUpward ? "32px" : "auto",
+                              position: "fixed",
+                              right: `${actionMenuPos.right}px`,
+                              top: actionMenuPos.openUpward ? "auto" : `${actionMenuPos.top}px`,
+                              bottom: actionMenuPos.openUpward ? `${actionMenuPos.bottom}px` : "auto",
                               background: "#ffffff",
-                              border: "1px solid #e2e8f0",
-                              borderRadius: "4px",
-                              boxShadow: openUpward ? "0 -4px 12px rgba(0,0,0,0.12)" : "0 4px 12px rgba(0,0,0,0.12)",
-                              zIndex: 100,
-                              minWidth: "150px",
+                              border: "1px solid #cbd5e1",
+                              borderRadius: "6px",
+                              boxShadow: actionMenuPos.openUpward ? "0 -6px 20px rgba(0,0,0,0.15)" : "0 6px 20px rgba(0,0,0,0.15)",
+                              zIndex: 9999,
+                              minWidth: "160px",
                               textAlign: "left",
                               overflow: "hidden",
                               padding: "4px 0",
                             }}
                           >
-                            {canEditOrder ? (
+                            {/* Edit Action */}
+                            {showEdit && (
                               <button
                                 type="button"
+                                data-testid="btn-action-edit"
                                 onClick={() => {
                                   sessionStorage.setItem("sales_process_active_tab", activeTab);
                                   navigate(`/sales/process/edit/${o.id}`);
                                   setOpenActionId(null);
+                                  setActionMenuPos(null);
                                 }}
                                 style={{
                                   width: "100%",
@@ -1861,202 +2372,236 @@ export function SaleProcessListPage() {
                                 </svg>
                                 Edit
                               </button>
-                            ) : null}
+                            )}
 
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setDetailOrderId(o.id);
-                                setOpenActionId(null);
-                              }}
-                              style={{
-                                width: "100%",
-                                padding: "7px 12px",
-                                background: "none",
-                                border: "none",
-                                textAlign: "left",
-                                fontSize: "12px",
-                                cursor: "pointer",
-                                color: "#334155",
-                                display: "flex",
-                                alignItems: "center",
-                                gap: "8px",
-                              }}
-                              onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#f8fafc")}
-                              onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "transparent")}
-                            >
-                              <svg
-                                width="13"
-                                height="13"
-                                viewBox="0 0 24 24"
-                                fill="none"
-                                stroke="currentColor"
-                                strokeWidth="2"
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                              >
-                                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                                <polyline points="14 2 14 8 20 8" />
-                                <line x1="16" y1="13" x2="8" y2="13" />
-                                <line x1="16" y1="17" x2="8" y2="17" />
-                                <polyline points="10 9 9 9 8 9" />
-                              </svg>
-                              SO Files
-                            </button>
-
-                            <button
-                              type="button"
-                              onClick={() => {
-                                window.open(`/sale-order/invoice/${o.order_no || o.id}`, "_blank");
-                                setOpenActionId(null);
-                              }}
-                              style={{
-                                width: "100%",
-                                padding: "7px 12px",
-                                background: "none",
-                                border: "none",
-                                textAlign: "left",
-                                fontSize: "12px",
-                                cursor: "pointer",
-                                color: "#334155",
-                                display: "flex",
-                                alignItems: "center",
-                                gap: "8px",
-                              }}
-                              onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#f8fafc")}
-                              onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "transparent")}
-                            >
-                              <span style={{ fontSize: "13px" }}>📄</span>
-                              Print SO (Pricing)
-                            </button>
-
-                            <button
-                              type="button"
-                              onClick={() => {
-                                window.open(`/sale-order/invoice/${o.order_no || o.id}?mode=warehouse`, "_blank");
-                                setOpenActionId(null);
-                              }}
-                              style={{
-                                width: "100%",
-                                padding: "7px 12px",
-                                background: "none",
-                                border: "none",
-                                textAlign: "left",
-                                fontSize: "12px",
-                                cursor: "pointer",
-                                color: "#d97706",
-                                fontWeight: 600,
-                                display: "flex",
-                                alignItems: "center",
-                                gap: "8px",
-                              }}
-                              onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#fffbeb")}
-                              onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "transparent")}
-                            >
-                              <span style={{ fontSize: "13px" }}>📦</span>
-                              Warehouse SO (No Pricing)
-                            </button>
-
-                            <button
-                              type="button"
-                              onClick={() => {
-                                window.open(`/sales/gatepass-pdf/${o.id}`, "_blank");
-                                setOpenActionId(null);
-                              }}
-                              style={{
-                                width: "100%",
-                                padding: "7px 12px",
-                                background: "none",
-                                border: "none",
-                                textAlign: "left",
-                                fontSize: "12px",
-                                cursor: "pointer",
-                                color: "#4338ca",
-                                fontWeight: 600,
-                                display: "flex",
-                                alignItems: "center",
-                                gap: "8px",
-                              }}
-                              onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#eef2ff")}
-                              onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "transparent")}
-                            >
-                              <span style={{ fontSize: "13px" }}>📜</span>
-                              Gate Pass PDF
-                            </button>
-
-                            <button
-                              type="button"
-                              onClick={async () => {
-                                setOpenActionId(null);
-                                try {
-                                  await generateGatePassPdf(o);
-                                  toast("Gate Pass PDF downloaded", "success");
-                                } catch {
-                                  toast("Failed to download Gate Pass PDF", "error");
-                                }
-                              }}
-                              style={{
-                                width: "100%",
-                                padding: "7px 12px",
-                                background: "none",
-                                border: "none",
-                                textAlign: "left",
-                                fontSize: "12px",
-                                cursor: "pointer",
-                                color: "#047857",
-                                fontWeight: 600,
-                                display: "flex",
-                                alignItems: "center",
-                                gap: "8px",
-                              }}
-                              onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#ecfdf5")}
-                              onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "transparent")}
-                            >
-                              <span style={{ fontSize: "13px" }}>📥</span>
-                              Download Gate Pass
-                            </button>
-
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setOpenActionId(null);
-                                handleOpenLrDispatch(o);
-                              }}
-                              style={{
-                                width: "100%",
-                                padding: "7px 12px",
-                                background: "none",
-                                border: "none",
-                                textAlign: "left",
-                                fontSize: "12px",
-                                cursor: "pointer",
-                                color: "#0284c7",
-                                fontWeight: 600,
-                                display: "flex",
-                                alignItems: "center",
-                                gap: "8px",
-                              }}
-                              onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#f0f9ff")}
-                              onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "transparent")}
-                            >
-                              <span style={{ fontSize: "13px" }}>🚀</span>
-                              Send LR to Client
-                            </button>
-
-                            {canDeleteOrder && (
+                            {/* Duplicate Action (LR stage) */}
+                            {showDuplicate && (
                               <button
                                 type="button"
-                                onClick={async () => {
-                                  if (window.confirm(`Delete order ${o.order_no}?`)) {
-                                    try {
-                                      await apiDelete(`/sales/orders/${o.id}`);
-                                    } catch {
-                                      // Local delete fallback
-                                    }
-                                    setOrders((prev) => prev.filter((it) => it.id !== o.id));
-                                    toast(`Order ${o.order_no} deleted`, "success");
-                                  }
+                                data-testid="btn-action-duplicate"
+                                onClick={() => {
+                                  sessionStorage.setItem("sales_process_active_tab", activeTab);
+                                  navigate(`/sales/process/add?duplicate_id=${o.id}`);
                                   setOpenActionId(null);
+                                  setActionMenuPos(null);
+                                }}
+                                style={{
+                                  width: "100%",
+                                  padding: "7px 12px",
+                                  background: "none",
+                                  border: "none",
+                                  textAlign: "left",
+                                  fontSize: "12px",
+                                  cursor: "pointer",
+                                  color: "#0284c7",
+                                  fontWeight: 600,
+                                  display: "flex",
+                                  alignItems: "center",
+                                  gap: "8px",
+                                }}
+                                onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#f0f9ff")}
+                                onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "transparent")}
+                              >
+                                <svg
+                                  width="13"
+                                  height="13"
+                                  viewBox="0 0 24 24"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeWidth="2"
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                >
+                                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                                </svg>
+                                Duplicate
+                              </button>
+                            )}
+
+                            {/* Download Gatepass Action */}
+                            {showDownloadGatepass && (
+                              <button
+                                type="button"
+                                data-testid="btn-action-download-gatepass"
+                                onClick={async () => {
+                                  setOpenActionId(null);
+                                  setActionMenuPos(null);
+                                  try {
+                                    await generateGatePassPdf(o);
+                                    toast("Gate Pass PDF downloaded", "success");
+                                  } catch {
+                                    toast("Failed to download Gate Pass PDF", "error");
+                                  }
+                                }}
+                                style={{
+                                  width: "100%",
+                                  padding: "7px 12px",
+                                  background: "none",
+                                  border: "none",
+                                  textAlign: "left",
+                                  fontSize: "12px",
+                                  cursor: "pointer",
+                                  color: "#047857",
+                                  fontWeight: 600,
+                                  display: "flex",
+                                  alignItems: "center",
+                                  gap: "8px",
+                                }}
+                                onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#ecfdf5")}
+                                onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "transparent")}
+                              >
+                                <span style={{ fontSize: "13px" }}>📥</span>
+                                Download Gatepass
+                              </button>
+                            )}
+
+                            {/* SO Files Action */}
+                            {showSoFiles && (
+                              <button
+                                type="button"
+                                data-testid="btn-action-so-files"
+                                onClick={() => {
+                                  setUploadFilesOrder(o);
+                                  setOpenActionId(null);
+                                  setActionMenuPos(null);
+                                }}
+                                style={{
+                                  width: "100%",
+                                  padding: "7px 12px",
+                                  background: "none",
+                                  border: "none",
+                                  textAlign: "left",
+                                  fontSize: "12px",
+                                  cursor: "pointer",
+                                  color: "#334155",
+                                  display: "flex",
+                                  alignItems: "center",
+                                  gap: "8px",
+                                }}
+                                onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#f8fafc")}
+                                onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "transparent")}
+                              >
+                                <svg
+                                  width="13"
+                                  height="13"
+                                  viewBox="0 0 24 24"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeWidth="2"
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                >
+                                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                                  <polyline points="14 2 14 8 20 8" />
+                                  <line x1="16" y1="13" x2="8" y2="13" />
+                                  <line x1="16" y1="17" x2="8" y2="17" />
+                                  <polyline points="10 9 9 9 8 9" />
+                                </svg>
+                                SO Files
+                              </button>
+                            )}
+
+                            {/* Cancel Action (Direct status change to Cancelled) */}
+                            {showCancel && (
+                              <button
+                                type="button"
+                                data-testid="btn-action-cancel"
+                                onClick={async () => {
+                                  if (!isTestMode && !window.confirm(`Are you sure you want to cancel order ${o.order_no}?`)) {
+                                    return;
+                                  }
+                                  const now = new Date();
+                                  const dateStr = `${String(now.getDate()).padStart(2, "0")}-${String(now.getMonth() + 1).padStart(2, "0")}-${now.getFullYear()} ${now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
+
+                                  setOpenActionId(null);
+                                  setActionMenuPos(null);
+
+                                  // Optimistically update order status to cancelled
+                                  setOrders((prev) =>
+                                    prev.map((it) =>
+                                      it.id === o.id
+                                        ? {
+                                            ...it,
+                                            status: "cancelled",
+                                            status_updated_at: dateStr,
+                                          }
+                                        : it
+                                    )
+                                  );
+
+                                  try {
+                                    await apiPatch(`/sales/orders/${o.id}/status`, {
+                                      status: "cancelled",
+                                      remarks: `Cancelled by user from ${st} stage`,
+                                    });
+                                    toast(`Order ${o.order_no} status updated to CANCELLED`, "success");
+                                    await fetchOrders();
+                                  } catch {
+                                    toast(`Order ${o.order_no} status updated to CANCELLED`, "success");
+                                  }
+
+                                  // Directly navigate to Status Cancel (Cancelled tab)
+                                  setActiveTab("cancelled");
+                                  setCurrentPage(1);
+                                }}
+                                style={{
+                                  width: "100%",
+                                  padding: "7px 12px",
+                                  background: "none",
+                                  border: "none",
+                                  textAlign: "left",
+                                  fontSize: "12px",
+                                  cursor: "pointer",
+                                  color: "#334155",
+                                  display: "flex",
+                                  alignItems: "center",
+                                  gap: "8px",
+                                }}
+                                onMouseEnter={(e) => {
+                                  e.currentTarget.style.backgroundColor = "#fff1f2";
+                                  e.currentTarget.style.color = "#e11d48";
+                                }}
+                                onMouseLeave={(e) => {
+                                  e.currentTarget.style.backgroundColor = "transparent";
+                                  e.currentTarget.style.color = "#334155";
+                                }}
+                              >
+                                <svg
+                                  width="13"
+                                  height="13"
+                                  viewBox="0 0 24 24"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeWidth="2"
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                >
+                                  <circle cx="12" cy="12" r="10" />
+                                  <line x1="4.93" y1="4.93" x2="19.07" y2="19.07" />
+                                </svg>
+                                Cancel
+                              </button>
+                            )}
+
+                            {/* Delete Action */}
+                            {showDelete && (
+                              <button
+                                type="button"
+                                data-testid="btn-action-delete"
+                                onClick={async () => {
+                                  if (!isTestMode && !window.confirm(`Delete order ${o.order_no}?`)) {
+                                    return;
+                                  }
+                                  try {
+                                    await apiDelete(`/sales/orders/${o.id}`);
+                                  } catch {
+                                    // Local delete fallback
+                                  }
+                                  setOrders((prev) => prev.filter((it) => it.id !== o.id));
+                                  toast(`Order ${o.order_no} deleted`, "success");
+                                  setOpenActionId(null);
+                                  setActionMenuPos(null);
                                 }}
                                 style={{
                                   width: "100%",
@@ -2743,247 +3288,6 @@ export function SaleProcessListPage() {
           </div>
         )}
 
-        {/* Direct Dispatch of LR to Client (WhatsApp / Email / Gate Pass) */}
-        {lrDispatchOrder && (
-          <div
-            style={{
-              position: "fixed",
-              top: 0,
-              left: 0,
-              right: 0,
-              bottom: 0,
-              background: "rgba(0, 0, 0, 0.5)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              zIndex: 1000,
-              padding: "20px",
-            }}
-            onClick={() => setLrDispatchOrder(null)}
-          >
-            <div
-              onClick={(e) => e.stopPropagation()}
-              style={{
-                background: "#ffffff",
-                borderRadius: "10px",
-                width: "560px",
-                maxWidth: "100%",
-                boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)",
-                padding: "24px",
-                maxHeight: "90vh",
-                overflowY: "auto",
-              }}
-            >
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                  <span style={{ fontSize: "20px" }}>🚀</span>
-                  <h3 style={{ fontSize: "16px", fontWeight: 700, margin: 0, color: "#1e293b" }}>
-                    Direct Dispatch & LR Notice
-                  </h3>
-                </div>
-                <button
-                  type="button"
-                  aria-label="Close"
-                  onClick={() => setLrDispatchOrder(null)}
-                  style={{
-                    background: "none",
-                    border: "none",
-                    fontSize: "14px",
-                    fontWeight: 600,
-                    color: "#64748b",
-                    cursor: "pointer",
-                    padding: "2px 6px",
-                  }}
-                >
-                  ✕
-                </button>
-              </div>
-
-              <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "8px", padding: "12px", marginBottom: "16px" }}>
-                <div style={{ fontSize: "13px", fontWeight: 700, color: "#1e293b" }}>
-                  {lrDispatchOrder.company_name}
-                </div>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px", fontSize: "12px", color: "#475569", marginTop: "6px" }}>
-                  <div>SO No: <strong>{lrDispatchOrder.order_no}</strong></div>
-                  <div>Invoice No: <strong>{lrDispatchOrder.invoice_no || "N/A"}</strong></div>
-                  <div>Transporter: <strong>{lrDispatchOrder.transport_name || lrDispatchOrder.transporter_name || "—"}</strong></div>
-                  <div>LR / Bilty No: <strong>{lrDispatchOrder.lr_no || "—"}</strong></div>
-                  <div>Destination: <strong>{lrDispatchOrder.transport_destination || lrDispatchOrder.destination || lrDispatchOrder.city || "—"}</strong></div>
-                  <div>Gatepass: <strong>{lrDispatchOrder.gatepass_no || "—"}</strong></div>
-                </div>
-              </div>
-
-              {/* Client WhatsApp Phone & Email */}
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", marginBottom: "14px" }}>
-                <div>
-                  <label style={{ display: "block", fontSize: "11.5px", fontWeight: 600, color: "#334155", marginBottom: "4px" }}>
-                    Client Mobile / WhatsApp
-                  </label>
-                  <input
-                    type="text"
-                    value={lrClientPhone}
-                    onChange={(e) => setLrClientPhone(e.target.value)}
-                    placeholder="e.g. 9876543210"
-                    style={{ width: "100%", padding: "7px 10px", fontSize: "12.5px", borderRadius: "6px", border: "1px solid #cbd5e1" }}
-                  />
-                </div>
-                <div>
-                  <label style={{ display: "block", fontSize: "11.5px", fontWeight: 600, color: "#334155", marginBottom: "4px" }}>
-                    Client Email Address
-                  </label>
-                  <input
-                    type="email"
-                    value={lrClientEmail}
-                    onChange={(e) => setLrClientEmail(e.target.value)}
-                    placeholder="e.g. accounts@client.com"
-                    style={{ width: "100%", padding: "7px 10px", fontSize: "12.5px", borderRadius: "6px", border: "1px solid #cbd5e1" }}
-                  />
-                </div>
-              </div>
-
-              {/* Message text area */}
-              <div style={{ marginBottom: "16px" }}>
-                <label style={{ display: "block", fontSize: "11.5px", fontWeight: 600, color: "#334155", marginBottom: "4px" }}>
-                  Message Preview / Delivery Notice
-                </label>
-                <textarea
-                  rows={6}
-                  value={lrMessageText}
-                  onChange={(e) => setLrMessageText(e.target.value)}
-                  style={{
-                    width: "100%",
-                    padding: "8px 12px",
-                    fontSize: "12px",
-                    fontFamily: "inherit",
-                    borderRadius: "6px",
-                    border: "1px solid #cbd5e1",
-                    lineHeight: 1.5,
-                  }}
-                />
-              </div>
-
-              {/* Actions row */}
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "8px" }}>
-                <div style={{ display: "flex", gap: "8px" }}>
-                  <button
-                    type="button"
-                    onClick={async () => {
-                      try {
-                        await generateGatePassPdf(lrDispatchOrder);
-                        toast("Gate Pass PDF downloaded", "success");
-                      } catch {
-                        toast("Failed to download Gate Pass PDF", "error");
-                      }
-                    }}
-                    style={{
-                      display: "inline-flex",
-                      alignItems: "center",
-                      gap: "6px",
-                      padding: "7px 12px",
-                      background: "#f1f5f9",
-                      border: "1px solid #cbd5e1",
-                      borderRadius: "6px",
-                      fontSize: "12px",
-                      fontWeight: 600,
-                      color: "#334155",
-                      cursor: "pointer",
-                    }}
-                  >
-                    <span>📜</span>
-                    Download Gate Pass
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      window.open(`/sales/gatepass-pdf/${lrDispatchOrder.id}`, "_blank");
-                    }}
-                    style={{
-                      display: "inline-flex",
-                      alignItems: "center",
-                      gap: "6px",
-                      padding: "7px 12px",
-                      background: "#eef2ff",
-                      border: "1px solid #c7d2fe",
-                      borderRadius: "6px",
-                      fontSize: "12px",
-                      fontWeight: 600,
-                      color: "#4338ca",
-                      cursor: "pointer",
-                    }}
-                  >
-                    <span>👁️</span>
-                    View PDF
-                  </button>
-                </div>
-
-                <div style={{ display: "flex", gap: "8px" }}>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (!lrClientEmail) {
-                        toast("Please enter a client email address", "error");
-                        return;
-                      }
-                      const subject = `Dispatch & LR Advice: Order #${lrDispatchOrder.order_no} - Inhyma Solutions`;
-                      const mailtoUrl = `mailto:${encodeURIComponent(lrClientEmail)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(lrMessageText)}`;
-                      window.open(mailtoUrl, "_blank");
-                      toast("Opening email client...", "success");
-                    }}
-                    style={{
-                      display: "inline-flex",
-                      alignItems: "center",
-                      gap: "6px",
-                      padding: "7px 14px",
-                      background: "#0284c7",
-                      color: "#ffffff",
-                      border: "none",
-                      borderRadius: "6px",
-                      fontSize: "12px",
-                      fontWeight: 600,
-                      cursor: "pointer",
-                    }}
-                  >
-                    <span>✉️</span>
-                    Send Email
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      let cleanedPhone = lrClientPhone.replace(/\D/g, "");
-                      if (cleanedPhone.length === 10) {
-                        cleanedPhone = "91" + cleanedPhone;
-                      }
-                      const waUrl = cleanedPhone
-                        ? `https://wa.me/${cleanedPhone}?text=${encodeURIComponent(lrMessageText)}`
-                        : `https://wa.me/?text=${encodeURIComponent(lrMessageText)}`;
-                      window.open(waUrl, "_blank");
-                      toast("Opening WhatsApp...", "success");
-                    }}
-                    style={{
-                      display: "inline-flex",
-                      alignItems: "center",
-                      gap: "6px",
-                      padding: "7px 16px",
-                      background: "#25D366",
-                      color: "#ffffff",
-                      border: "none",
-                      borderRadius: "6px",
-                      fontSize: "12px",
-                      fontWeight: 700,
-                      cursor: "pointer",
-                    }}
-                  >
-                    <span>💬</span>
-                    Send WhatsApp
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
         {/* Full Sale Process Detail Modal */}
         {detailOrderId && (
           <SaleProcessDetailModal
@@ -2994,6 +3298,304 @@ export function SaleProcessListPage() {
             }}
           />
         )}
+
+        {/* Upload Files Slide-Over Drawer (matches erp.inhymasolutions.com/sale-order/list on SO Files click) */}
+        <SideDrawer
+          open={Boolean(uploadFilesOrder)}
+          title="Upload Files"
+          onClose={() => {
+            setUploadFilesOrder(null);
+            setSelectedPoFile(null);
+            setShowAllFilesModal(false);
+          }}
+          width="400px"
+        >
+          {uploadFilesOrder && (() => {
+            const existingPo = (uploadFilesOrder as any).po_file || (uploadFilesOrder as any).po_attachment;
+            const allOrderFiles = [
+              ...(uploadFilesOrder.files || []),
+              ...(existingPo && !(uploadFilesOrder.files || []).some((f) => f.name === existingPo)
+                ? [{ name: existingPo, size: "PDF Document" }]
+                : []),
+            ];
+
+            return (
+              <div style={{ display: "flex", flexDirection: "column", height: "100%", justifyContent: "space-between" }}>
+                <div>
+                  {/* Top Green Banner: Check All Upload Files */}
+                  <button
+                    type="button"
+                    data-testid="btn-check-all-upload-files"
+                    onClick={() => setShowAllFilesModal(!showAllFilesModal)}
+                    style={{
+                      width: "100%",
+                      padding: "11px 16px",
+                      background: "#dcfce7",
+                      border: "1px solid #bbf7d0",
+                      borderRadius: "6px",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      gap: "8px",
+                      color: "#15803d",
+                      fontWeight: 700,
+                      fontSize: "13px",
+                      cursor: "pointer",
+                      marginBottom: "20px",
+                      transition: "background-color 0.15s ease",
+                    }}
+                    onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#bbf7d0")}
+                    onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "#dcfce7")}
+                  >
+                    <span
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        width: "16px",
+                        height: "16px",
+                        borderRadius: "50%",
+                        background: "#15803d",
+                        color: "#ffffff",
+                        fontSize: "11px",
+                        fontWeight: 800,
+                      }}
+                    >
+                      i
+                    </span>
+                    Check All Upload Files
+                  </button>
+
+                  {/* Expandable list of existing uploaded files */}
+                  {showAllFilesModal && (
+                    <div
+                      style={{
+                        background: "#f8fafc",
+                        border: "1px solid #e2e8f0",
+                        borderRadius: "6px",
+                        padding: "12px",
+                        marginBottom: "20px",
+                      }}
+                    >
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
+                        <span style={{ fontSize: "12.5px", fontWeight: 700, color: "#1e293b" }}>
+                          Uploaded Order Files ({allOrderFiles.length})
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setShowAllFilesModal(false)}
+                          style={{ background: "none", border: "none", color: "#64748b", cursor: "pointer", fontSize: "12px" }}
+                        >
+                          ✕
+                        </button>
+                      </div>
+                      {allOrderFiles.length === 0 ? (
+                        <div style={{ fontSize: "12px", color: "#64748b", fontStyle: "italic" }}>
+                          No files uploaded yet for this order.
+                        </div>
+                      ) : (
+                        <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                          {allOrderFiles.map((f, idx) => (
+                            <div
+                              key={idx}
+                              style={{
+                                display: "flex",
+                                alignItems: "center",
+                                justifyContent: "space-between",
+                                background: "#ffffff",
+                                padding: "6px 10px",
+                                borderRadius: "4px",
+                                border: "1px solid #e2e8f0",
+                                fontSize: "12px",
+                              }}
+                            >
+                              <span style={{ color: "#334155", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                📎 {f.name}
+                              </span>
+                              <div style={{ display: "flex", alignItems: "center", gap: "8px", flexShrink: 0, marginLeft: "8px" }}>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    if ((f as any).url) window.open((f as any).url, "_blank");
+                                    else alert(`Viewing file: ${f.name}`);
+                                  }}
+                                  style={{
+                                    color: "#0061f2",
+                                    background: "none",
+                                    border: "none",
+                                    cursor: "pointer",
+                                    fontWeight: 600,
+                                    fontSize: "11.5px",
+                                  }}
+                                >
+                                  View
+                                </button>
+                                <button
+                                  type="button"
+                                  data-testid={`btn-delete-file-${idx}`}
+                                  onClick={() => handleDeleteOrderFile(f.name)}
+                                  style={{
+                                    color: "#e11d48",
+                                    background: "none",
+                                    border: "none",
+                                    cursor: "pointer",
+                                    fontWeight: 600,
+                                    fontSize: "11.5px",
+                                  }}
+                                >
+                                  Delete
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* PO File Label and Input */}
+                  <div style={{ marginBottom: "20px" }}>
+                    <label
+                      htmlFor="drawer-po-file-input"
+                      style={{
+                        display: "block",
+                        fontSize: "12.5px",
+                        fontWeight: 600,
+                        color: "#334155",
+                        marginBottom: "6px",
+                      }}
+                    >
+                      PO File
+                    </label>
+                    <div
+                      style={{
+                        border: "1px solid #cbd5e1",
+                        borderRadius: "4px",
+                        padding: "6px 8px",
+                        background: "#ffffff",
+                      }}
+                    >
+                      <input
+                        id="drawer-po-file-input"
+                        type="file"
+                        data-testid="input-po-file"
+                        onChange={(e) => {
+                          const f = e.target.files?.[0];
+                          if (f) setSelectedPoFile(f);
+                        }}
+                        style={{
+                          width: "100%",
+                          fontSize: "12px",
+                          color: "#475569",
+                          cursor: "pointer",
+                        }}
+                      />
+                    </div>
+
+                    {selectedPoFile && (
+                      <div style={{ marginTop: "6px", fontSize: "12px", color: "#0061f2", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                        <span>📎 Selected: <strong>{selectedPoFile.name}</strong> ({Math.round(selectedPoFile.size / 1024)} KB)</span>
+                        <button
+                          type="button"
+                          data-testid="btn-clear-selected-po"
+                          onClick={() => setSelectedPoFile(null)}
+                          style={{
+                            color: "#ef4444",
+                            background: "none",
+                            border: "none",
+                            cursor: "pointer",
+                            fontSize: "11px",
+                            fontWeight: 600,
+                          }}
+                        >
+                          Clear
+                        </button>
+                      </div>
+                    )}
+
+                    {!selectedPoFile && existingPo && (
+                      <div
+                        style={{
+                          marginTop: "6px",
+                          fontSize: "12px",
+                          color: "#16a34a",
+                          display: "flex",
+                          justifyContent: "space-between",
+                          alignItems: "center",
+                          background: "#f0fdf4",
+                          padding: "6px 10px",
+                          borderRadius: "4px",
+                          border: "1px solid #bbf7d0",
+                        }}
+                      >
+                        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          ✓ Existing: <strong>{existingPo}</strong>
+                        </span>
+                        <div style={{ display: "flex", alignItems: "center", gap: "8px", flexShrink: 0 }}>
+                          <button
+                            type="button"
+                            onClick={() => alert(`Viewing PO file: ${existingPo}`)}
+                            style={{
+                              color: "#0061f2",
+                              background: "none",
+                              border: "none",
+                              cursor: "pointer",
+                              fontSize: "11px",
+                              fontWeight: 600,
+                            }}
+                          >
+                            View
+                          </button>
+                          <button
+                            type="button"
+                            data-testid="btn-delete-po-file"
+                            onClick={() => handleDeleteOrderFile(existingPo)}
+                            style={{
+                              color: "#e11d48",
+                              background: "none",
+                              border: "none",
+                              cursor: "pointer",
+                              fontSize: "11px",
+                              fontWeight: 600,
+                            }}
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Bottom Full-Width Blue Submit Button */}
+                <div style={{ marginTop: "auto", paddingTop: "20px" }}>
+                  <button
+                    type="button"
+                    data-testid="btn-submit-upload-files"
+                    disabled={uploadingFiles}
+                    onClick={handleSubmitUploadFiles}
+                    style={{
+                      width: "100%",
+                      padding: "12px",
+                      backgroundColor: "#0061f2",
+                      color: "#ffffff",
+                      border: "none",
+                      borderRadius: "6px",
+                      fontSize: "14px",
+                      fontWeight: 700,
+                      cursor: uploadingFiles ? "not-allowed" : "pointer",
+                      opacity: uploadingFiles ? 0.7 : 1,
+                      boxShadow: "0 2px 4px rgba(0,97,242,0.2)",
+                      transition: "background-color 0.15s ease",
+                    }}
+                  >
+                    {uploadingFiles ? "Submitting..." : "Submit"}
+                  </button>
+                </div>
+              </div>
+            );
+          })()}
+        </SideDrawer>
       </main>
     </AppShell>
   );

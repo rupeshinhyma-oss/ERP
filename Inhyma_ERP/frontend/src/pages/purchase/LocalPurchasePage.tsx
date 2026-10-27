@@ -2671,7 +2671,7 @@ export function LocalPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean
                         </button>
 
                         {activeMenuId === order.id && (() => {
-                          const openUpward = paginatedOrders.length >= 3 && idx >= paginatedOrders.length - (paginatedOrders.length >= 4 ? 2 : 1);
+                          const openUpward = (idx > 0 && paginatedOrders.length <= 3) || (paginatedOrders.length >= 4 && idx >= paginatedOrders.length - 2);
                           return (
                           <div
                             data-action-menu-container

@@ -442,3 +442,30 @@ async def test_migration_downgrade_removes_only_the_rules_and_keeps_the_data_col
         cols = {r[1] for r in (await conn.execute(sa.text("PRAGMA table_info(sales_orders)"))).all()}
     assert rules == 0
     assert {"stock_applied", "cancel_reason"} <= cols          # stock bookkeeping is never dropped
+
+
+@pytest.mark.asyncio
+async def test_list_sale_orders_metrics_calculation(factory):
+    async with _client(factory, SALES) as c:
+        # Create an initial order
+        res1 = await c.post("/sales/orders", json=FORM_PAYLOAD)
+        assert res1.status_code == 201
+
+        # Check metrics in list response with including_gst=true
+        list_res = await c.get("/sales/orders?including_gst=true")
+        assert list_res.status_code == 200
+        data = list_res.json()["data"]
+        assert "metrics" in data
+        metrics = data["metrics"]
+        assert metrics["all"]["count"] >= 1
+        assert metrics["all"]["amount"] > 0
+        assert metrics["pending"]["count"] >= 1
+
+        # Check metrics with including_gst=false
+        list_no_gst = await c.get("/sales/orders?including_gst=false")
+        assert list_no_gst.status_code == 200
+        no_gst_metrics = list_no_gst.json()["data"]["metrics"]
+        assert no_gst_metrics["all"]["count"] == metrics["all"]["count"]
+        # Basic amount should be less than GST-inclusive amount
+        assert no_gst_metrics["all"]["amount"] < metrics["all"]["amount"]
+

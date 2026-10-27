@@ -285,5 +285,54 @@ Machine-to-machine internal service endpoints invoked by `ERP_Main` over authent
 > - Normalizes keys via lowercase, alphanumeric stripping (e.g. `inhyma-erp` $\rightarrow$ `inhyma`).
 > - Prevents access denial from casing or suffix differences between ERP_Main registry and spoke apps.
 
+---
+
+## 18. Sales — Sales Orders & Sales Process Execution (`/sales/orders`, `/sales/gate-pass`, `/sales/discount-payments`)
+
+| Method | Endpoint URI | Description | Permission Gate |
+| :--- | :--- | :--- | :--- |
+| `GET` | `/api/v1/sales/orders` | Paginated list of Sales Orders with status tabs, search, warehouse, buyer, and date filters | `saleorder.view` |
+| `POST` | `/api/v1/sales/orders` | Create Sales Order defaulting to `pending` status with line items & commercial terms | `saleorder.create` |
+| `GET` | `/api/v1/sales/orders/{id}` | Inspect detailed Sales Order record with line items, tax, and address breakdown | `saleorder.view` |
+| `PATCH`| `/api/v1/sales/orders/{id}` | Update Sales Order details, line items, and commercial fields | `saleorder.update` |
+| `PATCH`| `/api/v1/sales/orders/{id}/status` | Advance Sales Order stage (`pending` -> `sales_confirmed` -> `admin_approved` -> `dispatched` -> `lr_uploaded`) | `saleorder.approve` |
+| `DELETE`| `/api/v1/sales/orders/{id}` | Soft-delete Sales Order and revert inventory stock deductions | `saleorder.delete` |
+| `POST` | `/api/v1/sales/orders/{id}/restore` | Restore soft-deleted Sales Order (Admin only) | `saleorder.manage` |
+| `GET` | `/api/v1/sales/metrics` | Grouped sales order KPI metrics by status tabs | `saleorder.view` |
+| `GET` | `/api/v1/sales/next-gatepass-no` | Generate next sequential gate pass reference number | `saleorder.view` |
+| `GET` | `/api/v1/sales/planning-consignments` | Extract consignment columns from Shipment Planning sheets for order pre-allocation | `saleorder.view` |
+| `GET` | `/api/v1/sales/planning-consignments/{column_id}/items` | Extract planned products and quantities from consignment column | `saleorder.view` |
+| `GET` | `/api/v1/sales/export` | Export Sales Orders dataset to Excel spreadsheet | `saleorder.view` |
+| `POST` | `/api/v1/sales/gate-pass` | Create dispatch Gate Pass with logistics metadata and transporter carrier | `saleorder.update` |
+| `POST` | `/api/v1/sales/orders/{id}/upload-lr` | Attach transporter LR document and multi-photo delivery proof | `saleorder.update` |
+| `GET` | `/api/v1/sales/discount-payments` | List under-invoicing cash discount payment ledger entries | `saleorder.view` |
+| `POST` | `/api/v1/sales/discount-payments` | Record discount payment settlement | `saleorder.update` |
+
+> **Sales Process Add/Edit Architecture (`SaleProcessForm.tsx`):**
+> - **100% Parity with Proforma Invoice:** Full alignment with Proforma's Add New form structure, validation rules, drawer slides, and calculation engine.
+> - **Default Status "Pending":** Newly submitted orders automatically assign `status: "pending"`, ensuring they enter the initial workflow stage cleanly.
+> - **Schema Harmonization:** Payload provides dual fields (`buyer_name` + `company_name`, `transport_name` + `transporter_name`, `expected_delivery_date` + `delivery_date`, `city`, `state`) to guarantee total compatibility with FastAPI backend schemas.
+> - **Dynamic Masters & Drawers:** Uses `useMasterNames` for live database masters, `ClientNameAutocomplete` with `AddCompanyDrawer`, and `EditAddressDrawer` for non-destructive Billing/Shipping address overrides.
+> - **Stock Exceeded Alerts:** Real-time query against `/inventory/product-stock?limit=500` warns users when quantity exceeds available warehouse stock with top banner, in-table alert, red border, and red badge.
+> - **Upward Dropdown Positioning (`placement="up"`):** Searchable Comboboxes inside table rows open upward, completely avoiding scrollbar boundary clipping.
+
+---
+
+## 19. Communication — Internal Feed & Broadcast Announcements (`/feed`)
+
+| Method | Endpoint URI | Description | Permission Gate |
+| :--- | :--- | :--- | :--- |
+| `GET` | `/api/v1/feed/posts` | List scoped feed posts with pagination, search, and department visibility checks | Authenticated |
+| `POST` | `/api/v1/feed/posts` | Create new feed post or broadcast with targeted departments/recipients and pin status | Authenticated |
+| `GET` | `/api/v1/feed/posts/{id}` | Detailed post record, comments, reaction aggregations, and viewer status | Authenticated |
+| `PUT` | `/api/v1/feed/posts/{id}` | Edit post content (creator or administrator only) | Authenticated |
+| `DELETE`| `/api/v1/feed/posts/{id}` | Soft-delete post | Authenticated |
+| `POST` | `/api/v1/feed/posts/{id}/pin` | Toggle post pinned status | `feed.pin` / Admin |
+| `POST` | `/api/v1/feed/posts/{id}/comments` | Post comment on feed entry | Authenticated |
+| `DELETE`| `/api/v1/feed/comments/{comment_id}` | Soft-delete comment | Authenticated |
+| `POST` | `/api/v1/feed/posts/{id}/reactions` | Toggle emoji reaction on post | Authenticated |
+| `POST` | `/api/v1/feed/posts/{id}/mark-read` | Record user read receipt for broadcast compliance | Authenticated |
+
+
 
 

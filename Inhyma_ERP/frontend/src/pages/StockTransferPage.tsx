@@ -1542,7 +1542,7 @@ export function StockTransferPage({
                                 </button>
 
                                 {openActionMenuId === item.id && (() => {
-                                  const openUpward = paginatedItems.length >= 3 && rowIdx >= paginatedItems.length - (paginatedItems.length >= 4 ? 2 : 1);
+                                  const openUpward = (rowIdx > 0 && paginatedItems.length <= 3) || (paginatedItems.length >= 4 && rowIdx >= paginatedItems.length - 2);
                                   return (
                                   <div
                                     className={`transfer-action-menu ${openUpward ? "open-upward" : ""}`}

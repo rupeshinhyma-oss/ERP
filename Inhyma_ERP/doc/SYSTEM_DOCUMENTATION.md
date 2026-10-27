@@ -43,7 +43,7 @@
    - 8.22. [Purchase: Import Purchase Consignments & Customs Landing Matrix](#822-purchase-import-purchase-consignments--customs-landing-matrix)
    - 8.23. [Sales: Proforma Invoices (PI) & Extended Commercial Terms](#823-sales-proforma-invoices-pi--extended-commercial-terms)
    - 8.24. [Database-Driven Status Rules & Dynamic Workflow Engine](#824-database-driven-status-rules--dynamic-workflow-engine)
-   - 8.25. [Sales: Sales Order Execution, Gate Pass Logistics & Discount Ledger](#825-sales-sales-order-execution-gate-pass-logistics--discount-ledger)
+   - 8.25. [Sales: Sales Order Execution & Sales Process Add/Edit Engine (Full Parity with Proforma, Dynamic Masters, Exceeded Stock Alerts, Grey-Locked Cells & Drawers), Gate Pass Logistics & Discount Ledger](#825-sales-sales-order-execution--sales-process-addedit-engine-full-parity-with-proforma-dynamic-masters-exceeded-stock-alerts-grey-locked-cells--drawers-gate-pass-logistics--discount-ledger)
    - 8.26. [CRM: Customer Relationship Management Full Suite, Quotations & Task Synchronization](#826-crm-customer-relationship-management-full-suite-leads-pipelines-distribution-timeline--branded-quotations-engine)
    - 8.27. [Workforce: Recurring Tasks Scheduling Engine & Automated Worker](#827-workforce-recurring-tasks-scheduling-engine--automated-spawning-worker)
    - 8.28. [Product Sync Adapter & Dynamic Relational Provisioning Engine](#828-product-sync-adapter--dynamic-relational-provisioning-engine-yinglima---inhyma)
@@ -987,15 +987,58 @@ A user may be assigned any number of Roles simultaneously (`POST /users/{id}/rol
     - `stock_in`: Boolean indicating if entering this status increments physical stock balances.
   - **Fail-Safe Fallbacks:** Built-in `FALLBACK_RULES` dictionary ensures API endpoints never crash with 503 if option lists are unseeded.
 
-### 8.25. Sales: Sales Order Execution, Gate Pass Logistics & Discount Ledger
-- **Files:** `backend/app/sales/service.py`, `backend/app/sales/routes.py`, `backend/app/sales/models.py`, `frontend/src/pages/sales/SaleProcessList.tsx`, `frontend/src/pages/sales/SaleProcessDetailModal.tsx`, `frontend/src/pages/sales/DiscountPaymentsPage.tsx`.
+### 8.25. Sales: Sales Order Execution & Sales Process Add/Edit Engine (Full Parity with Proforma, Dynamic Masters, Exceeded Stock Alerts, Grey-Locked Cells & Drawers), Gate Pass Logistics & Discount Ledger
+- **Files:** `backend/app/sales/service.py`, `backend/app/sales/routes.py`, `backend/app/sales/process_routes.py`, `backend/app/sales/models.py`, `backend/app/sales/schemas.py`, `frontend/src/pages/sales/SaleProcessList.tsx`, `frontend/src/pages/sales/SaleProcessForm.tsx`, `frontend/src/pages/sales/SaleProcessDetailModal.tsx`, `frontend/src/pages/sales/DiscountPaymentsPage.tsx`.
+- **Primary Routes:** `/sales/process` (List), `/sales/process/add` & `/sale-order/addedit` (Add Order), `/sales/process/edit/:id` & `/sale-order/addedit/:id` (Edit Order), `/discount-payments` (Discount Ledger).
 - **Endpoints:**
-  - `GET /api/v1/sales/orders`: Paginated list of confirmed Sales Orders with status stages and filters.
-  - `POST /api/v1/sales/orders`: Create/convert confirmed sales order and validate physical inventory reserves.
-  - `PATCH /api/v1/sales/orders/{id}/status`: Advance SO stage (`sales_confirmed` ➔ `admin_approved` ➔ `account_confirmed` ➔ `gatepass_created` ➔ `dispatched` ➔ `lr_uploaded`).
+  - `GET /api/v1/sales/orders`: Paginated list of confirmed & pending Sales Orders with status stages and filters.
+  - `POST /api/v1/sales/orders`: Create Sales Order defaulting to `pending` status with line items & commercial terms.
+  - `GET /api/v1/sales/orders/{id}`: Inspect detailed Sales Order record with line items, tax, and address breakdown.
+  - `PATCH /api/v1/sales/orders/{id}`: Update Sales Order details, line items, and commercial fields.
+  - `PATCH /api/v1/sales/orders/{id}/status`: Advance SO stage (`pending` ➔ `sales_confirmed` ➔ `admin_approved` ➔ `account_confirmed` ➔ `gatepass_created` ➔ `dispatched` ➔ `lr_uploaded`).
+  - `DELETE /api/v1/sales/orders/{id}`: Soft-delete Sales Order and revert stock allocations.
+  - `POST /api/v1/sales/orders/{id}/restore`: Restore soft-deleted Sales Order (Admin only).
+  - `GET /api/v1/sales/metrics`: Status-grouped KPI summary metrics (`total_orders`, `pending_count`, `confirmed_count`, etc.).
+  - `GET /api/v1/sales/next-gatepass-no`: Generate sequential Gate Pass reference number.
+  - `GET /api/v1/sales/planning-consignments`: Extract consignment columns from Shipment Planning sheets for order pre-allocation.
+  - `GET /api/v1/sales/planning-consignments/{column_id}/items`: Extract planned products and quantities from consignment column.
+  - `GET /api/v1/sales/export`: Export Sales Orders dataset to Excel spreadsheet.
   - `POST /api/v1/sales/gate-pass`: Create dispatch Gate Pass with logistics metadata.
   - `POST /api/v1/sales/orders/{id}/upload-lr`: Attach transporter LR document and multi-photo delivery proof.
   - `GET /api/v1/sales/discount-payments`: List under-invoicing discount ledger entries.
+  - `POST /api/v1/sales/discount-payments`: Record cash discount settlement against a Sales Order reference.
+- **Sales Process Add New Form Architecture (`SaleProcessForm.tsx`):**
+  - **100% Feature Parity with Proforma Invoice:** Designed to match the exact UX, visual structure, validation patterns, and calculation standards of Proforma Invoice's Add New form (`ProformaInvoicesPage.tsx`), ensuring zero learning curve for operators.
+  - **Dynamic DB Masters Integration (`useMasterNames`):**
+    - Dynamic lookups for `/masters/warehouses`, `/masters/payment-terms`, `/masters/transports`, and `/masters/additional-charges` using the reactive `useMasterNames` hook.
+    - Gracefully merges live database options with standard system defaults (e.g. `Mumbai`, `Ahmedabad`, `Indore`; `100% Advance`, `30 Days Credit`; `Self Pickup`, `VRL Logistics`).
+  - **Delivery Date Parsing & Past Date Protection (`parseDateAny`):**
+    - Universal parsing supporting `DD-MM-YYYY`, `YYYY-MM-DD`, and `DD/MM/YYYY`.
+    - Strict validation enforcing `minDate="today"`, rejecting expected delivery dates in the past with visual toast warnings.
+  - **Entity Cards with Slide-Over Drawers:**
+    - **Company Card:** Integrated `ClientNameAutocomplete` with real-time company search, clear (trash) button, `+ Add` button triggering `AddCompanyDrawer`, and detailed info card displaying Company Name, Business Type (`B2B`/`B2C`), and GST No.
+    - **Billing Address Card:** Formatted address card with pencil edit button opening `EditAddressDrawer` in edit mode; or text input with clear and `+ Add` button opening `EditAddressDrawer` in add mode.
+    - **Shipping Address Card:** Formatted address card with pencil edit button opening `EditAddressDrawer`; or text input with clear and `+ Add` button opening `EditAddressDrawer` in add mode.
+  - **Product Search Card & Real-Time Warehouse Stock Check:**
+    - Warehouse-specific live inventory check against `/inventory/product-stock?limit=500`.
+    - Auto-resolves HSN via `getAutoHsnForProduct()` and tax rate via `resolveGstPercent()` from `/masters/taxes`.
+    - Selecting a catalog product appends it directly to the **PRODUCT ITEM** table.
+  - **Product Item Table & Calculation Standards:**
+    - **Grey-Locked Computed Cells (`#f8fafc`):** ReadOnly cells for HSN, Taxable Amount, GST %, GST Amount, and Total, dynamically computed via `(unit_price - unit_discount) * quantity`.
+    - **Stock Exceeded Alerts:** Real-time top alert banner (`data-testid="alert-exceeded-stock"`), in-table warning alert banner, red border & background on Qty input, red badge (`Qty: ... ⚠️ Exceeds Available!`), and blur toast warnings.
+    - **Upward-Opening Comboboxes (`placement="up"`):** Combobox dropdowns within table rows open upward, completely eliminating table scrollbar clipping and container overflow issues.
+    - **Serial Number Tracking (`🔢 S/N`):** Modal window permitting operators to input comma/line-separated product serial numbers.
+    - **Additional Charges Toggle:** Checkbox `[✓] Additional Charges` (`data-testid="checkbox-additional-charges"`) defaulting to Transport Charges (HSN 996511) and Packing & Forwarding (HSN 996713) with dynamic add/remove charge actions.
+    - **Table Footer Summary Bar (`<tfoot>`):** Total Qty, Total Taxable, Total Tax, and Total With Tax.
+  - **Self-Pickup Automation:**
+    - Selecting `Self Pickup` / `Self Pick-up` as Transport Name automatically hides Row 3 (Destination, Delivery Type, Delivery Charge) and relaxes delivery type and delivery charge validation.
+  - **Standardized Terms and Conditions & Totals Breakdown:**
+    - Standard 3-rule terms: 1. Transport Charges: To Pay. 2. Payment Terms: 100% Before Dispatch. 3. Order once confirmed, cannot be cancelled.
+    - Totals breakdown card: Total Basic, Total Discount, Total Taxable Amount, Total Tax, Total Including Tax, and Indian currency words (e.g. `Amount In Words: ... Rupees Only`).
+  - **Default Status "Pending" & Schema Synchronization:**
+    - New sales orders automatically default to `status: "pending"`.
+    - Synchronizes payload with `buyer_name` + `company_name`, `transport_name` + `transporter_name`, `expected_delivery_date` + `delivery_date`, `city`, and `state`, guaranteeing complete interoperability with backend Pydantic schemas.
+    - Validates that unit discount cannot exceed unit price.
 - **Physical Stock Deduction & Negative Protection Engine:**
   - **Stock Deduction Trigger:** Upon transitioning to a status configured with `stock_out: True` (typically `sales_confirmed`), `_take_stock(order)` invokes `move_stock(warehouse, lines, -1)` and marks `order.stock_applied = True`.
   - **Strict Physical Warehouse Negative Lock:**
@@ -1015,6 +1058,38 @@ A user may be assigned any number of Roles simultaneously (`POST /users/{id}/rol
   - **Proof of Delivery (LR Upload):** Transporter Lorry Receipt (LR) number with multi-photo attachment; marks order lifecycle as `Dispatched`.
 - **Discount Payment Ledger (Under-Invoicing Tracking):**
   - Tracks cash discounts and under-invoiced amounts (`discount_amount`, `paid_discount`, `due_discount`) linked to each SO reference, providing accounts oversight and settlement controls.
+- **Sales Process List & Execution Architecture (`SaleProcessList.tsx`):**
+  - **Dynamic Top 6 KPI Metric Cards & 10 Status Tabs Calculation Engine:**
+    - Live aggregation directly computes counts and currency totals across order stages: `ALL`, `ADMIN CONFIRMED TO LR`, `PENDING`, `ADMIN APPROVED`, `LR`, and `CANCELLED`.
+    - Integrated with reactive `includingGst` toggle: dynamically recalculates values based on `amount_inc_gst` / `total_amount` vs. `amount_exc_gst` / `total_basic`.
+    - Status tabs dynamically reflect accurate counts (`All`, `Pending`, `Sales Confirmed`, `Admin Approved`, `Acc. Confirmed`, `Gatepass Created`, `Dispatched`, `Gatepass Cancelled`, `LR`, `Cancelled`).
+  - **Comprehensive 9-Status Action Menu Matrix (`⋮` Dropdown):**
+    - Rigorously isolates action choices per workflow status:
+      1. `pending`: **Edit**, **SO Files**, **Delete**
+      2. `sales_confirmed`: **Edit**, **SO Files**, **Cancel**, **Delete**
+      3. `admin_approved`: **SO Files**, **Cancel**, **Delete**
+      4. `acc_confirmed`: **SO Files**, **Delete**
+      5. `gatepass_created`: **Download Gatepass**, **SO Files**, **Delete**
+      6. `dispatched`: **Download Gatepass**, **SO Files**, **Delete**
+      7. `gatepass_cancelled`: **SO Files**, **Cancel**, **Delete**
+      8. `lr`: **Duplicate**, **Download Gatepass**, **Delete**
+      9. `cancelled`: **Delete**
+    - Unrequested menu items (`Print SO (Pricing)`, `Warehouse SO (No Pricing)`, `Gate Pass PDF`, `Send LR to Client`) are completely eliminated from the dropdown.
+  - **Direct Status Cancellation Workflow (`handleCancelOrder`):**
+    - For cancellable statuses (`sales_confirmed`, `admin_approved`, `gatepass_cancelled`), clicking **Cancel** directly sets `status: "cancelled"`, triggers `PATCH /api/v1/sales/orders/{id}/status`, surfaces a success toast, and immediately routes the user to the active **Cancelled** tab.
+  - **LR Duplicate Workflow:**
+    - For orders in `lr` status, clicking **Duplicate** navigates to `/sales/process/add?duplicate_id=${o.id}`. The form loads buyer info, shipping address, commercial terms, and line items, clears `order_no`, and presents a fresh order in `pending` status with header `"Add Sales Order (Duplicate)"`.
+  - **"Upload Files" Slide-Over Drawer with File Deletion & PO Unlinking:**
+    - Opens upon clicking **SO Files** (`data-testid="btn-action-so-files"`).
+    - Lists all uploaded attachments with dedicated **View** and **Delete** (`data-testid="btn-delete-file-{idx}"`) controls.
+    - Attached PO documents feature a dedicated **Delete** button (`data-testid="btn-delete-po-file"`), clearing `po_file`/`po_attachment`, resetting `po: "No"`, and synchronizing with backend order remarks.
+    - Provides a **Clear** button for pending files prior to upload.
+  - **13-Field Collapsible Filter Panel & Dynamic Sales Person Dropdown:**
+    - Organized in a responsive 6-column grid matching legacy reference layout:
+      - **Row 1 (6 Date Bounds):** `Order Date From/To`, `Invoice Date From/To`, `Exp. Delivery From/To`.
+      - **Row 2 (6 Criteria):** `State` (36 States/UTs), `Dispatch Status` (All/Yes/No), `Warehouse` (Mumbai/Mumbai Transit/Ahmedabad/Indore), `Sales Person` (dynamic `<select>` populated from users & active orders), `Company` (substring search), `Third Party` (All/Yes/No).
+      - **Row 3 (Actions):** `PO` (All/Yes/No), right-aligned `Reset` (`#64748b`) and `Search` (`#f59e0b`) buttons.
+    - Fully synchronizes client-side and backend filtering, restoring pristine state upon Reset.
 
 ### 8.26. CRM: Customer Relationship Management Full Suite (Leads, Pipelines, Distribution, Timeline & Branded Quotations Engine)
 - **Backend Architecture & Files:** `backend/app/crm/models.py`, `backend/app/crm/schemas.py`, `backend/app/crm/routes.py`, `backend/app/crm/service.py`, `backend/app/crm/quotation_service.py`, `backend/app/crm/distribution_service.py`.
@@ -1144,7 +1219,14 @@ A user may be assigned any number of Roles simultaneously (`POST /users/{id}/rol
     3. **Dynamic Directional Flipping (`openUpward`):** Automatically computes row position:
        `const openUpward = items.length >= 3 && idx >= items.length - (items.length >= 4 ? 2 : 1);`
        When `openUpward` is true, the menu cleanly flips upward (`top: "auto"`, `bottom: ...`), adjusts margins, and inverts box shadows (`0 -4px 12px rgba(0,0,0,0.12)`), keeping all actions fully visible and unobstructed.
-    4. **Applied Modules:** Import Purchase, Local Purchase, Sale Process List, Discount Payments, Proforma Invoices, Inquiries, Stock Transfer, Stock Adjustment, Technical Tasks, and Payments.
+    4. **Viewport-Relative Floating Menus (`position: fixed`):** Where container boundaries strictly enforce clipping, action menus resolve coordinates via `getBoundingClientRect()` with capture-phase outside click and scroll listeners, breaking out of scroll wrappers entirely.
+    5. **Applied Modules:** Import Purchase, Local Purchase, Sale Process List, Discount Payments, Proforma Invoices, Inquiries, Stock Transfer, Stock Adjustment, Technical Tasks, and Payments.
+- **Upward-Opening Combobox Placement in Table Rows & Form Line Items (`placement="up"`):**
+  - **Problem Statement:** In transactional item grids (e.g. `SaleProcessForm.tsx`, `ProformaInvoicesPage.tsx`), Combobox inputs rendered inside table cells default to opening downwards. In short tables, lower rows, or horizontally scrolled wrappers, downward popovers extend below the visible table boundaries, causing vertical scroll clipping or pushing container layout heights.
+  - **Standardized Prevention Pattern:**
+    1. Table-embedded searchable comboboxes specify `placement="up"`.
+    2. The dropdown popover floats cleanly above the input trigger (`bottom: 100%`, `margin-bottom: 4px`), completely avoiding container overflow, clipped options, or table bottom collision.
+    3. Applied across Product Row selectors, Additional Charge type selectors, and Unit selectors in Sales Process and Proforma Invoices.
 
 ---
 
@@ -1384,6 +1466,22 @@ A user may be assigned any number of Roles simultaneously (`POST /users/{id}/rol
 | **Sales: Proforma** | `POST` | `/api/v1/sales/proforma-invoices/{id}/status` | Transition proforma status via dynamic workflow engine | `sale.pi.approve` |
 | **Sales: Proforma** | `GET` | `/api/v1/sales/proforma-invoices/{id}/pdf` | Generate/stream official branded Proforma Invoice PDF | `sale.pi.view` |
 | **Sales: Proforma** | `GET` | `/api/v1/sales/proforma-invoices/export` | Export proforma invoices to Excel / CSV | `sale.pi.view` |
+| **Sales: Orders**   | `GET` | `/api/v1/sales/orders` | Paginated list of confirmed & pending Sales Orders with status stages and filters | `saleorder.view` |
+| **Sales: Orders**   | `POST`| `/api/v1/sales/orders` | Create Sales Order defaulting to `pending` status with line items & commercial terms | `saleorder.create` |
+| **Sales: Orders**   | `GET` | `/api/v1/sales/orders/{id}` | Inspect detailed Sales Order record with line items, tax, and address breakdown | `saleorder.view` |
+| **Sales: Orders**   | `PATCH`| `/api/v1/sales/orders/{id}` | Update Sales Order details, line items, and commercial fields | `saleorder.update` |
+| **Sales: Orders**   | `PATCH`| `/api/v1/sales/orders/{id}/status` | Advance Sales Order stage (`pending` -> `sales_confirmed` -> `admin_approved` -> `dispatched` -> `lr_uploaded`) | `saleorder.approve` |
+| **Sales: Orders**   | `DELETE`| `/api/v1/sales/orders/{id}` | Soft-delete Sales Order and atomically revert deducted stock back to inventory | `saleorder.delete` |
+| **Sales: Orders**   | `POST`| `/api/v1/sales/orders/{id}/restore` | Restore soft-deleted Sales Order (Admin only) | `saleorder.manage` |
+| **Sales: Orders**   | `GET` | `/api/v1/sales/metrics` | Grouped sales order KPI metrics by status tabs (all, pending, confirmed, dispatched, etc.) | `saleorder.view` |
+| **Sales: Orders**   | `GET` | `/api/v1/sales/next-gatepass-no` | Generate next sequential gate pass reference number | `saleorder.view` |
+| **Sales: Orders**   | `GET` | `/api/v1/sales/planning-consignments` | Extract consignment columns from Shipment Planning sheets for order pre-allocation | `saleorder.view` |
+| **Sales: Orders**   | `GET` | `/api/v1/sales/planning-consignments/{column_id}/items` | Extract planned products and quantities from consignment column | `saleorder.view` |
+| **Sales: Orders**   | `GET` | `/api/v1/sales/export` | Export Sales Orders dataset to Excel spreadsheet | `saleorder.view` |
+| **Sales: Gate Pass**| `POST`| `/api/v1/sales/gate-pass` | Create dispatch Gate Pass with logistics metadata and transporter carrier | `saleorder.update` |
+| **Sales: Logistics**| `POST`| `/api/v1/sales/orders/{id}/upload-lr` | Attach transporter LR document and multi-photo delivery proof | `saleorder.update` |
+| **Sales: Discounts**| `GET` | `/api/v1/sales/discount-payments` | List under-invoicing cash discount payment ledger entries | `saleorder.view` |
+| **Sales: Discounts**| `POST`| `/api/v1/sales/discount-payments` | Record discount payment settlement | `saleorder.update` |
 | **Workflow Engine** | `GET` | `/api/v1/masters/workflow-rules` | List registered workflow status transition rules | `workflow.view` |
 | **Workflow Engine** | `POST` | `/api/v1/masters/workflow-rules` | Create or update database-driven workflow transition rule | `workflow.manage` |
 | **Federation** | `POST` | `/api/v1/federation/sso-handover` | Generate cross-ERP single sign-on handover ticket | Authenticated |
@@ -1410,6 +1508,16 @@ A user may be assigned any number of Roles simultaneously (`POST /users/{id}/rol
 | **Workforce: Recurring**| `PATCH`| `/api/v1/tasks/recurring-schedules/{id}/status` | Pause, resume, or archive recurring schedule | `task.update` |
 | **Workforce: Recurring**| `POST` | `/api/v1/tasks/recurring-schedules/{id}/trigger` | Manually spawn next task instance immediately | `task.create` |
 | **Product: Sync** | `POST` | `/api/v1/products/sync-yinglima` | Trigger outbound product catalog synchronization from Yinglima to Inhyma | `product.manage` |
+| **Feed**            | `GET` | `/api/v1/feed/posts` | List scoped feed posts with pagination, search, and department visibility checks | Authenticated |
+| **Feed**            | `POST`| `/api/v1/feed/posts` | Create a new broadcast or discussion post with targeted departments/recipients | Authenticated |
+| **Feed**            | `GET` | `/api/v1/feed/posts/{id}` | Detailed post record, comments, reaction aggregations, and viewer status | Authenticated |
+| **Feed**            | `PUT` | `/api/v1/feed/posts/{id}` | Edit post content (creator or administrator only) | Authenticated |
+| **Feed**            | `DELETE`| `/api/v1/feed/posts/{id}` | Soft-delete feed post | Authenticated |
+| **Feed**            | `POST`| `/api/v1/feed/posts/{id}/pin` | Toggle post pinned status | `feed.pin` / Admin |
+| **Feed**            | `POST`| `/api/v1/feed/posts/{id}/comments` | Post comment on feed entry | Authenticated |
+| **Feed**            | `DELETE`| `/api/v1/feed/comments/{comment_id}` | Soft-delete comment | Authenticated |
+| **Feed**            | `POST`| `/api/v1/feed/posts/{id}/reactions` | Toggle emoji reaction on post | Authenticated |
+| **Feed**            | `POST`| `/api/v1/feed/posts/{id}/mark-read` | Record user read receipt for broadcast compliance | Authenticated |
 
 ---
 
