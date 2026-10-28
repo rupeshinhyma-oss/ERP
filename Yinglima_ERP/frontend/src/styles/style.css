@@ -946,7 +946,8 @@ select::-ms-expand {
 .modal-centered-backdrop {
   justify-content: center !important;
   align-items: center !important;
-  padding: 20px !important;
+  padding: 16px !important;
+  overflow-y: auto !important;
 }
 
 .modal-dialog-card {
@@ -986,6 +987,8 @@ select::-ms-expand {
 
 .modal-dialog-card.modal-overflow-visible {
   overflow: visible !important;
+  max-height: none !important;
+  margin: auto !important;
 }
 
 .modal-dialog-card.modal-overflow-visible form {

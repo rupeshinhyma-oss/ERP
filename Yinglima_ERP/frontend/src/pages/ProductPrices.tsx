@@ -2689,7 +2689,7 @@ export function ProductPricesPage() {
               title={hasExisting ? "+ Add New Supplier Quotation" : "Assign Supplier & Price Quote"}
               variant="center"
               cardClassName="modal-overflow-visible"
-              cardStyle={{ maxWidth: "540px", width: "95%", overflow: "visible" }}
+              cardStyle={{ maxWidth: "540px", width: "95%", height: "auto", maxHeight: "none", overflow: "visible" }}
               onClose={closeAssignModal}
             >
               <form
@@ -2697,117 +2697,175 @@ export function ProductPricesPage() {
                 style={{
                   display: "flex",
                   flexDirection: "column",
-                  gap: "16px",
-                  padding: "20px 24px",
+                  gap: "12px",
+                  padding: "16px 22px",
+                  height: "auto",
+                  maxHeight: "none",
                   overflow: "visible",
                 }}
               >
-                {/* Product Info Banner */}
-                <div
-                  style={{
-                    background: "#eff6ff",
-                    border: "1px solid #bfdbfe",
-                    borderRadius: "6px",
-                    padding: "12px 14px",
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "10px",
-                  }}
-                >
-                  <div>
-                    <div style={{ fontWeight: 700, color: "#1e3a8a", fontSize: "14px" }}>
-                      {assignModalProduct.product_name_tally || assignModalProduct.product_name}
-                    </div>
-                    <div style={{ fontSize: "12px", color: "#3b82f6" }}>
-                      Code: {assignModalProduct.product_code || "—"} • Category: {assignModalProduct.category_name || "—"}
-                    </div>
-                  </div>
-                </div>
-
-                {/* Current Lowest Benchmark Banner (if product already has quotes) */}
-                {hasExisting && (
+                <div style={{ display: "flex", flexDirection: "column", gap: "12px", padding: 0, overflow: "visible" }}>
+                  {/* Product Info Banner */}
                   <div
                     style={{
-                      background: "#f0fdf4",
-                      border: "1px solid #86efac",
+                      background: "#eff6ff",
+                      border: "1px solid #bfdbfe",
                       borderRadius: "6px",
                       padding: "10px 14px",
                       display: "flex",
                       alignItems: "center",
-                      justifyContent: "space-between",
                       gap: "10px",
                     }}
                   >
-                    <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                      <span style={{ fontSize: "16px" }}>🏷️</span>
-                      <div>
-                        <div style={{ fontSize: "11px", color: "#15803d", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.5px" }}>
-                          Current Lowest Benchmark:
-                        </div>
-                        <div style={{ fontSize: "14px", fontWeight: 700, color: "#166534" }}>
-                          {formatCurrency(assignModalProduct.best_price, assignModalProduct.best_currency || "CNY")}
-                          {assignModalProduct.primary_supplier_name && (
-                            <span style={{ fontWeight: 500, fontSize: "12px", color: "#15803d", marginLeft: "6px" }}>
-                              (via {assignModalProduct.primary_supplier_name})
-                            </span>
-                          )}
-                        </div>
+                    <div>
+                      <div style={{ fontWeight: 700, color: "#1e3a8a", fontSize: "13.5px" }}>
+                        {assignModalProduct.product_name_tally || assignModalProduct.product_name}
+                      </div>
+                      <div style={{ fontSize: "12px", color: "#3b82f6" }}>
+                        Code: {assignModalProduct.product_code || "—"} • Category: {assignModalProduct.category_name || "—"}
                       </div>
                     </div>
+                  </div>
+
+                  {/* Current Lowest Benchmark Banner (if product already has quotes) */}
+                  {hasExisting && (
                     <div
                       style={{
-                        background: "#dcfce7",
-                        color: "#166534",
-                        fontSize: "11.5px",
-                        fontWeight: 700,
-                        padding: "3px 10px",
-                        borderRadius: "12px",
-                        border: "1px solid #bbf7d0",
-                        whiteSpace: "nowrap",
+                        background: "#f0fdf4",
+                        border: "1px solid #86efac",
+                        borderRadius: "6px",
+                        padding: "8px 14px",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        gap: "10px",
                       }}
                     >
-                      {assignModalProduct.supplier_count || 1} {(assignModalProduct.supplier_count || 1) === 1 ? "Quote on file" : "Quotes on file"}
+                      <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                        <span style={{ fontSize: "15px" }}>🏷️</span>
+                        <div>
+                          <div style={{ fontSize: "10.5px", color: "#15803d", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.5px" }}>
+                            Current Lowest Benchmark:
+                          </div>
+                          <div style={{ fontSize: "13.5px", fontWeight: 700, color: "#166534" }}>
+                            {formatCurrency(assignModalProduct.best_price, assignModalProduct.best_currency || "CNY")}
+                            {assignModalProduct.primary_supplier_name && (
+                              <span style={{ fontWeight: 500, fontSize: "12px", color: "#15803d", marginLeft: "6px" }}>
+                                (via {assignModalProduct.primary_supplier_name})
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                      <div
+                        style={{
+                          background: "#dcfce7",
+                          color: "#166534",
+                          fontSize: "11.5px",
+                          fontWeight: 700,
+                          padding: "3px 10px",
+                          borderRadius: "12px",
+                          border: "1px solid #bbf7d0",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {assignModalProduct.supplier_count || 1} {(assignModalProduct.supplier_count || 1) === 1 ? "Quote on file" : "Quotes on file"}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Supplier Selection (Type to search dropdown) */}
+                  <div style={{ display: "flex", flexDirection: "column", gap: "5px", position: "relative", zIndex: 100 }}>
+                    <label style={{ fontSize: "12.5px", fontWeight: 600, color: "#334155" }}>
+                      Select Supplier <span style={{ color: "#ef4444" }}>*</span>
+                    </label>
+                    <SearchableDropdown
+                      value={assignSupplierId || null}
+                      onChange={(val) => setAssignSupplierId(val || "")}
+                      placeholder="Type to search supplier (e.g. Yinglima, Darsh)..."
+                      fetchOptions={supplierFetcher}
+                      fetchLabelForValue={supplierLabelFetcher}
+                      hasError={assignSubmitting && !assignSupplierId}
+                    />
+                    {matchedQuote && (
+                      <div style={{ fontSize: "12px", color: "#b45309", background: "#fef3c7", padding: "6px 10px", borderRadius: "4px", border: "1px solid #fde68a", marginTop: "2px" }}>
+                        ℹ️ <strong>{matchedQuote.supplier_name}</strong> already has a quote on file (
+                        {formatCurrency(matchedQuote.unit_price, matchedQuote.currency)}). Entering a new price will update their quotation.
+                      </div>
+                    )}
+                    {assignSubmitting && !assignSupplierId && (
+                      <span style={{ fontSize: "12px", color: "#ef4444" }}>Please select a supplier.</span>
+                    )}
+                  </div>
+
+                  {/* Price & Currency */}
+                  <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: "12px", position: "relative", zIndex: 10 }}>
+                    <div style={{ display: "flex", flexDirection: "column", gap: "5px" }}>
+                      <label style={{ fontSize: "12.5px", fontWeight: 600, color: "#334155" }}>
+                        Unit Price <span style={{ color: "#ef4444" }}>*</span>
+                      </label>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        required
+                        placeholder="e.g. 125.00"
+                        value={assignUnitPrice}
+                        onKeyDown={(e) => {
+                          if (e.key === "-" || e.key === "e") {
+                            e.preventDefault();
+                          }
+                        }}
+                        onChange={(e) => {
+                          const clean = e.target.value.replace(/[^0-9.]/g, "");
+                          setAssignUnitPrice(clean);
+                        }}
+                        style={{
+                          padding: "8px 12px",
+                          borderRadius: "6px",
+                          border:
+                            assignSubmitting && (!assignUnitPrice || parseFloat(assignUnitPrice) < 0 || isNaN(parseFloat(assignUnitPrice)))
+                              ? "1.5px solid #ef4444"
+                              : "1px solid #cbd5e1",
+                          fontSize: "13px",
+                        }}
+                      />
+                      {assignSubmitting && (!assignUnitPrice || parseFloat(assignUnitPrice) < 0 || isNaN(parseFloat(assignUnitPrice))) && (
+                        <span style={{ fontSize: "12px", color: "#ef4444" }}>Please enter a valid price (0 or greater).</span>
+                      )}
+                    </div>
+
+                    <div style={{ display: "flex", flexDirection: "column", gap: "5px" }}>
+                      <label style={{ fontSize: "12.5px", fontWeight: 600, color: "#334155" }}>Currency</label>
+                      <select
+                        value={assignCurrency}
+                        onChange={(e) => setAssignCurrency(e.target.value)}
+                        style={{
+                          padding: "8px 12px",
+                          borderRadius: "6px",
+                          border: "1px solid #cbd5e1",
+                          fontSize: "13px",
+                          background: "#fff",
+                        }}
+                      >
+                        <option value="CNY">CNY (¥)</option>
+                        <option value="USD">USD ($)</option>
+                        <option value="EUR">EUR (€)</option>
+                        <option value="INR">INR (₹)</option>
+                      </select>
                     </div>
                   </div>
-                )}
 
-                {/* Supplier Selection (Type to search dropdown) */}
-                <div style={{ display: "flex", flexDirection: "column", gap: "6px", position: "relative", zIndex: 100 }}>
-                  <label style={{ fontSize: "13px", fontWeight: 600, color: "#334155" }}>
-                    Select Supplier <span style={{ color: "#ef4444" }}>*</span>
-                  </label>
-                  <SearchableDropdown
-                    value={assignSupplierId || null}
-                    onChange={(val) => setAssignSupplierId(val || "")}
-                    placeholder="Type to search supplier (e.g. Yinglima, Darsh)..."
-                    fetchOptions={supplierFetcher}
-                    fetchLabelForValue={supplierLabelFetcher}
-                    hasError={assignSubmitting && !assignSupplierId}
-                  />
-                  {matchedQuote && (
-                    <div style={{ fontSize: "12px", color: "#b45309", background: "#fef3c7", padding: "6px 10px", borderRadius: "4px", border: "1px solid #fde68a", marginTop: "2px" }}>
-                      ℹ️ <strong>{matchedQuote.supplier_name}</strong> already has a quote on file (
-                      {formatCurrency(matchedQuote.unit_price, matchedQuote.currency)}). Entering a new price will update their quotation.
-                    </div>
-                  )}
-                  {assignSubmitting && !assignSupplierId && (
-                    <span style={{ fontSize: "12px", color: "#ef4444" }}>Please select a supplier.</span>
-                  )}
-                </div>
-
-                {/* Price & Currency */}
-                <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: "12px", position: "relative", zIndex: 10 }}>
-                  <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-                    <label style={{ fontSize: "13px", fontWeight: 600, color: "#334155" }}>
-                      Unit Price <span style={{ color: "#ef4444" }}>*</span>
+                  {/* MOQ */}
+                  <div style={{ display: "flex", flexDirection: "column", gap: "5px", position: "relative", zIndex: 5 }}>
+                    <label style={{ fontSize: "12.5px", fontWeight: 600, color: "#334155" }}>
+                      Minimum Order Quantity (MOQ)
                     </label>
                     <input
                       type="number"
                       min="0"
-                      step="0.01"
-                      required
-                      placeholder="e.g. 125.00"
-                      value={assignUnitPrice}
+                      placeholder="e.g. 50"
+                      value={assignMoq}
                       onKeyDown={(e) => {
                         if (e.key === "-" || e.key === "e") {
                           e.preventDefault();
@@ -2815,103 +2873,49 @@ export function ProductPricesPage() {
                       }}
                       onChange={(e) => {
                         const clean = e.target.value.replace(/[^0-9.]/g, "");
-                        setAssignUnitPrice(clean);
+                        setAssignMoq(clean);
                       }}
                       style={{
-                        padding: "9px 12px",
-                        borderRadius: "6px",
-                        border:
-                          assignSubmitting && (!assignUnitPrice || parseFloat(assignUnitPrice) < 0 || isNaN(parseFloat(assignUnitPrice)))
-                            ? "1.5px solid #ef4444"
-                            : "1px solid #cbd5e1",
-                        fontSize: "13.5px",
-                      }}
-                    />
-                    {assignSubmitting && (!assignUnitPrice || parseFloat(assignUnitPrice) < 0 || isNaN(parseFloat(assignUnitPrice))) && (
-                      <span style={{ fontSize: "12px", color: "#ef4444" }}>Please enter a valid price (0 or greater).</span>
-                    )}
-                  </div>
-
-                  <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-                    <label style={{ fontSize: "13px", fontWeight: 600, color: "#334155" }}>Currency</label>
-                    <select
-                      value={assignCurrency}
-                      onChange={(e) => setAssignCurrency(e.target.value)}
-                      style={{
-                        padding: "9px 12px",
+                        padding: "8px 12px",
                         borderRadius: "6px",
                         border: "1px solid #cbd5e1",
-                        fontSize: "13.5px",
-                        background: "#fff",
+                        fontSize: "13px",
                       }}
-                    >
-                      <option value="CNY">CNY (¥)</option>
-                      <option value="USD">USD ($)</option>
-                      <option value="EUR">EUR (€)</option>
-                      <option value="INR">INR (₹)</option>
-                    </select>
-                  </div>
-                </div>
-
-                {/* MOQ */}
-                <div style={{ display: "flex", flexDirection: "column", gap: "6px", position: "relative", zIndex: 5 }}>
-                  <label style={{ fontSize: "13px", fontWeight: 600, color: "#334155" }}>
-                    Minimum Order Quantity (MOQ)
-                  </label>
-                  <input
-                    type="number"
-                    min="0"
-                    placeholder="e.g. 50"
-                    value={assignMoq}
-                    onKeyDown={(e) => {
-                      if (e.key === "-" || e.key === "e") {
-                        e.preventDefault();
-                      }
-                    }}
-                    onChange={(e) => {
-                      const clean = e.target.value.replace(/[^0-9.]/g, "");
-                      setAssignMoq(clean);
-                    }}
-                    style={{
-                      padding: "9px 12px",
-                      borderRadius: "6px",
-                      border: "1px solid #cbd5e1",
-                      fontSize: "13.5px",
-                    }}
-                  />
-                </div>
-
-                {/* Notes */}
-                <div style={{ display: "flex", flexDirection: "column", gap: "6px", position: "relative", zIndex: 1 }}>
-                  <label style={{ fontSize: "13px", fontWeight: 600, color: "#334155" }}>Notes / Remarks</label>
-                  <textarea
-                    rows={3}
-                    placeholder="e.g. Quoted on WeChat, lead time 15 days, ex-factory."
-                    value={assignNotes}
-                    onChange={(e) => setAssignNotes(e.target.value)}
-                    style={{
-                      padding: "9px 12px",
-                      borderRadius: "6px",
-                      border: "1px solid #cbd5e1",
-                      fontSize: "13.5px",
-                      resize: "vertical",
-                    }}
-                  />
-                </div>
-
-                {/* Preferred Supplier Toggle */}
-                <div style={{ marginTop: "4px", padding: "8px 12px", background: "#fefce8", border: "1px solid #fef08a", borderRadius: "6px" }}>
-                  <label style={{ display: "inline-flex", alignItems: "center", gap: "8px", cursor: "pointer", fontSize: "13px", fontWeight: 600, color: "#854d0e", userSelect: "none" }}>
-                    <input
-                      type="checkbox"
-                      checked={assignIsPreferred}
-                      onChange={(e) => setAssignIsPreferred(e.target.checked)}
-                      style={{ width: "16px", height: "16px", cursor: "pointer" }}
                     />
-                    <span>⭐ Set as Preferred Supplier for this product</span>
-                  </label>
-                  <div style={{ fontSize: "11px", color: "#a16207", marginLeft: "24px", marginTop: "2px" }}>
-                    Optional: Check this only if you want to manually designate this supplier as Preferred. By default, quotes only record pricing without changing preference.
+                  </div>
+
+                  {/* Notes */}
+                  <div style={{ display: "flex", flexDirection: "column", gap: "5px", position: "relative", zIndex: 1 }}>
+                    <label style={{ fontSize: "12.5px", fontWeight: 600, color: "#334155" }}>Notes / Remarks</label>
+                    <textarea
+                      rows={2}
+                      placeholder="e.g. Quoted on WeChat, lead time 15 days, ex-factory."
+                      value={assignNotes}
+                      onChange={(e) => setAssignNotes(e.target.value)}
+                      style={{
+                        padding: "8px 12px",
+                        borderRadius: "6px",
+                        border: "1px solid #cbd5e1",
+                        fontSize: "13px",
+                        resize: "vertical",
+                      }}
+                    />
+                  </div>
+
+                  {/* Preferred Supplier Toggle */}
+                  <div style={{ padding: "8px 12px", background: "#fefce8", border: "1px solid #fef08a", borderRadius: "6px" }}>
+                    <label style={{ display: "inline-flex", alignItems: "center", gap: "8px", cursor: "pointer", fontSize: "12.5px", fontWeight: 600, color: "#854d0e", userSelect: "none" }}>
+                      <input
+                        type="checkbox"
+                        checked={assignIsPreferred}
+                        onChange={(e) => setAssignIsPreferred(e.target.checked)}
+                        style={{ width: "15px", height: "15px", cursor: "pointer" }}
+                      />
+                      <span>⭐ Set as Preferred Supplier for this product</span>
+                    </label>
+                    <div style={{ fontSize: "11px", color: "#a16207", marginLeft: "23px", marginTop: "2px", lineHeight: 1.35 }}>
+                      Optional: Check this only if you want to manually designate this supplier as Preferred. By default, quotes only record pricing without changing preference.
+                    </div>
                   </div>
                 </div>
 
@@ -2922,8 +2926,8 @@ export function ProductPricesPage() {
                     display: "flex",
                     justifyContent: "flex-end",
                     gap: "10px",
-                    marginTop: "6px",
-                    padding: "16px 0 0 0",
+                    marginTop: "2px",
+                    padding: "12px 0 0 0",
                     borderTop: "1px solid #e2e8f0",
                     background: "transparent",
                     overflow: "visible",

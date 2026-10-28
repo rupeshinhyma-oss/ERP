@@ -92,3 +92,7 @@ In industrial procurement and international trade, **the cheapest supplier is NO
    * `productPriceListCache.clear()` automatically invalidates cached query pages upon price or preference modifications to ensure fresh data across filters.
 3. **Inline Quick-Edit:**
    * Authorized users can click the pencil icon (`✏️`) or click the unit price in the sub-table to enter a new price, press `Enter` to commit, or `Esc` to cancel.
+
+4. **100% Zoom Compact Modal Layout & Footer Visibility (`ProductPrices.tsx` & `style.css`):**
+   * Wrapped the form fields inside a single zero-padding body container (`padding: 0, gap: "12px"`) so the global `.modal-card form > :not(.form-actions)` CSS rule does not inject `20px 24px` padding onto each individual input row.
+   * Configured `.modal-centered-backdrop` with `overflow-y: auto` and `.modal-dialog-card.modal-overflow-visible` with `max-height: none; margin: auto`, ensuring the `Cancel` and `+ Add Supplier Quote` action buttons are always 100% visible at 100% browser zoom on all screen resolutions.
