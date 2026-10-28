@@ -250,6 +250,7 @@ describe("ProductReorderPage", () => {
     // Default warehouse is Mumbai (per screenshot): Mumbai pipeline=0, reorder=5, shortfall=5, moq=8 -> order_to_be_place=8
     const whSelect = screen.getByLabelText("Warehouse") as HTMLSelectElement;
     expect(whSelect.value).toBe("Mumbai");
+    expect(screen.getByText("1–1")).toBeTruthy();
     expect(screen.getByText("5", { selector: ".reorder-shortfall-alert" })).toBeTruthy();
     expect(screen.getByText("8", { selector: ".reorder-order-place-badge" })).toBeTruthy();
 

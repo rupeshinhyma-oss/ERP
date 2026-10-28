@@ -793,10 +793,11 @@ export function ProductReorderPage() {
     () => ({
       current_page: currentPage,
       total_pages: totalPages,
-      total_count: sortedItems.length,
-      per_page: perPage,
+      total_records: sortedItems.length,
+      total_items: sortedItems.length,
+      page_size: perPage,
       has_next: currentPage < totalPages,
-      has_prev: currentPage > 1,
+      has_previous: currentPage > 1,
     }),
     [currentPage, totalPages, sortedItems.length, perPage]
   );
