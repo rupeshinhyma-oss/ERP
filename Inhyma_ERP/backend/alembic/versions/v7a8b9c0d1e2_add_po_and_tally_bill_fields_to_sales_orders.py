@@ -57,3 +57,4 @@ def downgrade() -> None:
     for col_name in ("eway_bill", "tally_bill_name", "tally_bill_url", "po_file_name", "po_file_url"):
         if col_name in cols:
             op.drop_column("sales_orders", col_name)
+

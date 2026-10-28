@@ -51,12 +51,25 @@ class ProductReorderItemRead(BaseModel):
     sr_no: int = Field(..., description="Sequential row index")
     product_id: Optional[str] = Field(None, description="Linked product master ID")
     product_name_tally: str = Field(..., description="Product name as per Tally")
+    product_name_invoice: Optional[str] = Field(None, description="Product name as per Invoice")
     product_code: str = Field("-", description="SKU / product code")
     brand: str = Field("-", description="Brand name")
     category: Optional[str] = Field(None, description="Product category")
     sub_category: Optional[str] = Field(None, description="Sub-category")
     hsn_code: Optional[str] = Field(None, description="HSN code")
+    gst_percent: Optional[float] = Field(None, description="GST percentage from Tax master")
+    import_duty_percent: Optional[float] = Field(None, description="Import duty percentage from Tax master")
     uom: Optional[str] = Field("SET", description="Unit of measurement")
+    minimum_price: Optional[float] = Field(None, description="Minimum selling price without GST")
+    packaging_quantity: Optional[float] = Field(None, description="Packaging quantity per unit")
+    packaging_net_weight: Optional[float] = Field(None, description="Packaging net weight (kg)")
+    packaging_gross_weight: Optional[float] = Field(None, description="Packaging gross weight (kg)")
+    length_cm: Optional[float] = Field(None, description="Length in cm for CBM")
+    width_cm: Optional[float] = Field(None, description="Width in cm for CBM")
+    height_cm: Optional[float] = Field(None, description="Height in cm for CBM")
+    packaging_unit_cbm: Optional[float] = Field(None, description="Auto-computed CBM per package")
+    specification: Optional[str] = Field(None, description="Product specifications")
+    description: Optional[str] = Field(None, description="Product description")
     mumbai: float = Field(0.0, description="Mumbai physical stock")
     mumbai_transit: float = Field(0.0, description="Mumbai transit container stock")
     mumbai_ordered: float = Field(0.0, description="Mumbai factory ordered stock")
@@ -71,12 +84,15 @@ class ProductReorderItemRead(BaseModel):
     short_fall: float = Field(0.0, description="Shortfall quantity requiring restock")
     moq: float = Field(0.0, description="Minimum order quantity")
     order_to_be_place: float = Field(0.0, description="Recommended order quantity to place")
+    breakup_flags: List[str] = Field(default_factory=list, description="Columns with active SO/PO/Transfer breakup")
+    warehouse_thresholds: dict[str, Any] = Field(default_factory=dict, description="Optional per-warehouse reorder/MOQ overrides")
 
 
 class ProductReorderUpdateSchema(BaseModel):
-    """Payload to update reorder level and MOQ for a product."""
+    """Payload to update reorder level and MOQ for a product (global or branch-scoped)."""
     reorder_level: Optional[float] = Field(None, ge=0)
     minimum_order_quantity: Optional[float] = Field(None, ge=0)
+    warehouse: Optional[str] = Field(None, description="Optional warehouse scope: Mumbai | Ahmedabad | Indore | All")
 
 
 # ==============================================================================

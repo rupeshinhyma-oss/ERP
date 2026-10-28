@@ -3313,14 +3313,15 @@ Positioned directly underneath the collapsible filter panel, these three metric 
   - Frontend List & Drawer: `frontend/src/pages/sales/SaleProcessList.tsx`
   - Frontend Detail Modal: `frontend/src/pages/sales/SaleProcessDetailModal.tsx`
   - Backend Models, Schemas, Service & Routes: `backend/app/sales/models.py`, `backend/app/sales/schemas.py`, `backend/app/sales/service.py`, `backend/app/sales/process_routes.py`
-  - Database Migration: `backend/alembic/versions/v7a8b9c0d1e2_add_po_and_tally_bill_fields_to_sales_orders.py`
+  - Database Migrations: `backend/alembic/versions/v7a8b9c0d1e2_add_po_and_tally_bill_fields_to_sales_orders.py`, `backend/alembic/versions/w8b9c0d1e2f3_add_lr_file_and_dispatch_media_to_sales_orders.py`, `backend/alembic/versions/x9c0d1e2f3a4_add_eway_bill_file_fields_to_sales_orders.py`, `backend/alembic/versions/y0d1e2f3a4b5_add_timeline_to_sales_orders.py`
   - Test Suites: `frontend/src/pages/__tests__/SaleProcessListPage.test.tsx`, `backend/tests/test_sale_order_workflow.py`
 
 ### Feature Overview & UI Specifications
 1. **Status Column Action & Badges (`SaleProcessList.tsx`):**
-   - Every row renders its status pill, a blue square edit icon button (`title="Update Status"`), optional `📎 PO` badge (when `po_file_url` is attached), optional `📎 Bill` badge (when `tally_bill_url` is attached), and a `DD-MM-YYYY hh:mm A` timestamp below the row.
+   - Every row renders its status pill (`Admin Approved`, `Acc. Confirmed`, `Gatepass Created`, and `Dispatched` use soft green `#dcfce7` / `#15803d`), a blue square edit icon button (`title="Update Status"`), optional `📎 PO` chip on upstream stages (`Sales Confirmed` / `Admin Approved`), and a `DD-MM-YYYY hh:mm A` timestamp below the row.
+   - In the **`Acc. Dep.`** column above `Timeline`, invoiced orders display orange `#f59e0b` square chips: **`i`** (instant dark hover tooltip `Tally Bill`, direct link to `tally_bill_url`) and **`E`** (instant dark hover tooltip `E-Way Bill`, direct link to `eway_bill_url` when `E-Way Bill` = `Yes`).
    - The `PO` column also renders `Yes 📎` as a direct clickable download link when `po_file_url` is present.
-2. **Sale Status Update Side Drawer (`<SideDrawer title="Sale Status Update" width="420px" maxWidth="95vw">`):**
+2. **Sale Status Update Side Drawer (`<SideDrawer title="Sale Status Update" width="480px" maxWidth="95vw">`):**
    - **Green Current Status Banner:** `Current Status: <Stage Label>` (`#dcfce7` background, `#15803d` text).
    - **Stage 1 (`Pending`):**
      - `Status` `<select>` options: `Sales Confirmed` (default) and `Cancel`.
@@ -3335,20 +3336,124 @@ Positioned directly underneath the collapsible filter panel, these three metric 
        - `Invoice No *` (`type="text"`, required)
        - `Tally Bill *` (file upload accepting `.pdf,.png,.jpg,.jpeg,.xlsx,.xls,.doc,.docx`, required unless already uploaded)
        - `E-Way Bill` (`No` / `Yes`, default `No`)
+       - `E-Way Bill *` (`data-testid="input-status-eway-bill-file"`, conditional file upload shown only when `E-Way Bill` = `Yes`; mandatory when `Yes`, uploaded via `POST /api/v1/sales/upload-eway-bill` and persisted to `eway_bill_url` / `eway_bill_name`; renders orange `[E]` chip in `Acc. Dep.` column and download link in `SaleProcessDetailModal` & `Upload Files`)
        - `Third Party Invoice / Reference *` (shown & required when Third-Party Delivery is `Yes`).
-   - **Downstream Stages:**
-     - `Acc. Confirmed` ➔ `Gatepass Created` (Outward Gate Pass Details).
+   - **Stage 4 (`Acc. Confirmed`):**
+     - Green banner `Current Status: Acc. Confirmed`, `Status` field locked to `Gatepass Created`, clean `Remarks` textarea, and bottom full-width `Submit` button (no extra Outward Gate Pass Details inputs inside the drawer; Gatepass number & metadata are auto-assigned on submission).
+   - **Downstream Stages (`Gatepass Created`, `Gatepass Cancelled`, `Dispatched`):**
      - `Gatepass Created` ➔ `Dispatched` / `Gatepass Cancelled`.
      - `Gatepass Cancelled` ➔ `Gatepass Created` / `Cancel`.
-     - `Dispatched` ➔ `LR` (`LR / Consignment No *`, Transporter Name, LR Document & Dispatch Photos).
-   - **Remarks & Submit:** Multi-line `Remarks` textarea (`Enter remarks (optional)...`) and full-width primary blue `Submit` button (`#0061f2`, `Submitting...` feedback).
+     - **Stage 6 (`Dispatched`):**
+       - Green banner `Current Status: Dispatched`.
+       - `Status` `<select>` options: `LR` (`value="lr"`, default) and `Gatepass Cancel` (`value="gatepass_cancelled"`).
+       - When `Status` = `LR` is selected:
+          - `[ ] Change Transport Info` checkbox (`data-testid="checkbox-change-transport-info"`): unchecked by default; when checked, expands a clean frameless 2×2 grid (`data-testid="section-change-transport-fields"`, `gridTemplateColumns: "1fr 1fr"`) directly on the white drawer surface:
+            - Row 1: `Transport Name` (`<select>` from `/masters/transports` + `Self Pickup`, pre-selected from order or first transport) | `Transport Destination` (`<input type="text">`, empty placeholder, initialized strictly from `order.transport_destination` without falling back to `order.city`).
+            - Row 2: `Delivery Type` (`<select>` from `delivery.type` option group, defaulting to `Door`) | `Delivery Charge` (`<select>` from `delivery.charge` option group, defaulting to `To Pay`).
+            - Selecting `Self Pickup` automatically hides `Transport Destination`, `Delivery Type`, and `Delivery Charge`.
+         - `LR File *` (`data-testid="input-status-lr-file"`): mandatory file upload input (`Choose File | No file chosen`) accepting `.pdf,.png,.jpg,.jpeg,.webp,.doc,.docx,.xlsx,.xls`, uploaded via `POST /api/v1/sales/upload-lr` with filename/KB preview & `Clear` button.
+         - `Images/Videos (Upload Multiple)` (`data-testid="dropzone-dispatch-media"`): rectangular drag-and-drop + click-to-browse dropzone (`Drag files here to upload`) accepting multiple `image/*,video/*` files, uploaded via `POST /api/v1/sales/upload-dispatch-media` with per-file remove (`✕`) buttons.
+         - `Remarks`: multi-line textarea (clean empty placeholder).
+       - When `Status` = `Gatepass Cancel` is selected: hides `Change Transport Info`, `LR File *`, and `Images/Videos (Upload Multiple)`, showing only `Status`, `Remarks`, and `Submit`.
+   - **Remarks & Submit:** Multi-line `Remarks` textarea and full-width primary blue `Submit` button (`#0061f2`, `Submitting...` feedback).
 3. **Sales Details Modal Integration (`SaleProcessDetailModal.tsx`):**
-   - Displays clickable `PO File` link, `Invoice` (`invoice_no` & `invoice_date`), clickable `Tally Bill` link, and `E-Way Bill` status in the `Detail` column and `Attached Files` list.
+   - Displays clickable `PO File` link, `Invoice` (`invoice_no` & `invoice_date`), clickable `Tally Bill` link, `E-Way Bill` status & clickable file link, plus uploaded `LR File` and `Dispatch Media` (images/videos) in `Attached Files & Documents`.
+4. **Sale Order Time Line Side Drawer (`<SideDrawer title="Sale Order Time Line #<OrderSuffix>" width="480px">`):**
+   - Triggered by clicking the blue `Timeline` button in the `Acc. Dep.` column.
+   - Renders newest-to-oldest stage nodes connected by a continuous `#cbd5e1` vertical line and `34px` `#dbeafe` clock circles:
+     - Pill badges: `LR Mandatory`, `Dispatched`, `Gatepass Created`, and `Account Confirmed` in soft green (`#dcfce7` / `#15803d`); `Sales Confirmed` in soft blue (`#dbeafe` / `#1d4ed8`); `Admin Approval` and `Pending` in soft amber (`#fef3c7` / `#b45309`); `Gatepass Cancelled` / `Cancelled` in soft red (`#fee2e2` / `#dc2626`).
+     - Every stage displays calendar icon + `DD-MM-YYYY hh:mm AM/PM` timestamp and user icon + `By : <Actor Name>`, plus optional `Remark : <note>` only when a remark was entered.
+     - The `Account Confirmed` node additionally renders `Invoice No : <invoice_no>`, `Invoice Date : <DD-MM-YYYY>`, conditional `E-Way Bill : [⬇]` blue download icon link (`data-testid="timeline-download-eway-bill"`, shown only when an E-Way Bill file was uploaded), and `Tally Bill : [⬇]` blue download icon link (`data-testid="timeline-download-tally-bill"`).
 
 ### QA Verification Test Cases
 - [ ] **TC-SP-11 (Pending ➔ Sales Confirmed with PO File):** On `/sales/process`, click `[✎]` (`Update Status`) on a `Pending` order. Verify `Sale Status Update` drawer opens with `Current Status: Pending` and `Sales Confirmed` selected. Choose a PO file, verify filename/KB preview and `Clear` button, enter remarks, and click `Submit`. Verify PO uploads via `POST /api/v1/sales/upload-po`, status updates to `Sales Confirmed`, `📎 PO` badge appears, and timestamp updates.
 - [ ] **TC-SP-12 (Sales Confirmed ➔ Admin Approved / Cancel):** Click `[✎]` on a `Sales Confirmed` order. Verify `Current Status: Sales Confirmed`, options `Admin Approved` (default) and `Cancel`, and confirm `PO File` input is hidden. Submit and verify status transitions cleanly.
-- [ ] **TC-SP-13 (Admin Approved ➔ Acc. Confirmed / Cancel):** Click `[✎]` on an `Admin Approved` order. Verify `Invoice Date*`, `Invoice No *`, `Tally Bill *`, and `E-Way Bill` fields render when `Acc. Confirmed` is selected, and required field validation blocks empty submission. Upload a Tally Bill, enter Invoice Date & No, select E-Way Bill `Yes`, and click `Submit`. Verify `POST /api/v1/sales/upload-tally-bill` succeeds, order moves to `Acc. Confirmed`, and `📎 Bill` badge renders in the table and detail modal.
+ - [ ] **TC-SP-13 (Admin Approved ➔ Acc. Confirmed / Cancel & Conditional E-Way Bill *):** Click `[✎]` on an `Admin Approved` order. Verify `Invoice Date*`, `Invoice No *`, `Tally Bill *`, and `E-Way Bill` (`No` default, with `E-Way Bill *` file upload hidden) render when `Acc. Confirmed` is selected. Switch `E-Way Bill` to `Yes` and verify the `E-Way Bill *` file upload field (`Choose File | No file chosen`) appears immediately below and blocks submission if empty. Attach both Tally Bill and E-Way Bill files, enter Invoice Date & No, and click `Submit`. Verify `POST /api/v1/sales/upload-tally-bill` and `POST /api/v1/sales/upload-eway-bill` succeed, order moves to `Acc. Confirmed`, and `[i]` + `[E]` chips render in `Acc. Dep.` alongside clickable links in the detail modal.
+- [ ] **TC-SP-14 (Acc. Confirmed ➔ Gatepass Created):** Click `[✎]` on an `Acc. Confirmed` order. Verify soft green `Acc. Confirmed` pill in table and drawer displaying `Current Status: Acc. Confirmed`, `Status: Gatepass Created`, `Remarks`, and `Submit` only.
+- [ ] **TC-SP-15 (Dispatched ➔ LR / Gatepass Cancel):** Click `[✎]` on a `Dispatched` order. Verify `Current Status: Dispatched` banner and `Status` dropdown containing `LR` and `Gatepass Cancel`. Under `LR`, verify `[ ] Change Transport Info` toggles transport inputs, `LR File *` blocks empty submission and uploads via `POST /api/v1/sales/upload-lr`, and `Images/Videos (Upload Multiple)` dropzone accepts drag-and-drop/browse of multiple photos & videos via `POST /api/v1/sales/upload-dispatch-media`. Verify switching `Status` to `Gatepass Cancel` hides LR fields and transitions the order to `gatepass_cancelled`.
+- [ ] **TC-SP-16 (Sale Order Time Line Drawer — Full 7-Stage Chain & Account Confirmed Downloads):** Click `Timeline` in the `Acc. Dep.` column across `Gatepass Created`, `Dispatched`, and `LR` tabs. Verify header `Sale Order Time Line #<OrderSuffix>`, newest-first stage pills (`LR Mandatory` ➔ `Dispatched` ➔ `Gatepass Created` ➔ `Account Confirmed` ➔ `Admin Approval` ➔ `Sales Confirmed` ➔ `Pending`), `DD-MM-YYYY hh:mm AM/PM` timestamps, `By : <Actor>` rows, and on `Account Confirmed`: `Invoice No`, `DD-MM-YYYY` `Invoice Date`, `E-Way Bill` download icon (shown only when E-Way Bill was uploaded), and `Tally Bill` download icon.
 
 ---
-*End of Master Features & Testing Specification Manual. Maintained for Inhyma Solutions Enterprise ERP. Last updated: October 28, 2026 (Sections 61-70: Dynamic Organization Company Logo, Product Master Category Rewiring & Floating Duplicate Overlay, Platform Migration Idempotency, Sales Process Workflow & 13-Field Filter Grid, HRMS Phases 2-6 RBAC & Approval Architecture, Feed & Broadcast Open Access & 1-to-1 Employee Messaging, and Sale Status Update Side Drawer with PO & Tally Bill Uploads).*
+
+## 71. SALE: Discount Payments Ledger, Multi-Installment Adjustment Drawer & Payment List Modal
+
+- **Module Name:** Discount Payments (`Discount.docx` & `Completed/Sales & PI Process.docx` L102)
+- **Routes:** `/sale-discount/list`, `/discount-payments/list`, `/sales/discount-payments`
+- **Files:**
+  - Frontend Page: `frontend/src/pages/sales/DiscountPaymentsPage.tsx`
+  - Backend Model, Service & Routes: `backend/app/sales/models.py` (`DiscountPayment`), `backend/app/sales/service.py` (`_sync_discount_payment`), `backend/app/sales/routes.py` (`GET / POST / PATCH /api/v1/sales/discount-payments`)
+  - Database Migration: `backend/alembic/versions/z1e2f3a4b5c6_add_payments_history_to_discount_payments.py`
+  - Test Suites: `frontend/src/pages/__tests__/DiscountPaymentsPage.test.tsx`, `backend/tests/test_discount_payments.py`
+
+### Feature Overview & UI Specifications
+1. **Collapsible Filter Panel (Above KPI Cards):**
+   - Toggled via top-right `#556987` funnel button (`data-testid="btn-toggle-filter"`, collapsed by default).
+   - Fields: `Order Date Range` (`DateRangePicker`), `Warehouse` (`All.` + dynamic warehouses), `Sales Person` (`All.` + dynamic sales persons), `Dispatch` (`All`, `LR`, `Dispatched`, `Pending`, `Gatepass Created`), with `Reset` and `Search` buttons.
+2. **Reactive Top 3 KPI Summary Cards:**
+   - `TOTAL DISCOUNT` (blue `#0061f2` label), `PAID` (green `#16a34a` label), and `DUE` (red `#ef4444` label), dynamically updating immediately upon submitting partial or full discount adjustments.
+3. **Top Stage Tabs (`Discount.docx`):**
+   - `All (<count>)`, `Pending (<count>)` (default active tab), and `Completed (<count>)` (completed rows render `✓ Completed` green badge `data-testid="badge-settled-<id>"`).
+4. **10-Column Discount Payments Table:**
+   - `Order No` (clickable blue `SO-...` link opening `/sale-order/invoice/<order_id>` + blue `DD-MM-YYYY` order date), `Warehouse`, `Company` (blue clickable company name + blue `Mr <Contact>` opening `Company Detail #<code` right drawer), `Contact Person` (name + mobile), `Sales Person`, `Total Discount`, `Paid/Due Dis. Amount` (`Paid ₹ <amount>` when `paid > 0`, red `Due ₹ <amount>` when `due > 0`, or green `✓ Completed` badge when settled), `Status` (live SaleOrder workflow stage badge e.g. `LR` + `DD-MM-YYYY hh:mm AM/PM` + red `Remark` button), `Gatepass` (blue `ID: <no>` + blue `DD-MM-YYYY` opening `Gate Pass Detail #<id>` right drawer), and `Action` (`⋮`).
+5. **Action (`⋮`) Menu:**
+   - Pending rows (`due_discount > 0`): `$ Adjust Discount` and `☰ List Payments`.
+   - Completed rows (`settled` / `due_discount === 0`): `☰ List Payments` only (`$ Adjust Discount` hidden to prevent over-adjustment).
+6. **`Discount Adjustment` Right-Side Drawer (`data-testid="discount-adjustment-drawer"`):**
+   - White `Discount Summary` card (`Total Discount:`, green `Total Discount Paid:`, red `Total Discount Due:`).
+   - `Date *` (`DatePicker`, defaults dynamically to current `DD-MM-YYYY` date), `Amount *` (`type="number"`, `placeholder="Max: <due_discount>"`, strictly validated `0 < amount <= due_discount` with inline alert `data-testid="adjust-discount-error"`), `Remarks/Feedback` textarea, and full-width blue `Submit` button.
+7. **`Discount Adjustment Payment List` Modal (`data-testid="list-payments-modal"`):**
+   - `Sale Order Detail` `#<OrderShortNo>` card with 3-column aligned grid (`Customer Name` / `Created Date` above `Total Discount` / `Paid Amount` / `Due Amount`).
+   - Multi-row installment table `# | Date | Title | Amount | Adjustment By` rendering every partial/full installment from `payments` (`Title` populated from `Remarks/Feedback`, `Adjustment By` populated from the authenticated user's full display name, or `No Payment Found` when `0` payments exist).
+
+### QA Verification Test Cases
+- [ ] **TC-DP-01 (Auto-Sync from Sale Process):** Create a Sale Order on `/sales/process/add` with a line-item `Unit Discount > 0` and advance its workflow status to `LR` with a Gatepass. Navigate to `/sale-discount/list` and verify the order automatically appears under `Pending` with accurate `Total Discount`, `Due ₹ <amount>`, `LR` status badge, Company contact details, and `ID: <gatepass_no>`.
+- [ ] **TC-DP-02 (Partial Discount Adjustment & Validation):** Click `⋮` ➔ `$ Adjust Discount`. Verify `Date *` defaults to today's `DD-MM-YYYY` date and `Amount *` displays `Max: <due>`. Attempt submitting empty/`0` or `> due` and verify inline error blocks submission. Submit a partial amount with `Remarks/Feedback` and verify `PAID` / `DUE` KPI cards and row `Paid ₹ ...` / `Due ₹ ...` update immediately.
+- [ ] **TC-DP-03 (Multi-Installment Payment List & Completion):** Click `⋮` ➔ `☰ List Payments` and verify `Sale Order Detail #<no>` and every recorded installment row (`#`, `Date`, `Title`, `Amount`, `Adjustment By`). Adjust the remaining balance to `0` and verify the record moves from `Pending` to `Completed` with `✓ Completed` badge, `$ Adjust Discount` hidden in `⋮`, and all installments preserved in `List Payments`.
+
+---
+
+## 72. REPORTS: Product Re-Order Matrix, Branch-Scoped Shortfall Engine & FIFO Stock Breakup
+
+- **Module Name:** Product Re-Order (`General New points inhyma.docx` L30/L69/L84/L103, `Phase 2/Stock Transactions.docx` L1-L36, `Phase 2/Reports.docx` L19-L20, `Completed/Product Stock 26-4-25.docx` L23-L24)
+- **Routes:** `/product-reorder/list`, `/reports/reorder`
+- **Files:**
+  - Frontend Page & Styles: `frontend/src/pages/ProductReorderPage.tsx`, `frontend/src/styles/productReorder.css`
+  - Frontend API Client: `frontend/src/lib/api.ts` (`ProductReorderItem`, `InventoryApi.listProductReorder`, `InventoryApi.updateProductReorder`, `InventoryApi.getStockBreakup`)
+  - Backend Schemas & Routes: `backend/app/inventory/schemas.py` (`ProductReorderItemRead`, `ProductReorderUpdateSchema`), `backend/app/inventory/routes.py` (`GET /api/v1/inventory/product-reorder`, `PATCH /api/v1/inventory/product-reorder/{product_id}`, `GET /api/v1/inventory/product-stock/breakup`)
+  - Test Suites: `frontend/src/pages/__tests__/ProductReorderPage.test.tsx`, `backend/tests/test_inventory_integrity.py`, `backend/tests/test_inventory_and_stock_adjustments.py`
+
+### Feature Overview & UI Specifications
+1. **Top Page Header & Collapsible 4-Column Filter Panel:**
+   - Title `Product Re-Order` on left; `Export` CSV button and dark slate `#5c6f88` funnel toggle button on right (open by default).
+   - **Row 1 (4 Columns):** `Category` (`All` + active `ProductCategory` masters), `Sub Category` (`All` + `ProductSubCategory` masters dynamically narrowed when `Category` is selected), `Brand` (`All` + active `Brand` masters), `Short Fall` (`All`, `0`, `Greater Than 0`).
+   - **Row 2 (Column 1):** `Re-Order` (`All`, `0`, `Greater Than 0`).
+   - **Bottom-Right Filter Actions:** Dark slate `Reset` button (`#5c6f88`) and golden-amber `Search` button (`#f7b919`).
+2. **Search + Branch Warehouse Selector Card:**
+   - Dedicated white card between Filter Panel and Table Card containing:
+     - Left `[ 🔍 | Search products by name, code, brand, sub-category... ]` input.
+     - Right Warehouse `<select>` (`Mumbai` default, `Ahmedabad`, `Indore`, `All Warehouses`).
+   - Changing the Warehouse selector dynamically scopes Columns 13-16 (`Re-Order`, `Short Fall`, `MOQ`, `Order To Be Place`), `Short Fall` / `Re-Order` filter evaluation, sorting, and inline threshold edits to that branch's net pipeline (`<city> + <city>_transit + <city>_ordered` and per-branch thresholds stored in `ProductStock.orders_info` under `_type == "wh_reorder"`), while `All Warehouses` evaluates against global `Total Qty` and global `Product` / `ProductStock` thresholds.
+3. **16-Column Color-Coded Product Re-Order Table (Default `50` Rows/Page, Full Catalog Load up to `2500`+ SKUs):**
+   - `Sr. No.` | `Product Name (As Per Tally)` (blue clickable hyperlink)
+   - **Physical Columns (Soft Rose-Pink `#f4dce0` header / `#f6dfe2` cells):** `Mumbai` (Col 3), `Ahmadabad` (Col 6), `Indore` (Col 9).
+   - **Transit Columns (Warm Beige-Grey `#edeae4` header / `#efece6` cells):** `Mumbai Transit` (Col 4), `Ahmedabad Transit` (Col 7), `Indore Transit` (Col 10).
+   - **Ordered Columns (Medium Neutral Grey `#dcdcdc` header / `#dedede` cells):** `Mumbai Ordered` (Col 5), `Ahmedabad Ordered` (Col 8), `Indore Ordered` (Col 11).
+   - **Summary & Replenishment Columns:** `Total Qty` (Col 12), `Re-Order` (Col 13, clickable blue inline-editable value), `Short Fall` (Col 14, `max(0, Re-Order - EffectivePipeline)`), `MOQ` (Col 15, clickable blue inline-editable value), `Order To Be Place` (Col 16, `0` when `Short Fall == 0`, else `max(Short Fall, MOQ)`).
+4. **Backend-Driven Circular Slate `ⓘ` Breakup Badges (`breakup_flags`):**
+   - Driven by live open transactions rather than `qty !== 0` alone:
+     - Physical cell (`Mumbai`, `Ahmadabad`, `Indore`) shows `ⓘ` whenever an open `SaleOrder` (`OPEN_SALE_ORDER_STATUSES`) exists for that product & branch—even when physical balance is `0` (`0 ⓘ`), and omits `ⓘ` on positive physical stock (e.g. `41`) when zero open Sale Orders exist.
+     - Transit / Ordered cell shows `ⓘ` when active `ImportPurchase` consignments, in-transit `StockTransfer`s (`pending` / `confirmed` / `in transit`), `orders_info` entries, or advance-booked `SaleOrder`s exist.
+5. **Interactive Drawers, Modals & Role-Safe PDF Integration:**
+   - **Physical `ⓘ` ➔ `Sale Order Information` Drawer:** Displays `SO No & Date` (clickable blue SO number fetching `/api/v1/sales/orders/{order_id}` to open the real Sale Order PDF, automatically enforcing `hidePricing: true` for Warehouse role users), `Company Name` (shown in Re-Order breakup), `City / State`, `Qty`, `Sales Person`, `Exp. Del. Date`, and clean workflow `Status` (`unit_price` strictly excluded).
+   - **Transit / Ordered `ⓘ` ➔ `Purchase Order Information` Drawer & `Consignment Details` Modal:** Combines incoming `ImportPurchase` containers and active inter-warehouse `StockTransfer`s, applies FIFO deduction against open `SaleOrder` bookings on `<City> Transit` / `<City> Ordered`, lists `Open Sale Order Bookings (FIFO Deducted)`, and makes every `Inv. / Cons No` clickable to open the `Consignment Details` modal (`Product Name`, `Qty`, `Warehouse`, `Inv. / Cons No`, `Inv. Date`, `Exp. Arri. Date`, `ETD Origin Date`, `ETA Port Date`, `Status`).
+   - **Clickable `Product Name` ➔ `Product Master View Window` Drawer:** Displays `Product Name (Tally)` & `Invoice Name`, `Category`, `Sub Category`, `Brand`, `HSN Code`, `GST %`, `Import Duty %`, `UOM`, `Min. Selling Price`, `Packaging` (`Qty/Box`, `Net Wt`, `Gross Wt`), `Dimensions For CBM` (`L × W × H cm` & `Unit CBM`), 9-column warehouse breakdown, `Specifications`, and `Open in Product Master ↗`.
+
+### QA Verification Test Cases
+- [ ] **TC-RO-01 (Master Joins, 4-Column Filter Panel & Full Catalog Load):** Navigate to `/product-reorder/list`. Verify all active catalog products load (default `50` per page), `Category`, `Sub Category` (narrowed by Category), and `Brand` dropdowns populate from master tables, and clicking `Search` / `Reset` filters and resets rows accurately.
+- [ ] **TC-RO-02 (Branch Warehouse Selector & Inline Threshold Persistence):** With `Mumbai` selected in the Warehouse bar, click a product's blue `Re-Order` and `MOQ` numbers, save new values, and verify `Short Fall` and `Order To Be Place` recalculate against `Mumbai + Mumbai Transit + Mumbai Ordered`. Switch Warehouse selector to `Indore` or `All Warehouses` and verify branch-isolated vs global pipeline shortfall calculation.
+- [ ] **TC-RO-03 (`0 ⓘ` Open Sale Order Breakup & Real Sale Order PDF):** For a product with `0` physical stock in Mumbai and an open Sale Order, verify `0 ⓘ` renders. Click `ⓘ`, verify `Company Name`, clean `Status`, and zero `unit_price` leakage, then click the blue `SO-...` link and confirm the real Sale Order PDF opens (with pricing hidden for Warehouse role).
+- [ ] **TC-RO-04 (Transit/Ordered FIFO Breakup, Stock Transfer Inclusion & Consignment Modal):** Click `ⓘ` on a Transit/Ordered cell with incoming Import Purchase or Stock Transfer entries and advance Sale Order bookings. Verify FIFO net available deduction across consignments, `Open Sale Order Bookings` table, and clicking `Inv. / Cons No` opens the `Consignment Details` modal with ETD/ETA dates.
+- [ ] **TC-RO-05 (Product Master View Window):** Click any blue `Product Name (As Per Tally)` hyperlink and verify the `Product Master View Window` drawer displays HSN, GST %, UOM, CBM dimensions, 9-column stock matrix, specifications, and `Open in Product Master ↗`.
+
+---
+*End of Master Features & Testing Specification Manual. Maintained for Inhyma Solutions Enterprise ERP. Last updated: October 28, 2026 (Sections 61-72: Dynamic Organization Company Logo, Product Master Category Rewiring & Floating Duplicate Overlay, Platform Migration Idempotency, Sales Process Workflow & 13-Field Filter Grid, HRMS Phases 2-6 RBAC & Approval Architecture, Feed & Broadcast Open Access & 1-to-1 Employee Messaging, Sale Status Update Side Drawer & Chronological Timeline, Discount Payments Multi-Installment Ledger, and Product Re-Order Branch-Scoped Matrix & FIFO Stock Breakup).*

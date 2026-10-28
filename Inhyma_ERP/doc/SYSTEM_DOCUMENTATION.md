@@ -687,6 +687,18 @@ A user may be assigned any number of Roles simultaneously (`POST /users/{id}/rol
 - **Container Inwarding via Stock Transfer (`Receive to Main WH`):**
   - Endpoint `POST /inventory/stock-transfer/{id}/receive-to-main` atomically decrements the source transit warehouse column and increments the destination physical warehouse column when offloaded.
 
+#### 8.16.1. Inventory: Product Re-Order Matrix, Branch-Scoped Shortfall & FIFO Stock Breakup
+- **Files:**
+  - Backend: `backend/app/inventory/routes.py`, `backend/app/inventory/schemas.py`, `backend/app/inventory/stock_service.py`.
+  - Frontend: `frontend/src/pages/ProductReorderPage.tsx`, `frontend/src/styles/productReorder.css`, `frontend/src/lib/api.ts`.
+- **Endpoints:**
+  - `GET /api/v1/inventory/product-reorder` (and `/product-reorder`, `/product-reorder/list`): Lists up to `5000` active products outer-joined with `ProductStock`, `ProductCategory`, `ProductSubCategory`, `Brand`, `UnitOfMeasurement`, and `Tax`, returning `filter_options`, `breakup_flags`, `warehouse_thresholds`, and branch-scoped or global shortfall metrics.
+  - `PATCH /api/v1/inventory/product-reorder/{product_id}`: Updates inline `reorder_level` and/or `minimum_order_quantity` (`MOQ`) either globally (`All` / omitted) or scoped to a specific branch (`Mumbai`, `Ahmedabad`, `Indore`) stored in `ProductStock.orders_info` (`_type == "wh_reorder"`).
+  - `GET /api/v1/inventory/product-stock/breakup`: Returns role-safe physical Sale Order bookings (`order_id`, clickable SO PDF without `unit_price` leakage) or Transit/Ordered incoming `ImportPurchase` consignments + active inter-warehouse `StockTransfer`s (`pending` / `confirmed` / `in transit`) with FIFO deduction against advance-booked `SaleOrder`s.
+- **Core Business Architecture:**
+  - **Branch-Scoped Replenishment Math:** Selecting `Mumbai` (default), `Ahmedabad`, or `Indore` in the Warehouse bar evaluates `Short Fall = max(0, Re-Order - (city + city_transit + city_ordered))` and `Order To Be Place = 0 if Short Fall == 0 else max(Short Fall, MOQ)` using branch-specific thresholds, while `All Warehouses` evaluates against global `Total Qty`.
+  - **Transaction-Driven `ⓘ` Badges (`breakup_flags`):** Computed from live open `SaleOrder`s, active `ImportPurchase`s, and in-transit `StockTransfer`s so `0` physical stock with an open Sale Order accurately displays `0 ⓘ`, while unbooked physical stock omits `ⓘ`.
+
 ### 8.17. Inventory: Stock Adjustment & Order PDF Generation
 - **Files:**
   - Backend: `backend/app/inventory/models.py`, `backend/app/inventory/routes.py`, `backend/app/inventory/stock_service.py`.
@@ -1003,6 +1015,9 @@ A user may be assigned any number of Roles simultaneously (`POST /users/{id}/rol
   - `PATCH /api/v1/sales/orders/{id}/status`: Advance SO stage (`pending` ➔ `sales_confirmed` ➔ `admin_approved` ➔ `acc_confirmed` ➔ `gatepass_created` ➔ `dispatched` ➔ `lr` / `cancelled`) with stage-specific metadata (`po_file_url`, `po_file_name`, `invoice_date`, `invoice_no`, `tally_bill_url`, `tally_bill_name`, `eway_bill`, `third_party_invoice`, `gatepass_no`, `lr_no`).
   - `POST /api/v1/sales/upload-po`: Upload Purchase Order (PO) document to `inhyma-sales-docs` / `/uploads/private/sales_po/`.
   - `POST /api/v1/sales/upload-tally-bill`: Upload Tally Bill document to `inhyma-sales-docs` / `/uploads/private/sales_tally_bills/`.
+  - `POST /api/v1/sales/upload-eway-bill`: Upload E-Way Bill document to `inhyma-sales-docs` / `/uploads/private/sales_eway_bills/`.
+  - `POST /api/v1/sales/upload-lr`: Upload Lorry Receipt (LR) document to `inhyma-sales-docs` / `/uploads/private/sales_lr/`.
+  - `POST /api/v1/sales/upload-dispatch-media`: Upload multiple dispatch images and videos (`files: list[UploadFile]`) to `inhyma-sales-docs` / `/uploads/private/sales_dispatch_media/`.
   - `POST /api/v1/sales/orders/{id}/status-with-po`: Atomic multipart status update with optional PO file upload.
   - `DELETE /api/v1/sales/orders/{id}`: Soft-delete Sales Order and revert stock allocations.
   - `POST /api/v1/sales/orders/{id}/restore`: Restore soft-deleted Sales Order (Admin only).
@@ -1015,14 +1030,17 @@ A user may be assigned any number of Roles simultaneously (`POST /users/{id}/rol
   - `POST /api/v1/sales/orders/{id}/upload-lr`: Attach transporter LR document and multi-photo delivery proof.
   - `GET /api/v1/sales/discount-payments`: List under-invoicing discount ledger entries.
   - `POST /api/v1/sales/discount-payments`: Record cash discount settlement against a Sales Order reference.
-- **Sale Status Update Side Drawer & Document Badges (`SaleProcessList.tsx`, `SaleProcessDetailModal.tsx`, Migration `v7a8b9c0d1e2`):**
-  - **Interactive Edit Action:** Clicking the square blue pen button (`title="Update Status"`) next to any row's status badge opens the right-hand **Sale Status Update** `SideDrawer` (`width="420px"`).
+- **Sale Status Update Side Drawer, Persistent Timeline & Document Badges (`SaleProcessList.tsx`, `SaleProcessDetailModal.tsx`, Migrations `v7a8b9c0d1e2`, `w8b9c0d1e2f3`, `x9c0d1e2f3a4` & `y0d1e2f3a4b5`):**
+  - **Interactive Edit Action:** Clicking the square blue pen button (`title="Update Status"`) next to any row's status badge opens the right-hand **Sale Status Update** `SideDrawer` (`width="480px"`).
   - **Multi-Stage Conditional Controls:**
     - **Pending:** Green banner `Current Status: Pending`, target status options `Sales Confirmed` (default) / `Cancel`, plus **PO File** upload (`.pdf,.png,.jpg,.jpeg,.xlsx,.xls,.doc,.docx`) with size preview & `Clear` action.
     - **Sales Confirmed:** `Admin Approved` (default) / `Cancel` (PO input hidden).
-    - **Admin Approved:** `Acc. Confirmed` (default) / `Cancel` — requires `Invoice Date*`, `Invoice No *`, `Tally Bill *` file upload, `E-Way Bill` (`No`/`Yes`), plus `Third Party Invoice / Reference *` when Third-Party Delivery is enabled.
-    - **Downstream Stages:** Supports `Acc. Confirmed` ➔ `Gatepass Created` (Outward Gate Pass Details), `Gatepass Created` ➔ `Dispatched` / `Gatepass Cancelled`, and `Dispatched` ➔ `LR` (LR No, Transporter, Proofs).
-  - **Direct Download Badges & Timestamps:** Displays clickable `📎 PO` and `📎 Bill` download badges (with authenticated `/uploads/private/...?token=` resolution) in the Status column, PO column, and `SaleProcessDetailModal`, plus `DD-MM-YYYY hh:mm A` timestamp below the status badge.
+    - **Admin Approved:** `Acc. Confirmed` (default) / `Cancel` — requires `Invoice Date*`, `Invoice No *`, `Tally Bill *` file upload, `E-Way Bill` (`No`/`Yes` — when `Yes` is selected, dynamically expands a mandatory `E-Way Bill *` file upload uploaded via `POST /api/v1/sales/upload-eway-bill` and persisted in `eway_bill_url` / `eway_bill_name`), plus `Third Party Invoice / Reference *` when Third-Party Delivery is enabled.
+    - **Acc. Confirmed:** `Gatepass Created` (clean drawer displaying `Current Status: Acc. Confirmed`, `Status: Gatepass Created`, `Remarks`, and `Submit` with auto-generated Gatepass metadata).
+    - **Gatepass Created / Gatepass Cancelled:** `Gatepass Created` ➔ `Dispatched` / `Gatepass Cancelled`; `Gatepass Cancelled` ➔ `Gatepass Created` / `Cancel`.
+    - **Dispatched:** `Status` `<select>` options `LR` (default) and `Gatepass Cancel`. When `LR` is selected, renders `[ ] Change Transport Info` checkbox (expanding a clean frameless 2×2 grid of `Transport Name`, `Transport Destination`, `Delivery Type` defaulting to `Door`, and `Delivery Charge` defaulting to `To Pay`, with `Self Pickup` handling), mandatory `LR File *` upload (`POST /api/v1/sales/upload-lr`), `Images/Videos (Upload Multiple)` drag-and-drop + browse dropzone (`POST /api/v1/sales/upload-dispatch-media`), and `Remarks`. Switching to `Gatepass Cancel` hides LR fields and transitions to `gatepass_cancelled`.
+  - **Direct Download Badges, `Acc. Dep.` `[i]`/`[E]` Chips & Timestamps:** Displays clickable `📎 PO` and `📎 Bill` download badges in the Status column & PO column, orange `[i]` (Tally Bill) and `[E]` (E-Way Bill) chips in the `Acc. Dep.` column above `Timeline`, clickable Tally Bill & E-Way Bill links in `SaleProcessDetailModal` & `Upload Files` (`SO Files`), plus `DD-MM-YYYY hh:mm A` timestamp below the status badge.
+  - **Persistent Chronological Sale Order Timeline (`sales_orders.timeline` JSON column, Migration `y0d1e2f3a4b5`):** Records every lifecycle transition newest-first (`LR Mandatory` ➔ `Dispatched` ➔ `Gatepass Created` ➔ `Account Confirmed` ➔ `Admin Approval` ➔ `Sales Confirmed` ➔ `Pending`, plus `Gatepass Cancelled` / `Cancelled`) with IST `DD-MM-YYYY hh:mm AM/PM` timestamps, resolved user display names (`By : <Actor>`), optional stage `Remark`, and rich `Account Confirmed` metadata (`Invoice No`, `DD-MM-YYYY` `Invoice Date`, conditional `E-Way Bill` download icon link when `E-Way Bill = Yes`, and `Tally Bill` download icon link), with automatic upstream stage backfill for pre-migration orders.
 - **Sales Process Add New Form Architecture (`SaleProcessForm.tsx`):**
   - **100% Feature Parity with Proforma Invoice:** Designed to match the exact UX, visual structure, validation patterns, and calculation standards of Proforma Invoice's Add New form (`ProformaInvoicesPage.tsx`), ensuring zero learning curve for operators.
   - **Dynamic DB Masters Integration (`useMasterNames`):**
@@ -1072,8 +1090,13 @@ A user may be assigned any number of Roles simultaneously (`POST /users/{id}/rol
     - Delivery Charges: `To Pay` / `Paid` (default: `To Pay`).
     - Destination City / Area.
   - **Proof of Delivery (LR Upload):** Transporter Lorry Receipt (LR) number with multi-photo attachment; marks order lifecycle as `Dispatched`.
-- **Discount Payment Ledger (Under-Invoicing Tracking):**
-  - Tracks cash discounts and under-invoiced amounts (`discount_amount`, `paid_discount`, `due_discount`) linked to each SO reference, providing accounts oversight and settlement controls.
+- **Discount Payment Ledger & Multi-Installment Adjustment Engine (`DiscountPaymentsPage.tsx`, `routes.py`, `service.py`):**
+  - **Automatic SaleOrder Synchronization (`_sync_discount_payment`):** Creating or updating any `SaleOrder` with `discount > 0` automatically creates/updates its `DiscountPayment` row (and `GET /api/v1/sales/discount-payments` auto-backfills missing discounted orders), enriching live `SaleOrder`, `Company`, and `GatePass` metadata (`status` workflow stage label such as `LR` / `Dispatched` / `Gatepass Created`, `gatepass_id`, `gatepass_date`, `contact_name`, `contact_person_name`, `contact_person_mobile`). Soft-deleting or cancelling an unpaid order automatically soft-deletes its ledger entry.
+  - **Top 3 KPI Cards & Stage Tabs (`Discount.docx`):** Reactive `TOTAL DISCOUNT`, `PAID`, and `DUE` cards above `All`, `Pending` (default active), and `Completed` (with green `✓ Completed` badge identifying settled payments) tabs.
+  - **Multi-Installment Payment Ledger (`z1e2f3a4b5c6` — `discount_payments.payments` JSON):**
+    - `PATCH /api/v1/sales/discount-payments/{payment_id}` validates `0 < amount <= due_discount`, resolves the authenticated user's full display name (`Adjustment By`), updates `paid_discount` / `due_discount` / `settled`, and appends `{ id, date, title, amount, adjusted_by }` to `discount_payments.payments`.
+    - **`Discount Adjustment` Right Drawer:** Displays `Discount Summary` card (`Total Discount:`, green `Total Discount Paid:`, red `Total Discount Due:`), dynamic today's `Date *` (`DD-MM-YYYY`), validated `Amount *` (`Max: <due>`), and `Remarks/Feedback` (stored as installment `Title`).
+    - **`Discount Adjustment Payment List` Modal:** Displays `Sale Order Detail #<OrderShortNo>` (`Customer Name`, `Created Date`, `Total Discount`, `Paid Amount`, `Due Amount`) and full chronological `# | Date | Title | Amount | Adjustment By` installment table.
 - **Sales Process List & Execution Architecture (`SaleProcessList.tsx`):**
   - **Dynamic Top 6 KPI Metric Cards & 10 Status Tabs Calculation Engine:**
     - Live aggregation directly computes counts and currency totals across order stages: `ALL`, `ADMIN CONFIRMED TO LR`, `PENDING`, `ADMIN APPROVED`, `LR`, and `CANCELLED`.
@@ -1417,6 +1440,9 @@ A user may be assigned any number of Roles simultaneously (`POST /users/{id}/rol
 | **Inventory: Stock** | `GET` | `/api/v1/inventory/product-stock/{id}` | Retrieve individual product stock valuation & availability ledger | `product.view` |
 | **Inventory: Stock** | `GET` | `/api/v1/product-stock` | Legacy alias for `/inventory/product-stock` | `product.view` |
 | **Inventory: Stock** | `GET` | `/api/v1/product-stock/list` | Legacy alias for `/inventory/product-stock` | `product.view` |
+| **Inventory: Re-Order** | `GET` | `/api/v1/inventory/product-reorder` | Full-catalog 16-column Product Re-Order matrix with master joins, `filter_options`, `breakup_flags` & branch `warehouse` scoping | `product.view` |
+| **Inventory: Re-Order** | `PATCH` | `/api/v1/inventory/product-reorder/{product_id}` | Inline update of global or branch-scoped `reorder_level` and `minimum_order_quantity` (`MOQ`) | `product.edit` |
+| **Inventory: Breakup** | `GET` | `/api/v1/inventory/product-stock/breakup` | Physical open Sale Order breakup (`unit_price` excluded) & Transit/Ordered consignment + StockTransfer FIFO breakup | `product.view` |
 | **Inventory: Adjustment** | `GET` | `/api/v1/inventory/stock-adjustment` | List stock adjustment vouchers with date range, purpose & type filters | `product.view` |
 | **Inventory: Adjustment** | `GET` | `/api/v1/inventory/stock-adjustment/{id}` | Retrieve stock adjustment voucher with multi-line item breakdown | `product.view` |
 | **Inventory: Adjustment** | `POST` | `/api/v1/inventory/stock-adjustment` | Create stock adjustment voucher & atomically update warehouse quantities | `product.create` |
@@ -1489,6 +1515,8 @@ A user may be assigned any number of Roles simultaneously (`POST /users/{id}/rol
 | **Sales: Orders**   | `PATCH`| `/api/v1/sales/orders/{id}/status` | Advance Sales Order stage (`pending` -> `sales_confirmed` -> `admin_approved` -> `acc_confirmed` -> `gatepass_created` -> `dispatched` -> `lr`) with PO & Tally Bill metadata | Authenticated (Workflow RBAC) |
 | **Sales: Orders**   | `POST`| `/api/v1/sales/upload-po` | Upload client Purchase Order (PO) document (`inhyma-sales-docs` / `sales_po`) | Authenticated |
 | **Sales: Orders**   | `POST`| `/api/v1/sales/upload-tally-bill` | Upload Tally Bill invoice document (`inhyma-sales-docs` / `sales_tally_bills`) | Authenticated |
+| **Sales: Orders**   | `POST`| `/api/v1/sales/upload-lr` | Upload Lorry Receipt (LR) document (`inhyma-sales-docs` / `sales_lr`) | Authenticated |
+| **Sales: Orders**   | `POST`| `/api/v1/sales/upload-dispatch-media` | Upload multiple dispatch images/videos (`inhyma-sales-docs` / `sales_dispatch_media`) | Authenticated |
 | **Sales: Orders**   | `POST`| `/api/v1/sales/orders/{id}/status-with-po` | Atomic multipart status transition with optional PO document upload | Authenticated (Workflow RBAC) |
 | **Sales: Orders**   | `DELETE`| `/api/v1/sales/orders/{id}` | Soft-delete Sales Order and atomically revert deducted stock back to inventory | `saleorder.delete` |
 | **Sales: Orders**   | `POST`| `/api/v1/sales/orders/{id}/restore` | Restore soft-deleted Sales Order (Admin only) | `saleorder.manage` |
@@ -1499,8 +1527,9 @@ A user may be assigned any number of Roles simultaneously (`POST /users/{id}/rol
 | **Sales: Orders**   | `GET` | `/api/v1/sales/export` | Export Sales Orders dataset to Excel spreadsheet | `saleorder.view` |
 | **Sales: Gate Pass**| `POST`| `/api/v1/sales/gate-pass` | Create dispatch Gate Pass with logistics metadata and transporter carrier | `saleorder.update` |
 | **Sales: Logistics**| `POST`| `/api/v1/sales/orders/{id}/upload-lr` | Attach transporter LR document and multi-photo delivery proof | `saleorder.update` |
-| **Sales: Discounts**| `GET` | `/api/v1/sales/discount-payments` | List under-invoicing cash discount payment ledger entries | `saleorder.view` |
-| **Sales: Discounts**| `POST`| `/api/v1/sales/discount-payments` | Record discount payment settlement | `saleorder.update` |
+| **Sales: Discounts**| `GET` | `/api/v1/sales/discount-payments` | List synchronized Sale Order discount payment ledger entries with live Company/GatePass enrichment & `payments` history | `saleorder.view` |
+| **Sales: Discounts**| `POST`| `/api/v1/sales/discount-payments` | Create standalone discount payment authorization record | `saleorder.update` |
+| **Sales: Discounts**| `PATCH`| `/api/v1/sales/discount-payments/{payment_id}` | Record validated partial/full discount adjustment installment into `payments` ledger with authenticated `adjusted_by` | `saleorder.update` |
 | **Workflow Engine** | `GET` | `/api/v1/masters/workflow-rules` | List registered workflow status transition rules | `workflow.view` |
 | **Workflow Engine** | `POST` | `/api/v1/masters/workflow-rules` | Create or update database-driven workflow transition rule | `workflow.manage` |
 | **Federation** | `POST` | `/api/v1/federation/sso-handover` | Generate cross-ERP single sign-on handover ticket | Authenticated |
@@ -1821,5 +1850,5 @@ Enterprise logos and branding assets are stored directly in PostgreSQL with publ
   - All brand caching operations are wrapped in graceful quota guards that safely degrade to in-memory state or remote streaming without throwing unhandled exceptions.
 
 ---
-*Maintained and verified for Inhyma Solutions Enterprise ERP. Last updated: October 2026 (Federation Resilience, Winsock DNS Platform Gating, Inbound Email DB Deduplication, Seed First-Install Protection, SSO Deactivated Account Guards, HRMS Attendance Calendar & Payroll Excel Export Engine).*
+*Maintained and verified for Inhyma Solutions Enterprise ERP. Last updated: October 28, 2026 (Federation Resilience, Winsock DNS Platform Gating, Inbound Email DB Deduplication, Seed First-Install Protection, SSO Deactivated Account Guards, HRMS Attendance Calendar & Payroll Excel Export Engine, Sale Status Update & Timeline Drawers, Discount Payments Multi-Installment Ledger, and Product Re-Order Branch-Scoped Matrix & FIFO Stock Breakup).*
 

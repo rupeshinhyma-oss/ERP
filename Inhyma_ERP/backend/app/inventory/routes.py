@@ -253,6 +253,141 @@ async def list_product_stock(
 # Product Re-Order Endpoints
 # ==============================================================================
 
+_SO_STATUS_LABELS: dict[str, str] = {
+    "pending": "Pending",
+    "sales_confirmed": "Sales Confirmed",
+    "admin_approved": "Admin Approved",
+    "acc_confirmed": "Acc. Confirmed",
+    "gatepass_created": "Gatepass Created",
+    "dispatched": "Dispatched",
+    "gatepass_cancelled": "Gatepass Cancelled",
+    "lr": "LR",
+    "cancelled": "Cancelled",
+}
+
+
+def _format_so_status(raw_status: Optional[str]) -> str:
+    key = (raw_status or "pending").strip().lower()
+    return _SO_STATUS_LABELS.get(key, key.replace("_", " ").title())
+
+
+def _extract_warehouse_thresholds(orders_info: Any) -> dict[str, dict[str, float]]:
+    """Extract per-branch Re-Order & MOQ overrides stored inside ProductStock.orders_info."""
+    out: dict[str, dict[str, float]] = {}
+    if not isinstance(orders_info, list):
+        return out
+    for entry in orders_info:
+        if isinstance(entry, dict) and entry.get("_type") == "wh_reorder":
+            wh = str(entry.get("warehouse") or "").strip().lower()
+            if wh in ("mumbai", "ahmedabad", "indore"):
+                out[wh] = {
+                    "reorder_level": float(entry.get("reorder_level") or 0.0),
+                    "moq": float(entry.get("moq") or 0.0),
+                }
+    return out
+
+
+async def _compute_breakup_flags(db: AsyncSession, product_names: list[str]) -> dict[str, list[str]]:
+    """Return {lower_product_name: sorted list of column keys} that have live breakup rows.
+
+    Covers:
+    1. Open SaleOrders (OPEN_SALE_ORDER_STATUSES) booked against physical, transit, or ordered warehouses.
+    2. Active ImportPurchases (ACTIVE_PURCHASE_STATUSES) in '<City> Transit' or '<City> Ordered'.
+    3. Active in-transit StockTransfers ('pending' / 'confirmed') moving into '<City>' / '<City> Transit'.
+    """
+    lowered_names = sorted({n.strip().lower() for n in product_names if n and n.strip()})
+    if not lowered_names:
+        return {}
+
+    from app.purchase.models import ImportPurchase, ImportPurchaseItem
+    from app.sales.models import SaleOrder, SaleOrderItem
+
+    flags: dict[str, set[str]] = {}
+
+    def _add_flag(prod_lower: str, raw_wh: Optional[str], *, force_transit: bool = False) -> None:
+        w = (raw_wh or "").strip().lower()
+        if not w:
+            return
+        for city in ("mumbai", "ahmedabad", "indore"):
+            if w == city:
+                flags.setdefault(prod_lower, set()).add(f"{city}_transit" if force_transit else city)
+                return
+            if w == f"{city} transit":
+                flags.setdefault(prod_lower, set()).add(f"{city}_transit")
+                return
+            if w == f"{city} ordered":
+                flags.setdefault(prod_lower, set()).add(f"{city}_ordered")
+                return
+
+    from sqlalchemy.exc import OperationalError
+
+    # 1. Open Sale Orders
+    try:
+        async with db.begin_nested():
+            so_rows = (
+                await db.execute(
+                    select(func.lower(SaleOrderItem.product_name), SaleOrder.warehouse)
+                    .join(SaleOrder, SaleOrder.id == SaleOrderItem.order_id)
+                    .where(
+                        SaleOrder.deleted_at.is_(None),
+                        SaleOrder.status.in_(OPEN_SALE_ORDER_STATUSES),
+                        func.lower(SaleOrderItem.product_name).in_(lowered_names),
+                    )
+                    .distinct()
+                )
+            ).all()
+        for p_low, wh in so_rows:
+            if p_low:
+                _add_flag(p_low, wh)
+    except OperationalError:
+        pass
+
+    # 2. Active Import Purchases (Transit / Ordered)
+    try:
+        async with db.begin_nested():
+            ip_rows = (
+                await db.execute(
+                    select(func.lower(ImportPurchaseItem.product_name), ImportPurchase.warehouse)
+                    .join(ImportPurchase, ImportPurchase.id == ImportPurchaseItem.purchase_id)
+                    .where(
+                        ImportPurchase.deleted_at.is_(None),
+                        ImportPurchase.status.in_(ACTIVE_PURCHASE_STATUSES),
+                        func.lower(ImportPurchaseItem.product_name).in_(lowered_names),
+                    )
+                    .distinct()
+                )
+            ).all()
+        for p_low, wh in ip_rows:
+            if p_low and wh and ("transit" in wh.lower() or "ordered" in wh.lower()):
+                _add_flag(p_low, wh)
+    except OperationalError:
+        pass
+
+    # 3. Active In-Transit Stock Transfers (Point 69)
+    try:
+        async with db.begin_nested():
+            st_rows = (
+                await db.execute(
+                    select(func.lower(StockTransferLineItem.product_name), StockTransfer.to_warehouse)
+                    .join(StockTransfer, StockTransfer.id == StockTransferLineItem.transfer_id)
+                    .where(
+                        StockTransfer.deleted_at.is_(None),
+                        func.lower(StockTransfer.status).in_(("pending", "confirmed", "in transit", "in_transit")),
+                        func.lower(StockTransferLineItem.product_name).in_(lowered_names),
+                    )
+                    .distinct()
+                )
+            ).all()
+        for p_low, to_wh in st_rows:
+            if p_low and to_wh:
+                _, city, _ = _parse_wh_column(to_wh, prefer_transit=True)
+                flags.setdefault(p_low, set()).add(f"{city}_transit")
+    except OperationalError:
+        pass
+
+    return {k: sorted(v) for k, v in flags.items()}
+
+
 @router.get("/inventory/product-reorder", summary="List product re-order table records")
 @router.get("/product-reorder/list", summary="Alias for product re-order table records")
 async def list_product_reorder(
@@ -262,80 +397,262 @@ async def list_product_reorder(
     brand: Optional[str] = Query(None, description="Brand filter"),
     shortfall: Optional[str] = Query(None, description="Short fall filter: 'All' | '0' | 'Greater Than 0'"),
     reorder: Optional[str] = Query(None, description="Re-order filter: 'All' | '0' | 'Greater Than 0'"),
-    warehouse: Optional[str] = Query(None, description="Warehouse filter (not used)"),
+    warehouse: Optional[str] = Query(None, description="Warehouse scope: 'Mumbai' | 'Ahmedabad' | 'Indore' | 'All'"),
     search: Optional[str] = Query(None, description="Search keyword"),
     skip: int = Query(0, ge=0),
-    limit: int = Query(50, ge=1, le=500),
+    limit: int = Query(50, ge=1, le=5000),
     db: AsyncSession = Depends(get_db_session),
 ) -> dict:
-    """Re-order table: every product with its stock, short fall and the quantity to order.
+    """Re-order table: every product with its master classification, warehouse pipeline stock, shortfall, and order qty.
 
-    Real products only (no sample rows), filtered and paginated in SQL -- there is no 100-product cap any more.
+    Joins Product -> ProductStock + ProductCategory + ProductSubCategory + Brand + UnitOfMeasurement + Tax so all
+    products (even those without stock movement rows yet) have accurate Category, Sub-Category, Brand, HSN, UOM, and
+    Product Master specifications. Supports warehouse-scoped shortfall evaluation ('Mumbai', 'Ahmedabad', 'Indore')
+    as well as global ('All' / omitted).
     """
+    from app.masters.brands.models import Brand
+    from app.masters.product_categories.models import ProductCategory
+    from app.masters.product_sub_categories.models import ProductSubCategory
     from app.masters.products.models import Product
+    from app.masters.taxes.models import Tax
+    from app.masters.uom.models import UnitOfMeasurement
 
     ps = ProductStock
     total_qty = func.coalesce(ps.total_qty, 0.0)
-    level = case((func.coalesce(ps.reorder_level, 0.0) > 0, ps.reorder_level), else_=func.coalesce(Product.reorder_level, 0.0))
-    moq = case((func.coalesce(ps.minimum_order_quantity, 0.0) > 0, ps.minimum_order_quantity), else_=func.coalesce(Product.minimum_order_quantity, 0.0))
-    short_fall = case((level > total_qty, level - total_qty), else_=0.0)
+    level = case(
+        (func.coalesce(ps.reorder_level, 0.0) > 0, ps.reorder_level),
+        else_=func.coalesce(Product.reorder_level, 0.0),
+    )
+    moq = case(
+        (func.coalesce(ps.minimum_order_quantity, 0.0) > 0, ps.minimum_order_quantity),
+        else_=func.coalesce(Product.minimum_order_quantity, 0.0),
+    )
+
+    wh_scope = _text(warehouse).lower()
+    is_branch_scope = wh_scope in ("mumbai", "ahmedabad", "indore")
+    if is_branch_scope:
+        eval_qty = (
+            func.coalesce(getattr(ps, wh_scope), 0.0)
+            + func.coalesce(getattr(ps, f"{wh_scope}_transit"), 0.0)
+            + func.coalesce(getattr(ps, f"{wh_scope}_ordered"), 0.0)
+        )
+    else:
+        eval_qty = total_qty
+
+    short_fall = case((level > eval_qty, level - eval_qty), else_=0.0)
+
+    name_expr = func.coalesce(ps.product_name_tally, Product.product_name_tally, Product.product_name)
+    code_expr = func.coalesce(func.nullif(Product.product_code, "-"), func.nullif(ps.product_code, "-"), "-")
+    brand_expr = func.coalesce(Brand.name, func.nullif(ps.brand, "-"), "-")
+    category_expr = func.coalesce(ProductCategory.name, func.nullif(ps.category, "-"), "-")
+    sub_category_expr = func.coalesce(ProductSubCategory.name, func.nullif(ps.sub_category, "-"), "-")
+    uom_expr = func.coalesce(UnitOfMeasurement.short_name, UnitOfMeasurement.name, func.nullif(ps.uom, ""), "SET")
+    hsn_expr = func.coalesce(Tax.hsn_number, ps.hsn_code)
 
     stmt = (
         select(
-            ps.id.label("stock_id"), Product.id.label("prod_id"), ps.sr_no.label("sr_no"),
-            func.coalesce(ps.product_name_tally, Product.product_name_tally).label("name"),
-            func.coalesce(ps.product_code, Product.product_code, "-").label("code"),
-            func.coalesce(ps.brand, "-").label("brand"), func.coalesce(ps.category, "-").label("category"),
-            func.coalesce(ps.sub_category, "-").label("sub_category"),
-            func.coalesce(ps.mumbai, 0.0).label("mumbai"), func.coalesce(ps.mumbai_transit, 0.0).label("mumbai_transit"),
-            func.coalesce(ps.mumbai_ordered, 0.0).label("mumbai_ordered"), func.coalesce(ps.ahmedabad, 0.0).label("ahmedabad"),
-            func.coalesce(ps.ahmedabad_transit, 0.0).label("ahmedabad_transit"), func.coalesce(ps.ahmedabad_ordered, 0.0).label("ahmedabad_ordered"),
-            func.coalesce(ps.indore, 0.0).label("indore"), func.coalesce(ps.indore_transit, 0.0).label("indore_transit"),
+            ps.id.label("stock_id"),
+            Product.id.label("prod_id"),
+            ps.sr_no.label("sr_no"),
+            name_expr.label("name"),
+            Product.product_name_invoice.label("name_invoice"),
+            code_expr.label("code"),
+            brand_expr.label("brand"),
+            category_expr.label("category"),
+            sub_category_expr.label("sub_category"),
+            uom_expr.label("uom"),
+            hsn_expr.label("hsn_code"),
+            Tax.gst_percent.label("gst_percent"),
+            Tax.import_duty_percent.label("import_duty_percent"),
+            Product.minimum_price.label("minimum_price"),
+            Product.packaging_quantity.label("packaging_quantity"),
+            Product.packaging_net_weight.label("packaging_net_weight"),
+            Product.packaging_gross_weight.label("packaging_gross_weight"),
+            func.coalesce(Product.length_cm, Product.length).label("length_cm"),
+            func.coalesce(Product.width_cm, Product.width).label("width_cm"),
+            func.coalesce(Product.height_cm, Product.height).label("height_cm"),
+            Product.packaging_unit_cbm.label("packaging_unit_cbm"),
+            Product.specification.label("specification"),
+            func.coalesce(Product.description, ps.description).label("description"),
+            ps.orders_info.label("orders_info"),
+            func.coalesce(ps.mumbai, 0.0).label("mumbai"),
+            func.coalesce(ps.mumbai_transit, 0.0).label("mumbai_transit"),
+            func.coalesce(ps.mumbai_ordered, 0.0).label("mumbai_ordered"),
+            func.coalesce(ps.ahmedabad, 0.0).label("ahmedabad"),
+            func.coalesce(ps.ahmedabad_transit, 0.0).label("ahmedabad_transit"),
+            func.coalesce(ps.ahmedabad_ordered, 0.0).label("ahmedabad_ordered"),
+            func.coalesce(ps.indore, 0.0).label("indore"),
+            func.coalesce(ps.indore_transit, 0.0).label("indore_transit"),
             func.coalesce(ps.indore_ordered, 0.0).label("indore_ordered"),
-            total_qty.label("total_qty"), level.label("reorder_level"), moq.label("moq"), short_fall.label("short_fall"),
+            total_qty.label("total_qty"),
+            level.label("reorder_level"),
+            moq.label("moq"),
+            short_fall.label("short_fall"),
         )
         .select_from(Product)
         .outerjoin(ps, and_(ps.product_id == Product.id, ps.deleted_at.is_(None)))
+        .outerjoin(ProductCategory, and_(ProductCategory.id == Product.category_id, ProductCategory.deleted_at.is_(None)))
+        .outerjoin(ProductSubCategory, and_(ProductSubCategory.id == Product.sub_category_id, ProductSubCategory.deleted_at.is_(None)))
+        .outerjoin(Brand, and_(Brand.id == Product.brand_id, Brand.deleted_at.is_(None)))
+        .outerjoin(UnitOfMeasurement, and_(UnitOfMeasurement.id == Product.uom_id, UnitOfMeasurement.deleted_at.is_(None)))
+        .outerjoin(Tax, and_(Tax.id == Product.hsn_id, Tax.deleted_at.is_(None)))
         .where(Product.deleted_at.is_(None))
     )
-    for column, value in ((ps.category, category), (ps.sub_category, sub_category), (ps.brand, brand)):
+
+    for column_expr, value in ((category_expr, category), (sub_category_expr, sub_category), (brand_expr, brand)):
         wanted = _text(value)
         if wanted and wanted.lower() not in ("all", "select"):
-            stmt = stmt.where(column == wanted)
-    sf = _text(shortfall).lower()
-    if sf == "0":
-        stmt = stmt.where(short_fall == 0)
-    elif sf in ("greater than 0", ">0", "gt0"):
-        stmt = stmt.where(short_fall > 0)
-    ro = _text(reorder).lower()
-    if ro == "0":
-        stmt = stmt.where(level == 0)
-    elif ro in ("greater than 0", ">0", "gt0"):
-        stmt = stmt.where(level > 0)
+            stmt = stmt.where(column_expr == wanted)
+
     if _text(search):
         stmt = stmt.where(
-            or_(_contains(func.coalesce(ps.product_name_tally, Product.product_name_tally), search),
-                _contains(func.coalesce(ps.product_code, Product.product_code), search),
-                _contains(ps.brand, search), _contains(ps.sub_category, search))
+            or_(
+                _contains(name_expr, search),
+                _contains(code_expr, search),
+                _contains(brand_expr, search),
+                _contains(sub_category_expr, search),
+                _contains(category_expr, search),
+            )
         )
 
-    total = (await db.execute(select(func.count()).select_from(stmt.order_by(None).subquery()))).scalar() or 0
-    rows = (await db.execute(stmt.order_by(short_fall.desc(), Product.product_name_tally, Product.id).offset(skip).limit(limit))).all()
+    sf = _text(shortfall).lower()
+    ro = _text(reorder).lower()
+
+    if not is_branch_scope:
+        if sf == "0":
+            stmt = stmt.where(short_fall == 0)
+        elif sf in ("greater than 0", ">0", "gt0"):
+            stmt = stmt.where(short_fall > 0)
+        if ro == "0":
+            stmt = stmt.where(level == 0)
+        elif ro in ("greater than 0", ">0", "gt0"):
+            stmt = stmt.where(level > 0)
+
+        total = (await db.execute(select(func.count()).select_from(stmt.order_by(None).subquery()))).scalar() or 0
+        rows = (
+            await db.execute(
+                stmt.order_by(short_fall.desc(), Product.product_name_tally, Product.id).offset(skip).limit(limit)
+            )
+        ).all()
+        resolved_rows = []
+        for r in rows:
+            wh_thresholds = _extract_warehouse_thresholds(r.orders_info)
+            eff_level = float(r.reorder_level or 0.0)
+            eff_moq = float(r.moq or 0.0)
+            if eff_level == 0.0 and wh_thresholds:
+                eff_level = sum(v["reorder_level"] for v in wh_thresholds.values())
+                if eff_moq == 0.0:
+                    eff_moq = max((v["moq"] for v in wh_thresholds.values()), default=0.0)
+            eff_sf = max(0.0, eff_level - float(r.total_qty or 0.0))
+            resolved_rows.append((r, wh_thresholds, eff_level, eff_moq, eff_sf))
+    else:
+        all_rows = (await db.execute(stmt.order_by(Product.product_name_tally, Product.id))).all()
+        computed = []
+        for r in all_rows:
+            wh_thresholds = _extract_warehouse_thresholds(r.orders_info)
+            if wh_scope in wh_thresholds:
+                eff_level = wh_thresholds[wh_scope]["reorder_level"]
+                eff_moq = wh_thresholds[wh_scope]["moq"]
+            else:
+                eff_level = float(r.reorder_level or 0.0)
+                eff_moq = float(r.moq or 0.0)
+            branch_qty = (
+                float(getattr(r, wh_scope) or 0.0)
+                + float(getattr(r, f"{wh_scope}_transit") or 0.0)
+                + float(getattr(r, f"{wh_scope}_ordered") or 0.0)
+            )
+            eff_sf = max(0.0, eff_level - branch_qty)
+            if sf == "0" and eff_sf != 0.0:
+                continue
+            if sf in ("greater than 0", ">0", "gt0") and eff_sf <= 0.0:
+                continue
+            if ro == "0" and eff_level != 0.0:
+                continue
+            if ro in ("greater than 0", ">0", "gt0") and eff_level <= 0.0:
+                continue
+            computed.append((r, wh_thresholds, eff_level, eff_moq, eff_sf))
+
+        computed.sort(key=lambda tup: (-tup[4], (tup[0].name or "").lower(), str(tup[0].prod_id)))
+        total = len(computed)
+        resolved_rows = computed[skip : skip + limit]
+
+    breakup_map = await _compute_breakup_flags(db, [r.name for (r, *_rest) in resolved_rows if r.name])
+
+    # Master dropdown options so filters always expose all active Categories, Sub-Categories, and Brands
+    cat_names = [
+        c for (c,) in (await db.execute(select(ProductCategory.name).where(ProductCategory.deleted_at.is_(None)).order_by(ProductCategory.name))).all() if c
+    ]
+    sub_rows = (
+        await db.execute(
+            select(ProductSubCategory.name, ProductCategory.name)
+            .outerjoin(ProductCategory, ProductCategory.id == ProductSubCategory.category_id)
+            .where(ProductSubCategory.deleted_at.is_(None))
+            .order_by(ProductSubCategory.name)
+        )
+    ).all()
+    brand_names = [
+        b for (b,) in (await db.execute(select(Brand.name).where(Brand.deleted_at.is_(None)).order_by(Brand.name))).all() if b
+    ]
+
     items = []
-    for idx, r in enumerate(rows, start=skip + 1):
-        order_to_place = (max(r.short_fall, r.moq) if r.moq > 0 else r.short_fall) if r.short_fall > 0 else 0.0
+    for idx, (r, wh_thresholds, eff_level, eff_moq, eff_sf) in enumerate(resolved_rows, start=skip + 1):
+        order_to_place = (max(eff_sf, eff_moq) if eff_moq > 0 else eff_sf) if eff_sf > 0 else 0.0
+        name_key = (r.name or "").strip().lower()
         items.append({
-            "id": str(r.stock_id or r.prod_id), "sr_no": idx, "product_id": str(r.prod_id) if r.prod_id else None,
-            "product_name_tally": r.name, "product_code": r.code, "brand": r.brand, "category": r.category,
-            "sub_category": r.sub_category, "mumbai": float(r.mumbai), "mumbai_transit": float(r.mumbai_transit),
-            "mumbai_ordered": float(r.mumbai_ordered), "ahmedabad": float(r.ahmedabad),
-            "ahmedabad_transit": float(r.ahmedabad_transit), "ahmedabad_ordered": float(r.ahmedabad_ordered),
-            "indore": float(r.indore), "indore_transit": float(r.indore_transit), "indore_ordered": float(r.indore_ordered),
-            "total_qty": float(r.total_qty), "reorder_level": float(r.reorder_level), "moq": float(r.moq),
-            "minimum_order_quantity": float(r.moq), "short_fall": float(r.short_fall), "order_to_be_place": float(order_to_place),
+            "id": str(r.stock_id or r.prod_id),
+            "sr_no": idx,
+            "product_id": str(r.prod_id) if r.prod_id else None,
+            "product_name_tally": r.name,
+            "product_name_invoice": r.name_invoice,
+            "product_code": r.code,
+            "brand": r.brand,
+            "category": r.category,
+            "sub_category": r.sub_category,
+            "uom": r.uom or "SET",
+            "hsn_code": r.hsn_code,
+            "gst_percent": float(r.gst_percent) if r.gst_percent is not None else None,
+            "import_duty_percent": float(r.import_duty_percent) if r.import_duty_percent is not None else None,
+            "minimum_price": float(r.minimum_price) if r.minimum_price is not None else None,
+            "packaging_quantity": float(r.packaging_quantity) if r.packaging_quantity is not None else None,
+            "packaging_net_weight": float(r.packaging_net_weight) if r.packaging_net_weight is not None else None,
+            "packaging_gross_weight": float(r.packaging_gross_weight) if r.packaging_gross_weight is not None else None,
+            "length_cm": float(r.length_cm) if r.length_cm is not None else None,
+            "width_cm": float(r.width_cm) if r.width_cm is not None else None,
+            "height_cm": float(r.height_cm) if r.height_cm is not None else None,
+            "packaging_unit_cbm": float(r.packaging_unit_cbm) if r.packaging_unit_cbm is not None else None,
+            "specification": r.specification,
+            "description": r.description,
+            "mumbai": float(r.mumbai),
+            "mumbai_transit": float(r.mumbai_transit),
+            "mumbai_ordered": float(r.mumbai_ordered),
+            "ahmedabad": float(r.ahmedabad),
+            "ahmedabad_transit": float(r.ahmedabad_transit),
+            "ahmedabad_ordered": float(r.ahmedabad_ordered),
+            "indore": float(r.indore),
+            "indore_transit": float(r.indore_transit),
+            "indore_ordered": float(r.indore_ordered),
+            "total_qty": float(r.total_qty),
+            "reorder_level": float(eff_level),
+            "moq": float(eff_moq),
+            "minimum_order_quantity": float(eff_moq),
+            "short_fall": float(eff_sf),
+            "order_to_be_place": float(order_to_place),
+            "breakup_flags": breakup_map.get(name_key, []),
+            "warehouse_thresholds": wh_thresholds,
         })
     return build_success_response(
-        data={"items": items, "total": total, "skip": skip, "limit": limit},
+        data={
+            "items": items,
+            "total": total,
+            "skip": skip,
+            "limit": limit,
+            "warehouse": warehouse or "All",
+            "filter_options": {
+                "categories": cat_names,
+                "sub_categories": [{"name": s_name, "category": c_name} for s_name, c_name in sub_rows if s_name],
+                "brands": brand_names,
+            },
+        },
         request_id=getattr(request.state, "request_id", "-") if request and hasattr(request, "state") else "-",
     )
 
@@ -347,7 +664,7 @@ async def update_product_reorder(
     request: Request,
     db: AsyncSession = Depends(get_db_session),
 ) -> dict:
-    """Update reorder level and MOQ on the product and its stock row. 404 when no such product exists."""
+    """Update reorder level and MOQ on the product and its stock row (global or branch-scoped). 404 when no such product exists."""
     from app.masters.products.models import Product
 
     for value in (payload.reorder_level, payload.minimum_order_quantity):
@@ -368,18 +685,54 @@ async def update_product_reorder(
         product = (await db.execute(select(Product).where(Product.id == stock.product_id))).scalars().first()
     if product is None and stock is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
-    for target in (product, stock):
-        if target is None:
-            continue
-        if payload.reorder_level is not None:
-            target.reorder_level = payload.reorder_level
-        if payload.minimum_order_quantity is not None:
-            target.minimum_order_quantity = payload.minimum_order_quantity
+
+    wh_scope = _text(payload.warehouse).lower()
+    is_branch_scope = wh_scope in ("mumbai", "ahmedabad", "indore")
+
+    if is_branch_scope and stock is None and product is not None:
+        stock = await stock_service._ensure_stock_row(db, product)
+
+    if is_branch_scope and stock is not None:
+        existing_entries = [
+            e for e in (stock.orders_info or [])
+            if not (isinstance(e, dict) and e.get("_type") == "wh_reorder" and str(e.get("warehouse") or "").strip().lower() == wh_scope)
+        ]
+        prev_wh = _extract_warehouse_thresholds(stock.orders_info).get(wh_scope, {})
+        next_level = float(payload.reorder_level if payload.reorder_level is not None else prev_wh.get("reorder_level", stock.reorder_level or 0.0))
+        next_moq = float(payload.minimum_order_quantity if payload.minimum_order_quantity is not None else prev_wh.get("moq", stock.minimum_order_quantity or 0.0))
+        existing_entries.append({
+            "_type": "wh_reorder",
+            "warehouse": wh_scope,
+            "reorder_level": next_level,
+            "moq": next_moq,
+        })
+        stock.orders_info = list(existing_entries)
+        wh_thresholds = _extract_warehouse_thresholds(stock.orders_info)
+    else:
+        for target in (product, stock):
+            if target is None:
+                continue
+            if payload.reorder_level is not None:
+                target.reorder_level = payload.reorder_level
+            if payload.minimum_order_quantity is not None:
+                target.minimum_order_quantity = payload.minimum_order_quantity
+        if stock is not None and isinstance(stock.orders_info, list):
+            stock.orders_info = [
+                e for e in stock.orders_info
+                if not (isinstance(e, dict) and e.get("_type") == "wh_reorder")
+            ]
+        wh_thresholds = _extract_warehouse_thresholds(stock.orders_info if stock is not None else [])
+
     await db.flush()
     return build_success_response(
         data={
-            "updated": True, "product_id": clean_id, "reorder_level": payload.reorder_level, "moq": payload.minimum_order_quantity,
+            "updated": True,
+            "product_id": clean_id,
+            "warehouse": payload.warehouse or "All",
+            "reorder_level": payload.reorder_level,
+            "moq": payload.minimum_order_quantity,
             "minimum_order_quantity": payload.minimum_order_quantity,
+            "warehouse_thresholds": wh_thresholds,
         },
         request_id=getattr(request.state, "request_id", "-") if request and hasattr(request, "state") else "-",
     )
@@ -397,10 +750,13 @@ async def get_product_stock_breakup(
 
     * physical: the sale orders that still hold a booking on this product in that warehouse (stock taken, not yet
       dispatched) -- cancelled and dispatched orders are not stock any more;
-    * transit / ordered: the import consignments still on the way (pending / confirmed) into "<City> Transit" /
-      "<City> Ordered" -- received and cancelled ones are history, and the other warehouses of the city are not mixed in.
+    * transit / ordered: the import consignments (and active inter-branch stock transfers for transit) still on the way
+      (pending / confirmed) into "<City> Transit" / "<City> Ordered", with FIFO deduction of any open SaleOrders booked
+      directly against that transit/ordered warehouse.
     The product is matched by its exact name and the warehouse by its exact name (no substring matching).
     """
+    from app.sales.models import SaleOrder, SaleOrderItem
+
     clean_p = product_name.strip()
     clean_w = warehouse.strip()
     stock_type = type.strip().lower()
@@ -408,10 +764,9 @@ async def get_product_stock_breakup(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="type must be physical, transit or ordered")
     all_warehouses = clean_w.lower() == "all"
     items: list[dict] = []
+    booked_orders: list[dict] = []
 
     if stock_type == "physical":
-        from app.sales.models import SaleOrder, SaleOrderItem
-
         stmt = (
             select(SaleOrder, SaleOrderItem)
             .join(SaleOrderItem, SaleOrderItem.order_id == SaleOrder.id)
@@ -427,13 +782,14 @@ async def get_product_stock_breakup(
         for idx, (so, so_item) in enumerate(results, start=1):
             items.append({
                 "sr_no": idx,
+                "order_id": str(so.id),
                 "order_no": so.order_no,
                 "order_date": so.order_date or "-",
                 "company_name": so.company_name or so.buyer_name or "-",
                 "gst_no": getattr(so, "gst_no", None),
                 "city_state": ", ".join(filter(None, [so.city, so.state])) or "-",
                 "quantity": so_item.quantity,
-                "status": (so.status or "pending").replace("_", " ").title(),
+                "status": _format_so_status(so.status),
                 "sales_person": so.sales_person or "-",
                 "delivery_date": so.delivery_date or "-",
             })
@@ -454,15 +810,24 @@ async def get_product_stock_breakup(
             stmt = stmt.where(func.lower(ImportPurchase.warehouse).like(f"% {stock_type}"))
         else:
             stmt = stmt.where(func.lower(ImportPurchase.warehouse) == target_warehouse.lower())
-        results = (await db.execute(stmt.order_by(ImportPurchase.created_at.desc()).limit(500))).all()
-        for idx, (ip, ip_item) in enumerate(results, start=1):
+        results = (
+            await db.execute(
+                stmt.order_by(
+                    ImportPurchase.expected_arrival_date.asc().nullslast(),
+                    ImportPurchase.created_at.asc(),
+                ).limit(500)
+            )
+        ).all()
+        for ip, ip_item in results:
             items.append({
-                "sr_no": idx,
+                "sr_no": len(items) + 1,
+                "source_type": "import_purchase",
                 "consignment_no": ip.consignment_no,
                 "invoice_no": ip.consignment_no,
                 "date": str(ip.invoice_date or ip.ordered_date or "-"),
                 "supplier_name": ip.supplier_name or "-",
-                "quantity": ip_item.quantity,
+                "gross_quantity": float(ip_item.quantity or 0),
+                "quantity": float(ip_item.quantity or 0),
                 "arrival_date": str(ip.expected_arrival_date or ip.eta_port_date or ip.ordered_date or "-"),
                 "status": (ip.status or stock_type).replace("_", " ").title(),
                 "warehouse": ip.warehouse or target_warehouse,
@@ -472,8 +837,100 @@ async def get_product_stock_breakup(
                 "eta_port_date": str(ip.eta_port_date or "-"),
             })
 
+        from sqlalchemy.exc import OperationalError
+
+        # Include active in-transit inter-warehouse Stock Transfers in Transit breakup (General New points L69)
+        if stock_type == "transit":
+            try:
+                async with db.begin_nested():
+                    st_stmt = (
+                        select(StockTransfer, StockTransferLineItem)
+                        .join(StockTransferLineItem, StockTransferLineItem.transfer_id == StockTransfer.id)
+                        .where(
+                            StockTransfer.deleted_at.is_(None),
+                            func.lower(StockTransfer.status).in_(("pending", "confirmed", "in transit", "in_transit")),
+                            func.lower(StockTransferLineItem.product_name) == clean_p.lower(),
+                        )
+                    )
+                    st_results = (await db.execute(st_stmt.order_by(StockTransfer.created_at.asc()).limit(200))).all()
+                for st_rec, st_item in st_results:
+                    _, dest_city, _ = _parse_wh_column(st_rec.to_warehouse, prefer_transit=True)
+                    if not all_warehouses and dest_city != clean_w.lower():
+                        continue
+                    items.append({
+                        "sr_no": len(items) + 1,
+                        "source_type": "stock_transfer",
+                        "consignment_no": st_rec.transfer_no,
+                        "invoice_no": st_rec.transfer_no,
+                        "date": str(st_rec.transfer_date or "-"),
+                        "supplier_name": f"Transfer from {st_rec.from_warehouse}",
+                        "gross_quantity": float(st_item.quantity or 0),
+                        "quantity": float(st_item.quantity or 0),
+                        "arrival_date": "-",
+                        "status": f"Transfer ({st_rec.status})",
+                        "warehouse": st_rec.to_warehouse or target_warehouse,
+                        "invoice_date": str(st_rec.transfer_date or "-"),
+                        "expected_arrival_date": "-",
+                        "etd_origin_date": "-",
+                        "eta_port_date": "-",
+                    })
+            except OperationalError:
+                pass
+
+        # Check open SaleOrders booked directly against '<City> Transit' or '<City> Ordered' and apply FIFO deduction
+        remaining_booked = 0.0
+        try:
+            async with db.begin_nested():
+                so_transit_stmt = (
+                    select(SaleOrder, SaleOrderItem)
+                    .join(SaleOrderItem, SaleOrderItem.order_id == SaleOrder.id)
+                    .where(
+                        SaleOrder.deleted_at.is_(None),
+                        SaleOrder.status.in_(OPEN_SALE_ORDER_STATUSES),
+                        func.lower(SaleOrderItem.product_name) == clean_p.lower(),
+                    )
+                )
+                if all_warehouses:
+                    so_transit_stmt = so_transit_stmt.where(func.lower(SaleOrder.warehouse).like(f"% {stock_type}"))
+                else:
+                    so_transit_stmt = so_transit_stmt.where(func.lower(SaleOrder.warehouse) == target_warehouse.lower())
+                so_transit_rows = (await db.execute(so_transit_stmt.order_by(SaleOrder.created_at.asc()).limit(500))).all()
+            for b_idx, (so, so_item) in enumerate(so_transit_rows, start=1):
+                b_qty = float(so_item.quantity or 0)
+                remaining_booked += b_qty
+                booked_orders.append({
+                    "sr_no": b_idx,
+                    "order_id": str(so.id),
+                    "order_no": so.order_no,
+                    "order_date": so.order_date or "-",
+                    "company_name": so.company_name or so.buyer_name or "-",
+                    "city_state": ", ".join(filter(None, [so.city, so.state])) or "-",
+                    "quantity": b_qty,
+                    "status": _format_so_status(so.status),
+                    "sales_person": so.sales_person or "-",
+                    "delivery_date": so.delivery_date or "-",
+                })
+        except OperationalError:
+            pass
+
+        if remaining_booked > 0 and items:
+            for entry in items:
+                if remaining_booked <= 0:
+                    entry["booked_quantity"] = 0.0
+                    continue
+                deduct = min(float(entry["quantity"]), remaining_booked)
+                entry["booked_quantity"] = deduct
+                entry["quantity"] = round(float(entry["quantity"]) - deduct, 6)
+                remaining_booked = round(remaining_booked - deduct, 6)
+
     return build_success_response(
-        data={"product_name": clean_p, "warehouse": clean_w, "stock_type": stock_type, "items": items},
+        data={
+            "product_name": clean_p,
+            "warehouse": clean_w,
+            "stock_type": stock_type,
+            "items": items,
+            "booked_orders": booked_orders,
+        },
         request_id=getattr(getattr(request, "state", None), "request_id", "-") if request else "-",
     )
 
@@ -563,6 +1020,8 @@ async def get_goods_expected_report(
             for st in stocks:
                 if st.orders_info:
                     for o in st.orders_info:
+                        if not isinstance(o, dict) or o.get("_type") == "wh_reorder":
+                            continue
                         items.append({
                             "sr_no": idx,
                             "id": f"po-{idx}",

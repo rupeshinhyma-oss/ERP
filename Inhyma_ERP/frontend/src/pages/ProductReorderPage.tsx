@@ -1,28 +1,40 @@
 import { useState, useMemo, useCallback, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
 import { SideDrawer } from "@/components/SideDrawer";
 import { Pagination } from "@/components/Pagination";
 import { SortHeader } from "@/components/SortHeader";
 import type { PaginationMeta } from "@/types";
-import { InventoryApi, type ProductReorderItem } from "@/lib/api";
+import { apiGet, InventoryApi, type ProductReorderItem } from "@/lib/api";
+import { Auth } from "@/lib/auth";
 import { generateSalesOrderPdf } from "@/lib/salesOrderPdf";
 import "@/styles/productReorder.css";
 
 export interface StockBreakupRow {
   sr_no: number;
+  order_id?: string;
   order_no?: string;
   consignment_no?: string;
   invoice_no?: string;
+  source_type?: string;
   date?: string;
   order_date?: string;
+  invoice_date?: string;
   company_name?: string;
+  gst_no?: string | null;
   supplier_name?: string;
   city_state?: string;
+  gross_quantity?: number;
+  booked_quantity?: number;
   quantity: number;
   status: string;
   sales_person?: string;
   delivery_date?: string;
   arrival_date?: string;
+  expected_arrival_date?: string;
+  etd_origin_date?: string;
+  eta_port_date?: string;
+  warehouse?: string;
 }
 
 export interface ActiveBreakupState {
@@ -32,6 +44,13 @@ export interface ActiveBreakupState {
   count: number;
   loading?: boolean;
   rows: StockBreakupRow[];
+  bookedOrders?: StockBreakupRow[];
+}
+
+interface MasterFilterOptions {
+  categories: string[];
+  sub_categories: Array<{ name: string; category?: string | null }>;
+  brands: string[];
 }
 
 export const INITIAL_REORDER_ITEMS: ProductReorderItem[] = [
@@ -267,6 +286,64 @@ export const INITIAL_REORDER_ITEMS: ProductReorderItem[] = [
   },
 ];
 
+function computeScopedMetrics(item: ProductReorderItem, warehouseScope: string) {
+  const scope = (warehouseScope || "All").trim().toLowerCase();
+  if (scope === "mumbai" || scope === "ahmedabad" || scope === "indore") {
+    const branchQty =
+      Number(item[scope] || 0) +
+      Number(item[`${scope}_transit` as keyof ProductReorderItem] || 0) +
+      Number(item[`${scope}_ordered` as keyof ProductReorderItem] || 0);
+    const override = item.warehouse_thresholds?.[scope];
+    const reorderLevel = override ? Number(override.reorder_level || 0) : Number(item.reorder_level || 0);
+    const moq = override ? Number(override.moq || 0) : Number(item.moq || 0);
+    const shortFall = Math.max(0, reorderLevel - branchQty);
+    const orderToBePlace = shortFall > 0 ? (moq > 0 ? Math.max(shortFall, moq) : shortFall) : 0;
+    return {
+      scopedQty: branchQty,
+      reorder_level: reorderLevel,
+      moq,
+      short_fall: shortFall,
+      order_to_be_place: orderToBePlace,
+    };
+  }
+
+  const overrides = item.warehouse_thresholds ? Object.values(item.warehouse_thresholds) : [];
+  const reorderLevel =
+    Number(item.reorder_level || 0) > 0
+      ? Number(item.reorder_level || 0)
+      : overrides.reduce((sum, entry) => sum + Number(entry.reorder_level || 0), 0);
+  const moq =
+    Number(item.moq || 0) > 0
+      ? Number(item.moq || 0)
+      : overrides.reduce((maxVal, entry) => Math.max(maxVal, Number(entry.moq || 0)), 0);
+  const totalQty = Number(item.total_qty || 0);
+  const shortFall = Math.max(0, reorderLevel - totalQty);
+  const orderToBePlace = shortFall > 0 ? (moq > 0 ? Math.max(shortFall, moq) : shortFall) : 0;
+  return {
+    scopedQty: totalQty,
+    reorder_level: reorderLevel,
+    moq,
+    short_fall: shortFall,
+    order_to_be_place: orderToBePlace,
+  };
+}
+
+function shouldShowBreakupInfo(
+  item: ProductReorderItem,
+  colKey: string,
+  qty: number,
+  isPhysical: boolean
+): boolean {
+  if (Array.isArray(item.breakup_flags)) {
+    if (isPhysical) {
+      return item.breakup_flags.includes(colKey);
+    }
+    return item.breakup_flags.includes(colKey) || qty !== 0;
+  }
+  // Unit-test / seed fallback when breakup_flags is not attached
+  return qty !== 0;
+}
+
 const ProductReorderSkeletonRows: React.FC<{ count?: number }> = ({ count = 8 }) => (
   <>
     {Array.from({ length: count }).map((_, index) => (
@@ -293,12 +370,15 @@ const ProductReorderSkeletonRows: React.FC<{ count?: number }> = ({ count = 8 })
 );
 
 export function ProductReorderPage() {
+  const navigate = useNavigate();
+
   // Primary records state
   const [items, setItems] = useState<ProductReorderItem[]>(INITIAL_REORDER_ITEMS);
+  const [masterFilters, setMasterFilters] = useState<MasterFilterOptions | null>(null);
   const [loading, setLoading] = useState(false);
 
   const isTestMode = import.meta.env.MODE === "test";
-  // Filter panel collapse toggle (default OFF, ON in tests)
+  // Filter panel collapse toggle (toggled via top-right funnel icon, open in unit tests)
   const [showFilterPanel, setShowFilterPanel] = useState(isTestMode);
 
   // Form input filter states
@@ -315,35 +395,45 @@ export function ProductReorderPage() {
   const [appliedShortfall, setAppliedShortfall] = useState("All");
   const [appliedReorder, setAppliedReorder] = useState("All");
 
-  // Search input & Warehouse selector state
+  // Search input & Warehouse selector state (Mumbai default per screenshot)
   const [searchTerm, setSearchTerm] = useState("");
-  const [warehouseFilter, setWarehouseFilter] = useState("Mumbai"); // As seen in screenshot!
+  const [warehouseFilter, setWarehouseFilter] = useState("Mumbai");
 
-  // Pagination settings
+  // Pagination settings (50 results per page default per Product Master & Re-Order spec)
   const [currentPage, setCurrentPage] = useState(1);
-  const [perPage, setPerPage] = useState(10);
+  const [perPage, setPerPage] = useState(50);
 
-  // Side Drawer Breakup state (for Physical SOs or Transit/Ordered POs)
+  // Side Drawer Breakup state (for Physical SOs or Transit/Ordered POs & Stock Transfers)
   const [activeBreakup, setActiveBreakup] = useState<ActiveBreakupState | null>(null);
 
-  // Product Master View Window Drawer / Modal state
+  // Clickable Consignment / PO Detail Modal state (Stock Transactions.docx L35-36)
+  const [selectedConsignment, setSelectedConsignment] = useState<{
+    row: StockBreakupRow;
+    productName: string;
+  } | null>(null);
+
+  // Product Master View Window Drawer state
   const [viewProductItem, setViewProductItem] = useState<ProductReorderItem | null>(null);
 
-  // Inline / Modal Edit Reorder Level & MOQ state
+  // Edit Reorder Level & MOQ Modal state
   const [editItem, setEditItem] = useState<{
     item: ProductReorderItem;
+    warehouse: string;
     reorder_level: number;
     moq: number;
   } | null>(null);
   const [savingEdit, setSavingEdit] = useState(false);
 
-  // Load live data from backend API
+  // Load live data from backend API (no 300-row truncation)
   const fetchReorderItems = useCallback(() => {
     setLoading(true);
     InventoryApi.listProductReorder({
-      limit: 300,
+      limit: 2500,
     })
       .then((res) => {
+        if (res?.data?.filter_options) {
+          setMasterFilters(res.data.filter_options);
+        }
         if (res?.data?.items && res.data.items.length > 0) {
           setItems(res.data.items);
         } else {
@@ -363,7 +453,7 @@ export function ProductReorderPage() {
     fetchReorderItems();
   }, [fetchReorderItems]);
 
-  // Open Breakup Modal (Sales Order Information or Consignment Breakup)
+  // Open Breakup Drawer (Sale Order Information or Consignment Breakup)
   const handleOpenBreakup = useCallback(
     (item: ProductReorderItem, location: string, stockType: "physical" | "transit" | "ordered", count: number) => {
       setActiveBreakup({
@@ -373,6 +463,7 @@ export function ProductReorderPage() {
         count,
         loading: true,
         rows: [],
+        bookedOrders: [],
       });
 
       InventoryApi.getProductStockBreakup({
@@ -382,103 +473,128 @@ export function ProductReorderPage() {
       })
         .then((res) => {
           const rows = res?.data?.items || [];
-          setActiveBreakup((prev) => (prev ? { ...prev, loading: false, rows } : null));
+          const bookedOrders = res?.data?.booked_orders || [];
+          setActiveBreakup((prev) => (prev ? { ...prev, loading: false, rows, bookedOrders } : null));
         })
         .catch((err) => {
           console.warn("Failed to load stock breakup:", err);
-          // Fallback mock rows if backend empty
-          if (stockType === "physical") {
-            const fallbackSORows: StockBreakupRow[] = [
-              {
-                sr_no: 1,
-                order_no: "SO-MH/26-27/0432",
-                order_date: "12-07-2026",
-                company_name: "VN GOURMET LLT",
-                city_state: "Mumbai, Maharashtra",
-                quantity: count || 1,
-                status: "Acc. Confirmed",
-                sales_person: "Inhyma Admin",
-                delivery_date: "25-07-2026",
-              },
-            ];
-            setActiveBreakup((prev) => (prev ? { ...prev, loading: false, rows: fallbackSORows } : null));
-          } else {
-            const fallbackPORows: StockBreakupRow[] = [
-              {
-                sr_no: 1,
-                consignment_no: stockType === "transit" ? "EXP-26" : "INM-01",
-                invoice_no: stockType === "transit" ? "EXP-26" : "INM-01",
-                date: "10-07-2026",
-                supplier_name: "Yinglima Machinery Co.",
-                quantity: count || 1,
-                arrival_date: "15-08-2026",
-                status: stockType === "transit" ? "In Transit" : "Ordered",
-              },
-            ];
-            setActiveBreakup((prev) => (prev ? { ...prev, loading: false, rows: fallbackPORows } : null));
-          }
+          setActiveBreakup((prev) => (prev ? { ...prev, loading: false, rows: [], bookedOrders: [] } : null));
         });
     },
     []
   );
 
-  // Handle clicking on SO Number to open official PDF
-  const handleOpenSaleOrderPdf = useCallback((so: StockBreakupRow) => {
-    try {
-      const mockOrderData = {
-        order_no: so.order_no || "SO-MH/26-27/0432",
-        order_date: so.order_date || "12-07-2026",
-        company_name: so.company_name || "VN GOURMET LLT",
-        buyer_name: so.company_name || "VN GOURMET LLT",
-        city: so.city_state ? so.city_state.split(",")[0].trim() : "Mumbai",
-        state: so.city_state ? so.city_state.split(",")[1]?.trim() || "Maharashtra" : "Maharashtra",
-        sales_person: so.sales_person || "Inhyma Admin",
-        expected_delivery_date: so.delivery_date || "25-07-2026",
+  // Handle clicking on SO Number to open official Sales Order PDF (General New points L103 + L84/L94)
+  const handleOpenSaleOrderPdf = useCallback(
+    (so: StockBreakupRow) => {
+      const profile = Auth.getProfile();
+      const roleNames = Array.isArray((profile as any)?.roles) ? (profile as any).roles : [];
+      const isWarehouseRole = roleNames.some((r: any) =>
+        String(typeof r === "string" ? r : r?.name || "").toLowerCase().includes("warehouse")
+      );
+
+      const buildFallbackPayload = () => ({
+        order_no: so.order_no || "SO-Direct",
+        order_date: so.order_date || "-",
+        company_name: so.company_name || "-",
+        buyer_name: so.company_name || "-",
+        city: so.city_state ? so.city_state.split(",")[0].trim() : "",
+        state: so.city_state ? so.city_state.split(",")[1]?.trim() || "" : "",
+        sales_person: so.sales_person || "-",
+        expected_delivery_date: so.delivery_date || "-",
+        warehouse: activeBreakup?.location || "Mumbai",
         items: [
           {
-            product_name: activeBreakup?.item.product_name_tally || "Industrial Packaging Equipment",
+            product_name: activeBreakup?.item.product_name_tally || "Product",
+            hsn_code: activeBreakup?.item.hsn_code || "-",
+            uom: activeBreakup?.item.uom || "SET",
             quantity: so.quantity || 1,
-            unit_price: 285000,
-            taxable_amount: 285000,
-            gst_percent: 18,
-            gst_amount: 51300,
-            total_amount: 336300,
+            unit_price: 0,
+            taxable_amount: 0,
+            gst_percent: activeBreakup?.item.gst_percent ?? 18,
+            gst_amount: 0,
+            total_amount: 0,
           },
         ],
-        subtotal: 285000,
-        tax_amount: 51300,
-        grand_total: 336300,
-      };
-      generateSalesOrderPdf(mockOrderData as any, { openInNewTab: true });
-    } catch (err) {
-      console.error("Error opening Sales Order PDF:", err);
-    }
-  }, [activeBreakup]);
+        subtotal: 0,
+        tax_amount: 0,
+        grand_total: 0,
+      });
 
-  // Unique options for Category, Sub Category, Brand
+      if (so.order_id) {
+        apiGet<any>(`/sales/orders/${so.order_id}`)
+          .then((res) => {
+            const realOrder = res?.data || res;
+            if (realOrder && (realOrder.order_no || realOrder.id)) {
+              generateSalesOrderPdf(realOrder, { openInNewTab: true, hidePricing: isWarehouseRole });
+            } else {
+              generateSalesOrderPdf(buildFallbackPayload() as any, { openInNewTab: true, hidePricing: true });
+            }
+          })
+          .catch((err) => {
+            console.warn("Falling back to summary Sales Order PDF:", err);
+            generateSalesOrderPdf(buildFallbackPayload() as any, { openInNewTab: true, hidePricing: true });
+          });
+        return;
+      }
+
+      try {
+        generateSalesOrderPdf(buildFallbackPayload() as any, {
+          openInNewTab: true,
+          hidePricing: isWarehouseRole,
+        });
+      } catch (err) {
+        console.error("Error opening Sales Order PDF:", err);
+      }
+    },
+    [activeBreakup]
+  );
+
+  // Master-backed dropdown options for Category, Sub Category, Brand
   const categoryOptions = useMemo(() => {
-    const cats = new Set<string>();
+    const cats = new Set<string>(masterFilters?.categories || []);
     items.forEach((item) => {
       if (item.category && item.category !== "-") cats.add(item.category);
     });
     return Array.from(cats).sort();
-  }, [items]);
+  }, [items, masterFilters]);
 
   const subCategoryOptions = useMemo(() => {
     const subs = new Set<string>();
+    if (masterFilters?.sub_categories?.length) {
+      masterFilters.sub_categories.forEach((entry) => {
+        if (!entry.name) return;
+        if (categoryFilter === "All" || !entry.category || entry.category === categoryFilter) {
+          subs.add(entry.name);
+        }
+      });
+    }
     items.forEach((item) => {
-      if (item.sub_category && item.sub_category !== "-") subs.add(item.sub_category);
+      if (!item.sub_category || item.sub_category === "-") return;
+      if (categoryFilter === "All" || item.category === categoryFilter) {
+        subs.add(item.sub_category);
+      }
     });
     return Array.from(subs).sort();
-  }, [items]);
+  }, [items, masterFilters, categoryFilter]);
 
   const brandOptions = useMemo(() => {
-    const brands = new Set<string>();
+    const brands = new Set<string>(masterFilters?.brands || []);
     items.forEach((item) => {
       if (item.brand && item.brand !== "-") brands.add(item.brand);
     });
     return Array.from(brands).sort();
-  }, [items]);
+  }, [items, masterFilters]);
+
+  const activeFilterCount = useMemo(() => {
+    let count = 0;
+    if (appliedCategory !== "All") count += 1;
+    if (appliedSubCategory !== "All") count += 1;
+    if (appliedBrand !== "All") count += 1;
+    if (appliedShortfall !== "All") count += 1;
+    if (appliedReorder !== "All") count += 1;
+    return count;
+  }, [appliedCategory, appliedSubCategory, appliedBrand, appliedShortfall, appliedReorder]);
 
   // Apply filters button action
   const handleApplyFilters = useCallback(() => {
@@ -503,39 +619,49 @@ export function ProductReorderPage() {
     setAppliedShortfall("All");
     setAppliedReorder("All");
     setSearchTerm("");
-    setWarehouseFilter("All");
+    setWarehouseFilter("Mumbai");
     setCurrentPage(1);
   }, []);
 
+  // Project each item with dynamic warehouse-scoped Re-Order, Short Fall, MOQ, and Order To Be Place
+  const scopedItems = useMemo(() => {
+    return items.map((item) => {
+      const scoped = computeScopedMetrics(item, warehouseFilter);
+      return {
+        ...item,
+        reorder_level: scoped.reorder_level,
+        moq: scoped.moq,
+        short_fall: scoped.short_fall,
+        order_to_be_place: scoped.order_to_be_place,
+      };
+    });
+  }, [items, warehouseFilter]);
+
   // Filter items
   const filteredItems = useMemo(() => {
-    return items.filter((item) => {
-      // Search term matching: name, code, brand, sub-category
+    return scopedItems.filter((item) => {
       if (searchTerm.trim()) {
         const query = searchTerm.toLowerCase().trim();
         const matchName = item.product_name_tally.toLowerCase().includes(query);
         const matchCode = item.product_code.toLowerCase().includes(query);
         const matchBrand = item.brand.toLowerCase().includes(query);
         const matchSub = (item.sub_category || "").toLowerCase().includes(query);
-        if (!matchName && !matchCode && !matchBrand && !matchSub) return false;
+        const matchCat = (item.category || "").toLowerCase().includes(query);
+        if (!matchName && !matchCode && !matchBrand && !matchSub && !matchCat) return false;
       }
 
-      // Category filter
       if (appliedCategory !== "All" && item.category !== appliedCategory) {
         return false;
       }
 
-      // Sub Category filter
       if (appliedSubCategory !== "All" && item.sub_category !== appliedSubCategory) {
         return false;
       }
 
-      // Brand filter
       if (appliedBrand !== "All" && item.brand !== appliedBrand) {
         return false;
       }
 
-      // Short Fall filter: "All" | "0" | "Greater Than 0"
       if (appliedShortfall === "0" && item.short_fall !== 0) {
         return false;
       }
@@ -543,7 +669,6 @@ export function ProductReorderPage() {
         return false;
       }
 
-      // Re-Order filter: "All" | "0" | "Greater Than 0"
       if (appliedReorder === "0" && item.reorder_level !== 0) {
         return false;
       }
@@ -553,8 +678,7 @@ export function ProductReorderPage() {
 
       return true;
     });
-  }, [items, searchTerm, appliedCategory, appliedSubCategory, appliedBrand, appliedShortfall, appliedReorder]);
-
+  }, [scopedItems, searchTerm, appliedCategory, appliedSubCategory, appliedBrand, appliedShortfall, appliedReorder]);
 
   const [sortColIndex, setSortColIndex] = useState<number | null>(null);
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
@@ -579,67 +703,67 @@ export function ProductReorderPage() {
       let vA: any = "";
       let vB: any = "";
       switch (sortColIndex) {
-        case 0: // Sr. No.
+        case 0:
           vA = a.sr_no || 0;
           vB = b.sr_no || 0;
           break;
-        case 1: // Product Name (As Per Tally)
+        case 1:
           vA = a.product_name_tally || "";
           vB = b.product_name_tally || "";
           break;
-        case 2: // Mumbai
+        case 2:
           vA = a.mumbai || 0;
           vB = b.mumbai || 0;
           break;
-        case 3: // Mumbai Transit
+        case 3:
           vA = a.mumbai_transit || 0;
           vB = b.mumbai_transit || 0;
           break;
-        case 4: // Mumbai Ordered
+        case 4:
           vA = a.mumbai_ordered || 0;
           vB = b.mumbai_ordered || 0;
           break;
-        case 5: // Ahmedabad
+        case 5:
           vA = a.ahmedabad || 0;
           vB = b.ahmedabad || 0;
           break;
-        case 6: // Ahmedabad Transit
+        case 6:
           vA = a.ahmedabad_transit || 0;
           vB = b.ahmedabad_transit || 0;
           break;
-        case 7: // Ahmedabad Ordered
+        case 7:
           vA = a.ahmedabad_ordered || 0;
           vB = b.ahmedabad_ordered || 0;
           break;
-        case 8: // Indore
+        case 8:
           vA = a.indore || 0;
           vB = b.indore || 0;
           break;
-        case 9: // Indore Transit
+        case 9:
           vA = a.indore_transit || 0;
           vB = b.indore_transit || 0;
           break;
-        case 10: // Indore Ordered
+        case 10:
           vA = a.indore_ordered || 0;
           vB = b.indore_ordered || 0;
           break;
-        case 11: // Total Qty
+        case 11:
           vA = a.total_qty || 0;
           vB = b.total_qty || 0;
           break;
-        case 12: // Re-Order
+        case 12:
           vA = a.reorder_level || 0;
           vB = b.reorder_level || 0;
           break;
-        case 13: // Short Fall
+        case 13:
           vA = a.short_fall || 0;
           vB = b.short_fall || 0;
           break;
-        case 14: // MOQ
+        case 14:
           vA = a.moq || 0;
           vB = b.moq || 0;
           break;
-        case 15: // Order To Be Place
+        case 15:
           vA = a.order_to_be_place || 0;
           vB = b.order_to_be_place || 0;
           break;
@@ -677,58 +801,65 @@ export function ProductReorderPage() {
     [currentPage, totalPages, sortedItems.length, perPage]
   );
 
-  // Save updated Re-Order and MOQ values
+  // Open Edit Modal initialized to current warehouse scope
+  const handleOpenEditModal = useCallback(
+    (scopedRow: ProductReorderItem) => {
+      const rawItem = items.find((r) => r.id === scopedRow.id) || scopedRow;
+      setEditItem({
+        item: rawItem,
+        warehouse: warehouseFilter,
+        reorder_level: scopedRow.reorder_level,
+        moq: scopedRow.moq,
+      });
+    },
+    [items, warehouseFilter]
+  );
+
+  // Save updated Re-Order and MOQ values (persists branch-scoped or global thresholds)
   const handleSaveEdit = async () => {
     if (!editItem) return;
     setSavingEdit(true);
+    const rLvl = Math.max(0, Number(editItem.reorder_level) || 0);
+    const mQty = Math.max(0, Number(editItem.moq) || 0);
+    const scopeKey = editItem.warehouse.trim().toLowerCase();
+    const isBranch = scopeKey === "mumbai" || scopeKey === "ahmedabad" || scopeKey === "indore";
+
+    const applyLocalUpdate = () => {
+      setItems((prev) =>
+        prev.map((raw) => {
+          if (raw.id !== editItem.item.id) return raw;
+          if (isBranch) {
+            const nextThresholds = {
+              ...(raw.warehouse_thresholds || {}),
+              [scopeKey]: { reorder_level: rLvl, moq: mQty },
+            };
+            return {
+              ...raw,
+              warehouse_thresholds: nextThresholds,
+            };
+          }
+          return {
+            ...raw,
+            reorder_level: rLvl,
+            moq: mQty,
+            warehouse_thresholds: {},
+          };
+        })
+      );
+    };
+
     try {
       const targetId = editItem.item.product_id || editItem.item.id;
       await InventoryApi.updateProductReorder(targetId, {
-        reorder_level: Number(editItem.reorder_level) || 0,
-        minimum_order_quantity: Number(editItem.moq) || 0,
+        reorder_level: rLvl,
+        minimum_order_quantity: mQty,
+        warehouse: editItem.warehouse,
       });
-
-      // Update local state
-      setItems((prev) =>
-        prev.map((i) => {
-          if (i.id === editItem.item.id) {
-            const r_lvl = Number(editItem.reorder_level) || 0;
-            const m_qty = Number(editItem.moq) || 0;
-            const short_fall = Math.max(0, r_lvl - i.total_qty);
-            const order_to_be_place = short_fall > 0 ? Math.max(short_fall, m_qty) : 0;
-            return {
-              ...i,
-              reorder_level: r_lvl,
-              moq: m_qty,
-              short_fall,
-              order_to_be_place,
-            };
-          }
-          return i;
-        })
-      );
+      applyLocalUpdate();
       setEditItem(null);
     } catch (err) {
       console.error("Failed to update reorder/moq:", err);
-      // Still update UI optimistically
-      setItems((prev) =>
-        prev.map((i) => {
-          if (i.id === editItem.item.id) {
-            const r_lvl = Number(editItem.reorder_level) || 0;
-            const m_qty = Number(editItem.moq) || 0;
-            const short_fall = Math.max(0, r_lvl - i.total_qty);
-            const order_to_be_place = short_fall > 0 ? Math.max(short_fall, m_qty) : 0;
-            return {
-              ...i,
-              reorder_level: r_lvl,
-              moq: m_qty,
-              short_fall,
-              order_to_be_place,
-            };
-          }
-          return i;
-        })
-      );
+      applyLocalUpdate();
       setEditItem(null);
     } finally {
       setSavingEdit(false);
@@ -740,6 +871,10 @@ export function ProductReorderPage() {
     const headers = [
       "Sr. No.",
       "Product Name (As Per Tally)",
+      "Product Code",
+      "Category",
+      "Sub Category",
+      "Brand",
       "Mumbai",
       "Mumbai Transit",
       "Mumbai Ordered",
@@ -750,15 +885,19 @@ export function ProductReorderPage() {
       "Indore Transit",
       "Indore Ordered",
       "Total Qty",
-      "Re-Order",
-      "Short Fall",
-      "MOQ",
-      "Order To Be Place",
+      `Re-Order (${warehouseFilter})`,
+      `Short Fall (${warehouseFilter})`,
+      `MOQ (${warehouseFilter})`,
+      `Order To Be Place (${warehouseFilter})`,
     ];
 
-    const rows = filteredItems.map((item, idx) => [
+    const rows = sortedItems.map((item, idx) => [
       idx + 1,
       `"${item.product_name_tally.replace(/"/g, '""')}"`,
+      `"${(item.product_code || "-").replace(/"/g, '""')}"`,
+      `"${(item.category || "-").replace(/"/g, '""')}"`,
+      `"${(item.sub_category || "-").replace(/"/g, '""')}"`,
+      `"${(item.brand || "-").replace(/"/g, '""')}"`,
       item.mumbai,
       item.mumbai_transit,
       item.mumbai_ordered,
@@ -779,77 +918,66 @@ export function ProductReorderPage() {
     const encodedUri = encodeURI(csvContent);
     const link = document.createElement("a");
     link.setAttribute("href", encodedUri);
-    link.setAttribute("download", `Product_ReOrder_${new Date().toISOString().slice(0, 10)}.csv`);
+    link.setAttribute("download", `Product_ReOrder_${warehouseFilter}_${new Date().toISOString().slice(0, 10)}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-  }, [filteredItems]);
+  }, [sortedItems, warehouseFilter]);
+
+  const editPreview = useMemo(() => {
+    if (!editItem) return null;
+    const scope = editItem.warehouse.trim().toLowerCase();
+    const baseQty =
+      scope === "mumbai" || scope === "ahmedabad" || scope === "indore"
+        ? Number(editItem.item[scope] || 0) +
+          Number(editItem.item[`${scope}_transit` as keyof ProductReorderItem] || 0) +
+          Number(editItem.item[`${scope}_ordered` as keyof ProductReorderItem] || 0)
+        : Number(editItem.item.total_qty || 0);
+    const sf = Math.max(0, (Number(editItem.reorder_level) || 0) - baseQty);
+    const m = Number(editItem.moq) || 0;
+    const orderQty = sf > 0 ? (m > 0 ? Math.max(sf, m) : sf) : 0;
+    return { baseQty, sf, orderQty };
+  }, [editItem]);
 
   return (
     <AppShell activeKey="reports-re-order">
       <main className="page page-product-reorder">
         {/* Page Header */}
-        <div className="page-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
+        <div className="reorder-header">
           <div>
-            <h1 style={{ margin: 0, fontSize: "20px", fontWeight: 700, color: "#1e293b" }}>Product Re-Order</h1>
+            <h1 className="reorder-header-title">Product Re-Order</h1>
           </div>
-          <div className="page-header-actions" style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+          <div className="reorder-header-actions">
             <button
               type="button"
-              className="btn btn-filter-toggle"
-              onClick={() => setShowFilterPanel(!showFilterPanel)}
-              title="Toggle filter panel"
-              aria-label="Toggle filter panel"
-              style={{
-                background: "#556987",
-                color: "#ffffff",
-                padding: "8px 14px",
-                borderRadius: "6px",
-                border: "none",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                cursor: "pointer",
-                boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
-              }}
-            >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
-              </svg>
-            </button>
-
-            <button
-              type="button"
-              className="btn reorder-btn-export"
-              style={{
-                background: "#059669",
-                color: "#ffffff",
-                padding: "8px 16px",
-                borderRadius: "6px",
-                fontWeight: 600,
-                fontSize: "13px",
-                border: "none",
-                cursor: "pointer",
-                display: "inline-flex",
-                alignItems: "center",
-                gap: "6px",
-                boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
-                transition: "all 0.15s ease",
-              }}
+              className="reorder-btn-export"
               onClick={handleExportCSV}
-              title="Export to CSV"
+              title="Export Re-Order Table to CSV"
             >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
                 <polyline points="7 10 12 15 17 10" />
                 <line x1="12" y1="15" x2="12" y2="3" />
               </svg>
               <span>Export</span>
             </button>
+
+            <button
+              type="button"
+              className={`reorder-btn-filter ${showFilterPanel ? "active" : ""}`}
+              onClick={() => setShowFilterPanel(!showFilterPanel)}
+              title="Toggle filter panel"
+              aria-label="Toggle filter panel"
+            >
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M3 4h18l-7 8.5V19l-4 2v-8.5L3 4z" />
+              </svg>
+              {activeFilterCount > 0 && <span className="reorder-filter-badge">{activeFilterCount}</span>}
+            </button>
           </div>
         </div>
 
-        {/* Collapsible Filter Panel */}
+        {/* Collapsible Filter Panel (4 Columns Row 1 + Re-Order Row 2 Col 1, matching Screenshot) */}
         {showFilterPanel && (
           <div className="reorder-filter-panel">
             <div className="reorder-filter-grid">
@@ -859,7 +987,10 @@ export function ProductReorderPage() {
                   id="reorder-filter-category"
                   className="reorder-filter-select"
                   value={categoryFilter}
-                  onChange={(e) => setCategoryFilter(e.target.value)}
+                  onChange={(e) => {
+                    setCategoryFilter(e.target.value);
+                    setSubCategoryFilter("All");
+                  }}
                 >
                   <option value="All">All</option>
                   {categoryOptions.map((cat) => (
@@ -933,144 +1064,122 @@ export function ProductReorderPage() {
               </div>
             </div>
 
-            <div className="reorder-filter-actions" style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "18px" }}>
-              <button type="button" className="btn-filter-reset" onClick={handleResetFilters}>
+            <div className="reorder-filter-actions">
+              <button type="button" className="reorder-btn-reset" onClick={handleResetFilters}>
                 Reset
               </button>
-              <button type="button" className="btn-filter-search" onClick={handleApplyFilters}>
+              <button type="button" className="reorder-btn-search" onClick={handleApplyFilters}>
                 Search
               </button>
             </div>
           </div>
         )}
 
-        {/* Main Data Table Card */}
-        <div className="reorder-card">
-          {/* Card Top Toolbar: Items/Page + Warehouse Selector + Search */}
-          <div className="reorder-toolbar">
-            <div className="reorder-toolbar-left">
-              <select
-                value={perPage}
+        {/* Middle Search + Warehouse Selector Card (Exact Screenshot Layout) */}
+        <div className="reorder-search-card">
+          <div className="reorder-search-group">
+            <span className="reorder-search-addon" aria-hidden="true">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="11" cy="11" r="8" />
+                <line x1="21" y1="21" x2="16.65" y2="16.65" />
+              </svg>
+            </span>
+            <div className="reorder-search-input-inner">
+              <input
+                type="text"
+                className="reorder-search-input"
+                placeholder="Search products by name, code, brand, sub-category..."
+                value={searchTerm}
                 onChange={(e) => {
-                  setPerPage(Number(e.target.value));
+                  setSearchTerm(e.target.value);
                   setCurrentPage(1);
                 }}
-                aria-label="Items per page"
-                className="reorder-perpage-select"
-              >
-                <option value={10}>10</option>
-                <option value={25}>25</option>
-                <option value={50}>50</option>
-                <option value={100}>100</option>
-              </select>
-              <span className="reorder-perpage-label">Items/Page</span>
-              <span className="reorder-toolbar-divider">|</span>
-              <span className="reorder-total-count">
-                Total: <strong>{filteredItems.length}</strong> items
-              </span>
-            </div>
-
-            <div className="reorder-toolbar-right">
-              <div className="reorder-warehouse-select-wrap">
-                <select
-                  className="reorder-warehouse-select"
-                  value={warehouseFilter}
-                  onChange={(e) => {
-                    setWarehouseFilter(e.target.value);
-                    setCurrentPage(1);
-                  }}
-                  title="Filter / highlight warehouse"
+              />
+              {searchTerm && (
+                <button
+                  type="button"
+                  className="reorder-search-clear"
+                  onClick={() => setSearchTerm("")}
+                  title="Clear search"
                 >
-                  <option value="All">All Warehouses</option>
-                  <option value="Mumbai">Mumbai</option>
-                  <option value="Ahmedabad">Ahmedabad</option>
-                  <option value="Indore">Indore</option>
-                </select>
-              </div>
-
-              <div className="reorder-search-input-wrap">
-                <span className="reorder-search-icon">
-                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <circle cx="11" cy="11" r="8"></circle>
-                    <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
-                  </svg>
-                </span>
-                <input
-                  type="text"
-                  className="reorder-search-input"
-                  placeholder="Search products by name, code, brand, sub-category..."
-                  value={searchTerm}
-                  onChange={(e) => {
-                    setSearchTerm(e.target.value);
-                    setCurrentPage(1);
-                  }}
-                />
-                {searchTerm && (
-                  <button
-                    type="button"
-                    className="reorder-search-clear"
-                    onClick={() => setSearchTerm("")}
-                    title="Clear search"
-                  >
-                    ✕
-                  </button>
-                )}
-              </div>
+                  ✕
+                </button>
+              )}
             </div>
           </div>
 
-          {/* 16-Column Table matching Screenshot 1 & 2 */}
+          <div className="reorder-warehouse-select-wrap">
+            <select
+              className="reorder-warehouse-select"
+              aria-label="Warehouse"
+              value={warehouseFilter}
+              onChange={(e) => {
+                setWarehouseFilter(e.target.value);
+                setCurrentPage(1);
+              }}
+              title="Select branch warehouse scope for Re-Order & Short Fall evaluation"
+            >
+              <option value="Mumbai">Mumbai</option>
+              <option value="Ahmedabad">Ahmedabad</option>
+              <option value="Indore">Indore</option>
+              <option value="All">All Warehouses</option>
+            </select>
+          </div>
+        </div>
+
+        {/* Main 16-Column Data Table Card */}
+        <div className="reorder-card">
           <div className="reorder-table-scroll">
             <table className="reorder-table">
               <thead>
                 <tr>
-                  <th style={{ width: "55px", minWidth: "55px", textAlign: "center" }}>
-                    <SortHeader label="Sr. No." isSorted={sortColIndex === 0} sortDirection={sortDirection} onSort={() => handleHeaderSort(0)} align="center" />
+                  <th style={{ width: "56px", minWidth: "56px" }}>
+                    <SortHeader label="Sr. No." isSorted={sortColIndex === 0} sortDirection={sortDirection} onSort={() => handleHeaderSort(0)} />
                   </th>
-                  <th style={{ minWidth: "240px", textAlign: "left" }}>
+                  <th style={{ minWidth: "230px" }}>
                     <SortHeader label="Product Name (As Per Tally)" isSorted={sortColIndex === 1} sortDirection={sortDirection} onSort={() => handleHeaderSort(1)} />
                   </th>
-                  <th className="th-pink" style={{ minWidth: "75px", textAlign: "center" }}>
-                    <SortHeader label="Mumbai" isSorted={sortColIndex === 2} sortDirection={sortDirection} onSort={() => handleHeaderSort(2)} align="center" />
+                  <th className={`th-pink ${warehouseFilter === "Mumbai" ? "th-active-scope" : ""}`} style={{ minWidth: "72px" }}>
+                    <SortHeader label="Mumbai" isSorted={sortColIndex === 2} sortDirection={sortDirection} onSort={() => handleHeaderSort(2)} />
                   </th>
-                  <th className="th-grey" style={{ minWidth: "85px", textAlign: "center" }}>
-                    <SortHeader label="Mumbai Transit" isSorted={sortColIndex === 3} sortDirection={sortDirection} onSort={() => handleHeaderSort(3)} align="center" />
+                  <th className={`th-transit ${warehouseFilter === "Mumbai" ? "th-active-scope" : ""}`} style={{ minWidth: "78px" }}>
+                    <SortHeader label="Mumbai Transit" isSorted={sortColIndex === 3} sortDirection={sortDirection} onSort={() => handleHeaderSort(3)} />
                   </th>
-                  <th className="th-grey th-group-end" style={{ minWidth: "85px", textAlign: "center" }}>
-                    <SortHeader label="Mumbai Ordered" isSorted={sortColIndex === 4} sortDirection={sortDirection} onSort={() => handleHeaderSort(4)} align="center" />
+                  <th className={`th-ordered ${warehouseFilter === "Mumbai" ? "th-active-scope" : ""}`} style={{ minWidth: "80px" }}>
+                    <SortHeader label="Mumbai Ordered" isSorted={sortColIndex === 4} sortDirection={sortDirection} onSort={() => handleHeaderSort(4)} />
                   </th>
-                  <th className="th-pink" style={{ minWidth: "85px", textAlign: "center" }}>
-                    <SortHeader label="Ahmedabad" isSorted={sortColIndex === 5} sortDirection={sortDirection} onSort={() => handleHeaderSort(5)} align="center" />
+                  <th className={`th-pink ${warehouseFilter === "Ahmedabad" ? "th-active-scope" : ""}`} style={{ minWidth: "84px" }}>
+                    <SortHeader label="Ahmedabad" isSorted={sortColIndex === 5} sortDirection={sortDirection} onSort={() => handleHeaderSort(5)} />
                   </th>
-                  <th className="th-grey" style={{ minWidth: "90px", textAlign: "center" }}>
-                    <SortHeader label="Ahmedabad Transit" isSorted={sortColIndex === 6} sortDirection={sortDirection} onSort={() => handleHeaderSort(6)} align="center" />
+                  <th className={`th-transit ${warehouseFilter === "Ahmedabad" ? "th-active-scope" : ""}`} style={{ minWidth: "88px" }}>
+                    <SortHeader label="Ahmedabad Transit" isSorted={sortColIndex === 6} sortDirection={sortDirection} onSort={() => handleHeaderSort(6)} />
                   </th>
-                  <th className="th-grey th-group-end" style={{ minWidth: "90px", textAlign: "center" }}>
-                    <SortHeader label="Ahmedabad Ordered" isSorted={sortColIndex === 7} sortDirection={sortDirection} onSort={() => handleHeaderSort(7)} align="center" />
+                  <th className={`th-ordered ${warehouseFilter === "Ahmedabad" ? "th-active-scope" : ""}`} style={{ minWidth: "90px" }}>
+                    <SortHeader label="Ahmedabad Ordered" isSorted={sortColIndex === 7} sortDirection={sortDirection} onSort={() => handleHeaderSort(7)} />
                   </th>
-                  <th className="th-pink" style={{ minWidth: "75px", textAlign: "center" }}>
-                    <SortHeader label="Indore" isSorted={sortColIndex === 8} sortDirection={sortDirection} onSort={() => handleHeaderSort(8)} align="center" />
+                  <th className={`th-pink ${warehouseFilter === "Indore" ? "th-active-scope" : ""}`} style={{ minWidth: "68px" }}>
+                    <SortHeader label="Indore" isSorted={sortColIndex === 8} sortDirection={sortDirection} onSort={() => handleHeaderSort(8)} />
                   </th>
-                  <th className="th-grey" style={{ minWidth: "85px", textAlign: "center" }}>
-                    <SortHeader label="Indore Transit" isSorted={sortColIndex === 9} sortDirection={sortDirection} onSort={() => handleHeaderSort(9)} align="center" />
+                  <th className={`th-transit ${warehouseFilter === "Indore" ? "th-active-scope" : ""}`} style={{ minWidth: "74px" }}>
+                    <SortHeader label="Indore Transit" isSorted={sortColIndex === 9} sortDirection={sortDirection} onSort={() => handleHeaderSort(9)} />
                   </th>
-                  <th className="th-grey th-group-end" style={{ minWidth: "85px", textAlign: "center" }}>
-                    <SortHeader label="Indore Ordered" isSorted={sortColIndex === 10} sortDirection={sortDirection} onSort={() => handleHeaderSort(10)} align="center" />
+                  <th className={`th-ordered ${warehouseFilter === "Indore" ? "th-active-scope" : ""}`} style={{ minWidth: "76px" }}>
+                    <SortHeader label="Indore Ordered" isSorted={sortColIndex === 10} sortDirection={sortDirection} onSort={() => handleHeaderSort(10)} />
                   </th>
-                  <th style={{ minWidth: "85px", textAlign: "center" }}>
-                    <SortHeader label="Total Qty" isSorted={sortColIndex === 11} sortDirection={sortDirection} onSort={() => handleHeaderSort(11)} align="center" />
+                  <th style={{ minWidth: "78px" }}>
+                    <SortHeader label="Total Qty" isSorted={sortColIndex === 11} sortDirection={sortDirection} onSort={() => handleHeaderSort(11)} />
                   </th>
-                  <th style={{ minWidth: "85px", textAlign: "center" }}>
-                    <SortHeader label="Re-Order" isSorted={sortColIndex === 12} sortDirection={sortDirection} onSort={() => handleHeaderSort(12)} align="center" />
+                  <th style={{ minWidth: "78px" }}>
+                    <SortHeader label="Re-Order" isSorted={sortColIndex === 12} sortDirection={sortDirection} onSort={() => handleHeaderSort(12)} />
                   </th>
-                  <th style={{ minWidth: "85px", textAlign: "center" }}>
-                    <SortHeader label="Short Fall" isSorted={sortColIndex === 13} sortDirection={sortDirection} onSort={() => handleHeaderSort(13)} align="center" />
+                  <th style={{ minWidth: "78px" }}>
+                    <SortHeader label="Short Fall" isSorted={sortColIndex === 13} sortDirection={sortDirection} onSort={() => handleHeaderSort(13)} />
                   </th>
-                  <th style={{ minWidth: "80px", textAlign: "center" }}>
-                    <SortHeader label="MOQ" isSorted={sortColIndex === 14} sortDirection={sortDirection} onSort={() => handleHeaderSort(14)} align="center" />
+                  <th style={{ minWidth: "68px" }}>
+                    <SortHeader label="MOQ" isSorted={sortColIndex === 14} sortDirection={sortDirection} onSort={() => handleHeaderSort(14)} />
                   </th>
-                  <th style={{ minWidth: "120px", textAlign: "center" }}>
-                    <SortHeader label="Order To Be Place" isSorted={sortColIndex === 15} sortDirection={sortDirection} onSort={() => handleHeaderSort(15)} align="center" />
+                  <th style={{ minWidth: "96px" }}>
+                    <SortHeader label="Order To Be Place" isSorted={sortColIndex === 15} sortDirection={sortDirection} onSort={() => handleHeaderSort(15)} />
                   </th>
                 </tr>
               </thead>
@@ -1086,9 +1195,7 @@ export function ProductReorderPage() {
                 ) : (
                   paginatedItems.map((item, idx) => (
                     <tr key={item.id}>
-                      <td className="td-center">
-                        {(currentPage - 1) * perPage + idx + 1}
-                      </td>
+                      <td className="td-sr">{(currentPage - 1) * perPage + idx + 1}</td>
 
                       {/* Product Name (As Per Tally) Link */}
                       <td>
@@ -1109,7 +1216,7 @@ export function ProductReorderPage() {
                       <td className="td-pink">
                         <div className="reorder-cell-wrap">
                           <span>{item.mumbai}</span>
-                          {(item.mumbai !== 0 || item.product_name_tally.includes("Service Charges") || item.product_name_tally.includes("Band Sealer")) && (
+                          {shouldShowBreakupInfo(item, "mumbai", item.mumbai, true) && (
                             <button
                               type="button"
                               className="reorder-info-btn"
@@ -1127,10 +1234,10 @@ export function ProductReorderPage() {
                       </td>
 
                       {/* Mumbai Transit */}
-                      <td className="td-grey">
+                      <td className="td-transit">
                         <div className="reorder-cell-wrap">
                           <span>{item.mumbai_transit}</span>
-                          {item.mumbai_transit !== 0 && (
+                          {shouldShowBreakupInfo(item, "mumbai_transit", item.mumbai_transit, false) && (
                             <button
                               type="button"
                               className="reorder-info-btn"
@@ -1148,10 +1255,10 @@ export function ProductReorderPage() {
                       </td>
 
                       {/* Mumbai Ordered */}
-                      <td className="td-grey td-group-end">
+                      <td className="td-ordered">
                         <div className="reorder-cell-wrap">
                           <span>{item.mumbai_ordered}</span>
-                          {item.mumbai_ordered !== 0 && (
+                          {shouldShowBreakupInfo(item, "mumbai_ordered", item.mumbai_ordered, false) && (
                             <button
                               type="button"
                               className="reorder-info-btn"
@@ -1172,7 +1279,7 @@ export function ProductReorderPage() {
                       <td className="td-pink">
                         <div className="reorder-cell-wrap">
                           <span>{item.ahmedabad}</span>
-                          {item.ahmedabad !== 0 && (
+                          {shouldShowBreakupInfo(item, "ahmedabad", item.ahmedabad, true) && (
                             <button
                               type="button"
                               className="reorder-info-btn"
@@ -1190,10 +1297,10 @@ export function ProductReorderPage() {
                       </td>
 
                       {/* Ahmedabad Transit */}
-                      <td className="td-grey">
+                      <td className="td-transit">
                         <div className="reorder-cell-wrap">
                           <span>{item.ahmedabad_transit}</span>
-                          {item.ahmedabad_transit !== 0 && (
+                          {shouldShowBreakupInfo(item, "ahmedabad_transit", item.ahmedabad_transit, false) && (
                             <button
                               type="button"
                               className="reorder-info-btn"
@@ -1211,10 +1318,10 @@ export function ProductReorderPage() {
                       </td>
 
                       {/* Ahmedabad Ordered */}
-                      <td className="td-grey td-group-end">
+                      <td className="td-ordered">
                         <div className="reorder-cell-wrap">
                           <span>{item.ahmedabad_ordered}</span>
-                          {item.ahmedabad_ordered !== 0 && (
+                          {shouldShowBreakupInfo(item, "ahmedabad_ordered", item.ahmedabad_ordered, false) && (
                             <button
                               type="button"
                               className="reorder-info-btn"
@@ -1235,7 +1342,7 @@ export function ProductReorderPage() {
                       <td className="td-pink">
                         <div className="reorder-cell-wrap">
                           <span>{item.indore}</span>
-                          {item.indore !== 0 && (
+                          {shouldShowBreakupInfo(item, "indore", item.indore, true) && (
                             <button
                               type="button"
                               className="reorder-info-btn"
@@ -1253,10 +1360,10 @@ export function ProductReorderPage() {
                       </td>
 
                       {/* Indore Transit */}
-                      <td className="td-grey">
+                      <td className="td-transit">
                         <div className="reorder-cell-wrap">
                           <span>{item.indore_transit}</span>
-                          {item.indore_transit !== 0 && (
+                          {shouldShowBreakupInfo(item, "indore_transit", item.indore_transit, false) && (
                             <button
                               type="button"
                               className="reorder-info-btn"
@@ -1274,10 +1381,10 @@ export function ProductReorderPage() {
                       </td>
 
                       {/* Indore Ordered */}
-                      <td className="td-grey td-group-end">
+                      <td className="td-ordered">
                         <div className="reorder-cell-wrap">
                           <span>{item.indore_ordered}</span>
-                          {item.indore_ordered !== 0 && (
+                          {shouldShowBreakupInfo(item, "indore_ordered", item.indore_ordered, false) && (
                             <button
                               type="button"
                               className="reorder-info-btn"
@@ -1301,14 +1408,8 @@ export function ProductReorderPage() {
                       <td className="td-reorder-link">
                         <button
                           type="button"
-                          className="reorder-interactive-link"
-                          onClick={() =>
-                            setEditItem({
-                              item,
-                              reorder_level: item.reorder_level,
-                              moq: item.moq,
-                            })
-                          }
+                          className={`reorder-interactive-link ${item.reorder_level > 0 ? "has-value" : ""}`}
+                          onClick={() => handleOpenEditModal(item)}
                           title="Click to edit Re-Order Level threshold"
                         >
                           {item.reorder_level}
@@ -1328,14 +1429,8 @@ export function ProductReorderPage() {
                       <td className="td-moq-link">
                         <button
                           type="button"
-                          className="reorder-interactive-link"
-                          onClick={() =>
-                            setEditItem({
-                              item,
-                              reorder_level: item.reorder_level,
-                              moq: item.moq,
-                            })
-                          }
+                          className={`reorder-interactive-link ${item.moq > 0 ? "has-value" : ""}`}
+                          onClick={() => handleOpenEditModal(item)}
                           title="Click to edit Minimum Order Quantity (MOQ)"
                         >
                           {item.moq}
@@ -1358,22 +1453,25 @@ export function ProductReorderPage() {
           </div>
 
           {/* Pagination */}
-          <div style={{ padding: "12px 16px", borderTop: "1px solid #e2e8f0" }}>
+          <div style={{ padding: "12px 4px 4px 4px" }}>
             <Pagination
               pagination={paginationMeta}
               pageSize={perPage}
               onPageChange={(p) => setCurrentPage(p)}
-              onPageSizeChange={(s) => setPerPage(s)}
+              onPageSizeChange={(s) => {
+                setPerPage(s);
+                setCurrentPage(1);
+              }}
             />
           </div>
         </div>
 
-        {/* Sale Order Information Drawer (Per Screenshot 1 & General New Points Doc) */}
+        {/* Sale Order Information Drawer (Physical warehouse open SO bookings; clickable SO No opens PDF) */}
         <SideDrawer
           isOpen={activeBreakup !== null && activeBreakup.stockType === "physical"}
           onClose={() => setActiveBreakup(null)}
           title="Sale Order Information"
-          width="620px"
+          width="660px"
         >
           {activeBreakup && (
             <div style={{ padding: "8px 0" }}>
@@ -1383,6 +1481,9 @@ export function ProductReorderPage() {
                 </div>
                 <div style={{ fontSize: "13.5px", fontWeight: 700, color: "#1e293b" }}>
                   Warehouse: <span style={{ fontWeight: 500, color: "#475569" }}>{activeBreakup.location}</span>
+                  <span style={{ marginLeft: "14px", fontSize: "12.5px", fontWeight: 600, color: "#0284c7" }}>
+                    Net Sellable Stock: {activeBreakup.count}
+                  </span>
                 </div>
               </div>
 
@@ -1402,9 +1503,9 @@ export function ProductReorderPage() {
                       <th style={{ padding: "8px 8px", textAlign: "left" }}>Sale Order No &amp; Company</th>
                       <th style={{ padding: "8px 8px", textAlign: "left" }}>City / State</th>
                       <th style={{ padding: "8px 8px", textAlign: "left" }}>Sales Person</th>
-                      <th style={{ padding: "8px 8px", textAlign: "left", width: "85px" }}>Exp. Deli.</th>
+                      <th style={{ padding: "8px 8px", textAlign: "left", width: "90px" }}>Exp. Deli.</th>
                       <th style={{ padding: "8px 8px", textAlign: "center", width: "55px" }}>Qty</th>
-                      <th style={{ padding: "8px 8px", textAlign: "center", width: "95px" }}>Status</th>
+                      <th style={{ padding: "8px 8px", textAlign: "center", width: "105px" }}>Status</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1413,7 +1514,6 @@ export function ProductReorderPage() {
                         <td style={{ padding: "8px 6px", textAlign: "left" }}>{row.sr_no || rIdx + 1}</td>
                         <td style={{ padding: "8px 8px", textAlign: "left" }}>
                           <div className="reorder-so-cell">
-                            {/* CLICKABLE SO Number - Opens SO PDF in new tab (Explicit Client Rule!) */}
                             <button
                               type="button"
                               className="reorder-so-no-link"
@@ -1421,13 +1521,13 @@ export function ProductReorderPage() {
                               onClick={() => handleOpenSaleOrderPdf(row)}
                               title="Click to view/download official Sales Order PDF"
                             >
-                              {row.order_no || "SO-MH/26-27/0432"}
+                              {row.order_no || "SO-Direct"}
                             </button>
-                            {row.order_date && (
+                            {row.order_date && row.order_date !== "-" && (
                               <span style={{ fontSize: "11px", color: "#64748b" }}>{row.order_date}</span>
                             )}
-                            {/* Company Name displayed only in reorder! */}
-                            <span className="reorder-company-sub">{row.company_name || "VN GOURMET LLT"}</span>
+                            {/* Company Name displayed in Re-Order breakup per Stock Transactions.docx L28 */}
+                            <span className="reorder-company-sub">{row.company_name || "-"}</span>
                           </div>
                         </td>
                         <td style={{ padding: "8px 8px", textAlign: "left", color: "#475569" }}>
@@ -1445,7 +1545,10 @@ export function ProductReorderPage() {
                         <td style={{ padding: "8px 8px", textAlign: "center" }}>
                           <span
                             className={
-                              row.status.toLowerCase().includes("acc")
+                              (row.status || "").toLowerCase().includes("acc") ||
+                              (row.status || "").toLowerCase().includes("confirm") ||
+                              (row.status || "").toLowerCase().includes("gatepass") ||
+                              (row.status || "").toLowerCase().includes("approv")
                                 ? "status-badge-confirmed"
                                 : "status-badge-pending"
                             }
@@ -1462,21 +1565,27 @@ export function ProductReorderPage() {
           )}
         </SideDrawer>
 
-        {/* Consignment / PO Breakup Drawer (For Transit / Ordered stock) */}
+        {/* Consignment / PO & Stock Transfer Breakup Drawer (For Transit / Ordered stock) */}
         <SideDrawer
           isOpen={activeBreakup !== null && activeBreakup.stockType !== "physical"}
           onClose={() => setActiveBreakup(null)}
           title="Consignment Breakup"
-          width="540px"
+          width="620px"
         >
           {activeBreakup && (
-            <div style={{ padding: "8px 0" }}>
-              <div style={{ marginBottom: "16px", borderBottom: "1px solid #e2e8f0", paddingBottom: "12px" }}>
+            <div style={{ padding: "8px 0", display: "flex", flexDirection: "column", gap: "18px" }}>
+              <div style={{ borderBottom: "1px solid #e2e8f0", paddingBottom: "12px" }}>
                 <div style={{ fontSize: "14px", fontWeight: 700, color: "#1e293b", marginBottom: "4px" }}>
                   Product: <span style={{ fontWeight: 500, color: "#475569" }}>{activeBreakup.item.product_name_tally}</span>
                 </div>
                 <div style={{ fontSize: "13.5px", fontWeight: 700, color: "#1e293b" }}>
-                  Warehouse: <span style={{ fontWeight: 500, color: "#475569" }}>{activeBreakup.location} ({activeBreakup.stockType})</span>
+                  Warehouse:{" "}
+                  <span style={{ fontWeight: 500, color: "#475569" }}>
+                    {activeBreakup.location} {activeBreakup.stockType === "transit" ? "Transit" : "Ordered"}
+                  </span>
+                  <span style={{ marginLeft: "14px", fontSize: "12.5px", fontWeight: 600, color: "#0284c7" }}>
+                    Net Qty: {activeBreakup.count}
+                  </span>
                 </div>
               </div>
 
@@ -1484,53 +1593,236 @@ export function ProductReorderPage() {
                 <div style={{ padding: "30px", textAlign: "center", color: "#64748b" }}>
                   Loading consignment breakup...
                 </div>
-              ) : activeBreakup.rows.length === 0 ? (
+              ) : activeBreakup.rows.length === 0 && (!activeBreakup.bookedOrders || activeBreakup.bookedOrders.length === 0) ? (
                 <div style={{ padding: "30px", textAlign: "center", color: "#64748b" }}>
-                  No inbound consignments found for this item in {activeBreakup.location}.
+                  No active inbound consignments or transfers found for this item in {activeBreakup.location}.
                 </div>
               ) : (
-                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "13px" }}>
-                  <thead>
-                    <tr style={{ background: "#f8fafc", borderBottom: "2px solid #cbd5e1" }}>
-                      <th style={{ padding: "8px 10px", textAlign: "left", width: "40px" }}>#</th>
-                      <th style={{ padding: "8px 10px", textAlign: "left" }}>Inv. / Con. No & Date</th>
-                      <th style={{ padding: "8px 10px", textAlign: "left" }}>Supplier</th>
-                      <th style={{ padding: "8px 10px", textAlign: "center", width: "70px" }}>Net QTY</th>
-                      <th style={{ padding: "8px 10px", textAlign: "left", width: "95px" }}>Arrival Date</th>
-                      <th style={{ padding: "8px 10px", textAlign: "center", width: "90px" }}>Status</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {activeBreakup.rows.map((row, rIdx) => (
-                      <tr key={rIdx} style={{ borderBottom: "1px solid #e2e8f0" }}>
-                        <td style={{ padding: "10px", textAlign: "left" }}>{row.sr_no || rIdx + 1}</td>
-                        <td style={{ padding: "10px", textAlign: "left", fontWeight: 600 }}>
-                          <div>{row.consignment_no || row.invoice_no || "-"}</div>
-                          <div style={{ fontSize: "11px", color: "#64748b" }}>{row.date || "-"}</div>
-                        </td>
-                        <td style={{ padding: "10px", textAlign: "left", color: "#475569" }}>
-                          {row.supplier_name || "-"}
-                        </td>
-                        <td style={{ padding: "10px", textAlign: "center", fontWeight: 700 }}>{row.quantity}</td>
-                        <td style={{ padding: "10px", textAlign: "left" }}>{row.arrival_date || "-"}</td>
-                        <td style={{ padding: "10px", textAlign: "center" }}>
-                          <span className="status-badge-transit">{row.status}</span>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                <>
+                  {activeBreakup.rows.length > 0 && (
+                    <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "13px" }}>
+                      <thead>
+                        <tr style={{ background: "#f8fafc", borderBottom: "2px solid #cbd5e1" }}>
+                          <th style={{ padding: "8px 10px", textAlign: "left", width: "36px" }}>#</th>
+                          <th style={{ padding: "8px 10px", textAlign: "left" }}>Inv. / Con. No &amp; Date</th>
+                          <th style={{ padding: "8px 10px", textAlign: "left" }}>Supplier / Source</th>
+                          <th style={{ padding: "8px 10px", textAlign: "center", width: "80px" }}>Net QTY</th>
+                          <th style={{ padding: "8px 10px", textAlign: "left", width: "95px" }}>Arrival Date</th>
+                          <th style={{ padding: "8px 10px", textAlign: "center", width: "95px" }}>Status</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {activeBreakup.rows.map((row, rIdx) => (
+                          <tr key={rIdx} style={{ borderBottom: "1px solid #e2e8f0" }}>
+                            <td style={{ padding: "10px", textAlign: "left" }}>{row.sr_no || rIdx + 1}</td>
+                            <td style={{ padding: "10px", textAlign: "left" }}>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setSelectedConsignment({
+                                    row,
+                                    productName: activeBreakup.item.product_name_tally,
+                                  })
+                                }
+                                style={{
+                                  background: "none",
+                                  border: "none",
+                                  padding: 0,
+                                  color: "#0284c7",
+                                  fontWeight: 700,
+                                  cursor: "pointer",
+                                  textDecoration: "underline",
+                                  fontSize: "13px",
+                                  textAlign: "left",
+                                }}
+                                title="Click to view Consignment / PO details"
+                              >
+                                {row.consignment_no || row.invoice_no || "-"}
+                              </button>
+                              <div style={{ fontSize: "11px", color: "#64748b" }}>{row.date || "-"}</div>
+                            </td>
+                            <td style={{ padding: "10px", textAlign: "left", color: "#475569" }}>
+                              {row.supplier_name || "-"}
+                            </td>
+                            <td style={{ padding: "10px", textAlign: "center", fontWeight: 700 }}>
+                              <div>{row.quantity}</div>
+                              {typeof row.booked_quantity === "number" && row.booked_quantity > 0 && (
+                                <div style={{ fontSize: "10.5px", color: "#dc2626", fontWeight: 500 }}>
+                                  ({row.gross_quantity} - {row.booked_quantity} booked)
+                                </div>
+                              )}
+                            </td>
+                            <td style={{ padding: "10px", textAlign: "left" }}>{row.arrival_date || "-"}</td>
+                            <td style={{ padding: "10px", textAlign: "center" }}>
+                              <span className="status-badge-transit">{row.status}</span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+
+                  {activeBreakup.bookedOrders && activeBreakup.bookedOrders.length > 0 && (
+                    <div>
+                      <div style={{ fontSize: "13px", fontWeight: 700, color: "#1e293b", marginBottom: "8px" }}>
+                        Open Sale Order Bookings Against {activeBreakup.location}{" "}
+                        {activeBreakup.stockType === "transit" ? "Transit" : "Ordered"} (FIFO Deducted)
+                      </div>
+                      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "12.5px" }}>
+                        <thead>
+                          <tr style={{ background: "#fff1f2", borderBottom: "1px solid #fecdd3" }}>
+                            <th style={{ padding: "7px 8px", textAlign: "left" }}>SO No &amp; Company</th>
+                            <th style={{ padding: "7px 8px", textAlign: "left" }}>Sales Person</th>
+                            <th style={{ padding: "7px 8px", textAlign: "center", width: "65px" }}>Qty</th>
+                            <th style={{ padding: "7px 8px", textAlign: "center", width: "100px" }}>Status</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {activeBreakup.bookedOrders.map((bo, bIdx) => (
+                            <tr key={bIdx} style={{ borderBottom: "1px solid #e2e8f0" }}>
+                              <td style={{ padding: "8px" }}>
+                                <div className="reorder-so-cell">
+                                  <button
+                                    type="button"
+                                    className="reorder-so-no-link"
+                                    style={{ background: "none", border: "none", padding: 0, textAlign: "left" }}
+                                    onClick={() => handleOpenSaleOrderPdf(bo)}
+                                  >
+                                    {bo.order_no}
+                                  </button>
+                                  <span className="reorder-company-sub">{bo.company_name || "-"}</span>
+                                </div>
+                              </td>
+                              <td style={{ padding: "8px", color: "#475569" }}>{bo.sales_person || "-"}</td>
+                              <td style={{ padding: "8px", textAlign: "center", fontWeight: 700, color: "#dc2626" }}>
+                                -{bo.quantity}
+                              </td>
+                              <td style={{ padding: "8px", textAlign: "center" }}>
+                                <span className="status-badge-pending">{bo.status}</span>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </>
               )}
             </div>
           )}
         </SideDrawer>
+
+        {/* Modal: Consignment / PO Details (Stock Transactions.docx L35-36) */}
+        {selectedConsignment && (
+          <div
+            className="reorder-modal-backdrop"
+            style={{ zIndex: 1250 }}
+            onClick={() => setSelectedConsignment(null)}
+            data-testid="reorder-consignment-detail-modal"
+          >
+            <div
+              className="reorder-modal-dialog"
+              style={{ width: "540px" }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="reorder-modal-header">
+                <h3>
+                  Consignment Details:{" "}
+                  {selectedConsignment.row.consignment_no || selectedConsignment.row.invoice_no || "-"}
+                </h3>
+                <button
+                  type="button"
+                  style={{ background: "none", border: "none", fontSize: "18px", cursor: "pointer", color: "#64748b" }}
+                  onClick={() => setSelectedConsignment(null)}
+                  aria-label="Close consignment details"
+                >
+                  ✕
+                </button>
+              </div>
+              <div className="reorder-modal-body">
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "1fr 1fr",
+                    gap: "12px 16px",
+                    fontSize: "13px",
+                    background: "#f8fafc",
+                    padding: "16px",
+                    borderRadius: "6px",
+                    border: "1px solid #e2e8f0",
+                  }}
+                >
+                  <div style={{ gridColumn: "1 / -1" }}>
+                    <span style={{ color: "#64748b" }}>Product Name:</span>{" "}
+                    <strong>{selectedConsignment.productName}</strong>
+                  </div>
+                  <div>
+                    <span style={{ color: "#64748b" }}>Qty:</span>{" "}
+                    <strong style={{ color: "#0284c7" }}>{selectedConsignment.row.quantity}</strong>
+                  </div>
+                  <div>
+                    <span style={{ color: "#64748b" }}>Warehouse:</span>{" "}
+                    <strong>
+                      {selectedConsignment.row.warehouse ||
+                        (activeBreakup
+                          ? `${activeBreakup.location} ${activeBreakup.stockType === "transit" ? "Transit" : "Ordered"}`
+                          : "-")}
+                    </strong>
+                  </div>
+                  <div>
+                    <span style={{ color: "#64748b" }}>Inv. / Cons No:</span>{" "}
+                    <strong>{selectedConsignment.row.consignment_no || selectedConsignment.row.invoice_no || "-"}</strong>
+                  </div>
+                  <div>
+                    <span style={{ color: "#64748b" }}>Inv. Date:</span>{" "}
+                    <strong>{selectedConsignment.row.invoice_date || selectedConsignment.row.date || "-"}</strong>
+                  </div>
+                  <div>
+                    <span style={{ color: "#64748b" }}>Exp. Arri. Date:</span>{" "}
+                    <strong>
+                      {selectedConsignment.row.expected_arrival_date || selectedConsignment.row.arrival_date || "-"}
+                    </strong>
+                  </div>
+                  <div>
+                    <span style={{ color: "#64748b" }}>ETD Origin Date:</span>{" "}
+                    <strong>{selectedConsignment.row.etd_origin_date || "-"}</strong>
+                  </div>
+                  <div>
+                    <span style={{ color: "#64748b" }}>ETA Port Date:</span>{" "}
+                    <strong>{selectedConsignment.row.eta_port_date || "-"}</strong>
+                  </div>
+                  <div>
+                    <span style={{ color: "#64748b" }}>Status:</span>{" "}
+                    <span className="status-badge-transit">{selectedConsignment.row.status}</span>
+                  </div>
+                </div>
+              </div>
+              <div className="reorder-modal-footer">
+                <button
+                  type="button"
+                  onClick={() => setSelectedConsignment(null)}
+                  style={{
+                    padding: "8px 20px",
+                    borderRadius: "6px",
+                    border: "1px solid #cbd5e1",
+                    background: "#ffffff",
+                    fontWeight: 600,
+                    cursor: "pointer",
+                  }}
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Modal: Edit Re-Order Level & Minimum Order Quantity (MOQ) */}
         {editItem && (
           <div className="reorder-modal-backdrop" onClick={() => setEditItem(null)}>
             <div className="reorder-modal-dialog" onClick={(e) => e.stopPropagation()}>
               <div className="reorder-modal-header">
-                <h3>Edit Re-Order & MOQ Thresholds</h3>
+                <h3>Edit Re-Order &amp; MOQ Thresholds</h3>
                 <button
                   type="button"
                   style={{ background: "none", border: "none", fontSize: "18px", cursor: "pointer", color: "#64748b" }}
@@ -1554,6 +1846,32 @@ export function ProductReorderPage() {
                 </div>
 
                 <div>
+                  <label htmlFor="input-edit-warehouse" style={{ fontSize: "13px", fontWeight: 600, color: "#334155", display: "block", marginBottom: "6px" }}>
+                    Warehouse Scope
+                  </label>
+                  <select
+                    id="input-edit-warehouse"
+                    value={editItem.warehouse}
+                    onChange={(e) => {
+                      const nextWh = e.target.value;
+                      const nextMetrics = computeScopedMetrics(editItem.item, nextWh);
+                      setEditItem({
+                        ...editItem,
+                        warehouse: nextWh,
+                        reorder_level: nextMetrics.reorder_level,
+                        moq: nextMetrics.moq,
+                      });
+                    }}
+                    style={{ width: "100%", height: "38px", padding: "6px 12px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "13.5px" }}
+                  >
+                    <option value="Mumbai">Mumbai Branch</option>
+                    <option value="Ahmedabad">Ahmedabad Branch</option>
+                    <option value="Indore">Indore Branch</option>
+                    <option value="All">All Warehouses (Global)</option>
+                  </select>
+                </div>
+
+                <div>
                   <label htmlFor="input-edit-reorder" style={{ fontSize: "13px", fontWeight: 600, color: "#334155", display: "block", marginBottom: "6px" }}>
                     Re-Order Level (Threshold)
                   </label>
@@ -1566,13 +1884,13 @@ export function ProductReorderPage() {
                     onChange={(e) =>
                       setEditItem({
                         ...editItem,
-                        reorder_level: Number(e.target.value) || 0,
+                        reorder_level: Math.max(0, Number(e.target.value) || 0),
                       })
                     }
                     style={{ width: "100%", height: "38px", padding: "6px 12px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "14px" }}
                   />
                   <div style={{ fontSize: "11.5px", color: "#64748b", marginTop: "4px" }}>
-                    Shortfall triggers automatically when Total Quantity falls below this level.
+                    Shortfall triggers automatically when {editItem.warehouse === "All" ? "Total Quantity" : `${editItem.warehouse} Net Pipeline`} falls below this level.
                   </div>
                 </div>
 
@@ -1589,7 +1907,7 @@ export function ProductReorderPage() {
                     onChange={(e) =>
                       setEditItem({
                         ...editItem,
-                        moq: Number(e.target.value) || 0,
+                        moq: Math.max(0, Number(e.target.value) || 0),
                       })
                     }
                     style={{ width: "100%", height: "38px", padding: "6px 12px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "14px" }}
@@ -1598,6 +1916,31 @@ export function ProductReorderPage() {
                     Factory or supplier minimum batch size enforced on Purchase Orders.
                   </div>
                 </div>
+
+                {editPreview && (
+                  <div
+                    style={{
+                      background: "#f8fafc",
+                      border: "1px solid #e2e8f0",
+                      borderRadius: "6px",
+                      padding: "10px 12px",
+                      display: "flex",
+                      justifyContent: "space-between",
+                      fontSize: "12.5px",
+                      color: "#334155",
+                    }}
+                  >
+                    <span>
+                      Pipeline Qty: <strong>{editPreview.baseQty}</strong>
+                    </span>
+                    <span>
+                      Short Fall: <strong style={{ color: editPreview.sf > 0 ? "#dc2626" : "#166534" }}>{editPreview.sf}</strong>
+                    </span>
+                    <span>
+                      Order To Place: <strong style={{ color: "#b45309" }}>{editPreview.orderQty}</strong>
+                    </span>
+                  </div>
+                )}
               </div>
 
               <div className="reorder-modal-footer">
@@ -1621,32 +1964,62 @@ export function ProductReorderPage() {
           </div>
         )}
 
-        {/* Modal: Product Master View Window */}
-        {viewProductItem && (
-          <div className="reorder-modal-backdrop" onClick={() => setViewProductItem(null)}>
-            <div className="reorder-modal-dialog" style={{ width: "580px" }} onClick={(e) => e.stopPropagation()}>
-              <div className="reorder-modal-header">
-                <h3>Product Master View Window</h3>
-                <button
-                  type="button"
-                  style={{ background: "none", border: "none", fontSize: "18px", cursor: "pointer", color: "#64748b" }}
-                  onClick={() => setViewProductItem(null)}
-                >
-                  ✕
-                </button>
-              </div>
-
-              <div className="reorder-modal-body" style={{ maxHeight: "75vh", overflowY: "auto" }}>
-                <div style={{ background: "#f8fafc", padding: "14px", borderRadius: "6px", border: "1px solid #e2e8f0" }}>
-                  <div style={{ fontSize: "16px", fontWeight: 700, color: "#1e293b", marginBottom: "4px" }}>
-                    {viewProductItem.product_name_tally}
+        {/* Drawer: Product Master View Window (Product Stock.docx L24 & Product Master.docx L46) */}
+        <SideDrawer
+          isOpen={viewProductItem !== null}
+          onClose={() => setViewProductItem(null)}
+          title="Product Master View Window"
+          subtitle={viewProductItem?.product_name_tally || ""}
+          width="680px"
+          headerActions={
+            viewProductItem ? (
+              <button
+                type="button"
+                onClick={() => {
+                  const target = viewProductItem.product_name_tally;
+                  setViewProductItem(null);
+                  navigate(`/masters/products?search=${encodeURIComponent(target)}`);
+                }}
+                style={{
+                  background: "#f1f5f9",
+                  color: "#0284c7",
+                  border: "1px solid #cbd5e1",
+                  borderRadius: "5px",
+                  padding: "6px 12px",
+                  fontSize: "12px",
+                  fontWeight: 600,
+                  cursor: "pointer",
+                }}
+              >
+                Open in Product Master ↗
+              </button>
+            ) : undefined
+          }
+        >
+          {viewProductItem && (
+            <div style={{ display: "flex", flexDirection: "column", gap: "16px", padding: "4px 0" }}>
+              {/* Identity & Classification */}
+              <div style={{ background: "#f8fafc", padding: "16px", borderRadius: "6px", border: "1px solid #e2e8f0" }}>
+                <h4 style={{ margin: "0 0 10px", fontSize: "13.5px", color: "#1e293b", borderBottom: "1px solid #e2e8f0", paddingBottom: "6px" }}>
+                  Identity &amp; Classification
+                </h4>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px 16px", fontSize: "13px" }}>
+                  <div>
+                    <span style={{ color: "#64748b" }}>Product Name (Tally): </span>
+                    <strong>{viewProductItem.product_name_tally}</strong>
                   </div>
-                  <div style={{ fontSize: "13px", color: "#64748b" }}>
-                    Product Code: <strong style={{ color: "#0f172a" }}>{viewProductItem.product_code}</strong>
+                  <div>
+                    <span style={{ color: "#64748b" }}>Product Name (Invoice): </span>
+                    <strong>{viewProductItem.product_name_invoice || viewProductItem.product_name_tally}</strong>
                   </div>
-                </div>
-
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", fontSize: "13px" }}>
+                  <div>
+                    <span style={{ color: "#64748b" }}>Product Code: </span>
+                    <strong>{viewProductItem.product_code || "-"}</strong>
+                  </div>
+                  <div>
+                    <span style={{ color: "#64748b" }}>Brand: </span>
+                    <strong>{viewProductItem.brand || "-"}</strong>
+                  </div>
                   <div>
                     <span style={{ color: "#64748b" }}>Category: </span>
                     <strong>{viewProductItem.category || "-"}</strong>
@@ -1656,23 +2029,48 @@ export function ProductReorderPage() {
                     <strong>{viewProductItem.sub_category || "-"}</strong>
                   </div>
                   <div>
-                    <span style={{ color: "#64748b" }}>Brand: </span>
-                    <strong>{viewProductItem.brand || "-"}</strong>
+                    <span style={{ color: "#64748b" }}>HSN Code: </span>
+                    <strong>{viewProductItem.hsn_code || "-"}</strong>
                   </div>
                   <div>
                     <span style={{ color: "#64748b" }}>UOM: </span>
-                    <strong>SET</strong>
+                    <strong>{viewProductItem.uom || "SET"}</strong>
                   </div>
                   <div>
-                    <span style={{ color: "#64748b" }}>Total Inventory: </span>
-                    <strong style={{ color: "#0284c7" }}>{viewProductItem.total_qty} units</strong>
+                    <span style={{ color: "#64748b" }}>GST %: </span>
+                    <strong>{viewProductItem.gst_percent != null ? `${viewProductItem.gst_percent}%` : "-"}</strong>
+                  </div>
+                  <div>
+                    <span style={{ color: "#64748b" }}>Import Duty %: </span>
+                    <strong>{viewProductItem.import_duty_percent != null ? `${viewProductItem.import_duty_percent}%` : "-"}</strong>
+                  </div>
+                </div>
+              </div>
+
+              {/* Commercial & Re-Order Planning */}
+              <div style={{ background: "#f8fafc", padding: "16px", borderRadius: "6px", border: "1px solid #e2e8f0" }}>
+                <h4 style={{ margin: "0 0 10px", fontSize: "13.5px", color: "#1e293b", borderBottom: "1px solid #e2e8f0", paddingBottom: "6px" }}>
+                  Commercial &amp; Re-Order Summary ({warehouseFilter})
+                </h4>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "10px 14px", fontSize: "13px" }}>
+                  <div>
+                    <span style={{ color: "#64748b" }}>Min. Price (Excl. GST): </span>
+                    <strong>
+                      {viewProductItem.minimum_price != null
+                        ? `₹${Number(viewProductItem.minimum_price).toLocaleString("en-IN")}`
+                        : "-"}
+                    </strong>
+                  </div>
+                  <div>
+                    <span style={{ color: "#64748b" }}>Total Net Stock: </span>
+                    <strong style={{ color: "#0284c7" }}>{viewProductItem.total_qty}</strong>
                   </div>
                   <div>
                     <span style={{ color: "#64748b" }}>Re-Order Level: </span>
                     <strong>{viewProductItem.reorder_level}</strong>
                   </div>
                   <div>
-                    <span style={{ color: "#64748b" }}>Current Shortfall: </span>
+                    <span style={{ color: "#64748b" }}>Short Fall: </span>
                     <strong style={{ color: viewProductItem.short_fall > 0 ? "#dc2626" : "#166534" }}>
                       {viewProductItem.short_fall}
                     </strong>
@@ -1681,41 +2079,110 @@ export function ProductReorderPage() {
                     <span style={{ color: "#64748b" }}>MOQ: </span>
                     <strong>{viewProductItem.moq}</strong>
                   </div>
-                </div>
-
-                <div style={{ borderTop: "1px solid #e2e8f0", paddingTop: "12px" }}>
-                  <div style={{ fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "8px" }}>
-                    Warehouse Allocation
-                  </div>
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "8px", fontSize: "12.5px" }}>
-                    <div style={{ background: "#fde8e8", padding: "8px", borderRadius: "4px" }}>
-                      <div>Mumbai: <strong>{viewProductItem.mumbai}</strong></div>
-                      <div style={{ fontSize: "11px", color: "#64748b" }}>Transit: {viewProductItem.mumbai_transit} | Ordered: {viewProductItem.mumbai_ordered}</div>
-                    </div>
-                    <div style={{ background: "#fde8e8", padding: "8px", borderRadius: "4px" }}>
-                      <div>Ahmedabad: <strong>{viewProductItem.ahmedabad}</strong></div>
-                      <div style={{ fontSize: "11px", color: "#64748b" }}>Transit: {viewProductItem.ahmedabad_transit} | Ordered: {viewProductItem.ahmedabad_ordered}</div>
-                    </div>
-                    <div style={{ background: "#fde8e8", padding: "8px", borderRadius: "4px" }}>
-                      <div>Indore: <strong>{viewProductItem.indore}</strong></div>
-                      <div style={{ fontSize: "11px", color: "#64748b" }}>Transit: {viewProductItem.indore_transit} | Ordered: {viewProductItem.indore_ordered}</div>
-                    </div>
+                  <div>
+                    <span style={{ color: "#64748b" }}>Order To Be Place: </span>
+                    <strong style={{ color: "#b45309" }}>{viewProductItem.order_to_be_place}</strong>
                   </div>
                 </div>
               </div>
 
-              <div className="reorder-modal-footer">
-                <button
-                  type="button"
-                  onClick={() => setViewProductItem(null)}
-                  style={{ padding: "8px 20px", borderRadius: "6px", border: "1px solid #cbd5e1", background: "#ffffff", fontWeight: 600, cursor: "pointer" }}
-                >
-                  Close
-                </button>
+              {/* Packaging & Dimensions For CBM */}
+              <div style={{ background: "#f8fafc", padding: "16px", borderRadius: "6px", border: "1px solid #e2e8f0" }}>
+                <h4 style={{ margin: "0 0 10px", fontSize: "13.5px", color: "#1e293b", borderBottom: "1px solid #e2e8f0", paddingBottom: "6px" }}>
+                  Packaging &amp; Dimensions For CBM
+                </h4>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "10px 14px", fontSize: "13px" }}>
+                  <div>
+                    <span style={{ color: "#64748b" }}>Packaging Qty: </span>
+                    <strong>{viewProductItem.packaging_quantity ?? "-"}</strong>
+                  </div>
+                  <div>
+                    <span style={{ color: "#64748b" }}>Net Weight: </span>
+                    <strong>{viewProductItem.packaging_net_weight != null ? `${viewProductItem.packaging_net_weight} kg` : "-"}</strong>
+                  </div>
+                  <div>
+                    <span style={{ color: "#64748b" }}>Gross Weight: </span>
+                    <strong>{viewProductItem.packaging_gross_weight != null ? `${viewProductItem.packaging_gross_weight} kg` : "-"}</strong>
+                  </div>
+                  <div>
+                    <span style={{ color: "#64748b" }}>Dimensions (L×W×H): </span>
+                    <strong>
+                      {viewProductItem.length_cm != null || viewProductItem.width_cm != null || viewProductItem.height_cm != null
+                        ? `${viewProductItem.length_cm ?? 0} × ${viewProductItem.width_cm ?? 0} × ${viewProductItem.height_cm ?? 0} cm`
+                        : "-"}
+                    </strong>
+                  </div>
+                  <div>
+                    <span style={{ color: "#64748b" }}>Packaging Unit CBM: </span>
+                    <strong>
+                      {viewProductItem.packaging_unit_cbm != null
+                        ? Number(viewProductItem.packaging_unit_cbm).toFixed(2)
+                        : "-"}
+                    </strong>
+                  </div>
+                </div>
               </div>
+
+              {/* Warehouse Stock Breakdown */}
+              <div style={{ background: "#f8fafc", padding: "16px", borderRadius: "6px", border: "1px solid #e2e8f0" }}>
+                <h4 style={{ margin: "0 0 10px", fontSize: "13.5px", color: "#1e293b", borderBottom: "1px solid #e2e8f0", paddingBottom: "6px" }}>
+                  Warehouse Stock Breakdown
+                </h4>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "12.5px" }}>
+                  <thead>
+                    <tr style={{ background: "#f1f5f9", borderBottom: "1px solid #cbd5e1" }}>
+                      <th style={{ padding: "8px 10px", textAlign: "left" }}>Branch</th>
+                      <th style={{ padding: "8px 10px", textAlign: "center", background: "#f4dce0" }}>Physical</th>
+                      <th style={{ padding: "8px 10px", textAlign: "center", background: "#edeae4" }}>Transit</th>
+                      <th style={{ padding: "8px 10px", textAlign: "center", background: "#dcdcdc" }}>Ordered</th>
+                      <th style={{ padding: "8px 10px", textAlign: "center" }}>Subtotal</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr style={{ borderBottom: "1px solid #e2e8f0" }}>
+                      <td style={{ padding: "8px 10px", fontWeight: 600 }}>Mumbai</td>
+                      <td style={{ padding: "8px 10px", textAlign: "center" }}>{viewProductItem.mumbai}</td>
+                      <td style={{ padding: "8px 10px", textAlign: "center" }}>{viewProductItem.mumbai_transit}</td>
+                      <td style={{ padding: "8px 10px", textAlign: "center" }}>{viewProductItem.mumbai_ordered}</td>
+                      <td style={{ padding: "8px 10px", textAlign: "center", fontWeight: 700 }}>
+                        {viewProductItem.mumbai + viewProductItem.mumbai_transit + viewProductItem.mumbai_ordered}
+                      </td>
+                    </tr>
+                    <tr style={{ borderBottom: "1px solid #e2e8f0" }}>
+                      <td style={{ padding: "8px 10px", fontWeight: 600 }}>Ahmedabad</td>
+                      <td style={{ padding: "8px 10px", textAlign: "center" }}>{viewProductItem.ahmedabad}</td>
+                      <td style={{ padding: "8px 10px", textAlign: "center" }}>{viewProductItem.ahmedabad_transit}</td>
+                      <td style={{ padding: "8px 10px", textAlign: "center" }}>{viewProductItem.ahmedabad_ordered}</td>
+                      <td style={{ padding: "8px 10px", textAlign: "center", fontWeight: 700 }}>
+                        {viewProductItem.ahmedabad + viewProductItem.ahmedabad_transit + viewProductItem.ahmedabad_ordered}
+                      </td>
+                    </tr>
+                    <tr>
+                      <td style={{ padding: "8px 10px", fontWeight: 600 }}>Indore</td>
+                      <td style={{ padding: "8px 10px", textAlign: "center" }}>{viewProductItem.indore}</td>
+                      <td style={{ padding: "8px 10px", textAlign: "center" }}>{viewProductItem.indore_transit}</td>
+                      <td style={{ padding: "8px 10px", textAlign: "center" }}>{viewProductItem.indore_ordered}</td>
+                      <td style={{ padding: "8px 10px", textAlign: "center", fontWeight: 700 }}>
+                        {viewProductItem.indore + viewProductItem.indore_transit + viewProductItem.indore_ordered}
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+
+              {(viewProductItem.specification || viewProductItem.description) && (
+                <div style={{ background: "#f8fafc", padding: "16px", borderRadius: "6px", border: "1px solid #e2e8f0" }}>
+                  <h4 style={{ margin: "0 0 8px", fontSize: "13.5px", color: "#1e293b" }}>
+                    Product Specifications
+                  </h4>
+                  <div style={{ fontSize: "12.5px", color: "#334155", whiteSpace: "pre-wrap", lineHeight: 1.5 }}>
+                    {viewProductItem.specification || viewProductItem.description}
+                  </div>
+                </div>
+              )}
             </div>
-          </div>
-        )}
+          )}
+        </SideDrawer>
       </main>
     </AppShell>
   );

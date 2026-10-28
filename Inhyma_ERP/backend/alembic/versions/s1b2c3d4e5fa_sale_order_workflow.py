@@ -65,8 +65,9 @@ RULES = {
         "action_label": "Dispatch", "action_color": "#d97706",
     },
     "dispatched": {
-        "label": "Dispatched", "next": ["lr"], "perm_to": {"lr": "saleorder.warehouse"},
-        "physical_only_to": ["lr"], "edit": "none", "delete": "admin", "stock_out": True,
+        "label": "Dispatched", "next": ["lr", "gatepass_cancelled"],
+        "perm_to": {"lr": "saleorder.warehouse", "gatepass_cancelled": "saleorder.warehouse"},
+        "physical_only_to": ["lr", "gatepass_cancelled"], "edit": "none", "delete": "admin", "stock_out": True,
         "action_label": "Attach LR", "action_color": "#059669",
     },
     "gatepass_cancelled": {

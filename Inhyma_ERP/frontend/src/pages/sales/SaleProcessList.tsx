@@ -16,7 +16,7 @@
  * - Interactive Account Department Timeline Drawer
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
 import { Breadcrumb } from "@/components/Breadcrumb";
@@ -27,7 +27,7 @@ import { apiDelete, apiGet, apiPatch, errorMessage } from "@/lib/api";
 import { useAuth } from "@/lib/hooks";
 import { useToast } from "@/lib/toast";
 import { generateGatePassPdf } from "@/lib/gatePassPdf";
-import type { SaleOrder, SaleSummaryMetrics } from "@/types/saleProcess";
+import type { DispatchMediaItem, SaleOrder, SaleSummaryMetrics, SaleTimelineEvent } from "@/types/saleProcess";
 import { SaleProcessDetailModal } from "./SaleProcessDetailModal";
 import { SortHeader } from "@/components/SortHeader";
 
@@ -171,125 +171,186 @@ export function formatIndianCurrency(amount: number | null | undefined): string 
   });
 }
 
+export function formatTimelineDateOnly(dStr?: string | null): string | null {
+  if (!dStr) return null;
+  const s = String(dStr).trim();
+  if (!s) return null;
+  const dmy = s.match(/^(\d{2})[-/](\d{2})[-/](\d{4})$/);
+  if (dmy) return `${dmy[1]}-${dmy[2]}-${dmy[3]}`;
+  const ymd = s.match(/^(\d{4})[-/](\d{2})[-/](\d{2})/);
+  if (ymd) return `${ymd[3]}-${ymd[2]}-${ymd[1]}`;
+  return s;
+}
+
+export function formatTimelineDateTime(dateStr?: string | null): string | null {
+  if (!dateStr) return null;
+  const raw = String(dateStr).trim();
+  if (!raw) return null;
+  if (/^\d{2}-\d{2}-\d{4}\s+\d{1,2}:\d{2}\s*(AM|PM)$/i.test(raw)) {
+    return raw;
+  }
+  if (/^\d{2}-\d{2}-\d{4}$/.test(raw)) {
+    return `${raw} 12:00 PM`;
+  }
+  const d = new Date(raw);
+  if (isNaN(d.getTime())) return raw;
+  const day = String(d.getDate()).padStart(2, "0");
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const year = d.getFullYear();
+  let hours = d.getHours();
+  const minutes = String(d.getMinutes()).padStart(2, "0");
+  const ampm = hours >= 12 ? "PM" : "AM";
+  hours = hours % 12;
+  hours = hours ? hours : 12;
+  const strHours = String(hours).padStart(2, "0");
+  return `${day}-${month}-${year} ${strHours}:${minutes} ${ampm}`;
+}
+
+export function getTimelineStageLabel(status: string): string {
+  const s = (status || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
+  if (s === "pending") return "Pending";
+  if (s === "sales_confirmed") return "Sales Confirmed";
+  if (s === "admin_approved" || s === "admin_approval") return "Admin Approval";
+  if (s === "acc_confirmed" || s === "acc._confirmed" || s === "account_confirmed") return "Account Confirmed";
+  if (s === "gatepass_created") return "Gatepass Created";
+  if (s === "dispatched") return "Dispatched";
+  if (s === "lr" || s === "lr_mandatory") return "LR Mandatory";
+  if (s === "gatepass_cancelled" || s === "gatepass_cancel") return "Gatepass Cancelled";
+  if (s === "cancelled") return "Cancelled";
+  return status.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
 export function getTimelineBadgeStyles(status: string) {
-  const s = status.toLowerCase();
-  if (s.includes("admin approved") || s.includes("admin_approved")) {
+  const s = (status || "").toLowerCase();
+  if (s.includes("cancelled") || s.includes("cancel")) {
+    return { background: "#fee2e2", color: "#dc2626", border: "1px solid #fecaca" };
+  }
+  if (
+    s.includes("admin approval") ||
+    s.includes("admin approved") ||
+    s.includes("admin_approved") ||
+    s.includes("pending")
+  ) {
     return { background: "#fef3c7", color: "#b45309", border: "1px solid #fde68a" };
   }
   if (s.includes("sales confirmed") || s.includes("sales_confirmed")) {
     return { background: "#dbeafe", color: "#1d4ed8", border: "1px solid #bfdbfe" };
   }
-  if (s.includes("pending")) {
-    return { background: "#fef3c7", color: "#b45309", border: "1px solid #fde68a" };
-  }
-  if (s.includes("acc. confirmed") || s.includes("acc_confirmed")) {
+  if (
+    s.includes("account confirmed") ||
+    s.includes("acc. confirmed") ||
+    s.includes("acc_confirmed") ||
+    s.includes("gatepass created") ||
+    s.includes("gatepass_created") ||
+    s.includes("dispatched") ||
+    s.includes("lr")
+  ) {
     return { background: "#dcfce7", color: "#15803d", border: "1px solid #bbf7d0" };
-  }
-  if (s.includes("gatepass created") || s.includes("gatepass_created")) {
-    return { background: "#e0e7ff", color: "#4338ca", border: "1px solid #c7d2fe" };
-  }
-  if (s.includes("dispatched")) {
-    return { background: "#f3e8ff", color: "#7e22ce", border: "1px solid #e9d5ff" };
-  }
-  if (s.includes("lr")) {
-    return { background: "#ede9fe", color: "#4338ca", border: "1px solid #ddd6fe" };
   }
   return { background: "#f1f5f9", color: "#475569", border: "1px solid #cbd5e1" };
 }
 
-export function getTimelineEvents(order: SaleOrder): Array<{
-  status: string;
-  date: string;
-  by: string;
-  remark?: string | null;
-}> {
+export function getTimelineEvents(order: SaleOrder): SaleTimelineEvent[] {
+  const enrichEvent = (ev: SaleTimelineEvent): SaleTimelineEvent => {
+    const label = getTimelineStageLabel(ev.status_key || ev.status);
+    const formattedDate = formatTimelineDateTime(ev.date) || ev.date;
+    const cleanRemark = (ev.remark || "").trim() || null;
+
+    if (label === "Account Confirmed") {
+      const hasEway = Boolean(ev.eway_bill_url || (_yes(order.eway_bill) && order.eway_bill_url));
+      return {
+        ...ev,
+        status: label,
+        date: formattedDate,
+        remark: cleanRemark,
+        invoice_no: ev.invoice_no || order.invoice_no || null,
+        invoice_date: formatTimelineDateOnly(ev.invoice_date || order.invoice_date),
+        eway_bill_url: hasEway ? (ev.eway_bill_url || order.eway_bill_url || null) : null,
+        eway_bill_name: hasEway ? (ev.eway_bill_name || order.eway_bill_name || null) : null,
+        tally_bill_url: ev.tally_bill_url || order.tally_bill_url || null,
+        tally_bill_name: ev.tally_bill_name || order.tally_bill_name || null,
+      };
+    }
+
+    return {
+      ...ev,
+      status: label,
+      date: formattedDate,
+      remark: cleanRemark,
+    };
+  };
+
   if (order.timeline && order.timeline.length > 0) {
-    return order.timeline;
+    return order.timeline.map(enrichEvent);
   }
 
-  const s = (order.status || "pending").toLowerCase();
-  const salesPerson = order.sales_person || "Dhairya Shah";
-  const statusDate = order.status_updated_at || `${order.order_date} 12:29 PM`;
+  const s = (order.status || "pending").trim().toLowerCase().replace(/[\s-]+/g, "_");
+  const actor = (order.sales_person || order.created_by_name || "Admin").trim();
+  const baseDate =
+    formatTimelineDateTime(order.created_at) ||
+    formatTimelineDateTime(order.order_date) ||
+    `${order.order_date} 12:00 PM`;
+  const latestDate =
+    formatTimelineDateTime(order.status_updated_at) ||
+    formatTimelineDateTime(order.updated_at) ||
+    baseDate;
 
-  if (s.includes("admin_approved") || s.includes("admin approved")) {
-    return [
-      {
-        status: "Admin Approved",
-        date: statusDate,
-        by: salesPerson,
-      },
-      {
-        status: "Sales Confirmed",
-        date: statusDate,
-        by: salesPerson,
-      },
-      {
-        status: "Pending",
-        date: statusDate,
-        by: salesPerson,
-        remark:
-          order.remarks ||
-          "Bill Abhi Mat Banana. Next Week taka Stock Ayega Tab Bill Banana Hai. Abhi Dispatch Karna Hai",
-      },
+  let chain: string[] = ["pending"];
+  if (s === "lr" || s === "lr_mandatory") {
+    chain = ["lr", "dispatched", "gatepass_created", "acc_confirmed", "admin_approved", "sales_confirmed", "pending"];
+  } else if (s === "dispatched") {
+    chain = ["dispatched", "gatepass_created", "acc_confirmed", "admin_approved", "sales_confirmed", "pending"];
+  } else if (s === "gatepass_created") {
+    chain = ["gatepass_created", "acc_confirmed", "admin_approved", "sales_confirmed", "pending"];
+  } else if (s === "gatepass_cancelled") {
+    chain = [
+      "gatepass_cancelled",
+      "gatepass_created",
+      "acc_confirmed",
+      "admin_approved",
+      "sales_confirmed",
+      "pending",
     ];
+  } else if (s === "acc_confirmed" || s === "acc._confirmed" || s === "account_confirmed") {
+    chain = ["acc_confirmed", "admin_approved", "sales_confirmed", "pending"];
+  } else if (s === "admin_approved" || s === "admin_approval") {
+    chain = ["admin_approved", "sales_confirmed", "pending"];
+  } else if (s === "sales_confirmed") {
+    chain = ["sales_confirmed", "pending"];
+  } else if (s === "cancelled") {
+    chain = ["cancelled", "pending"];
   }
 
-  if (s.includes("acc_confirmed") || s.includes("acc confirmed")) {
-    return [
-      {
-        status: "Acc. Confirmed",
-        date: statusDate,
-        by: "Accounts Team",
-      },
-      {
-        status: "Admin Approved",
-        date: `${order.order_date} 01:15 PM`,
-        by: salesPerson,
-      },
-      {
-        status: "Sales Confirmed",
-        date: `${order.order_date} 11:30 AM`,
-        by: salesPerson,
-      },
-      {
-        status: "Pending",
-        date: `${order.order_date} 10:00 AM`,
-        by: salesPerson,
-        remark:
-          order.remarks ||
-          "Bill Abhi Mat Banana. Next Week taka Stock Ayega Tab Bill Banana Hai. Abhi Dispatch Karna Hai",
-      },
-    ];
+  let initialRemark: string | null = null;
+  if (order.remarks) {
+    const firstChunk = order.remarks.split(/\n\[\d{4}-\d{2}-\d{2}\]/)[0].trim();
+    if (firstChunk && !/^\[\d{4}-\d{2}-\d{2}\]/.test(firstChunk)) {
+      initialRemark = firstChunk;
+    }
   }
 
-  if (s.includes("sales_confirmed") || s.includes("sales confirmed")) {
-    return [
-      {
-        status: "Sales Confirmed",
-        date: statusDate,
-        by: salesPerson,
-      },
-      {
-        status: "Pending",
-        date: `${order.order_date} 10:00 AM`,
-        by: salesPerson,
-        remark:
-          order.remarks ||
-          "Bill Abhi Mat Banana. Next Week taka Stock Ayega Tab Bill Banana Hai. Abhi Dispatch Karna Hai",
-      },
-    ];
-  }
+  return chain.map((stageKey, idx) => {
+    const stageActor =
+      stageKey === "gatepass_created" &&
+      order.gatepass_handled_by &&
+      order.gatepass_handled_by !== "Warehouse Team"
+        ? order.gatepass_handled_by
+        : actor;
+    const stageRemark =
+      stageKey === "pending"
+        ? initialRemark
+        : (stageKey === "cancelled" || stageKey === "gatepass_cancelled") && (order as any).cancel_reason
+        ? String((order as any).cancel_reason).trim()
+        : null;
 
-  return [
-    {
-      status: "Pending",
-      date: `${order.order_date} 12:29 PM`,
-      by: salesPerson,
-      remark:
-        order.remarks ||
-        "Bill Abhi Mat Banana. Next Week taka Stock Ayega Tab Bill Banana Hai. Abhi Dispatch Karna Hai",
-    },
-  ];
+    return enrichEvent({
+      status: getTimelineStageLabel(stageKey),
+      status_key: stageKey,
+      date: idx === 0 ? latestDate : baseDate,
+      by: stageActor,
+      remark: stageRemark,
+    });
+  });
 }
 
 // Re-export Mock KPI Metrics and Orders from saleMockData
@@ -508,6 +569,30 @@ export function SaleProcessListPage() {
     "Sunita Pawar",
     "Bhavin Suthar",
   ]);
+  const [transportOptions, setTransportOptions] = useState<string[]>([
+    "Falcon Cargo",
+    "Self Pickup",
+    "VRL Logistics",
+    "TCI Freight",
+    "Blue Dart",
+    "Delhivery",
+    "Road",
+  ]);
+  const [deliveryTypeOptions, setDeliveryTypeOptions] = useState<string[]>([
+    "Door",
+    "Godown",
+    "Door Delivery",
+    "Godown Delivery",
+    "Courier",
+  ]);
+  const [deliveryChargeOptions, setDeliveryChargeOptions] = useState<string[]>([
+    "To Pay",
+    "Paid",
+    "Inclusive",
+    "Exclusive",
+    "Extra as Actual",
+    "Free Delivery",
+  ]);
 
   useEffect(() => {
     void apiGet<any>("/masters/warehouses")
@@ -516,6 +601,35 @@ export function SaleProcessListPage() {
         if (raw.length > 0) {
           const names = raw.map((w: any) => w.name || w.warehouse_name || w).filter(Boolean);
           setWarehouseOptions((prev) => Array.from(new Set([...prev, ...names])));
+        }
+      })
+      .catch(() => {});
+
+    void apiGet<any>("/masters/transports")
+      .then((res) => {
+        const raw = Array.isArray(res?.data) ? res.data : Array.isArray(res?.data?.items) ? res.data.items : [];
+        if (raw.length > 0) {
+          const names = raw
+            .map((t: any) => t.name || t.transport_name || t.transporter_name || t)
+            .filter(Boolean);
+          setTransportOptions((prev) => Array.from(new Set([...names, "Self Pickup", ...prev])));
+        }
+      })
+      .catch(() => {});
+
+    void apiGet<any>("/masters/options/lookup?groups=delivery.type,delivery.charge")
+      .then((res) => {
+        const dTypes = Array.isArray(res?.data?.["delivery.type"])
+          ? res.data["delivery.type"].map((o: any) => o.value || o.label || o).filter(Boolean)
+          : [];
+        if (dTypes.length > 0) {
+          setDeliveryTypeOptions((prev) => Array.from(new Set(["Door", "Godown", ...dTypes, ...prev])));
+        }
+        const dCharges = Array.isArray(res?.data?.["delivery.charge"])
+          ? res.data["delivery.charge"].map((o: any) => o.value || o.label || o).filter(Boolean)
+          : [];
+        if (dCharges.length > 0) {
+          setDeliveryChargeOptions((prev) => Array.from(new Set(["To Pay", "Paid", ...dCharges, ...prev])));
         }
       })
       .catch(() => {});
@@ -556,6 +670,15 @@ export function SaleProcessListPage() {
     }
     return Array.from(list).filter(Boolean).sort();
   }, [warehouseOptions, orders]);
+
+  const transportsList = useMemo(() => {
+    const list = new Set<string>(transportOptions);
+    for (const o of orders) {
+      const tName = (o.transport_name || o.transporter_name || "").trim();
+      if (tName) list.add(tName);
+    }
+    return Array.from(list).filter(Boolean);
+  }, [transportOptions, orders]);
 
   const [appliedFilters, setAppliedFilters] = useState({
     orderDateRange: "",
@@ -650,6 +773,7 @@ export function SaleProcessListPage() {
     right: number;
     openUpward: boolean;
   } | null>(null);
+  const [hoveredAccBadge, setHoveredAccBadge] = useState<string | null>(null);
 
   // Upload Files Drawer state (matches erp.inhymasolutions.com/sale-order/list on SO Files click)
   const [uploadFilesOrder, setUploadFilesOrder] = useState<SaleOrder | null>(null);
@@ -765,12 +889,16 @@ export function SaleProcessListPage() {
       fileName === (uploadFilesOrder as any).po_file ||
       fileName === (uploadFilesOrder as any).po_attachment ||
       fileName.toLowerCase().includes("po");
+    const isTally = Boolean(uploadFilesOrder.tally_bill_name && fileName === uploadFilesOrder.tally_bill_name);
+    const isEway = Boolean(uploadFilesOrder.eway_bill_name && fileName === uploadFilesOrder.eway_bill_name);
     const remainingFiles = (uploadFilesOrder.files || []).filter((f) => f.name !== fileName);
 
     try {
       await apiPatch(`/sales/orders/${orderId}`, {
         booking_remarks: (uploadFilesOrder.booking_remarks || "").replace(`PO Attached: ${fileName}`, "").trim(),
         ...(isPo ? { po: "No", po_file: null, po_attachment: null, po_file_url: "", po_file_name: "" } : {}),
+        ...(isTally ? { tally_bill_url: "", tally_bill_name: "" } : {}),
+        ...(isEway ? { eway_bill: "No", eway_bill_url: "", eway_bill_name: "" } : {}),
       });
     } catch {
       // Local fallback
@@ -786,6 +914,11 @@ export function SaleProcessListPage() {
               po_attachment: isPo ? undefined : (o as any).po_attachment,
               po_file_url: isPo ? null : o.po_file_url,
               po_file_name: isPo ? null : o.po_file_name,
+              tally_bill_url: isTally ? null : o.tally_bill_url,
+              tally_bill_name: isTally ? null : o.tally_bill_name,
+              eway_bill: isEway ? "No" : o.eway_bill,
+              eway_bill_url: isEway ? null : o.eway_bill_url,
+              eway_bill_name: isEway ? null : o.eway_bill_name,
               files: remainingFiles,
             }
           : o
@@ -801,6 +934,11 @@ export function SaleProcessListPage() {
             po_attachment: isPo ? undefined : (prev as any).po_attachment,
             po_file_url: isPo ? null : prev.po_file_url,
             po_file_name: isPo ? null : prev.po_file_name,
+            tally_bill_url: isTally ? null : prev.tally_bill_url,
+            tally_bill_name: isTally ? null : prev.tally_bill_name,
+            eway_bill: isEway ? "No" : prev.eway_bill,
+            eway_bill_url: isEway ? null : prev.eway_bill_url,
+            eway_bill_name: isEway ? null : prev.eway_bill_name,
             files: remainingFiles,
           }
         : prev
@@ -818,6 +956,7 @@ export function SaleProcessListPage() {
   const [drawerInvoiceNo, setDrawerInvoiceNo] = useState<string>("");
   const [selectedTallyBillFile, setSelectedTallyBillFile] = useState<File | null>(null);
   const [drawerEwayBill, setDrawerEwayBill] = useState<string>("No");
+  const [selectedEwayBillFile, setSelectedEwayBillFile] = useState<File | null>(null);
   const [modalThirdPartyInvoice, setModalThirdPartyInvoice] = useState("");
   const [modalGpNo, setModalGpNo] = useState("");
   const [modalGpDate, setModalGpDate] = useState(() => new Date().toLocaleDateString("en-GB").split("/").join("-"));
@@ -827,10 +966,16 @@ export function SaleProcessListPage() {
   const [modalGpDeliveryType, setModalGpDeliveryType] = useState("Godown");
   const [modalGpDeliveryCharge, setModalGpDeliveryCharge] = useState("To Pay");
   const [modalLrNo, setModalLrNo] = useState("");
-  const [modalLrTransporter, setModalLrTransporter] = useState("");
   const [modalLrDate, setModalLrDate] = useState(() => new Date().toLocaleDateString("en-GB").split("/").join("-"));
-  const [modalLrFile, setModalLrFile] = useState("");
-  const [modalLrPhotos, setModalLrPhotos] = useState<string[]>([]);
+  const [changeTransportInfo, setChangeTransportInfo] = useState<boolean>(false);
+  const [drawerTransportName, setDrawerTransportName] = useState<string>("");
+  const [drawerTransportDestination, setDrawerTransportDestination] = useState<string>("");
+  const [drawerDeliveryType, setDrawerDeliveryType] = useState<string>("Door");
+  const [drawerDeliveryCharge, setDrawerDeliveryCharge] = useState<string>("To Pay");
+  const [selectedLrFile, setSelectedLrFile] = useState<File | null>(null);
+  const [selectedDispatchMediaFiles, setSelectedDispatchMediaFiles] = useState<File[]>([]);
+  const [isDraggingDispatchMedia, setIsDraggingDispatchMedia] = useState<boolean>(false);
+  const dispatchMediaInputRef = useRef<HTMLInputElement | null>(null);
 
   const formatStatusTimestamp = (dateStr?: string | null): string | null => {
     if (!dateStr) return null;
@@ -889,6 +1034,7 @@ export function SaleProcessListPage() {
     setDrawerTargetStatus(nextStatus);
     setStatusDrawerPoFile(null);
     setSelectedTallyBillFile(null);
+    setSelectedEwayBillFile(null);
     setDrawerInvoiceDate(toIsoDateInput(order.invoice_date));
     setDrawerInvoiceNo(order.invoice_no || "");
     setDrawerEwayBill(order.eway_bill || "No");
@@ -906,10 +1052,15 @@ export function SaleProcessListPage() {
     setModalGpDeliveryType(order.delivery_type || "Godown");
     setModalGpDeliveryCharge(order.delivery_charge || "To Pay");
     setModalLrNo(order.lr_no || "");
-    setModalLrTransporter(order.transport_name || order.transporter_name || "");
     setModalLrDate(order.lr_date || new Date().toLocaleDateString("en-GB").split("/").join("-"));
-    setModalLrFile("");
-    setModalLrPhotos([]);
+    setChangeTransportInfo(false);
+    setDrawerTransportName(order.transport_name || order.transporter_name || transportsList[0] || "Falcon Cargo");
+    setDrawerTransportDestination(order.transport_destination || order.destination || "");
+    setDrawerDeliveryType(order.delivery_type || "Door");
+    setDrawerDeliveryCharge(order.delivery_charge || order.delivery_charges || "To Pay");
+    setSelectedLrFile(null);
+    setSelectedDispatchMediaFiles([]);
+    setIsDraggingDispatchMedia(false);
 
     if (!order.gatepass_no) {
       apiGet<{ gatepass_no: string }>("/sales/next-gatepass-no")
@@ -939,6 +1090,10 @@ export function SaleProcessListPage() {
         toast("Please upload Tally Bill file", "error");
         return;
       }
+      if (_yes(drawerEwayBill) && !selectedEwayBillFile && !editingStatusOrder.eway_bill_url) {
+        toast("Please upload E-Way Bill file", "error");
+        return;
+      }
       if (
         (_yes(editingStatusOrder.third_party) || _yes(editingStatusOrder.third_party_delivery)) &&
         !modalThirdPartyInvoice.trim() &&
@@ -951,8 +1106,26 @@ export function SaleProcessListPage() {
         return;
       }
     } else if (targetStatus === "lr") {
-      if (!modalLrNo.trim()) {
-        toast("LR / Consignment No is required", "error");
+      if (changeTransportInfo) {
+        const cleanTransport = drawerTransportName.trim();
+        if (!cleanTransport) {
+          toast("Please select Transport Name", "error");
+          return;
+        }
+        const isSelfPickup = cleanTransport.toLowerCase().replace(/[\s-_]/g, "") === "selfpickup";
+        if (!isSelfPickup) {
+          if (!drawerDeliveryType.trim()) {
+            toast("Please select Delivery Type", "error");
+            return;
+          }
+          if (!drawerDeliveryCharge.trim()) {
+            toast("Please select Delivery Charge", "error");
+            return;
+          }
+        }
+      }
+      if (!selectedLrFile && !editingStatusOrder.lr_file_url) {
+        toast("Please upload LR File", "error");
         return;
       }
     }
@@ -963,6 +1136,13 @@ export function SaleProcessListPage() {
       let poName = editingStatusOrder.po_file_name || null;
       let tallyUrl = editingStatusOrder.tally_bill_url || null;
       let tallyName = editingStatusOrder.tally_bill_name || null;
+      let ewayUrl = _yes(drawerEwayBill) ? (editingStatusOrder.eway_bill_url || null) : null;
+      let ewayName = _yes(drawerEwayBill) ? (editingStatusOrder.eway_bill_name || null) : null;
+      let lrFileUrl = editingStatusOrder.lr_file_url || null;
+      let lrFileName = editingStatusOrder.lr_file_name || null;
+      let dispatchMediaList: DispatchMediaItem[] = Array.isArray(editingStatusOrder.dispatch_media)
+        ? [...editingStatusOrder.dispatch_media]
+        : [];
 
       const token = localStorage.getItem("erp_access_token") || "";
 
@@ -1022,6 +1202,104 @@ export function SaleProcessListPage() {
         }
       }
 
+      // Upload E-Way Bill if E-Way Bill = Yes and file is attached
+      if (_yes(drawerEwayBill) && selectedEwayBillFile) {
+        const formData = new FormData();
+        formData.append("file", selectedEwayBillFile);
+        try {
+          const uploadRes = await fetch("/api/v1/sales/upload-eway-bill", {
+            method: "POST",
+            headers: {
+              ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            },
+            body: formData,
+          });
+          if (!uploadRes.ok) {
+            const errData = await uploadRes.json().catch(() => ({}));
+            throw new Error(errData.detail || errData.message || "Failed to upload E-Way Bill file");
+          }
+          const uploadJson = await uploadRes.json();
+          ewayUrl = uploadJson.data?.url || `/uploads/private/sales_eway_bills/${selectedEwayBillFile.name}`;
+          ewayName = uploadJson.data?.filename || selectedEwayBillFile.name;
+        } catch (uploadErr) {
+          if (!isTestMode || !(uploadErr instanceof TypeError)) {
+            throw uploadErr;
+          }
+          ewayUrl = `/uploads/private/sales_eway_bills/${selectedEwayBillFile.name}`;
+          ewayName = selectedEwayBillFile.name;
+        }
+      }
+
+      // Upload LR File if attached
+      if (selectedLrFile) {
+        const formData = new FormData();
+        formData.append("file", selectedLrFile);
+        try {
+          const uploadRes = await fetch("/api/v1/sales/upload-lr", {
+            method: "POST",
+            headers: {
+              ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            },
+            body: formData,
+          });
+          if (!uploadRes.ok) {
+            const errData = await uploadRes.json().catch(() => ({}));
+            throw new Error(errData.detail || errData.message || "Failed to upload LR file");
+          }
+          const uploadJson = await uploadRes.json();
+          lrFileUrl = uploadJson.data?.url || `/uploads/private/sales_lr/${selectedLrFile.name}`;
+          lrFileName = uploadJson.data?.filename || selectedLrFile.name;
+        } catch (uploadErr) {
+          if (!isTestMode || !(uploadErr instanceof TypeError)) {
+            throw uploadErr;
+          }
+          lrFileUrl = `/uploads/private/sales_lr/${selectedLrFile.name}`;
+          lrFileName = selectedLrFile.name;
+        }
+      }
+
+      // Upload Multiple Images/Videos if attached
+      if (selectedDispatchMediaFiles.length > 0) {
+        const mediaForm = new FormData();
+        selectedDispatchMediaFiles.forEach((mf) => mediaForm.append("files", mf));
+        try {
+          const mediaRes = await fetch("/api/v1/sales/upload-dispatch-media", {
+            method: "POST",
+            headers: {
+              ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            },
+            body: mediaForm,
+          });
+          if (!mediaRes.ok) {
+            const errData = await mediaRes.json().catch(() => ({}));
+            throw new Error(errData.detail || errData.message || "Failed to upload dispatch media");
+          }
+          const mediaJson = await mediaRes.json();
+          const uploadedItems: DispatchMediaItem[] = Array.isArray(mediaJson.data?.files)
+            ? mediaJson.data.files
+            : selectedDispatchMediaFiles.map((mf) => ({
+                url: `/uploads/private/sales_dispatch_media/${mf.name}`,
+                filename: mf.name,
+                content_type: mf.type || "application/octet-stream",
+                size: mf.size,
+              }));
+          dispatchMediaList = [...dispatchMediaList, ...uploadedItems];
+        } catch (mediaErr) {
+          if (!isTestMode || !(mediaErr instanceof TypeError)) {
+            throw mediaErr;
+          }
+          dispatchMediaList = [
+            ...dispatchMediaList,
+            ...selectedDispatchMediaFiles.map((mf) => ({
+              url: `/uploads/private/sales_dispatch_media/${mf.name}`,
+              filename: mf.name,
+              content_type: mf.type || "application/octet-stream",
+              size: mf.size,
+            })),
+          ];
+        }
+      }
+
       const needsFallbackCancelReason =
         (targetStatus === "cancelled" || targetStatus === "gatepass_cancelled") && !drawerRemarks.trim();
       const effectiveRemarks = drawerRemarks.trim()
@@ -1043,6 +1321,10 @@ export function SaleProcessListPage() {
         patchPayload.tally_bill_url = tallyUrl || undefined;
         patchPayload.tally_bill_name = tallyName || undefined;
         patchPayload.eway_bill = drawerEwayBill || "No";
+        if (_yes(drawerEwayBill)) {
+          patchPayload.eway_bill_url = ewayUrl || undefined;
+          patchPayload.eway_bill_name = ewayName || undefined;
+        }
         if (modalThirdPartyInvoice.trim()) {
           patchPayload.third_party_invoice = modalThirdPartyInvoice.trim();
         }
@@ -1056,9 +1338,25 @@ export function SaleProcessListPage() {
         patchPayload.delivery_charge = modalGpDeliveryCharge;
         patchPayload.gatepass = "Generated";
       } else if (targetStatus === "lr") {
-        patchPayload.lr_no = modalLrNo.trim();
-        patchPayload.transporter_name = modalLrTransporter.trim();
-        patchPayload.lr_date = modalLrDate.trim();
+        patchPayload.lr_file_url = lrFileUrl || undefined;
+        patchPayload.lr_file_name = lrFileName || undefined;
+        if (dispatchMediaList.length > 0) {
+          patchPayload.dispatch_media = dispatchMediaList;
+        }
+        if (modalLrNo.trim()) {
+          patchPayload.lr_no = modalLrNo.trim();
+        }
+        patchPayload.lr_date = modalLrDate.trim() || undefined;
+        if (changeTransportInfo) {
+          const cleanTransport = drawerTransportName.trim();
+          const isSelfPickup = cleanTransport.toLowerCase().replace(/[\s-_]/g, "") === "selfpickup";
+          patchPayload.change_transport_info = true;
+          patchPayload.transport_name = cleanTransport;
+          patchPayload.transporter_name = cleanTransport;
+          patchPayload.transport_destination = isSelfPickup ? null : (drawerTransportDestination.trim() || null);
+          patchPayload.delivery_type = isSelfPickup ? null : (drawerDeliveryType || null);
+          patchPayload.delivery_charge = isSelfPickup ? null : (drawerDeliveryCharge || null);
+        }
       }
 
       const nowIso = new Date().toISOString();
@@ -1077,60 +1375,107 @@ export function SaleProcessListPage() {
       const newGatepass = ["gatepass_created", "dispatched", "lr"].includes(targetStatus)
         ? "Generated"
         : editingStatusOrder.gatepass || "Pending";
+      const actorName =
+        profile?.full_name || profile?.username || editingStatusOrder.sales_person || "Admin";
 
       setOrders((prev) =>
-        prev.map((it) =>
-          it.id === editingStatusOrder.id
-            ? {
-                ...it,
-                status: targetStatus,
-                status_updated_at: formattedNow,
-                updated_at: nowIso,
-                gatepass: newGatepass,
-                po: poUrl ? "Yes" : it.po,
-                po_file_url: poUrl ?? it.po_file_url,
-                po_file_name: poName ?? it.po_file_name,
-                ...(targetStatus === "acc_confirmed"
-                  ? {
-                      invoice_date: drawerInvoiceDate,
-                      invoice_no: drawerInvoiceNo.trim(),
-                      tally_bill_url: tallyUrl,
-                      tally_bill_name: tallyName,
-                      eway_bill: drawerEwayBill || "No",
-                      ...(modalThirdPartyInvoice.trim()
-                        ? { third_party_invoice: modalThirdPartyInvoice.trim() }
-                        : {}),
-                    }
-                  : {}),
-                ...(targetStatus === "gatepass_created"
-                  ? {
-                      gatepass_no: modalGpNo.trim(),
-                      gatepass_date: modalGpDate.trim(),
-                      gatepass_handled_by: modalGpHandledBy.trim(),
-                      transporter_name: modalGpTransporter.trim(),
-                      transport_name: modalGpTransporter.trim(),
-                      transport_destination: modalGpDestination.trim(),
-                      delivery_type: modalGpDeliveryType,
-                      delivery_charge: modalGpDeliveryCharge,
-                    }
-                  : {}),
-                ...(targetStatus === "lr"
-                  ? {
-                      lr_no: modalLrNo.trim(),
-                      transporter_name: modalLrTransporter.trim(),
-                      transport_name: modalLrTransporter.trim(),
-                      lr_date: modalLrDate.trim(),
-                    }
-                  : {}),
-              }
-            : it
-        )
+        prev.map((it) => {
+          if (it.id !== editingStatusOrder.id) return it;
+          const prevEvents = getTimelineEvents(it);
+          const nextEvent: SaleTimelineEvent = {
+            status: getTimelineStageLabel(targetStatus),
+            status_key: targetStatus,
+            date: formattedNow,
+            by: actorName,
+            ...(drawerRemarks.trim() ? { remark: drawerRemarks.trim() } : {}),
+            ...(targetStatus === "acc_confirmed"
+              ? {
+                  invoice_no: drawerInvoiceNo.trim() || null,
+                  invoice_date: formatTimelineDateOnly(drawerInvoiceDate),
+                  eway_bill_url: _yes(drawerEwayBill) ? ewayUrl : null,
+                  eway_bill_name: _yes(drawerEwayBill) ? ewayName : null,
+                  tally_bill_url: tallyUrl,
+                  tally_bill_name: tallyName,
+                }
+              : {}),
+            ...(targetStatus === "sales_confirmed" && poUrl
+              ? { po_file_url: poUrl, po_file_name: poName }
+              : {}),
+            ...(targetStatus === "lr" && lrFileUrl
+              ? { lr_file_url: lrFileUrl, lr_file_name: lrFileName }
+              : {}),
+          };
+          return {
+            ...it,
+            status: targetStatus,
+            status_updated_at: formattedNow,
+            updated_at: nowIso,
+            gatepass: newGatepass,
+            po: poUrl ? "Yes" : it.po,
+            po_file_url: poUrl ?? it.po_file_url,
+            po_file_name: poName ?? it.po_file_name,
+            timeline: [nextEvent, ...prevEvents],
+            ...(targetStatus === "acc_confirmed"
+              ? {
+                  invoice_date: drawerInvoiceDate,
+                  invoice_no: drawerInvoiceNo.trim(),
+                  tally_bill_url: tallyUrl,
+                  tally_bill_name: tallyName,
+                  eway_bill: drawerEwayBill || "No",
+                  eway_bill_url: _yes(drawerEwayBill) ? ewayUrl : null,
+                  eway_bill_name: _yes(drawerEwayBill) ? ewayName : null,
+                  ...(modalThirdPartyInvoice.trim()
+                    ? { third_party_invoice: modalThirdPartyInvoice.trim() }
+                    : {}),
+                }
+              : {}),
+            ...(targetStatus === "gatepass_created"
+              ? {
+                  gatepass_no: modalGpNo.trim(),
+                  gatepass_date: modalGpDate.trim(),
+                  gatepass_handled_by: modalGpHandledBy.trim(),
+                  transporter_name: modalGpTransporter.trim(),
+                  transport_name: modalGpTransporter.trim(),
+                  transport_destination: modalGpDestination.trim(),
+                  delivery_type: modalGpDeliveryType,
+                  delivery_charge: modalGpDeliveryCharge,
+                }
+              : {}),
+            ...(targetStatus === "lr"
+              ? {
+                  lr_file_url: lrFileUrl ?? it.lr_file_url,
+                  lr_file_name: lrFileName ?? it.lr_file_name,
+                  dispatch_media: dispatchMediaList,
+                  lr_date: modalLrDate.trim(),
+                  ...(modalLrNo.trim() ? { lr_no: modalLrNo.trim() } : {}),
+                  ...(changeTransportInfo
+                    ? (() => {
+                        const cleanTransport = drawerTransportName.trim();
+                        const isSelfPickup =
+                          cleanTransport.toLowerCase().replace(/[\s-_]/g, "") === "selfpickup";
+                        return {
+                          transporter_name: cleanTransport,
+                          transport_name: cleanTransport,
+                          transport_destination: isSelfPickup ? null : (drawerTransportDestination.trim() || null),
+                          delivery_type: isSelfPickup ? null : (drawerDeliveryType || null),
+                          delivery_charge: isSelfPickup ? null : (drawerDeliveryCharge || null),
+                        };
+                      })()
+                    : {}),
+                }
+              : {}),
+          };
+        })
       );
 
       toast(`Order ${editingStatusOrder.order_no} status updated to ${targetLabel}`, "success");
       setEditingStatusOrder(null);
       setStatusDrawerPoFile(null);
       setSelectedTallyBillFile(null);
+      setSelectedEwayBillFile(null);
+      setSelectedLrFile(null);
+      setSelectedDispatchMediaFiles([]);
+      setChangeTransportInfo(false);
       setDrawerRemarks("");
       await fetchOrders();
     } catch (err) {
@@ -1604,25 +1949,25 @@ export function SaleProcessListPage() {
     } else if (s === "acc_confirmed") {
       badgeStyle = {
         ...badgeStyle,
-        backgroundColor: "#ccfbf1",
-        color: "#0f766e",
-        borderColor: "#99f6e4",
+        backgroundColor: "#dcfce7",
+        color: "#15803d",
+        borderColor: "#bbf7d0",
       };
       label = "Acc. Confirmed";
     } else if (s === "gatepass_created") {
       badgeStyle = {
         ...badgeStyle,
-        backgroundColor: "#f3e8ff",
-        color: "#7e22ce",
-        borderColor: "#e9d5ff",
+        backgroundColor: "#dcfce7",
+        color: "#15803d",
+        borderColor: "#bbf7d0",
       };
       label = "Gatepass Created";
     } else if (s === "dispatched") {
       badgeStyle = {
         ...badgeStyle,
-        backgroundColor: "#e0e7ff",
-        color: "#4338ca",
-        borderColor: "#c7d2fe",
+        backgroundColor: "#dcfce7",
+        color: "#15803d",
+        borderColor: "#bbf7d0",
       };
       label = "Dispatched";
     } else if (s === "lr") {
@@ -1691,7 +2036,7 @@ export function SaleProcessListPage() {
               <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
             </svg>
           </button>
-          {order?.po_file_url && (
+          {order?.po_file_url && !["acc_confirmed", "gatepass_created", "dispatched", "lr"].includes(s) && (
             <a
               href={resolveSaleFileHref(order.po_file_url)}
               target="_blank"
@@ -1713,30 +2058,6 @@ export function SaleProcessListPage() {
               }}
             >
               📎 PO
-            </a>
-          )}
-          {order?.tally_bill_url && (
-            <a
-              href={resolveSaleFileHref(order.tally_bill_url)}
-              target="_blank"
-              rel="noopener noreferrer"
-              onClick={(e) => e.stopPropagation()}
-              title={`Download Tally Bill: ${order.tally_bill_name || "Bill File"}`}
-              style={{
-                fontSize: "11px",
-                fontWeight: 700,
-                color: "#15803d",
-                background: "#dcfce7",
-                border: "1px solid #bbf7d0",
-                padding: "1px 5px",
-                borderRadius: "4px",
-                textDecoration: "none",
-                display: "inline-flex",
-                alignItems: "center",
-                gap: "2px",
-              }}
-            >
-              📎 Bill
             </a>
           )}
         </div>
@@ -2619,40 +2940,144 @@ export function SaleProcessListPage() {
                         {renderStatusBadge(o.status, o.status_updated_at, o)}
                       </td>
 
-                      {/* Acc. Dep. (Timeline) */}
+                      {/* Acc. Dep. (Timeline + i = Tally Bill, E = E-Way Bill) */}
                       <td style={{ padding: "8px 12px", textAlign: "center" }}>
-                        {o.acc_dep_badges && o.acc_dep_badges.length > 0 && (
-                          <div
-                            style={{
-                              display: "flex",
-                              alignItems: "center",
-                              justifyContent: "center",
-                              gap: "3px",
-                              marginBottom: "3px",
-                            }}
-                          >
-                            {o.acc_dep_badges.map((b, bIdx) => (
-                              <span
-                                key={bIdx}
-                                style={{
-                                  background: "#f59e0b",
-                                  color: "#ffffff",
-                                  borderRadius: "3px",
-                                  width: "15px",
-                                  height: "15px",
-                                  display: "inline-flex",
-                                  alignItems: "center",
-                                  justifyContent: "center",
-                                  fontSize: "10px",
-                                  fontWeight: 700,
-                                  lineHeight: 1,
-                                }}
-                              >
-                                {b}
-                              </span>
-                            ))}
-                          </div>
-                        )}
+                        {(() => {
+                          const invoicedStage = [
+                            "acc_confirmed",
+                            "gatepass_created",
+                            "dispatched",
+                            "gatepass_cancelled",
+                            "lr",
+                          ].includes((o.status || "").toLowerCase());
+                          const normalizedExisting = (o.acc_dep_badges || []).map((raw) => {
+                            const clean = String(raw || "").trim();
+                            if (clean.toLowerCase() === "i") return "i";
+                            if (clean.toUpperCase() === "E") return "E";
+                            return clean;
+                          });
+                          const badges = [...normalizedExisting];
+                          if ((invoicedStage || o.tally_bill_url || o.invoice_no) && (o.tally_bill_url || o.invoice_no)) {
+                            if (!badges.includes("i")) badges.push("i");
+                          }
+                          if ((invoicedStage || o.eway_bill_url) && (_yes(o.eway_bill) || o.eway_bill_url)) {
+                            if (!badges.includes("E")) badges.push("E");
+                          }
+                          if (badges.length === 0) return null;
+
+                          const chipStyle: React.CSSProperties = {
+                            background: "#f59e0b",
+                            color: "#ffffff",
+                            borderRadius: "3px",
+                            width: "17px",
+                            height: "17px",
+                            display: "inline-flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            fontSize: "11px",
+                            fontWeight: 700,
+                            lineHeight: 1,
+                            textDecoration: "none",
+                            cursor: "pointer",
+                          };
+
+                          return (
+                            <div
+                              style={{
+                                display: "flex",
+                                alignItems: "center",
+                                justifyContent: "center",
+                                gap: "4px",
+                                marginBottom: "3px",
+                              }}
+                            >
+                              {badges.map((b, bIdx) => {
+                                const isTally = b === "i";
+                                const isEway = b === "E";
+                                const tooltipText = isTally
+                                  ? "Tally Bill"
+                                  : isEway
+                                  ? "E-Way Bill"
+                                  : b;
+                                const fileUrl = isTally
+                                  ? o.tally_bill_url
+                                  : isEway
+                                  ? o.eway_bill_url
+                                  : null;
+                                const badgeHoverKey = `${o.id}:${b}:${bIdx}`;
+                                const isHovered = hoveredAccBadge === badgeHoverKey;
+
+                                return (
+                                  <span
+                                    key={bIdx}
+                                    style={{ position: "relative", display: "inline-flex" }}
+                                    onMouseEnter={() => setHoveredAccBadge(badgeHoverKey)}
+                                    onMouseLeave={() =>
+                                      setHoveredAccBadge((prev) => (prev === badgeHoverKey ? null : prev))
+                                    }
+                                  >
+                                    {fileUrl ? (
+                                      <a
+                                        href={resolveSaleFileHref(fileUrl)}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        aria-label={tooltipText}
+                                        data-testid={
+                                          isTally
+                                            ? `acc-dep-tally-${o.id}`
+                                            : isEway
+                                            ? `acc-dep-eway-${o.id}`
+                                            : undefined
+                                        }
+                                        onClick={(e) => e.stopPropagation()}
+                                        style={chipStyle}
+                                      >
+                                        {b}
+                                      </a>
+                                    ) : (
+                                      <span
+                                        aria-label={tooltipText}
+                                        data-testid={
+                                          isTally
+                                            ? `acc-dep-tally-${o.id}`
+                                            : isEway
+                                            ? `acc-dep-eway-${o.id}`
+                                            : undefined
+                                        }
+                                        style={{ ...chipStyle, cursor: "default" }}
+                                      >
+                                        {b}
+                                      </span>
+                                    )}
+                                    {isHovered && (
+                                      <span
+                                        role="tooltip"
+                                        style={{
+                                          position: "absolute",
+                                          top: "calc(100% + 4px)",
+                                          left: "50%",
+                                          transform: "translateX(-50%)",
+                                          background: "#18181b",
+                                          color: "#ffffff",
+                                          padding: "4px 8px",
+                                          borderRadius: "4px",
+                                          fontSize: "11px",
+                                          fontWeight: 500,
+                                          whiteSpace: "nowrap",
+                                          zIndex: 45,
+                                          pointerEvents: "none",
+                                          boxShadow: "0 2px 6px rgba(0, 0, 0, 0.28)",
+                                        }}
+                                      >
+                                        {tooltipText}
+                                      </span>
+                                    )}
+                                  </span>
+                                );
+                              })}
+                            </div>
+                          );
+                        })()}
                         <button
                           type="button"
                           onClick={() => setTimelineOrder(o)}
@@ -3125,42 +3550,41 @@ export function SaleProcessListPage() {
                 "4669"
               : ""
           }`}
-          width="440px"
+          width="480px"
         >
           {timelineOrder && (
-            <div style={{ padding: "20px 16px" }}>
+            <div style={{ padding: "20px 20px 36px 20px" }} data-testid="sale-order-timeline-list">
               {getTimelineEvents(timelineOrder).map((ev, idx, arr) => (
                 <div
                   key={idx}
+                  data-testid={`timeline-event-${idx}`}
                   style={{
                     position: "relative",
                     display: "flex",
                     gap: "16px",
-                    marginBottom: idx === arr.length - 1 ? 0 : "28px",
+                    marginBottom: idx === arr.length - 1 ? 0 : "24px",
                   }}
                 >
-                  {/* Vertical connecting line */}
-                  {idx < arr.length - 1 && (
-                    <div
-                      style={{
-                        position: "absolute",
-                        left: "15px",
-                        top: "32px",
-                        bottom: "-28px",
-                        width: "1.5px",
-                        backgroundColor: "#e2e8f0",
-                      }}
-                    />
-                  )}
+                  {/* Continuous vertical connecting line (including 20px bottom tail on Pending) */}
+                  <div
+                    style={{
+                      position: "absolute",
+                      left: "16.5px",
+                      top: "34px",
+                      bottom: idx === arr.length - 1 ? "-20px" : "-24px",
+                      width: "1px",
+                      backgroundColor: "#cbd5e1",
+                    }}
+                  />
 
                   {/* Clock icon in light-blue circle */}
                   <div
                     style={{
-                      width: "32px",
-                      height: "32px",
+                      width: "34px",
+                      height: "34px",
                       borderRadius: "50%",
-                      background: "#e0f2fe",
-                      color: "#0284c7",
+                      background: "#dbeafe",
+                      color: "#2563eb",
                       display: "flex",
                       alignItems: "center",
                       justifyContent: "center",
@@ -3189,11 +3613,11 @@ export function SaleProcessListPage() {
                     <span
                       style={{
                         display: "inline-block",
-                        borderRadius: "14px",
-                        padding: "3px 12px",
-                        fontSize: "11px",
-                        fontWeight: 700,
-                        letterSpacing: "0.02em",
+                        borderRadius: "12px",
+                        padding: "2px 11px",
+                        fontSize: "11.5px",
+                        fontWeight: 600,
+                        letterSpacing: "0.01em",
                         ...getTimelineBadgeStyles(ev.status),
                       }}
                     >
@@ -3205,10 +3629,10 @@ export function SaleProcessListPage() {
                       style={{
                         display: "flex",
                         alignItems: "center",
-                        gap: "6px",
+                        gap: "7px",
                         fontSize: "12px",
                         color: "#64748b",
-                        marginTop: "6px",
+                        marginTop: "7px",
                       }}
                     >
                       <svg
@@ -3220,6 +3644,7 @@ export function SaleProcessListPage() {
                         strokeWidth="2"
                         strokeLinecap="round"
                         strokeLinejoin="round"
+                        style={{ flexShrink: 0 }}
                       >
                         <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
                         <line x1="16" y1="2" x2="16" y2="6" />
@@ -3234,10 +3659,10 @@ export function SaleProcessListPage() {
                       style={{
                         display: "flex",
                         alignItems: "center",
-                        gap: "6px",
+                        gap: "7px",
                         fontSize: "12px",
                         color: "#64748b",
-                        marginTop: "4px",
+                        marginTop: "5px",
                       }}
                     >
                       <svg
@@ -3249,6 +3674,7 @@ export function SaleProcessListPage() {
                         strokeWidth="2"
                         strokeLinecap="round"
                         strokeLinejoin="round"
+                        style={{ flexShrink: 0 }}
                       >
                         <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
                         <circle cx="12" cy="7" r="4" />
@@ -3256,21 +3682,197 @@ export function SaleProcessListPage() {
                       <span>By : {ev.by}</span>
                     </div>
 
-                    {/* Remark row with document icon */}
+                    {/* Invoice No row (Account Confirmed) */}
+                    {ev.invoice_no && (
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "7px",
+                          fontSize: "12px",
+                          color: "#64748b",
+                          marginTop: "5px",
+                        }}
+                      >
+                        <svg
+                          width="13"
+                          height="13"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          style={{ flexShrink: 0 }}
+                        >
+                          <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                        </svg>
+                        <span>{`Invoice No : ${ev.invoice_no}`}</span>
+                      </div>
+                    )}
+
+                    {/* Invoice Date row (Account Confirmed) */}
+                    {ev.invoice_date && (
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "7px",
+                          fontSize: "12px",
+                          color: "#64748b",
+                          marginTop: "5px",
+                        }}
+                      >
+                        <svg
+                          width="13"
+                          height="13"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          style={{ flexShrink: 0 }}
+                        >
+                          <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                        </svg>
+                        <span>{`Invoice Date : ${ev.invoice_date}`}</span>
+                      </div>
+                    )}
+
+                    {/* E-Way Bill download row (shown only when E-Way Bill file is present) */}
+                    {ev.eway_bill_url && (
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "7px",
+                          fontSize: "12px",
+                          color: "#64748b",
+                          marginTop: "5px",
+                        }}
+                      >
+                        <svg
+                          width="13"
+                          height="13"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          style={{ flexShrink: 0 }}
+                        >
+                          <path
+                            d="M6 2a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6H6z"
+                            fill="#475569"
+                          />
+                          <path d="M14 2v6h6" fill="#cbd5e1" />
+                          <line x1="8" y1="13" x2="16" y2="13" stroke="#ffffff" strokeWidth="1.6" strokeLinecap="round" />
+                          <line x1="8" y1="17" x2="14" y2="17" stroke="#ffffff" strokeWidth="1.6" strokeLinecap="round" />
+                        </svg>
+                        <span>E-Way Bill :</span>
+                        <a
+                          href={resolveSaleFileHref(ev.eway_bill_url)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          title="Download E-Way Bill"
+                          aria-label="Download E-Way Bill"
+                          data-testid="timeline-download-eway-bill"
+                          onClick={(e) => e.stopPropagation()}
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            color: "#0061f2",
+                            textDecoration: "none",
+                          }}
+                        >
+                          <svg
+                            width="13"
+                            height="13"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2.4"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          >
+                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                            <polyline points="7 10 12 15 17 10" />
+                            <line x1="12" y1="15" x2="12" y2="3" />
+                          </svg>
+                        </a>
+                      </div>
+                    )}
+
+                    {/* Tally Bill download row (Account Confirmed) */}
+                    {ev.tally_bill_url && (
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "7px",
+                          fontSize: "12px",
+                          color: "#64748b",
+                          marginTop: "5px",
+                        }}
+                      >
+                        <svg
+                          width="13"
+                          height="13"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          style={{ flexShrink: 0 }}
+                        >
+                          <path
+                            d="M6 2a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6H6z"
+                            fill="#475569"
+                          />
+                          <path d="M14 2v6h6" fill="#cbd5e1" />
+                          <line x1="8" y1="13" x2="16" y2="13" stroke="#ffffff" strokeWidth="1.6" strokeLinecap="round" />
+                          <line x1="8" y1="17" x2="14" y2="17" stroke="#ffffff" strokeWidth="1.6" strokeLinecap="round" />
+                        </svg>
+                        <span>Tally Bill :</span>
+                        <a
+                          href={resolveSaleFileHref(ev.tally_bill_url)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          title="Download Tally Bill"
+                          aria-label="Download Tally Bill"
+                          data-testid="timeline-download-tally-bill"
+                          onClick={(e) => e.stopPropagation()}
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            color: "#0061f2",
+                            textDecoration: "none",
+                          }}
+                        >
+                          <svg
+                            width="13"
+                            height="13"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2.4"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          >
+                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                            <polyline points="7 10 12 15 17 10" />
+                            <line x1="12" y1="15" x2="12" y2="3" />
+                          </svg>
+                        </a>
+                      </div>
+                    )}
+
+                    {/* Optional Remark row (shown only when a remark exists on that stage) */}
                     {ev.remark && (
                       <div
                         style={{
                           display: "flex",
                           alignItems: "flex-start",
-                          gap: "6px",
-                          fontSize: "11.5px",
-                          color: "#475569",
-                          marginTop: "8px",
+                          gap: "7px",
+                          fontSize: "12px",
+                          color: "#64748b",
+                          marginTop: "5px",
                           lineHeight: 1.45,
-                          background: "#f8fafc",
-                          padding: "8px 10px",
-                          borderRadius: "6px",
-                          border: "1px solid #e2e8f0",
                         }}
                       >
                         <svg
@@ -3284,16 +3886,9 @@ export function SaleProcessListPage() {
                           strokeLinejoin="round"
                           style={{ flexShrink: 0, marginTop: "2px" }}
                         >
-                          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                          <polyline points="14 2 14 8 20 8" />
-                          <line x1="16" y1="2" x2="16" y2="6" />
-                          <line x1="16" y1="17" x2="8" y2="17" />
-                          <polyline points="10 9 9 9 8 9" />
+                          <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
                         </svg>
-                        <div>
-                          <strong>Remark : </strong>
-                          <span>{ev.remark}</span>
-                        </div>
+                        <span>{`Remark : ${ev.remark}`}</span>
                       </div>
                     )}
                   </div>
@@ -3314,7 +3909,7 @@ export function SaleProcessListPage() {
               setSelectedTallyBillFile(null);
               setDrawerRemarks("");
             }}
-            width="420px"
+            width="480px"
             maxWidth="95vw"
           >
             <div style={{ display: "flex", flexDirection: "column", gap: "16px", minHeight: "100%" }}>
@@ -3359,13 +3954,16 @@ export function SaleProcessListPage() {
                   onChange={(e) => setDrawerTargetStatus(e.target.value)}
                   style={{
                     width: "100%",
-                    padding: "8px 12px",
+                    padding: "9px 12px",
                     borderRadius: "6px",
                     border: "1px solid #cbd5e1",
                     fontSize: "13px",
                     color: "#0f172a",
                     background: "#ffffff",
                     outline: "none",
+                    ...(editingStatusOrder.status.toLowerCase() === "acc_confirmed"
+                      ? { appearance: "none" as const, WebkitAppearance: "none" as const }
+                      : {}),
                   }}
                 >
                   {editingStatusOrder.status.toLowerCase() === "pending" && (
@@ -3406,6 +4004,7 @@ export function SaleProcessListPage() {
                   {editingStatusOrder.status.toLowerCase() === "dispatched" && (
                     <>
                       <option value="lr">LR</option>
+                      <option value="gatepass_cancelled">Gatepass Cancel</option>
                     </>
                   )}
                   {![
@@ -3669,7 +4268,13 @@ export function SaleProcessListPage() {
                       id="sale-status-eway-bill"
                       data-testid="select-status-eway-bill"
                       value={drawerEwayBill}
-                      onChange={(e) => setDrawerEwayBill(e.target.value)}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setDrawerEwayBill(val);
+                        if (!_yes(val)) {
+                          setSelectedEwayBillFile(null);
+                        }
+                      }}
                       style={{
                         width: "100%",
                         padding: "8px 12px",
@@ -3686,6 +4291,93 @@ export function SaleProcessListPage() {
                       <option value="Yes">Yes</option>
                     </select>
                   </div>
+
+                  {/* Conditional E-Way Bill * File Upload (shown when E-Way Bill = Yes) */}
+                  {_yes(drawerEwayBill) && (
+                    <div>
+                      <label
+                        htmlFor="sale-status-eway-bill-input"
+                        style={{ display: "block", fontSize: "12.5px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}
+                      >
+                        E-Way Bill <span style={{ color: "#ef4444" }}>*</span>
+                      </label>
+                      <div
+                        style={{
+                          border: "1px solid #cbd5e1",
+                          borderRadius: "6px",
+                          padding: "6px 10px",
+                          background: "#ffffff",
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "8px",
+                        }}
+                      >
+                        <input
+                          type="file"
+                          id="sale-status-eway-bill-input"
+                          data-testid="input-status-eway-bill-file"
+                          accept=".pdf,.png,.jpg,.jpeg,.webp,.xlsx,.xls,.doc,.docx"
+                          onChange={(e) => {
+                            const f = e.target.files?.[0] || null;
+                            setSelectedEwayBillFile(f);
+                          }}
+                          style={{
+                            fontSize: "13px",
+                            color: "#475569",
+                            width: "100%",
+                            cursor: "pointer",
+                          }}
+                        />
+                      </div>
+                      {selectedEwayBillFile && (
+                        <div
+                          style={{
+                            marginTop: "6px",
+                            fontSize: "12px",
+                            color: "#0284c7",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "space-between",
+                          }}
+                        >
+                          <span>
+                            📎 {selectedEwayBillFile.name} ({(selectedEwayBillFile.size / 1024).toFixed(1)} KB)
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSelectedEwayBillFile(null);
+                              const el = document.getElementById("sale-status-eway-bill-input") as HTMLInputElement;
+                              if (el) el.value = "";
+                            }}
+                            style={{
+                              background: "none",
+                              border: "none",
+                              color: "#ef4444",
+                              cursor: "pointer",
+                              fontSize: "11.5px",
+                              fontWeight: 600,
+                            }}
+                          >
+                            Clear
+                          </button>
+                        </div>
+                      )}
+                      {editingStatusOrder.eway_bill_url && !selectedEwayBillFile && (
+                        <div style={{ marginTop: "6px", fontSize: "12px", color: "#15803d" }}>
+                          <span>Current E-Way Bill: </span>
+                          <a
+                            href={resolveSaleFileHref(editingStatusOrder.eway_bill_url)}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            style={{ color: "#0061f2", textDecoration: "underline", fontWeight: 600 }}
+                          >
+                            {editingStatusOrder.eway_bill_name || "Download E-Way Bill"}
+                          </a>
+                        </div>
+                      )}
+                    </div>
+                  )}
 
                   {(_yes(editingStatusOrder.third_party) || _yes(editingStatusOrder.third_party_delivery)) && (
                     <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: "6px", padding: "10px" }}>
@@ -3711,172 +4403,429 @@ export function SaleProcessListPage() {
                 </>
               )}
 
-              {/* Outward Gate Pass Details (When transitioning to Gatepass Created) */}
-              {drawerTargetStatus === "gatepass_created" && (
-                <div style={{ background: "#eef2ff", border: "1px solid #c7d2fe", borderRadius: "6px", padding: "12px" }}>
-                  <div style={{ fontSize: "12px", fontWeight: 700, color: "#3730a3", marginBottom: "8px" }}>
-                    🚚 Outward Gate Pass Details:
-                  </div>
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" }}>
-                    <div>
-                      <label style={{ display: "block", fontSize: "11px", fontWeight: 600, color: "#3730a3", marginBottom: "3px" }}>
-                        Gate Pass No
-                      </label>
-                      <input
-                        type="text"
-                        value={modalGpNo}
-                        onChange={(e) => setModalGpNo(e.target.value)}
-                        style={{ width: "100%", padding: "5px 8px", fontSize: "12px", borderRadius: "4px", border: "1px solid #a5b4fc", boxSizing: "border-box" }}
-                      />
-                    </div>
-                    <div>
-                      <label style={{ display: "block", fontSize: "11px", fontWeight: 600, color: "#3730a3", marginBottom: "3px" }}>
-                        Gate Pass Date
-                      </label>
-                      <input
-                        type="text"
-                        value={modalGpDate}
-                        onChange={(e) => setModalGpDate(e.target.value)}
-                        style={{ width: "100%", padding: "5px 8px", fontSize: "12px", borderRadius: "4px", border: "1px solid #a5b4fc", boxSizing: "border-box" }}
-                      />
-                    </div>
-                    <div>
-                      <label style={{ display: "block", fontSize: "11px", fontWeight: 600, color: "#3730a3", marginBottom: "3px" }}>
-                        Handled By (from login)
-                      </label>
-                      <input
-                        type="text"
-                        value={modalGpHandledBy}
-                        onChange={(e) => setModalGpHandledBy(e.target.value)}
-                        style={{ width: "100%", padding: "5px 8px", fontSize: "12px", borderRadius: "4px", border: "1px solid #a5b4fc", boxSizing: "border-box" }}
-                      />
-                    </div>
-                    <div>
-                      <label style={{ display: "block", fontSize: "11px", fontWeight: 600, color: "#3730a3", marginBottom: "3px" }}>
-                        Transporter Name
-                      </label>
-                      <input
-                        type="text"
-                        value={modalGpTransporter}
-                        onChange={(e) => setModalGpTransporter(e.target.value)}
-                        placeholder="e.g. VRL Logistics, SafeXpress"
-                        style={{ width: "100%", padding: "5px 8px", fontSize: "12px", borderRadius: "4px", border: "1px solid #a5b4fc", boxSizing: "border-box" }}
-                      />
-                    </div>
-                    <div>
-                      <label style={{ display: "block", fontSize: "11px", fontWeight: 600, color: "#3730a3", marginBottom: "3px" }}>
-                        Destination
-                      </label>
-                      <input
-                        type="text"
-                        value={modalGpDestination}
-                        onChange={(e) => setModalGpDestination(e.target.value)}
-                        placeholder="Destination city"
-                        style={{ width: "100%", padding: "5px 8px", fontSize: "12px", borderRadius: "4px", border: "1px solid #a5b4fc", boxSizing: "border-box" }}
-                      />
-                    </div>
-                    <div>
-                      <label style={{ display: "block", fontSize: "11px", fontWeight: 600, color: "#3730a3", marginBottom: "3px" }}>
-                        Delivery Type
-                      </label>
-                      <select
-                        value={modalGpDeliveryType}
-                        onChange={(e) => setModalGpDeliveryType(e.target.value)}
-                        style={{ width: "100%", padding: "5px 8px", fontSize: "12px", borderRadius: "4px", border: "1px solid #a5b4fc", boxSizing: "border-box" }}
-                      >
-                        <option value="Godown">Godown</option>
-                        <option value="Door">Door Delivery</option>
-                      </select>
-                    </div>
-                    <div style={{ gridColumn: "span 2" }}>
-                      <label style={{ display: "block", fontSize: "11px", fontWeight: 600, color: "#3730a3", marginBottom: "3px" }}>
-                        Delivery Charges
-                      </label>
-                      <select
-                        value={modalGpDeliveryCharge}
-                        onChange={(e) => setModalGpDeliveryCharge(e.target.value)}
-                        style={{ width: "100%", padding: "5px 8px", fontSize: "12px", borderRadius: "4px", border: "1px solid #a5b4fc", boxSizing: "border-box" }}
-                      >
-                        <option value="To Pay">To Pay</option>
-                        <option value="Paid">Paid</option>
-                        <option value="Free">Free</option>
-                      </select>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* Transporter LR & Dispatch Proofs (When Dispatched -> LR) */}
+              {/* Dispatched -> LR Drawer Fields (Change Transport Info, LR File *, Images/Videos Upload Multiple) */}
               {drawerTargetStatus === "lr" && editingStatusOrder.status.toLowerCase() === "dispatched" && (
-                <div style={{ background: "#faf5ff", border: "1px solid #e9d5ff", borderRadius: "6px", padding: "12px" }}>
-                  <div style={{ fontSize: "12px", fontWeight: 700, color: "#6b21a8", marginBottom: "8px" }}>
-                    📦 Transporter LR & Dispatch Proofs:
+                <>
+                  {/* Change Transport Info Checkbox + Conditional Fields */}
+                  <div>
+                    <label
+                      htmlFor="sale-status-change-transport"
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: "8px",
+                        fontSize: "13px",
+                        fontWeight: 500,
+                        color: "#1e293b",
+                        cursor: "pointer",
+                        userSelect: "none",
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        id="sale-status-change-transport"
+                        data-testid="checkbox-change-transport-info"
+                        checked={changeTransportInfo}
+                        onChange={(e) => setChangeTransportInfo(e.target.checked)}
+                        style={{
+                          width: "14px",
+                          height: "14px",
+                          cursor: "pointer",
+                          accentColor: "#0061f2",
+                        }}
+                      />
+                      <span>Change Transport Info</span>
+                    </label>
+
+                    {changeTransportInfo && (
+                      <div
+                        data-testid="section-change-transport-fields"
+                        style={{
+                          marginTop: "14px",
+                          display: "grid",
+                          gridTemplateColumns: "1fr 1fr",
+                          gap: "14px 12px",
+                        }}
+                      >
+                        <div>
+                          <label
+                            htmlFor="sale-status-transport-name"
+                            style={{
+                              display: "block",
+                              fontSize: "12.5px",
+                              fontWeight: 600,
+                              color: "#334155",
+                              marginBottom: "6px",
+                            }}
+                          >
+                            Transport Name
+                          </label>
+                          <select
+                            id="sale-status-transport-name"
+                            data-testid="select-status-transport-name"
+                            value={drawerTransportName}
+                            onChange={(e) => setDrawerTransportName(e.target.value)}
+                            style={{
+                              width: "100%",
+                              padding: "8px 10px",
+                              borderRadius: "6px",
+                              border: "1px solid #cbd5e1",
+                              fontSize: "13px",
+                              color: "#0f172a",
+                              background: "#ffffff",
+                              outline: "none",
+                              boxSizing: "border-box",
+                            }}
+                          >
+                            {!drawerTransportName && <option value="">Select Transport</option>}
+                            {Array.from(new Set([drawerTransportName, ...transportsList].filter(Boolean))).map((t) => (
+                              <option key={t} value={t}>
+                                {t}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+
+                        {drawerTransportName.trim().toLowerCase().replace(/[\s-_]/g, "") !== "selfpickup" && (
+                          <>
+                            <div>
+                              <label
+                                htmlFor="sale-status-transport-destination"
+                                style={{
+                                  display: "block",
+                                  fontSize: "12.5px",
+                                  fontWeight: 600,
+                                  color: "#334155",
+                                  marginBottom: "6px",
+                                }}
+                              >
+                                Transport Destination
+                              </label>
+                              <input
+                                type="text"
+                                id="sale-status-transport-destination"
+                                data-testid="input-status-transport-destination"
+                                placeholder=""
+                                value={drawerTransportDestination}
+                                onChange={(e) => setDrawerTransportDestination(e.target.value)}
+                                style={{
+                                  width: "100%",
+                                  padding: "8px 10px",
+                                  borderRadius: "6px",
+                                  border: "1px solid #cbd5e1",
+                                  fontSize: "13px",
+                                  color: "#0f172a",
+                                  background: "#ffffff",
+                                  outline: "none",
+                                  boxSizing: "border-box",
+                                }}
+                              />
+                            </div>
+
+                            <div>
+                              <label
+                                htmlFor="sale-status-delivery-type"
+                                style={{
+                                  display: "block",
+                                  fontSize: "12.5px",
+                                  fontWeight: 600,
+                                  color: "#334155",
+                                  marginBottom: "6px",
+                                }}
+                              >
+                                Delivery Type
+                              </label>
+                              <select
+                                id="sale-status-delivery-type"
+                                data-testid="select-status-delivery-type"
+                                value={drawerDeliveryType}
+                                onChange={(e) => setDrawerDeliveryType(e.target.value)}
+                                style={{
+                                  width: "100%",
+                                  padding: "8px 10px",
+                                  borderRadius: "6px",
+                                  border: "1px solid #cbd5e1",
+                                  fontSize: "13px",
+                                  color: "#0f172a",
+                                  background: "#ffffff",
+                                  outline: "none",
+                                  boxSizing: "border-box",
+                                }}
+                              >
+                                {Array.from(
+                                  new Set([drawerDeliveryType, ...deliveryTypeOptions].filter(Boolean))
+                                ).map((opt) => (
+                                  <option key={opt} value={opt}>
+                                    {opt}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+
+                            <div>
+                              <label
+                                htmlFor="sale-status-delivery-charge"
+                                style={{
+                                  display: "block",
+                                  fontSize: "12.5px",
+                                  fontWeight: 600,
+                                  color: "#334155",
+                                  marginBottom: "6px",
+                                }}
+                              >
+                                Delivery Charge
+                              </label>
+                              <select
+                                id="sale-status-delivery-charge"
+                                data-testid="select-status-delivery-charge"
+                                value={drawerDeliveryCharge}
+                                onChange={(e) => setDrawerDeliveryCharge(e.target.value)}
+                                style={{
+                                  width: "100%",
+                                  padding: "8px 10px",
+                                  borderRadius: "6px",
+                                  border: "1px solid #cbd5e1",
+                                  fontSize: "13px",
+                                  color: "#0f172a",
+                                  background: "#ffffff",
+                                  outline: "none",
+                                  boxSizing: "border-box",
+                                }}
+                              >
+                                {Array.from(
+                                  new Set([drawerDeliveryCharge, ...deliveryChargeOptions].filter(Boolean))
+                                ).map((opt) => (
+                                  <option key={opt} value={opt}>
+                                    {opt}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    )}
                   </div>
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" }}>
-                    <div>
-                      <label style={{ display: "block", fontSize: "11px", fontWeight: 600, color: "#6b21a8", marginBottom: "3px" }}>
-                        LR / Consignment No <span style={{ color: "#ef4444" }}>*</span>
-                      </label>
-                      <input
-                        type="text"
-                        value={modalLrNo}
-                        onChange={(e) => setModalLrNo(e.target.value)}
-                        placeholder="e.g. VRL-90123"
-                        style={{ width: "100%", padding: "5px 8px", fontSize: "12px", borderRadius: "4px", border: "1px solid #d8b4fe", boxSizing: "border-box" }}
-                      />
-                    </div>
-                    <div>
-                      <label style={{ display: "block", fontSize: "11px", fontWeight: 600, color: "#6b21a8", marginBottom: "3px" }}>
-                        Transporter Name
-                      </label>
-                      <input
-                        type="text"
-                        value={modalLrTransporter}
-                        onChange={(e) => setModalLrTransporter(e.target.value)}
-                        style={{ width: "100%", padding: "5px 8px", fontSize: "12px", borderRadius: "4px", border: "1px solid #d8b4fe", boxSizing: "border-box" }}
-                      />
-                    </div>
-                    <div style={{ gridColumn: "span 2", marginTop: "4px" }}>
-                      <label style={{ display: "block", fontSize: "11px", fontWeight: 600, color: "#6b21a8", marginBottom: "3px" }}>
-                        Attach LR Document (PDF / Scan)
-                      </label>
+
+                  {/* LR File * */}
+                  <div>
+                    <label
+                      htmlFor="sale-status-lr-file"
+                      style={{ display: "block", fontSize: "12.5px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}
+                    >
+                      LR File <span style={{ color: "#ef4444" }}>*</span>
+                    </label>
+                    <div
+                      style={{
+                        border: "1px solid #cbd5e1",
+                        borderRadius: "6px",
+                        padding: "6px 10px",
+                        background: "#ffffff",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "8px",
+                      }}
+                    >
                       <input
                         type="file"
+                        id="sale-status-lr-file"
+                        data-testid="input-status-lr-file"
+                        accept=".pdf,.png,.jpg,.jpeg,.webp,.doc,.docx,.xlsx,.xls"
                         onChange={(e) => {
-                          const f = e.target.files?.[0];
-                          if (f) setModalLrFile(f.name);
+                          const f = e.target.files?.[0] || null;
+                          setSelectedLrFile(f);
                         }}
-                        style={{ width: "100%", fontSize: "11.5px" }}
-                      />
-                      {modalLrFile && (
-                        <div style={{ fontSize: "11px", color: "#7c3aed", marginTop: "2px" }}>
-                          📎 Attached: {modalLrFile}
-                        </div>
-                      )}
-                    </div>
-                    <div style={{ gridColumn: "span 2", marginTop: "4px" }}>
-                      <label style={{ display: "block", fontSize: "11px", fontWeight: 600, color: "#6b21a8", marginBottom: "3px" }}>
-                        Upload Loading / Dispatch Photos & Videos (Multiple)
-                      </label>
-                      <input
-                        type="file"
-                        multiple
-                        onChange={(e) => {
-                          if (e.target.files) {
-                            const names = Array.from(e.target.files).map((f) => f.name);
-                            setModalLrPhotos(names);
-                          }
+                        style={{
+                          fontSize: "13px",
+                          color: "#475569",
+                          width: "100%",
+                          cursor: "pointer",
                         }}
-                        style={{ width: "100%", fontSize: "11.5px" }}
                       />
-                      {modalLrPhotos.length > 0 && (
-                        <div style={{ fontSize: "11px", color: "#7c3aed", marginTop: "2px" }}>
-                          📸 {modalLrPhotos.length} file(s) selected: {modalLrPhotos.join(", ")}
-                        </div>
-                      )}
                     </div>
+                    {selectedLrFile && (
+                      <div
+                        style={{
+                          marginTop: "6px",
+                          fontSize: "12px",
+                          color: "#0284c7",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                        }}
+                      >
+                        <span>
+                          📎 {selectedLrFile.name} ({(selectedLrFile.size / 1024).toFixed(1)} KB)
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSelectedLrFile(null);
+                            const el = document.getElementById("sale-status-lr-file") as HTMLInputElement;
+                            if (el) el.value = "";
+                          }}
+                          style={{
+                            background: "none",
+                            border: "none",
+                            color: "#ef4444",
+                            cursor: "pointer",
+                            fontSize: "11.5px",
+                            fontWeight: 600,
+                          }}
+                        >
+                          Clear
+                        </button>
+                      </div>
+                    )}
+                    {editingStatusOrder.lr_file_url && !selectedLrFile && (
+                      <div style={{ marginTop: "6px", fontSize: "12px", color: "#15803d" }}>
+                        <span>Current LR File: </span>
+                        <a
+                          href={resolveSaleFileHref(editingStatusOrder.lr_file_url)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          style={{ color: "#0061f2", textDecoration: "underline", fontWeight: 600 }}
+                        >
+                          {editingStatusOrder.lr_file_name || "Download LR"}
+                        </a>
+                      </div>
+                    )}
                   </div>
-                </div>
+
+                  {/* Images/Videos (Upload Multiple) */}
+                  <div>
+                    <label
+                      htmlFor="sale-status-dispatch-media"
+                      style={{ display: "block", fontSize: "12.5px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}
+                    >
+                      Images/Videos (Upload Multiple)
+                    </label>
+                    <input
+                      ref={dispatchMediaInputRef}
+                      type="file"
+                      id="sale-status-dispatch-media"
+                      data-testid="input-status-dispatch-media"
+                      multiple
+                      accept="image/*,video/*"
+                      onChange={(e) => {
+                        const incoming = e.target.files ? Array.from(e.target.files) : [];
+                        if (incoming.length > 0) {
+                          setSelectedDispatchMediaFiles((prev) => {
+                            const existingKeys = new Set(prev.map((f) => `${f.name}:${f.size}`));
+                            const additions = incoming.filter((f) => !existingKeys.has(`${f.name}:${f.size}`));
+                            return [...prev, ...additions];
+                          });
+                        }
+                        e.target.value = "";
+                      }}
+                      style={{ display: "none" }}
+                    />
+                    <div
+                      data-testid="dropzone-dispatch-media"
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => dispatchMediaInputRef.current?.click()}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          dispatchMediaInputRef.current?.click();
+                        }
+                      }}
+                      onDragOver={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        if (!isDraggingDispatchMedia) setIsDraggingDispatchMedia(true);
+                      }}
+                      onDragLeave={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        setIsDraggingDispatchMedia(false);
+                      }}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        setIsDraggingDispatchMedia(false);
+                        const dropped = e.dataTransfer?.files ? Array.from(e.dataTransfer.files) : [];
+                        if (dropped.length > 0) {
+                          setSelectedDispatchMediaFiles((prev) => {
+                            const existingKeys = new Set(prev.map((f) => `${f.name}:${f.size}`));
+                            const additions = dropped.filter((f) => !existingKeys.has(`${f.name}:${f.size}`));
+                            return [...prev, ...additions];
+                          });
+                        }
+                      }}
+                      style={{
+                        border: isDraggingDispatchMedia ? "1.5px dashed #0061f2" : "1px solid #cbd5e1",
+                        borderRadius: "4px",
+                        minHeight: "130px",
+                        background: isDraggingDispatchMedia ? "#eff6ff" : "#ffffff",
+                        display: "flex",
+                        flexDirection: "column",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        padding: "16px",
+                        cursor: "pointer",
+                        transition: "all 0.15s ease",
+                        boxSizing: "border-box",
+                      }}
+                    >
+                      <span style={{ fontSize: "13px", color: "#475569", fontWeight: 400 }}>
+                        Drag files here to upload
+                      </span>
+                    </div>
+
+                    {selectedDispatchMediaFiles.length > 0 && (
+                      <div
+                        data-testid="list-selected-dispatch-media"
+                        style={{
+                          marginTop: "8px",
+                          display: "flex",
+                          flexDirection: "column",
+                          gap: "4px",
+                        }}
+                      >
+                        {selectedDispatchMediaFiles.map((mf, idx) => (
+                          <div
+                            key={`${mf.name}-${idx}`}
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "space-between",
+                              padding: "4px 8px",
+                              borderRadius: "4px",
+                              background: "#f8fafc",
+                              border: "1px solid #e2e8f0",
+                              fontSize: "12px",
+                              color: "#334155",
+                            }}
+                          >
+                            <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                              {mf.type.startsWith("video/") ? "🎬" : "🖼️"} {mf.name} ({(mf.size / 1024).toFixed(1)} KB)
+                            </span>
+                            <button
+                              type="button"
+                              aria-label={`Remove ${mf.name}`}
+                              onClick={() =>
+                                setSelectedDispatchMediaFiles((prev) => prev.filter((_, i) => i !== idx))
+                              }
+                              style={{
+                                background: "none",
+                                border: "none",
+                                color: "#ef4444",
+                                cursor: "pointer",
+                                fontSize: "12px",
+                                fontWeight: 700,
+                                marginLeft: "8px",
+                              }}
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </>
               )}
 
               {/* Remarks */}
@@ -3890,10 +4839,14 @@ export function SaleProcessListPage() {
                 <textarea
                   id="sale-status-remarks"
                   data-testid="textarea-status-remarks"
-                  rows={4}
+                  rows={3}
                   value={drawerRemarks}
                   onChange={(e) => setDrawerRemarks(e.target.value)}
-                  placeholder="Enter remarks (optional)..."
+                  placeholder={
+                    ["admin_approved", "acc_confirmed", "dispatched"].includes(editingStatusOrder.status.toLowerCase())
+                      ? ""
+                      : "Enter remarks (optional)..."
+                  }
                   style={{
                     width: "100%",
                     padding: "8px 12px",
@@ -3975,6 +4928,24 @@ export function SaleProcessListPage() {
                       name: existingPo,
                       size: "PDF Document",
                       ...(uploadFilesOrder.po_file_url ? { url: uploadFilesOrder.po_file_url } : {}),
+                    },
+                  ]
+                : []),
+              ...(uploadFilesOrder.tally_bill_url
+                ? [
+                    {
+                      name: uploadFilesOrder.tally_bill_name || "Tally_Bill.pdf",
+                      size: "Tally Bill",
+                      url: uploadFilesOrder.tally_bill_url,
+                    },
+                  ]
+                : []),
+              ...(uploadFilesOrder.eway_bill_url
+                ? [
+                    {
+                      name: uploadFilesOrder.eway_bill_name || "EWay_Bill.pdf",
+                      size: "E-Way Bill",
+                      url: uploadFilesOrder.eway_bill_url,
                     },
                   ]
                 : []),

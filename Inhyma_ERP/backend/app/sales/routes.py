@@ -21,8 +21,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.auth.dependencies import get_current_user
-from app.auth.service import CurrentUser
+from app.auth.dependencies import get_auth_service, get_current_user
+from app.auth.service import AuthService, CurrentUser
 from app.core.exceptions import BadRequestException, ConflictException
 from app.core.responses import build_success_response
 from app.database.session import get_db_session
@@ -494,43 +494,337 @@ async def delete_proforma_invoice(
 # Discount Payments Endpoints
 # ==============================================================================
 
-def _serialize_discount_payment(dp: DiscountPayment) -> dict:
-    paid = float(getattr(dp, "paid_discount", 0.0) or 0.0)
-    total_disc = float(dp.discount_amount)
-    due = float(getattr(dp, "due_discount", None) if getattr(dp, "due_discount", None) is not None else max(0.0, total_disc - paid))
-    is_settled = bool(getattr(dp, "settled", False) or due <= 0 or dp.status.lower() in ("completed", "settled", "paid"))
-    
+def _extract_order_short_no(order_ref: str | None) -> str:
+    s = (order_ref or "").strip()
+    if "/" in s:
+        tail = s.rsplit("/", 1)[-1].strip()
+        if tail:
+            return tail
+    return s or "0001"
+
+
+def _normalize_discount_stage(dp_status: str | None, so: Optional[object] = None) -> str:
+    from app.sales.service import _discount_status_label
+
+    if so is not None and getattr(so, "status", None):
+        return _discount_status_label(getattr(so, "status", None))
+    raw = (dp_status or "").strip()
+    if not raw or raw.lower() == "pending":
+        return "Pending"
+    if raw.lower() in ("completed", "settled", "paid"):
+        return "LR"
+    return _discount_status_label(raw)
+
+
+def _serialize_discount_payment(
+    dp: DiscountPayment,
+    so: Optional[object] = None,
+    comp: Optional[object] = None,
+    gp: Optional[object] = None,
+) -> dict:
+    from app.sales.service import _clean_gatepass_id, _format_ddmmyyyy, _format_ist_timeline_dt
+
+    paid = round(float(getattr(dp, "paid_discount", 0.0) or 0.0), 2)
+    total_disc = round(float(dp.discount_amount or 0.0), 2)
+    raw_due = getattr(dp, "due_discount", None)
+    due = round(
+        float(raw_due) if raw_due is not None else max(0.0, total_disc - paid),
+        2,
+    )
+    is_settled = bool(
+        getattr(dp, "settled", False)
+        or due <= 0.009
+        or (dp.status or "").strip().lower() in ("completed", "settled", "paid")
+    )
+    if is_settled and due <= 0.009:
+        due = 0.0
+
+    # Live SaleOrder & GatePass enrichment
+    order_id = str(getattr(so, "id", None) or dp.id)
+    order_no = getattr(so, "order_no", None) or dp.order_ref
+    order_date = (
+        _format_ddmmyyyy(getattr(so, "order_date", None))
+        or _format_ddmmyyyy(dp.payment_date)
+        or dp.payment_date
+    )
+    warehouse = (
+        getattr(so, "warehouse", None)
+        or getattr(dp, "warehouse", None)
+        or "Mumbai"
+    )
+    company_name = (
+        getattr(so, "company_name", None)
+        or getattr(so, "buyer_name", None)
+        or dp.customer_name
+    )
+    sales_person = (
+        getattr(so, "sales_person", None)
+        or dp.sales_person
+        or ""
+    )
+    stage_label = _normalize_discount_stage(dp.status, so=so)
+
+    so_timeline = getattr(so, "timeline", None) if so is not None else None
+    latest_timeline_dt = (
+        str(so_timeline[0].get("date") or "").strip()
+        if isinstance(so_timeline, list) and so_timeline and isinstance(so_timeline[0], dict)
+        else ""
+    )
+    status_updated_at = (
+        latest_timeline_dt
+        or getattr(dp, "status_updated_at", None)
+        or order_date
+    )
+
+    created_dt_obj = getattr(so, "created_at", None) or getattr(dp, "created_at", None)
+    created_at_str = (
+        _format_ist_timeline_dt(created_dt_obj)
+        if created_dt_obj is not None
+        else f"{order_date} 12:00 PM"
+    )
+
+    gatepass_id = (
+        _clean_gatepass_id(getattr(gp, "gatepass_no", None))
+        or _clean_gatepass_id(getattr(so, "gatepass_no", None) if so is not None else None)
+        or _clean_gatepass_id(getattr(so, "gatepass", None) if so is not None else None)
+        or _clean_gatepass_id(getattr(dp, "gatepass_id", None))
+    )
+    gatepass_date = (
+        _format_ddmmyyyy(getattr(gp, "gatepass_date", None) if gp is not None else None)
+        or _format_ddmmyyyy(getattr(so, "gatepass_date", None) if so is not None else None)
+        or _format_ddmmyyyy(getattr(dp, "gatepass_date", None))
+    )
+
+    # Contact & Company Detail Drawer enrichment
+    comp_contact_full = (getattr(comp, "contact_full_name", None) or "").strip() if comp is not None else ""
+    comp_salutation = (getattr(comp, "contact_salutation", None) or "").strip() if comp is not None else ""
+    comp_mobile = (
+        ((getattr(comp, "contact_calling_number", None) or "").strip()
+         or (getattr(comp, "contact_whatsapp_number", None) or "").strip())
+        if comp is not None
+        else ""
+    )
+
+    contact_person_name = (
+        getattr(dp, "contact_person_name", None)
+        or comp_contact_full
+        or None
+    )
+    contact_person_mobile = (
+        getattr(dp, "contact_person_mobile", None)
+        or comp_mobile
+        or None
+    )
+    if comp_contact_full:
+        prefix = comp_salutation or "Mr"
+        contact_name = (
+            comp_contact_full
+            if comp_contact_full.lower().startswith(("mr ", "ms ", "mrs ", "dr "))
+            else f"{prefix} {comp_contact_full}"
+        )
+    elif contact_person_name:
+        contact_name = (
+            contact_person_name
+            if contact_person_name.lower().startswith(("mr ", "ms ", "mrs ", "dr "))
+            else f"Mr {contact_person_name}"
+        )
+    else:
+        contact_name = None
+
+    remark_val = (
+        dp.remarks
+        or (getattr(so, "booking_remarks", None) if so is not None else None)
+        or (getattr(so, "remarks", None) if so is not None else None)
+    )
+
+    # Installment payment ledger (`payments` JSON array)
+    raw_payments = getattr(dp, "payments", None)
+    payments: list[dict] = []
+    if isinstance(raw_payments, list) and len(raw_payments) > 0:
+        for idx, item in enumerate(raw_payments):
+            if isinstance(item, dict):
+                payments.append({
+                    "id": str(item.get("id") or f"{dp.id}-{idx + 1}"),
+                    "date": str(item.get("date") or dp.settle_date or order_date),
+                    "title": str(item.get("title") or "Discount Adjustment"),
+                    "amount": round(float(item.get("amount") or 0.0), 2),
+                    "adjusted_by": str(item.get("adjusted_by") or dp.created_by or "Admin"),
+                })
+    elif paid > 0.009:
+        payments.append({
+            "id": f"{dp.id}-1",
+            "date": str(getattr(dp, "settle_date", None) or order_date),
+            "title": str(getattr(dp, "settle_remarks", None) or "Discount Adjustment"),
+            "amount": paid,
+            "adjusted_by": str(sales_person or dp.created_by or "Admin"),
+        })
+
+    comp_status_raw = getattr(comp, "current_status", None) if comp is not None else None
+    comp_status = (
+        comp_status_raw.value
+        if hasattr(comp_status_raw, "value")
+        else str(comp_status_raw or "Existing")
+    ).title()
+    comp_potential_raw = getattr(comp, "potential", None) if comp is not None else None
+    comp_potential = (
+        comp_potential_raw.value
+        if hasattr(comp_potential_raw, "value")
+        else str(comp_potential_raw or "Yes")
+    ).title()
+
     return {
         "id": str(dp.id),
+        "order_id": order_id,
+        "invoice_id": _extract_order_short_no(order_no),
+        "created_at": created_at_str,
         "payment_no": dp.payment_no,
-        "payment_date": dp.payment_date,
-        "order_ref": dp.order_ref,
-        "customer_name": dp.customer_name,
-        "sales_person": dp.sales_person or "",
-        "warehouse": getattr(dp, "warehouse", "Mumbai") or "Mumbai",
-        "contact_person_name": getattr(dp, "contact_person_name", None),
-        "contact_person_mobile": getattr(dp, "contact_person_mobile", None),
-        "total_order_amount": float(dp.total_order_amount),
-        "discount_percent": float(dp.discount_percent),
+        "payment_date": order_date,
+        "order_ref": order_no,
+        "customer_name": company_name,
+        "sales_person": sales_person,
+        "warehouse": warehouse,
+        "contact_person_name": contact_person_name,
+        "contact_person_mobile": contact_person_mobile,
+        "total_order_amount": float(dp.total_order_amount or 0.0),
+        "discount_percent": float(dp.discount_percent or 0.0),
         "discount_amount": total_disc,
         "paid_discount": paid,
         "due_discount": due,
-        "net_payable": float(dp.net_payable),
-        "status": dp.status,
-        "status_updated_at": getattr(dp, "status_updated_at", dp.payment_date) or dp.payment_date,
+        "net_payable": float(dp.net_payable or 0.0),
+        "status": stage_label,
+        "status_updated_at": status_updated_at,
         "settled": is_settled,
-        "gatepass_id": getattr(dp, "gatepass_id", None),
-        "gatepass_date": getattr(dp, "gatepass_date", None),
-        "remarks": dp.remarks,
-        "remark": dp.remarks,
+        "gatepass_id": gatepass_id,
+        "gatepass_date": gatepass_date,
+        "gate_keeper_name": (
+            (getattr(gp, "handled_by", None) if gp is not None else None)
+            or (getattr(so, "gatepass_handled_by", None) if so is not None else None)
+            or None
+        ),
+        "transport_name": (
+            (getattr(gp, "transport_name", None) if gp is not None else None)
+            or (getattr(so, "transporter_name", None) if so is not None else None)
+            or None
+        ),
+        "delivery_type": (
+            (getattr(gp, "delivery_type", None) if gp is not None else None)
+            or (getattr(so, "delivery_type", None) if so is not None else None)
+            or None
+        ),
+        "delivery_charge": (
+            (getattr(gp, "delivery_charges", None) if gp is not None else None)
+            or (getattr(so, "delivery_charge", None) if so is not None else None)
+            or None
+        ),
+        "lr_file_url": getattr(so, "lr_file_url", None) if so is not None else None,
+        "lr_file_name": getattr(so, "lr_file_name", None) if so is not None else None,
+        "gst_no": getattr(comp, "tax_id_number", None) if comp is not None else None,
+        "designation": getattr(comp, "contact_designation", None) if comp is not None else None,
+        "contact_number": contact_person_mobile,
+        "address_area": (
+            ", ".join(
+                p for p in (
+                    getattr(comp, "address", None) if comp is not None else None,
+                    getattr(comp, "area", None) if comp is not None else None,
+                )
+                if p
+            )
+            or (getattr(so, "billing_address", None) if so is not None else None)
+        ),
+        "city": (
+            (getattr(so, "city", None) if so is not None else None)
+            or (getattr(comp, "town", None) if comp is not None else None)
+        ),
+        "district": getattr(comp, "district", None) if comp is not None else None,
+        "state": getattr(so, "state", None) if so is not None else None,
+        "current_status": comp_status,
+        "business_type": getattr(comp, "company_type", None) if comp is not None else None,
+        "category": getattr(comp, "company_category", None) if comp is not None else None,
+        "potential_type": comp_potential,
+        "business_categories": getattr(comp, "business_category", None) if comp is not None else None,
+        "payments": payments,
+        "remarks": remark_val,
+        "remark": remark_val,
         "created_by": dp.created_by,
         # Frontend UI compatibility aliases
-        "order_no": dp.order_ref,
-        "order_date": dp.payment_date,
-        "company_name": dp.customer_name,
-        "contact_name": getattr(dp, "contact_person_name", None),
+        "order_no": order_no,
+        "order_date": order_date,
+        "company_name": company_name,
+        "contact_name": contact_name,
         "total_discount": total_disc,
     }
+
+
+async def _load_discount_enrichment_maps(
+    db: AsyncSession,
+    rows: list[DiscountPayment],
+) -> tuple[dict[str, object], dict[str, object], dict[str, object]]:
+    so_map: dict[str, object] = {}
+    comp_map: dict[str, object] = {}
+    gp_map: dict[str, object] = {}
+    if not rows:
+        return so_map, comp_map, gp_map
+
+    order_refs = list({r.order_ref for r in rows if r.order_ref})
+    try:
+        from app.sales.models import GatePass, SaleOrder
+
+        if order_refs:
+            async with db.begin_nested():
+                so_rows = (
+                    await db.execute(
+                        select(SaleOrder).where(
+                            SaleOrder.order_no.in_(order_refs),
+                            SaleOrder.deleted_at.is_(None),
+                        )
+                    )
+                ).scalars().all()
+                for so in so_rows:
+                    so_map[so.order_no] = so
+
+                gp_rows = (
+                    await db.execute(
+                        select(GatePass).where(
+                            GatePass.so_no.in_(order_refs),
+                            GatePass.deleted_at.is_(None),
+                        )
+                    )
+                ).scalars().all()
+                for gp in gp_rows:
+                    if gp.so_no:
+                        gp_map[gp.so_no] = gp
+    except Exception:
+        pass
+
+    comp_names = list({
+        (
+            getattr(so_map.get(r.order_ref), "company_name", None)
+            or r.customer_name
+            or ""
+        ).strip().lower()
+        for r in rows
+        if (getattr(so_map.get(r.order_ref), "company_name", None) or r.customer_name)
+    })
+    if comp_names:
+        try:
+            from sqlalchemy.orm import noload
+            from app.companies.models import Company
+
+            async with db.begin_nested():
+                c_rows = (
+                    await db.execute(
+                        select(Company).options(noload("*")).where(
+                            Company.deleted_at.is_(None),
+                            func.lower(Company.company_name).in_(comp_names),
+                        )
+                    )
+                ).scalars().all()
+                for c in c_rows:
+                    comp_map[c.company_name.strip().lower()] = c
+        except Exception:
+            pass
+
+    return so_map, comp_map, gp_map
 
 
 @router.get("/sales/discount-payments", summary="List discount payments")
@@ -541,21 +835,56 @@ async def list_discount_payments(
     sales_person: Optional[str] = Query(None),
     search: Optional[str] = Query(None),
     skip: int = Query(0, ge=0),
-    limit: int = Query(50, ge=1, le=500),
+    limit: int = Query(500, ge=1, le=2000),
     db: AsyncSession = Depends(get_db_session),
 ) -> dict:
-    """Return list of discount payment records."""
+    """Return list of discount payment records, auto-synchronized with Sales Orders."""
     req_id = getattr(request.state, "request_id", "-")
     try:
+        # Backfill any discounted SaleOrders not yet present in discount_payments
+        try:
+            from app.sales.models import SaleOrder
+            from app.sales.service import SaleService
+
+            async with db.begin_nested():
+                missing_orders = (
+                    await db.execute(
+                        select(SaleOrder).where(
+                            SaleOrder.deleted_at.is_(None),
+                            SaleOrder.discount > 0,
+                            func.lower(SaleOrder.status) != "cancelled",
+                            ~SaleOrder.order_no.in_(
+                                select(DiscountPayment.order_ref).where(
+                                    DiscountPayment.deleted_at.is_(None)
+                                )
+                            ),
+                        )
+                    )
+                ).scalars().all()
+                if missing_orders:
+                    svc = SaleService(db)
+                    for mo in missing_orders:
+                        await svc._sync_discount_payment(mo)
+        except Exception:
+            pass
+
         stmt = select(DiscountPayment).where(DiscountPayment.deleted_at.is_(None))
         if status_filter and status_filter.lower() != "all":
             sf = status_filter.strip().lower()
             if sf == "pending":
-                stmt = stmt.where(or_(DiscountPayment.settled.is_(False), DiscountPayment.status == "pending"))
+                stmt = stmt.where(
+                    DiscountPayment.settled.is_(False),
+                    DiscountPayment.due_discount > 0.009,
+                )
             elif sf == "completed":
-                stmt = stmt.where(or_(DiscountPayment.settled.is_(True), DiscountPayment.status.in_(["completed", "settled", "paid"])))
+                stmt = stmt.where(
+                    or_(
+                        DiscountPayment.settled.is_(True),
+                        DiscountPayment.due_discount <= 0.009,
+                    )
+                )
             else:
-                stmt = stmt.where(DiscountPayment.status == sf)
+                stmt = stmt.where(func.lower(DiscountPayment.status) == sf)
         if warehouse and warehouse.lower() not in ("all", "all."):
             stmt = stmt.where(func.lower(DiscountPayment.warehouse) == warehouse.strip().lower())
         if sales_person and sales_person.lower() not in ("all", "all."):
@@ -574,8 +903,23 @@ async def list_discount_payments(
             )
         total = (await db.execute(select(func.count()).select_from(stmt.subquery()))).scalar() or 0
         stmt = stmt.order_by(DiscountPayment.created_at.desc()).offset(skip).limit(limit)
-        results = (await db.execute(stmt)).scalars().all()
-        items = [_serialize_discount_payment(dp) for dp in results]
+        results = list((await db.execute(stmt)).scalars().all())
+        so_map, comp_map, gp_map = await _load_discount_enrichment_maps(db, results)
+        items = [
+            _serialize_discount_payment(
+                dp,
+                so=so_map.get(dp.order_ref),
+                comp=comp_map.get(
+                    (
+                        getattr(so_map.get(dp.order_ref), "company_name", None)
+                        or dp.customer_name
+                        or ""
+                    ).strip().lower()
+                ),
+                gp=gp_map.get(dp.order_ref),
+            )
+            for dp in results
+        ]
         return build_success_response(
             data={"items": items},
             meta={"total": total, "skip": skip, "limit": limit},
@@ -596,11 +940,13 @@ async def create_discount_payment(
     db: AsyncSession = Depends(get_db_session),
 ) -> dict:
     """Create a new discount payment authorization record."""
-    from datetime import datetime
+    from app.sales.service import IST, _format_ist_timeline_dt
+
     req_id = getattr(request.state, "request_id", "-")
     disc_amt = round(payload.total_order_amount * (payload.discount_percent / 100.0), 2)
     net = round(payload.total_order_amount - disc_amt, 2)
-    today_str = datetime.now().strftime("%d-%m-%Y")
+    today_str = datetime.now(IST).strftime("%d-%m-%Y")
+    now_ist_str = _format_ist_timeline_dt()
 
     try:
         total_existing = (await db.execute(select(func.count()).select_from(DiscountPayment))).scalar() or 0
@@ -617,9 +963,10 @@ async def create_discount_payment(
             paid_discount=0.0,
             due_discount=disc_amt,
             net_payable=net,
-            status="pending",
-            status_updated_at=today_str,
+            status="Pending",
+            status_updated_at=now_ist_str,
             settled=False,
+            payments=[],
             remarks=payload.remarks,
             created_by="Admin User",
         )
@@ -646,8 +993,9 @@ async def create_discount_payment(
             "paid_discount": 0.0,
             "due_discount": disc_amt,
             "net_payable": net,
-            "status": "pending",
+            "status": "Pending",
             "settled": False,
+            "payments": [],
             "remarks": payload.remarks,
             "created_by": "Admin User",
         }
@@ -664,55 +1012,133 @@ async def update_discount_payment_settlement(
     payload: dict,
     request: Request,
     db: AsyncSession = Depends(get_db_session),
+    auth_service: AuthService = Depends(get_auth_service),
 ) -> dict:
-    """Record payment settlement or adjustment on a discount record."""
-    from datetime import datetime
-    req_id = getattr(request.state, "request_id", "-")
-    try:
-        stmt = select(DiscountPayment).where(
-            or_(
-                func.cast(DiscountPayment.id, String) == payment_id,
-                DiscountPayment.payment_no == payment_id,
-                DiscountPayment.order_ref == payment_id,
-            )
-        )
-        rec = (await db.execute(stmt)).scalars().first()
-        if not rec:
-            return build_success_response(
-                data={"id": payment_id, "settled": payload.get("settled", True)},
-                message="Settlement updated (mock).",
-                request_id=req_id,
-            )
+    """Record a partial or full discount adjustment installment on a discount record."""
+    from app.sales.service import IST, SaleService, _format_ddmmyyyy
 
-        if "paid_discount" in payload:
-            rec.paid_discount = float(payload["paid_discount"])
-        if "due_discount" in payload:
-            rec.due_discount = float(payload["due_discount"])
-        if "settled" in payload:
-            rec.settled = bool(payload["settled"])
-            if rec.settled:
-                rec.status = "completed"
-        if "settle_date" in payload:
-            rec.settle_date = str(payload["settle_date"])
-        if "settle_remarks" in payload and payload["settle_remarks"]:
-            new_rem = str(payload["settle_remarks"])
-            rec.settle_remarks = new_rem
-            rec.remarks = f"{rec.remarks} | {new_rem}" if rec.remarks else new_rem
-        
-        rec.status_updated_at = datetime.now().strftime("%d-%m-%Y %I:%M %p")
-        await db.flush()
-        await db.refresh(rec)
+    req_id = getattr(request.state, "request_id", "-")
+    stmt = select(DiscountPayment).where(
+        DiscountPayment.deleted_at.is_(None),
+        or_(
+            func.cast(DiscountPayment.id, String) == payment_id,
+            DiscountPayment.payment_no == payment_id,
+            DiscountPayment.order_ref == payment_id,
+        ),
+    )
+    rec = (await db.execute(stmt)).scalars().first()
+    if not rec:
         return build_success_response(
-            data=_serialize_discount_payment(rec),
-            message="Discount settlement updated successfully.",
+            data={"id": payment_id, "settled": payload.get("settled", True)},
+            message="Settlement updated (mock).",
             request_id=req_id,
         )
-    except Exception as e:
-        return build_success_response(
-            data={"id": payment_id, "updated": True},
-            message=f"Discount settlement recorded: {e}",
-            request_id=req_id,
+
+    total_disc = round(float(rec.discount_amount or 0.0), 2)
+    old_paid = round(float(rec.paid_discount or 0.0), 2)
+    old_due = round(
+        float(rec.due_discount)
+        if rec.due_discount is not None
+        else max(0.0, total_disc - old_paid),
+        2,
+    )
+
+    if "amount" in payload and payload["amount"] is not None:
+        try:
+            delta = round(float(payload["amount"]), 2)
+        except (TypeError, ValueError):
+            raise BadRequestException("Adjustment amount must be a valid number.")
+    elif "paid_discount" in payload and payload["paid_discount"] is not None:
+        try:
+            target_paid = round(float(payload["paid_discount"]), 2)
+        except (TypeError, ValueError):
+            raise BadRequestException("Paid discount must be a valid number.")
+        delta = round(target_paid - old_paid, 2)
+    else:
+        delta = old_due
+
+    if delta <= 0:
+        raise BadRequestException("Adjustment amount must be greater than 0.")
+    if delta > old_due + 0.01:
+        raise BadRequestException(
+            f"Adjustment amount ({delta:.2f}) cannot exceed remaining due discount ({old_due:.2f})."
         )
+
+    # Resolve logged-in user display name ("Adjustment By" in List Payments modal)
+    actor_name: str | None = None
+    auth_header = request.headers.get("authorization") or ""
+    if auth_header.lower().startswith("bearer "):
+        raw_token = auth_header.split(" ", 1)[1].strip()
+        if raw_token:
+            try:
+                curr_user = await auth_service.verify_access_token(raw_token)
+                actor_name = await SaleService(db)._resolve_actor_name(curr_user)
+            except Exception:
+                actor_name = None
+    if not actor_name:
+        actor_name = (
+            str(payload.get("adjusted_by") or "").strip()
+            or rec.sales_person
+            or rec.created_by
+            or "Admin"
+        )
+
+    settle_date_str = (
+        _format_ddmmyyyy(payload.get("settle_date"))
+        or datetime.now(IST).strftime("%d-%m-%Y")
+    )
+    raw_remark = str(payload.get("settle_remarks") or "").strip()
+    title_str = raw_remark or "Discount Adjustment"
+
+    existing_payments = list(rec.payments) if isinstance(rec.payments, list) else []
+    if not existing_payments and old_paid > 0.009:
+        existing_payments.append({
+            "id": str(uuid.uuid4()),
+            "date": str(rec.settle_date or rec.payment_date),
+            "title": str(rec.settle_remarks or "Discount Adjustment"),
+            "amount": old_paid,
+            "adjusted_by": str(rec.sales_person or rec.created_by or "Admin"),
+        })
+
+    existing_payments.append({
+        "id": str(uuid.uuid4()),
+        "date": settle_date_str,
+        "title": title_str,
+        "amount": round(min(delta, old_due), 2),
+        "adjusted_by": actor_name,
+    })
+
+    new_paid = round(min(total_disc, old_paid + delta), 2)
+    new_due = round(max(0.0, total_disc - new_paid), 2)
+    is_settled = new_due <= 0.009
+
+    rec.paid_discount = new_paid
+    rec.due_discount = 0.0 if is_settled else new_due
+    rec.settled = is_settled
+    rec.settle_date = settle_date_str
+    rec.payments = existing_payments
+    if raw_remark:
+        rec.settle_remarks = raw_remark
+        if not rec.remarks:
+            rec.remarks = raw_remark
+
+    await db.flush()
+    await db.refresh(rec)
+    so_map, comp_map, gp_map = await _load_discount_enrichment_maps(db, [rec])
+    so_obj = so_map.get(rec.order_ref)
+    comp_obj = comp_map.get(
+        (
+            getattr(so_obj, "company_name", None)
+            or rec.customer_name
+            or ""
+        ).strip().lower()
+    )
+    gp_obj = gp_map.get(rec.order_ref)
+    return build_success_response(
+        data=_serialize_discount_payment(rec, so=so_obj, comp=comp_obj, gp=gp_obj),
+        message="Discount settlement updated successfully.",
+        request_id=req_id,
+    )
 
 
 # ==============================================================================

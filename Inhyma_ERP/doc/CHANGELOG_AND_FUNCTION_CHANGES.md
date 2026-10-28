@@ -11,18 +11,22 @@
   - **Pending Stage:** Displays green `Current Status: Pending` banner, `Status` selector (`Sales Confirmed` default, `Cancel`), and **PO File** upload input (`.pdf,.png,.jpg,.jpeg,.xlsx,.xls,.doc,.docx`) with file size preview and `Clear` button.
   - **Sales Confirmed Stage:** Displays `Current Status: Sales Confirmed` banner, `Status` selector (`Admin Approved` default, `Cancel`), and hides the PO File upload field.
   - **Admin Approved Stage:** Displays `Current Status: Admin Approved` banner, `Status` selector (`Acc. Confirmed` default, `Cancel`), and renders `Invoice Date*`, `Invoice No *`, `Tally Bill *` file upload, `E-Way Bill` (`No`/`Yes`), plus `Third Party Invoice / Reference *` when Third-Party Delivery is enabled.
-  - **Downstream Stages:** Preserves full `Inhyma_ERP` support for `Gatepass Created` (Outward Gate Pass Details), `Dispatched`, `Gatepass Cancelled`, and `LR` (LR No, Transporter, and Dispatch Proofs).
+  - **Acc. Confirmed Stage:** Displays `Current Status: Acc. Confirmed` green banner, `Status` (`Gatepass Created`), clean `Remarks` textarea, and bottom `Submit` button matching production (auto-generating Gatepass metadata on submission without extra Gatepass input fields).
+  - **Dispatched Stage (`LR` & `Gatepass Cancel`):** Soft green `Dispatched` pill in the table Status column; drawer displays `Current Status: Dispatched`, `Status` dropdown with `LR` and `Gatepass Cancel`, `[ ] Change Transport Info` toggle (editable `Transport Name *`, `Transport Destination`, `Delivery Type *`, `Delivery Charge *` with `Self Pickup` clearing), mandatory `LR File *` upload, `Images/Videos (Upload Multiple)` drag-and-drop + browse dropzone, and `Remarks`.
 - **Direct Download Badges & Formatted Timestamps:**
   - Added clickable `📎 PO` and `📎 Bill` download badges in the Status column, PO column (`Yes 📎`), and `SaleProcessDetailModal` (`Detail` box & `Attached Files`), with authenticated `/uploads/private/...?token=` resolution for local private files.
   - Standardized status timestamps below badges to `DD-MM-YYYY hh:mm A`.
 
 ### 2. Backend Schema, Alembic Migration & Upload Endpoints (`models.py`, `schemas.py`, `service.py`, `process_routes.py`)
 - **Migration `v7a8b9c0d1e2`:** Idempotently added `po_file_url` (`VARCHAR(500)`), `po_file_name` (`VARCHAR(255)`), `tally_bill_url` (`VARCHAR(500)`), `tally_bill_name` (`VARCHAR(255)`), and `eway_bill` (`VARCHAR(10)`, default `'No'`) to `sales_orders` while preserving `invoice_no` and `invoice_date`.
+- **Migration `w8b9c0d1e2f3`:** Idempotently added `lr_date`, `lr_file_url`, `lr_file_name`, and `dispatch_media` (`JSON`) to `sales_orders`, and updated `option_lists` (`sale.order.status` -> `dispatched`) so `Dispatched` permits transitioning to both `lr` and `gatepass_cancelled`.
 - **New & Enhanced Endpoints:**
   - `POST /api/v1/sales/upload-po`: Uploads client PO document to `inhyma-sales-docs` / `/uploads/private/sales_po/`.
   - `POST /api/v1/sales/upload-tally-bill`: Uploads Tally Bill document to `inhyma-sales-docs` / `/uploads/private/sales_tally_bills/`.
+  - `POST /api/v1/sales/upload-lr`: Uploads Lorry Receipt (LR) document to `inhyma-sales-docs` / `/uploads/private/sales_lr/`.
+  - `POST /api/v1/sales/upload-dispatch-media`: Uploads multiple dispatch images & videos to `inhyma-sales-docs` / `/uploads/private/sales_dispatch_media/`.
   - `POST /api/v1/sales/orders/{id}/status-with-po`: Atomic multipart status transition with optional PO upload.
-  - `PATCH /api/v1/sales/orders/{id}/status`: Extended `SaleOrderStatusUpdate` and `SaleService.update_status` to persist PO, Tally Bill, Invoice, and E-Way Bill metadata.
+  - `PATCH /api/v1/sales/orders/{id}/status`: Extended `SaleOrderStatusUpdate` and `SaleService.update_status` to persist PO, Tally Bill, Invoice, E-Way Bill, LR File, Dispatch Media, and `Change Transport Info` updates.
 
 ---
 

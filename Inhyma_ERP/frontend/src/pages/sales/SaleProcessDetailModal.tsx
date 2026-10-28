@@ -175,6 +175,34 @@ export function SaleProcessDetailModal({
           url: ord.tally_bill_url,
         });
       }
+      if (ord.eway_bill_url) {
+        defaultFiles.push({
+          name: ord.eway_bill_name || "EWay_Bill.pdf",
+          size: "E-Way Bill",
+          type: "application/pdf",
+          url: ord.eway_bill_url,
+        });
+      }
+      if (ord.lr_file_url) {
+        defaultFiles.push({
+          name: ord.lr_file_name || "LR_Document.pdf",
+          size: "LR File",
+          type: "application/pdf",
+          url: ord.lr_file_url,
+        });
+      }
+      if (Array.isArray(ord.dispatch_media)) {
+        for (const m of ord.dispatch_media) {
+          if (m && m.url) {
+            defaultFiles.push({
+              name: m.filename || "Dispatch_Media",
+              size: m.size ? `${(m.size / 1024).toFixed(1)} KB` : "Dispatch Media",
+              type: m.content_type || "image/jpeg",
+              url: m.url,
+            });
+          }
+        }
+      }
       if (ord.gatepass && ord.gatepass !== "Pending") {
         defaultFiles.push({
           name: `Gatepass_${ord.gatepass.replace(/[/]/g, "_")}.pdf`,
@@ -709,6 +737,19 @@ export function SaleProcessDetailModal({
                     {order?.eway_bill && order.eway_bill !== "No" && (
                       <div style={{ color: "#475569", marginTop: "2px" }}>
                         E-Way Bill: <strong>{order.eway_bill}</strong>
+                        {order.eway_bill_url && (
+                          <>
+                            {" "}
+                            <a
+                              href={resolveDetailFileHref(order.eway_bill_url)}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              style={{ color: "#0061f2", textDecoration: "underline", fontWeight: 700 }}
+                            >
+                              📎 {order.eway_bill_name || "Download E-Way Bill"}
+                            </a>
+                          </>
+                        )}
                       </div>
                     )}
                     {order?.gatepass_no && (

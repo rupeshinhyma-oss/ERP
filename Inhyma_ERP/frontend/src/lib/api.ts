@@ -839,10 +839,25 @@ export interface ProductReorderItem {
   sr_no: number;
   product_id?: string | null;
   product_name_tally: string;
+  product_name_invoice?: string | null;
   product_code: string;
   brand: string;
   category?: string;
   sub_category?: string;
+  uom?: string;
+  hsn_code?: string | null;
+  gst_percent?: number | null;
+  import_duty_percent?: number | null;
+  minimum_price?: number | null;
+  packaging_quantity?: number | null;
+  packaging_net_weight?: number | null;
+  packaging_gross_weight?: number | null;
+  length_cm?: number | null;
+  width_cm?: number | null;
+  height_cm?: number | null;
+  packaging_unit_cbm?: number | null;
+  specification?: string | null;
+  description?: string | null;
   mumbai: number;
   mumbai_transit: number;
   mumbai_ordered: number;
@@ -857,6 +872,8 @@ export interface ProductReorderItem {
   short_fall: number;
   moq: number;
   order_to_be_place: number;
+  breakup_flags?: string[];
+  warehouse_thresholds?: Record<string, { reorder_level: number; moq: number }>;
 }
 
 export interface StockAdjustmentFilterParams {
@@ -955,7 +972,10 @@ export const InventoryApi = {
   /**
    * Update reorder level and MOQ for a product.
    */
-  async updateProductReorder(productId: string, data: { reorder_level?: number; minimum_order_quantity?: number }) {
+  async updateProductReorder(
+    productId: string,
+    data: { reorder_level?: number; minimum_order_quantity?: number; warehouse?: string }
+  ) {
     return apiPatch<any>(`/inventory/product-reorder/${productId}`, data);
   },
 
