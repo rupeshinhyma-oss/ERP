@@ -3,6 +3,21 @@
 **System:** Yinglima_ERP (China Procurement)  
 **Scope:** Functional updates, schema changes, UI hardening, and bug fixes.
 
+## [Release 2026-10-28] — Sale Process Local Purchase Costing Resolution & Product Prices Quote Modal 100% Zoom Fix
+
+### 0. Product Prices "+ Add New Supplier Quotation" Modal 100% Zoom Footer Visibility Fix (`ProductPrices.tsx` & `style.css`)
+- **Root Cause:** `.modal-card form > :not(.form-actions):not(.modal-footer)` in `style.css` applied `padding: 20px 24px` to every direct child `<div>` inside `<form>`, adding 160px of vertical height and pushing the `Cancel` and `+ Add Supplier Quote` footer buttons outside the `max-height: 90vh` `.modal-dialog-card` box at 100% zoom.
+- **Fix:** Wrapped the form fields inside a single body container (`padding: 0, gap: 12px`), aligned all fields flush with the top banners, reduced textarea height to `rows={2}`, and added `max-height: none !important; margin: auto !important` on `.modal-dialog-card.modal-overflow-visible` and `overflow-y: auto !important` on `.modal-centered-backdrop` so the entire modal and its Save/Add button fit comfortably at 100% zoom.
+
+### 1. Root Cause & Fix (`backend/app/sales/service.py`)
+- **Included `Received / Inwarded` Local Purchases in Sale Process Costing (`extract_consignment_items` & `get_product_costing_info`):**
+  - Previously, `SaleService` filtered `LocalPurchase.status == "Confirmed"` only. Once a Local Purchase invoice was inwarded into warehouse stock (`status = "Received / Inwarded"`), auto-loading a consignment in Sale Process ignored the inwarded purchase and returned `0.00` for `Unit Price (RMB) Including VAT` and blank `Supplier`.
+  - Updated `valid_lp_statuses = ("Confirmed", "Received / Inwarded", "Inwarded", "Completed")` in both `extract_consignment_items` and `get_product_costing_info`.
+- **Consignment-First Priority Resolution (Strict Option A — No Catalog Fallback):**
+  - **Priority 1:** Matches finalized Local Purchase invoices linked to the exact consignment column (`planning_column_id` or `consignment_code`).
+  - **Priority 2:** Falls back to the latest finalized (`Confirmed` or `Received / Inwarded`) Local Purchase invoice for that product across the ERP (`ORDER BY invoice_date DESC, created_at DESC`).
+  - **Strict No-Fallback Rule:** Never falls back to Product Prices catalog quotes; if no finalized Local Purchase exists for a product, rate remains `0.00` and supplier remains blank.
+
 ## [Release 2026-10-27 Part 5] — Comprehensive Multi-Field Search & Digit-Normalized Phone Search Across ERP
 
 ### 1. Root Cause Resolution & Unified Search Accuracy

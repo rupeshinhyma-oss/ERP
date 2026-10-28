@@ -349,11 +349,15 @@ class SaleService:
             for u in q_uom.scalars().all():
                 uom_map[u.id] = u.short_name or u.code or u.name or "NOS"
 
-        # Fetch suppliers & purchase rates from confirmed Local Purchase (Primary Source of Truth)
+        # Fetch suppliers & purchase rates from Confirmed or Received / Inwarded Local Purchase (Primary Source of Truth)
+        # Priority 1: Exact consignment match (planning_column_id == col.id or consignment_code == col.name)
+        # Priority 2: Latest Confirmed / Inwarded Local Purchase for that product
         # NOTE: Local Purchase Unit Rate is the BASIC price (excluding VAT); VAT is added on top there.
         # So the CI "Unit Price(RMB) Including VAT" = unit_rate x (1 + LP vat_rate / 100).
         lp_supplier_map: dict[uuid.UUID, tuple[uuid.UUID, str, float]] = {}
         lp_vat_map: dict[uuid.UUID, float] = {}
+        lp_matched_consignment: set[uuid.UUID] = set()
+        valid_lp_statuses = ("Confirmed", "Received / Inwarded", "Inwarded", "Completed")
         if prod_ids:
             q_lp = await self.session.execute(
                 select(
@@ -362,17 +366,24 @@ class SaleService:
                     LocalPurchase.supplier_name,
                     LocalPurchaseItem.unit_rate,
                     LocalPurchaseItem.vat_rate,
+                    LocalPurchase.planning_column_id,
+                    LocalPurchase.consignment_code,
                 )
                 .join(LocalPurchase, LocalPurchaseItem.purchase_id == LocalPurchase.id)
                 .where(
                     LocalPurchaseItem.product_id.in_(prod_ids),
-                    LocalPurchase.status == "Confirmed",
+                    LocalPurchase.status.in_(valid_lp_statuses),
                     LocalPurchase.deleted_at.is_(None),
                 )
                 .order_by(LocalPurchase.invoice_date.desc(), LocalPurchaseItem.created_at.desc())
             )
-            for pid, s_id, s_name, u_rate, lp_vat in q_lp.all():
-                if pid not in lp_supplier_map:
+            col_name_clean = col.name.strip().lower()
+            for pid, s_id, s_name, u_rate, lp_vat, lp_col_id, lp_cons_code in q_lp.all():
+                is_exact_consignment = (
+                    lp_col_id == col.id
+                    or (lp_cons_code is not None and lp_cons_code.strip().lower() == col_name_clean)
+                )
+                if pid not in lp_supplier_map or (is_exact_consignment and pid not in lp_matched_consignment):
                     vat_pct = (
                         float(lp_vat)
                         if lp_vat is not None
@@ -385,6 +396,8 @@ class SaleService:
                     rate_with_vat = round(float(u_rate or 0.0) * (1.0 + vat_pct / 100.0), 2)
                     lp_supplier_map[pid] = (s_id, s_name, rate_with_vat)
                     lp_vat_map[pid] = vat_pct
+                    if is_exact_consignment:
+                        lp_matched_consignment.add(pid)
 
         # Check spare categories
         cat_map: dict[uuid.UUID, ProductCategory] = {}
@@ -509,7 +522,8 @@ class SaleService:
         if not prod:
             raise NotFoundException(f"Product {product_id} not found.")
 
-        # 1. Primary Source of Truth: Confirmed Local Purchase
+        # 1. Primary Source of Truth: Confirmed or Received / Inwarded Local Purchase (No fallback)
+        valid_lp_statuses = ("Confirmed", "Received / Inwarded", "Inwarded", "Completed")
         q_lp = await self.session.execute(
             select(
                 LocalPurchaseItem,
@@ -519,7 +533,7 @@ class SaleService:
             .join(LocalPurchase, LocalPurchaseItem.purchase_id == LocalPurchase.id)
             .where(
                 LocalPurchaseItem.product_id == product_id,
-                LocalPurchase.status == "Confirmed",
+                LocalPurchase.status.in_(valid_lp_statuses),
                 LocalPurchase.deleted_at.is_(None),
             )
             .order_by(LocalPurchase.invoice_date.desc(), LocalPurchaseItem.created_at.desc())
