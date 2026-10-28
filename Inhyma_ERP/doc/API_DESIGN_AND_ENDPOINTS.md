@@ -295,7 +295,10 @@ Machine-to-machine internal service endpoints invoked by `ERP_Main` over authent
 | `POST` | `/api/v1/sales/orders` | Create Sales Order defaulting to `pending` status with line items & commercial terms | `saleorder.create` |
 | `GET` | `/api/v1/sales/orders/{id}` | Inspect detailed Sales Order record with line items, tax, and address breakdown | `saleorder.view` |
 | `PATCH`| `/api/v1/sales/orders/{id}` | Update Sales Order details, line items, and commercial fields | `saleorder.update` |
-| `PATCH`| `/api/v1/sales/orders/{id}/status` | Advance Sales Order stage (`pending` -> `sales_confirmed` -> `admin_approved` -> `dispatched` -> `lr_uploaded`) | `saleorder.approve` |
+| `PATCH`| `/api/v1/sales/orders/{id}/status` | Advance Sales Order stage (`pending` -> `sales_confirmed` -> `admin_approved` -> `acc_confirmed` -> `gatepass_created` -> `dispatched` -> `lr`) with PO & Tally Bill metadata | Authenticated (Workflow RBAC) |
+| `POST` | `/api/v1/sales/upload-po` | Upload client Purchase Order (PO) document (`inhyma-sales-docs` / `/uploads/private/sales_po/`) | Authenticated |
+| `POST` | `/api/v1/sales/upload-tally-bill` | Upload Tally Bill document (`inhyma-sales-docs` / `/uploads/private/sales_tally_bills/`) | Authenticated |
+| `POST` | `/api/v1/sales/orders/{id}/status-with-po` | Atomic multipart status update with optional PO file upload | Authenticated (Workflow RBAC) |
 | `DELETE`| `/api/v1/sales/orders/{id}` | Soft-delete Sales Order and revert inventory stock deductions | `saleorder.delete` |
 | `POST` | `/api/v1/sales/orders/{id}/restore` | Restore soft-deleted Sales Order (Admin only) | `saleorder.manage` |
 | `GET` | `/api/v1/sales/metrics` | Grouped sales order KPI metrics by status tabs | `saleorder.view` |

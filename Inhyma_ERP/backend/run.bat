@@ -52,11 +52,14 @@ if exist "alembic.ini" (
     python -m alembic upgrade heads
 )
 
-REM 6. Start Uvicorn Server
+REM 6. Clean up any stale/duplicate listeners on port 8002 and start Uvicorn Server
+if not "%~1"=="" goto custom_start
+echo [Inhyma_ERP Backend] Checking port 8002 for stale backend processes...
+for /f "tokens=5" %%a in ('netstat -ano ^| findstr /R /C:":8002 .*LISTENING"') do if not "%%a"=="0" taskkill /F /T /PID %%a >nul 2>nul
 echo [Inhyma_ERP Backend] Starting FastAPI server on http://0.0.0.0:8002 ...
-if "%~1"=="" goto default_start
-python -m uvicorn app.main:app %*
+python -m uvicorn app.main:app --host 0.0.0.0 --port 8002 --reload
 goto :eof
 
-:default_start
-python -m uvicorn app.main:app --host 0.0.0.0 --port 8002 --reload
+:custom_start
+echo [Inhyma_ERP Backend] Starting FastAPI server with custom args...
+python -m uvicorn app.main:app %*

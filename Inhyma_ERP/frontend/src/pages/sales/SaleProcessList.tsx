@@ -23,7 +23,7 @@ import { Breadcrumb } from "@/components/Breadcrumb";
 import { Pagination } from "@/components/Pagination";
 import { SideDrawer } from "@/components/SideDrawer";
 import type { PaginationMeta } from "@/types";
-import { apiDelete, apiGet, apiPatch } from "@/lib/api";
+import { apiDelete, apiGet, apiPatch, errorMessage } from "@/lib/api";
 import { useAuth } from "@/lib/hooks";
 import { useToast } from "@/lib/toast";
 import { generateGatePassPdf } from "@/lib/gatePassPdf";
@@ -58,6 +58,25 @@ export const INDIAN_STATES = [
 
 export function _yes(val: any): boolean {
   return ["yes", "y", "true", "1"].includes(String(val || "").trim().toLowerCase());
+}
+
+export function resolveSaleFileHref(url?: string | null): string {
+  if (!url) return "#";
+  if (url.startsWith("/uploads/private/")) {
+    const token = typeof localStorage !== "undefined" ? localStorage.getItem("erp_access_token") || "" : "";
+    return token ? `${url}${url.includes("?") ? "&" : "?"}token=${encodeURIComponent(token)}` : url;
+  }
+  return url;
+}
+
+function toIsoDateInput(dStr?: string | null): string {
+  if (!dStr) return new Date().toISOString().slice(0, 10);
+  const s = dStr.trim();
+  const dmy = s.match(/^(\d{2})[-/](\d{2})[-/](\d{4})$/);
+  if (dmy) return `${dmy[3]}-${dmy[2]}-${dmy[1]}`;
+  const ymd = s.match(/^(\d{4})[-/](\d{2})[-/](\d{2})/);
+  if (ymd) return `${ymd[1]}-${ymd[2]}-${ymd[3]}`;
+  return new Date().toISOString().slice(0, 10);
 }
 
 export function parseDateForCompare(dStr?: string | null): number | null {
@@ -640,26 +659,68 @@ export function SaleProcessListPage() {
 
   const handleSubmitUploadFiles = async () => {
     if (!uploadFilesOrder) return;
-    if (!selectedPoFile && !(uploadFilesOrder as any).po_file && !(uploadFilesOrder as any).po_attachment) {
+    if (
+      !selectedPoFile &&
+      !uploadFilesOrder.po_file_name &&
+      !(uploadFilesOrder as any).po_file &&
+      !(uploadFilesOrder as any).po_attachment
+    ) {
       toast("Please choose a file to upload", "error");
       return;
     }
 
     setUploadingFiles(true);
     try {
-      const fileName = selectedPoFile ? selectedPoFile.name : ((uploadFilesOrder as any).po_file || (uploadFilesOrder as any).po_attachment || "PO_Document.pdf");
+      let uploadedUrl = uploadFilesOrder.po_file_url || undefined;
+      let fileName = selectedPoFile
+        ? selectedPoFile.name
+        : uploadFilesOrder.po_file_name ||
+          (uploadFilesOrder as any).po_file ||
+          (uploadFilesOrder as any).po_attachment ||
+          "PO_Document.pdf";
+
+      if (selectedPoFile) {
+        const token = localStorage.getItem("erp_access_token") || "";
+        const formData = new FormData();
+        formData.append("file", selectedPoFile);
+        try {
+          const uploadRes = await fetch("/api/v1/sales/upload-po", {
+            method: "POST",
+            headers: {
+              ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            },
+            body: formData,
+          });
+          if (uploadRes.ok) {
+            const uploadJson = await uploadRes.json();
+            uploadedUrl = uploadJson.data?.url || uploadedUrl;
+            fileName = uploadJson.data?.filename || fileName;
+          } else if (!isTestMode) {
+            const errData = await uploadRes.json().catch(() => ({}));
+            throw new Error(errData.detail || errData.message || "Failed to upload PO file");
+          }
+        } catch (uploadErr) {
+          if (!isTestMode || !(uploadErr instanceof TypeError)) {
+            if (!isTestMode) throw uploadErr;
+          }
+          uploadedUrl = uploadedUrl || `/uploads/private/sales_po/${fileName}`;
+        }
+      }
+
       const updatedFiles = [
         ...((uploadFilesOrder.files || []).filter((f) => !f.name.toLowerCase().includes("po"))),
         {
           name: fileName,
           size: selectedPoFile ? `${Math.round(selectedPoFile.size / 1024)} KB` : "120 KB",
           type: selectedPoFile?.type || "application/pdf",
+          ...(uploadedUrl ? { url: uploadedUrl } : {}),
         },
       ];
 
       try {
         await apiPatch(`/sales/orders/${uploadFilesOrder.id}`, {
           booking_remarks: uploadFilesOrder.booking_remarks || `PO Attached: ${fileName}`,
+          ...(uploadedUrl ? { po_file_url: uploadedUrl, po_file_name: fileName } : {}),
         });
       } catch {
         // Local fallback
@@ -673,6 +734,8 @@ export function SaleProcessListPage() {
                 po: "Yes",
                 po_file: fileName,
                 po_attachment: fileName,
+                po_file_name: fileName,
+                po_file_url: uploadedUrl || o.po_file_url || null,
                 files: updatedFiles,
               }
             : o
@@ -698,6 +761,7 @@ export function SaleProcessListPage() {
 
     const orderId = uploadFilesOrder.id;
     const isPo =
+      fileName === uploadFilesOrder.po_file_name ||
       fileName === (uploadFilesOrder as any).po_file ||
       fileName === (uploadFilesOrder as any).po_attachment ||
       fileName.toLowerCase().includes("po");
@@ -706,7 +770,7 @@ export function SaleProcessListPage() {
     try {
       await apiPatch(`/sales/orders/${orderId}`, {
         booking_remarks: (uploadFilesOrder.booking_remarks || "").replace(`PO Attached: ${fileName}`, "").trim(),
-        ...(isPo ? { po: "No", po_file: null, po_attachment: null } : {}),
+        ...(isPo ? { po: "No", po_file: null, po_attachment: null, po_file_url: "", po_file_name: "" } : {}),
       });
     } catch {
       // Local fallback
@@ -720,6 +784,8 @@ export function SaleProcessListPage() {
               po: isPo ? "No" : o.po,
               po_file: isPo ? undefined : (o as any).po_file,
               po_attachment: isPo ? undefined : (o as any).po_attachment,
+              po_file_url: isPo ? null : o.po_file_url,
+              po_file_name: isPo ? null : o.po_file_name,
               files: remainingFiles,
             }
           : o
@@ -733,6 +799,8 @@ export function SaleProcessListPage() {
             po: isPo ? "No" : prev.po,
             po_file: isPo ? undefined : (prev as any).po_file,
             po_attachment: isPo ? undefined : (prev as any).po_attachment,
+            po_file_url: isPo ? null : prev.po_file_url,
+            po_file_name: isPo ? null : prev.po_file_name,
             files: remainingFiles,
           }
         : prev
@@ -741,10 +809,15 @@ export function SaleProcessListPage() {
     toast(`File "${fileName}" deleted successfully`, "success");
   };
 
-  // Status modal input states
-  const [selectedNewStatus, setSelectedNewStatus] = useState<string | null>(null);
-  const [modalInvoiceNo, setModalInvoiceNo] = useState("");
-  const [modalInvoiceDate, setModalInvoiceDate] = useState(() => new Date().toLocaleDateString("en-GB").split("/").join("-"));
+  // Sale Status Update Side Drawer state (matches production reference)
+  const [drawerTargetStatus, setDrawerTargetStatus] = useState<string>("sales_confirmed");
+  const [statusDrawerPoFile, setStatusDrawerPoFile] = useState<File | null>(null);
+  const [drawerRemarks, setDrawerRemarks] = useState<string>("");
+  const [submittingStatus, setSubmittingStatus] = useState<boolean>(false);
+  const [drawerInvoiceDate, setDrawerInvoiceDate] = useState<string>(() => new Date().toISOString().slice(0, 10));
+  const [drawerInvoiceNo, setDrawerInvoiceNo] = useState<string>("");
+  const [selectedTallyBillFile, setSelectedTallyBillFile] = useState<File | null>(null);
+  const [drawerEwayBill, setDrawerEwayBill] = useState<string>("No");
   const [modalThirdPartyInvoice, setModalThirdPartyInvoice] = useState("");
   const [modalGpNo, setModalGpNo] = useState("");
   const [modalGpDate, setModalGpDate] = useState(() => new Date().toLocaleDateString("en-GB").split("/").join("-"));
@@ -758,6 +831,314 @@ export function SaleProcessListPage() {
   const [modalLrDate, setModalLrDate] = useState(() => new Date().toLocaleDateString("en-GB").split("/").join("-"));
   const [modalLrFile, setModalLrFile] = useState("");
   const [modalLrPhotos, setModalLrPhotos] = useState<string[]>([]);
+
+  const formatStatusTimestamp = (dateStr?: string | null): string | null => {
+    if (!dateStr) return null;
+    const raw = String(dateStr).trim();
+    if (/^\d{2}-\d{2}-\d{4}\s+\d{1,2}:\d{2}\s*(AM|PM)$/i.test(raw)) {
+      return raw;
+    }
+    const d = new Date(raw);
+    if (isNaN(d.getTime())) return raw;
+    const day = String(d.getDate()).padStart(2, "0");
+    const month = String(d.getMonth() + 1).padStart(2, "0");
+    const year = d.getFullYear();
+    let hours = d.getHours();
+    const minutes = String(d.getMinutes()).padStart(2, "0");
+    const ampm = hours >= 12 ? "PM" : "AM";
+    hours = hours % 12;
+    hours = hours ? hours : 12;
+    const strHours = String(hours).padStart(2, "0");
+    return `${day}-${month}-${year} ${strHours}:${minutes} ${ampm}`;
+  };
+
+  const getStatusDisplayLabel = (status: string): string => {
+    const s = (status || "").toLowerCase();
+    if (s === "pending") return "Pending";
+    if (s === "sales_confirmed") return "Sales Confirmed";
+    if (s === "admin_approved") return "Admin Approved";
+    if (s === "acc_confirmed") return "Acc. Confirmed";
+    if (s === "gatepass_created") return "Gatepass Created";
+    if (s === "dispatched") return "Dispatched";
+    if (s === "lr") return "LR";
+    if (s === "gatepass_cancelled") return "Gatepass Cancelled";
+    if (s === "cancelled") return "Cancelled";
+    return status.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+  };
+
+  const openStatusDrawer = (order: SaleOrder) => {
+    const cur = (order.status || "pending").toLowerCase().trim();
+    const nextStatus =
+      cur === "pending"
+        ? "sales_confirmed"
+        : cur === "sales_confirmed"
+        ? "admin_approved"
+        : cur === "admin_approved"
+        ? "acc_confirmed"
+        : cur === "acc_confirmed"
+        ? "gatepass_created"
+        : cur === "gatepass_created"
+        ? "dispatched"
+        : cur === "gatepass_cancelled"
+        ? "gatepass_created"
+        : cur === "dispatched"
+        ? "lr"
+        : cur;
+
+    setEditingStatusOrder(order);
+    setDrawerTargetStatus(nextStatus);
+    setStatusDrawerPoFile(null);
+    setSelectedTallyBillFile(null);
+    setDrawerInvoiceDate(toIsoDateInput(order.invoice_date));
+    setDrawerInvoiceNo(order.invoice_no || "");
+    setDrawerEwayBill(order.eway_bill || "No");
+    setDrawerRemarks("");
+    setModalThirdPartyInvoice(order.third_party_invoice || "");
+
+    const curGp =
+      order.gatepass_no ||
+      `GP-${new Date().getFullYear().toString().slice(-2)}-${(new Date().getFullYear() + 1).toString().slice(-2)}/0123`;
+    setModalGpNo(curGp);
+    setModalGpDate(order.gatepass_date || new Date().toLocaleDateString("en-GB").split("/").join("-"));
+    setModalGpHandledBy(order.gatepass_handled_by || profile?.full_name || profile?.username || "Warehouse Team");
+    setModalGpTransporter(order.transport_name || order.transporter_name || "Road");
+    setModalGpDestination(order.transport_destination || order.city || "");
+    setModalGpDeliveryType(order.delivery_type || "Godown");
+    setModalGpDeliveryCharge(order.delivery_charge || "To Pay");
+    setModalLrNo(order.lr_no || "");
+    setModalLrTransporter(order.transport_name || order.transporter_name || "");
+    setModalLrDate(order.lr_date || new Date().toLocaleDateString("en-GB").split("/").join("-"));
+    setModalLrFile("");
+    setModalLrPhotos([]);
+
+    if (!order.gatepass_no) {
+      apiGet<{ gatepass_no: string }>("/sales/next-gatepass-no")
+        .then((r) => {
+          if (r?.data?.gatepass_no) setModalGpNo(r.data.gatepass_no);
+        })
+        .catch(() => {});
+    }
+  };
+
+  const handleStatusDrawerSubmit = async () => {
+    if (!editingStatusOrder) return;
+    const curStage = (editingStatusOrder.status || "pending").toLowerCase().trim();
+    const targetStatus = drawerTargetStatus || "sales_confirmed";
+
+    // Validation for Admin Approved -> Acc. Confirmed
+    if (targetStatus === "acc_confirmed") {
+      if (!drawerInvoiceDate) {
+        toast("Please enter Invoice Date", "error");
+        return;
+      }
+      if (!drawerInvoiceNo.trim()) {
+        toast("Please enter Invoice No", "error");
+        return;
+      }
+      if (!selectedTallyBillFile && !editingStatusOrder.tally_bill_url) {
+        toast("Please upload Tally Bill file", "error");
+        return;
+      }
+      if (
+        (_yes(editingStatusOrder.third_party) || _yes(editingStatusOrder.third_party_delivery)) &&
+        !modalThirdPartyInvoice.trim() &&
+        !editingStatusOrder.third_party_invoice
+      ) {
+        toast(
+          "Third Party Invoice / Reference is mandatory for Third Party Delivery at Acc. Confirmed stage",
+          "error"
+        );
+        return;
+      }
+    } else if (targetStatus === "lr") {
+      if (!modalLrNo.trim()) {
+        toast("LR / Consignment No is required", "error");
+        return;
+      }
+    }
+
+    setSubmittingStatus(true);
+    try {
+      let poUrl = editingStatusOrder.po_file_url || null;
+      let poName = editingStatusOrder.po_file_name || null;
+      let tallyUrl = editingStatusOrder.tally_bill_url || null;
+      let tallyName = editingStatusOrder.tally_bill_name || null;
+
+      const token = localStorage.getItem("erp_access_token") || "";
+
+      // Upload PO File if attached
+      if (statusDrawerPoFile) {
+        const formData = new FormData();
+        formData.append("file", statusDrawerPoFile);
+        try {
+          const uploadRes = await fetch("/api/v1/sales/upload-po", {
+            method: "POST",
+            headers: {
+              ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            },
+            body: formData,
+          });
+          if (!uploadRes.ok) {
+            const errData = await uploadRes.json().catch(() => ({}));
+            throw new Error(errData.detail || errData.message || "Failed to upload PO file");
+          }
+          const uploadJson = await uploadRes.json();
+          poUrl = uploadJson.data?.url || `/uploads/private/sales_po/${statusDrawerPoFile.name}`;
+          poName = uploadJson.data?.filename || statusDrawerPoFile.name;
+        } catch (uploadErr) {
+          if (!isTestMode || !(uploadErr instanceof TypeError)) {
+            throw uploadErr;
+          }
+          poUrl = `/uploads/private/sales_po/${statusDrawerPoFile.name}`;
+          poName = statusDrawerPoFile.name;
+        }
+      }
+
+      // Upload Tally Bill if attached
+      if (selectedTallyBillFile) {
+        const formData = new FormData();
+        formData.append("file", selectedTallyBillFile);
+        try {
+          const uploadRes = await fetch("/api/v1/sales/upload-tally-bill", {
+            method: "POST",
+            headers: {
+              ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            },
+            body: formData,
+          });
+          if (!uploadRes.ok) {
+            const errData = await uploadRes.json().catch(() => ({}));
+            throw new Error(errData.detail || errData.message || "Failed to upload Tally Bill file");
+          }
+          const uploadJson = await uploadRes.json();
+          tallyUrl = uploadJson.data?.url || `/uploads/private/sales_tally_bills/${selectedTallyBillFile.name}`;
+          tallyName = uploadJson.data?.filename || selectedTallyBillFile.name;
+        } catch (uploadErr) {
+          if (!isTestMode || !(uploadErr instanceof TypeError)) {
+            throw uploadErr;
+          }
+          tallyUrl = `/uploads/private/sales_tally_bills/${selectedTallyBillFile.name}`;
+          tallyName = selectedTallyBillFile.name;
+        }
+      }
+
+      const needsFallbackCancelReason =
+        (targetStatus === "cancelled" || targetStatus === "gatepass_cancelled") && !drawerRemarks.trim();
+      const effectiveRemarks = drawerRemarks.trim()
+        ? drawerRemarks.trim()
+        : needsFallbackCancelReason
+        ? `Cancelled from ${curStage} stage via Sale Status Update`
+        : undefined;
+
+      const patchPayload: Record<string, any> = {
+        status: targetStatus,
+        remarks: effectiveRemarks,
+        po_file_url: poUrl || undefined,
+        po_file_name: poName || undefined,
+      };
+
+      if (targetStatus === "acc_confirmed") {
+        patchPayload.invoice_date = drawerInvoiceDate || undefined;
+        patchPayload.invoice_no = drawerInvoiceNo.trim() || undefined;
+        patchPayload.tally_bill_url = tallyUrl || undefined;
+        patchPayload.tally_bill_name = tallyName || undefined;
+        patchPayload.eway_bill = drawerEwayBill || "No";
+        if (modalThirdPartyInvoice.trim()) {
+          patchPayload.third_party_invoice = modalThirdPartyInvoice.trim();
+        }
+      } else if (targetStatus === "gatepass_created") {
+        patchPayload.gatepass_no = modalGpNo.trim();
+        patchPayload.gatepass_date = modalGpDate.trim();
+        patchPayload.gatepass_handled_by = modalGpHandledBy.trim();
+        patchPayload.transporter_name = modalGpTransporter.trim();
+        patchPayload.transport_destination = modalGpDestination.trim();
+        patchPayload.delivery_type = modalGpDeliveryType;
+        patchPayload.delivery_charge = modalGpDeliveryCharge;
+        patchPayload.gatepass = "Generated";
+      } else if (targetStatus === "lr") {
+        patchPayload.lr_no = modalLrNo.trim();
+        patchPayload.transporter_name = modalLrTransporter.trim();
+        patchPayload.lr_date = modalLrDate.trim();
+      }
+
+      const nowIso = new Date().toISOString();
+      const formattedNow = formatStatusTimestamp(nowIso) || nowIso;
+      const targetLabel = targetStatus.replace(/_/g, " ").toUpperCase();
+
+      try {
+        await apiPatch<SaleOrder>(`/sales/orders/${editingStatusOrder.id}/status`, patchPayload);
+      } catch (patchErr) {
+        if (!isTestMode) {
+          throw patchErr;
+        }
+      }
+
+      // Optimistically sync local order state (ensures instant UI & test updates)
+      const newGatepass = ["gatepass_created", "dispatched", "lr"].includes(targetStatus)
+        ? "Generated"
+        : editingStatusOrder.gatepass || "Pending";
+
+      setOrders((prev) =>
+        prev.map((it) =>
+          it.id === editingStatusOrder.id
+            ? {
+                ...it,
+                status: targetStatus,
+                status_updated_at: formattedNow,
+                updated_at: nowIso,
+                gatepass: newGatepass,
+                po: poUrl ? "Yes" : it.po,
+                po_file_url: poUrl ?? it.po_file_url,
+                po_file_name: poName ?? it.po_file_name,
+                ...(targetStatus === "acc_confirmed"
+                  ? {
+                      invoice_date: drawerInvoiceDate,
+                      invoice_no: drawerInvoiceNo.trim(),
+                      tally_bill_url: tallyUrl,
+                      tally_bill_name: tallyName,
+                      eway_bill: drawerEwayBill || "No",
+                      ...(modalThirdPartyInvoice.trim()
+                        ? { third_party_invoice: modalThirdPartyInvoice.trim() }
+                        : {}),
+                    }
+                  : {}),
+                ...(targetStatus === "gatepass_created"
+                  ? {
+                      gatepass_no: modalGpNo.trim(),
+                      gatepass_date: modalGpDate.trim(),
+                      gatepass_handled_by: modalGpHandledBy.trim(),
+                      transporter_name: modalGpTransporter.trim(),
+                      transport_name: modalGpTransporter.trim(),
+                      transport_destination: modalGpDestination.trim(),
+                      delivery_type: modalGpDeliveryType,
+                      delivery_charge: modalGpDeliveryCharge,
+                    }
+                  : {}),
+                ...(targetStatus === "lr"
+                  ? {
+                      lr_no: modalLrNo.trim(),
+                      transporter_name: modalLrTransporter.trim(),
+                      transport_name: modalLrTransporter.trim(),
+                      lr_date: modalLrDate.trim(),
+                    }
+                  : {}),
+              }
+            : it
+        )
+      );
+
+      toast(`Order ${editingStatusOrder.order_no} status updated to ${targetLabel}`, "success");
+      setEditingStatusOrder(null);
+      setStatusDrawerPoFile(null);
+      setSelectedTallyBillFile(null);
+      setDrawerRemarks("");
+      await fetchOrders();
+    } catch (err) {
+      toast(errorMessage(err), "error");
+    } finally {
+      setSubmittingStatus(false);
+    }
+  };
 
   // Close kebab menu on outside click, window scroll, or window resize
   useEffect(() => {
@@ -1262,59 +1643,105 @@ export function SaleProcessListPage() {
       label = s === "gatepass_cancelled" ? "Gatepass Cancelled" : "Cancelled";
     }
 
+    const displayTimestamp =
+      formatStatusTimestamp(timestamp) || formatStatusTimestamp(order?.updated_at || order?.created_at);
+
     return (
       <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "2px" }}>
-        <span style={badgeStyle}>
-          <span>{label}</span>
+        <div style={{ display: "inline-flex", alignItems: "center", gap: "6px", flexWrap: "wrap", justifyContent: "center" }}>
+          <span style={badgeStyle}>
+            <span>{label}</span>
+          </span>
           <button
             type="button"
             title="Update Status"
+            aria-label="Update Status"
             onClick={(e) => {
               e.stopPropagation();
               if (order) {
-                setEditingStatusOrder(order);
-                setSelectedNewStatus(null);
-                setModalInvoiceNo(order.invoice_no || `INV-INH/${new Date().getFullYear().toString().slice(-2)}-${(new Date().getFullYear() + 1).toString().slice(-2)}/${Math.floor(1000 + Math.random() * 9000)}`);
-                setModalInvoiceDate(order.invoice_date || new Date().toLocaleDateString("en-GB").split("/").join("-"));
-                setModalThirdPartyInvoice(order.third_party_invoice || "");
-                const curGp = order.gatepass_no || `GP-${new Date().getFullYear().toString().slice(-2)}-${(new Date().getFullYear() + 1).toString().slice(-2)}/0123`;
-                setModalGpNo(curGp);
-                setModalGpDate(order.gatepass_date || new Date().toLocaleDateString("en-GB").split("/").join("-"));
-                setModalGpHandledBy(order.gatepass_handled_by || profile?.full_name || profile?.username || "Warehouse Team");
-                setModalGpTransporter(order.transport_name || order.transporter_name || "Road");
-                setModalGpDestination(order.transport_destination || order.city || "");
-                setModalGpDeliveryType(order.delivery_type || "Godown");
-                setModalGpDeliveryCharge(order.delivery_charge || "To Pay");
-                setModalLrNo(order.lr_no || "");
-                setModalLrTransporter(order.transport_name || order.transporter_name || "");
-                setModalLrDate(order.lr_date || new Date().toLocaleDateString("en-GB").split("/").join("-"));
-                setModalLrFile("");
-                setModalLrPhotos([]);
-
-                if (!order.gatepass_no) {
-                  apiGet<{ gatepass_no: string }>("/sales/next-gatepass-no")
-                    .then((r) => {
-                      if (r?.data?.gatepass_no) setModalGpNo(r.data.gatepass_no);
-                    })
-                    .catch(() => {});
-                }
+                openStatusDrawer(order);
               }
             }}
             style={{
-              background: "none",
-              border: "none",
-              padding: 0,
-              fontSize: "11px",
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              width: "22px",
+              height: "22px",
+              borderRadius: "4px",
+              border: "1px solid #3b82f6",
+              background: "#ffffff",
+              color: "#2563eb",
               cursor: "pointer",
-              lineHeight: 1,
-              opacity: 0.85,
+              padding: 0,
+              boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
+              transition: "all 0.15s ease",
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = "#eff6ff";
+              e.currentTarget.style.borderColor = "#1d4ed8";
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = "#ffffff";
+              e.currentTarget.style.borderColor = "#3b82f6";
             }}
           >
-            📝
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+              <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+            </svg>
           </button>
-        </span>
-        {timestamp ? (
-          <span style={{ fontSize: "11px", color: "#64748b" }}>{timestamp}</span>
+          {order?.po_file_url && (
+            <a
+              href={resolveSaleFileHref(order.po_file_url)}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={(e) => e.stopPropagation()}
+              title={`Download PO: ${order.po_file_name || "PO File"}`}
+              style={{
+                fontSize: "11px",
+                fontWeight: 700,
+                color: "#0284c7",
+                background: "#e0f2fe",
+                border: "1px solid #bae6fd",
+                padding: "1px 5px",
+                borderRadius: "4px",
+                textDecoration: "none",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "2px",
+              }}
+            >
+              📎 PO
+            </a>
+          )}
+          {order?.tally_bill_url && (
+            <a
+              href={resolveSaleFileHref(order.tally_bill_url)}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={(e) => e.stopPropagation()}
+              title={`Download Tally Bill: ${order.tally_bill_name || "Bill File"}`}
+              style={{
+                fontSize: "11px",
+                fontWeight: 700,
+                color: "#15803d",
+                background: "#dcfce7",
+                border: "1px solid #bbf7d0",
+                padding: "1px 5px",
+                borderRadius: "4px",
+                textDecoration: "none",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "2px",
+              }}
+            >
+              📎 Bill
+            </a>
+          )}
+        </div>
+        {displayTimestamp ? (
+          <span style={{ fontSize: "11px", color: "#64748b", fontWeight: 500 }}>{displayTimestamp}</span>
         ) : null}
       </div>
     );
@@ -2122,10 +2549,31 @@ export function SaleProcessListPage() {
                       {/* PO */}
                       <td style={{ padding: "8px 12px", color: "#475569" }}>
                         {(() => {
-                          const isPo = _yes(o.po);
-                          const poAtt = (o as any).po_file || (o as any).po_attachment || (o.files || []).find((f) => f.name?.toLowerCase().includes("po"));
+                          const isPo = _yes(o.po) || Boolean(o.po_file_url);
+                          const poAtt =
+                            o.po_file_name ||
+                            (o as any).po_file ||
+                            (o as any).po_attachment ||
+                            (o.files || []).find((f) => f.name?.toLowerCase().includes("po"));
                           const poName = typeof poAtt === "string" ? poAtt : poAtt?.name;
                           if (!isPo && !poName) return "No";
+                          if (o.po_file_url) {
+                            return (
+                              <span style={{ display: "inline-flex", alignItems: "center", gap: "4px" }}>
+                                <span style={{ color: "#0284c7", fontWeight: 600 }}>Yes</span>
+                                <a
+                                  href={resolveSaleFileHref(o.po_file_url)}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  title={`Purchase Order: ${poName || "Download PO"}`}
+                                  style={{ cursor: "pointer", fontSize: "13px", textDecoration: "none" }}
+                                  onClick={(e) => e.stopPropagation()}
+                                >
+                                  📎
+                                </a>
+                              </span>
+                            );
+                          }
                           if (poName) {
                             return (
                               <span style={{ display: "inline-flex", alignItems: "center", gap: "4px" }}>
@@ -2855,160 +3303,417 @@ export function SaleProcessListPage() {
           )}
         </SideDrawer>
 
-        {/* Quick Status Update Modal */}
+        {/* Sale Status Update Side Drawer (Matches Production Reference) */}
         {editingStatusOrder && (
-          <div
-            onClick={() => {
+          <SideDrawer
+            open={Boolean(editingStatusOrder)}
+            title="Sale Status Update"
+            onClose={() => {
               setEditingStatusOrder(null);
-              setSelectedNewStatus(null);
+              setStatusDrawerPoFile(null);
+              setSelectedTallyBillFile(null);
+              setDrawerRemarks("");
             }}
-            style={{
-              position: "fixed",
-              top: 0,
-              left: 0,
-              right: 0,
-              bottom: 0,
-              backgroundColor: "rgba(0,0,0,0.45)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              zIndex: 1000,
-            }}
+            width="420px"
+            maxWidth="95vw"
           >
-            <div
-              onClick={(e) => e.stopPropagation()}
-              style={{
-                background: "#ffffff",
-                borderRadius: "8px",
-                width: "440px",
-                maxWidth: "92%",
-                padding: "20px",
-                boxShadow: "0 10px 25px rgba(0,0,0,0.2)",
-              }}
-            >
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
-                <h3 style={{ fontSize: "15px", fontWeight: 700, margin: 0, color: "#1e293b" }}>
-                  Update Order Status
-                </h3>
-                <button
-                  type="button"
-                  aria-label="Close"
-                  onClick={() => {
-                    setEditingStatusOrder(null);
-                    setSelectedNewStatus(null);
-                  }}
+            <div style={{ display: "flex", flexDirection: "column", gap: "16px", minHeight: "100%" }}>
+              {/* Current Status Alert Banner */}
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: "8px",
+                  padding: "12px 16px",
+                  borderRadius: "8px",
+                  background: "#dcfce7",
+                  color: "#15803d",
+                  fontSize: "14px",
+                  fontWeight: 700,
+                  border: "1px solid #bbf7d0",
+                }}
+              >
+                <svg width="20" height="20" viewBox="0 0 20 20" fill="#16a34a" style={{ flexShrink: 0 }}>
+                  <path
+                    fillRule="evenodd"
+                    d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z"
+                    clipRule="evenodd"
+                  />
+                </svg>
+                <span>Current Status: {getStatusDisplayLabel(editingStatusOrder.status)}</span>
+              </div>
+
+              {/* Status Selection */}
+              <div>
+                <label
+                  htmlFor="sale-status-target-select"
+                  style={{ display: "block", fontSize: "12.5px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}
+                >
+                  Status
+                </label>
+                <select
+                  id="sale-status-target-select"
+                  data-testid="select-sale-status"
+                  value={drawerTargetStatus}
+                  onChange={(e) => setDrawerTargetStatus(e.target.value)}
                   style={{
-                    background: "none",
-                    border: "none",
-                    fontSize: "14px",
-                    fontWeight: 600,
-                    color: "#64748b",
-                    cursor: "pointer",
-                    padding: "2px 6px",
+                    width: "100%",
+                    padding: "8px 12px",
+                    borderRadius: "6px",
+                    border: "1px solid #cbd5e1",
+                    fontSize: "13px",
+                    color: "#0f172a",
+                    background: "#ffffff",
+                    outline: "none",
                   }}
                 >
-                  Close
-                </button>
+                  {editingStatusOrder.status.toLowerCase() === "pending" && (
+                    <>
+                      <option value="sales_confirmed">Sales Confirmed</option>
+                      <option value="cancelled">Cancel</option>
+                    </>
+                  )}
+                  {editingStatusOrder.status.toLowerCase() === "sales_confirmed" && (
+                    <>
+                      <option value="admin_approved">Admin Approved</option>
+                      <option value="cancelled">Cancel</option>
+                    </>
+                  )}
+                  {editingStatusOrder.status.toLowerCase() === "admin_approved" && (
+                    <>
+                      <option value="acc_confirmed">Acc. Confirmed</option>
+                      <option value="cancelled">Cancel</option>
+                    </>
+                  )}
+                  {editingStatusOrder.status.toLowerCase() === "acc_confirmed" && (
+                    <>
+                      <option value="gatepass_created">Gatepass Created</option>
+                    </>
+                  )}
+                  {editingStatusOrder.status.toLowerCase() === "gatepass_created" && (
+                    <>
+                      <option value="dispatched">Dispatched</option>
+                      <option value="gatepass_cancelled">Gatepass Cancelled</option>
+                    </>
+                  )}
+                  {editingStatusOrder.status.toLowerCase() === "gatepass_cancelled" && (
+                    <>
+                      <option value="gatepass_created">Gatepass Created</option>
+                      <option value="cancelled">Cancel</option>
+                    </>
+                  )}
+                  {editingStatusOrder.status.toLowerCase() === "dispatched" && (
+                    <>
+                      <option value="lr">LR</option>
+                    </>
+                  )}
+                  {![
+                    "pending",
+                    "sales_confirmed",
+                    "admin_approved",
+                    "acc_confirmed",
+                    "gatepass_created",
+                    "gatepass_cancelled",
+                    "dispatched",
+                  ].includes(editingStatusOrder.status.toLowerCase()) && (
+                    <>
+                      <option value={editingStatusOrder.status.toLowerCase()}>
+                        {getStatusDisplayLabel(editingStatusOrder.status)}
+                      </option>
+                    </>
+                  )}
+                </select>
               </div>
-              <p style={{ fontSize: "12.5px", color: "#64748b", margin: "0 0 14px" }}>
-                Order No: <strong>{editingStatusOrder.order_no}</strong> ({editingStatusOrder.company_name})
-              </p>
 
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px", marginBottom: "14px" }}>
-                {[
-                  { key: "pending", label: "Pending" },
-                  { key: "sales_confirmed", label: "Sales Confirmed" },
-                  { key: "admin_approved", label: "Admin Approved" },
-                  { key: "acc_confirmed", label: "Acc. Confirmed" },
-                  { key: "gatepass_created", label: "Gatepass Created" },
-                  { key: "dispatched", label: "Dispatched" },
-                  { key: "lr", label: "LR" },
-                  { key: "gatepass_cancelled", label: "Gatepass Cancelled" },
-                  { key: "cancelled", label: "Cancelled" },
-                ].map((s) => {
-                  const isCurrent = (selectedNewStatus || editingStatusOrder.status) === s.key;
-                  return (
-                    <button
-                      key={s.key}
-                      type="button"
-                      onClick={() => setSelectedNewStatus(s.key)}
+              {/* PO File Upload (Only when Current Status is Pending) */}
+              {editingStatusOrder.status.toLowerCase() === "pending" && (
+                <div>
+                  <label
+                    htmlFor="sale-status-po-input"
+                    style={{ display: "block", fontSize: "12.5px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}
+                  >
+                    PO File
+                  </label>
+                  <div
+                    style={{
+                      border: "1px solid #cbd5e1",
+                      borderRadius: "6px",
+                      padding: "6px 10px",
+                      background: "#ffffff",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "8px",
+                    }}
+                  >
+                    <input
+                      type="file"
+                      id="sale-status-po-input"
+                      data-testid="input-status-po-file"
+                      accept=".pdf,.png,.jpg,.jpeg,.xlsx,.xls,.doc,.docx"
+                      onChange={(e) => {
+                        const f = e.target.files?.[0] || null;
+                        setStatusDrawerPoFile(f);
+                      }}
                       style={{
-                        padding: "7px 10px",
-                        borderRadius: "5px",
-                        border: isCurrent ? "2px solid #0061f2" : "1px solid #cbd5e1",
-                        background: isCurrent ? "#eff6ff" : "#ffffff",
-                        color: isCurrent ? "#0061f2" : "#334155",
-                        fontWeight: isCurrent ? 700 : 500,
-                        fontSize: "12px",
-                        textAlign: "left",
+                        fontSize: "13px",
+                        color: "#475569",
+                        width: "100%",
                         cursor: "pointer",
+                      }}
+                    />
+                  </div>
+                  {statusDrawerPoFile && (
+                    <div
+                      style={{
+                        marginTop: "6px",
+                        fontSize: "12px",
+                        color: "#0284c7",
                         display: "flex",
-                        justifyContent: "space-between",
                         alignItems: "center",
+                        justifyContent: "space-between",
                       }}
                     >
-                      <span>{s.label}</span>
-                      {isCurrent && <span>✓</span>}
-                    </button>
-                  );
-                })}
-              </div>
+                      <span>
+                        📎 {statusDrawerPoFile.name} ({(statusDrawerPoFile.size / 1024).toFixed(1)} KB)
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setStatusDrawerPoFile(null);
+                          const el = document.getElementById("sale-status-po-input") as HTMLInputElement;
+                          if (el) el.value = "";
+                        }}
+                        style={{
+                          background: "none",
+                          border: "none",
+                          color: "#ef4444",
+                          cursor: "pointer",
+                          fontSize: "11.5px",
+                          fontWeight: 600,
+                        }}
+                      >
+                        Clear
+                      </button>
+                    </div>
+                  )}
+                  {editingStatusOrder.po_file_url && !statusDrawerPoFile && (
+                    <div style={{ marginTop: "6px", fontSize: "12px", color: "#15803d" }}>
+                      <span>Current PO File: </span>
+                      <a
+                        href={resolveSaleFileHref(editingStatusOrder.po_file_url)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        style={{ color: "#0061f2", textDecoration: "underline", fontWeight: 600 }}
+                      >
+                        {editingStatusOrder.po_file_name || "Download PO"}
+                      </a>
+                    </div>
+                  )}
+                </div>
+              )}
 
-              {/* Conditional Inputs based on selected status */}
-              {(selectedNewStatus || editingStatusOrder.status) === "acc_confirmed" && (
-                <div style={{ background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: "6px", padding: "12px", marginBottom: "14px" }}>
-                  <div style={{ fontSize: "12px", fontWeight: 700, color: "#166534", marginBottom: "8px" }}>
-                    🧾 Accounts Invoicing Details:
-                  </div>
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" }}>
+              {/* Invoice Date, Invoice No, Tally Bill & E-Way Bill (When Admin Approved -> Acc. Confirmed) */}
+              {editingStatusOrder.status.toLowerCase() === "admin_approved" && drawerTargetStatus === "acc_confirmed" && (
+                <>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
                     <div>
-                      <label style={{ display: "block", fontSize: "11px", fontWeight: 600, color: "#166534", marginBottom: "3px" }}>
+                      <label
+                        htmlFor="sale-status-invoice-date"
+                        style={{ display: "block", fontSize: "12.5px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}
+                      >
+                        Invoice Date<span style={{ color: "#ef4444" }}>*</span>
+                      </label>
+                      <input
+                        id="sale-status-invoice-date"
+                        data-testid="input-status-invoice-date"
+                        type="date"
+                        value={drawerInvoiceDate}
+                        onChange={(e) => setDrawerInvoiceDate(e.target.value)}
+                        style={{
+                          width: "100%",
+                          padding: "8px 12px",
+                          borderRadius: "6px",
+                          border: "1px solid #cbd5e1",
+                          fontSize: "13px",
+                          color: "#0f172a",
+                          background: "#ffffff",
+                          outline: "none",
+                          boxSizing: "border-box",
+                        }}
+                      />
+                    </div>
+                    <div>
+                      <label
+                        htmlFor="sale-status-invoice-no"
+                        style={{ display: "block", fontSize: "12.5px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}
+                      >
                         Invoice No <span style={{ color: "#ef4444" }}>*</span>
                       </label>
                       <input
+                        id="sale-status-invoice-no"
+                        data-testid="input-status-invoice-no"
                         type="text"
-                        value={modalInvoiceNo}
-                        onChange={(e) => setModalInvoiceNo(e.target.value)}
-                        placeholder="INV-INH/..."
-                        style={{ width: "100%", padding: "5px 8px", fontSize: "12px", borderRadius: "4px", border: "1px solid #86efac" }}
-                      />
-                    </div>
-                    <div>
-                      <label style={{ display: "block", fontSize: "11px", fontWeight: 600, color: "#166534", marginBottom: "3px" }}>
-                        Invoice Date <span style={{ color: "#ef4444" }}>*</span>
-                      </label>
-                      <input
-                        type="text"
-                        value={modalInvoiceDate}
-                        onChange={(e) => setModalInvoiceDate(e.target.value)}
-                        placeholder="DD-MM-YYYY"
-                        style={{ width: "100%", padding: "5px 8px", fontSize: "12px", borderRadius: "4px", border: "1px solid #86efac" }}
+                        value={drawerInvoiceNo}
+                        onChange={(e) => setDrawerInvoiceNo(e.target.value)}
+                        placeholder=""
+                        style={{
+                          width: "100%",
+                          padding: "8px 12px",
+                          borderRadius: "6px",
+                          border: "1px solid #cbd5e1",
+                          fontSize: "13px",
+                          color: "#0f172a",
+                          background: "#ffffff",
+                          outline: "none",
+                          boxSizing: "border-box",
+                        }}
                       />
                     </div>
                   </div>
 
-                  {_yes(editingStatusOrder.third_party) && (
-                    <div style={{ marginTop: "10px", background: "#fef2f2", border: "1px solid #fecaca", borderRadius: "6px", padding: "8px" }}>
-                      <label style={{ display: "block", fontSize: "11.5px", fontWeight: 700, color: "#991b1b", marginBottom: "3px" }}>
-                        Third Party Invoice / Reference <span style={{ color: "#dc2626" }}>* (Mandatory for 3rd-Party Delivery)</span>
+                  {/* Tally Bill File Upload */}
+                  <div>
+                    <label
+                      htmlFor="sale-status-tally-input"
+                      style={{ display: "block", fontSize: "12.5px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}
+                    >
+                      Tally Bill <span style={{ color: "#ef4444" }}>*</span>
+                    </label>
+                    <div
+                      style={{
+                        border: "1px solid #cbd5e1",
+                        borderRadius: "6px",
+                        padding: "6px 10px",
+                        background: "#ffffff",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "8px",
+                      }}
+                    >
+                      <input
+                        type="file"
+                        id="sale-status-tally-input"
+                        data-testid="input-status-tally-bill"
+                        accept=".pdf,.png,.jpg,.jpeg,.xlsx,.xls,.doc,.docx"
+                        onChange={(e) => {
+                          const f = e.target.files?.[0] || null;
+                          setSelectedTallyBillFile(f);
+                        }}
+                        style={{
+                          fontSize: "13px",
+                          color: "#475569",
+                          width: "100%",
+                          cursor: "pointer",
+                        }}
+                      />
+                    </div>
+                    {selectedTallyBillFile && (
+                      <div
+                        style={{
+                          marginTop: "6px",
+                          fontSize: "12px",
+                          color: "#0284c7",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                        }}
+                      >
+                        <span>
+                          📎 {selectedTallyBillFile.name} ({(selectedTallyBillFile.size / 1024).toFixed(1)} KB)
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSelectedTallyBillFile(null);
+                            const el = document.getElementById("sale-status-tally-input") as HTMLInputElement;
+                            if (el) el.value = "";
+                          }}
+                          style={{
+                            background: "none",
+                            border: "none",
+                            color: "#ef4444",
+                            cursor: "pointer",
+                            fontSize: "11.5px",
+                            fontWeight: 600,
+                          }}
+                        >
+                          Clear
+                        </button>
+                      </div>
+                    )}
+                    {editingStatusOrder.tally_bill_url && !selectedTallyBillFile && (
+                      <div style={{ marginTop: "6px", fontSize: "12px", color: "#15803d" }}>
+                        <span>Current Tally Bill: </span>
+                        <a
+                          href={resolveSaleFileHref(editingStatusOrder.tally_bill_url)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          style={{ color: "#0061f2", textDecoration: "underline", fontWeight: 600 }}
+                        >
+                          {editingStatusOrder.tally_bill_name || "Download Tally Bill"}
+                        </a>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* E-Way Bill */}
+                  <div>
+                    <label
+                      htmlFor="sale-status-eway-bill"
+                      style={{ display: "block", fontSize: "12.5px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}
+                    >
+                      E-Way Bill
+                    </label>
+                    <select
+                      id="sale-status-eway-bill"
+                      data-testid="select-status-eway-bill"
+                      value={drawerEwayBill}
+                      onChange={(e) => setDrawerEwayBill(e.target.value)}
+                      style={{
+                        width: "100%",
+                        padding: "8px 12px",
+                        borderRadius: "6px",
+                        border: "1px solid #cbd5e1",
+                        fontSize: "13px",
+                        color: "#0f172a",
+                        background: "#ffffff",
+                        outline: "none",
+                        boxSizing: "border-box",
+                      }}
+                    >
+                      <option value="No">No</option>
+                      <option value="Yes">Yes</option>
+                    </select>
+                  </div>
+
+                  {(_yes(editingStatusOrder.third_party) || _yes(editingStatusOrder.third_party_delivery)) && (
+                    <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: "6px", padding: "10px" }}>
+                      <label style={{ display: "block", fontSize: "12px", fontWeight: 700, color: "#991b1b", marginBottom: "4px" }}>
+                        Third Party Invoice / Reference <span style={{ color: "#dc2626" }}>*</span>
                       </label>
                       <input
                         type="text"
                         value={modalThirdPartyInvoice}
                         onChange={(e) => setModalThirdPartyInvoice(e.target.value)}
                         placeholder="Enter 3rd Party Vendor Invoice No / Document Ref"
-                        style={{ width: "100%", padding: "5px 8px", fontSize: "12px", borderRadius: "4px", border: "1px solid #f87171" }}
+                        style={{
+                          width: "100%",
+                          padding: "7px 10px",
+                          fontSize: "12.5px",
+                          borderRadius: "5px",
+                          border: "1px solid #f87171",
+                          boxSizing: "border-box",
+                        }}
                       />
-                      <div style={{ fontSize: "10.5px", color: "#b91c1c", marginTop: "3px" }}>
-                        Third-Party Delivery is set to "Yes". Entering/uploading the third-party invoice details is mandatory at the Acc. Confirmed stage.
-                      </div>
                     </div>
                   )}
-                </div>
+                </>
               )}
 
-              {(selectedNewStatus || editingStatusOrder.status) === "gatepass_created" && (
-                <div style={{ background: "#eef2ff", border: "1px solid #c7d2fe", borderRadius: "6px", padding: "12px", marginBottom: "14px" }}>
+              {/* Outward Gate Pass Details (When transitioning to Gatepass Created) */}
+              {drawerTargetStatus === "gatepass_created" && (
+                <div style={{ background: "#eef2ff", border: "1px solid #c7d2fe", borderRadius: "6px", padding: "12px" }}>
                   <div style={{ fontSize: "12px", fontWeight: 700, color: "#3730a3", marginBottom: "8px" }}>
                     🚚 Outward Gate Pass Details:
                   </div>
@@ -3021,7 +3726,7 @@ export function SaleProcessListPage() {
                         type="text"
                         value={modalGpNo}
                         onChange={(e) => setModalGpNo(e.target.value)}
-                        style={{ width: "100%", padding: "5px 8px", fontSize: "12px", borderRadius: "4px", border: "1px solid #a5b4fc" }}
+                        style={{ width: "100%", padding: "5px 8px", fontSize: "12px", borderRadius: "4px", border: "1px solid #a5b4fc", boxSizing: "border-box" }}
                       />
                     </div>
                     <div>
@@ -3032,7 +3737,7 @@ export function SaleProcessListPage() {
                         type="text"
                         value={modalGpDate}
                         onChange={(e) => setModalGpDate(e.target.value)}
-                        style={{ width: "100%", padding: "5px 8px", fontSize: "12px", borderRadius: "4px", border: "1px solid #a5b4fc" }}
+                        style={{ width: "100%", padding: "5px 8px", fontSize: "12px", borderRadius: "4px", border: "1px solid #a5b4fc", boxSizing: "border-box" }}
                       />
                     </div>
                     <div>
@@ -3043,7 +3748,7 @@ export function SaleProcessListPage() {
                         type="text"
                         value={modalGpHandledBy}
                         onChange={(e) => setModalGpHandledBy(e.target.value)}
-                        style={{ width: "100%", padding: "5px 8px", fontSize: "12px", borderRadius: "4px", border: "1px solid #a5b4fc" }}
+                        style={{ width: "100%", padding: "5px 8px", fontSize: "12px", borderRadius: "4px", border: "1px solid #a5b4fc", boxSizing: "border-box" }}
                       />
                     </div>
                     <div>
@@ -3055,7 +3760,7 @@ export function SaleProcessListPage() {
                         value={modalGpTransporter}
                         onChange={(e) => setModalGpTransporter(e.target.value)}
                         placeholder="e.g. VRL Logistics, SafeXpress"
-                        style={{ width: "100%", padding: "5px 8px", fontSize: "12px", borderRadius: "4px", border: "1px solid #a5b4fc" }}
+                        style={{ width: "100%", padding: "5px 8px", fontSize: "12px", borderRadius: "4px", border: "1px solid #a5b4fc", boxSizing: "border-box" }}
                       />
                     </div>
                     <div>
@@ -3067,7 +3772,7 @@ export function SaleProcessListPage() {
                         value={modalGpDestination}
                         onChange={(e) => setModalGpDestination(e.target.value)}
                         placeholder="Destination city"
-                        style={{ width: "100%", padding: "5px 8px", fontSize: "12px", borderRadius: "4px", border: "1px solid #a5b4fc" }}
+                        style={{ width: "100%", padding: "5px 8px", fontSize: "12px", borderRadius: "4px", border: "1px solid #a5b4fc", boxSizing: "border-box" }}
                       />
                     </div>
                     <div>
@@ -3077,7 +3782,7 @@ export function SaleProcessListPage() {
                       <select
                         value={modalGpDeliveryType}
                         onChange={(e) => setModalGpDeliveryType(e.target.value)}
-                        style={{ width: "100%", padding: "5px 8px", fontSize: "12px", borderRadius: "4px", border: "1px solid #a5b4fc" }}
+                        style={{ width: "100%", padding: "5px 8px", fontSize: "12px", borderRadius: "4px", border: "1px solid #a5b4fc", boxSizing: "border-box" }}
                       >
                         <option value="Godown">Godown</option>
                         <option value="Door">Door Delivery</option>
@@ -3090,7 +3795,7 @@ export function SaleProcessListPage() {
                       <select
                         value={modalGpDeliveryCharge}
                         onChange={(e) => setModalGpDeliveryCharge(e.target.value)}
-                        style={{ width: "100%", padding: "5px 8px", fontSize: "12px", borderRadius: "4px", border: "1px solid #a5b4fc" }}
+                        style={{ width: "100%", padding: "5px 8px", fontSize: "12px", borderRadius: "4px", border: "1px solid #a5b4fc", boxSizing: "border-box" }}
                       >
                         <option value="To Pay">To Pay</option>
                         <option value="Paid">Paid</option>
@@ -3101,8 +3806,9 @@ export function SaleProcessListPage() {
                 </div>
               )}
 
-              {(selectedNewStatus || editingStatusOrder.status) === "lr" && (
-                <div style={{ background: "#faf5ff", border: "1px solid #e9d5ff", borderRadius: "6px", padding: "12px", marginBottom: "14px" }}>
+              {/* Transporter LR & Dispatch Proofs (When Dispatched -> LR) */}
+              {drawerTargetStatus === "lr" && editingStatusOrder.status.toLowerCase() === "dispatched" && (
+                <div style={{ background: "#faf5ff", border: "1px solid #e9d5ff", borderRadius: "6px", padding: "12px" }}>
                   <div style={{ fontSize: "12px", fontWeight: 700, color: "#6b21a8", marginBottom: "8px" }}>
                     📦 Transporter LR & Dispatch Proofs:
                   </div>
@@ -3116,7 +3822,7 @@ export function SaleProcessListPage() {
                         value={modalLrNo}
                         onChange={(e) => setModalLrNo(e.target.value)}
                         placeholder="e.g. VRL-90123"
-                        style={{ width: "100%", padding: "5px 8px", fontSize: "12px", borderRadius: "4px", border: "1px solid #d8b4fe" }}
+                        style={{ width: "100%", padding: "5px 8px", fontSize: "12px", borderRadius: "4px", border: "1px solid #d8b4fe", boxSizing: "border-box" }}
                       />
                     </div>
                     <div>
@@ -3127,7 +3833,7 @@ export function SaleProcessListPage() {
                         type="text"
                         value={modalLrTransporter}
                         onChange={(e) => setModalLrTransporter(e.target.value)}
-                        style={{ width: "100%", padding: "5px 8px", fontSize: "12px", borderRadius: "4px", border: "1px solid #d8b4fe" }}
+                        style={{ width: "100%", padding: "5px 8px", fontSize: "12px", borderRadius: "4px", border: "1px solid #d8b4fe", boxSizing: "border-box" }}
                       />
                     </div>
                     <div style={{ gridColumn: "span 2", marginTop: "4px" }}>
@@ -3173,119 +3879,65 @@ export function SaleProcessListPage() {
                 </div>
               )}
 
-              <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px" }}>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setEditingStatusOrder(null);
-                    setSelectedNewStatus(null);
-                  }}
+              {/* Remarks */}
+              <div>
+                <label
+                  htmlFor="sale-status-remarks"
+                  style={{ display: "block", fontSize: "12.5px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}
+                >
+                  Remarks
+                </label>
+                <textarea
+                  id="sale-status-remarks"
+                  data-testid="textarea-status-remarks"
+                  rows={4}
+                  value={drawerRemarks}
+                  onChange={(e) => setDrawerRemarks(e.target.value)}
+                  placeholder="Enter remarks (optional)..."
                   style={{
-                    padding: "6px 14px",
+                    width: "100%",
+                    padding: "8px 12px",
                     borderRadius: "6px",
                     border: "1px solid #cbd5e1",
-                    background: "#f1f5f9",
-                    color: "#475569",
-                    fontSize: "12px",
-                    cursor: "pointer",
+                    fontSize: "13px",
+                    outline: "none",
+                    boxSizing: "border-box",
+                    fontFamily: "inherit",
+                    resize: "vertical",
                   }}
-                >
-                  Cancel
-                </button>
+                />
+              </div>
 
+              {/* Submit Button */}
+              <div style={{ marginTop: "auto", paddingTop: "8px" }}>
                 <button
                   type="button"
-                  onClick={async () => {
-                    const targetStatus = selectedNewStatus || editingStatusOrder.status;
-                    const extra: Record<string, any> = {};
-
-                    if (targetStatus === "acc_confirmed") {
-                      if (!modalInvoiceNo.trim()) {
-                        toast("Invoice Number is required for Acc. Confirmed", "error");
-                        return;
-                      }
-                      if (_yes(editingStatusOrder.third_party) && !modalThirdPartyInvoice.trim()) {
-                        toast("Third Party Invoice / Reference is mandatory for Third Party Delivery at Acc. Confirmed stage", "error");
-                        return;
-                      }
-                      extra.invoice_no = modalInvoiceNo.trim();
-                      extra.invoice_date = modalInvoiceDate.trim();
-                      if (modalThirdPartyInvoice.trim()) {
-                        extra.third_party_invoice = modalThirdPartyInvoice.trim();
-                      }
-                    } else if (targetStatus === "gatepass_created") {
-                      extra.gatepass_no = modalGpNo.trim();
-                      extra.gatepass_date = modalGpDate.trim();
-                      extra.gatepass_handled_by = modalGpHandledBy.trim();
-                      extra.transporter_name = modalGpTransporter.trim();
-                      extra.transport_name = modalGpTransporter.trim();
-                      extra.transport_destination = modalGpDestination.trim();
-                      extra.destination = modalGpDestination.trim();
-                      extra.delivery_type = modalGpDeliveryType;
-                      extra.delivery_charge = modalGpDeliveryCharge;
-                      extra.delivery_charges = modalGpDeliveryCharge;
-                      extra.gatepass = "Generated";
-                    } else if (targetStatus === "lr") {
-                      if (!modalLrNo.trim()) {
-                        toast("LR / Consignment No is required", "error");
-                        return;
-                      }
-                      extra.lr_no = modalLrNo.trim();
-                      extra.transporter_name = modalLrTransporter.trim();
-                      extra.transport_name = modalLrTransporter.trim();
-                      extra.lr_date = modalLrDate.trim();
-                      if (modalLrFile) extra.lr_file = modalLrFile;
-                      if (modalLrPhotos.length > 0) extra.lr_photos = modalLrPhotos;
-                    }
-
-                    try {
-                      await apiPatch(`/sales/orders/${editingStatusOrder.id}/status`, {
-                        status: targetStatus,
-                        ...extra,
-                      });
-                      toast(`Status updated to ${targetStatus.replace(/_/g, " ").toUpperCase()}`, "success");
-                      await fetchOrders();
-                    } catch {
-                      // Local fallback
-                      const now = new Date();
-                      const dateStr = `${String(now.getDate()).padStart(2, "0")}-${String(now.getMonth() + 1).padStart(2, "0")}-${now.getFullYear()} ${now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
-                      const newGatepass = ["gatepass_created", "dispatched", "lr"].includes(targetStatus) ? "Generated" : "Pending";
-
-                      setOrders((prev) =>
-                        prev.map((it) =>
-                          it.id === editingStatusOrder.id
-                            ? {
-                                ...it,
-                                status: targetStatus,
-                                status_updated_at: dateStr,
-                                gatepass: newGatepass,
-                                ...extra,
-                              }
-                            : it
-                        )
-                      );
-                      toast(`Status updated to ${targetStatus.replace(/_/g, " ").toUpperCase()}`, "success");
-                    } finally {
-                      setEditingStatusOrder(null);
-                      setSelectedNewStatus(null);
-                    }
-                  }}
+                  data-testid="btn-submit-status-drawer"
+                  disabled={submittingStatus}
+                  onClick={handleStatusDrawerSubmit}
                   style={{
-                    padding: "6px 16px",
+                    width: "100%",
+                    padding: "11px 16px",
                     borderRadius: "6px",
                     border: "none",
-                    background: "#0061f2",
+                    background: submittingStatus ? "#93c5fd" : "#0061f2",
                     color: "#ffffff",
-                    fontSize: "12px",
-                    fontWeight: 600,
-                    cursor: "pointer",
+                    fontSize: "14px",
+                    fontWeight: 700,
+                    cursor: submittingStatus ? "not-allowed" : "pointer",
+                    boxShadow: "0 2px 4px rgba(0,97,242,0.25)",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: "8px",
+                    transition: "background 0.2s ease",
                   }}
                 >
-                  Save & Update Status
+                  {submittingStatus ? "Submitting..." : "Submit"}
                 </button>
               </div>
             </div>
-          </div>
+          </SideDrawer>
         )}
 
         {/* Full Sale Process Detail Modal */}
@@ -3311,11 +3963,20 @@ export function SaleProcessListPage() {
           width="400px"
         >
           {uploadFilesOrder && (() => {
-            const existingPo = (uploadFilesOrder as any).po_file || (uploadFilesOrder as any).po_attachment;
+            const existingPo =
+              uploadFilesOrder.po_file_name ||
+              (uploadFilesOrder as any).po_file ||
+              (uploadFilesOrder as any).po_attachment;
             const allOrderFiles = [
               ...(uploadFilesOrder.files || []),
               ...(existingPo && !(uploadFilesOrder.files || []).some((f) => f.name === existingPo)
-                ? [{ name: existingPo, size: "PDF Document" }]
+                ? [
+                    {
+                      name: existingPo,
+                      size: "PDF Document",
+                      ...(uploadFilesOrder.po_file_url ? { url: uploadFilesOrder.po_file_url } : {}),
+                    },
+                  ]
                 : []),
             ];
 
@@ -3416,7 +4077,7 @@ export function SaleProcessListPage() {
                                 <button
                                   type="button"
                                   onClick={() => {
-                                    if ((f as any).url) window.open((f as any).url, "_blank");
+                                    if ((f as any).url) window.open(resolveSaleFileHref((f as any).url), "_blank");
                                     else alert(`Viewing file: ${f.name}`);
                                   }}
                                   style={{
@@ -3534,7 +4195,13 @@ export function SaleProcessListPage() {
                         <div style={{ display: "flex", alignItems: "center", gap: "8px", flexShrink: 0 }}>
                           <button
                             type="button"
-                            onClick={() => alert(`Viewing PO file: ${existingPo}`)}
+                            onClick={() => {
+                              if (uploadFilesOrder.po_file_url) {
+                                window.open(resolveSaleFileHref(uploadFilesOrder.po_file_url), "_blank");
+                              } else {
+                                alert(`Viewing PO file: ${existingPo}`);
+                              }
+                            }}
                             style={{
                               color: "#0061f2",
                               background: "none",

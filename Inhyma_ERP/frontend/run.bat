@@ -25,11 +25,14 @@ if not exist "node_modules\" (
     )
 )
 
-REM 3. Start Vite dev server
+REM 3. Clean up any stale listeners on port 5174 and start Vite dev server
+if not "%~1"=="" goto custom_start
+echo [Inhyma_ERP Frontend] Checking port 5174 for stale dev server processes...
+for /f "tokens=5" %%a in ('netstat -ano ^| findstr /R /C:":5174 .*LISTENING"') do if not "%%a"=="0" taskkill /F /T /PID %%a >nul 2>nul
 echo [Inhyma_ERP Frontend] Starting Vite dev server on http://localhost:5174 ...
-if "%~1"=="" goto default_start
-call npm run dev -- %*
+call npm run dev
 goto :eof
 
-:default_start
-call npm run dev
+:custom_start
+echo [Inhyma_ERP Frontend] Starting Vite dev server with custom args...
+call npm run dev -- %*

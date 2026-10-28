@@ -503,6 +503,13 @@ class SaleService:
             port_of_loading=payload.port_of_loading,
             port_of_discharge=payload.port_of_discharge,
             remarks=payload.remarks,
+            po_file_url=payload.po_file_url,
+            po_file_name=payload.po_file_name,
+            invoice_no=payload.invoice_no,
+            invoice_date=payload.invoice_date,
+            tally_bill_url=payload.tally_bill_url,
+            tally_bill_name=payload.tally_bill_name,
+            eway_bill=payload.eway_bill or "No",
             created_by_id=getattr(current_user, "id", None),
             created_by_name=getattr(current_user, "name", getattr(current_user, "username", "Admin")),
             items=item_entities,
@@ -683,10 +690,20 @@ class SaleService:
         if payload.discount is not None:
             order.discount = payload.discount
 
+        if "po_file_url" in payload.model_fields_set:
+            order.po_file_url = payload.po_file_url or None
+        if "po_file_name" in payload.model_fields_set:
+            order.po_file_name = payload.po_file_name or None
         if payload.invoice_no is not None:
             order.invoice_no = payload.invoice_no
         if payload.invoice_date is not None:
             order.invoice_date = payload.invoice_date
+        if "tally_bill_url" in payload.model_fields_set:
+            order.tally_bill_url = payload.tally_bill_url or None
+        if "tally_bill_name" in payload.model_fields_set:
+            order.tally_bill_name = payload.tally_bill_name or None
+        if payload.eway_bill is not None:
+            order.eway_bill = payload.eway_bill
         if payload.gatepass is not None:
             order.gatepass = payload.gatepass
         if payload.gatepass_no is not None:
@@ -797,10 +814,20 @@ class SaleService:
             raise BadRequestException("The LR number is required to complete the order.")
 
         # Details supplied with this step
+        if getattr(payload, "po_file_url", None):
+            order.po_file_url = payload.po_file_url
+        if getattr(payload, "po_file_name", None):
+            order.po_file_name = payload.po_file_name
         if payload.invoice_no:
             order.invoice_no = payload.invoice_no
         if payload.invoice_date:
             order.invoice_date = payload.invoice_date
+        if getattr(payload, "tally_bill_url", None):
+            order.tally_bill_url = payload.tally_bill_url
+        if getattr(payload, "tally_bill_name", None):
+            order.tally_bill_name = payload.tally_bill_name
+        if getattr(payload, "eway_bill", None) is not None:
+            order.eway_bill = payload.eway_bill
         if payload.third_party_invoice:
             order.third_party_invoice = payload.third_party_invoice
         if payload.gatepass or payload.gatepass_no:

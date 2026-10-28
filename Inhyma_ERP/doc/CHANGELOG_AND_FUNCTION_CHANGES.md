@@ -3,6 +3,29 @@
 **System:** Inhyma_ERP (India Distribution)  
 **Scope:** Functional updates, schema migrations, UI hardening, and bug fixes.
 
+## [Release 2026-10-28] — Sale Status Update Side Drawer, Multi-Stage Workflow, PO File & Tally Bill Upload
+
+### 1. Interactive Sale Status Update Side Drawer (`SaleProcessList.tsx`, `SaleProcessDetailModal.tsx`)
+- **Quick Status Edit Action:** Replaced the legacy centered status popup with the right-hand slide-over **Sale Status Update** `SideDrawer` (`width="420px"`, `maxWidth="95vw"`), opened via the blue pen button (`title="Update Status"`) in the Status column.
+- **Multi-Stage Conditional Workflow:**
+  - **Pending Stage:** Displays green `Current Status: Pending` banner, `Status` selector (`Sales Confirmed` default, `Cancel`), and **PO File** upload input (`.pdf,.png,.jpg,.jpeg,.xlsx,.xls,.doc,.docx`) with file size preview and `Clear` button.
+  - **Sales Confirmed Stage:** Displays `Current Status: Sales Confirmed` banner, `Status` selector (`Admin Approved` default, `Cancel`), and hides the PO File upload field.
+  - **Admin Approved Stage:** Displays `Current Status: Admin Approved` banner, `Status` selector (`Acc. Confirmed` default, `Cancel`), and renders `Invoice Date*`, `Invoice No *`, `Tally Bill *` file upload, `E-Way Bill` (`No`/`Yes`), plus `Third Party Invoice / Reference *` when Third-Party Delivery is enabled.
+  - **Downstream Stages:** Preserves full `Inhyma_ERP` support for `Gatepass Created` (Outward Gate Pass Details), `Dispatched`, `Gatepass Cancelled`, and `LR` (LR No, Transporter, and Dispatch Proofs).
+- **Direct Download Badges & Formatted Timestamps:**
+  - Added clickable `📎 PO` and `📎 Bill` download badges in the Status column, PO column (`Yes 📎`), and `SaleProcessDetailModal` (`Detail` box & `Attached Files`), with authenticated `/uploads/private/...?token=` resolution for local private files.
+  - Standardized status timestamps below badges to `DD-MM-YYYY hh:mm A`.
+
+### 2. Backend Schema, Alembic Migration & Upload Endpoints (`models.py`, `schemas.py`, `service.py`, `process_routes.py`)
+- **Migration `v7a8b9c0d1e2`:** Idempotently added `po_file_url` (`VARCHAR(500)`), `po_file_name` (`VARCHAR(255)`), `tally_bill_url` (`VARCHAR(500)`), `tally_bill_name` (`VARCHAR(255)`), and `eway_bill` (`VARCHAR(10)`, default `'No'`) to `sales_orders` while preserving `invoice_no` and `invoice_date`.
+- **New & Enhanced Endpoints:**
+  - `POST /api/v1/sales/upload-po`: Uploads client PO document to `inhyma-sales-docs` / `/uploads/private/sales_po/`.
+  - `POST /api/v1/sales/upload-tally-bill`: Uploads Tally Bill document to `inhyma-sales-docs` / `/uploads/private/sales_tally_bills/`.
+  - `POST /api/v1/sales/orders/{id}/status-with-po`: Atomic multipart status transition with optional PO upload.
+  - `PATCH /api/v1/sales/orders/{id}/status`: Extended `SaleOrderStatusUpdate` and `SaleService.update_status` to persist PO, Tally Bill, Invoice, and E-Way Bill metadata.
+
+---
+
 ## [Release 2026-10-27] — Sales Process Add New Parity with Proforma, Dynamic Masters, Exceeded Stock Alerts, Upward Comboboxes, and Logo PDF Integration
 
 ### 1. Dynamic Organization Logo from ERP Settings in Proforma Invoice PDF (`proformaInvoicePdf.ts`, `ProformaInvoicePdfPage.tsx`)

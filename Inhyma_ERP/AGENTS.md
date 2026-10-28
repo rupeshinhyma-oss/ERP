@@ -1,5 +1,10 @@
 # AI Assistant & Developer Guidelines
 
+## Workspace Scope Rule (Rupesh Machine)
+
+- **Default Target (`Inhyma_ERP` Only)**: Work exclusively inside `Inhyma_ERP` (`c:\Users\Inhyma Solutions\OneDrive\Desktop\ERP\Inhyma_ERP`). Do **not** modify `Yinglima_ERP` unless the user explicitly instructs you to make changes in `Yinglima_ERP`.
+- **No Unsolicited Push**: Never run `git push` unless explicitly requested by the user.
+
 ## Living Documentation & Testing Manual Policy (Mandatory)
 
 Whenever any features, functions, API endpoints, database schemas, frontend components, forms, fields, modals, or architecture components are added, modified, or removed in this codebase:

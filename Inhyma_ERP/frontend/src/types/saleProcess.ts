@@ -78,8 +78,13 @@ export interface SaleOrder {
   gatepass_no?: string | null;
   gatepass_date?: string | null;
   gatepass_handled_by?: string | null;
+  po_file_url?: string | null;
+  po_file_name?: string | null;
   invoice_no?: string | null;
   invoice_date?: string | null;
+  tally_bill_url?: string | null;
+  tally_bill_name?: string | null;
+  eway_bill?: string | null;
   lr_date?: string | null;
   billing_address?: string | null;
   shipping_address?: string | null;

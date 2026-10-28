@@ -469,3 +469,109 @@ async def test_list_sale_orders_metrics_calculation(factory):
         # Basic amount should be less than GST-inclusive amount
         assert no_gst_metrics["all"]["amount"] < metrics["all"]["amount"]
 
+
+@pytest.mark.asyncio
+async def test_po_and_tally_bill_uploads_and_multi_stage_status_drawer_fields(factory, monkeypatch):
+    from app.common import storage
+
+    async def _fake_supabase_none(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr(storage, "upload_to_supabase", _fake_supabase_none)
+
+    async with _client(factory, SALES) as sales, _client(factory, APPROVER) as approver, _client(factory, ACCOUNTS) as accounts:
+        oid = (await _create(sales))["id"]
+
+        # 1. Upload PO document via POST /sales/upload-po
+        po_res = await sales.post(
+            "/sales/upload-po",
+            files={"file": ("client_po_2026.pdf", b"%PDF-1.4 test po", "application/pdf")},
+        )
+        assert po_res.status_code == 200, po_res.text
+        po_data = po_res.json()["data"]
+        assert po_data["filename"] == "client_po_2026.pdf"
+        assert "/sales_po/" in po_data["url"]
+
+        # 2. Pending -> Sales Confirmed with PO metadata
+        sc_res = await _status(
+            sales,
+            oid,
+            "sales_confirmed",
+            remarks="Client PO verified",
+            po_file_url=po_data["url"],
+            po_file_name=po_data["filename"],
+        )
+        assert sc_res.status_code == 200, sc_res.text
+        sc_order = sc_res.json()["data"]
+        assert sc_order["status"] == "sales_confirmed"
+        assert sc_order["po_file_url"] == po_data["url"]
+        assert sc_order["po_file_name"] == "client_po_2026.pdf"
+
+        # 3. Sales Confirmed -> Admin Approved
+        aa_res = await _status(approver, oid, "admin_approved", remarks="Approved by admin")
+        assert aa_res.status_code == 200, aa_res.text
+        assert aa_res.json()["data"]["status"] == "admin_approved"
+
+        # 4. Upload Tally Bill via POST /sales/upload-tally-bill
+        tb_res = await accounts.post(
+            "/sales/upload-tally-bill",
+            files={"file": ("tally_invoice_101.pdf", b"%PDF-1.4 test tally bill", "application/pdf")},
+        )
+        assert tb_res.status_code == 200, tb_res.text
+        tb_data = tb_res.json()["data"]
+        assert tb_data["filename"] == "tally_invoice_101.pdf"
+        assert "/sales_tally_bills/" in tb_data["url"]
+
+        # 5. Admin Approved -> Acc. Confirmed with Invoice Date, Invoice No, Tally Bill & E-Way Bill
+        ac_res = await _status(
+            accounts,
+            oid,
+            "acc_confirmed",
+            remarks="Invoiced in Tally",
+            invoice_date="2026-10-28",
+            invoice_no="INV-INH/26-27/0101",
+            tally_bill_url=tb_data["url"],
+            tally_bill_name=tb_data["filename"],
+            eway_bill="Yes",
+        )
+        assert ac_res.status_code == 200, ac_res.text
+        ac_order = ac_res.json()["data"]
+        assert ac_order["status"] == "acc_confirmed"
+        assert ac_order["invoice_date"] == "2026-10-28"
+        assert ac_order["invoice_no"] == "INV-INH/26-27/0101"
+        assert ac_order["tally_bill_url"] == tb_data["url"]
+        assert ac_order["tally_bill_name"] == "tally_invoice_101.pdf"
+        assert ac_order["eway_bill"] == "Yes"
+        assert ac_order["po_file_url"] == po_data["url"]
+
+        # 6. Verify list endpoint also serializes PO & Tally Bill fields
+        listed = (await accounts.get("/sales/orders")).json()["data"]["items"]
+        matched = next(item for item in listed if item["id"] == oid)
+        assert matched["po_file_url"] == po_data["url"]
+        assert matched["tally_bill_url"] == tb_data["url"]
+        assert matched["eway_bill"] == "Yes"
+
+
+@pytest.mark.asyncio
+async def test_atomic_status_with_po_endpoint_and_migration_idempotency(factory, monkeypatch):
+    from app.common import storage
+
+    async def _fake_supabase_none(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr(storage, "upload_to_supabase", _fake_supabase_none)
+
+    async with _client(factory, SALES) as sales:
+        oid = (await _create(sales))["id"]
+        res = await sales.post(
+            f"/sales/orders/{oid}/status-with-po",
+            data={"status": "sales_confirmed", "remarks": "Atomic PO attach"},
+            files={"po_file": ("atomic_po.pdf", b"%PDF-1.4 atomic", "application/pdf")},
+        )
+        assert res.status_code == 200, res.text
+        data = res.json()["data"]
+        assert data["status"] == "sales_confirmed"
+        assert data["po_file_name"] == "atomic_po.pdf"
+        assert data["po_file_url"] and "/sales_po/" in data["po_file_url"]
+
+

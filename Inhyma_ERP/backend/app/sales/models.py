@@ -195,9 +195,14 @@ class SaleOrder(Base, UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin):
     amount_inc_gst: Mapped[float] = mapped_column(Float, default=0.0, server_default="0", nullable=False)
     discount: Mapped[float] = mapped_column(Float, default=0.0, server_default="0", nullable=False)
 
-    # Invoicing & Accounting
+    # Purchase Order (PO) & Invoicing / Accounting
+    po_file_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    po_file_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     invoice_no: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
     invoice_date: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    tally_bill_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    tally_bill_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    eway_bill: Mapped[str | None] = mapped_column(String(10), default="No", nullable=True)
 
     # Gate Pass tracking
     gatepass: Mapped[str | None] = mapped_column(String(100), nullable=True)

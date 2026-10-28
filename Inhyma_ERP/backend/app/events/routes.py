@@ -42,10 +42,10 @@ from __future__ import annotations
 
 import json
 
-from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 
-from app.auth.dependencies import get_auth_service
-from app.auth.service import AuthService, CurrentUser
+from app.auth.dependencies import verify_websocket_token
+from app.auth.service import CurrentUser
 from app.core.exceptions import UnauthorizedException
 from app.core.logging import get_logger
 from app.events.channels import is_any_user_channel, is_user_channel, permission_required_for_channel
@@ -94,7 +94,6 @@ def _authorize_channel(channel: str, current_user: CurrentUser) -> str | None:
 async def live_events(
     websocket: WebSocket,
     token: str = Query(..., description="Access token (same one used for Authorization: Bearer)."),
-    auth_service: AuthService = Depends(get_auth_service),
 ) -> None:
     """
     General-purpose live-event WebSocket. See the module docstring above
@@ -108,7 +107,7 @@ async def live_events(
     authentication system."
     """
     try:
-        current_user = await auth_service.verify_access_token(token)
+        current_user = await verify_websocket_token(websocket, token)
     except UnauthorizedException:
         await websocket.accept()
         await websocket.close(code=4401, reason="Invalid or expired token.")

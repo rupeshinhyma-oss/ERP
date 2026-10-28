@@ -13,7 +13,7 @@ the dependency graph a DAG rather than a cycle.
 
 from __future__ import annotations
 
-from fastapi import Depends, Request
+from fastapi import Depends, Request, WebSocket
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -21,6 +21,7 @@ from app.auth.repository import PasswordHistoryRepository, SessionRepository, To
 from app.auth.service import AuthService, CurrentUser, LoginContext
 from app.cache.base import CacheBackend
 from app.cache.dependency import get_cache
+from app.database.engine import get_sessionmaker
 from app.database.session import get_db_session
 from app.rbac.repository import RoleRepository
 from app.users.repository import UserRepository
@@ -91,3 +92,48 @@ def get_login_context(request: Request) -> LoginContext:
     user_agent = request.headers.get("user-agent")
     device_info = request.headers.get("x-device-info") or user_agent
     return LoginContext(ip_address=get_client_ip(request), user_agent=user_agent, device_info=device_info)
+
+
+async def verify_websocket_token(websocket: WebSocket, token: str) -> CurrentUser:
+    """
+    Verify a WebSocket handshake token using a strictly short-lived DB session.
+
+    IMPORTANT: WebSocket routes stay open for hours. Injecting ``Depends(get_auth_service)``
+    into a ``@router.websocket`` handler keeps ``Depends(get_db_session)`` open for the
+    entire lifetime of the socket -- exhausting the connection pool and holding an
+    ``idle in transaction`` lock on ``users``/``roles`` in PostgreSQL. Closing the session
+    immediately after ``verify_access_token`` returns releases the connection before the
+    receive loop begins.
+    """
+    overrides = getattr(websocket.app, "dependency_overrides", {}) or {}
+    cache_fn = overrides.get(get_cache, get_cache)
+    cache = cache_fn()
+
+    if get_auth_service in overrides:
+        auth_service = overrides[get_auth_service]()
+        return await auth_service.verify_access_token(token)
+
+    if get_db_session in overrides:
+        gen = overrides[get_db_session]()
+        db = await gen.__anext__()
+        try:
+            auth_service = get_auth_service(db=db, cache=cache)
+            user = await auth_service.verify_access_token(token)
+            await db.commit()
+            return user
+        finally:
+            try:
+                await gen.aclose()
+            except Exception:
+                pass
+
+    session_factory = get_sessionmaker()
+    async with session_factory() as db:
+        try:
+            auth_service = get_auth_service(db=db, cache=cache)
+            user = await auth_service.verify_access_token(token)
+            await db.commit()
+            return user
+        except Exception:
+            await db.rollback()
+            raise

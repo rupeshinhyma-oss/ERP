@@ -76,6 +76,7 @@
 65. [SALE: Sales Process Live KPI Metrics & Status Tabs Dynamic Calculation Engine](#65-sale-sales-process-live-kpi-metrics--status-tabs-dynamic-calculation-engine)
 66. [SALE: Sales Process 9-Status Action Menu Matrix, LR Duplicate, Direct Cancellation & SO Files Deletion](#66-sale-sales-process-9-status-action-menu-matrix-lr-duplicate-direct-cancellation--so-files-deletion)
 67. [SALE PROCESS: Collapsible Filter Panel 13-Field Grid & Dropdown Sales Person Selection](#67-sale-process-collapsible-filter-panel-13-field-grid--dropdown-sales-person-selection)
+68. [SALE PROCESS: Sale Status Update Side Drawer, Multi-Stage Workflow, PO File & Tally Bill Upload](#68-sale-process-sale-status-update-side-drawer-multi-stage-workflow-po-file--tally-bill-upload)
 
 ---
 
@@ -1062,10 +1063,13 @@ Manage complete vendor team directory:
 
 ## 25. AUTHENTICATION: Login & Session Recovery
 
-- **Route:** `/login`
-- **Form Fields:** Username or Corporate Email (*Required*), Password (*Required*), "Remember Me" checkbox, `Sign In` button.
-- **Security Logic:** Rate-limiting protection on failed attempts; automated single-flight token refresh upon access token expiration (`/auth/refresh`).
-- **Deactivated Account Immunity & Permanent Deletion Retirement:** User deletion is completely disabled across the system. Deactivated accounts (`is_active=False`, `status=INACTIVE`) cannot log in under any circumstances. Submitting credentials for a deactivated user fails immediately with `403 Forbidden: Account is inactive or locked.`, preventing authentication. Any existing active JWT access tokens are immediately rejected on API calls, and clicking `Force Logout` instantly expels active sessions via real-time WebSocket termination and token invalidation.
+- **Route:** `/login` (`frontend/src/pages/Login.tsx`)
+- **Form Fields:** Username, Email or Mobile Number (*Required*), Password (*Required*, with show/hide eye toggle), "Remember Me" checkbox, `Sign In` button.
+- **Security & Reliability Logic:**
+  - Rate-limiting protection on failed attempts; automated single-flight token refresh upon access token expiration (`/auth/refresh`).
+  - **Bounded Login Timeout & Reachability Guard:** `POST /auth/login` uses a `15s` `AbortController` timeout (paired with a `30s` Vite `/api` proxy timeout in `vite.config.ts`). If the local `Inhyma_ERP` backend (port `8002`) is unreachable or returns `5xx`, `LoginPage` surfaces the error banner directly on `/login` instead of redirecting into `/dashboard?sso_handover=...`.
+  - **Autofill-Safe Session Notice Preservation:** Incoming `ihm_login_notice` messages from `sessionStorage` are protected from immediate browser password-manager autofill `onChange` events for `1000ms` after mount so SSO/session failure banners remain visible.
+- **Deactivated Account Immunity & Permanent Deletion Retirement:** User deletion is completely disabled across the system. Deactivated accounts (`is_active=False`, `status=INACTIVE`) cannot log in under any circumstances. Submitting credentials for a deactivated user fails immediately with `403 Forbidden` / `401 Unauthorized`, preventing authentication. Any existing active JWT access tokens are immediately rejected on API calls, and clicking `Force Logout` instantly expels active sessions via real-time WebSocket termination and token invalidation.
 
 ---
 
@@ -3240,7 +3244,55 @@ Positioned directly underneath the collapsible filter panel, these three metric 
 - [ ] Verify Row 3 contains PO filter and right-aligned Reset and Search buttons.
 
 ---
-*End of Master Features & Testing Specification Manual. Maintained for Inhyma Solutions Enterprise ERP. Last updated: October 2026 (Sections 61-67: Dynamic Organization Company Logo, Product Master Category Rewiring & Floating Duplicate Overlay, Platform Migration Idempotency, Sales Process Add New Form Full Parity with Proforma, Sales Process Live KPI Metrics & Status Tabs Dynamic Calculation Engine, Sales Process Sales Confirmed Action Menu Stage Isolation & Direct Cancellation, Sales Process 9-Status Action Menu Matrix, LR Duplicate, Direct Cancellation & SO Files Deletion, and Sales Process 13-Field Filter Panel & Sales Person Dropdown).*
+
+## 68. SALE PROCESS: Sale Status Update Side Drawer, Multi-Stage Workflow, PO File & Tally Bill Upload
+
+### Module Identification & Location
+- **Module Name:** Sale Status Update Slide-Over Drawer & Multi-Stage Document Workflow
+- **Routes:** `/sales/process`
+- **Files:**
+  - Frontend List & Drawer: `frontend/src/pages/sales/SaleProcessList.tsx`
+  - Frontend Detail Modal: `frontend/src/pages/sales/SaleProcessDetailModal.tsx`
+  - Backend Models, Schemas, Service & Routes: `backend/app/sales/models.py`, `backend/app/sales/schemas.py`, `backend/app/sales/service.py`, `backend/app/sales/process_routes.py`
+  - Database Migration: `backend/alembic/versions/v7a8b9c0d1e2_add_po_and_tally_bill_fields_to_sales_orders.py`
+  - Test Suites: `frontend/src/pages/__tests__/SaleProcessListPage.test.tsx`, `backend/tests/test_sale_order_workflow.py`
+
+### Feature Overview & UI Specifications
+1. **Status Column Action & Badges (`SaleProcessList.tsx`):**
+   - Every row renders its status pill, a blue square edit icon button (`title="Update Status"`), optional `📎 PO` badge (when `po_file_url` is attached), optional `📎 Bill` badge (when `tally_bill_url` is attached), and a `DD-MM-YYYY hh:mm A` timestamp below the row.
+   - The `PO` column also renders `Yes 📎` as a direct clickable download link when `po_file_url` is present.
+2. **Sale Status Update Side Drawer (`<SideDrawer title="Sale Status Update" width="420px" maxWidth="95vw">`):**
+   - **Green Current Status Banner:** `Current Status: <Stage Label>` (`#dcfce7` background, `#15803d` text).
+   - **Stage 1 (`Pending`):**
+     - `Status` `<select>` options: `Sales Confirmed` (default) and `Cancel`.
+     - `PO File` upload input accepting `.pdf,.png,.jpg,.jpeg,.xlsx,.xls,.doc,.docx` with selected filename/KB preview and `Clear` button.
+   - **Stage 2 (`Sales Confirmed`):**
+     - `Status` `<select>` options: `Admin Approved` (default) and `Cancel`.
+     - `PO File` upload input is hidden.
+   - **Stage 3 (`Admin Approved`):**
+     - `Status` `<select>` options: `Acc. Confirmed` (default) and `Cancel`.
+     - When `Acc. Confirmed` is selected, renders:
+       - `Invoice Date*` (`type="date"`, required)
+       - `Invoice No *` (`type="text"`, required)
+       - `Tally Bill *` (file upload accepting `.pdf,.png,.jpg,.jpeg,.xlsx,.xls,.doc,.docx`, required unless already uploaded)
+       - `E-Way Bill` (`No` / `Yes`, default `No`)
+       - `Third Party Invoice / Reference *` (shown & required when Third-Party Delivery is `Yes`).
+   - **Downstream Stages:**
+     - `Acc. Confirmed` ➔ `Gatepass Created` (Outward Gate Pass Details).
+     - `Gatepass Created` ➔ `Dispatched` / `Gatepass Cancelled`.
+     - `Gatepass Cancelled` ➔ `Gatepass Created` / `Cancel`.
+     - `Dispatched` ➔ `LR` (`LR / Consignment No *`, Transporter Name, LR Document & Dispatch Photos).
+   - **Remarks & Submit:** Multi-line `Remarks` textarea (`Enter remarks (optional)...`) and full-width primary blue `Submit` button (`#0061f2`, `Submitting...` feedback).
+3. **Sales Details Modal Integration (`SaleProcessDetailModal.tsx`):**
+   - Displays clickable `PO File` link, `Invoice` (`invoice_no` & `invoice_date`), clickable `Tally Bill` link, and `E-Way Bill` status in the `Detail` column and `Attached Files` list.
+
+### QA Verification Test Cases
+- [ ] **TC-SP-11 (Pending ➔ Sales Confirmed with PO File):** On `/sales/process`, click `[✎]` (`Update Status`) on a `Pending` order. Verify `Sale Status Update` drawer opens with `Current Status: Pending` and `Sales Confirmed` selected. Choose a PO file, verify filename/KB preview and `Clear` button, enter remarks, and click `Submit`. Verify PO uploads via `POST /api/v1/sales/upload-po`, status updates to `Sales Confirmed`, `📎 PO` badge appears, and timestamp updates.
+- [ ] **TC-SP-12 (Sales Confirmed ➔ Admin Approved / Cancel):** Click `[✎]` on a `Sales Confirmed` order. Verify `Current Status: Sales Confirmed`, options `Admin Approved` (default) and `Cancel`, and confirm `PO File` input is hidden. Submit and verify status transitions cleanly.
+- [ ] **TC-SP-13 (Admin Approved ➔ Acc. Confirmed / Cancel):** Click `[✎]` on an `Admin Approved` order. Verify `Invoice Date*`, `Invoice No *`, `Tally Bill *`, and `E-Way Bill` fields render when `Acc. Confirmed` is selected, and required field validation blocks empty submission. Upload a Tally Bill, enter Invoice Date & No, select E-Way Bill `Yes`, and click `Submit`. Verify `POST /api/v1/sales/upload-tally-bill` succeeds, order moves to `Acc. Confirmed`, and `📎 Bill` badge renders in the table and detail modal.
+
+---
+*End of Master Features & Testing Specification Manual. Maintained for Inhyma Solutions Enterprise ERP. Last updated: October 28, 2026 (Sections 61-68: Dynamic Organization Company Logo, Product Master Category Rewiring & Floating Duplicate Overlay, Platform Migration Idempotency, Sales Process Add New Form Full Parity with Proforma, Sales Process Live KPI Metrics & Status Tabs Dynamic Calculation Engine, Sales Process 9-Status Action Menu Matrix, Sales Process 13-Field Filter Panel, and Sale Status Update Side Drawer with PO & Tally Bill Uploads).*
 
 
 

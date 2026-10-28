@@ -1,7 +1,7 @@
 # Enterprise ERP System — Unified Architecture, Feature & Technical Manual
 
 > **System Version:** 1.0.0 (Production)  
-> **Last Updated:** October 2026  
+> **Last Updated:** October 28, 2026  
 > **Architectural Pattern:** Modular Async Monolith (FastAPI) + React 18 SPA (Vite) + Real-Time WebSocket Event Bus  
 > **Target Audience:** Systems Architects, Software Engineers, DevOps, and Autonomous AI Coding Assistants.  
 > **Scope:** Complete end-to-end technical reference containing all system features, data models, API endpoints, background workers, frontend architecture, and developer integration guidelines.
@@ -295,8 +295,13 @@ In accordance with system security standards, soft-deleted user accounts (`delet
   - **Outbound Sync (`erp_main_client.py`):** Whenever an authenticated user or administrator changes a password locally in Inhyma (`POST /users/{id}/reset-password` or `/auth/change-password`), the backend asynchronously pushes the new hash to `ERP_Main` (`POST /api/v1/auth/internal/sync-password`). If ERP_Main is temporarily unreachable, the call fails silently without rolling back the local transaction, and the Durable Access Sync Engine catches up queued updates.
   - **Inbound Central Push:** When ERP_Main resets a password centrally, it updates the user's password hash in Inhyma via internal synchronization RPC.
 - **SSO Ecosystem Bridge & Switcher:**
-  - Supports incoming SSO handover tickets from `ERP_Main` (`POST /auth/sso/handover`) allowing authorized cross-ERP navigation without credential re-entry.
+  - Supports incoming SSO handover tickets from `ERP_Main` (`POST /auth/sso-handover`) allowing authorized cross-ERP navigation without credential re-entry.
   - Clears local session cache if an incoming ticket targets an identity differing from the currently active local user.
+- **WebSocket Handshake Connection Pool & Lock Safety (`verify_websocket_token` in `app/auth/dependencies.py`):**
+  - Long-lived WebSocket endpoints (`/api/v1/events/live`, `/api/v1/planning/sheets/{sheet_id}/live`) verify handshake tokens inside a strictly short-lived `AsyncSession` that commits and closes **before** entering the socket receive loop, ensuring open browser tabs never hold database pool connections or `idle in transaction` PostgreSQL locks on `users`/`roles`.
+- **Non-Blocking Startup Schema Check & Port Cleanup (`app/main.py`, `backend/run.bat`, `frontend/run.bat`):**
+  - Application lifespan inspects `information_schema.columns` via read-only `SELECT` before issuing any `ALTER TABLE` / `create_all` DDL (guarded with `SET LOCAL lock_timeout = '5s'`), eliminating `ACCESS EXCLUSIVE` lock contention on `users` during `--reload` restarts.
+  - Disables Windows Console QuickEdit mode on startup and clears stale listeners on ports `8002` and `5174` in `run.bat` to prevent duplicate `SO_REUSEADDR` listeners on Windows.
 
 ---
 
@@ -994,8 +999,11 @@ A user may be assigned any number of Roles simultaneously (`POST /users/{id}/rol
   - `GET /api/v1/sales/orders`: Paginated list of confirmed & pending Sales Orders with status stages and filters.
   - `POST /api/v1/sales/orders`: Create Sales Order defaulting to `pending` status with line items & commercial terms.
   - `GET /api/v1/sales/orders/{id}`: Inspect detailed Sales Order record with line items, tax, and address breakdown.
-  - `PATCH /api/v1/sales/orders/{id}`: Update Sales Order details, line items, and commercial fields.
-  - `PATCH /api/v1/sales/orders/{id}/status`: Advance SO stage (`pending` ➔ `sales_confirmed` ➔ `admin_approved` ➔ `account_confirmed` ➔ `gatepass_created` ➔ `dispatched` ➔ `lr_uploaded`).
+  - `PATCH /api/v1/sales/orders/{id}`: Update Sales Order details, line items, PO/Tally bill links, and commercial fields.
+  - `PATCH /api/v1/sales/orders/{id}/status`: Advance SO stage (`pending` ➔ `sales_confirmed` ➔ `admin_approved` ➔ `acc_confirmed` ➔ `gatepass_created` ➔ `dispatched` ➔ `lr` / `cancelled`) with stage-specific metadata (`po_file_url`, `po_file_name`, `invoice_date`, `invoice_no`, `tally_bill_url`, `tally_bill_name`, `eway_bill`, `third_party_invoice`, `gatepass_no`, `lr_no`).
+  - `POST /api/v1/sales/upload-po`: Upload Purchase Order (PO) document to `inhyma-sales-docs` / `/uploads/private/sales_po/`.
+  - `POST /api/v1/sales/upload-tally-bill`: Upload Tally Bill document to `inhyma-sales-docs` / `/uploads/private/sales_tally_bills/`.
+  - `POST /api/v1/sales/orders/{id}/status-with-po`: Atomic multipart status update with optional PO file upload.
   - `DELETE /api/v1/sales/orders/{id}`: Soft-delete Sales Order and revert stock allocations.
   - `POST /api/v1/sales/orders/{id}/restore`: Restore soft-deleted Sales Order (Admin only).
   - `GET /api/v1/sales/metrics`: Status-grouped KPI summary metrics (`total_orders`, `pending_count`, `confirmed_count`, etc.).
@@ -1007,6 +1015,14 @@ A user may be assigned any number of Roles simultaneously (`POST /users/{id}/rol
   - `POST /api/v1/sales/orders/{id}/upload-lr`: Attach transporter LR document and multi-photo delivery proof.
   - `GET /api/v1/sales/discount-payments`: List under-invoicing discount ledger entries.
   - `POST /api/v1/sales/discount-payments`: Record cash discount settlement against a Sales Order reference.
+- **Sale Status Update Side Drawer & Document Badges (`SaleProcessList.tsx`, `SaleProcessDetailModal.tsx`, Migration `v7a8b9c0d1e2`):**
+  - **Interactive Edit Action:** Clicking the square blue pen button (`title="Update Status"`) next to any row's status badge opens the right-hand **Sale Status Update** `SideDrawer` (`width="420px"`).
+  - **Multi-Stage Conditional Controls:**
+    - **Pending:** Green banner `Current Status: Pending`, target status options `Sales Confirmed` (default) / `Cancel`, plus **PO File** upload (`.pdf,.png,.jpg,.jpeg,.xlsx,.xls,.doc,.docx`) with size preview & `Clear` action.
+    - **Sales Confirmed:** `Admin Approved` (default) / `Cancel` (PO input hidden).
+    - **Admin Approved:** `Acc. Confirmed` (default) / `Cancel` — requires `Invoice Date*`, `Invoice No *`, `Tally Bill *` file upload, `E-Way Bill` (`No`/`Yes`), plus `Third Party Invoice / Reference *` when Third-Party Delivery is enabled.
+    - **Downstream Stages:** Supports `Acc. Confirmed` ➔ `Gatepass Created` (Outward Gate Pass Details), `Gatepass Created` ➔ `Dispatched` / `Gatepass Cancelled`, and `Dispatched` ➔ `LR` (LR No, Transporter, Proofs).
+  - **Direct Download Badges & Timestamps:** Displays clickable `📎 PO` and `📎 Bill` download badges (with authenticated `/uploads/private/...?token=` resolution) in the Status column, PO column, and `SaleProcessDetailModal`, plus `DD-MM-YYYY hh:mm A` timestamp below the status badge.
 - **Sales Process Add New Form Architecture (`SaleProcessForm.tsx`):**
   - **100% Feature Parity with Proforma Invoice:** Designed to match the exact UX, visual structure, validation patterns, and calculation standards of Proforma Invoice's Add New form (`ProformaInvoicesPage.tsx`), ensuring zero learning curve for operators.
   - **Dynamic DB Masters Integration (`useMasterNames`):**
@@ -1470,7 +1486,10 @@ A user may be assigned any number of Roles simultaneously (`POST /users/{id}/rol
 | **Sales: Orders**   | `POST`| `/api/v1/sales/orders` | Create Sales Order defaulting to `pending` status with line items & commercial terms | `saleorder.create` |
 | **Sales: Orders**   | `GET` | `/api/v1/sales/orders/{id}` | Inspect detailed Sales Order record with line items, tax, and address breakdown | `saleorder.view` |
 | **Sales: Orders**   | `PATCH`| `/api/v1/sales/orders/{id}` | Update Sales Order details, line items, and commercial fields | `saleorder.update` |
-| **Sales: Orders**   | `PATCH`| `/api/v1/sales/orders/{id}/status` | Advance Sales Order stage (`pending` -> `sales_confirmed` -> `admin_approved` -> `dispatched` -> `lr_uploaded`) | `saleorder.approve` |
+| **Sales: Orders**   | `PATCH`| `/api/v1/sales/orders/{id}/status` | Advance Sales Order stage (`pending` -> `sales_confirmed` -> `admin_approved` -> `acc_confirmed` -> `gatepass_created` -> `dispatched` -> `lr`) with PO & Tally Bill metadata | Authenticated (Workflow RBAC) |
+| **Sales: Orders**   | `POST`| `/api/v1/sales/upload-po` | Upload client Purchase Order (PO) document (`inhyma-sales-docs` / `sales_po`) | Authenticated |
+| **Sales: Orders**   | `POST`| `/api/v1/sales/upload-tally-bill` | Upload Tally Bill invoice document (`inhyma-sales-docs` / `sales_tally_bills`) | Authenticated |
+| **Sales: Orders**   | `POST`| `/api/v1/sales/orders/{id}/status-with-po` | Atomic multipart status transition with optional PO document upload | Authenticated (Workflow RBAC) |
 | **Sales: Orders**   | `DELETE`| `/api/v1/sales/orders/{id}` | Soft-delete Sales Order and atomically revert deducted stock back to inventory | `saleorder.delete` |
 | **Sales: Orders**   | `POST`| `/api/v1/sales/orders/{id}/restore` | Restore soft-deleted Sales Order (Admin only) | `saleorder.manage` |
 | **Sales: Orders**   | `GET` | `/api/v1/sales/metrics` | Grouped sales order KPI metrics by status tabs (all, pending, confirmed, dispatched, etc.) | `saleorder.view` |

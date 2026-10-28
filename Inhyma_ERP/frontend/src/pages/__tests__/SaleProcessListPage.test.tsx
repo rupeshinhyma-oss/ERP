@@ -108,7 +108,7 @@ describe("SaleProcessListPage", () => {
     expect(screen.getAllByText("Pending").length).toBeGreaterThanOrEqual(1);
   });
 
-  it("opens quick status update modal when clicking the 📝 edit icon on a status badge", () => {
+  it("opens Sale Status Update side drawer when clicking the edit icon on a status badge", () => {
     render(
       <BrowserRouter>
         <SaleProcessListPage />
@@ -119,9 +119,12 @@ describe("SaleProcessListPage", () => {
     expect(editBtns.length).toBeGreaterThan(0);
 
     fireEvent.click(editBtns[0]);
-    expect(screen.getByText("Update Order Status")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Sales Confirmed" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Close" })).toBeTruthy();
+    expect(screen.getByText("Sale Status Update")).toBeTruthy();
+    expect(screen.getByText(/Current Status:\s*Pending/i)).toBeTruthy();
+    const statusSelect = screen.getByTestId("select-sale-status") as HTMLSelectElement;
+    expect(statusSelect.value).toBe("sales_confirmed");
+    expect(screen.getByTestId("input-status-po-file")).toBeTruthy();
+    expect(screen.getByTestId("btn-submit-status-drawer")).toBeTruthy();
   });
 
   it("renders Edit, SO Files, and Delete in action menu and opens Upload Files drawer when clicking SO Files", async () => {
@@ -744,6 +747,154 @@ describe("SaleProcessListPage", () => {
       expect(apiPatch).toHaveBeenCalledWith(
         expect.stringMatching(/\/sales\/orders\/ord-files-1/),
         expect.objectContaining({ po: "No" })
+      );
+    });
+  });
+
+  it("supports multi-stage Sale Status Update drawer workflow (Pending -> Sales Confirmed -> Admin Approved -> Acc. Confirmed)", async () => {
+    const { apiGet, apiPatch } = await import("@/lib/api");
+
+    (apiGet as any).mockImplementation((url: string) => {
+      if (url.startsWith("/sales/orders")) {
+        return Promise.resolve({
+          data: {
+            items: [
+              {
+                id: "ord-stage-1",
+                order_no: "SO-STAGE-01",
+                company_name: "Alpha Packaging",
+                buyer_name: "Alpha Packaging",
+                status: "pending",
+                total_amount: 100000,
+                amount_inc_gst: 118000,
+                order_date: "28-10-2026",
+                warehouse: "Mumbai",
+              },
+              {
+                id: "ord-stage-2",
+                order_no: "SO-STAGE-02",
+                company_name: "Beta Industries",
+                buyer_name: "Beta Industries",
+                status: "sales_confirmed",
+                po_file_url: "/uploads/private/sales_po/beta_po.pdf",
+                po_file_name: "beta_po.pdf",
+                total_amount: 150000,
+                amount_inc_gst: 177000,
+                order_date: "28-10-2026",
+                warehouse: "Mumbai",
+              },
+              {
+                id: "ord-stage-3",
+                order_no: "SO-STAGE-03",
+                company_name: "Gamma Corp",
+                buyer_name: "Gamma Corp",
+                status: "admin_approved",
+                po_file_url: "/uploads/private/sales_po/gamma_po.pdf",
+                po_file_name: "gamma_po.pdf",
+                total_amount: 200000,
+                amount_inc_gst: 236000,
+                order_date: "28-10-2026",
+                warehouse: "Mumbai",
+              },
+            ],
+            total: 3,
+          },
+        });
+      }
+      return Promise.resolve({ data: [] });
+    });
+
+    render(
+      <BrowserRouter>
+        <SaleProcessListPage />
+      </BrowserRouter>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("SO-STAGE-01")).toBeTruthy();
+      expect(screen.getByText("SO-STAGE-02")).toBeTruthy();
+      expect(screen.getByText("SO-STAGE-03")).toBeTruthy();
+    });
+
+    // PO badges are rendered for orders that already have po_file_url
+    expect(screen.getAllByText(/📎 PO/i).length).toBeGreaterThanOrEqual(2);
+
+    const updateBtns = screen.getAllByTitle("Update Status");
+
+    // Stage 1: Pending -> Sales Confirmed with PO File upload
+    fireEvent.click(updateBtns[0]);
+    expect(screen.getByText(/Current Status:\s*Pending/i)).toBeTruthy();
+    const poInput = screen.getByTestId("input-status-po-file") as HTMLInputElement;
+    const poFile = new File(["dummy po"], "alpha_po.pdf", { type: "application/pdf" });
+    fireEvent.change(poInput, { target: { files: [poFile] } });
+    expect(screen.getByText(/alpha_po\.pdf/i)).toBeTruthy();
+
+    fireEvent.change(screen.getByTestId("textarea-status-remarks"), {
+      target: { value: "PO verified by sales" },
+    });
+    fireEvent.click(screen.getByTestId("btn-submit-status-drawer"));
+
+    await waitFor(() => {
+      expect(apiPatch).toHaveBeenCalledWith(
+        "/sales/orders/ord-stage-1/status",
+        expect.objectContaining({
+          status: "sales_confirmed",
+          remarks: "PO verified by sales",
+          po_file_name: "alpha_po.pdf",
+        })
+      );
+    });
+
+    // Stage 2: Sales Confirmed -> Admin Approved (PO File input hidden)
+    fireEvent.click(screen.getAllByTitle("Update Status")[1]);
+    expect(screen.getByText(/Current Status:\s*Sales Confirmed/i)).toBeTruthy();
+    expect(screen.queryByTestId("input-status-po-file")).toBeNull();
+    const stage2Select = screen.getByTestId("select-sale-status") as HTMLSelectElement;
+    expect(stage2Select.value).toBe("admin_approved");
+    fireEvent.click(screen.getByTestId("btn-submit-status-drawer"));
+
+    await waitFor(() => {
+      expect(apiPatch).toHaveBeenCalledWith(
+        "/sales/orders/ord-stage-2/status",
+        expect.objectContaining({
+          status: "admin_approved",
+        })
+      );
+    });
+
+    // Stage 3: Admin Approved -> Acc. Confirmed (Invoice Date, Invoice No, Tally Bill, E-Way Bill)
+    fireEvent.click(screen.getAllByTitle("Update Status")[2]);
+    expect(screen.getByText(/Current Status:\s*Admin Approved/i)).toBeTruthy();
+    expect(screen.getByTestId("input-status-invoice-date")).toBeTruthy();
+    expect(screen.getByTestId("input-status-invoice-no")).toBeTruthy();
+    expect(screen.getByTestId("input-status-tally-bill")).toBeTruthy();
+    expect(screen.getByTestId("select-status-eway-bill")).toBeTruthy();
+
+    fireEvent.change(screen.getByTestId("input-status-invoice-date"), {
+      target: { value: "2026-10-28" },
+    });
+    fireEvent.change(screen.getByTestId("input-status-invoice-no"), {
+      target: { value: "INV-INH/26-27/0999" },
+    });
+    const tallyFile = new File(["tally pdf"], "gamma_tally_bill.pdf", { type: "application/pdf" });
+    fireEvent.change(screen.getByTestId("input-status-tally-bill"), {
+      target: { files: [tallyFile] },
+    });
+    fireEvent.change(screen.getByTestId("select-status-eway-bill"), {
+      target: { value: "Yes" },
+    });
+    fireEvent.click(screen.getByTestId("btn-submit-status-drawer"));
+
+    await waitFor(() => {
+      expect(apiPatch).toHaveBeenCalledWith(
+        "/sales/orders/ord-stage-3/status",
+        expect.objectContaining({
+          status: "acc_confirmed",
+          invoice_date: "2026-10-28",
+          invoice_no: "INV-INH/26-27/0999",
+          tally_bill_name: "gamma_tally_bill.pdf",
+          eway_bill: "Yes",
+        })
       );
     });
   });
