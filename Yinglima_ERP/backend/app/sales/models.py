@@ -78,6 +78,12 @@ class SaleOrder(Base, UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin):
     profit_percent: Mapped[float] = mapped_column(Numeric(6, 2), default=3.0, nullable=False)
     total_container_cbm: Mapped[float] = mapped_column(Numeric(12, 4), default=0.0, nullable=False)
 
+    # Outward Stock Movement Linkage
+    stock_movement_id: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(), ForeignKey("stock_movements.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    stock_movement_number: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
+
     remarks: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     created_by_id: Mapped[uuid.UUID | None] = mapped_column(

@@ -46,9 +46,12 @@ class StateRepository(BaseRepository[State]):
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 
-    async def list_all(self) -> list[State]:
-        """Return every non-deleted state, ordered by name."""
-        stmt = self._base_select().order_by(State.name)
+    async def list_all(self, *, active_only: bool = True) -> list[State]:
+        """Return states, optionally filtering to active only, ordered by name."""
+        stmt = self._base_select()
+        if active_only:
+            stmt = stmt.where(State.status == "active")
+        stmt = stmt.order_by(State.name)
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 

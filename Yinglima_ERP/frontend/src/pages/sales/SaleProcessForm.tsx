@@ -25,6 +25,12 @@ import type {
   SaleOrderItem,
 } from "@/types/saleProcess";
 import type { PlanningSheet } from "@/types/planning";
+import {
+  getSaleOrderDetailCache,
+  updateSaleOrderInCache,
+  getCachedPlanningSheets,
+  setCachedPlanningSheets,
+} from "@/lib/saleProcessCache";
 
 import { getCachedBrandName } from "@/lib/brand";
 
@@ -49,7 +55,7 @@ export function SaleProcessFormPage() {
   const entityDropdownRef = useRef<HTMLDivElement>(null);
 
   // Planning Sheet / Branch Combobox
-  const [sheets, setSheets] = useState<PlanningSheet[]>([]);
+  const [sheets, setSheets] = useState<PlanningSheet[]>(() => getCachedPlanningSheets() || []);
   const [loadingSheets, setLoadingSheets] = useState(false);
   const [selectedSheetId, setSelectedSheetId] = useState("");
   const [selectedSheetName, setSelectedSheetName] = useState("");
@@ -134,7 +140,7 @@ export function SaleProcessFormPage() {
 
   // Submitting
   const [submitting, setSubmitting] = useState(false);
-  const [initialLoading, setInitialLoading] = useState(isEdit);
+  const [initialLoading, setInitialLoading] = useState(() => isEdit && !getSaleOrderDetailCache(id || "")?.order);
 
   // Lookups
   const orgLookup = useLookup<{ id: string; name: string }>("/masters/company-list/lookup", 250);
@@ -143,7 +149,7 @@ export function SaleProcessFormPage() {
     company_name: string;
     name?: string;
     branches?: Array<{ id: string; name: string }>;
-  }>("/buyers?page_size=500", 500);
+  }>("/buyers", 500);
 
   // Close search results dropdown on outside click
   useEffect(() => {
@@ -189,48 +195,58 @@ export function SaleProcessFormPage() {
     }
   }, [orgLookup.items, organizationId]);
 
+  const populateFromOrder = (o: SaleOrder) => {
+    setOrganizationId(o.organization_id);
+    setOrganizationName(o.organization_name);
+    setBuyerId(o.buyer_id || "");
+    setBuyerName(o.buyer_name);
+    setBuyerBranchId(o.buyer_branch_id || "");
+    setBuyerBranchName(o.buyer_branch_name || "");
+    setSelectedConsignmentCode(o.consignment_code || "");
+    setSelectedColumnId(o.planning_column_id || "");
+    setSelectedSheetId(o.planning_sheet_id || "");
+    setOrderDate(o.order_date);
+    setDeliveryDate(o.delivery_date || "");
+    setCurrency(o.currency || "RMB");
+    setStatus(o.status || "pending");
+    setContainerNo(o.container_no || "");
+    setBlNo(o.bl_no || "");
+    setLrNo(o.lr_no || "");
+    setTransporterName(o.transporter_name || "");
+    setPortOfLoading(o.port_of_loading || "");
+    setPortOfDischarge(o.port_of_discharge || "");
+    setRemarks(o.remarks || "");
+    setOceanFreightUsd(Number(o.ocean_freight_usd) || 0.0);
+    setLocalChargesCocUsd(Number(o.local_charges_coc_usd) || 0.0);
+    setUsdExchangeRate(Number(o.usd_exchange_rate) || 6.70);
+    setProfitPercent(Number(o.profit_percent) || 3.00);
+    setTotalContainerCbm(Number(o.total_container_cbm) || 0.0);
+
+    if (o.items && o.items.length > 0) {
+      setItems(o.items.map((it) => ({ ...it, uom: it.uom || "NOS" })));
+    }
+  };
+
   // Load existing order if editing
   useEffect(() => {
     if (!isEdit || !id) return;
+
+    const cached = getSaleOrderDetailCache(id);
+    if (cached?.order) {
+      populateFromOrder(cached.order);
+      setInitialLoading(false);
+    }
 
     let mounted = true;
     async function loadOrder() {
       try {
         const res = await apiGet<SaleOrder>(`/sales/orders/${id}`);
         if (mounted && res.data) {
-          const o = res.data;
-          setOrganizationId(o.organization_id);
-          setOrganizationName(o.organization_name);
-          setBuyerId(o.buyer_id || "");
-          setBuyerName(o.buyer_name);
-          setBuyerBranchId(o.buyer_branch_id || "");
-          setBuyerBranchName(o.buyer_branch_name || "");
-          setSelectedConsignmentCode(o.consignment_code || "");
-          setSelectedColumnId(o.planning_column_id || "");
-          setSelectedSheetId(o.planning_sheet_id || "");
-          setOrderDate(o.order_date);
-          setDeliveryDate(o.delivery_date || "");
-          setCurrency(o.currency || "RMB");
-          setStatus(o.status || "pending");
-          setContainerNo(o.container_no || "");
-          setBlNo(o.bl_no || "");
-          setLrNo(o.lr_no || "");
-          setTransporterName(o.transporter_name || "");
-          setPortOfLoading(o.port_of_loading || "");
-          setPortOfDischarge(o.port_of_discharge || "");
-          setRemarks(o.remarks || "");
-          setOceanFreightUsd(Number(o.ocean_freight_usd) || 0.0);
-          setLocalChargesCocUsd(Number(o.local_charges_coc_usd) || 0.0);
-          setUsdExchangeRate(Number(o.usd_exchange_rate) || 6.70);
-          setProfitPercent(Number(o.profit_percent) || 3.00);
-          setTotalContainerCbm(Number(o.total_container_cbm) || 0.0);
-
-          if (o.items && o.items.length > 0) {
-            setItems(o.items.map((it) => ({ ...it, uom: it.uom || "NOS" })));
-          }
+          populateFromOrder(res.data);
+          updateSaleOrderInCache(res.data);
         }
       } catch (err) {
-        if (mounted) toast(errorMessage(err), "error");
+        if (mounted && !cached?.order) toast(errorMessage(err), "error");
       } finally {
         if (mounted) setInitialLoading(false);
       }
@@ -244,12 +260,21 @@ export function SaleProcessFormPage() {
   // Fetch ALL planning sheets across the ERP
   useEffect(() => {
     let mounted = true;
+    const cachedSheets = getCachedPlanningSheets();
+    if (cachedSheets && cachedSheets.length > 0) {
+      setSheets(cachedSheets);
+      setLoadingSheets(false);
+    }
+
     async function fetchSheets() {
-      setLoadingSheets(true);
+      if (!cachedSheets || cachedSheets.length === 0) {
+        setLoadingSheets(true);
+      }
       try {
         const res = await apiGet<PlanningSheet[]>("/planning/sheets");
         if (mounted && res.data) {
           setSheets(res.data);
+          setCachedPlanningSheets(res.data);
         }
       } catch {
         // Fallback quietly
@@ -684,7 +709,7 @@ export function SaleProcessFormPage() {
       setSpareSearchLoading(true);
       try {
         const query = spareSearch.trim() ? `&search=${encodeURIComponent(spareSearch.trim())}` : "";
-        const res = await apiGet<any[]>(`/masters/products?is_spare=true&page_size=100${query}`);
+        const res = await apiGet<any[]>(`/masters/products?is_spare=true&status=active&page_size=100${query}`);
         if (mounted && res.data) {
           const list = Array.isArray(res.data) ? res.data : [];
           setSpareSearchResults(list);
@@ -726,7 +751,7 @@ export function SaleProcessFormPage() {
     let cfrPriceUsd = 0;
     let totalSupplierRmb = 0;
     let isFromLp = false;
-    let taxPct = Number(p.refund_vat_percent) || 13.0;
+    let taxPct = Number(p.refund_vat_percent) || 0.0;
     let isCostingSpare = false;
 
     try {
@@ -879,7 +904,7 @@ export function SaleProcessFormPage() {
       const target = { ...next[index], [field]: val };
 
       const qty = Number(target.quantity) || 0;
-      const vatPct = Number(target.tax_percent) || 13.0;
+      const vatPct = Number(target.tax_percent) || 0.0;
 
       // When quantity, RMB price, or total CBM changes, recompute CI costing for this item
       if (field === "unit_price_rmb_with_vat" || field === "quantity" || field === "total_cbm") {
@@ -934,7 +959,7 @@ export function SaleProcessFormPage() {
       const next = [...prev];
       const target = { ...next[index] };
       const qty = Number(target.quantity) || 0;
-      const vatPct = Number(target.tax_percent) || 13.0;
+      const vatPct = Number(target.tax_percent) || 0.0;
 
       target.cfr_price_usd = usdVal;
 
@@ -1139,10 +1164,12 @@ export function SaleProcessFormPage() {
       };
 
       if (isEdit) {
-        await apiPatch(`/sales/orders/${id}`, payload);
+        const res = await apiPatch<SaleOrder>(`/sales/orders/${id}`, payload);
+        if (res.data) updateSaleOrderInCache(res.data);
         toast("Sale order updated successfully!", "success");
       } else {
-        await apiPost(`/sales/orders`, payload);
+        const res = await apiPost<SaleOrder>(`/sales/orders`, payload);
+        if (res.data) updateSaleOrderInCache(res.data);
         toast("Sale order created successfully!", "success");
       }
 
@@ -2935,7 +2962,7 @@ export function SaleProcessFormPage() {
                                       }}
                                     />
                                   </td>
-                                  {/* 9. Unit Price(RMB) Excluding VAT = Col 8 / 1.13 */}
+                                  {/* 9. Unit Price(RMB) Excluding VAT = Col 8 / (1 + vatPct/100) */}
                                   <td style={{ padding: "6px 6px", textAlign: "right", color: "#475569", fontWeight: 600, fontSize: "11.5px" }}>
                                     ¥ {exVat.toFixed(2)}
                                   </td>

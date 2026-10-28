@@ -33,6 +33,7 @@ from app.sales.schemas import (
     SaleOrderDetailResponse,
     SaleOrderResponse,
     SaleOrderCreate,
+    SaleOrderDispatchRequest,
     SaleOrderStatusUpdate,
     SaleOrderUpdate,
     SaleSummaryMetrics,
@@ -187,6 +188,8 @@ async def list_sale_orders(
                 port_of_loading=r.port_of_loading,
                 port_of_discharge=r.port_of_discharge,
                 remarks=r.remarks,
+                stock_movement_id=r.stock_movement_id,
+                stock_movement_number=r.stock_movement_number,
                 created_by_name=r.created_by_name,
                 created_at=r.created_at,
                 updated_at=r.updated_at,
@@ -285,12 +288,47 @@ async def update_order_status(
     current_user: CurrentUser = Depends(require_permission("sale_process.approve")),
 ) -> dict:
     req_id = getattr(request.state, "request_id", "-")
-    order = await service.update_status(id, payload.status, payload.remarks)
+    if payload.status.strip().lower() == "dispatched":
+        # Dispatch warehouse stock movement
+        user_name = getattr(current_user, "name", getattr(current_user, "username", "Admin"))
+        order = await service.dispatch_order(
+            order_id=id,
+            created_by_id=getattr(current_user, "id", None),
+            created_by_name=user_name,
+        )
+    else:
+        order = await service.update_status(id, payload.status, payload.remarks)
     loaded = await service.repo.get_by_id(order.id)
     if not loaded:
         raise NotFoundException("Order could not be reloaded.")
     return build_success_response(
         data=SaleOrderDetailResponse.model_validate(loaded).model_dump(),
+        request_id=req_id,
+    )
+
+
+@router.post("/orders/{id}/dispatch", summary="Dispatch a sale order into warehouse outward stock movement")
+async def dispatch_sale_order(
+    id: uuid.UUID,
+    request: Request,
+    payload: SaleOrderDispatchRequest | None = None,
+    service: SaleService = Depends(get_sale_service),
+    current_user: CurrentUser = Depends(require_permission("sale_process.approve")),
+) -> dict:
+    req_id = getattr(request.state, "request_id", "-") if request else "-"
+    user_name = getattr(current_user, "name", getattr(current_user, "username", "Admin"))
+    order = await service.dispatch_order(
+        order_id=id,
+        dispatch_data=payload,
+        created_by_id=getattr(current_user, "id", None),
+        created_by_name=user_name,
+    )
+    loaded = await service.repo.get_by_id(order.id)
+    if not loaded:
+        raise NotFoundException("Dispatched order could not be reloaded.")
+    return build_success_response(
+        data=SaleOrderDetailResponse.model_validate(loaded).model_dump(),
+        message=f"Sale order {order.order_no} successfully dispatched under outward slip {order.stock_movement_number}.",
         request_id=req_id,
     )
 

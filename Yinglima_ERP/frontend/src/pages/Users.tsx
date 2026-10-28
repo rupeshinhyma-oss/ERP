@@ -272,14 +272,22 @@ const EMPTY_EDIT = {
   notes: "",
 };
 
+interface UserListCacheEntry {
+  rows: User[];
+  pagination: PaginationMeta | undefined;
+  timestamp: number;
+}
+const userListCache = new Map<string, UserListCacheEntry>();
+
 export function UsersPage() {
   const { profile, hasPermission, isSuperAdmin } = useAuth();
   const showToast = useToast();
   const confirm = useConfirm();
 
-  const [rows, setRows] = useState<User[]>([]);
-  const [pagination, setPagination] = useState<PaginationMeta | undefined>();
-  const [loading, setLoading] = useState(true);
+  const initialCache = userListCache.get("default");
+  const [rows, setRows] = useState<User[]>(() => initialCache?.rows || []);
+  const [pagination, setPagination] = useState<PaginationMeta | undefined>(() => initialCache?.pagination || undefined);
+  const [loading, setLoading] = useState(() => !initialCache);
   const [error, setError] = useState<unknown>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
@@ -442,23 +450,28 @@ export function UsersPage() {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      setLoading(true);
+      const qs = toQueryString({
+        page: currentPage,
+        page_size: pageSize,
+        query,
+        status: statusFilter,
+      });
+      const cached = userListCache.get(qs) || userListCache.get("default");
+      if (!cached && rows.length === 0) {
+        setLoading(true);
+      }
       try {
-        const url =
-          "/users" +
-          toQueryString({
-            page: currentPage,
-            page_size: pageSize,
-            query,
-            status: statusFilter,
-          });
+        const url = "/users" + qs;
         const { data, meta } = await apiGet<ItemsPage<User>>(url);
         if (cancelled) return;
-        setRows(data.items || []);
+        const items = data.items || [];
+        setRows(items);
         setPagination(meta?.pagination);
+        userListCache.set(qs, { rows: items, pagination: meta?.pagination, timestamp: Date.now() });
+        userListCache.set("default", { rows: items, pagination: meta?.pagination, timestamp: Date.now() });
         setError(null);
       } catch (err) {
-        if (!cancelled) setError(err);
+        if (!cancelled && !cached) setError(err);
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -590,37 +603,33 @@ export function UsersPage() {
   }
 
   async function openViewUser(userId: string) {
-    setViewLoading(true);
-    setViewUser(null);
+    const localUser = rows.find((u) => u.id === userId) || allUsers.find((u) => u.id === userId);
+    if (localUser) {
+      setViewUser(localUser);
+      setViewLoading(false);
+    } else {
+      setViewLoading(true);
+      setViewUser(null);
+    }
     setViewSessions(null);
     setViewPositions(null);
     setViewManagers(null);
     setViewDirectReports(null);
     try {
-      const { data } = await apiGet<User>(`/users/${userId}`);
-      setViewUser(data);
-      try {
-        const sessRes = await apiGet<UserSession[]>(`/users/${userId}/sessions`);
-        setViewSessions(sessRes.data || []);
-      } catch {
-        setViewSessions([]);
-      }
-      try {
-        const [posRes, mgrRes, reportsRes] = await Promise.all([
-          apiGet<PositionAssignment[]>(`/positions/holders-for-user/${userId}`).catch(() => ({ data: [] as PositionAssignment[] })),
-          apiGet<ReportingRelationship[]>(`/reporting/managers/${userId}`).catch(() => ({ data: [] as ReportingRelationship[] })),
-          apiGet<ReportingRelationship[]>(`/reporting/direct-reports/${userId}`).catch(() => ({ data: [] as ReportingRelationship[] })),
-        ]);
-        setViewPositions(posRes.data || []);
-        setViewManagers(mgrRes.data || []);
-        setViewDirectReports(reportsRes.data || []);
-      } catch {
-        setViewPositions([]);
-        setViewManagers([]);
-        setViewDirectReports([]);
-      }
+      const [uRes, sessRes, posRes, mgrRes, reportsRes] = await Promise.all([
+        apiGet<User>(`/users/${userId}`).catch(() => ({ data: localUser as User })),
+        apiGet<UserSession[]>(`/users/${userId}/sessions`).catch(() => ({ data: [] as UserSession[] })),
+        apiGet<PositionAssignment[]>(`/positions/holders-for-user/${userId}`).catch(() => ({ data: [] as PositionAssignment[] })),
+        apiGet<ReportingRelationship[]>(`/reporting/managers/${userId}`).catch(() => ({ data: [] as ReportingRelationship[] })),
+        apiGet<ReportingRelationship[]>(`/reporting/direct-reports/${userId}`).catch(() => ({ data: [] as ReportingRelationship[] })),
+      ]);
+      if (uRes.data) setViewUser(uRes.data);
+      setViewSessions(sessRes.data || []);
+      setViewPositions(posRes.data || []);
+      setViewManagers(mgrRes.data || []);
+      setViewDirectReports(reportsRes.data || []);
     } catch (err) {
-      setError(err);
+      if (!localUser) setError(err);
     } finally {
       setViewLoading(false);
     }
@@ -628,22 +637,9 @@ export function UsersPage() {
 
   async function openEditUser(user: User) {
     setEditUserRoles(user.roles || []);
-    let currentPositionId = user.position_id || "";
-    if (!currentPositionId) {
-      try {
-        const { data } = await apiGet<PositionAssignment[]>(`/positions/holders-for-user/${user.id}`);
-        const primaryPos =
-          (data || []).find((p) => p.is_primary && p.status === "ACTIVE") ||
-          (data || []).find((p) => p.status === "ACTIVE") ||
-          (data || [])[0];
-        if (primaryPos) {
-          currentPositionId = primaryPos.position_id;
-        }
-      } catch {
-        /* ignore */
-      }
-    }
+    const currentPositionId = user.position_id || "";
 
+    // 1. Immediately render edit modal at 0ms with local user data
     setEditForm({
       id: user.id,
       username: user.username || "",
@@ -672,6 +668,21 @@ export function UsersPage() {
     setEditError(null);
     setEditAddRoleId("");
     setEditOpen(true);
+
+    // 2. Concurrently resolve position and fresh roles in background
+    if (!currentPositionId) {
+      void apiGet<PositionAssignment[]>(`/positions/holders-for-user/${user.id}`)
+        .then(({ data }) => {
+          const primaryPos =
+            (data || []).find((p) => p.is_primary && p.status === "ACTIVE") ||
+            (data || []).find((p) => p.status === "ACTIVE") ||
+            (data || [])[0];
+          if (primaryPos) {
+            setEditForm((f) => ({ ...f, position_id: primaryPos.position_id }));
+          }
+        })
+        .catch(() => {});
+    }
 
     // Fetch fresh user details to ensure assigned departments/roles are completely up to date
     apiGet<User>(`/users/${user.id}`)

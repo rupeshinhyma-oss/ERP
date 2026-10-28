@@ -1,9 +1,8 @@
-/** States master. Ported from masters-states.html. */
-
 import { useState } from "react";
 import { MasterPage, type FormState } from "@/components/MasterPage";
 import { StatusBadge, dash } from "@/components/ui";
 import { SelectField, TextField, nullIfBlank } from "@/components/fields";
+import { SearchableFilterDropdown } from "@/components/SearchableDropdown";
 import { useLookup, useNameMap } from "@/lib/lookups";
 import type { Country, State } from "@/types";
 
@@ -28,16 +27,25 @@ export function StatesPage() {
       searchPlaceholder="Search province name or code or Sr. No..."
       hideQuickAdd={true}
       reloadToken={countries.loaded}
+      onResetFilters={() => setCountryFilter("")}
       extraFilters={countryFilter ? { country_id: countryFilter } : undefined}
       toolbarExtras={
-        <select value={countryFilter} onChange={(e) => setCountryFilter(e.target.value)}>
-          <option value="">All Countries / National Levels</option>
-          {countries.items.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.name}
-            </option>
-          ))}
-        </select>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 320px))", gap: "16px" }}>
+          <div>
+            <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px" }}>
+              Country / National Level
+            </label>
+            <SearchableFilterDropdown
+              value={countryFilter || null}
+              onChange={(val) => setCountryFilter(val || "")}
+              allLabel="All Countries / National Levels"
+              options={countries.items.map((c) => ({
+                value: c.id,
+                label: c.name,
+              }))}
+            />
+          </div>
+        </div>
       }
       columnHeaders={["Province Name", "Province Code", "Country", "Status"]}
       columns={[

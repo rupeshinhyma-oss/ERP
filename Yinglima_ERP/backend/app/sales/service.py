@@ -27,7 +27,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.buyers.models import Buyer
 from app.common.currency import get_active_rates
-from app.core.exceptions import NotFoundException, ValidationException
+from app.core.exceptions import BadRequestException, NotFoundException, ValidationException
 from app.masters.hsn.models import HsnCode
 from app.masters.product_categories.models import ProductCategory
 from app.masters.products.models import Product
@@ -42,6 +42,7 @@ from app.sales.schemas import (
     PlanningConsignmentColumnResponse,
     PlanningConsignmentItemsResponse,
     SaleOrderCreate,
+    SaleOrderDispatchRequest,
     SaleOrderUpdate,
 )
 
@@ -372,7 +373,15 @@ class SaleService:
             )
             for pid, s_id, s_name, u_rate, lp_vat in q_lp.all():
                 if pid not in lp_supplier_map:
-                    vat_pct = float(lp_vat) if lp_vat is not None else 13.0
+                    vat_pct = (
+                        float(lp_vat)
+                        if lp_vat is not None
+                        else (
+                            float(prod_map[pid].purchase_vat_percent or 0.0)
+                            if pid in prod_map and prod_map[pid].purchase_vat_percent is not None
+                            else 0.0
+                        )
+                    )
                     rate_with_vat = round(float(u_rate or 0.0) * (1.0 + vat_pct / 100.0), 2)
                     lp_supplier_map[pid] = (s_id, s_name, rate_with_vat)
                     lp_vat_map[pid] = vat_pct
@@ -419,7 +428,15 @@ class SaleService:
             if prod and prod.id in lp_vat_map:
                 vat_rate = lp_vat_map[prod.id]
             else:
-                vat_rate = float(prod.refund_vat_percent) if (prod and prod.refund_vat_percent is not None) else 13.0
+                vat_rate = (
+                    float(prod.refund_vat_percent)
+                    if (prod and prod.refund_vat_percent is not None)
+                    else (
+                        float(prod.purchase_vat_percent or 0.0)
+                        if (prod and prod.purchase_vat_percent is not None)
+                        else 0.0
+                    )
+                )
             divisor = 1.0 + (vat_rate / 100.0)
             unit_price_rmb_ex_vat = round(unit_price_rmb_with_vat / divisor, 2) if divisor > 0 else unit_price_rmb_with_vat
 
@@ -519,7 +536,15 @@ class SaleService:
             supplier_id = lp_row[1]
             supplier_name = lp_row[2]
             # LP Unit Rate is BASIC (excl. VAT) -> gross up to get "Including VAT"
-            lp_vat_pct = float(lp_row[0].vat_rate) if lp_row[0].vat_rate is not None else 13.0
+            lp_vat_pct = (
+                float(lp_row[0].vat_rate)
+                if lp_row[0].vat_rate is not None
+                else (
+                    float(prod.purchase_vat_percent or 0.0)
+                    if prod.purchase_vat_percent is not None
+                    else 0.0
+                )
+            )
             unit_price_rmb_with_vat = round(float(lp_row[0].unit_rate or 0.0) * (1.0 + lp_vat_pct / 100.0), 2)
         else:
             # Strict Local Purchase enforcement: NO fallback to quotes or standard cost
@@ -528,7 +553,15 @@ class SaleService:
             unit_price_rmb_with_vat = 0.0
 
         # 2. HSN and Refund VAT %
-        refund_vat_percent = float(prod.refund_vat_percent) if prod.refund_vat_percent is not None else 13.0
+        refund_vat_percent = (
+            float(prod.refund_vat_percent)
+            if prod.refund_vat_percent is not None
+            else (
+                float(prod.purchase_vat_percent or 0.0)
+                if prod.purchase_vat_percent is not None
+                else 0.0
+            )
+        )
         hsn_code_str = None
         if prod.hsn_id:
             hsn_obj = await self.session.get(HsnCode, prod.hsn_id)
@@ -865,6 +898,94 @@ class SaleService:
             order.remarks = f"{order.remarks or ''}\n[{date.today()}] Status updated to {status}: {remarks}".strip()
 
         return await self.repo.update(order)
+
+    async def dispatch_order(
+        self,
+        order_id: uuid.UUID,
+        dispatch_data: SaleOrderDispatchRequest | None = None,
+        created_by_id: uuid.UUID | None = None,
+        created_by_name: str | None = None,
+    ) -> SaleOrder:
+        """
+        Dispatch a confirmed sale order from warehouse stock.
+        Creates an official outward Stock Movement (OUT-YYYY-XXXX), validates stock availability,
+        decreases warehouse stock balances, and sets order status to 'dispatched'.
+        """
+        order = await self.repo.get_by_id(order_id)
+        if not order:
+            raise NotFoundException(f"Sale order {order_id} not found.")
+
+        if order.stock_movement_id or order.status == "dispatched":
+            raise BadRequestException(
+                f"Sale order {order.order_no} has already been dispatched under slip {order.stock_movement_number or 'OUT'}."
+            )
+
+        if not order.items:
+            raise BadRequestException(f"Sale order {order.order_no} has no line items to dispatch.")
+
+        from app.stock.schemas import StockMovementCreate, StockMovementItemCreate
+        from app.stock.service import StockMovementService
+
+        items_to_dispatch: list[StockMovementItemCreate] = []
+        if dispatch_data and dispatch_data.items:
+            for itm in dispatch_data.items:
+                items_to_dispatch.append(
+                    StockMovementItemCreate(
+                        product_id=itm.product_id,
+                        product_name=itm.product_name,
+                        product_code=itm.product_code,
+                        expected_quantity=itm.quantity,
+                        quantity=itm.quantity,
+                        damaged_quantity=0.0,
+                        accepted_quantity=itm.quantity,
+                        remarks=itm.remarks,
+                    )
+                )
+        else:
+            for s_item in order.items:
+                items_to_dispatch.append(
+                    StockMovementItemCreate(
+                        product_id=s_item.product_id,
+                        product_name=s_item.product_name,
+                        product_code=s_item.product_code,
+                        expected_quantity=float(s_item.quantity),
+                        quantity=float(s_item.quantity),
+                        damaged_quantity=0.0,
+                        accepted_quantity=float(s_item.quantity),
+                        unit_rate=float(s_item.unit_rate),
+                    )
+                )
+
+        movement_payload = StockMovementCreate(
+            movement_type="outward",
+            movement_date=getattr(dispatch_data, "movement_date", None) or order.order_date or date.today(),
+            source_type="sale_process",
+            sale_order_id=order.id,
+            sale_order_no=order.order_no,
+            buyer_id=order.buyer_id,
+            buyer_name=order.buyer_name,
+            warehouse_location=getattr(dispatch_data, "warehouse_location", None) or "Main Godown",
+            vehicle_no=getattr(dispatch_data, "vehicle_no", None) or order.lr_no,
+            transporter_name=getattr(dispatch_data, "transporter_name", None) or order.transporter_name,
+            container_no=getattr(dispatch_data, "container_no", None) or order.container_no,
+            reference_no=order.order_no,
+            remarks=getattr(dispatch_data, "remarks", None) or f"Auto-dispatched from Sale Order {order.order_no}",
+            items=items_to_dispatch,
+        )
+
+        stock_service = StockMovementService(self.session)
+        movement = await stock_service.create_movement(
+            data=movement_payload,
+            created_by_id=created_by_id,
+            created_by_name=created_by_name,
+        )
+
+        order.status = "dispatched"
+        order.stock_movement_id = movement.id
+        order.stock_movement_number = movement.movement_no
+        await self.session.commit()
+        await self.session.refresh(order)
+        return order
 
     def export_excel(self, records: list[SaleOrder]) -> io.BytesIO:
         """Export Sale Process orders to styled Excel workbook."""

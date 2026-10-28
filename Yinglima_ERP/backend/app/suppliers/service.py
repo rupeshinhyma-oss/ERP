@@ -16,6 +16,7 @@ Profile" specification document's Notes section:
 
 from __future__ import annotations
 
+import inspect
 import re
 import uuid
 from typing import Any
@@ -240,31 +241,47 @@ class SupplierService:
         potential_blocks_delete = supplier.potential is not None and supplier.potential.value == "yes"
         return not (status_blocks_delete or potential_blocks_delete)
 
-    async def list_suppliers_lookup(self) -> list[dict[str, Any]]:
-        """Return lightweight list of active suppliers {id, company_name, brand_description}, cached in CacheManager."""
+    async def list_suppliers_lookup(self, search: str | None = None) -> list[dict[str, Any]]:
+        """Return lightweight list of active suppliers {id, company_name, brand_description, supplier_type}, cached in CacheManager."""
         cached = await self.cache_manager.get_dropdown(DROPDOWN_CACHE_NAME)
-        if cached is not None:
+        if cached is None:
+            stmt = (
+                select(Supplier.id, Supplier.company_name, Supplier.brand_description, Supplier.supplier_type)
+                .where(Supplier.deleted_at.is_(None), Supplier.is_active.is_(True))
+                .order_by(Supplier.company_name.asc())
+            )
+            res = await self.repository.session.execute(stmt)
+            cached = [
+                {
+                    "id": str(r.id),
+                    "company_name": r.company_name,
+                    "brand_description": r.brand_description or "",
+                    "supplier_type": r.supplier_type or "",
+                }
+                for r in res.all()
+            ]
+            await self.cache_manager.set_dropdown(DROPDOWN_CACHE_NAME, cached)
+
+        if not search:
             return cached
-        stmt = (
-            select(Supplier.id, Supplier.company_name, Supplier.brand_description)
-            .where(Supplier.deleted_at.is_(None), Supplier.is_active.is_(True))
-            .order_by(Supplier.company_name.asc())
-        )
-        res = await self.repository.session.execute(stmt)
-        data = [
-            {
-                "id": str(r.id),
-                "company_name": r.company_name,
-                "brand_description": r.brand_description or "",
-            }
-            for r in res.all()
+
+        clean = search.strip().lower()
+        return [
+            s
+            for s in cached
+            if clean in s["company_name"].lower()
+            or clean in s["brand_description"].lower()
+            or clean in (s.get("supplier_type") or "").lower()
         ]
-        await self.cache_manager.set_dropdown(DROPDOWN_CACHE_NAME, data)
-        return data
 
     async def _invalidate_cache(self) -> None:
-        """Invalidate the suppliers dropdown cache after any mutation."""
+        """Invalidate the suppliers dropdown cache and paginated list cache after any mutation."""
         await self.cache_manager.invalidate_dropdown(DROPDOWN_CACHE_NAME)
+        del_ns = getattr(self.cache_manager, "delete_namespace", None)
+        if callable(del_ns):
+            res = del_ns("suppliers")
+            if inspect.isawaitable(res):
+                await res
 
     # ------------------------------------------------------------------
     # Create / Update

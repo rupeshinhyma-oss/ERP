@@ -78,3 +78,5 @@ artifacts/
 /AGENTS.md
 /GEMINI.md
 /.agents/
+**/AGENTS.md
+**/GEMINI.md

@@ -51,9 +51,12 @@ class UomRepository(BaseRepository[UnitOfMeasurement]):
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 
-    async def list_all(self) -> list[UnitOfMeasurement]:
-        """Return every non-deleted UOM, ordered by name."""
-        stmt = self._base_select().order_by(UnitOfMeasurement.name)
+    async def list_all(self, *, active_only: bool = True) -> list[UnitOfMeasurement]:
+        """Return units of measurement, optionally filtering to active only, ordered by name."""
+        stmt = self._base_select()
+        if active_only:
+            stmt = stmt.where(UnitOfMeasurement.status == "active")
+        stmt = stmt.order_by(UnitOfMeasurement.name)
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 

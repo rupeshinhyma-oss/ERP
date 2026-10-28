@@ -6,39 +6,50 @@
  * currency calculations in RMB (¥), and workflow status transitions.
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { apiGet, apiPatch, errorMessage } from "@/lib/api";
 import { Auth } from "@/lib/auth";
 import { useToast } from "@/lib/toast";
 import type { SaleOrder, SaleOrderStatus } from "@/types/saleProcess";
+import { getSaleOrderDetailCache, updateSaleOrderInCache } from "@/lib/saleProcessCache";
 
 interface SaleProcessDetailModalProps {
   orderId: string;
+  initialOrder?: SaleOrder | null;
   onClose: () => void;
   onStatusUpdated?: () => void;
 }
 
 export function SaleProcessDetailModal({
   orderId,
+  initialOrder,
   onClose,
   onStatusUpdated,
 }: SaleProcessDetailModalProps) {
   const toast = useToast();
-  const [order, setOrder] = useState<SaleOrder | null>(null);
-  const [loading, setLoading] = useState(true);
+  const cached = useMemo(() => getSaleOrderDetailCache(orderId), [orderId]);
+  const [order, setOrder] = useState<SaleOrder | null>(() => {
+    if (cached?.order) return cached.order;
+    if (initialOrder && initialOrder.id === orderId) return initialOrder;
+    return null;
+  });
+  const [tradeDetails, setTradeDetails] = useState<any>(() => cached?.tradeDetails ?? null);
+  const [loading, setLoading] = useState(() => !cached?.order && !(initialOrder && initialOrder.id === orderId));
   const [updatingStatus, setUpdatingStatus] = useState(false);
   const [statusRemark, setStatusRemark] = useState("");
   const [showStatusModal, setShowStatusModal] = useState<SaleOrderStatus | null>(null);
   const [isFullScreen, setIsFullScreen] = useState(false);
   const [activeDocTab, setActiveDocTab] = useState<"overview" | "ci" | "spares" | "pl">("overview");
-  const [tradeDetails, setTradeDetails] = useState<any>(null);
   const [exportingExcel, setExportingExcel] = useState(false);
   const [ciViewMode, setCiViewMode] = useState<"standard" | "costing">("costing");
 
   useEffect(() => {
     let mounted = true;
     async function fetchDetails() {
-      setLoading(true);
+      const cachedEntry = getSaleOrderDetailCache(orderId);
+      if (!cachedEntry?.order && !(initialOrder && initialOrder.id === orderId)) {
+        setLoading(true);
+      }
       try {
         const [res, tradeRes] = await Promise.all([
           apiGet<SaleOrder>(`/sales/orders/${orderId}`),
@@ -46,12 +57,12 @@ export function SaleProcessDetailModal({
         ]);
         if (mounted && res.data) {
           setOrder(res.data);
-        }
-        if (mounted && tradeRes && tradeRes.data) {
-          setTradeDetails(tradeRes.data);
+          const td = tradeRes?.data ?? null;
+          if (td) setTradeDetails(td);
+          updateSaleOrderInCache(res.data, td);
         }
       } catch (err) {
-        if (mounted) {
+        if (mounted && !cachedEntry?.order && !initialOrder) {
           toast(errorMessage(err), "error");
           onClose();
         }
@@ -63,7 +74,7 @@ export function SaleProcessDetailModal({
     return () => {
       mounted = false;
     };
-  }, [orderId]);
+  }, [orderId, initialOrder]);
 
   const handleStatusChange = async (newStatus: SaleOrderStatus) => {
     setUpdatingStatus(true);
@@ -74,6 +85,7 @@ export function SaleProcessDetailModal({
       });
       if (res.data) {
         setOrder(res.data);
+        updateSaleOrderInCache(res.data, tradeDetails);
         toast(`Order status updated to ${newStatus.replace("_", " ").toUpperCase()}`, "success");
         setShowStatusModal(null);
         setStatusRemark("");
@@ -1103,6 +1115,19 @@ export function SaleProcessDetailModal({
                   <div style={{ fontSize: "12px", color: "#334155" }}>
                     Transporter: <strong>{order.transporter_name || "—"}</strong>
                   </div>
+                  {order.stock_movement_number && (
+                    <div style={{ fontSize: "12px", color: "#7e22ce", marginTop: "4px", fontWeight: 600 }}>
+                      <a
+                        href="/inventory/stock-movements"
+                        target="_blank"
+                        rel="noreferrer"
+                        style={{ color: "#7e22ce", textDecoration: "none" }}
+                        title="View Outward Stock Movement Voucher"
+                      >
+                        📤 Outward Voucher: <strong>{order.stock_movement_number}</strong> ↗
+                      </a>
+                    </div>
+                  )}
                   {(order.port_of_loading || order.port_of_discharge) && (
                     <div style={{ fontSize: "11px", color: "#64748b", marginTop: "2px" }}>
                       {order.port_of_loading || "POL"} → {order.port_of_discharge || "POD"}
@@ -1532,6 +1557,7 @@ export function SaleProcessDetailModal({
                       type="button"
                       disabled={updatingStatus}
                       onClick={() => setShowStatusModal("dispatched")}
+                      title="Dispatch sale order and deduct stock from warehouse"
                       style={{
                         padding: "6px 12px",
                         borderRadius: "6px",
@@ -1541,9 +1567,12 @@ export function SaleProcessDetailModal({
                         fontWeight: 600,
                         fontSize: "12px",
                         cursor: "pointer",
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: "4px",
                       }}
                     >
-                      🚚 Mark Dispatched
+                      📤 Outward / Dispatch Stock
                     </button>
                   )}
 

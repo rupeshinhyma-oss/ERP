@@ -1,0 +1,137 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 780" width="100%" height="100%">
+  <defs>
+    <style>
+      .title { font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; font-size: 22px; font-weight: 800; fill: #0f172a; }
+      .subtitle { font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; font-size: 13px; fill: #64748b; font-weight: 500; }
+      .phase-badge { font-family: 'Segoe UI', system-ui, sans-serif; font-size: 11px; font-weight: 800; letter-spacing: 0.5px; }
+      .card-title { font-family: 'Segoe UI', system-ui, sans-serif; font-size: 14px; font-weight: 700; fill: #1e293b; }
+      .body-txt { font-family: 'Segoe UI', system-ui, sans-serif; font-size: 12px; fill: #334155; line-height: 1.5; }
+      .bold-txt { font-weight: 700; fill: #0f172a; }
+      .highlight-blue { fill: #2563eb; font-weight: 700; }
+      .highlight-green { fill: #16a34a; font-weight: 700; }
+      .highlight-amber { fill: #d97706; font-weight: 700; }
+      .arrow { stroke: #2563eb; stroke-width: 2.5; fill: none; }
+      .arrow-dashed { stroke: #64748b; stroke-width: 2; stroke-dasharray: 5,5; fill: none; }
+      .arrow-green { stroke: #16a34a; stroke-width: 2.5; fill: none; }
+    </style>
+    <filter id="shadow" x="-5%" y="-5%" width="110%" height="115%">
+      <feDropShadow dx="0" dy="3" stdDeviation="4" flood-color="#0f172a" flood-opacity="0.08" />
+    </filter>
+    <marker id="arrow-blue" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1 L 10 5 L 0 9 z" fill="#2563eb" />
+    </marker>
+    <marker id="arrow-green" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1 L 10 5 L 0 9 z" fill="#16a34a" />
+    </marker>
+    <marker id="arrow-gray" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1 L 10 5 L 0 9 z" fill="#64748b" />
+    </marker>
+  </defs>
+
+  <!-- Background Canvas -->
+  <rect width="1100" height="780" fill="#f8fafc" rx="12" />
+
+  <!-- Top Banner -->
+  <rect x="30" y="24" width="1040" height="64" rx="10" fill="#ffffff" stroke="#e2e8f0" filter="url(#shadow)" />
+  <text x="54" y="52" class="title">Local Purchase &rarr; Inward Stock Movement Automation</text>
+  <text x="54" y="73" class="subtitle">Operational Lifecycle: Eliminating Manual Warehouse Inward Re-Entry via Purchase Order Status Triggers</text>
+
+  <!-- ========================================== -->
+  <!-- STEP 1: LOCAL PURCHASE CREATION -->
+  <!-- ========================================== -->
+  <rect x="30" y="115" width="290" height="235" rx="10" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5" filter="url(#shadow)" />
+  <rect x="30" y="115" width="290" height="34" rx="10" fill="#eff6ff" />
+  <text x="44" y="137" class="phase-badge" fill="#1d4ed8">PHASE 1: DOMESTIC PROCUREMENT</text>
+  <text x="44" y="174" class="card-title">1. Create Local Purchase Order</text>
+  <text x="44" y="196" class="body-txt">&bull; Page: <tspan class="bold-txt">/purchase/local/new</tspan></text>
+  <text x="44" y="216" class="body-txt">&bull; Select Supplier (e.g. LT1 / Prathamesh)</text>
+  <text x="44" y="236" class="body-txt">&bull; Select Consignment (e.g. Mum 48)</text>
+  <text x="44" y="256" class="body-txt">&bull; Line items, rates (RMB), domestic VAT</text>
+  
+  <rect x="44" y="275" width="262" height="58" rx="6" fill="#fef3c7" stroke="#fcd34d" />
+  <text x="56" y="295" class="body-txt" font-weight="700" fill="#92400e">Initial Status on Creation:</text>
+  <text x="56" y="317" class="body-txt" font-weight="800" fill="#b45309">&bull; Status = "Confirmed" (or "Ordered")</text>
+
+  <!-- Arrow Step 1 -> Step 2 -->
+  <path d="M 320 232 L 380 232" class="arrow" marker-end="url(#arrow-blue)" />
+
+  <!-- ========================================== -->
+  <!-- STEP 2: STATUS & ACTION IN TABLE -->
+  <!-- ========================================== -->
+  <rect x="390" y="115" width="320" height="235" rx="10" fill="#ffffff" stroke="#93c5fd" stroke-width="1.5" filter="url(#shadow)" />
+  <rect x="390" y="115" width="320" height="34" rx="10" fill="#dbeafe" />
+  <text x="404" y="137" class="phase-badge" fill="#1e40af">PHASE 2: GOODS ARRIVAL AT WAREHOUSE</text>
+  <text x="404" y="174" class="card-title">2. Inward Trigger in Purchase List</text>
+  <text x="404" y="196" class="body-txt">&bull; In <tspan class="bold-txt">/purchase/local</tspan> row for this bill:</text>
+  
+  <!-- Option A Card -->
+  <rect x="404" y="210" width="292" height="56" rx="6" fill="#f8fafc" stroke="#cbd5e1" />
+  <text x="416" y="230" class="body-txt" font-weight="700" fill="#0f172a">Action 1: Change Status Dropdown</text>
+  <text x="416" y="250" class="body-txt">Change <tspan class="highlight-amber">Confirmed</tspan> &rarr; <tspan class="highlight-green">Inwarded</tspan></text>
+
+  <!-- Option B Card -->
+  <rect x="404" y="274" width="292" height="60" rx="6" fill="#ecfdf5" stroke="#a7f3d0" />
+  <text x="416" y="294" class="body-txt" font-weight="700" fill="#065f46">Action 2: Direct Action Button (⋮)</text>
+  <text x="416" y="315" class="body-txt">&bull; Click: <tspan font-weight="800" fill="#047857">[ 📦 Inward Stock ]</tspan></text>
+
+  <!-- Arrow Step 2 -> Step 3 -->
+  <path d="M 710 232 L 770 232" class="arrow" marker-end="url(#arrow-blue)" />
+
+  <!-- ========================================== -->
+  <!-- STEP 3: AUTOMATED INWARD MODAL -->
+  <!-- ========================================== -->
+  <rect x="780" y="115" width="290" height="235" rx="10" fill="#ffffff" stroke="#86efac" stroke-width="1.5" filter="url(#shadow)" />
+  <rect x="780" y="115" width="290" height="34" rx="10" fill="#dcfce7" />
+  <text x="794" y="137" class="phase-badge" fill="#15803d">PHASE 3: ZERO RE-TYPING</text>
+  <text x="794" y="174" class="card-title">3. Pre-Filled Inward Slip Modal</text>
+  <text x="794" y="196" class="body-txt">&bull; Supplier &amp; Invoice No auto-populated</text>
+  <text x="794" y="216" class="body-txt">&bull; All line items &amp; purchased quantities</text>
+  <text x="794" y="236" class="body-txt">&bull; Accepted Qty pre-filled (100%)</text>
+  <text x="794" y="256" class="body-txt">&bull; Damaged Qty box (if transit defect)</text>
+  <text x="794" y="276" class="body-txt">&bull; Warehouse location: "Main Godown"</text>
+
+  <rect x="794" y="292" width="262" height="42" rx="6" fill="#16a34a" />
+  <text x="835" y="318" font-family="'Segoe UI', sans-serif" font-size="13px" font-weight="700" fill="#ffffff">&check; 1-CLICK: CONFIRM INWARD</text>
+
+  <!-- Arrow Step 3 -> Step 4 Downwards -->
+  <path d="M 925 350 L 925 400 L 925 420" class="arrow-green" marker-end="url(#arrow-green)" />
+
+  <!-- ========================================== -->
+  <!-- STEP 4: SYSTEM EXECUTION & LEDGER POSTING -->
+  <!-- ========================================== -->
+  <rect x="420" y="420" width="650" height="185" rx="10" fill="#ffffff" stroke="#16a34a" stroke-width="1.5" filter="url(#shadow)" />
+  <rect x="420" y="420" width="650" height="34" rx="10" fill="#dcfce7" />
+  <text x="438" y="442" class="phase-badge" fill="#166534">PHASE 4: REAL-TIME LEDGER POSTING &amp; DUAL UPDATE</text>
+
+  <!-- Output 1 -->
+  <rect x="438" y="470" width="295" height="115" rx="8" fill="#f0fdf4" stroke="#bbf7d0" />
+  <text x="452" y="494" class="card-title" fill="#166534">A. Stock Movement Ledger Updated</text>
+  <text x="452" y="516" class="body-txt">&bull; Generates Slip: <tspan class="bold-txt">INW-2026-0004</tspan></text>
+  <text x="452" y="536" class="body-txt">&bull; Movement Type: <tspan class="highlight-green">INWARD</tspan></text>
+  <text x="452" y="556" class="body-txt">&bull; Live warehouse stock increases</text>
+  <text x="452" y="574" class="body-txt">&bull; Ref: Links back to Purchase Bill No</text>
+
+  <!-- Output 2 -->
+  <rect x="753" y="470" width="300" height="115" rx="8" fill="#eff6ff" stroke="#bfdbfe" />
+  <text x="767" y="494" class="card-title" fill="#1e40af">B. Local Purchase Status Updated</text>
+  <text x="767" y="516" class="body-txt">&bull; Status updates to: <tspan class="highlight-green">&bull; Inwarded</tspan></text>
+  <text x="767" y="536" class="body-txt">&bull; Displays link: <tspan class="highlight-blue">[View Slip INW-0004]</tspan></text>
+  <text x="767" y="556" class="body-txt">&bull; <tspan class="bold-txt" fill="#991b1b">Duplicate Guard:</tspan> Prevents double</text>
+  <text x="767" y="574" class="body-txt">  inwarding of the same bill</text>
+
+  <!-- Arrow Feedback to Local Purchase List -->
+  <path d="M 420 512 L 200 512 L 200 355" class="arrow-green" marker-end="url(#arrow-green)" />
+  <text x="210" y="495" class="body-txt" font-weight="700" fill="#15803d">Dual sync: Status marked "Inwarded"</text>
+
+  <!-- ========================================== -->
+  <!-- STEP 5: SALE PROCESS / OUTWARD (ON HOLD) -->
+  <!-- ========================================== -->
+  <rect x="30" y="635" width="1040" height="115" rx="10" fill="#f1f5f9" stroke="#94a3b8" stroke-dasharray="6,6" />
+  <rect x="45" y="648" width="180" height="22" rx="4" fill="#cbd5e1" />
+  <text x="52" y="663" font-family="'Segoe UI', sans-serif" font-size="10.5px" font-weight="800" fill="#475569">FUTURE PHASE (ON HOLD)</text>
+  <text x="240" y="665" class="card-title" fill="#334155">Sale Process &rarr; Outward Stock Movement (Stuffed Containers)</text>
+  <text x="45" y="692" class="body-txt">&bull; Status: <tspan font-weight="700" fill="#b91c1c">Paused as requested</tspan> — Manager is simplifying the Sales Process stages first before deciding the exact trigger.</text>
+  <text x="45" y="712" class="body-txt">&bull; When ready: Stuffed containers in <tspan class="bold-txt">/sale/process</tspan> will generate <tspan class="bold-txt">OUTWARD</tspan> stock movements (e.g. OUT-2026-xxxx) reducing warehouse stock balance.</text>
+  <text x="45" y="732" class="body-txt">&bull; Net Warehouse Formula: <tspan class="bold-txt">Current Stock = &sum; Inward (Local Purchases) &minus; &sum; Outward (Export Containers)</tspan></text>
+
+</svg>

@@ -120,7 +120,25 @@ export function useLookup<T>(apiBase: string, pageSize = 250, includeInactive = 
     return () => window.removeEventListener("lookup:invalidated", handler);
   }, [apiBase]);
 
-  const cacheKey = `${apiBase}?page=1&page_size=${pageSize}&sort_order=asc${includeInactive ? "" : "&status=active"}`;
+  // Parse apiBase in case it already contains query parameters (e.g. /buyers?page_size=500)
+  const [basePath, existingQuery] = apiBase.split("?");
+  const initialParams: Record<string, string | number> = {
+    page: 1,
+    page_size: pageSize,
+    sort_order: "asc",
+  };
+  if (existingQuery) {
+    const sp = new URLSearchParams(existingQuery);
+    sp.forEach((val, key) => {
+      initialParams[key] = val;
+    });
+  }
+  if (!includeInactive) {
+    initialParams.status = "active";
+  }
+  const queryString = toQueryString(initialParams);
+  const cacheKey = `${basePath}${queryString}`;
+
   const cached = lookupCache.get(cacheKey);
   const isFresh = cached && Date.now() - cached.timestamp < CACHE_TTL_MS;
 
@@ -141,17 +159,7 @@ export function useLookup<T>(apiBase: string, pageSize = 250, includeInactive = 
     // Check if an identical request is already in-flight (Promise Deduplication)
     let promise = inFlightRequests.get(cacheKey);
     if (!promise) {
-      const queryParams: Record<string, string | number> = {
-        page: 1,
-        page_size: pageSize,
-        sort_order: "asc",
-      };
-      if (!includeInactive) {
-        queryParams.status = "active";
-      }
-      promise = apiGet<T[]>(
-        apiBase + toQueryString(queryParams)
-      ).then(({ data }) => {
+      promise = apiGet<T[]>(cacheKey).then(({ data }) => {
         const result = data || [];
         lookupCache.set(cacheKey, { items: result, timestamp: Date.now() });
         inFlightRequests.delete(cacheKey);

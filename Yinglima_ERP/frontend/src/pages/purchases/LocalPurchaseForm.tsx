@@ -26,6 +26,11 @@ import type {
   LocalPurchasePayload,
   SheetConsignmentLookup,
 } from "@/types/localPurchase";
+import { getLocalPurchaseDetailCache, updateLocalPurchaseInCache } from "@/lib/localPurchaseCache";
+
+// Fast in-memory cache across navigation for instant 0ms dropdown render
+let cachedCompaniesList: Array<{ id: string; name: string; branches?: any[] }> | null = null;
+let cachedConsignmentsLookup: SheetConsignmentLookup[] | null = null;
 
 export function LocalPurchaseFormPage() {
   const navigate = useNavigate();
@@ -35,9 +40,12 @@ export function LocalPurchaseFormPage() {
   const toast = useToast();
 
   // Cascading Sourcing (Organization -> Branch -> Group Label -> Consignment)
-  const [consignmentsLookup, setConsignmentsLookup] = useState<SheetConsignmentLookup[]>([]);
-  const [loadingConsignments, setLoadingConsignments] = useState(false);
-  const [companies, setCompanies] = useState<Array<{ id: string; name: string; branches?: any[] }>>([]);
+  const [consignmentsLookup, setConsignmentsLookup] = useState<SheetConsignmentLookup[]>(
+    () => cachedConsignmentsLookup || []
+  );
+  const [companies, setCompanies] = useState<Array<{ id: string; name: string; branches?: any[] }>>(
+    () => cachedCompaniesList || []
+  );
 
   const [organizationId, setOrganizationId] = useState("");
   const [organizationName, setOrganizationName] = useState("");
@@ -76,9 +84,17 @@ export function LocalPurchaseFormPage() {
   const [offloadingExpense, setOffloadingExpense] = useState<number | "">("");
   const [otherExpense, setOtherExpense] = useState<number | "">("");
 
-  // Remarks & Status
+  // Remarks & Status (Confirmed / Inwarded)
   const [remarks, setRemarks] = useState("");
-  const [status, setStatus] = useState("Confirmed");
+  const [status, setStatus] = useState<"Confirmed" | "Inwarded">("Confirmed");
+  const [existingSlipNumber, setExistingSlipNumber] = useState<string | null>(null);
+
+  // Inward details (visible and configurable when status === "Inwarded")
+  const [inwardWarehouse, setInwardWarehouse] = useState("Main Godown");
+  const [inwardDate, setInwardDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [inwardTransporter, setInwardTransporter] = useState("");
+  const [inwardVehicleNo, setInwardVehicleNo] = useState("");
+  const [inwardRemarks, setInwardRemarks] = useState("");
 
   // Validation state (Product Master visual styling)
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -103,20 +119,6 @@ export function LocalPurchaseFormPage() {
 
   // Product Search state
   const [productSearch, setProductSearch] = useState("");
-  const [productSearchResults, setProductSearchResults] = useState<
-    Array<{
-      id: string;
-      product_name: string;
-      product_code?: string;
-      hsn_id?: string;
-      hsn_code?: string;
-      refund_vat_percent?: number;
-      standard_cost?: number;
-      packaging_quantity?: number;
-      minimum_order_quantity?: number;
-    }>
-  >([]);
-  const [searchLoading, setSearchLoading] = useState(false);
   const [showSearchResults, setShowSearchResults] = useState(false);
   const searchContainerRef = useRef<HTMLDivElement | null>(null);
 
@@ -125,22 +127,10 @@ export function LocalPurchaseFormPage() {
 
   // Lookups
   const supplierLookup = useLookup<{ id: string; company_name: string; supplier_type?: string; brand_description?: string }>(
-    "/suppliers",
-    500
+    "/suppliers/lookup",
+    1000
   );
   const hsnLookup = useLookup<{ id: string; code: string; purchase_vat_percent?: number }>("/masters/hsn", 500);
-  const productLookup = useLookup<{
-    id: string;
-    product_name: string;
-    product_code?: string;
-    hsn_id?: string;
-    hsn_code?: string;
-    purchase_vat_percent?: number;
-    refund_vat_percent?: number;
-    standard_cost?: number;
-    packaging_quantity?: number;
-    minimum_order_quantity?: number;
-  }>("/masters/products", 1000);
 
   // Type-ahead Supplier search & label fetchers
   const supplierFetcher = useCallback(
@@ -148,7 +138,7 @@ export function LocalPurchaseFormPage() {
       let list = supplierLookup.items || [];
       if (!list || list.length === 0) {
         try {
-          const res = await apiGet<any>("/suppliers?page_size=1000");
+          const res = await apiGet<any>("/suppliers/lookup");
           const items = Array.isArray(res.data) ? res.data : res.data?.items || [];
           list = items;
         } catch {
@@ -199,7 +189,7 @@ export function LocalPurchaseFormPage() {
       let list = supplierLookup.items || [];
       if (!list || list.length === 0) {
         try {
-          const res = await apiGet<any>("/suppliers?page_size=1000");
+          const res = await apiGet<any>("/suppliers/lookup");
           const items = Array.isArray(res.data) ? res.data : res.data?.items || [];
           list = items;
         } catch {
@@ -217,71 +207,90 @@ export function LocalPurchaseFormPage() {
     [supplierLookup.items, supplierName]
   );
 
-  // Load existing purchase for Edit mode
+  const applyPurchaseToForm = useCallback((data: LocalPurchaseDetail) => {
+    setOrganizationId(data.organization_id || "");
+    setOrganizationName(data.organization_name || "");
+    setBranchId(data.branch_id || "");
+    setBranchName(data.branch_name || "");
+    setGroupLabel(data.group_label || "");
+    setConsignmentCode(data.consignment_code || "");
+    setPlanningSheetId(data.planning_sheet_id || "");
+    setPlanningColumnId(data.planning_column_id || "");
+    setSupplierId(data.supplier_id);
+    setSupplierName(data.supplier_name);
+    setInvoiceNo(data.invoice_no);
+    setInvoiceDate(data.invoice_date);
+    setCurrency(data.currency || "RMB");
+    setInvoiceTotalValue(data.invoice_total_value);
+    setPackingForwarding(data.total_expenses ? (data as any).packing_forwarding || "" : "");
+    setTransportExpense((data as any).transport_expense || "");
+    setOffloadingExpense((data as any).offloading_expense || "");
+    setOtherExpense((data as any).other_expense || "");
+    setRemarks(data.remarks || "");
+    setExistingSlipNumber((data as any).stock_movement_number || null);
+    setStatus(((data.status === "Inwarded" || (data as any).stock_movement_number) ? "Inwarded" : "Confirmed") as "Confirmed" | "Inwarded");
+    setBillFileUrl(data.bill_file_url || null);
+    if (data.items && data.items.length > 0) {
+      setItems(data.items);
+    }
+  }, []);
+
+  // Load existing purchase for Edit mode (instant 0ms paint from cache + background revalidation)
   useEffect(() => {
     if (!isEdit || !id) return;
-    const loadPurchase = async () => {
+    const cached = getLocalPurchaseDetailCache(id);
+    if (cached) {
+      applyPurchaseToForm(cached);
+      setInitialLoading(false);
+    } else {
       setInitialLoading(true);
+    }
+
+    const loadPurchase = async () => {
       try {
         const { data } = await apiGet<LocalPurchaseDetail>(`/purchases/local/${id}`);
         if (data) {
-          setOrganizationId(data.organization_id || "");
-          setOrganizationName(data.organization_name || "");
-          setBranchId(data.branch_id || "");
-          setBranchName(data.branch_name || "");
-          setGroupLabel(data.group_label || "");
-          setConsignmentCode(data.consignment_code || "");
-          setPlanningSheetId(data.planning_sheet_id || "");
-          setPlanningColumnId(data.planning_column_id || "");
-          setSupplierId(data.supplier_id);
-          setSupplierName(data.supplier_name);
-          setInvoiceNo(data.invoice_no);
-          setInvoiceDate(data.invoice_date);
-          setCurrency(data.currency || "RMB");
-          setInvoiceTotalValue(data.invoice_total_value);
-          setPackingForwarding(data.total_expenses ? (data as any).packing_forwarding || "" : "");
-          setTransportExpense((data as any).transport_expense || "");
-          setOffloadingExpense((data as any).offloading_expense || "");
-          setOtherExpense((data as any).other_expense || "");
-          setRemarks(data.remarks || "");
-          setStatus(data.status || "Confirmed");
-          setBillFileUrl(data.bill_file_url || null);
-          setItems(data.items || []);
+          applyPurchaseToForm(data);
+          updateLocalPurchaseInCache(data);
         }
       } catch (err) {
-        toast(errorMessage(err), "error");
+        if (!cached) {
+          toast(errorMessage(err), "error");
+        }
       } finally {
         setInitialLoading(false);
       }
     };
     loadPurchase();
-  }, [id, isEdit, toast]);
+  }, [id, isEdit, applyPurchaseToForm, toast]);
 
   // Fetch cascading sheets & consignments lookup + company master records on mount
   useEffect(() => {
-    const fetchInitialCascades = async () => {
-      setLoadingConsignments(true);
-      try {
-        const [lookupRes, compRes] = await Promise.all([
-          apiGet<SheetConsignmentLookup[]>("/purchases/local/consignments-lookup"),
-          apiGet<any>("/masters/company-list/lookup").catch(() => ({ data: [] })),
-        ]);
-        const lookupList = Array.isArray(lookupRes.data) ? lookupRes.data : [];
-        setConsignmentsLookup(lookupList);
-
+    // 1. Fetch fresh organizations immediately and independently (instant ~15ms)
+    apiGet<any>("/masters/company-list/lookup")
+      .then((compRes) => {
         const compList = Array.isArray(compRes.data)
           ? compRes.data
           : Array.isArray(compRes.data?.items)
           ? compRes.data.items
           : [];
+        cachedCompaniesList = compList;
         setCompanies(compList);
-      } catch (err) {
+      })
+      .catch((err) => {
+        console.warn("Failed to load organizations lookup:", err);
+      });
+
+    // 2. Fetch fresh consignments in parallel without blocking Organization dropdown
+    apiGet<SheetConsignmentLookup[]>("/purchases/local/consignments-lookup")
+      .then((lookupRes) => {
+        const lookupList = Array.isArray(lookupRes.data) ? lookupRes.data : [];
+        cachedConsignmentsLookup = lookupList;
+        setConsignmentsLookup(lookupList);
+      })
+      .catch((err) => {
         console.error("Failed to load consignments lookup:", err);
-      } finally {
-        setLoadingConsignments(false);
-      }
-    };
-    fetchInitialCascades();
+      });
   }, []);
 
   // Cascading helpers: Available Organizations
@@ -408,9 +417,9 @@ export function LocalPurchaseFormPage() {
 
   const mapConsignmentItemToLocal = (it: ConsignmentProductItem): LocalPurchaseItem => {
     const qty = it.quantity || 0;
-    const rate = it.unit_rate || 0;
+    const rate: number | "" = it.unit_rate && Number(it.unit_rate) > 0 ? Number(it.unit_rate) : "";
+    const itemTotal = typeof rate === "number" ? Number((qty * rate).toFixed(2)) : 0;
     const vat = it.vat_rate || 0;
-    const itemTotal = Number((qty * rate).toFixed(2));
     const vatAmt = Number(((itemTotal * vat) / 100).toFixed(2));
     return {
       product_id: it.product_id,
@@ -418,12 +427,12 @@ export function LocalPurchaseFormPage() {
       product_code: it.product_code || undefined,
       hsn_code: it.hsn_code || undefined,
       quantity: it.quantity,
-      unit_rate: it.unit_rate,
+      unit_rate: rate,
       vat_rate: it.vat_rate,
       item_total: itemTotal,
       vat_amount: vatAmt,
       expense_per_unit: 0,
-      unit_landing_rate: rate,
+      unit_landing_rate: typeof rate === "number" ? rate : 0,
       total_landing_rate: itemTotal,
     };
   };
@@ -880,185 +889,102 @@ export function LocalPurchaseFormPage() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  // All active catalog products (unrestricted)
-  const availableProducts = useMemo(() => {
-    return productLookup.items || [];
-  }, [productLookup.items]);
+  // Products strictly scoped to selected Consignment and Branch (sourced from consignmentRawItems)
+  const availableConsignmentProducts = useMemo<ConsignmentProductItem[]>(() => {
+    if (!planningColumnId || !consignmentRawItems || consignmentRawItems.length === 0) {
+      return [];
+    }
+    // Deduplicate by product_id if same product appears multiple times in planning
+    const seen = new Set<string>();
+    const uniqueList: ConsignmentProductItem[] = [];
+    for (const it of consignmentRawItems) {
+      if (!it.product_id) continue;
+      if (!seen.has(it.product_id)) {
+        seen.add(it.product_id);
+        uniqueList.push(it);
+      }
+    }
 
-  // Instant client-side search across availableProducts (0ms latency)
-  const displayedSearchResults = useMemo(() => {
+    // Sort: if supplierId is selected, prioritize matching supplier items first
+    if (supplierId) {
+      return [...uniqueList].sort((a, b) => {
+        const aMatch = isItemForSupplier(a, supplierId, supplierName) ? 1 : 0;
+        const bMatch = isItemForSupplier(b, supplierId, supplierName) ? 1 : 0;
+        return bMatch - aMatch;
+      });
+    }
+    return uniqueList;
+  }, [planningColumnId, consignmentRawItems, supplierId, supplierName]);
+
+  // Instant client-side search across availableConsignmentProducts
+  const displayedSearchResults = useMemo<ConsignmentProductItem[]>(() => {
     const q = productSearch.trim().toLowerCase();
     if (!q) {
-      return availableProducts.slice(0, 35);
+      return availableConsignmentProducts.slice(0, 50);
     }
-    return availableProducts
-      .filter((p: any) => {
-        const name = (p.product_name || p.product_name_tally || "").toLowerCase();
+    return availableConsignmentProducts
+      .filter((p) => {
+        const name = (p.product_name || "").toLowerCase();
         const code = (p.product_code || "").toLowerCase();
-        const barcode = (p.barcode || "").toLowerCase();
-        return name.includes(q) || code.includes(q) || barcode.includes(q);
+        const sup = (p.supplier_name || p.supplier_brand || "").toLowerCase();
+        return name.includes(q) || code.includes(q) || sup.includes(q);
       })
-      .slice(0, 40);
-  }, [availableProducts, productSearch]);
+      .slice(0, 50);
+  }, [availableConsignmentProducts, productSearch]);
 
-  // Background fallback search for queries not matched in local cache
-  useEffect(() => {
-    const query = productSearch.trim();
-    if (!query || displayedSearchResults.length > 0) {
-      setProductSearchResults([]);
+  const finalSearchResults = displayedSearchResults;
+
+  // Add Consignment Product to line items with planned quantity and blank unit rate
+  const handleAddConsignmentProduct = (prod: ConsignmentProductItem | any) => {
+    const pId = prod.product_id || prod.id;
+    const existingIndex = items.findIndex((it) => it.product_id === pId);
+    if (existingIndex !== -1) {
+      toast(`"${prod.product_name}" is already in the items table (Row #${existingIndex + 1})`, "info");
+      setShowSearchResults(false);
+      setProductSearch("");
       return;
     }
-    const timer = setTimeout(async () => {
-      setSearchLoading(true);
-      try {
-        const { data } = await apiGet<any>(
-          `/masters/products?search=${encodeURIComponent(query)}&page=1&page_size=20&status=active`
-        );
-        const list = Array.isArray(data) ? data : Array.isArray(data?.items) ? data.items : [];
-        setProductSearchResults(
-          list.map((it: any) => ({
-            id: it.id,
-            product_name: it.product_name || it.product_name_tally || "Unnamed Product",
-            product_code: it.product_code,
-            hsn_id: it.hsn_id,
-            hsn_code: it.hsn_code,
-            purchase_vat_percent: it.purchase_vat_percent,
-            refund_vat_percent: it.refund_vat_percent,
-            standard_cost: it.standard_cost,
-            packaging_quantity: it.packaging_quantity != null ? Number(it.packaging_quantity) : undefined,
-            minimum_order_quantity: it.minimum_order_quantity != null ? Number(it.minimum_order_quantity) : undefined,
-          }))
-        );
-      } catch {
-        // quiet error
-      } finally {
-        setSearchLoading(false);
-      }
-    }, 250);
 
-    return () => clearTimeout(timer);
-  }, [productSearch, displayedSearchResults.length]);
-
-  const finalSearchResults = useMemo(() => {
-    if (displayedSearchResults.length > 0) return displayedSearchResults;
-    return productSearchResults;
-  }, [displayedSearchResults, productSearchResults]);
-
-  // Add Product to line items with Supplier Quote & MOQ / Pack Qty priority
-  const handleAddProduct = async (prod: {
-    id: string;
-    product_name: string;
-    product_code?: string;
-    hsn_id?: string;
-    hsn_code?: string;
-    purchase_vat_percent?: number;
-    refund_vat_percent?: number;
-    standard_cost?: number;
-    packaging_quantity?: number;
-    minimum_order_quantity?: number;
-  }) => {
     const resolvedHsnObj = prod.hsn_id ? hsnLookup.items?.find((h) => h.id === prod.hsn_id) : undefined;
-    const resolvedHsn =
-      prod.hsn_code ||
-      resolvedHsnObj?.code ||
-      null;
-
-    let quotePrice: number | undefined = undefined;
-    let quoteMoq: number | undefined = undefined;
-
-    try {
-      const res = await apiGet<Array<{
-        supplier_id: string;
-        unit_price?: number | null;
-        currency?: string;
-        moq?: number | null;
-        is_preferred?: boolean;
-      }>>(`/inventory/product-prices/${prod.id}/suppliers`);
-
-      const quotes = Array.isArray(res.data) ? res.data : [];
-      if (quotes.length > 0) {
-        // Priority 1: Match the currently selected supplier on the purchase invoice
-        const match = supplierId ? quotes.find((q) => q.supplier_id === supplierId) : undefined;
-        if (match && match.unit_price != null && Number(match.unit_price) > 0) {
-          quotePrice = Number(match.unit_price);
-          if (match.moq != null && Number(match.moq) > 0) {
-            quoteMoq = Number(match.moq);
-          }
-        } else {
-          // Priority 2: Fallback to preferred supplier quote, or first available quote with price > 0
-          const preferred = quotes.find((q) => q.is_preferred && q.unit_price != null && Number(q.unit_price) > 0);
-          const fallback = preferred || quotes.find((q) => q.unit_price != null && Number(q.unit_price) > 0);
-          if (fallback && fallback.unit_price != null && Number(fallback.unit_price) > 0) {
-            quotePrice = Number(fallback.unit_price);
-            if (fallback.moq != null && Number(fallback.moq) > 0) {
-              quoteMoq = Number(fallback.moq);
-            }
-          }
-        }
-      }
-    } catch {
-      // quiet fallback
-    }
-
-    // Unit Rate resolution:
-    // Only check Product Prices quotes (Priority 1: Selected Supplier, Priority 2: Preferred/Available quote).
-    // If no supplier quote exists in Product Prices, do NOT check Product Master: leave as "" so user writes their own price directly.
-    const resolvedRate: number | "" =
-      quotePrice !== undefined && quotePrice > 0
-        ? quotePrice
-        : "";
-
-    // Quantity resolution rules:
-    // Priority 1: Supplier Quote MOQ if > 0
-    // Priority 2: Product Master Packaging Quantity if > 0 (or minimum_order_quantity)
-    // Priority 3: If both are 0 or empty, do NOT default to 1! Leave as "" so user writes on their own
-    let resolvedQuantity: number | "" = "";
-    if (quoteMoq && quoteMoq > 0) {
-      resolvedQuantity = quoteMoq;
-    } else if (prod.packaging_quantity && Number(prod.packaging_quantity) > 0) {
-      resolvedQuantity = Number(prod.packaging_quantity);
-    } else if (prod.minimum_order_quantity && Number(prod.minimum_order_quantity) > 0) {
-      resolvedQuantity = Number(prod.minimum_order_quantity);
-    } else {
-      resolvedQuantity = "";
-    }
-
+    const resolvedHsn = prod.hsn_code || resolvedHsnObj?.code || null;
     const vatRate =
-      resolvedHsnObj?.purchase_vat_percent !== undefined && resolvedHsnObj?.purchase_vat_percent !== null
-        ? Number(resolvedHsnObj.purchase_vat_percent)
-        : (prod.purchase_vat_percent !== undefined && prod.purchase_vat_percent !== null
+      prod.vat_rate != null
+        ? Number(prod.vat_rate)
+        : (prod.purchase_vat_percent != null
             ? Number(prod.purchase_vat_percent)
-            : 0);
+            : (resolvedHsnObj?.purchase_vat_percent != null
+                ? Number(resolvedHsnObj.purchase_vat_percent)
+                : 0));
 
-    const initialQty = typeof resolvedQuantity === "number" ? resolvedQuantity : 0;
-    const initialRate = typeof resolvedRate === "number" ? resolvedRate : 0;
-    const initialItemTotal = Number((initialQty * initialRate).toFixed(2));
-    const initialVatAmount = Number(((initialItemTotal * vatRate) / 100).toFixed(2));
+    const plannedQty = prod.quantity && Number(prod.quantity) > 0 ? Number(prod.quantity) : "";
+    const resolvedRate: number | "" = ""; // Left blank as requested for invoice entry
 
     const newItem: LocalPurchaseItem = {
-      product_id: prod.id,
+      product_id: pId,
       product_name: prod.product_name,
-      product_code: prod.product_code || null,
-      hsn_code: resolvedHsn,
-      quantity: resolvedQuantity,
+      product_code: prod.product_code || undefined,
+      hsn_code: resolvedHsn || undefined,
+      quantity: plannedQty,
       unit_rate: resolvedRate,
       vat_rate: vatRate,
-      item_total: initialItemTotal,
-      vat_amount: initialVatAmount,
+      item_total: 0,
+      vat_amount: 0,
       expense_per_unit: 0,
-      unit_landing_rate: initialRate,
-      total_landing_rate: initialItemTotal,
+      unit_landing_rate: 0,
+      total_landing_rate: 0,
     };
 
     setItems((prev) => {
-      // If there is currently only 1 row and it is completely blank (no product name and 0 unit rate), replace it
+      // If there is currently only 1 row and it is completely blank, replace it
       if (prev.length === 1 && !prev[0].product_name && (!prev[0].unit_rate || prev[0].unit_rate === 0)) {
         return [newItem];
       }
       return [...prev, newItem];
     });
+
     setProductSearch("");
     setShowSearchResults(false);
+    toast(`Added "${prod.product_name}" (Planned Qty: ${prod.quantity || 0})`, "success");
     if (errors.items) {
       setErrors((prev) => {
         const next = { ...prev };
@@ -1444,12 +1370,68 @@ export function LocalPurchaseFormPage() {
         })),
       };
 
+      let savedPurchaseId: string = id || "";
+      let savedDetail: LocalPurchaseDetail | null = null;
       if (isEdit && id) {
-        await apiPatch(`/purchases/local/${id}`, payload);
-        toast("Local purchase updated successfully!", "success");
+        const patchRes = await apiPatch<LocalPurchaseDetail>(`/purchases/local/${id}`, payload);
+        savedPurchaseId = id;
+        savedDetail = patchRes.data || null;
       } else {
-        await apiPost("/purchases/local", payload);
-        toast("Local purchase created successfully!", "success");
+        const createRes = await apiPost<LocalPurchaseDetail>("/purchases/local", payload);
+        savedPurchaseId = createRes.data?.id || "";
+        savedDetail = createRes.data || null;
+      }
+
+      // If status is Inwarded, automatically execute warehouse stock inward
+      if (status === "Inwarded" && savedPurchaseId) {
+        try {
+          const inwardPayload = {
+            movement_date: inwardDate || invoiceDate,
+            warehouse_location: inwardWarehouse.trim() || "Main Godown",
+            vehicle_no: inwardVehicleNo.trim() || null,
+            transporter_name: inwardTransporter.trim() || null,
+            remarks: inwardRemarks.trim() || `Auto-inwarded on purchase save (${invoiceNo})`,
+            items: calculations.calculatedItems.map((it) => {
+              const expected = Number(it.quantity) || 0;
+              return {
+                product_id: it.product_id || null,
+                product_name: it.product_name,
+                product_code: it.product_code || null,
+                expected_quantity: expected,
+                quantity: expected,
+                damaged_quantity: 0,
+                unit_rate: Number(it.unit_rate) || 0,
+              };
+            }),
+          };
+
+          const inwRes = await apiPost<{ stock_movement_number?: string }>(
+            `/purchases/local/${savedPurchaseId}/inward`,
+            inwardPayload
+          );
+          if (savedDetail) {
+            savedDetail.status = "Inwarded";
+            savedDetail.stock_movement_number = inwRes.data?.stock_movement_number;
+          }
+          toast(
+            `Purchase saved & inwarded into warehouse (${inwRes.data?.stock_movement_number || "INW"})!`,
+            "success"
+          );
+        } catch (inwErr: any) {
+          if (String(inwErr?.message || "").includes("already been inwarded")) {
+            toast(isEdit ? "Local purchase updated successfully!" : "Local purchase created successfully!", "success");
+          } else {
+            toast(`Purchase saved, but warehouse inward receipt failed: ${errorMessage(inwErr)}`, "error");
+          }
+        }
+      } else {
+        toast(isEdit ? "Local purchase updated successfully!" : "Local purchase created successfully!", "success");
+      }
+
+      // CRITICAL: Immediately update in-memory cache so navigating back to list
+      // and clicking the blue link shows the freshly updated data at 0ms!
+      if (savedDetail) {
+        updateLocalPurchaseInCache(savedDetail);
       }
 
       navigate("/purchase/local");
@@ -1614,7 +1596,6 @@ export function LocalPurchaseFormPage() {
               <div style={{ position: "relative", zIndex: 60 }}>
                 <label style={{ fontSize: "12.5px", fontWeight: 700, color: "#334155", marginBottom: "6px", display: "block" }}>
                   Organization <span style={{ color: "#ef4444" }}>*</span>
-                  {loadingConsignments && <span style={{ fontSize: "11px", color: "#0284c7", marginLeft: "6px" }}>⏳ Loading...</span>}
                 </label>
                 <SearchableDropdown
                   value={organizationId || null}
@@ -1850,11 +1831,11 @@ export function LocalPurchaseFormPage() {
               </div>
             </div>
 
-            {/* ROW 3: Currency, Invoice Total Value with VAT, Bill Document Attachment */}
+            {/* ROW 3: Currency, Status, Invoice Total Value with VAT, Bill Document Attachment */}
             <div
               style={{
                 display: "grid",
-                gridTemplateColumns: "minmax(140px, 0.9fr) minmax(200px, 1.3fr) minmax(260px, 1.8fr)",
+                gridTemplateColumns: "minmax(120px, 0.8fr) minmax(150px, 1fr) minmax(180px, 1.2fr) minmax(220px, 1.5fr)",
                 gap: "16px",
                 paddingTop: "14px",
                 borderTop: "1px dashed #e2e8f0",
@@ -1887,6 +1868,35 @@ export function LocalPurchaseFormPage() {
                 </select>
                 <span style={{ fontSize: "11px", color: "#94a3b8", marginTop: "4px", display: "block" }}>
                   Billing currency
+                </span>
+              </div>
+
+              {/* 2. Status (Confirmed / Inwarded) */}
+              <div>
+                <label style={{ fontSize: "12.5px", fontWeight: 700, color: "#334155", marginBottom: "6px", display: "block" }}>
+                  Status <span style={{ color: "#ef4444" }}>*</span>
+                </label>
+                <select
+                  value={status}
+                  onChange={(e) => setStatus(e.target.value as "Confirmed" | "Inwarded")}
+                  style={{
+                    width: "100%",
+                    padding: "8px 10px",
+                    borderRadius: "6px",
+                    border: status === "Inwarded" ? "1.5px solid #16a34a" : "1.5px solid #2563eb",
+                    background: status === "Inwarded" ? "#f0fdf4" : "#eff6ff",
+                    color: status === "Inwarded" ? "#166534" : "#1e40af",
+                    fontSize: "13px",
+                    fontWeight: 700,
+                    boxSizing: "border-box",
+                    cursor: "pointer",
+                  }}
+                >
+                  <option value="Confirmed">● Confirmed</option>
+                  <option value="Inwarded">● Inwarded (Stock In)</option>
+                </select>
+                <span style={{ fontSize: "11px", color: status === "Inwarded" ? "#15803d" : "#64748b", marginTop: "4px", display: "block", fontWeight: 500 }}>
+                  {status === "Inwarded" ? "📦 Inward details active" : "Default order status"}
                 </span>
               </div>
 
@@ -2034,6 +2044,212 @@ export function LocalPurchaseFormPage() {
             </div>
           </div>
 
+          {/* INWARD STOCK DETAILS CARD (Shown when Status is Inwarded) */}
+          {status === "Inwarded" && (
+            <div
+              className="card"
+              style={{
+                background: "#f0fdf4",
+                border: "1.5px solid #86efac",
+                borderRadius: "10px",
+                padding: "18px 22px",
+                marginBottom: "16px",
+                boxShadow: "0 2px 5px rgba(22, 101, 52, 0.08)",
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  marginBottom: "14px",
+                  borderBottom: "1px dashed #bbf7d0",
+                  paddingBottom: "10px",
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                  <span style={{ fontSize: "20px" }}>📦</span>
+                  <div>
+                    <h4 style={{ margin: 0, fontSize: "14px", fontWeight: 700, color: "#166534" }}>
+                      Warehouse Inward Stock Receipt
+                    </h4>
+                    <p style={{ margin: 0, fontSize: "12px", color: "#15803d" }}>
+                      Goods will be automatically credited to warehouse stock ledger upon saving.
+                    </p>
+                  </div>
+                </div>
+                {existingSlipNumber && (
+                  <span
+                    style={{
+                      background: "#dcfce7",
+                      color: "#166534",
+                      border: "1px solid #86efac",
+                      fontSize: "11.5px",
+                      fontWeight: 700,
+                      padding: "3px 10px",
+                      borderRadius: "12px",
+                    }}
+                  >
+                    ✓ Linked Voucher: {existingSlipNumber}
+                  </span>
+                )}
+              </div>
+
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
+                  gap: "14px",
+                }}
+              >
+                <div>
+                  <label
+                    style={{
+                      fontSize: "12px",
+                      fontWeight: 700,
+                      color: "#166534",
+                      marginBottom: "4px",
+                      display: "block",
+                    }}
+                  >
+                    Receiving Warehouse <span style={{ color: "#ef4444" }}>*</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={inwardWarehouse}
+                    onChange={(e) => setInwardWarehouse(e.target.value)}
+                    placeholder="e.g. Main Godown, Bay 3"
+                    style={{
+                      width: "100%",
+                      padding: "7px 10px",
+                      borderRadius: "6px",
+                      border: "1px solid #86efac",
+                      fontSize: "13px",
+                      background: "#ffffff",
+                      boxSizing: "border-box",
+                      fontWeight: 500,
+                    }}
+                  />
+                </div>
+
+                <div>
+                  <label
+                    style={{
+                      fontSize: "12px",
+                      fontWeight: 700,
+                      color: "#166534",
+                      marginBottom: "4px",
+                      display: "block",
+                    }}
+                  >
+                    Movement / Inward Date <span style={{ color: "#ef4444" }}>*</span>
+                  </label>
+                  <input
+                    type="date"
+                    value={inwardDate}
+                    onChange={(e) => setInwardDate(e.target.value)}
+                    style={{
+                      width: "100%",
+                      padding: "6px 10px",
+                      borderRadius: "6px",
+                      border: "1px solid #86efac",
+                      fontSize: "13px",
+                      background: "#ffffff",
+                      boxSizing: "border-box",
+                    }}
+                  />
+                </div>
+
+                <div>
+                  <label
+                    style={{
+                      fontSize: "12px",
+                      fontWeight: 700,
+                      color: "#166534",
+                      marginBottom: "4px",
+                      display: "block",
+                    }}
+                  >
+                    Transporter Name
+                  </label>
+                  <input
+                    type="text"
+                    value={inwardTransporter}
+                    onChange={(e) => setInwardTransporter(e.target.value)}
+                    placeholder="e.g. SF Express / Vendor Fleet"
+                    style={{
+                      width: "100%",
+                      padding: "7px 10px",
+                      borderRadius: "6px",
+                      border: "1px solid #86efac",
+                      fontSize: "13px",
+                      background: "#ffffff",
+                      boxSizing: "border-box",
+                    }}
+                  />
+                </div>
+
+                <div>
+                  <label
+                    style={{
+                      fontSize: "12px",
+                      fontWeight: 700,
+                      color: "#166534",
+                      marginBottom: "4px",
+                      display: "block",
+                    }}
+                  >
+                    Vehicle Registration No
+                  </label>
+                  <input
+                    type="text"
+                    value={inwardVehicleNo}
+                    onChange={(e) => setInwardVehicleNo(e.target.value)}
+                    placeholder="e.g. 浙B-88888"
+                    style={{
+                      width: "100%",
+                      padding: "7px 10px",
+                      borderRadius: "6px",
+                      border: "1px solid #86efac",
+                      fontSize: "13px",
+                      background: "#ffffff",
+                      boxSizing: "border-box",
+                    }}
+                  />
+                </div>
+
+                <div>
+                  <label
+                    style={{
+                      fontSize: "12px",
+                      fontWeight: 700,
+                      color: "#166534",
+                      marginBottom: "4px",
+                      display: "block",
+                    }}
+                  >
+                    Inward Delivery Remarks
+                  </label>
+                  <input
+                    type="text"
+                    value={inwardRemarks}
+                    onChange={(e) => setInwardRemarks(e.target.value)}
+                    placeholder="e.g. Received in good order at Godown"
+                    style={{
+                      width: "100%",
+                      padding: "7px 10px",
+                      borderRadius: "6px",
+                      border: "1px solid #86efac",
+                      fontSize: "13px",
+                      background: "#ffffff",
+                      boxSizing: "border-box",
+                    }}
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* CARD 2: Value-Based (VB) Landing Expense Engine */}
           <div
             className="card"
@@ -2174,7 +2390,7 @@ export function LocalPurchaseFormPage() {
             </div>
           </div>
 
-          {/* CARD 3: PRODUCT SEARCH (Inhyma ERP Style) */}
+          {/* CARD 3: PRODUCT SEARCH (Strictly Scoped to Selected Branch & Consignment) */}
           <div
             className="card"
             style={{
@@ -2186,12 +2402,14 @@ export function LocalPurchaseFormPage() {
               boxShadow: "0 1px 3px rgba(0,0,0,0.05)",
             }}
           >
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px", flexWrap: "wrap", gap: "6px" }}>
               <div style={{ fontSize: "12px", fontWeight: 700, color: "#475569", textTransform: "uppercase", letterSpacing: "0.5px" }}>
                 PRODUCT SEARCH
               </div>
-              <div style={{ fontSize: "12px", color: "#64748b" }}>
-                Search and select any active product from catalog to add to items
+              <div style={{ fontSize: "12px", color: !planningColumnId ? "#e11d48" : "#0369a1", fontWeight: 600 }}>
+                {!planningColumnId
+                  ? "🔒 Please select Branch & Consignment in Card 1 first to search planned products"
+                  : `📦 Showing planned products for Consignment "${consignmentCode}" (${availableConsignmentProducts.length} items)`}
               </div>
             </div>
 
@@ -2199,29 +2417,40 @@ export function LocalPurchaseFormPage() {
               <div style={{ position: "relative" }}>
                 <input
                   type="text"
-                  placeholder="Search products (Name, Model, Code, Barcode)..."
+                  disabled={!planningColumnId}
+                  placeholder={
+                    !planningColumnId
+                      ? "🔒 Select Branch & Consignment in Card 1 above first to search planned container products..."
+                      : `Search planned products in Consignment ${consignmentCode} (Name, Code, Supplier)...`
+                  }
                   value={productSearch}
-                  onFocus={() => setShowSearchResults(true)}
+                  onFocus={() => {
+                    if (planningColumnId) setShowSearchResults(true);
+                  }}
                   onChange={(e) => {
                     setProductSearch(e.target.value);
-                    setShowSearchResults(true);
+                    if (planningColumnId) setShowSearchResults(true);
                   }}
                   style={{
                     width: "100%",
                     padding: "10px 38px 10px 14px",
                     borderRadius: "6px",
-                    border: showSearchResults ? "1.5px solid #0061f2" : "1.5px solid #3b82f6",
+                    border: !planningColumnId
+                      ? "1.5px dashed #cbd5e1"
+                      : showSearchResults
+                      ? "1.5px solid #0061f2"
+                      : "1.5px solid #3b82f6",
                     fontSize: "13.5px",
                     fontWeight: 500,
                     boxSizing: "border-box",
                     outline: "none",
-                    background: "#ffffff",
-                    color: "#0f172a",
-                    cursor: "text",
-                    boxShadow: showSearchResults ? "0 0 0 3px rgba(59, 130, 246, 0.15)" : "none",
+                    background: !planningColumnId ? "#f8fafc" : "#ffffff",
+                    color: !planningColumnId ? "#94a3b8" : "#0f172a",
+                    cursor: !planningColumnId ? "not-allowed" : "text",
+                    boxShadow: showSearchResults && planningColumnId ? "0 0 0 3px rgba(59, 130, 246, 0.15)" : "none",
                   }}
                 />
-                {searchLoading && (
+                {loadingConsignmentItems && (
                   <span style={{ position: "absolute", right: "12px", top: "50%", transform: "translateY(-50%)", fontSize: "14px" }}>
                     ⏳
                   </span>
@@ -2229,7 +2458,7 @@ export function LocalPurchaseFormPage() {
               </div>
 
               {/* Autocomplete Results Dropdown Opening Strictly Below */}
-              {showSearchResults && (
+              {showSearchResults && planningColumnId && (
                 <div
                   style={{
                     position: "absolute",
@@ -2241,52 +2470,101 @@ export function LocalPurchaseFormPage() {
                     boxShadow: "0 10px 25px rgba(0,0,0,0.18)",
                     border: "1.5px solid #cbd5e1",
                     zIndex: 1000,
-                    maxHeight: "300px",
+                    maxHeight: "320px",
                     overflowY: "auto",
                   }}
                 >
-                  <div style={{ padding: "6px 12px", background: "#f8fafc", borderBottom: "1px solid #e2e8f0", fontSize: "11px", fontWeight: 700, color: "#64748b", textTransform: "uppercase" }}>
-                    Click product to add to consignment items ({finalSearchResults.length} available)
+                  <div
+                    style={{
+                      padding: "8px 12px",
+                      background: "#f8fafc",
+                      borderBottom: "1px solid #e2e8f0",
+                      fontSize: "11px",
+                      fontWeight: 700,
+                      color: "#64748b",
+                      textTransform: "uppercase",
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                    }}
+                  >
+                    <span>
+                      Planned Products in {consignmentCode} ({finalSearchResults.length} available)
+                    </span>
+                    {supplierName && (
+                      <span style={{ color: "#059669", fontWeight: 700 }}>
+                        Prioritizing: {supplierName}
+                      </span>
+                    )}
                   </div>
+
                   {finalSearchResults.length > 0 ? (
-                    finalSearchResults.map((prod: any) => (
-                      <div
-                        key={prod.id}
-                        onClick={() => handleAddProduct(prod)}
-                        style={{
-                          padding: "10px 14px",
-                          borderBottom: "1px solid #f1f5f9",
-                          cursor: "pointer",
-                          display: "flex",
-                          justifyContent: "space-between",
-                          alignItems: "center",
-                          fontSize: "13px",
-                          background: "#ffffff",
-                        }}
-                        onMouseEnter={(e) => (e.currentTarget.style.background = "#eff6ff")}
-                        onMouseLeave={(e) => (e.currentTarget.style.background = "#ffffff")}
-                      >
-                        <div>
-                          <span style={{ fontWeight: 700, color: "#1e293b" }}>{prod.product_name}</span>
-                          {prod.product_code && (
-                            <span style={{ marginLeft: "8px", padding: "2px 6px", fontSize: "11px", fontWeight: 600, background: "#f1f5f9", color: "#475569", borderRadius: "4px", border: "1px solid #cbd5e1" }}>
-                              {prod.product_code}
+                    finalSearchResults.map((prod) => {
+                      const isMatch = supplierId ? isItemForSupplier(prod, supplierId, supplierName) : false;
+                      const isAlreadyAdded = items.some((it) => it.product_id === prod.product_id);
+                      return (
+                        <div
+                          key={prod.product_id}
+                          onClick={() => handleAddConsignmentProduct(prod)}
+                          style={{
+                            padding: "10px 14px",
+                            borderBottom: "1px solid #f1f5f9",
+                            cursor: "pointer",
+                            display: "flex",
+                            justifyContent: "space-between",
+                            alignItems: "center",
+                            fontSize: "13px",
+                            background: isMatch ? "#f0fdf4" : "#ffffff",
+                            transition: "background 0.15s ease",
+                          }}
+                          onMouseEnter={(e) => (e.currentTarget.style.background = isMatch ? "#dcfce7" : "#eff6ff")}
+                          onMouseLeave={(e) => (e.currentTarget.style.background = isMatch ? "#f0fdf4" : "#ffffff")}
+                        >
+                          <div>
+                            <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                              <span style={{ fontWeight: 700, color: "#1e293b" }}>{prod.product_name}</span>
+                              {prod.product_code && (
+                                <span style={{ padding: "1px 6px", fontSize: "11px", fontWeight: 600, background: "#f1f5f9", color: "#475569", borderRadius: "4px", border: "1px solid #cbd5e1" }}>
+                                  {prod.product_code}
+                                </span>
+                              )}
+                              {isMatch && (
+                                <span style={{ padding: "1px 6px", fontSize: "11px", fontWeight: 700, background: "#dcfce7", color: "#15803d", borderRadius: "4px", border: "1px solid #86efac" }}>
+                                  ✓ Selected Supplier
+                                </span>
+                              )}
+                              {isAlreadyAdded && (
+                                <span style={{ padding: "1px 6px", fontSize: "11px", fontWeight: 600, background: "#fef3c7", color: "#92400e", borderRadius: "4px", border: "1px solid #fde68a" }}>
+                                  In Table
+                                </span>
+                              )}
+                            </div>
+                            <div style={{ fontSize: "12px", color: "#64748b", marginTop: "3px", display: "flex", gap: "12px", flexWrap: "wrap" }}>
+                              <span>📦 Planned Qty: <strong style={{ color: "#0f172a" }}>{prod.quantity || 0}</strong></span>
+                              {(prod.supplier_name || prod.supplier_brand) && (
+                                <span>🏭 Supplier: <strong>{prod.supplier_name || prod.supplier_brand}</strong></span>
+                              )}
+                              {prod.hsn_code && <span>HSN: {prod.hsn_code}</span>}
+                            </div>
+                          </div>
+                          <div style={{ fontSize: "12px", color: "#64748b", whiteSpace: "nowrap", textAlign: "right" }}>
+                            <div>
+                              VAT: <strong>{prod.vat_rate != null ? `${prod.vat_rate}%` : "0%"}</strong>
+                            </div>
+                            <span style={{ fontSize: "11px", color: isAlreadyAdded ? "#92400e" : "#2563eb", fontWeight: 700 }}>
+                              {isAlreadyAdded ? "Added" : "+ Add Item"}
                             </span>
-                          )}
+                          </div>
                         </div>
-                        <div style={{ fontSize: "12px", color: "#64748b", whiteSpace: "nowrap" }}>
-                          VAT: <strong>{prod.refund_vat_percent != null ? `${prod.refund_vat_percent}%` : "0%"}</strong>
-                          {prod.standard_cost && prod.standard_cost > 0 && (
-                            <span style={{ marginLeft: "8px", color: "#059669", fontWeight: 700 }}>
-                              Cost: {currencySymbol}{prod.standard_cost}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    ))
+                      );
+                    })
+                  ) : availableConsignmentProducts.length === 0 ? (
+                    <div style={{ padding: "16px", color: "#64748b", fontSize: "13px", textAlign: "center" }}>
+                      Consignment "{consignmentCode}" does not have any planned items with quantity &gt; 0.
+                    </div>
                   ) : (
                     <div style={{ padding: "16px", color: "#64748b", fontSize: "13px", textAlign: "center" }}>
-                      No products found matching "<strong>{productSearch}</strong>".
+                      No planned products in Consignment "{consignmentCode}" match "<strong>{productSearch}</strong>".
                     </div>
                   )}
                 </div>

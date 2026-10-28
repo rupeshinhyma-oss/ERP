@@ -325,6 +325,13 @@ function BuyerSkeletonRows({
   );
 }
 
+interface BuyerListCacheEntry {
+  rows: Buyer[];
+  totalRecords: number;
+  timestamp: number;
+}
+const buyerListCache = new Map<string, BuyerListCacheEntry>();
+
 export function BuyersPage() {
   const { hasPermission } = useAuth();
   const confirm = useConfirm();
@@ -338,11 +345,12 @@ export function BuyersPage() {
   const canEditPotential = hasPermission("buyer.potential");
   const canEditClientGrade = hasPermission("buyer.clientgrade");
 
-  const [rows, setRows] = useState<Buyer[]>([]);
-  const [totalRecords, setTotalRecords] = useState(0);
+  const initialCache = buyerListCache.get("default");
+  const [rows, setRows] = useState<Buyer[]>(() => initialCache?.rows || []);
+  const [totalRecords, setTotalRecords] = useState(() => initialCache?.totalRecords || 0);
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(() => !initialCache);
   const [error, setError] = useState<unknown>(null);
   const [reloadCounter, setReloadCounter] = useState(0);
 
@@ -713,30 +721,38 @@ export function BuyersPage() {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      setLoading(true);
+      const params: Record<string, string | number | boolean | null | undefined> = {
+        search: effectiveSearch,
+        page: currentPage,
+        page_size: pageSize,
+        is_active: statusTab === "active",
+        buyer_type: buyerTypeFilter || undefined,
+        current_status: statusFilter || undefined,
+        potential: potentialFilter || undefined,
+        buyer_grade: gradeFilter || undefined,
+        country_id: countryFilter || undefined,
+        category_id: categoryFilter || undefined,
+        sub_category_id: subCategoryFilter || undefined,
+      };
+
+      const queryKey = toQueryString(params);
+      const cached = buyerListCache.get(queryKey) || buyerListCache.get("default");
+      if (!cached && rows.length === 0) {
+        setLoading(true);
+      }
       setError(null);
       try {
-        const params: Record<string, string | number | boolean | null | undefined> = {
-          search: effectiveSearch,
-          page: currentPage,
-          page_size: pageSize,
-          is_active: statusTab === "active",
-          buyer_type: buyerTypeFilter || undefined,
-          current_status: statusFilter || undefined,
-          potential: potentialFilter || undefined,
-          buyer_grade: gradeFilter || undefined,
-          country_id: countryFilter || undefined,
-          category_id: categoryFilter || undefined,
-          sub_category_id: subCategoryFilter || undefined,
-        };
-
         const { data, meta } = await apiGet<Buyer[]>("/buyers" + toQueryString(params));
         if (!cancelled) {
-          setRows(data || []);
-          setTotalRecords(meta?.pagination?.total_records ?? data?.length ?? 0);
+          const list = data || [];
+          const total = meta?.pagination?.total_records ?? list.length ?? 0;
+          setRows(list);
+          setTotalRecords(total);
+          buyerListCache.set(queryKey, { rows: list, totalRecords: total, timestamp: Date.now() });
+          buyerListCache.set("default", { rows: list, totalRecords: total, timestamp: Date.now() });
         }
       } catch (err) {
-        if (!cancelled) setError(err);
+        if (!cancelled && !cached) setError(err);
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -1045,56 +1061,48 @@ export function BuyersPage() {
     setEditingId(buyer.id);
     setError(null);
     setValidationErrors({});
-    let fullBuyer: Buyer = buyer;
-    try {
-      const { data } = await apiGet<Buyer>(`/buyers/${buyer.id}`);
-      if (data) {
-        fullBuyer = data;
-      }
-    } catch (err) {
-      console.error("Failed to load full buyer profile for editing:", err);
-    }
 
+    // 1. POPULATE FORM IMMEDIATELY AT 0ms FROM LOCAL ROW
     setWhatsappSameAsCalling(
-      Boolean(fullBuyer.contact_calling_number && fullBuyer.contact_calling_number === fullBuyer.contact_whatsapp_number)
+      Boolean(buyer.contact_calling_number && buyer.contact_calling_number === buyer.contact_whatsapp_number)
     );
     setForm({
-      company_name: fullBuyer.company_name,
-      buyer_type: fullBuyer.buyer_type || "",
-      country_id: fullBuyer.country_id,
-      state_id: fullBuyer.state_id || "",
-      city: fullBuyer.city || "",
-      address: fullBuyer.address || "",
-      contact_salutation: fullBuyer.contact_salutation || "",
-      contact_full_name: fullBuyer.contact_full_name || "",
-      contact_designation: fullBuyer.contact_designation || "",
-      contact_calling_number: fullBuyer.contact_calling_number || "",
-      contact_whatsapp_number: fullBuyer.contact_whatsapp_number || "",
-      emails: fullBuyer.emails || [],
-      tax_id_number: fullBuyer.tax_id_number || "",
-      website: fullBuyer.website || "",
-      current_status: fullBuyer.current_status || "",
-      product_range: fullBuyer.product_range || "",
-      potential: fullBuyer.potential || "",
-      potential_reason: fullBuyer.potential_reason || "",
-      buyer_grade: fullBuyer.buyer_grade || "",
-      currently_buying_from: fullBuyer.currently_buying_from || "",
-      overall_remarks: fullBuyer.overall_remarks || "",
-      is_active: fullBuyer.is_active !== false ? "true" : "false",
+      company_name: buyer.company_name || "",
+      buyer_type: buyer.buyer_type || "",
+      country_id: buyer.country_id,
+      state_id: buyer.state_id || "",
+      city: buyer.city || "",
+      address: buyer.address || "",
+      contact_salutation: buyer.contact_salutation || "",
+      contact_full_name: buyer.contact_full_name || "",
+      contact_designation: buyer.contact_designation || "",
+      contact_calling_number: buyer.contact_calling_number || "",
+      contact_whatsapp_number: buyer.contact_whatsapp_number || "",
+      emails: buyer.emails || [],
+      tax_id_number: buyer.tax_id_number || "",
+      website: buyer.website || "",
+      current_status: buyer.current_status || "",
+      product_range: buyer.product_range || "",
+      potential: buyer.potential || "",
+      potential_reason: buyer.potential_reason || "",
+      buyer_grade: buyer.buyer_grade || "",
+      currently_buying_from: buyer.currently_buying_from || "",
+      overall_remarks: buyer.overall_remarks || "",
+      is_active: buyer.is_active !== false ? "true" : "false",
     });
-    setCategoryIds(fullBuyer.category_ids || []);
-    setSubCategoryIds(fullBuyer.sub_category_ids || []);
-    setFormStateId(fullBuyer.state_id || null);
+    setCategoryIds(buyer.category_ids || []);
+    setSubCategoryIds(buyer.sub_category_ids || []);
+    setFormStateId(buyer.state_id || null);
     setFormCityId(null);
     setIsCompanyInputFocused(false);
-    if (fullBuyer.city && fullBuyer.country_id) {
+    if (buyer.city && buyer.country_id) {
       void (async () => {
         try {
           const res = await apiGet<Array<{ id: string; name: string }>>(
-            `/masters/cities${toQueryString({ search: fullBuyer.city, country_id: fullBuyer.country_id, page: 1, page_size: 5 })}`
+            `/masters/cities${toQueryString({ search: buyer.city, country_id: buyer.country_id, page: 1, page_size: 5 })}`
           );
           const matched = res.data?.find(
-            (c) => c.name.toLowerCase() === fullBuyer.city?.toLowerCase() || c.id === fullBuyer.city
+            (c) => c.name.toLowerCase() === buyer.city?.toLowerCase() || c.id === buyer.city
           );
           if (matched) {
             setFormCityId(matched.id);
@@ -1103,6 +1111,42 @@ export function BuyersPage() {
           // ignore
         }
       })();
+    }
+
+    // 2. Fetch full buyer profile in background and enrich silently
+    try {
+      const { data } = await apiGet<Buyer>(`/buyers/${buyer.id}`);
+      if (data) {
+        setForm((f) => ({
+          ...f,
+          company_name: data.company_name || f.company_name,
+          buyer_type: data.buyer_type || f.buyer_type,
+          country_id: data.country_id || f.country_id,
+          state_id: data.state_id || f.state_id,
+          city: data.city || f.city,
+          address: data.address || f.address,
+          contact_salutation: data.contact_salutation || f.contact_salutation,
+          contact_full_name: data.contact_full_name || f.contact_full_name,
+          contact_designation: data.contact_designation || f.contact_designation,
+          contact_calling_number: data.contact_calling_number || f.contact_calling_number,
+          contact_whatsapp_number: data.contact_whatsapp_number || f.contact_whatsapp_number,
+          emails: data.emails && data.emails.length ? data.emails : f.emails,
+          tax_id_number: data.tax_id_number || f.tax_id_number,
+          website: data.website || f.website,
+          current_status: data.current_status || f.current_status,
+          product_range: data.product_range || f.product_range,
+          potential: data.potential || f.potential,
+          potential_reason: data.potential_reason || f.potential_reason,
+          buyer_grade: data.buyer_grade || f.buyer_grade,
+          currently_buying_from: data.currently_buying_from || f.currently_buying_from,
+          overall_remarks: data.overall_remarks || f.overall_remarks,
+          is_active: data.is_active !== false ? "true" : "false",
+        }));
+        if (data.category_ids) setCategoryIds(data.category_ids);
+        if (data.sub_category_ids) setSubCategoryIds(data.sub_category_ids);
+      }
+    } catch (err) {
+      console.error("Failed to load full buyer profile for editing:", err);
     }
     try {
       const { data } = await apiGet<BuyerContact[]>(`/buyers/${buyer.id}/contacts`);

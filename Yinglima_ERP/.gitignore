@@ -47,3 +47,7 @@ scratch/
 backups/
 .git_standalone_backup/
 *.tgz
+
+# Local AI Agent Rules
+AGENTS.md
+GEMINI.md

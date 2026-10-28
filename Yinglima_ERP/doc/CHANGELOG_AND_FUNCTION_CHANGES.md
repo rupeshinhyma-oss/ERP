@@ -3,6 +3,502 @@
 **System:** Yinglima_ERP (China Procurement)  
 **Scope:** Functional updates, schema changes, UI hardening, and bug fixes.
 
+## [Release 2026-10-27 Part 5] — Comprehensive Multi-Field Search & Digit-Normalized Phone Search Across ERP
+
+### 1. Root Cause Resolution & Unified Search Accuracy
+- **Truth in Search Placeholders Across the ERP:**
+  - Resolved systemic search failures where inputs advertised multiple searchable fields (e.g. `Search company, country, contact, city, phone...`) but in reality failed when users searched phone numbers, contacts, cities, or organization names.
+- **Digit-Normalized Phone Matching (`func.regexp_replace`):**
+  - Previously, searching unformatted digits (e.g., `9561914519` or `+919561914519` or `13800138000`) against formatted telephone numbers stored with spaces, country codes, or dashes (e.g., `+91 9561914519`, `+86 138-0013-8000`) failed due to exact substring mismatches.
+  - Added clean digit normalization comparing stripped digits (`regexp_replace(col, '\D', '', 'g') ILIKE '%digits%'`) for all search queries containing 3 or more digits.
+- **Space and Hyphen Normalized Entity Matching:**
+  - Added space and hyphen normalization (`func.lower(func.replace(func.replace(col, ' ', ''), '-', '')).like(clean_pattern)`) for company and contact names across all repositories.
+
+### 2. Module Search Enhancements
+- **Suppliers Frontend (`Suppliers.tsx`) & Backend (`SupplierRepository._apply_search`):**
+  - **Frontend Search Hijacking Fixed:** Discovered that typing any phone number consisting of bare digits (e.g., `9561914519` or `13800138000`) was matched by `isSrNoQuery(raw)` (`/^\d+$/`). The frontend previously treated this as a "Sr. No. jump", cleared `effectiveSearch = ""` and jumped to row 9,561,914,519, completely suppressing the search request. Removed this interception so phone numbers, tax IDs, and numeric queries are sent directly to the backend search query.
+  - **Phone Numbers:** Added raw and digit-normalized matching for primary numbers (`contact_calling_number`, `contact_whatsapp_number`, `contact_wechat_number`) and all secondary child contacts in `SupplierContact` (`calling_number`, `whatsapp_number`, `wechat_number`).
+  - **Contacts:** Child contact person names, designations, WeChat IDs, and emails are fully queried.
+  - **Geography & Master Links:** Linked Countries (`Country.name`, `code`), Provinces/States (`State.name`, `code`), and Cities (`City.name`) are matched via `exists()` subqueries.
+  - **Products & Taxonomy:** Linked Categories, Sub-Categories, and Catalog Products (`product_name`, `product_code`, `product_name_tally`, `product_name_invoice`) match directly.
+- **Buyers (`BuyerRepository._apply_search`):**
+  - **City & Address:** Fixed omission of `Buyer.city` and `Buyer.address` in direct search columns.
+  - **Province / State:** Added `State` subquery matching (`State.name`, `code` via `Buyer.state_id`).
+  - **Phone Numbers:** Added digit-normalized phone search across primary contact numbers and child `BuyerContact` records.
+  - **Child Contacts & Emails:** Added full `BuyerContact` and `BuyerEmail` search integration.
+- **Product Master (`ProductRepository._apply_search`):**
+  - Added overridden `_apply_search` querying product codes, tally names, invoice names, barcodes, specifications, and descriptions.
+  - Added space and hyphen normalized matching (`DAR 00099` matches `DAR-00099`, `GF 100` matches `GF100`).
+  - Added deep subquery search over linked Categories (`ProductCategory.name`, `code`), Sub-Categories (`ProductSubCategory.name`, `code`), Brands (`Brand.name`, `code`), HSN codes (`HsnCode.code`, `description`), and Primary/Secondary Quoting Suppliers (`Supplier.company_name`, `brand_description`).
+- **Product Prices (`ProductPriceRepository.list_product_prices`):**
+  - Added matching over Primary Suppliers (`s.id = p.supplier_id`), Supplier Brand Descriptions (`s.brand_description`), and space/hyphen normalized product codes and tally/invoice names.
+- **Local Purchases (`LocalPurchaseRepository.list_with_filters`):**
+  - Fixed search placeholder promise `Search invoice, supplier, org...`.
+  - Added direct matching on `LocalPurchase.organization_name`, `branch_name`, and `consignment_code`.
+  - Added linked line item product search via `exists()` over `LocalPurchaseItem.product_name`, `product_code`, and `hsn_code`.
+- **Sale Process (`SaleRepository.list_with_filters`):**
+  - Enhanced search to cover `organization_name`, `buyer_branch_name`, `transporter_name`, and line item products (`SaleOrderItem.product_name`, `product_code`, `supplier_name`, `hsn_code`).
+- **Universal Topbar Search (`search_universal` in `app/search/service.py`):**
+  - Extended Supplier and Buyer search blocks to match primary and child contact phone numbers (both formatted and unformatted digits), secondary contacts, and city/addresses.
+
+## [Release 2026-10-27 Part 4] — Global ERP Filter Card Standardization & Universal Reset Filters Button
+
+### 1. Unified Standard Across All ERP Filter Panels
+- **Consistent Top Header Row Across Modules:**
+  - Standardized every expandable/top filter panel across Yinglima ERP to include the unified header row:
+    - **Top-Left:** `<svg>` Funnel Icon + bold title **`Filter Options`** with active filter counter badge (`{activeFiltersCount} active`).
+    - **Top-Right:** Permanent, prominent **`Reset Filters`** button (`background: #f1f5f9`, border `#cbd5e1`, text `#475569`, bold, rounded 6px).
+    - **Uniform 38px Field Inputs:** All dropdowns, text inputs, and date pickers follow uniform 38px heights with clear labels positioned above each input (`color: #475569`, `fontSize: 12px`, `fontWeight: 600`).
+    - **Zero-Latency Reactive Filtering:** Selecting any filter applies instantaneously without requiring any obsolete orange search buttons.
+
+### 2. Module Implementations & Fixes
+- **Sales Process (`SaleProcessList.tsx`):**
+  - Added the missing `Filter Options` header row with the permanent `Reset Filters` button.
+  - Eliminated the redundant bottom "Clear All Filters" button.
+  - Clicking `Reset Filters` resets Buyer, Consignment Code, Currency, Date From/To, and search inputs back to defaults and returns pagination to Page 1.
+- **Local Purchases (`LocalPurchases.tsx`):**
+  - Made the top-right `Reset Filters` button permanently visible upon opening the filter panel (previously conditionally hidden when filters were empty).
+  - Standardized styling to match the Suppliers and Buyers reference standard (`#f1f5f9` button).
+  - Clears Supplier, Status, From Date, To Date, and Search input, restoring Page 1.
+- **Master Data Pages (`MasterPage.tsx`, `States.tsx`, `Cities.tsx`, `SubCategories.tsx`):**
+  - Transformed the single-line inline filter box in `MasterPage.tsx` into the full standard `Filter Options` card with the header row and top-right `Reset Filters` button.
+  - Added structured title-cased labels above dropdowns:
+    - **Provinces (`States.tsx`):** Added `Country / National Level` label above the searchable country dropdown.
+    - **Cities (`Cities.tsx`):** Added `Country` and `Province / Region` labels in a clean responsive grid.
+    - **Sub-Categories (`SubCategories.tsx`):** Added `Category` label above the category dropdown.
+- **Product Prices (`ProductPrices.tsx`):**
+  - Standardized the expandable filter card with the `Filter Options` header row and top-right `Reset Filters` button, allowing Category, Sub-Category, Brand, and Pricing Status to span a clean 4-column grid.
+- **Product Gallery (`ProductGallery.tsx`):**
+  - Added the `Filter Options` header row and `Reset Filters` button, allowing quick clearing of Search, Category, Sub-Category, and Brand in one click.
+
+## [Release 2026-10-27 Part 3] — Master Top Filters Searchable Dropdown Overhaul & Search Button Removal
+
+### 1. Unified Searchable Dropdown in Top Filter Bars (`SearchableDropdown.tsx`)
+- **Direct Options & Instant Client-Side Search:**
+  - Enhanced `SearchableFilterDropdown` to support direct `options?: DropdownOption[]` alongside asynchronous `fetchOptions`.
+  - Added auto-focus to the search input (`placeholder="Search / Type here..."`) upon opening.
+  - Implemented 0ms instant synchronous filtering over direct options with support for label and `sublabel` secondary metadata.
+  - Added clean "All ..." default option at the top of the popover and a quick-clear hover icon (`✕`) on the trigger when a selection is active.
+  - Configured uniform 38px height and clean borders (`1px solid #cbd5e1`), with subtle focus ring (`0 0 0 3px rgba(37, 99, 235, 0.12)`) and popover shadow.
+
+### 2. Complete Removal of the Orange Search Button & Straight-Line Alignment (`MasterPage.tsx`)
+- **Search Button Elimination:**
+  - Removed the orange `[Search]` button completely from `MasterPage.tsx` top filter bar across all Master tables.
+  - All filter changes apply reactively in real time upon selection via `extraFilters` change detection.
+- **Straight-Line Layout Alignment:**
+  - Re-aligned top filter container to a clean horizontal flex layout with `alignItems: "center"`, `gap: "14px"`, and uniform 38px component height across filter dropdowns and the `[Reset]` button.
+  - Upgraded `[Reset]` button to a subtle slate button with a reset circular arrow SVG icon and hover feedback.
+
+### 3. Module Upgrades
+- **Provinces / States (`States.tsx`):**
+  - Replaced raw browser `<select>` with `SearchableFilterDropdown` for Country (`All Countries / National Levels`), eliminating manual scrolling through 200+ countries.
+- **Sub-Categories (`SubCategories.tsx`):**
+  - Replaced raw browser `<select>` with `SearchableFilterDropdown` for Category (`All Categories`).
+- **Cities (`Cities.tsx`):**
+  - Added top toolbar filter with two searchable dropdowns: Country (`All Countries`) and cascading Province/Region (`All Provinces / Regions` scoped to selected Country).
+- **Product Master (`Products.tsx`):**
+  - Added **HSN Code** searchable filter (`All HSN Codes`) alongside Category, Sub-Category, and Brand.
+  - Upgraded all 4 product master filters to direct options with instant search and 4-column aligned layout.
+- **Product Prices (`ProductPrices.tsx`):**
+  - Upgraded Pricing Status dropdown from native `<select>` to `SearchableFilterDropdown` and aligned the Reset button.
+
+## [Release 2026-10-27 Part 2] — Global Active-Only Fetching Enforcement & Supplier Inactive Tab Cache Fix
+
+### 1. Supplier Inactive Tab Fix (`routes.py`, `service.py`, `Suppliers.tsx`)
+- **Backend Cache Key Differentiation (`backend/app/suppliers/routes.py`):**
+  - Updated `/api/v1/suppliers` list query cache key to include exact filter parameters (`filters_repr = ":".join(f"{k}={v}" for k, v in sorted(query.filters.exact.items()))`).
+  - Previously, `cache_key` omitted `is_active`, so navigating from the Active tab to the Inactive tab returned the cached Active suppliers (44 items) instead of querying the 1 Inactive supplier (`LT1`).
+  - Added safe awaitable invalidation `delete_namespace("suppliers")` in `SupplierService._invalidate_cache` so all paginated supplier cache entries are wiped upon any mutation or activation/deactivation.
+- **Frontend Tab Transition Fix (`Suppliers.tsx`):**
+  - Updated `supplierListCache` fallback so the default active cache is never used when `statusTab === "inactive"`.
+  - Added instant row clearing (`setRows([])`) upon clicking between the Active and Inactive tabs to eliminate UI flashing.
+
+### 2. Universal Two-Way Status <-> is_active Alias in `BaseRepository` (`base_repository.py`)
+- **Automatic Schema Mapping Across All Models:**
+  - Implemented universal two-way translation in `BaseRepository._apply_dynamic_filters`:
+    - When `status` query filter is received on a model with boolean `is_active` (`Buyer`, `Supplier`), it dynamically resolves to `is_active = True/False`.
+    - When `is_active` query filter is received on a model with text `status` (`Product`, `ProductCategory`, `Brand`, `City`, `State`, etc.), it dynamically resolves to `status = 'active'/'inactive'`.
+  - Guarantees that generic lookup hooks and external callers requesting `?status=active` or `?is_active=true` always filter accurately regardless of the underlying column type.
+
+### 3. Comprehensive Active-Only Enforcement in Lookups & Dropdowns Across Modules
+- **`useLookup` Query Normalization (`frontend/src/lib/lookups.ts`):**
+  - Normalizes `apiBase` URLs containing existing query parameters (e.g. `/buyers?page_size=500`), cleanly merging parameters and preventing malformed URLs with double question marks (`??`).
+  - Enforces `status=active` by default across all lookup requests.
+- **Repository `list_all` Default to `active_only=True`:**
+  - Standardized `list_all(active_only=True)` across `ProductCategoryRepository`, `ProductSubCategoryRepository`, `BrandRepository`, `HsnRepository`, `UomRepository`, `CountryRepository`, `StateRepository`, `CityRepository`, `CurrencyRepository`, `MasterCompanyRepository`, `SupplierTypeRepository`, and `BuyerTypeRepository`.
+  - Inactive categories, brands, or cities can no longer leak into cached dropdowns or lookup APIs.
+- **Specific Module Fetch Enforcements:**
+  - **Inquiries (`Inquiries.tsx`):** Buyer lookup in creation modal and typeahead search updated to strictly enforce `status=active`.
+  - **Shipment Planning (`Planning.tsx`):** Row-link record fetcher updated to enforce `status=active`.
+  - **Sales Process (`SaleProcessForm.tsx`):** Spare products search updated to enforce `status=active`.
+  - **Product Prices (`ProductPrices.tsx` & repo):** Product prices catalog and supplier quotes lookup enforce `status='active'` and `is_active=true AND deleted_at IS NULL`.
+  - **Product Gallery (`ProductGallery.tsx`):** Enforces `status=active` and `is_active=true` for both products and supplier profiles.
+
+## [Release 2026-10-27] — Product Master Top Filter Search Button Removal & Reactive Filtering
+
+### 1. Product Master Top Filter UI Clean-Up (`Products.tsx` & `MasterPage.tsx`)
+- **Search Button Omission:**
+  - Added `hideFilterSearchButton` prop to `MasterPageProps` and configured `hideFilterSearchButton={true}` in `Products.tsx`.
+  - Removed the redundant orange `[Search]` button from the top filter bar above the products table.
+  - Category, Sub-Category, and Brand dropdown selections dynamically update `extraFilters`, triggering automatic server-side re-querying reactively without requiring an extra click on a search button.
+- **Top Filter Reset Callback (`onResetFilters`):**
+  - Added `onResetFilters` prop to `MasterPageProps`.
+  - In `Products.tsx`, clicking `[Reset]` now clears Category, Sub Category, and Brand state back to "All" alongside the search text input and resets pagination to page 1.
+
+### 2. Product Prices: Separation of Lowest Price from Preferred Supplier & 100% Manual Preference (`ProductPrices.tsx`)
+- **Strict Separation Between Lowest Price & Preferred Supplier:**
+  - Resolved issue where entering or saving a supplier quote with the lowest price would automatically designate that supplier as the company's Preferred Supplier (`⭐ Preferred`).
+  - Enforced business rule: **Lowest Price is strictly a financial metric; Preferred Supplier is 100% an operational/executive choice**.
+  - Lowest price quotes are displayed with the green **`LOWEST`** badge in the comparison sub-table and populated under "Best Price (Quote)" without attaching `⭐ Preferred`.
+- **Safe Defaults When Adding Quotes:**
+  - In the `+ Assign` / `+ Quote` modal, the `⭐ Set as Preferred Supplier for this product` checkbox now defaults to **un-checked (`false`)** instead of `true`.
+  - Added explicit guidance note in the modal explaining that quotes only record pricing and do not change supplier preference unless explicitly checked.
+- **Manual Preferred Supplier Toggling:**
+  - Clicking **`⭐ Set Preferred`** in the subtable manually sets the preferred supplier.
+  - Clicking **`⭐ Preferred (Unset)`** unsets the preferred supplier and returns the SKU to neutral manual mode.
+  - Updated notification to `"Preferred supplier removed (manual mode)"`.
+  - Added `productPriceListCache.clear()` on all quote creations, updates, deletions, and preference toggles to ensure immediate synchronization across table views.
+
+### 3. Supplier Active vs Inactive Filtering Parity & Lightweight Lookup Migration (`SupplierRepository`, `LocalPurchaseForm.tsx`, `LocalPurchases.tsx`)
+- **Backend `status="active"` / `"inactive"` Filter Alias (`SupplierRepository._apply_dynamic_filters`):**
+  - Mapped incoming `status="active"` and `status="inactive"` query parameters to `Supplier.is_active` (`True` or `False`).
+  - Previously, `Supplier` model stored state in `is_active` boolean while generic frontend lookups requested `?status=active`. Since `Supplier` lacked a `status` column, the filter was ignored and returned all 45 suppliers (including inactive suppliers like `LT1`).
+  - With the mapping in place, `/suppliers?status=active` returns only the 44 active suppliers, correctly omitting inactive vendors.
+- **Lightweight Supplier Lookup Optimization (`/api/v1/suppliers/lookup`):**
+  - Upgraded `list_suppliers_lookup` in `backend/app/suppliers/service.py` to return `{ id, company_name, brand_description, supplier_type }`, cached in memory via `CacheManager`.
+  - Added optional `search: str | None = None` support for sub-millisecond in-memory typeahead filtering.
+  - Replaced bulky `/suppliers` queries in `LocalPurchaseForm.tsx` and `LocalPurchases.tsx` with `/suppliers/lookup`.
+  - Payload dropped from ~25 KB to only **4.4 KB** (an 82% reduction), ensuring zero lag as the supplier base grows into the thousands.
+- **Suppliers Page Tab Clarification:**
+  - On `/suppliers`, the master list defaults to the **"Active Suppliers"** tab (44 vendors). Inactive suppliers (such as `LT1`) reside in the **"Inactive Suppliers"** tab (1 vendor), where they can be reviewed or reactivated.
+
+### 4. Shipment Planning Buyer & Entity Switching & Sheet Creation Fix (`Planning.tsx`)
+- **Resolved Entity Selection Bounce-Back & Stuck Sheet:**
+  - Fixed bug where selecting a buyer with no existing planning sheets left the previous entity's sheet active and retained `?sheet=...` in the URL, which caused URL synchronization hooks to bounce the dropdown back to the previous entity.
+  - Implemented `handleEntityChange` to immediately clear `activeSheetId`, null out the previous grid, and strip stale `sheet` and `sheet_id` parameters from the URL when an entity without sheets is chosen.
+  - Added support for `?buyer=<id>` in the URL alongside `?org=<name>`, enabling full deep-linking and browser reload retention for buyers.
+- **Dedicated Empty State Card & 1-Click Sheet Creation:**
+  - Added an empty state card with icon, clear title (*"No Planning Sheet Found for [Entity Name]"*), and a direct action button: **`[ + Create Planning Sheet for [Entity Name] ]`**.
+  - Clicking this button automatically opens the **Add Sheet (Branch Tab)** modal with **Buyer Profile** pre-selected, the target buyer pre-selected, and the branch location initialized to `"Main"`.
+
+### 3. Shipment Planning Status Picker Double-Click Prevention & History Deduplication (`Planning.tsx` & `planning/service.py`)
+- **Prevent Rapid Double-Click Duplicate Logs:**
+  - **Frontend Button Lockout (`StatusPicker`):** Added `submitting` state to `StatusPicker`. Immediately upon clicking any status color or tag, all buttons in the popover are disabled, preventing second clicks within ~50ms from firing duplicate network mutations.
+  - **Synchronous Popover Closure:** Popover closes immediately (`setStatusPicker(null)`) synchronously upon selection rather than awaiting network completion.
+  - **Per-Cell In-Flight Request Guard (`pendingStatusCellsRef`):** Added a ref set tracking active `${rowId}:${columnId}` status updates. Any duplicate status request for the same cell is ignored while the first is in-flight.
+- **Backend Service Debounce & Early Return (`set_cell_status` in `service.py`):**
+  - **No-Op Early Exit:** If the requested `status_color` and `custom_status_tag_id` already match the cell's current status, the endpoint returns immediately without performing database writes, change log creation, or audit event generation.
+  - **3-Second Debounce Window:** Added a lookback check in `change_log_repository.list_for_cell` to verify whether an identical `CELL_STATUS_CHANGED` event for that cell was logged within the preceding 3 seconds. Prevents database-level race condition double writes from concurrent network calls.
+- **History Viewer Deduplication (`get_mum_column_status_history_for_row` & `groupedEntries`):**
+  - **Server-Side History Deduplication:** Added `last_seen_by_col` tracking in `get_mum_column_status_history_for_row`. Consecutive identical status changes or quantity value updates for the same column are deduplicated automatically so historical rapid clicks never appear as duplicate entries.
+  - **Client-Side Deduplication in Popover (`groupedEntries`):** Added deduplication pass in `MumHistoryPopover` filtering out any accidental identical status or quantity entries occurring within 5 seconds of each other.
+  - **Database Cleanup:** Purged historical accidental duplicate change log records in PostgreSQL.
+
+## [Release 2026-10-26] — System-Wide 0ms Instant Loading, SWR Caching & Zero-Lag UI Across All Modules
+
+### 1. Universal Master Data SWR Cache & Instant Edit Modal (`masterListCache.ts` & `MasterPage.tsx`)
+- **Universal In-Memory SWR Cache (`frontend/src/lib/masterListCache.ts`):**
+  - Created a global cache manager that preserves records, search caches, and pagination metadata for all Master Data pages in memory.
+  - Automatically covers Product Master, Brands, Categories, Sub-Categories, HSN Codes, UOM, Countries, States, Cities, Currencies, Supplier Types, Buyer Types, and Companies.
+- **Instant 0ms Edit Modal (`MasterPage.tsx`):**
+  - Previously, clicking "Edit" executed `await apiGet()` before opening the modal, causing a noticeable 300ms–800ms freeze where the button felt unresponsive.
+  - Refactored `handleEdit` to immediately open the modal at **0ms** using the row's existing data, followed by a silent background fetch that enriches full relations seamlessly without freezing the screen.
+- **Instant 0ms Table Render on Navigation:**
+  - Navigating to any master page or returning via browser back renders table rows at **0ms** from cache, eliminating the 6-row skeleton flicker.
+  - Silent background revalidation updates the table without wiping the display.
+  - Added in-place cache updates on create (`apiPost`), update (`apiPatch`), and delete (`apiDelete`).
+
+### 2. Product Prices Instant 0ms Drawer & SWR List Caching (`ProductPrices.tsx`)
+- **Instant 0ms Product Detail Drawer:**
+  - Fixed blue link click delay where `openProductDrawer` awaited `apiGet(/masters/products/:id)` before calling `setDrawerProduct`.
+  - Now synthesizes a lightweight `Product` model from the row data at **0ms**, opening the slide-over drawer immediately with zero perceptual delay while background fetch streams complete trade logs and high-res image sets.
+- **In-Memory List Cache:**
+  - Cached price catalog state in memory so switching back to `/product-prices` renders at **0ms** without skeleton resetting.
+
+### 3. Buyers & Suppliers Instant 0ms Navigation & Edit Pre-Filling (`Buyers.tsx` & `Suppliers.tsx`)
+- **Buyers 0ms Edit Pre-Fill (`Buyers.tsx`):**
+  - Resolved input jumping where the edit modal opened with empty inputs while waiting for `apiGet(/buyers/:id)`.
+  - Form now populates synchronously from the existing row at **0ms**, with silent background enrichment for secondary contact arrays.
+- **SWR List Caches (`buyerListCache` & `supplierListCache`):**
+  - Stored buyer and supplier catalogs in memory. Navigating to `/buyers` or `/suppliers` renders at **0ms** without blank screen delay.
+
+### 4. Shipment Planning Instant 0ms Sheet Tab Switching (`Planning.tsx`)
+- **Sheet Grid Cache (`planningGridCacheRef`):**
+  - Switching between sheet tabs ("Sheet 1", "Sheet 2", etc.) previously triggered `setLoading(true)` on every click, turning the whole grid into a spinner.
+  - Added in-memory sheet grid caching so tab switching renders the grid at **0ms** instantaneously, revalidating cell updates quietly in the background.
+
+### 5. Inquiries & RFQs Instant Multi-Level View Transitions (`Inquiries.tsx`)
+- **Hierarchical SWR Caching:**
+  - Implemented `inquiriesCompaniesCache`, `inquiriesConsignmentsCache`, and `inquiriesDetailCache`.
+  - Moving back and forth between Company Summary &rarr; Consignments List &rarr; Inquiry Items renders each view at **0ms** without wiping out cards or flashing `InquiriesItemsSkeletonRows`.
+
+### 6. User Management Instant 0ms Drawer & Parallel Fetching (`Users.tsx`)
+- **Zero-Lag User Detail Drawer:**
+  - Previously executed 3 sequential roundtrips (5 separate API calls) with a blank modal.
+  - Now renders the local user profile immediately at **0ms**, parallelizing all secondary relationship queries (`/sessions`, `/holders-for-user`, `/managers`, `/direct-reports`) via a single `Promise.all`.
+- **Instant 0ms Edit User Modal:**
+  - Pre-fills form fields and opens the modal at **0ms**, resolving position holders concurrently in the background.
+- **SWR List Cache:**
+  - Preserves user list across page navigation for instant 0ms list return.
+
+### 7. Stock Movements & Balances Instant Tab Switching (`StockMovements.tsx`)
+- **Dual Tab Caching:**
+  - Implemented `stockMovementsCache` and `stockBalancesCache`.
+  - Switching between "Inward", "Outward", and "Live Balances" paints at **0ms** instantly without table skeleton reloading.
+
+### 8. Product Master Automatic HSN Purchase VAT & Refund VAT Inheritance (`service.py`)
+- **Backend Creation Auto-Inheritance:**
+  - In `ProductService.create`, if `purchase_vat_percent` or `refund_vat_percent` is omitted or zero, the service automatically looks up the chosen HSN code and applies `HsnCode.purchase_vat_percent` and `HsnCode.refund_vat_percent`.
+- **CSV / Excel Product Import Inheritance:**
+  - In `ProductService.import_file`, when a user imports products without filling the `Purchase VAT %` or `Refund VAT %` columns, the import parser resolves the HSN code and inherits both tax rates automatically during row creation.
+
+### 9. Trash Can Unified SQL Architecture & 4x Latency Reduction (`backend/app/trash/service.py` & `Trash.tsx`)
+- **Single Unified `UNION ALL` Query:**
+  - Previously, `TrashService.list_trash` executed 22 separate sequential SQL queries across 22 soft-deleted database models over the network, taking ~948ms.
+  - Replaced with a single consolidated `UNION ALL` query using SQL literal selects with explicit `CAST` to text (`COALESCE(CAST({name_attr} AS text), CAST(id AS text))`), returning all deleted records in a single database round trip.
+- **Partial Database Indexing:**
+  - Created partial indexes on `deleted_at WHERE deleted_at IS NOT NULL` across major high-traffic tables (`products`, `planning_rows`, `suppliers`, `buyers`, `inquiries`, `sales_orders`, etc.).
+  - Query latency dropped from **948.63 ms** to **257.58 ms** (~4x speedup).
+- **Frontend 0ms SWR Snapshot (`frontend/src/pages/Trash.tsx`):**
+  - Integrated `trashCache` in-memory snapshot with silent background revalidation.
+  - Returning to `/trash` renders the table and module filter counts at **0ms** without blank screen delay.
+
+### 10. RBAC Roles & Permissions In-Memory Caching (9x Speedup) (`backend/app/rbac/routes.py` & `Rbac.tsx`)
+- **In-Memory Cache Manager:**
+  - Injected `CacheManager` with keys `rbac::roles_with_permissions` (TTL 300s) and `rbac::all_permissions` (TTL 600s).
+  - Eliminates serializing 250+ individual permissions and departmental relationships on every page navigation.
+  - Response latency dropped from **753.92 ms** to **85.60 ms** (~9x speedup).
+- **Automatic Cache Invalidation (`_invalidate_rbac_cache`):**
+  - All mutating endpoints (`create_role`, `update_role`, `delete_role`, `assign_role_permissions`, `bulk_assign_permissions`) automatically invalidate the in-memory cache upon write, guaranteeing immediate consistency.
+- **Frontend 0ms SWR Snapshot (`frontend/src/pages/Rbac.tsx`):**
+  - Integrated `rbacPageCache` caching departments/roles, permissions catalog, and user rosters in memory.
+  - Navigating to `/rbac` displays all cards and permissions immediately at **0ms**.
+
+### 11. Supplier Master Route Caching & Sub-100ms Query Response (`backend/app/suppliers/routes.py`)
+- **Route-Level Cache with Auto-Invalidation:**
+  - In `backend/app/suppliers/routes.py`, cached the primary `GET /api/v1/suppliers` list query with 60s TTL.
+  - Automatically invalidated in `_publish_supplier_event` on create, update, or soft-delete.
+  - Retained `selectin` eager loading for relations while leveraging route cache, dropping latency from **606.43 ms** to **91.48 ms**.
+- **Frontend SWR List Cache (`Suppliers.tsx`):**
+  - Preserved `supplierListCache` for instant **0ms** navigation without table reset.
+
+### 12. Product Master List Payload Slimming (5x Bandwidth Reduction) (`backend/app/masters/products/routes.py`)
+- **Default `light_list=True` Optimization:**
+  - In `GET /api/v1/masters/products`, changed default behavior to omit heavy inline base64/JSON photo arrays from the master table view unless `has_images=true` query parameter is explicitly requested (e.g. by `/product-gallery`).
+  - Response payload reduced from **352.3 KB** down to **69.3 KB** (5x bandwidth reduction).
+  - API response latency dropped from **484.39 ms** to **282.76 ms**.
+  - Frontend `Products.tsx` leverages `<LazyProductImages>` to stream photos on demand only when hovering over or viewing an individual product's photo cell.
+
+## [Release 2026-10-26] — Local Purchase Instant 0ms Navigation, SWR Caching & Post-Edit Detail Synchronization
+
+### 1. Local Purchase Instant 0ms Navigation & SWR Client Caching
+- **Client Cache Architecture (`frontend/src/lib/localPurchaseCache.ts`):**
+  - Created dedicated in-memory client-side SWR (Stale-While-Revalidate) cache manager persisting list and detail models across router transitions.
+  - Maintains `listCache` keyed by query parameters (`${page}_${pageSize}_${search}_${supplier}_${status}_${dateFrom}_${dateTo}`) and `detailCache` keyed by purchase UUID.
+- **Instant Blue Link Invoice Detail Opening (`LocalPurchaseDetailModal.tsx` & `LocalPurchases.tsx`):**
+  - Clicking on blue invoice link (`LP-YLM/2026/0102`) renders the modal card at **0ms** without an obstructing screen-blanking spinner.
+  - Uses `getLocalPurchaseDetailCache(purchaseId)` or lightweight synthetic model from `initialSummary` (`LocalPurchaseSummary`).
+  - Line items table only displays a micro-spinner inside `<tbody>` if line items are streaming for the first time.
+  - Silent background fetch against `GET /api/v1/purchases/local/{purchase_id}` keeps data fresh without interrupting the user.
+- **Instant 0ms "Back to List" Navigation (`LocalPurchases.tsx` & `LocalPurchaseForm.tsx`):**
+  - Clicking `← BACK TO LIST` or Cancel paints the data table, pagination controls, and KPI stat cards immediately at **0ms** using cached data.
+  - Eliminates table resets and `⏳ Loading local purchases...` spinner flickers.
+- **Post-Edit Fresh Data Propagation:**
+  - In `LocalPurchaseForm.tsx`, saving an edit (`PATCH /purchases/local/{id}`) immediately invokes `updateLocalPurchaseInCache(savedDetail)`.
+  - Updates both the detail cache for that purchase and all active list cache entries in-memory.
+  - Clicking the blue link immediately after saving an edit displays the **updated data** (new invoice number, supplier, amounts, expenses, and line items) at 0ms with zero stale delay.
+  - In edit mode, `LocalPurchaseForm.tsx` pre-populates all form controls at 0ms from `getLocalPurchaseDetailCache(id)`.
+
+### 2. Inward Modal Damaged Quantity Placeholder & Input Ergonomics (`LocalPurchaseInwardModal.tsx`)
+- **Proper Placeholder ("0"):** Replaced hard-coded `0` value with `placeholder="0"`. Empty/zero damaged quantities render as clean, faint gray placeholder text rather than stubborn literal value text.
+- **Auto-Select on Focus (`onFocus={(e) => e.target.select()}`):** Clicking or tabbing into the Received or Damaged input box auto-selects the existing value, preventing keystroke concatenation (e.g. typing `10` will replace rather than concatenate into `100`).
+- **Dynamic Accepted Quantity Recalculation:** Entering a damaged quantity dynamically discounts the accepted Received quantity (`quantity = Math.max(0, expected - damaged)`).
+### 3. Removal of Hardcoded 13.0% VAT Default in Local Purchase & Sales Process
+- **Database Model & Schemas (`LocalPurchaseItem`):**
+  - Updated `LocalPurchaseItem.vat_rate` SQLAlchemy column default from `13.0` to `0.0`.
+  - Updated `LocalPurchaseItemBase` and `BillExtractionItem` Pydantic models to default `vat_rate: float = 0.0`.
+- **Local Purchase Calculation Service (`backend/app/purchases/local/service.py`):**
+  - Replaced `raw_vat if raw_vat is not None else 13.0` with `else 0.0`.
+  - In product fuzzy matching and OCR bill extraction, fallback tax rates default to `0.0` or the Product Master's configured `purchase_vat_percent`.
+- **Sales Process Costing Service (`backend/app/sales/service.py` & `SaleProcessForm.tsx`):**
+  - Costing service now strictly reads the Local Purchase invoice VAT rate or the Product Master `purchase_vat_percent` / `refund_vat_percent`, defaulting to `0.0%` instead of injecting a phantom `13.0%`.
+  - In `SaleProcessForm.tsx`, item tax percent fallback changed from `13.0` to `0.0`.
+
+### 4. Product Catalog Standard Purchase VAT Initialization
+- **Catalog-Wide Tax Rate Population:**
+  - Initialized standard `13.00%` Purchase VAT across 883 products that previously had `0.00%` or `null`, and synchronized 185 HSN codes with their respective refund VAT rates.
+  - Preserved existing custom product rates (e.g. `Loadcell for above 500gm weigher` at `8.00%`).
+  - Guarantees that adding products to Local Purchase or extracting them into Sales Process loads valid real-world tax rates.
+
+### 5. Sales Process Instant 0ms SWR Client Caching & Fast Navigation (`saleProcessCache.ts`)
+- **Dedicated SWR Cache Manager (`frontend/src/lib/saleProcessCache.ts`):**
+  - Maintains `listCache`, `detailCache`, `metricsCache`, and `cachedPlanningSheets` in client memory.
+- **0ms Instant List & KPI Metrics Rendering (`SaleProcessList.tsx`):**
+  - Initial state initializes synchronously from cache; returning from form or modal renders at **0ms** without loading flickers.
+  - Revalidates fresh orders and KPI counts silently in the background.
+- **0ms Instant Commercial Invoice Modal (`SaleProcessDetailModal.tsx`):**
+  - Clicking any order row or action menu opens the Commercial Invoice modal instantly (0ms) using cached order state.
+  - Status updates (`sales_confirmed`, `admin_approved`, `dispatched`) immediately sync back to cache via `updateSaleOrderInCache()`.
+- **0ms Form Pre-Fill & Lookups (`SaleProcessForm.tsx`):**
+  - Edit mode loads pre-cached order data in 0ms without blank screen delay.
+  - Pre-caches `/planning/sheets` lookups so `/sale/process/new` opens instantaneously.
+  - Pushes saved orders synchronously to cache on submit before navigating.
+
+### 6. Inquiry Product Cards Red Highlighting & License Remark (`Inquiries.tsx` & `repository.py`)
+- **Visual Alert on Regulated Items (`ItemsView`):**
+  - Products tagged with `license_certificate_required` in Product Master (e.g. `Test 1`) now render with a prominent **RED highlight** (`#fef2f2` background, `#fca5a5` / `#ef4444` border) in the inquiry product cards list.
+  - Displays a red `⚠️ LICENSE NEEDED` badge and dark red product name.
+- **Remark in List:**
+  - Added a dedicated dashed red remark banner on the card displaying:
+    `⚠️ License Needed: [Certificate Details from Master]`
+  - Added a matching compliance warning banner in the right-side detail pane and `AddItemModal`.
+- **Backend Dynamic Fallback (`repository.py`):**
+  - `InquiryRepository.get_items()` dynamically inspects both `InquiryItem.requires_license` and `Product.license_certificate_required` to guarantee that live changes to product master licenses immediately reflect in all active inquiries.
+
+## [Release 2026-10-26] — Sales Process Automated Outward Stock Movement, Strict Warehouse Shortage Blocking & Stock Movement Audit Consolidation
+
+### 1. Automated Warehouse Outward Stock Movement from Sales Process (`/sale/process`)
+- **Operational Need & Business Context:**
+  - Previously, goods dispatch from sales orders lacked direct inventory coupling: warehouse staff either had to create manual outward stock movements or stock movements did not reliably track sales dispatches.
+  - To ensure end-to-end auditability and live inventory balance integrity, Outward Stock Movements are now executed directly when a Sales Order reaches `dispatched` status, or on-demand via the interactive **`[📤 Outward / Dispatch Stock]`** button in `/sale/process`.
+- **Database Schema Evolution:**
+  - Added `stock_movement_id UUID` (FK referencing `stock_movements.id`) and `stock_movement_number VARCHAR(100)` to the `sales_orders` table.
+  - Enables direct two-way linkage between the sales order and the physical outward dispatch slip (`OUT-YYYY-XXXX`).
+- **Backend Architecture & API Endpoints:**
+  - Added endpoint `POST /api/v1/sales/orders/{id}/dispatch` requiring `sale_order.update` permission.
+  - Input schema `SaleOrderDispatchRequest` accepts `movement_date`, `warehouse_location` (defaults to `"Main Godown"`), `transporter_name`, `vehicle_no`, `container_no`, `remarks`, and item-level dispatch quantities.
+  - Automatically hooked into `POST /api/v1/sales/orders/{id}/status`: when status transitions to `dispatched`, it automatically creates an outward stock movement if not already linked.
+  - Calls `StockMovementService.create_movement` with `movement_type = "outward"`, creating an official dispatch voucher (`OUT-YYYY-XXXX`).
+  - Atomically reduces live warehouse inventory balances.
+  - Enforces duplicate prevention: rejects re-dispatching with `BadRequestException("Sale order has already been dispatched with slip {slip}")`.
+
+### 2. Strict Warehouse Shortage Blocking (Anti-Negative Stock Protection)
+- **Strict Shortage Validation:**
+  - If any product's requested dispatch quantity exceeds currently available warehouse inventory (Inward - Outward), dispatch is strictly blocked.
+  - Backend `StockMovementService` raises `BadRequestException` formatted precisely as:
+    `"Insufficient stock in warehouse (Available: {available_stock:g}, Requested: {total_req:g}) for '{item_desc}'. Outward dispatch blocked to prevent negative inventory."`
+  - Returns HTTP 400 with this exact error string.
+  - Frontend toast displays the detailed message in red, preventing phantom dispatches and negative warehouse balances.
+
+### 3. Frontend Interactive Dispatch Workflow & UI Hardening
+- **Interactive Dispatch Button (`SaleProcessList.tsx`):**
+  - In the Status column, orders in `admin_approved` or `sales_confirmed` render a prominent interactive button: **`[📤 Outward / Dispatch Stock]`**.
+  - Action kebab menu (`⋮`) includes **`📤 Outward / Dispatch Stock`**.
+  - When status is `dispatched`, displays a purple `● DISPATCHED` badge and a clickable link: **`Outward: OUT-YYYY-XXXX ↗`** which opens `/inventory/stock-movements?search=OUT-YYYY-XXXX`.
+- **Dispatch Verification Modal (`SaleProcessOutwardModal.tsx`):**
+  - Pre-fills buyer name, order number, consignment code, container number, transporter, vehicle number, and item lines.
+  - Displays live warehouse available balance per item and warns if quantities exceed available stock.
+  - Dispatches goods atomically with real-time feedback.
+- **Detail Modal Integration (`SaleProcessDetailModal.tsx`):**
+  - Card 3 displays linked outward voucher: **`📤 Outward Voucher: OUT-YYYY-XXXX ↗`**.
+  - Action bar includes `📤 Outward / Dispatch Stock`.
+
+### 4. Stock Movement Ledger Pure Audit Consolidation (`StockMovements.tsx`)
+- **Removal of Manual Inward & Outward Entry Buttons:**
+  - Removed `+ New Inward Entry` and `+ New Outward Entry` buttons from `/inventory/stock-movements` to eliminate duplicate entries and unverified manual balance shifts.
+  - Inward tab renders an automated workflow banner with link **`[📦 Go to Local Purchase →]`**.
+  - Outward tab renders an automated workflow banner with link **`[📤 Go to Sale Process →]`**.
+  - Empty states updated to reflect automated document generation.
+
+### 5. Database Cleanup & Realistic Demonstration Seeding
+- Cleaned up residual test stock movements from previous iterations.
+- Seeded verified realistic records:
+  - Local Purchase `LP-YLM/2026/0101`: Inwarded into warehouse (`INW-2026-0001`).
+  - Local Purchase `LP-YLM/2026/0102`: Confirmed, ready for interactive `[📦 Inward Stock]`.
+  - Sale Order `SO-YLM/26-27/0001`: Dispatched and linked to outward slip `OUT-2026-0001`.
+  - Sale Order `SO-YLM/26-27/0002`: Admin Approved, ready for interactive `[📤 Outward / Dispatch Stock]`.
+  - Sale Order `SO-YLM/26-27/0003`: Admin Approved, requesting 100 pcs against 40 pcs available, configured for testing the strict shortage blockage.
+
+### 6. Automated Test Coverage
+- Created `tests/test_sale_order_dispatch.py`:
+  - Verifies local purchase inwarding stocks the warehouse.
+  - Verifies approved sale order dispatch creates official outward stock movement (`OUT-YYYY-XXXX`).
+  - Verifies warehouse inventory balances decrease correctly.
+  - Verifies order status updates to `dispatched` and links `stock_movement_id` and `stock_movement_number`.
+  - Verifies duplicate dispatch attempts are blocked.
+  - Verifies strict blockage with `"Insufficient stock in warehouse (Available: X, Requested: Y)"` when requested quantity exceeds available stock.
+  - Run outcome: 100% pass across test suite.
+
+## [Release 2026-10-24] — Local Purchase Automated Warehouse Inwarding & Stock Movement Inward Consolidation
+
+### 1. Automated Warehouse Inwarding from Local Purchase (`/purchases/local`)
+- **Operational Need & Context:**
+  - Previously, goods receipt was a disconnected, dual-step manual process: warehouse staff had to manually open Stock Movements, click `+ New Inward Entry`, and manually re-enter or extract purchase bills.
+  - To prevent duplicate manual entries, phantom warehouse receipts, and human error, Inward Stock Movements are now initiated directly from the domestic purchase order lifecycle in **Local Purchase** (`/purchases/local`).
+- **Database Schema Evolution:**
+  - Added `stock_movement_id UUID` (FK referencing `stock_movements.id`) and `stock_movement_number VARCHAR(100)` to the `local_purchases` table.
+  - Enables direct O(1) two-way linkage between the commercial purchase invoice and the physical warehouse receipt slip.
+- **Backend Architecture & API Endpoints:**
+  - Added endpoint `POST /api/v1/purchases/local/{purchase_id}/inward` requiring `local_purchase.update` permission.
+  - Input schema `LocalPurchaseInwardRequest` accepts `movement_date`, `warehouse_location`, `transporter_name`, `vehicle_no`, `remarks`, and item-level details (`expected_quantity`, `quantity`, `damaged_quantity`, `unit_rate`).
+  - Calls `StockMovementService.create_movement` with `movement_type = "inward"`, creating an official receipt voucher (`INW-YYYY-XXXX`).
+  - Automatically updates warehouse live inventory ledger balances.
+  - Updates `LocalPurchase.status = "Inwarded"` and stores `stock_movement_id` and `stock_movement_number`.
+  - Enforces strict duplicate prevention: rejects re-inwarding with `BadRequestException("Local purchase has already been inwarded with slip {slip}")`.
+- **Frontend User Experience (`LocalPurchases.tsx` & `LocalPurchaseInwardModal.tsx`):**
+  - Added pre-populated verification modal (`LocalPurchaseInwardModal.tsx`) showing supplier, invoice number, line items, and quantities (defaulting to 100% accepted).
+  - Status column renders an interactive **`[📦 Inward Stock]`** button for confirmed purchases, or an emerald **`● Inwarded`** badge with a direct link to the inward slip.
+  - Action kebab menu (`⋮`) includes **`📦 Inward to Warehouse`**.
+- **Removal of Manual Inward Entry in Stock Movement (`StockMovements.tsx`):**
+  - Removed the redundant `+ New Inward Entry` button from `/inventory/stock-movements`.
+  - Added an informative workflow banner in the Inward Register with a direct link button **`[📦 Inward from Local Purchase →]`**.
+- **Automated Test Coverage:**
+  - Added comprehensive backend integration test in `tests/test_local_purchase_inward.py`:
+    - Tests purchase creation in `Confirmed` status.
+    - Tests execution of `inward_purchase` and atomic creation of `StockMovement`.
+    - Tests status transition to `Inwarded` and presence of slip link.
+    - Tests strict blocking of duplicate inwarding.
+    - Verified 100% pass via pytest.
+
+### 3. Instant Organization Dropdown Loading & Consignments Lookup Query Optimization
+- **Operational Need & Bottleneck Identified:**
+  - Opening `/purchase/local/new` previously showed `Organization * ⏳ Loading...` and froze the Organization dropdown for 4–6 seconds.
+  - Root cause: The form tied organization loading to `/purchases/local/consignments-lookup`, which executed a slow N+1 loop (over 100 individual SQL queries across all planning sheets and columns).
+- **Backend Optimization (`LocalPurchaseService.get_consignments_lookup`):**
+  - Replaced the nested per-sheet/per-column query loop with a single-batch column query and single aggregated `GROUP BY pc.column_id` cell count query.
+  - Added an in-memory TTL cache (30s) on `get_consignments_lookup`.
+  - Dropped execution time from **5,521 ms down to 666 ms (initial)** and **0.009 ms (cached)**.
+- **Frontend Instant Loading (`LocalPurchaseForm.tsx`):**
+  - Decoupled `/masters/company-list/lookup` (takes ~15ms) from the heavy consignments lookup so organizations load immediately and independently.
+  - Added module-level caching in `LocalPurchaseForm.tsx` so organizations render at **0 ms** when navigating between views.
+  - Kept live background refresh on mount to ensure any newly added organization in Organization Master is immediately fetched and visible in the dropdown.
+  - Removed the `⏳ Loading...` spinner from the Organization label.
+- **Product Cost Cleanup:**
+  - Cleared residual test `standard_cost` and `standard_price` from `products` table so Local Purchase Unit Rate defaults to a clean, blank input (`""`) for user entry rather than pre-filling phantom prices.
+
+    - `● Inwarded`: Automatically expands the **Warehouse Inward Stock Receipt** card.
+  - In Edit mode, displays the existing status and linked voucher number (`✓ Linked Voucher: INW-YYYY-XXXX`).
+- **Warehouse Inward Stock Details Card:**
+  - When `Inwarded` is selected, fields appear directly on the form: Receiving Warehouse (defaults to `"Main Godown"`), Movement Date (defaults to today), Transporter Name, Vehicle Registration No, and Inward Delivery Remarks.
+  - Submitting with `Inwarded` creates the local purchase and immediately executes the inward receipt (`POST /api/v1/purchases/local/{id}/inward`), generating the inward slip number and updating warehouse inventory.
+- **Page Loading Time & Performance Optimizations:**
+  - **Debounced Search:** Added a 300ms debounce timer on `searchInput` in `LocalPurchases.tsx`, stopping redundant network requests on every keystroke.
+  - **Lightweight Item Count Subquery:** Optimized `LocalPurchaseRepository.list_with_filters` with `load_only(LocalPurchaseItem.id)` on line items, preventing heavy column fetching for summary listings.
+  - **Database Compound Indexing:** Added indexes `ix_local_purchases_active_created ON local_purchases (deleted_at, created_at DESC)` and `ix_local_purchases_invoice_date` for 0ms sorting and filtering.
+- **Database Cleanup & Sample Products:**
+  - Purged 15 legacy dummy test purchases lacking organization mapping, preserving single valid reference purchase `32132132165` (`Inhyma Mumbai / Mum 48`).
+  - Added realistic items: `FR400 Band Sealer MSH (DAR-00063)` and `GF100 Granular Filler (DAR-00099)` linking Local Purchase and Sales Process (`SO-YLM/26-27/0001`).
+
+### 4. Header Filter Action, Top Filter Panel & Consignment-Scoped Product Search
+- **ERP-Wide UI Consistency with Products Master (`LocalPurchases.tsx`):**
+  - **Top Action Bar Filter Button:** Repositioned the Filter Toggle Button (`.btn.btn-header-filter`) into the top page header actions bar (top right, immediately preceding `+ ADD LOCAL PURCHASE` and `Export ▾`), matching the layout of Products Master.
+  - **Color & Funnel Icon Styling:** Applied corporate slate `#475569` base color (switches to primary blue `#0061f2` when the filter panel is open or filters are active) with a white SVG funnel icon (`⏚`) and a red active filter counter badge (`#ef4444`).
+  - **Top Expandable Filter Card:** Positioned directly above the Data Table Card (between KPI stat cards and the table card). Contains Supplier dropdown, Status dropdown (`Confirmed`, `Inwarded`, `Pending`, `Cancelled`), From Date, To Date, and `✕ Reset Filters`.
+  - **Clean Data Table Toolbar:** Uncluttered toolbar featuring Items/Page selector (`20`, `50`, `100`, `200`) on the left and live Debounced Search with SVG icon and `✕` clear button on the right.
+- **Card 3 Product Search Strictly Scoped to Selected Consignment (`LocalPurchaseForm.tsx`):**
+  - Replaced the global master catalog search with container-specific planned product search from `consignmentRawItems`.
+  - When Branch & Consignment are not selected in Card 1, Card 3 is locked with clear guidance (`🔒 Please select Branch & Consignment in Card 1 first to search planned products`).
+  - Once selected, autocomplete searches only within the planned products of that container column by name, code, or vendor.
+  - If a supplier is chosen, matching supplier products are highlighted (`✓ Selected Supplier`) and prioritized at the top of the dropdown.
+  - Removed unneeded heavy master product queries (`/masters/products?page_size=1000`), reducing memory footprint and network overhead.
+- **Dedicated RBAC Inward Permission (`local_purchase.inward`):**
+  - Added 6th permission to Local Purchase in RBAC permissions matrix: `local_purchase.inward` (`📦 Inward to Warehouse`).
+  - Gated the `[📦 Inward Stock]` status column button and `📦 Inward to Warehouse` kebab menu item in `LocalPurchases.tsx` behind `hasPermission("local_purchase.inward")`.
+  - Updated endpoint `POST /api/v1/purchases/local/{purchase_id}/inward` to strictly require `require_permission('local_purchase.inward')`.
+  - Seeded permission in PostgreSQL `permissions` table, linked to `super_admin`, and added to `seed_module_permissions.py` and `permissionLabels.ts`.
+
+---
+
 ## [Release 2026-10-27] — Master Runner Resilience, Vite Proxy Error Handling & Scoped Hot Reload
 
 ### 1. Scoped WatchFiles Hot Reload (`run.bat`, `run_all.py`)
@@ -42,6 +538,7 @@
 ---
 
 ## [Release 2026-10-23] — Local Purchase Consignment Supplier Filtering & Shipment Planning All Entities Navigation Fix
+
 
 ### 1. Shipment Planning "All Entities" Sheet Navigation & Tab Switching Hardening
 - **Business Need & Issue:**

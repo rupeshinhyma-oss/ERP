@@ -147,10 +147,68 @@ Whenever a new sale process order is created in the system, the Sale Process ser
 
 ---
 
-## 7. Sale Process List Toolbar UI Alignment (Products Master Pattern)
+---
 
-The action toolbar on `/sale/process` is aligned with the Products Master standard:
-* **Filter Toggle Button:** Compact slate square button (`#475569`, toggling to `#0061f2` when open or active) featuring the standardized filter funnel SVG icon and active filter counter badge.
-* **Export Button:** Vibrant amber/orange button (`#f59e0b`, `color: #ffffff`, `fontWeight: 700`, `border: none`) matching the Products Master `Imp / Exp ▾` visual hierarchy.
-* **Create Sale Process:** Blue primary action button (`#0061f2`, `color: #ffffff`).
+## 8. Warehouse Outward Stock Dispatch Workflow (Added 2026-10-26)
 
+### Purpose & Architecture
+To maintain a synchronized single source of truth for physical inventory, stock deductions occur directly when export sale orders reach **Dispatched** status, rather than requiring duplicate manual register entries.
+
+### User Flow:
+1. **Interactive Dispatch Button (`[📤 Outward / Dispatch Stock]`):**
+   - In `/sale/process`, for orders in `admin_approved` or `sales_confirmed` status, an interactive purple button `[📤 Outward / Dispatch Stock]` is displayed in the Status column (matching the `[📦 Inward Stock]` design in Local Purchase).
+   - Alternatively, selecting `📤 Outward / Dispatch Stock` from the `⋮` action menu or clicking `📤 Outward / Dispatch Stock` in the order details modal (`SaleProcessDetailModal.tsx`) initiates dispatch.
+2. **Outward Confirmation Modal (`SaleProcessOutwardModal.tsx`):**
+   - Opens pre-filled with movement date, warehouse location (`"Main Godown"`), container number, vehicle number, transporter name, and line items with requested quantities and unit rates.
+   - User reviews logistics information and clicks **Confirm Outward & Dispatch**.
+3. **Strict Stock Availability Validation:**
+   - The backend (`POST /api/v1/sales/orders/{id}/dispatch`) validates available stock in the warehouse ($\sum \text{Inward} - \sum \text{Outward}$) for each SKU.
+   - **Strict Blocking Rule:** If requested quantity exceeds available stock, dispatch is strictly prevented and returns `400 Bad Request`:
+     $$\text{"Insufficient stock in warehouse (Available: X, Requested: Y) for 'Product Name (SKU)'. Outward dispatch blocked to prevent negative inventory."}$$
+   - The frontend immediately displays this error in a red toast notification.
+4. **Automated Inventory Deduction & Voucher Linking:**
+   - When sufficient stock is verified, the system atomically creates an official `StockMovement` (type `outward`, `OUT-YYYY-XXXX`).
+   - Deducts quantities from the warehouse live inventory ledger.
+   - Transitions order status to `dispatched`.
+   - The list row renders an official `● DISPATCHED` badge with a direct link to the generated outward voucher.
+
+---
+
+## 9. Sale Process In-Memory SWR Cache & Instant 0ms Navigation (Release 2026-10-26)
+
+### Purpose & Architecture
+To eliminate blank loading spinners and latency across `/sale/process`, `/sale/process/new`, and `/sale/process/:id/edit`, an in-memory client-side SWR (Stale-While-Revalidate) cache is implemented in [`saleProcessCache.ts`](file:///d:/Om%20work1/ERP/Yinglima_ERP/frontend/src/lib/saleProcessCache.ts).
+
+### Key Features:
+1. **0ms Instant List Paint (`SaleProcessList.tsx`):**
+   - On initial load or returning from details/edit via `← BACK TO LIST`, the order list and KPI cards render instantaneously in **0ms** from memory.
+   - Background revalidation refreshes fresh network data seamlessly without blanking the screen or showing jarring spinners.
+2. **0ms Instant Commercial Invoice Modal (`SaleProcessDetailModal.tsx`):**
+   - Clicking an order number (`SO-YLM/2026/001`) immediately paints the Commercial Invoice and trade details in **0ms** from cache.
+   - Updates made to order workflow status (`sales_confirmed`, `admin_approved`, `dispatched`, etc.) are written directly to cache via `updateSaleOrderInCache()`.
+3. **0ms Form Pre-Filling & Lookup Caching (`SaleProcessForm.tsx`):**
+   - When editing an existing sale order, all fields (consignments, logistics, line items) populate in **0ms** from `getSaleOrderDetailCache()`.
+   - Planning sheets (`/planning/sheets`) are cached in memory to eliminate network delays when creating new orders.
+   - On save/patch, the updated order is pushed synchronously to `updateSaleOrderInCache()` prior to navigation, ensuring the list immediately reflects changes without stale data.
+
+---
+
+## 10. Filter Options Card Standardization & Reset Filters Button (Release 2026-10-27)
+
+### Purpose & Architecture
+To ensure visual and operational consistency across the entire ERP, the collapsible filter panel in [`SaleProcessList.tsx`](file:///d:/Om%20work1/ERP/Yinglima_ERP/frontend/src/pages/sales/SaleProcessList.tsx) was standardized to match the gold standard layout established in Suppliers and Buyers.
+
+### Key Features:
+1. **Standard Header Row:**
+   - **Top-Left:** Funnel icon with bold title `Filter Options` and an active filter count pill (`{activeFiltersCount} active`).
+   - **Top-Right:** Permanent, prominent `Reset Filters` button (`background: #f1f5f9`, border `#cbd5e1`, slate text `#475569`, bold, rounded 6px).
+2. **One-Click Filter Reset:**
+   - Clicking `Reset Filters` immediately clears:
+     - `selectedBuyerId` (resets to "All Buyers")
+     - `selectedConsignment` (clears consignment code)
+     - `selectedCurrency` (resets to "All Currencies")
+     - `dateFrom` and `dateTo` (clears date range)
+     - `search` (clears order / consignment text search)
+     - Resets pagination back to Page 1.
+3. **Structured Inputs & Field Labels:**
+   - All filter controls (`Buyer Company`, `Consignment Code`, `Currency`, `Date From`, `Date To`) are arranged in a responsive grid with uniform 38px heights and title-cased labels placed cleanly above each input.

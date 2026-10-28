@@ -33,6 +33,8 @@ from app.database.session import get_db_session
 from app.events.dependencies import get_event_dispatcher
 from app.events.dispatcher import EventDispatcher
 from app.rbac.dependencies import require_permission
+from app.cache.dependency import get_cache_manager
+from app.cache.manager import CacheManager
 from app.suppliers.dependencies import get_supplier_service
 from app.suppliers.schemas import (
     ImportSummaryRead,
@@ -86,6 +88,11 @@ async def _publish_supplier_event(
         user_id=user_id,
         changes=changes,
     )
+    try:
+        from app.cache.dependency import get_cache_manager
+        await get_cache_manager().delete_namespace("suppliers")
+    except Exception:
+        pass
 
 
 async def _record_action(
@@ -223,23 +230,23 @@ async def list_suppliers(
     product_id: uuid.UUID | None = None,
     service: SupplierService = Depends(get_supplier_service),
     _current_user: CurrentUser = Depends(require_permission("supplier.view")),
+    cache_manager: CacheManager = Depends(get_cache_manager),
 ) -> dict:
     """
     List suppliers, with search/sort/filter/pagination.
-
-    Supports the document's Top Filter Fields via standard query params:
-    ``country_id``, ``state_id``, ``city_id``, ``supplier_type``,
-    ``supplier_grade``, ``current_status``, ``potential``,
-    ``visited_factory_office``, ``is_active`` (dynamic exact-match filters),
-    plus ``category_id``/``sub_category_id``/``product_id`` (many-to-many,
-    handled explicitly) -- ``product_id`` answers "which suppliers supply
-    this exact SKU?".
     """
+    filters_repr = ":".join(f"{k}={v}" for k, v in sorted(query.filters.exact.items()))
+    cache_key = f"suppliers:{query.page.page}:{query.page.page_size}:{query.search.normalized or ''}:{filters_repr}:{category_id}:{sub_category_id}:{product_id}"
+    cached = await cache_manager.get(cache_key)
+    if cached is not None:
+        return build_success_response(data=cached["data"], request_id=request.state.request_id, meta=cached["meta"])
+
     suppliers, total = await service.list_paginated(
         query, category_id=category_id, sub_category_id=sub_category_id, product_id=product_id
     )
     meta = PageMeta.build(page=query.page.page, page_size=query.page.page_size, total_records=total).as_meta_dict()
     data = [_to_list_item(s) for s in suppliers]
+    await cache_manager.set(cache_key, {"data": data, "meta": meta}, ttl_seconds=60)
     return build_success_response(data=data, request_id=request.state.request_id, meta=meta)
 
 
@@ -322,11 +329,12 @@ async def upload_supplier_media(
 @router.get("/lookup", summary="Lightweight active suppliers lookup")
 async def get_suppliers_lookup(
     request: Request,
+    search: str | None = None,
     service: SupplierService = Depends(get_supplier_service),
     _current_user: CurrentUser = Depends(require_permission("supplier.view")),
 ) -> dict:
-    """Return lightweight list of active suppliers {id, company_name}."""
-    suppliers = await service.list_suppliers_lookup()
+    """Return lightweight list of active suppliers {id, company_name, brand_description, supplier_type}."""
+    suppliers = await service.list_suppliers_lookup(search=search)
     return build_success_response(data=suppliers, request_id=request.state.request_id)
 
 

@@ -51,9 +51,12 @@ class CurrencyRepository(BaseRepository[Currency]):
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 
-    async def list_all(self) -> list[Currency]:
-        """Return every non-deleted currency, ordered by name."""
-        stmt = self._base_select().order_by(Currency.name)
+    async def list_all(self, *, active_only: bool = True) -> list[Currency]:
+        """Return currencies, optionally filtering to active only, ordered by name."""
+        stmt = self._base_select()
+        if active_only:
+            stmt = stmt.where(Currency.status == "active")
+        stmt = stmt.order_by(Currency.name)
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 

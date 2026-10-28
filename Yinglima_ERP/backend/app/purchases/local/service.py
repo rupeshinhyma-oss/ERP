@@ -17,6 +17,7 @@ import json
 import logging
 import os
 import re
+import time
 import uuid
 from datetime import date, datetime
 from typing import Any
@@ -53,6 +54,12 @@ logger = logging.getLogger(__name__)
 
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini").strip()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
+
+_CONSIGNMENTS_LOOKUP_CACHE: dict[str, Any] = {
+    "data": None,
+    "timestamp": 0.0,
+}
+_CONSIGNMENTS_CACHE_TTL_SECONDS = 30.0
 
 
 class LocalPurchaseService:
@@ -98,7 +105,7 @@ class LocalPurchaseService:
             qty = float(item.get("quantity") or 0)
             rate = float(item.get("unit_rate") or 0)
             raw_vat = item.get("vat_rate")
-            vat_rate = float(raw_vat) if raw_vat is not None else 13.0
+            vat_rate = float(raw_vat) if raw_vat is not None else 0.0
 
             basic_total = round(qty * rate, 2)
             vat_amount = round(basic_total * (vat_rate / 100.0), 2)
@@ -427,11 +434,109 @@ class LocalPurchaseService:
             raise NotFoundException(f"Local purchase with id {purchase_id} not found.")
         await self.repo.delete(purchase)
 
+    async def inward_purchase(
+        self,
+        purchase_id: uuid.UUID,
+        inward_data: Any,
+        created_by_id: uuid.UUID | None = None,
+        created_by_name: str | None = None,
+    ) -> LocalPurchase:
+        """Inward an existing local purchase into warehouse stock ledger.
+        Creates a StockMovement (INWARD), updates warehouse inventory,
+        marks Local Purchase status as 'Inwarded', and links the slip number.
+        """
+        from app.stock.schemas import StockMovementCreate, StockMovementItemCreate
+        from app.stock.service import StockMovementService
+
+        purchase = await self.get_purchase(purchase_id)
+
+        if purchase.stock_movement_id:
+            msg = f"Purchase invoice '{purchase.invoice_no}' has already been inwarded"
+            if purchase.stock_movement_number:
+                msg += f" under slip {purchase.stock_movement_number}"
+            raise BadRequestException(msg)
+
+        # Build line items for StockMovement
+        items_to_inward: list[StockMovementItemCreate] = []
+
+        if hasattr(inward_data, "items") and inward_data.items and len(inward_data.items) > 0:
+            for itm in inward_data.items:
+                dmg = float(getattr(itm, "damaged_quantity", 0.0) or 0.0)
+                qty = float(getattr(itm, "quantity", 0.0) or 0.0)
+                exp = float(getattr(itm, "expected_quantity", 0.0) or 0.0)
+                if dmg > 0 and qty == exp and qty > 0:
+                    accepted_qty = max(0.0, qty - dmg)
+                elif qty > 0:
+                    accepted_qty = qty
+                else:
+                    accepted_qty = max(0.0, exp - dmg)
+
+                items_to_inward.append(
+                    StockMovementItemCreate(
+                        product_id=itm.product_id,
+                        product_name=itm.product_name,
+                        product_code=itm.product_code,
+                        expected_quantity=exp,
+                        quantity=qty,
+                        damaged_quantity=dmg,
+                        accepted_quantity=accepted_qty,
+                        unit_rate=itm.unit_rate,
+                        remarks=itm.remarks,
+                    )
+                )
+        else:
+            # Default: inward all items from the purchase
+            for p_item in purchase.items:
+                items_to_inward.append(
+                    StockMovementItemCreate(
+                        product_id=p_item.product_id,
+                        product_name=p_item.product_name,
+                        product_code=p_item.product_code,
+                        expected_quantity=float(p_item.quantity),
+                        quantity=float(p_item.quantity),
+                        damaged_quantity=0.0,
+                        accepted_quantity=float(p_item.quantity),
+                        unit_rate=float(p_item.unit_rate),
+                    )
+                )
+
+        movement_payload = StockMovementCreate(
+            movement_type="inward",
+            movement_date=getattr(inward_data, "movement_date", None) or purchase.invoice_date,
+            source_type="local_purchase",
+            purchase_id=purchase.id,
+            purchase_invoice_no=purchase.invoice_no,
+            supplier_id=purchase.supplier_id,
+            supplier_name=purchase.supplier_name,
+            warehouse_location=getattr(inward_data, "warehouse_location", None) or "Main Godown",
+            vehicle_no=getattr(inward_data, "vehicle_no", None),
+            transporter_name=getattr(inward_data, "transporter_name", None),
+            container_no=getattr(inward_data, "container_no", None),
+            reference_no=purchase.invoice_no,
+            remarks=getattr(inward_data, "remarks", None) or f"Auto-inwarded from Local Purchase {purchase.invoice_no}",
+            items=items_to_inward,
+        )
+
+        stock_service = StockMovementService(self.session)
+        movement = await stock_service.create_movement(
+            data=movement_payload,
+            created_by_id=created_by_id,
+            created_by_name=created_by_name,
+        )
+
+        # Update Local Purchase status and link movement
+        purchase.status = "Inwarded"
+        purchase.stock_movement_id = movement.id
+        purchase.stock_movement_number = movement.movement_no
+
+        await self.session.flush()
+        return purchase
+
     async def match_product(self, name_or_code: str) -> tuple[uuid.UUID | None, str | None, str | None, float]:
         """Fuzzy match product in Product Master to inherit ID, Code, HSN, and VAT %."""
         clean = name_or_code.strip()
         if not clean or not self.session:
-            return None, None, None, 13.0
+            return None, None, None, 0.0
 
         stmt = (
             select(Product)
@@ -455,9 +560,9 @@ class LocalPurchaseService:
                 if hsn_obj:
                     hsn_str = hsn_obj.code
             vat = (
-                float(hsn_obj.purchase_vat_percent)
-                if hsn_obj and hsn_obj.purchase_vat_percent is not None
-                else (float(prod.purchase_vat_percent or 0.0) if prod.purchase_vat_percent is not None else 0.0)
+                float(prod.purchase_vat_percent)
+                if prod.purchase_vat_percent is not None
+                else (float(hsn_obj.purchase_vat_percent) if hsn_obj and hsn_obj.purchase_vat_percent is not None else 0.0)
             )
             return prod.id, prod.product_code, hsn_str, vat
         return None, None, None, 0.0
@@ -640,11 +745,11 @@ class LocalPurchaseService:
                     rate = 0.0
 
                 # Extract VAT %
-                vat_raw = row[col_map["vat_rate"]] if "vat_rate" in col_map else 13
+                vat_raw = row[col_map["vat_rate"]] if "vat_rate" in col_map else 0
                 try:
-                    vat = float(re.sub(r"[^\d.]", "", str(vat_raw))) if vat_raw else 13.0
+                    vat = float(re.sub(r"[^\d.]", "", str(vat_raw))) if vat_raw else 0.0
                 except ValueError:
-                    vat = 13.0
+                    vat = 0.0
 
                 if not name and code:
                     name = code
@@ -1201,9 +1306,9 @@ class LocalPurchaseService:
                 hsn_code = hsn_obj.code if hsn_obj else None
                 unit_rate = float(prod.standard_cost or 0.0)
                 vat_rate = (
-                    float(hsn_obj.purchase_vat_percent)
-                    if hsn_obj and hsn_obj.purchase_vat_percent is not None
-                    else (float(prod.purchase_vat_percent or 0.0) if prod.purchase_vat_percent is not None else 0.0)
+                    float(prod.purchase_vat_percent)
+                    if prod.purchase_vat_percent is not None
+                    else (float(hsn_obj.purchase_vat_percent) if hsn_obj and hsn_obj.purchase_vat_percent is not None else 0.0)
                 )
                 item_total = round(qty * unit_rate, 2)
                 vat_amount = round(item_total * (vat_rate / 100.0), 2)
@@ -1247,11 +1352,17 @@ class LocalPurchaseService:
             "count": len(items),
         }
 
-    async def get_consignments_lookup(self) -> list[SheetConsignmentLookup]:
+    async def get_consignments_lookup(self, force_refresh: bool = False) -> list[SheetConsignmentLookup]:
         """
         Fetch all active planning sheets, their organization/branch bindings,
         group labels, and all active consignment columns with planned items counts.
+        Optimized single-batch query with in-memory TTL caching.
         """
+        now = time.time()
+        if not force_refresh and _CONSIGNMENTS_LOOKUP_CACHE["data"] is not None:
+            if now - _CONSIGNMENTS_LOOKUP_CACHE["timestamp"] < _CONSIGNMENTS_CACHE_TTL_SECONDS:
+                return _CONSIGNMENTS_LOOKUP_CACHE["data"]
+
         stmt = (
             select(PlanningSheet, MasterCompany)
             .outerjoin(MasterCompany, MasterCompany.id == PlanningSheet.organization_id)
@@ -1259,9 +1370,62 @@ class LocalPurchaseService:
             .order_by(PlanningSheet.name.asc())
         )
         res = await self.session.execute(stmt)
+        sheets_with_companies = res.all()
+        if not sheets_with_companies:
+            return []
+
+        sheet_ids = [sheet.id for sheet, _ in sheets_with_companies]
+
+        # Single query for all columns belonging to these active sheets
+        col_stmt = (
+            select(PlanningColumn)
+            .where(PlanningColumn.sheet_id.in_(sheet_ids), PlanningColumn.deleted_at.is_(None))
+            .order_by(PlanningColumn.position.asc())
+        )
+        col_res = await self.session.execute(col_stmt)
+        all_columns = col_res.scalars().all()
+
+        valid_cols_by_sheet: dict[uuid.UUID, list[PlanningColumn]] = {}
+        target_column_ids: list[uuid.UUID] = []
+
+        for col in all_columns:
+            cl = col.name.strip().lower()
+            if any(x in cl for x in ("remark", "total", "pkg", "tally", "approval", "supplier", "city", "weight", "cbm")):
+                continue
+            if not re.search(r"([A-Za-z]+)[\s\-]*(\d+)", col.name):
+                continue
+            valid_cols_by_sheet.setdefault(col.sheet_id, []).append(col)
+            target_column_ids.append(col.id)
+
+        # Single aggregated query for planned items count across all target consignment columns
+        counts_by_col: dict[uuid.UUID, int] = {}
+        if target_column_ids:
+            count_stmt = text("""
+                SELECT pc.column_id, count(*)
+                FROM planning_cells pc
+                JOIN planning_rows pr ON pr.id = pc.row_id
+                WHERE pc.column_id = ANY(:col_ids)
+                  AND pr.deleted_at IS NULL
+                  AND pc.value IS NOT NULL
+                  AND pc.value ~ '^[0-9]+(\\.[0-9]+)?$'
+                  AND pc.value::numeric > 0
+                GROUP BY pc.column_id
+            """)
+            col_id_strs = [str(cid) for cid in target_column_ids]
+            count_res = await self.session.execute(count_stmt, {"col_ids": col_id_strs})
+            for r in count_res.fetchall():
+                try:
+                    counts_by_col[uuid.UUID(str(r[0]))] = int(r[1])
+                except Exception:
+                    pass
+
         results: list[SheetConsignmentLookup] = []
 
-        for sheet, company in res.all():
+        for sheet, company in sheets_with_companies:
+            cols = valid_cols_by_sheet.get(sheet.id, [])
+            if not cols:
+                continue
+
             org_id = sheet.organization_id
             org_name = company.name if company else None
 
@@ -1277,65 +1441,34 @@ class LocalPurchaseService:
             if not branch_name and branch_id:
                 branch_name = branch_id
 
-            # Determine group label
             group_label = sheet.mum_group_label or "Mum"
 
-            # Query non-deleted columns on this sheet
-            col_stmt = (
-                select(PlanningColumn)
-                .where(PlanningColumn.sheet_id == sheet.id, PlanningColumn.deleted_at.is_(None))
-                .order_by(PlanningColumn.position.asc())
+            consignments = [
+                ConsignmentColumnInfo(
+                    column_id=col.id,
+                    column_name=col.name,
+                    consignment_code=col.name.strip(),
+                    position=col.position,
+                    planned_items_count=counts_by_col.get(col.id, 0),
+                )
+                for col in cols
+            ]
+
+            results.append(
+                SheetConsignmentLookup(
+                    sheet_id=sheet.id,
+                    sheet_name=sheet.name,
+                    organization_id=org_id,
+                    organization_name=org_name,
+                    branch_id=branch_id,
+                    branch_name=branch_name,
+                    group_label=group_label,
+                    consignments=consignments,
+                )
             )
-            col_res = await self.session.execute(col_stmt)
-            columns = col_res.scalars().all()
 
-            consignments: list[ConsignmentColumnInfo] = []
-            for col in columns:
-                cl = col.name.strip().lower()
-                # Exclude non-consignment helper columns
-                if any(x in cl for x in ("remark", "total", "pkg", "tally", "approval", "supplier", "city", "weight", "cbm")):
-                    continue
-                # Match consignment naming pattern (e.g. Mum 48, GJ14, MP-06, etc.)
-                m = re.search(r"([A-Za-z]+)[\s\-]*(\d+)", col.name)
-                if not m:
-                    continue
-
-                # Count rows where planned quantity > 0
-                count_stmt = text("""
-                    SELECT count(*)
-                    FROM planning_cells pc
-                    JOIN planning_rows pr ON pr.id = pc.row_id
-                    WHERE pc.column_id = :col_id
-                      AND pr.deleted_at IS NULL
-                      AND NULLIF(regexp_replace(pc.value, '[^0-9.]', '', 'g'), '')::numeric > 0
-                """)
-                cell_count_res = await self.session.execute(count_stmt, {"col_id": str(col.id)})
-                planned_count = cell_count_res.scalar() or 0
-
-                consignments.append(
-                    ConsignmentColumnInfo(
-                        column_id=col.id,
-                        column_name=col.name,
-                        consignment_code=col.name.strip(),
-                        position=col.position,
-                        planned_items_count=planned_count,
-                    )
-                )
-
-            # Only include sheets that have consignment columns
-            if consignments:
-                results.append(
-                    SheetConsignmentLookup(
-                        sheet_id=sheet.id,
-                        sheet_name=sheet.name,
-                        organization_id=org_id,
-                        organization_name=org_name,
-                        branch_id=branch_id,
-                        branch_name=branch_name,
-                        group_label=group_label,
-                        consignments=consignments,
-                    )
-                )
+        _CONSIGNMENTS_LOOKUP_CACHE["data"] = results
+        _CONSIGNMENTS_LOOKUP_CACHE["timestamp"] = now
 
         return results
 
@@ -1416,11 +1549,11 @@ class LocalPurchaseService:
             p_name = product.product_name if product else item_label
             p_code = product.product_code if product else None
             hsn_code = hsn.code if hsn else None
-            unit_rate = float(product.standard_cost or 0.0) if product else 0.0
+            unit_rate = 0.0
             vat_rate = (
-                float(hsn.purchase_vat_percent)
-                if hsn and hsn.purchase_vat_percent is not None
-                else (float(product.purchase_vat_percent or 0.0) if product and product.purchase_vat_percent is not None else 0.0)
+                float(product.purchase_vat_percent)
+                if product and product.purchase_vat_percent is not None
+                else (float(hsn.purchase_vat_percent) if hsn and hsn.purchase_vat_percent is not None else 0.0)
             )
             item_total = round(qty_val * unit_rate, 2)
 

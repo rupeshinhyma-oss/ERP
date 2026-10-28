@@ -106,19 +106,28 @@ function formatCurrency(amount: number | null | undefined, currency = "CNY"): st
   return `${symbol} ${Number(amount).toFixed(2)}`;
 }
 
+interface ProductPriceCacheEntry {
+  items: ProductPriceRow[];
+  totalItems: number;
+  totalPages: number;
+  timestamp: number;
+}
+const productPriceListCache = new Map<string, ProductPriceCacheEntry>();
+
 export function ProductPricesPage() {
   const { hasPermission } = useAuth();
   const confirm = useConfirm();
   // Query Filters & Pagination State
-  const [items, setItems] = useState<ProductPriceRow[]>([]);
-  const [loading, setLoading] = useState<boolean>(true);
+  const initialCache = productPriceListCache.get("default");
+  const [items, setItems] = useState<ProductPriceRow[]>(() => initialCache?.items || []);
+  const [loading, setLoading] = useState<boolean>(() => !initialCache);
   const [error, setError] = useState<unknown>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
   const [page, setPage] = useState<number>(1);
   const [pageSize, setPageSize] = useState<number>(50);
-  const [totalItems, setTotalItems] = useState<number>(0);
-  const [totalPages, setTotalPages] = useState<number>(1);
+  const [totalItems, setTotalItems] = useState<number>(() => initialCache?.totalItems || 0);
+  const [totalPages, setTotalPages] = useState<number>(() => initialCache?.totalPages || 1);
 
   const [searchTerm, setSearchTerm] = useState<string>("");
   const [debouncedSearch, setDebouncedSearch] = useState<string>("");
@@ -307,7 +316,7 @@ export function ProductPricesPage() {
   const [assignCurrency, setAssignCurrency] = useState<string>("CNY");
   const [assignMoq, setAssignMoq] = useState<string>("");
   const [assignNotes, setAssignNotes] = useState<string>("");
-  const [assignIsPreferred, setAssignIsPreferred] = useState<boolean>(true);
+  const [assignIsPreferred, setAssignIsPreferred] = useState<boolean>(false);
   const [assignSubmitting, setAssignSubmitting] = useState<boolean>(false);
 
 
@@ -478,32 +487,51 @@ export function ProductPricesPage() {
 
   // Load Main Product Prices List
   const fetchPrices = useCallback(async () => {
-    setLoading(true);
+    const params: Record<string, string | number> = {
+      page,
+      page_size: pageSize,
+      sort_by: sortBy,
+      sort_dir: sortDir,
+    };
+
+    if (debouncedSearch.trim()) params.search = debouncedSearch.trim();
+    if (categoryFilter) params.category_id = categoryFilter;
+    if (subCategoryFilter) params.sub_category_id = subCategoryFilter;
+    if (brandFilter) params.brand_id = brandFilter;
+    if (pricingStatusFilter === "priced") params.has_price = "true";
+    else if (pricingStatusFilter === "unpriced") params.has_price = "false";
+
+    const queryKey = toQueryString(params);
+    const cached = productPriceListCache.get(queryKey) || productPriceListCache.get("default");
+    if (!cached && items.length === 0) {
+      setLoading(true);
+    }
     setError(null);
     try {
-      const params: Record<string, string | number> = {
-        page,
-        page_size: pageSize,
-        sort_by: sortBy,
-        sort_dir: sortDir,
-      };
-
-      if (debouncedSearch.trim()) params.search = debouncedSearch.trim();
-      if (categoryFilter) params.category_id = categoryFilter;
-      if (subCategoryFilter) params.sub_category_id = subCategoryFilter;
-      if (brandFilter) params.brand_id = brandFilter;
-      if (pricingStatusFilter === "priced") params.has_price = "true";
-      else if (pricingStatusFilter === "unpriced") params.has_price = "false";
-
       const url = `/inventory/product-prices${toQueryString(params)}`;
       const { data, meta } = await apiGet<ProductPriceRow[]>(url);
 
-      setItems(data || []);
+      const itemsList = data || [];
       const metaAny = meta as Record<string, any> | undefined;
-      if (metaAny) {
-        setTotalItems(metaAny.total_items ?? 0);
-        setTotalPages(metaAny.total_pages ?? 1);
-      }
+      const tItems = metaAny?.total_items ?? itemsList.length;
+      const tPages = metaAny?.total_pages ?? 1;
+
+      setItems(itemsList);
+      setTotalItems(tItems);
+      setTotalPages(tPages);
+
+      productPriceListCache.set(queryKey, {
+        items: itemsList,
+        totalItems: tItems,
+        totalPages: tPages,
+        timestamp: Date.now(),
+      });
+      productPriceListCache.set("default", {
+        items: itemsList,
+        totalItems: tItems,
+        totalPages: tPages,
+        timestamp: Date.now(),
+      });
     } catch (err) {
       setError(err);
     } finally {
@@ -614,7 +642,8 @@ export function ProductPricesPage() {
 
     try {
       await apiPut(`/inventory/product-prices/${productId}/preferred-supplier`, { supplier_id: supplierId });
-      setSuccess(supplierId ? `Supplier ${supplierName || ""} selected as preferred` : "Preferred supplier reset to lowest quote");
+      productPriceListCache.clear();
+      setSuccess(supplierId ? `Supplier ${supplierName || ""} selected as preferred` : "Preferred supplier removed (manual mode)");
       setTimeout(() => setSuccess(null), 3000);
       loadProductSuppliers(productId);
     } catch (err) {
@@ -763,6 +792,7 @@ export function ProductPricesPage() {
 
     try {
       await apiDelete(`/inventory/product-prices/${linkId}`);
+      productPriceListCache.clear();
     } catch (err) {
       alert("Failed to remove quote: " + (err instanceof Error ? err.message : String(err)));
       loadProductSuppliers(productId);
@@ -837,7 +867,7 @@ export function ProductPricesPage() {
             primary_supplier_name: makeActive ? resolvedSuppName : row.primary_supplier_name,
             supplier_count: newCount,
             has_price: true,
-            is_preferred: isPref || row.is_preferred,
+            is_preferred: isPref ? true : row.is_preferred,
           };
         }
         return row;
@@ -864,6 +894,7 @@ export function ProductPricesPage() {
         is_preferred: isPref,
       });
       if (res.data?.link_id) {
+        productPriceListCache.clear();
         setItems((prev) =>
           prev.map((r) =>
             r.product_id === productId && (isPref || !r.primary_link_id || priceNum <= (r.best_price ?? 999999))
@@ -889,7 +920,7 @@ export function ProductPricesPage() {
     setAssignCurrency(row.best_currency || "CNY");
     setAssignMoq("");
     setAssignNotes("");
-    setAssignIsPreferred(true);
+    setAssignIsPreferred(false);
     if ((row.supplier_count || 0) > 0 && !supplierQuotes[row.product_id]) {
       loadProductSuppliers(row.product_id);
     }
@@ -942,7 +973,7 @@ export function ProductPricesPage() {
             primary_supplier_name: makeActive ? resolvedSuppName : row.primary_supplier_name,
             supplier_count: newCount,
             has_price: true,
-            is_preferred: assignIsPreferred || row.is_preferred,
+            is_preferred: assignIsPreferred ? true : row.is_preferred,
           };
         }
         return row;
@@ -997,6 +1028,7 @@ export function ProductPricesPage() {
         is_preferred: assignIsPreferred,
       });
       if (res.data?.link_id) {
+        productPriceListCache.clear();
         setItems((prev) =>
           prev.map((r) =>
             r.product_id === productId && (assignIsPreferred || !r.primary_link_id || priceVal <= (r.best_price ?? 999999))
@@ -1014,12 +1046,34 @@ export function ProductPricesPage() {
     }
   };
 
-  // Open Product Detail Drawer
-  const openProductDrawer = async (productId: string) => {
-    setDrawerLoading(true);
+  // Open Product Detail Drawer (Instant 0ms with local summary fallback)
+  const openProductDrawer = async (productId: string, fallbackItem?: any) => {
+    const summary = fallbackItem || items.find((p) => p.product_id === productId || (p as any).id === productId);
+    if (summary) {
+      setDrawerProduct({
+        id: summary.product_id || (summary as any).id || productId,
+        product_code: summary.product_code || "",
+        product_name: summary.product_name || "",
+        product_name_tally: summary.product_name_tally || summary.product_name || "",
+        specification: summary.specification || "",
+        category_id: summary.category_id || "",
+        sub_category_id: summary.sub_category_id || "",
+        brand_id: summary.brand_id || "",
+        uom_id: summary.uom_id || "",
+        packaging_quantity: summary.packaging_quantity,
+        packaging_gross_weight: summary.packaging_gross_weight,
+        packaging_unit_cbm: summary.packaging_unit_cbm,
+        status: "active",
+      } as any);
+      setDrawerLoading(false);
+    } else {
+      setDrawerLoading(true);
+    }
     try {
       const { data } = await apiGet<Product>(`/masters/products/${productId}`);
-      setDrawerProduct(data);
+      if (data) {
+        setDrawerProduct(data);
+      }
     } catch (err) {
       console.error("Failed to load product details:", err);
     } finally {
@@ -1275,28 +1329,60 @@ export function ProductPricesPage() {
 
         <Banner error={error} success={success} />
 
-        {/* Expandable Filter Box matching Products Master Design */}
+        {/* Expandable Filter Box matching ERP Design */}
         {filterOpen && (
           <div
             className="card"
             style={{
-              padding: "14px 18px",
-              marginBottom: "14px",
+              padding: "16px 20px",
+              marginBottom: "16px",
               background: "#ffffff",
-              borderRadius: "8px",
+              borderRadius: "10px",
               border: "1px solid #e2e8f0",
-              boxShadow: "0 1px 3px rgba(0,0,0,0.05)",
-              display: "flex",
-              alignItems: "flex-end",
-              justifyContent: "space-between",
-              gap: "16px",
-              flexWrap: "wrap",
+              boxShadow: "0 2px 8px rgba(0,0,0,0.04)",
             }}
           >
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "16px", flex: 1, alignItems: "flex-end" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "14px" }}>
+              <div style={{ fontWeight: 600, fontSize: "14px", color: "#0f172a", display: "flex", alignItems: "center", gap: "6px" }}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon>
+                </svg>
+                Filter Options
+              </div>
+              <button
+                type="button"
+                className="btn btn-small"
+                style={{
+                  background: "#f1f5f9",
+                  color: "#475569",
+                  border: "1px solid #cbd5e1",
+                  borderRadius: "6px",
+                  cursor: "pointer",
+                  fontWeight: 600,
+                  padding: "5px 14px",
+                  fontSize: "12px",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "6px",
+                }}
+                onClick={() => {
+                  setCategoryFilter("");
+                  setSubCategoryFilter("");
+                  setBrandFilter("");
+                  setPricingStatusFilter("all");
+                  setSearchTerm("");
+                  setDebouncedSearch("");
+                  setPage(1);
+                }}
+              >
+                Reset Filters
+              </button>
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "16px" }}>
               {/* Category Filter */}
               <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-                <label style={{ fontSize: "13px", fontWeight: 600, color: "#334155" }}>Category</label>
+                <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px" }}>Category</label>
                 <SearchableFilterDropdown
                   value={categoryFilter || null}
                   onChange={(val) => {
@@ -1321,7 +1407,7 @@ export function ProductPricesPage() {
 
               {/* Sub Category Filter */}
               <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-                <label style={{ fontSize: "13px", fontWeight: 600, color: "#334155" }}>Sub Category</label>
+                <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px" }}>Sub Category</label>
                 <SearchableFilterDropdown
                   value={subCategoryFilter || null}
                   onChange={(val) => {
@@ -1345,7 +1431,7 @@ export function ProductPricesPage() {
 
               {/* Brand Filter */}
               <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-                <label style={{ fontSize: "13px", fontWeight: 600, color: "#334155" }}>Brand</label>
+                <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px" }}>Brand</label>
                 <SearchableFilterDropdown
                   value={brandFilter || null}
                   onChange={(val) => {
@@ -1369,59 +1455,21 @@ export function ProductPricesPage() {
 
               {/* Pricing Status Filter */}
               <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-                <label style={{ fontSize: "13px", fontWeight: 600, color: "#334155" }}>Pricing Status</label>
-                <select
-                  value={pricingStatusFilter}
-                  onChange={(e) => {
-                    setPricingStatusFilter(e.target.value as any);
+                <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px" }}>Pricing Status</label>
+                <SearchableFilterDropdown
+                  value={pricingStatusFilter === "all" ? null : pricingStatusFilter}
+                  onChange={(val) => {
+                    setPricingStatusFilter((val || "all") as any);
                     setPage(1);
                   }}
-                  style={{
-                    padding: "9px 12px",
-                    borderRadius: "6px",
-                    border: "1px solid #cbd5e0",
-                    fontSize: "13.5px",
-                    background: "#ffffff",
-                    color: "#1e293b",
-                    width: "100%",
-                  }}
-                >
-                  <option value="all">All</option>
-                  <option value="priced">Priced Items Only</option>
-                  <option value="unpriced">Unpriced Items Only</option>
-                </select>
+                  placeholder="All"
+                  allLabel="All"
+                  options={[
+                    { value: "priced", label: "Priced Items Only" },
+                    { value: "unpriced", label: "Unpriced Items Only" },
+                  ]}
+                />
               </div>
-            </div>
-
-            {/* Filter Actions */}
-            <div style={{ display: "flex", gap: "10px", alignItems: "flex-end", flexShrink: 0 }}>
-              <button
-                type="button"
-                style={{
-                  padding: "8px 18px",
-                  borderRadius: "6px",
-                  border: "none",
-                  background: "#64748b",
-                  color: "#ffffff",
-                  fontWeight: 600,
-                  fontSize: "13px",
-                  cursor: "pointer",
-                  transition: "background-color 0.15s ease",
-                }}
-                onMouseEnter={(e) => (e.currentTarget.style.background = "#475569")}
-                onMouseLeave={(e) => (e.currentTarget.style.background = "#64748b")}
-                onClick={() => {
-                  setCategoryFilter("");
-                  setSubCategoryFilter("");
-                  setBrandFilter("");
-                  setPricingStatusFilter("all");
-                  setSearchTerm("");
-                  setDebouncedSearch("");
-                  setPage(1);
-                }}
-              >
-                Reset
-              </button>
             </div>
           </div>
         )}
@@ -1807,7 +1855,7 @@ export function ProductPricesPage() {
                                       <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
                                         <button
                                           type="button"
-                                          onClick={() => openProductDrawer(row.product_id)}
+                                          onClick={() => openProductDrawer(row.product_id, row)}
                                           style={{
                                             background: "none",
                                             border: "none",
@@ -2388,7 +2436,7 @@ export function ProductPricesPage() {
                                                         alignItems: "center",
                                                         gap: "3px",
                                                       }}
-                                                      title="Click to unset preferred supplier and revert to lowest quote"
+                                                      title="Click to remove preferred status from this supplier"
                                                     >
                                                       ⭐ Preferred (Unset)
                                                     </button>
@@ -2863,7 +2911,7 @@ export function ProductPricesPage() {
                     <span>⭐ Set as Preferred Supplier for this product</span>
                   </label>
                   <div style={{ fontSize: "11px", color: "#a16207", marginLeft: "24px", marginTop: "2px" }}>
-                    When enabled, this supplier's price will be displayed as the primary rate instead of automatic lowest quote.
+                    Optional: Check this only if you want to manually designate this supplier as Preferred. By default, quotes only record pricing without changing preference.
                   </div>
                 </div>
 

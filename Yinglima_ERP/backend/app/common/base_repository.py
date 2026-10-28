@@ -160,10 +160,10 @@ class BaseRepository(Generic[ModelT]):
             try:
                 if hasattr(column.type, "python_type") and column.type.python_type is uuid.UUID:
                     is_uuid_col = True
-                elif getattr(column.type, "__class__", None).__name__ == "GUID":
+                elif type(column.type).__name__ == "GUID":
                     is_uuid_col = True
             except (NotImplementedError, AttributeError):
-                is_uuid_col = getattr(column.type, "__class__", None).__name__ == "GUID"
+                is_uuid_col = type(column.type).__name__ == "GUID"
 
             if isinstance(value, str) and isinstance(column.type, (String, Text)):
                 stmt = stmt.where(func.lower(column) == value.lower())
@@ -284,17 +284,41 @@ class BaseRepository(Generic[ModelT]):
     def _apply_dynamic_filters(self, stmt: Select, filters: Any) -> Select:
         """Apply exact-match and date-range dynamic filters, restricted to ``filterable_fields``."""
         for column_name, value in filters.exact.items():
-            if column_name not in self.filterable_fields or not hasattr(self.model, column_name):
+            resolved_col_name = column_name
+            target_val = value
+
+            # Universal alias 1: map 'status' -> 'is_active' if model has is_active but no status
+            if column_name == "status" and "status" not in self.filterable_fields and hasattr(self.model, "is_active"):
+                resolved_col_name = "is_active"
+                if isinstance(value, str):
+                    val_clean = value.strip().lower()
+                    if val_clean in ("active", "true", "1"):
+                        target_val = "true"
+                    elif val_clean in ("inactive", "false", "0"):
+                        target_val = "false"
+
+            # Universal alias 2: map 'is_active' -> 'status' if model has status but no is_active
+            elif column_name == "is_active" and "is_active" not in self.filterable_fields and hasattr(self.model, "status"):
+                resolved_col_name = "status"
+                if isinstance(value, str):
+                    val_clean = value.strip().lower()
+                    if val_clean in ("true", "1", "yes", "active"):
+                        target_val = "active"
+                    elif val_clean in ("false", "0", "no", "inactive"):
+                        target_val = "inactive"
+
+            if resolved_col_name not in self.filterable_fields or not hasattr(self.model, resolved_col_name):
                 continue
-            column = getattr(self.model, column_name)
+            column = getattr(self.model, resolved_col_name)
+            value = target_val
             is_uuid_col = False
             try:
                 if hasattr(column.type, "python_type") and column.type.python_type is uuid.UUID:
                     is_uuid_col = True
-                elif getattr(column.type, "__class__", None).__name__ == "GUID":
+                elif type(column.type).__name__ == "GUID":
                     is_uuid_col = True
             except (NotImplementedError, AttributeError):
-                is_uuid_col = getattr(column.type, "__class__", None).__name__ == "GUID"
+                is_uuid_col = type(column.type).__name__ == "GUID"
 
             is_bool_col = False
             try:

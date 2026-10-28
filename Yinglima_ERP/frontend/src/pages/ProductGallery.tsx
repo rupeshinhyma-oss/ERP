@@ -411,6 +411,7 @@ export function ProductGalleryPage() {
     try {
       const prodParams: Record<string, string> = {
         has_images: "true",
+        status: "active",
         page_size: "100",
         sort_by: "created_at",
         sort_order: "desc",
@@ -424,12 +425,12 @@ export function ProductGalleryPage() {
       let prodItems = Array.isArray(prodRes.data) ? prodRes.data : (prodRes.data?.items || []);
       // Fallback: if has_images didn't return any, fetch standard page of 60 products
       if (prodItems.length === 0 && !categoryFilter && !subCategoryFilter && !brandFilter) {
-        const fallbackRes = await apiGet<Product[] | { items: Product[] }>("/masters/products?page=1&page_size=60&sort_order=desc");
+        const fallbackRes = await apiGet<Product[] | { items: Product[] }>("/masters/products?page=1&page_size=60&sort_order=desc&status=active");
         prodItems = Array.isArray(fallbackRes.data) ? fallbackRes.data : (fallbackRes.data?.items || []);
       }
       setProducts(prodItems);
 
-      const suppRes = await apiGet<Supplier[] | { items: Supplier[] }>("/suppliers?page=1&page_size=100");
+      const suppRes = await apiGet<Supplier[] | { items: Supplier[] }>("/suppliers?page=1&page_size=100&is_active=true");
       const suppItems = Array.isArray(suppRes.data) ? suppRes.data : (suppRes.data?.items || []);
       setSuppliers(suppItems);
 
@@ -686,88 +687,145 @@ export function ProductGalleryPage() {
         <div
           className="card"
           style={{
-            padding: "16px",
+            padding: "16px 20px",
             marginBottom: "24px",
-            display: "flex",
-            gap: "14px",
-            flexWrap: "wrap",
-            alignItems: "center",
             background: "#ffffff",
+            borderRadius: "10px",
+            border: "1px solid #e2e8f0",
+            boxShadow: "0 2px 8px rgba(0,0,0,0.04)",
           }}
         >
-          <input
-            type="text"
-            placeholder="Search by code, product name, or supplier company..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            style={{
-              padding: "9px 14px",
-              borderRadius: "6px",
-              border: "1px solid #cbd5e0",
-              fontSize: "13.5px",
-              flex: 1,
-              minWidth: "220px",
-            }}
-          />
-
-          <div style={{ minWidth: "170px" }}>
-            <SearchableFilterDropdown
-              value={categoryFilter || null}
-              onChange={(val) => {
-                setCategoryFilter(val || "");
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "14px" }}>
+            <div style={{ fontWeight: 600, fontSize: "14px", color: "#0f172a", display: "flex", alignItems: "center", gap: "6px" }}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon>
+              </svg>
+              Filter Options
+            </div>
+            <button
+              type="button"
+              className="btn btn-small"
+              style={{
+                background: "#f1f5f9",
+                color: "#475569",
+                border: "1px solid #cbd5e1",
+                borderRadius: "6px",
+                cursor: "pointer",
+                fontWeight: 600,
+                padding: "5px 14px",
+                fontSize: "12px",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "6px",
+              }}
+              onClick={() => {
+                setSearch("");
+                setCategoryFilter("");
                 setSubCategoryFilter("");
+                setBrandFilter("");
               }}
-              placeholder="All Categories"
-              allLabel="All Categories"
-              fetchOptions={async (term) => {
-                const q = term.toLowerCase().trim();
-                return categories.items
-                  .filter((c) => !q || c.name.toLowerCase().includes(q))
-                  .map((c) => ({ value: c.id, label: c.name }));
-              }}
-              fetchLabelForValue={async (val) => {
-                const c = categories.items.find((item) => item.id === val);
-                return c ? c.name : "";
-              }}
-            />
+            >
+              Reset Filters
+            </button>
           </div>
 
-          <div style={{ minWidth: "170px" }}>
-            <SearchableFilterDropdown
-              value={subCategoryFilter || null}
-              onChange={(val) => setSubCategoryFilter(val || "")}
-              placeholder="All Sub Categories"
-              allLabel="All Sub Categories"
-              fetchOptions={async (term) => {
-                const q = term.toLowerCase().trim();
-                return scopedSubCategories
-                  .filter((sc: ProductSubCategory) => !q || sc.name.toLowerCase().includes(q) || (sc.code && sc.code.toLowerCase().includes(q)))
-                  .map((sc: ProductSubCategory) => ({ value: sc.id, label: sc.name }));
-              }}
-              fetchLabelForValue={async (val) => {
-                const sc = subCategories.items.find((item) => item.id === val);
-                return sc ? sc.name : "";
-              }}
-            />
-          </div>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
+              gap: "14px",
+              alignItems: "flex-end",
+            }}
+          >
+            <div>
+              <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px" }}>
+                Search
+              </label>
+              <input
+                type="text"
+                placeholder="Search code, name, supplier..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                style={{
+                  width: "100%",
+                  height: "38px",
+                  padding: "7px 10px",
+                  borderRadius: "6px",
+                  border: "1px solid #cbd5e0",
+                  fontSize: "13.5px",
+                  boxSizing: "border-box",
+                }}
+              />
+            </div>
 
-          <div style={{ minWidth: "170px" }}>
-            <SearchableFilterDropdown
-              value={brandFilter || null}
-              onChange={(val) => setBrandFilter(val || "")}
-              placeholder="All Brands"
-              allLabel="All Brands"
-              fetchOptions={async (term) => {
-                const q = term.toLowerCase().trim();
-                return brands.items
-                  .filter((b) => !q || b.name.toLowerCase().includes(q))
-                  .map((b) => ({ value: b.id, label: b.name }));
-              }}
-              fetchLabelForValue={async (val) => {
-                const b = brands.items.find((item) => item.id === val);
-                return b ? b.name : "";
-              }}
-            />
+            <div>
+              <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px" }}>
+                Category
+              </label>
+              <SearchableFilterDropdown
+                value={categoryFilter || null}
+                onChange={(val) => {
+                  setCategoryFilter(val || "");
+                  setSubCategoryFilter("");
+                }}
+                placeholder="All Categories"
+                allLabel="All Categories"
+                fetchOptions={async (term) => {
+                  const q = term.toLowerCase().trim();
+                  return categories.items
+                    .filter((c) => !q || c.name.toLowerCase().includes(q))
+                    .map((c) => ({ value: c.id, label: c.name }));
+                }}
+                fetchLabelForValue={async (val) => {
+                  const c = categories.items.find((item) => item.id === val);
+                  return c ? c.name : "";
+                }}
+              />
+            </div>
+
+            <div>
+              <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px" }}>
+                Sub Category
+              </label>
+              <SearchableFilterDropdown
+                value={subCategoryFilter || null}
+                onChange={(val) => setSubCategoryFilter(val || "")}
+                placeholder="All Sub Categories"
+                allLabel="All Sub Categories"
+                fetchOptions={async (term) => {
+                  const q = term.toLowerCase().trim();
+                  return scopedSubCategories
+                    .filter((sc: ProductSubCategory) => !q || sc.name.toLowerCase().includes(q) || (sc.code && sc.code.toLowerCase().includes(q)))
+                    .map((sc: ProductSubCategory) => ({ value: sc.id, label: sc.name }));
+                }}
+                fetchLabelForValue={async (val) => {
+                  const sc = subCategories.items.find((item) => item.id === val);
+                  return sc ? sc.name : "";
+                }}
+              />
+            </div>
+
+            <div>
+              <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px" }}>
+                Brand
+              </label>
+              <SearchableFilterDropdown
+                value={brandFilter || null}
+                onChange={(val) => setBrandFilter(val || "")}
+                placeholder="All Brands"
+                allLabel="All Brands"
+                fetchOptions={async (term) => {
+                  const q = term.toLowerCase().trim();
+                  return brands.items
+                    .filter((b) => !q || b.name.toLowerCase().includes(q))
+                    .map((b) => ({ value: b.id, label: b.name }));
+                }}
+                fetchLabelForValue={async (val) => {
+                  const b = brands.items.find((item) => item.id === val);
+                  return b ? b.name : "";
+                }}
+              />
+            </div>
           </div>
         </div>
 

@@ -7,6 +7,7 @@ import uuid
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common.base_repository import BaseRepository
+from app.core.constants import RecordStatus
 from app.masters.supplier_types.models import SupplierType
 
 
@@ -43,9 +44,12 @@ class SupplierTypeRepository(BaseRepository[SupplierType]):
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 
-    async def list_all(self) -> list[SupplierType]:
-        """Return all non-deleted supplier types ordered by name."""
-        stmt = self._base_select().order_by(SupplierType.name)
+    async def list_all(self, *, active_only: bool = True) -> list[SupplierType]:
+        """Return all supplier types, optionally filtering to active only, ordered by name."""
+        stmt = self._base_select()
+        if active_only:
+            stmt = stmt.where(SupplierType.status == RecordStatus.ACTIVE)
+        stmt = stmt.order_by(SupplierType.name)
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 

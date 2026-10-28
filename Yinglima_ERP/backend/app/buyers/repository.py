@@ -22,6 +22,7 @@ from app.common.base_repository import BaseRepository
 from app.masters.countries.models import Country
 from app.masters.product_categories.models import ProductCategory
 from app.masters.product_sub_categories.models import ProductSubCategory
+from app.masters.states.models import State
 
 
 class BuyerRepository(BaseRepository[Buyer]):
@@ -61,8 +62,9 @@ class BuyerRepository(BaseRepository[Buyer]):
     def _apply_search(self, stmt: Select, term: str | None) -> Select:
         """
         Comprehensive search matching anything visible on the buyer row / details:
-        company name, buyer type, country (name/code), city, address, contact name/phone/email,
-        tax ID, websites, product range, remarks, and linked categories/sub-categories.
+        company name, buyer type, country (name/code), state/province (name/code), city, address,
+        contact name/phone/email (formatted or raw digits), tax ID, websites, product range, remarks,
+        and linked categories/sub-categories.
         """
         if not term:
             return stmt
@@ -70,6 +72,8 @@ class BuyerRepository(BaseRepository[Buyer]):
         if not clean:
             return stmt
         pattern = f"%{clean}%"
+        clean_norm = clean.replace(" ", "").replace("-", "").lower()
+        clean_pattern = f"%{clean_norm}%"
 
         direct_columns = [
             Buyer.company_name,
@@ -89,6 +93,21 @@ class BuyerRepository(BaseRepository[Buyer]):
         ]
         conditions: list[Any] = [col.ilike(pattern) for col in direct_columns]
 
+        # Normalized space/hyphen matching for company and contact names
+        conditions.append(func.lower(func.replace(func.replace(Buyer.company_name, " ", ""), "-", "")).like(clean_pattern))
+        conditions.append(func.lower(func.replace(func.replace(Buyer.contact_full_name, " ", ""), "-", "")).like(clean_pattern))
+
+        # Normalized digits search for phone numbers
+        import re
+        digits = re.sub(r"\D", "", clean)
+        if len(digits) >= 3:
+            digit_pattern = f"%{digits}%"
+            for phone_col in (
+                Buyer.contact_calling_number,
+                Buyer.contact_whatsapp_number,
+            ):
+                conditions.append(func.regexp_replace(phone_col, r"\D", "", "g").ilike(digit_pattern))
+
         # 1. Country Name / Code
         conditions.append(
             exists().where(
@@ -97,7 +116,15 @@ class BuyerRepository(BaseRepository[Buyer]):
             )
         )
 
-        # 2. Child Emails
+        # 2. State / Province Name / Code
+        conditions.append(
+            exists().where(
+                State.id == Buyer.state_id,
+                or_(State.name.ilike(pattern), State.code.ilike(pattern)),
+            )
+        )
+
+        # 3. Child Emails
         conditions.append(
             exists().where(
                 BuyerEmail.buyer_id == Buyer.id,
@@ -105,21 +132,30 @@ class BuyerRepository(BaseRepository[Buyer]):
             )
         )
 
-        # 3. Child Contacts (name, phone, email, designation)
+        # 4. Child Contacts (name, phone, email, designation)
+        contact_conds = [
+            BuyerContact.person_name.ilike(pattern),
+            BuyerContact.calling_number.ilike(pattern),
+            BuyerContact.whatsapp_number.ilike(pattern),
+            BuyerContact.email.ilike(pattern),
+            BuyerContact.designation.ilike(pattern),
+            func.lower(func.replace(func.replace(BuyerContact.person_name, " ", ""), "-", "")).like(clean_pattern),
+        ]
+        if len(digits) >= 3:
+            digit_pattern = f"%{digits}%"
+            contact_conds.extend([
+                func.regexp_replace(BuyerContact.calling_number, r"\D", "", "g").ilike(digit_pattern),
+                func.regexp_replace(BuyerContact.whatsapp_number, r"\D", "", "g").ilike(digit_pattern),
+            ])
+
         conditions.append(
             exists().where(
                 BuyerContact.buyer_id == Buyer.id,
-                or_(
-                    BuyerContact.person_name.ilike(pattern),
-                    BuyerContact.calling_number.ilike(pattern),
-                    BuyerContact.whatsapp_number.ilike(pattern),
-                    BuyerContact.email.ilike(pattern),
-                    BuyerContact.designation.ilike(pattern),
-                ),
+                or_(*contact_conds),
             )
         )
 
-        # 4. Linked Product Categories
+        # 5. Linked Product Categories
         conditions.append(
             exists().where(
                 BuyerCategoryLink.buyer_id == Buyer.id,
@@ -128,7 +164,7 @@ class BuyerRepository(BaseRepository[Buyer]):
             )
         )
 
-        # 5. Linked Product Sub Categories
+        # 6. Linked Product Sub Categories
         conditions.append(
             exists().where(
                 BuyerSubCategoryLink.buyer_id == Buyer.id,
