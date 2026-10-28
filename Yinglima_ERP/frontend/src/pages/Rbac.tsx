@@ -101,6 +101,12 @@ function RolesTableSkeletonRows({ count = 6 }: { count?: number }) {
   );
 }
 
+let rbacPageCache: {
+  permissions: Permission[];
+  roles: Role[];
+  users: User[];
+} | null = null;
+
 export function RbacPage() {
   const { hasPermission } = useAuth();
   const showToast = useToast();
@@ -118,10 +124,10 @@ export function RbacPage() {
   // button at all, for either case.
   const canManageOrCreate = canManage || canCreateRole;
 
-  const [allPermissions, setAllPermissions] = useState<Permission[]>([]);
-  const [allRoles, setAllRoles] = useState<Role[]>([]);
-  const [allUsers, setAllUsers] = useState<User[]>([]);
-  const [rolesLoading, setRolesLoading] = useState(true);
+  const [allPermissions, setAllPermissions] = useState<Permission[]>(() => rbacPageCache?.permissions || []);
+  const [allRoles, setAllRoles] = useState<Role[]>(() => rbacPageCache?.roles || []);
+  const [allUsers, setAllUsers] = useState<User[]>(() => rbacPageCache?.users || []);
+  const [rolesLoading, setRolesLoading] = useState(() => !rbacPageCache);
   const [error, setError] = useState<unknown>(null);
   const [roleSearch, setRoleSearch] = useState("");
   const [selectedRoleIds, setSelectedRoleIds] = useState<string[]>([]);
@@ -195,13 +201,19 @@ export function RbacPage() {
   const [cloneSubmitting, setCloneSubmitting] = useState(false);
   const [bulkDeleting, setBulkDeleting] = useState(false);
 
-  const loadRoles = useCallback(async () => {
-    setRolesLoading(true);
+  const loadRoles = useCallback(async (silent = false) => {
+    if (!silent && !rbacPageCache) {
+      setRolesLoading(true);
+    }
     try {
       const res = await apiGet<Role[]>("/rbac/roles");
-      setAllRoles(res.data || []);
+      const rolesData = res.data || [];
+      setAllRoles(rolesData);
+      if (rbacPageCache) {
+        rbacPageCache.roles = rolesData;
+      }
     } catch (err) {
-      setError(err);
+      if (!rbacPageCache) setError(err);
     } finally {
       setRolesLoading(false);
     }
@@ -210,9 +222,13 @@ export function RbacPage() {
   const loadUsers = useCallback(async () => {
     try {
       const res = await apiGet<ItemsPage<User>>("/users?page_size=200");
-      setAllUsers(res.data.items || []);
+      const usersData = res.data.items || [];
+      setAllUsers(usersData);
+      if (rbacPageCache) {
+        rbacPageCache.users = usersData;
+      }
     } catch (err) {
-      setError(err);
+      if (!rbacPageCache) setError(err);
     }
   }, []);
 
@@ -221,10 +237,16 @@ export function RbacPage() {
     (async () => {
       try {
         const permsRes = await apiGet<Permission[]>("/rbac/permissions");
-        setAllPermissions(permsRes.data || []);
-        await Promise.all([loadRoles(), loadUsers()]);
+        const permsData = permsRes.data || [];
+        setAllPermissions(permsData);
+        await Promise.all([loadRoles(Boolean(rbacPageCache)), loadUsers()]);
+        rbacPageCache = {
+          permissions: permsData,
+          roles: allRoles,
+          users: allUsers,
+        };
       } catch (err) {
-        setError(err);
+        if (!rbacPageCache) setError(err);
       }
     })();
   }, [loadRoles, loadUsers]);

@@ -42,9 +42,19 @@ from app.rbac.schemas import (
     RoleUpdate,
     RoleWithPermissions,
 )
+from app.cache.dependency import get_cache_manager
+from app.cache.manager import CacheManager
 from app.rbac.service import RBACService
 
 router = APIRouter(prefix="/rbac", tags=["Roles & Permissions"])
+
+
+async def _invalidate_rbac_cache(cache_manager: CacheManager) -> None:
+    try:
+        await cache_manager.delete("rbac::roles_with_permissions")
+        await cache_manager.delete("rbac::all_permissions")
+    except Exception:
+        pass
 
 
 async def _role_with_permissions(role: Role, rbac_service: RBACService) -> RoleWithPermissions:
@@ -58,10 +68,17 @@ async def list_permissions(
     request: Request,
     rbac_service: RBACService = Depends(get_rbac_service),
     _current_user: CurrentUser = Depends(require_any_permission("roles_permissions.view", "user.action", "user.view")),
+    cache_manager: CacheManager = Depends(get_cache_manager),
 ) -> dict:
     """List every permission in the system."""
+    cache_key = "rbac::all_permissions"
+    cached = await cache_manager.get(cache_key)
+    if cached is not None:
+        return build_success_response(data=cached, request_id=request.state.request_id)
+
     permissions = await rbac_service.list_permissions()
     data = [PermissionRead.model_validate(p).model_dump(mode="json") for p in permissions]
+    await cache_manager.set(cache_key, data, ttl_seconds=600)
     return build_success_response(data=data, request_id=request.state.request_id)
 
 
@@ -73,12 +90,14 @@ async def create_role(
     rbac_service: RBACService = Depends(get_rbac_service),
     current_user: CurrentUser = Depends(require_permission("roles_permissions.create")),
     audit_service: AuditService = Depends(get_audit_service),
+    cache_manager: CacheManager = Depends(get_cache_manager),
 ) -> dict:
     """Create a new role/department, optionally granting it an initial set of permission codes."""
     role = await rbac_service.create_role(
         name=payload.name, description=payload.description, permission_codes=payload.permission_codes,
         code=payload.code, parent_department_id=payload.parent_department_id,
     )
+    await _invalidate_rbac_cache(cache_manager)
     data = (await _role_with_permissions(role, rbac_service)).model_dump(mode="json")
     await audit_service.record(
         action=AuditAction.CREATE,
@@ -105,8 +124,14 @@ async def list_roles(
     request: Request,
     rbac_service: RBACService = Depends(get_rbac_service),
     _current_user: CurrentUser = Depends(require_permission("roles_permissions.view")),
+    cache_manager: CacheManager = Depends(get_cache_manager),
 ) -> dict:
     """List every role, with each role's granted permission codes expanded."""
+    cache_key = "rbac::roles_with_permissions"
+    cached = await cache_manager.get(cache_key)
+    if cached is not None:
+        return build_success_response(data=cached, request_id=request.state.request_id)
+
     roles = await rbac_service.list_roles_with_permissions()
     data = [
         RoleWithPermissions(
@@ -115,6 +140,7 @@ async def list_roles(
         ).model_dump(mode="json")
         for r in roles
     ]
+    await cache_manager.set(cache_key, data, ttl_seconds=300)
     return build_success_response(data=data, request_id=request.state.request_id)
 
 
@@ -139,6 +165,7 @@ async def update_role(
     rbac_service: RBACService = Depends(get_rbac_service),
     current_user: CurrentUser = Depends(require_permission("roles_permissions.action")),
     audit_service: AuditService = Depends(get_audit_service),
+    cache_manager: CacheManager = Depends(get_cache_manager),
 ) -> dict:
     """Update a role's name/description. System roles cannot be renamed."""
     unset_parent = "parent_department_id" in payload.model_fields_set and payload.parent_department_id is None
@@ -147,6 +174,7 @@ async def update_role(
         code=payload.code, parent_department_id=payload.parent_department_id,
         unset_parent=unset_parent,
     )
+    await _invalidate_rbac_cache(cache_manager)
     data = (await _role_with_permissions(role, rbac_service)).model_dump(mode="json")
     await audit_service.record(
         action=AuditAction.UPDATE,

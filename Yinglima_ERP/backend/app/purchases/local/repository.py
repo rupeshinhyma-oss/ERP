@@ -8,9 +8,9 @@ import uuid
 from datetime import date
 from typing import Any
 
-from sqlalchemy import Select, and_, desc, func, or_, select
+from sqlalchemy import Select, and_, desc, exists, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import selectinload, load_only
 
 from app.common.base_repository import BaseRepository
 from app.purchases.local.models import LocalPurchase, LocalPurchaseItem
@@ -22,6 +22,9 @@ class LocalPurchaseRepository(BaseRepository[LocalPurchase]):
     searchable_fields = (
         "invoice_no",
         "supplier_name",
+        "organization_name",
+        "branch_name",
+        "consignment_code",
         "remarks",
     )
     sortable_fields = (
@@ -81,11 +84,27 @@ class LocalPurchaseRepository(BaseRepository[LocalPurchase]):
             base_conditions.append(LocalPurchase.invoice_date <= date_to)
 
         if search and search.strip():
-            term = f"%{search.strip()}%"
+            clean = search.strip()
+            term = f"%{clean}%"
+            clean_norm = clean.replace(" ", "").replace("-", "").lower()
+            clean_pattern = f"%{clean_norm}%"
             search_clause = or_(
                 LocalPurchase.invoice_no.ilike(term),
                 LocalPurchase.supplier_name.ilike(term),
+                LocalPurchase.organization_name.ilike(term),
+                LocalPurchase.branch_name.ilike(term),
+                LocalPurchase.consignment_code.ilike(term),
                 LocalPurchase.remarks.ilike(term),
+                func.lower(func.replace(func.replace(LocalPurchase.supplier_name, " ", ""), "-", "")).like(clean_pattern),
+                func.lower(func.replace(func.replace(LocalPurchase.invoice_no, " ", ""), "-", "")).like(clean_pattern),
+                exists().where(
+                    LocalPurchaseItem.purchase_id == LocalPurchase.id,
+                    or_(
+                        LocalPurchaseItem.product_name.ilike(term),
+                        LocalPurchaseItem.product_code.ilike(term),
+                        LocalPurchaseItem.hsn_code.ilike(term),
+                    ),
+                ),
             )
             base_conditions.append(search_clause)
 
@@ -95,10 +114,10 @@ class LocalPurchaseRepository(BaseRepository[LocalPurchase]):
         count_stmt = select(func.count(LocalPurchase.id)).where(where_clause)
         total_count = (await self.session.execute(count_stmt)).scalar() or 0
 
-        # Data query with items loaded for line-item count
+        # Data query with items loaded for line-item count (load only id for performance)
         data_stmt = (
             select(LocalPurchase)
-            .options(selectinload(LocalPurchase.items))
+            .options(selectinload(LocalPurchase.items).load_only(LocalPurchaseItem.id))
             .where(where_clause)
             .order_by(desc(LocalPurchase.created_at))
             .offset(offset)

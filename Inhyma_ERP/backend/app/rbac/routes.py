@@ -506,6 +506,11 @@ async def assign_user_permission(
     current_user: CurrentUser = Depends(require_any_permission("roles_permissions.action", "user.action")),
     audit_service: AuditService = Depends(get_audit_service),
 ) -> dict:
+    if user_id == current_user.id and not current_user.is_super_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Permission administration self-modification is not permitted.",
+        )
     await rbac_service.assign_user_permission(
         user_id, payload.permission_id, is_granted=payload.is_granted, granted_by=current_user.id
     )
@@ -538,6 +543,11 @@ async def remove_user_permission(
     current_user: CurrentUser = Depends(require_any_permission("roles_permissions.action", "user.action")),
     audit_service: AuditService = Depends(get_audit_service),
 ) -> dict:
+    if user_id == current_user.id and not current_user.is_super_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Permission administration self-modification is not permitted.",
+        )
     await rbac_service.remove_user_permission(user_id, permission_id)
     await audit_service.record(
         action=AuditAction.USER_OVERRIDE_REMOVED,
@@ -568,6 +578,11 @@ async def set_user_permissions_bulk(
     current_user: CurrentUser = Depends(require_any_permission("roles_permissions.action", "user.action")),
     audit_service: AuditService = Depends(get_audit_service),
 ) -> dict:
+    if user_id == current_user.id and not current_user.is_super_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Permission administration self-modification is not permitted.",
+        )
     overrides_tuples = [(item.permission_id, item.is_granted) for item in payload.overrides]
     count = await rbac_service.set_user_permissions_bulk(
         user_id, overrides_tuples, granted_by=current_user.id

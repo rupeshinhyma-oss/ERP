@@ -22,11 +22,14 @@ Validates:
 import uuid
 from datetime import datetime, timezone
 import pytest
-from httpx import AsyncClient
+import pytest_asyncio
+from httpx import ASGITransport, AsyncClient
 
 from app.database.engine import get_sessionmaker
 from app.hrms.models import HrmsAttendance
-from sqlalchemy import delete
+from sqlalchemy import delete, select
+from app.users.models import User
+from app.auth.security import create_access_token
 
 # Thane office coordinates
 THANE_LAT = 19.199824
@@ -35,6 +38,23 @@ THANE_LNG = 72.956795
 # 500 meters outside Thane office
 OUTSIDE_LAT = 19.204320
 OUTSIDE_LNG = 72.956795
+
+
+@pytest_asyncio.fixture
+async def client():
+    from app.main import create_application
+
+    sessionmaker = get_sessionmaker()
+    async with sessionmaker() as session:
+        user = (await session.execute(select(User).where(User.email == "qa_super_admin@inhyma.test"))).scalars().first()
+        token = create_access_token(user.id, permissions=["*"]).token
+        default_headers = {"Authorization": f"Bearer {token}"}
+
+    app = create_application()
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://testserver", headers=default_headers) as ac:
+        async with app.router.lifespan_context(app):
+            yield ac
 
 
 @pytest.mark.asyncio

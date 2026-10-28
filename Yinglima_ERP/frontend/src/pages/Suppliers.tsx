@@ -66,7 +66,7 @@ import {
   toQueryString,
 } from "@/lib/api";
 import { createNameResolver } from "@/lib/nameResolver";
-import { useAuth, useSrNoJump, isSrNoQuery, usePendingGuard, useModalHistorySync } from "@/lib/hooks";
+import { useAuth, useSrNoJump, usePendingGuard, useModalHistorySync } from "@/lib/hooks";
 import { useLiveConnectionStatus } from "@/lib/live/useLive";
 import { useLiveList } from "@/lib/live/useLiveList";
 import type {
@@ -435,6 +435,13 @@ function SupplierSkeletonRows({
   );
 }
 
+interface SupplierListCacheEntry {
+  rows: Supplier[];
+  pagination: PaginationMeta | undefined;
+  timestamp: number;
+}
+const supplierListCache = new Map<string, SupplierListCacheEntry>();
+
 export function SuppliersPage() {
   const { hasPermission } = useAuth();
   const confirm = useConfirm();
@@ -448,9 +455,10 @@ export function SuppliersPage() {
   const canEditPotential = hasPermission("supplier.potential_edit");
   const canEditCurrentStatus = hasPermission("supplier.currentstatus") || hasPermission("supplier.update");
 
-  const [rows, setRows] = useState<Supplier[]>([]);
-  const [pagination, setPagination] = useState<PaginationMeta | undefined>();
-  const [loading, setLoading] = useState(true);
+  const initialCache = supplierListCache.get("default");
+  const [rows, setRows] = useState<Supplier[]>(() => initialCache?.rows || []);
+  const [pagination, setPagination] = useState<PaginationMeta | undefined>(() => initialCache?.pagination || undefined);
+  const [loading, setLoading] = useState(() => !initialCache);
   const [error, setError] = useState<unknown>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
@@ -1382,19 +1390,10 @@ export function SuppliersPage() {
     return list;
   }, [rows, sortColIndex, sortDirection, resolver, namesVersion]);
 
-  /* --- Search debounce with Sr. No. jump --- */
+  /* --- Search debounce --- */
   useEffect(() => {
     const timer = setTimeout(() => {
       const raw = searchInput.trim();
-      if (raw && isSrNoQuery(raw)) {
-        const srNo = parseInt(raw, 10);
-        if (srNo >= 1) {
-          setCurrentPage(Math.ceil(srNo / pageSize));
-          setEffectiveSearch("");
-          srNoJump.request(srNo);
-          return;
-        }
-      }
       srNoJump.clear();
       setCurrentPage(1);
       setEffectiveSearch(raw);
@@ -1407,7 +1406,6 @@ export function SuppliersPage() {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      setLoading(true);
       const params = {
         page: currentPage,
         page_size: pageSize,
@@ -1426,13 +1424,22 @@ export function SuppliersPage() {
         sub_category_id: subCategoryFilter || "",
         product_id: productFilter || "",
       };
+      const queryKey = toQueryString(params);
+      const isDefaultActiveQuery = statusTab === "active" && !effectiveSearch && !categoryFilter && !subCategoryFilter && !productFilter && !countryFilter && !stateFilter && !cityFilter && !supplierTypeFilter && !gradeFilter && !statusFilter && !potentialFilter && !visitedFilter && currentPage === 1;
+      const cached = supplierListCache.get(queryKey) || (isDefaultActiveQuery ? supplierListCache.get("default") : null);
+      if (!cached && rows.length === 0) {
+        setLoading(true);
+      }
       try {
         const { data, meta } = await apiGet<Supplier[]>("/suppliers" + toQueryString(params));
         if (cancelled) return;
         const items = data || [];
-        // Immediately render rows to the user without delay
         setRows(items);
         setPagination(meta?.pagination);
+        supplierListCache.set(queryKey, { rows: items, pagination: meta?.pagination, timestamp: Date.now() });
+        if (isDefaultActiveQuery) {
+          supplierListCache.set("default", { rows: items, pagination: meta?.pagination, timestamp: Date.now() });
+        }
         setError(null);
         setLoading(false);
 
@@ -4649,9 +4656,12 @@ export function SuppliersPage() {
                   cursor: "pointer",
                 }}
                 onClick={() => {
-                  setCurrentPage(1);
-                  setSelectedIds([]);
-                  setStatusTab("active");
+                  if (statusTab !== "active") {
+                    setRows([]);
+                    setCurrentPage(1);
+                    setSelectedIds([]);
+                    setStatusTab("active");
+                  }
                 }}
               >
                 Active
@@ -4669,9 +4679,12 @@ export function SuppliersPage() {
                   cursor: "pointer",
                 }}
                 onClick={() => {
-                  setCurrentPage(1);
-                  setSelectedIds([]);
-                  setStatusTab("inactive");
+                  if (statusTab !== "inactive") {
+                    setRows([]);
+                    setCurrentPage(1);
+                    setSelectedIds([]);
+                    setStatusTab("inactive");
+                  }
                 }}
               >
                 Inactive

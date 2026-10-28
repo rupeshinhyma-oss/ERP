@@ -61,13 +61,15 @@ function TrashTableSkeletonRows({ count = 6 }: { count?: number }) {
   );
 }
 
+let trashCache: TrashItem[] | null = null;
+
 export function TrashPage() {
   const [searchParams] = useSearchParams();
   const confirm = useConfirm();
   const deepLinkQ = searchParams.get("q");
 
-  const [items, setItems] = useState<TrashItem[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [items, setItems] = useState<TrashItem[]>(() => trashCache || []);
+  const [loading, setLoading] = useState<boolean>(() => !trashCache);
   const [error, setError] = useState<unknown>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
@@ -87,23 +89,28 @@ export function TrashPage() {
   // at a time, so they share the same keyed guard under fixed keys.
   const { isPending: isRowActionPending, guard: guardRowAction } = usePendingGuard<string>();
 
-  async function loadTrash() {
+  async function loadTrash(silent = false) {
     try {
-      setLoading(true);
+      if (!silent && !trashCache) {
+        setLoading(true);
+      }
       setError(null);
       const res = await apiGet<TrashItem[]>("/trash");
       if (res && res.data) {
+        trashCache = res.data;
         setItems(res.data);
       }
     } catch (err) {
-      setError(err);
+      if (!trashCache) {
+        setError(err);
+      }
     } finally {
       setLoading(false);
     }
   }
 
   useEffect(() => {
-    loadTrash();
+    loadTrash(Boolean(trashCache));
   }, []);
 
   const modules = Array.from(new Set(items.map((i) => i.entity_type)));

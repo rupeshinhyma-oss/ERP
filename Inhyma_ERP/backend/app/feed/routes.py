@@ -1,5 +1,9 @@
 """
 Feed and Broadcast Messaging API Routes.
+
+Provides open access for all authenticated ERP employees:
+- Company-wide and targeted announcements (create, view, edit/delete own, comments, reactions, readership)
+- Individual 1-to-1 employee direct messaging and private conversations
 """
 
 from __future__ import annotations
@@ -9,10 +13,14 @@ import uuid
 from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.auth.dependencies import get_current_user
 from app.auth.service import CurrentUser
 from app.core.responses import build_success_response
 from app.database.session import get_db_session
 from app.feed.schemas import (
+    ConversationCreate,
+    DirectMessageCreate,
+    DirectMessageUpdate,
     FeedCommentCreate,
     FeedCommentUpdate,
     FeedPostCreate,
@@ -20,7 +28,6 @@ from app.feed.schemas import (
     FeedReactionToggle,
 )
 from app.feed.service import FeedService
-from app.rbac.dependencies import require_any_permission
 
 router = APIRouter(prefix="/feed", tags=["feed"])
 
@@ -30,16 +37,21 @@ def get_feed_service(session: AsyncSession = Depends(get_db_session)) -> FeedSer
     return FeedService(session)
 
 
+# ==============================================================================
+# Announcements & Broadcast Posts Endpoints (Open Access to All Authenticated Employees)
+# ==============================================================================
+
 @router.post("/posts", summary="Create a new feed post", status_code=201)
 async def create_feed_post(
     request: Request,
     payload: FeedPostCreate,
     service: FeedService = Depends(get_feed_service),
-    current_user: CurrentUser = Depends(require_any_permission("feed.create", "feed.manage")),
+    current_user: CurrentUser = Depends(get_current_user),
 ) -> dict:
     """
     Create a new feed announcement or message.
-    Supports 'ALL' audience for company-wide broadcast or 'SELECTED' for targeted recipients.
+    Available to all authenticated employees without administrative barriers.
+    Supports 'ALL' audience for company-wide broadcast or 'SELECTED' for targeted recipients/departments.
     """
     post = await service.create_post(actor=current_user, data=payload)
     return build_success_response(
@@ -57,12 +69,11 @@ async def list_feed_posts(
     status: str | None = Query(default=None, description="Optional status filter: PUBLISHED or DRAFT"),
     search: str | None = Query(default=None, description="Optional keyword search"),
     service: FeedService = Depends(get_feed_service),
-    current_user: CurrentUser = Depends(
-        require_any_permission("feed.view", "feed.create", "feed.manage")
-    ),
+    current_user: CurrentUser = Depends(get_current_user),
 ) -> dict:
     """
     Retrieve paginated feed posts accessible to the current user.
+    Open to all authenticated employees.
     """
     response_data = await service.list_posts(
         actor=current_user,
@@ -82,9 +93,7 @@ async def get_feed_post(
     request: Request,
     post_id: uuid.UUID,
     service: FeedService = Depends(get_feed_service),
-    current_user: CurrentUser = Depends(
-        require_any_permission("feed.view", "feed.create", "feed.manage")
-    ),
+    current_user: CurrentUser = Depends(get_current_user),
 ) -> dict:
     """
     Retrieve a specific post. Access is denied if the user is not in the post's audience.
@@ -102,11 +111,11 @@ async def update_feed_post(
     post_id: uuid.UUID,
     payload: FeedPostUpdate,
     service: FeedService = Depends(get_feed_service),
-    current_user: CurrentUser = Depends(require_any_permission("feed.create", "feed.manage")),
+    current_user: CurrentUser = Depends(get_current_user),
 ) -> dict:
     """
     Update post content, title, audience, or publication state.
-    Only the post author or an authorized feed administrator may update.
+    Only the post author may update their announcement.
     """
     post = await service.update_post(actor=current_user, post_id=post_id, data=payload)
     return build_success_response(
@@ -121,10 +130,10 @@ async def delete_feed_post(
     request: Request,
     post_id: uuid.UUID,
     service: FeedService = Depends(get_feed_service),
-    current_user: CurrentUser = Depends(require_any_permission("feed.create", "feed.manage")),
+    current_user: CurrentUser = Depends(get_current_user),
 ) -> dict:
     """
-    Soft-delete a post. Only the author or a feed administrator may delete.
+    Soft-delete a post. Only the author may delete their announcement.
     """
     await service.delete_post(actor=current_user, post_id=post_id)
     return build_success_response(
@@ -139,10 +148,11 @@ async def list_eligible_recipients(
     request: Request,
     query: str | None = Query(default=None, description="Optional search string"),
     service: FeedService = Depends(get_feed_service),
-    current_user: CurrentUser = Depends(require_any_permission("feed.create", "feed.manage")),
+    current_user: CurrentUser = Depends(get_current_user),
 ) -> dict:
     """
-    List active workforce members for targeted audience selection.
+    List active workforce members for targeted audience selection or direct messaging.
+    Available to all authenticated employees.
     """
     recipients = await service.list_eligible_recipients(actor=current_user, query=query)
     return build_success_response(
@@ -155,10 +165,11 @@ async def list_eligible_recipients(
 async def list_eligible_departments(
     request: Request,
     service: FeedService = Depends(get_feed_service),
-    current_user: CurrentUser = Depends(require_any_permission("feed.create", "feed.manage")),
+    current_user: CurrentUser = Depends(get_current_user),
 ) -> dict:
     """
     List active departments and their eligible member counts for audience selection.
+    Available to all authenticated employees.
     """
     departments = await service.list_eligible_departments()
     return build_success_response(
@@ -175,7 +186,7 @@ async def add_post_comment(
     post_id: uuid.UUID,
     payload: FeedCommentCreate,
     service: FeedService = Depends(get_feed_service),
-    current_user: CurrentUser = Depends(require_any_permission("feed.view", "feed.create", "feed.manage")),
+    current_user: CurrentUser = Depends(get_current_user),
 ) -> dict:
     comment = await service.add_comment(actor=current_user, post_id=post_id, data=payload)
     return build_success_response(
@@ -190,7 +201,7 @@ async def list_post_comments(
     request: Request,
     post_id: uuid.UUID,
     service: FeedService = Depends(get_feed_service),
-    current_user: CurrentUser = Depends(require_any_permission("feed.view", "feed.create", "feed.manage")),
+    current_user: CurrentUser = Depends(get_current_user),
 ) -> dict:
     response_data = await service.list_comments(actor=current_user, post_id=post_id)
     return build_success_response(
@@ -206,7 +217,7 @@ async def update_post_comment(
     comment_id: uuid.UUID,
     payload: FeedCommentUpdate,
     service: FeedService = Depends(get_feed_service),
-    current_user: CurrentUser = Depends(require_any_permission("feed.view", "feed.create", "feed.manage")),
+    current_user: CurrentUser = Depends(get_current_user),
 ) -> dict:
     updated = await service.update_comment(
         actor=current_user, post_id=post_id, comment_id=comment_id, data=payload
@@ -224,7 +235,7 @@ async def delete_post_comment(
     post_id: uuid.UUID,
     comment_id: uuid.UUID,
     service: FeedService = Depends(get_feed_service),
-    current_user: CurrentUser = Depends(require_any_permission("feed.view", "feed.create", "feed.manage")),
+    current_user: CurrentUser = Depends(get_current_user),
 ) -> dict:
     await service.delete_comment(actor=current_user, post_id=post_id, comment_id=comment_id)
     return build_success_response(
@@ -242,7 +253,7 @@ async def toggle_post_reaction(
     post_id: uuid.UUID,
     payload: FeedReactionToggle,
     service: FeedService = Depends(get_feed_service),
-    current_user: CurrentUser = Depends(require_any_permission("feed.view", "feed.create", "feed.manage")),
+    current_user: CurrentUser = Depends(get_current_user),
 ) -> dict:
     summary = await service.toggle_reaction(actor=current_user, post_id=post_id, data=payload)
     return build_success_response(
@@ -259,7 +270,7 @@ async def mark_post_as_read(
     request: Request,
     post_id: uuid.UUID,
     service: FeedService = Depends(get_feed_service),
-    current_user: CurrentUser = Depends(require_any_permission("feed.view", "feed.create", "feed.manage")),
+    current_user: CurrentUser = Depends(get_current_user),
 ) -> dict:
     result = await service.mark_as_read(actor=current_user, post_id=post_id)
     return build_success_response(
@@ -274,7 +285,7 @@ async def get_post_readership(
     request: Request,
     post_id: uuid.UUID,
     service: FeedService = Depends(get_feed_service),
-    current_user: CurrentUser = Depends(require_any_permission("feed.view", "feed.create", "feed.manage")),
+    current_user: CurrentUser = Depends(get_current_user),
 ) -> dict:
     readership = await service.get_readership(actor=current_user, post_id=post_id)
     return build_success_response(
@@ -283,3 +294,168 @@ async def get_post_readership(
     )
 
 
+# ==============================================================================
+# Direct Messaging & Private Conversations Endpoints
+# ==============================================================================
+
+@router.post("/conversations", summary="Start or get direct conversation with an employee", status_code=201)
+async def start_or_get_conversation(
+    request: Request,
+    payload: ConversationCreate,
+    service: FeedService = Depends(get_feed_service),
+    current_user: CurrentUser = Depends(get_current_user),
+) -> dict:
+    """
+    Retrieve or create a 1-to-1 conversation with the selected employee.
+    Enforces that self-messaging is prohibited.
+    """
+    conversation = await service.get_or_create_conversation(actor=current_user, recipient_id=payload.recipient_id)
+    return build_success_response(
+        data=conversation.model_dump(mode="json"),
+        request_id=getattr(request.state, "request_id", "-"),
+        message="Conversation initialized.",
+    )
+
+
+@router.get("/conversations", summary="List private conversations for current employee")
+async def list_conversations(
+    request: Request,
+    service: FeedService = Depends(get_feed_service),
+    current_user: CurrentUser = Depends(get_current_user),
+) -> dict:
+    """
+    Retrieve all direct messaging conversations for the current employee.
+    Strictly restricted to conversations the user is a participant of.
+    """
+    conversations = await service.list_conversations(actor=current_user)
+    return build_success_response(
+        data=conversations.model_dump(mode="json"),
+        request_id=getattr(request.state, "request_id", "-"),
+    )
+
+
+@router.get("/conversations/unread-count", summary="Get total unread private messages count")
+async def get_unread_messages_count(
+    request: Request,
+    service: FeedService = Depends(get_feed_service),
+    current_user: CurrentUser = Depends(get_current_user),
+) -> dict:
+    """
+    Return total unread message count across all conversations for badge indicator.
+    """
+    unread_total = await service.get_unread_messages_count(actor=current_user)
+    return build_success_response(
+        data={"unread_count": unread_total},
+        request_id=getattr(request.state, "request_id", "-"),
+    )
+
+
+@router.get("/conversations/{conversation_id}", summary="Get conversation details")
+async def get_conversation(
+    request: Request,
+    conversation_id: uuid.UUID,
+    service: FeedService = Depends(get_feed_service),
+    current_user: CurrentUser = Depends(get_current_user),
+) -> dict:
+    """
+    Get conversation details. Access is denied if the user is not a participant.
+    """
+    conversation = await service.get_conversation(actor=current_user, conversation_id=conversation_id)
+    return build_success_response(
+        data=conversation.model_dump(mode="json"),
+        request_id=getattr(request.state, "request_id", "-"),
+    )
+
+
+@router.get("/conversations/{conversation_id}/messages", summary="List messages in conversation")
+async def list_conversation_messages(
+    request: Request,
+    conversation_id: uuid.UUID,
+    limit: int = Query(default=100, ge=1, le=500),
+    service: FeedService = Depends(get_feed_service),
+    current_user: CurrentUser = Depends(get_current_user),
+) -> dict:
+    """
+    List messages in conversation and automatically mark conversation as read for the user.
+    Access strictly restricted to conversation participants.
+    """
+    messages = await service.list_messages(actor=current_user, conversation_id=conversation_id, limit=limit)
+    return build_success_response(
+        data=messages.model_dump(mode="json"),
+        request_id=getattr(request.state, "request_id", "-"),
+    )
+
+
+@router.post("/conversations/{conversation_id}/messages", summary="Send message in conversation", status_code=201)
+async def send_conversation_message(
+    request: Request,
+    conversation_id: uuid.UUID,
+    payload: DirectMessageCreate,
+    service: FeedService = Depends(get_feed_service),
+    current_user: CurrentUser = Depends(get_current_user),
+) -> dict:
+    """
+    Send a direct message in a conversation.
+    Sender is validated strictly from authentication.
+    """
+    message = await service.send_message(actor=current_user, conversation_id=conversation_id, data=payload)
+    return build_success_response(
+        data=message.model_dump(mode="json"),
+        request_id=getattr(request.state, "request_id", "-"),
+        message="Message sent successfully.",
+    )
+
+
+@router.patch("/messages/{message_id}", summary="Edit own direct message")
+async def update_direct_message(
+    request: Request,
+    message_id: uuid.UUID,
+    payload: DirectMessageUpdate,
+    service: FeedService = Depends(get_feed_service),
+    current_user: CurrentUser = Depends(get_current_user),
+) -> dict:
+    """
+    Update a direct message. Strictly restricted to the original sender.
+    """
+    updated = await service.update_message(actor=current_user, message_id=message_id, data=payload)
+    return build_success_response(
+        data=updated.model_dump(mode="json"),
+        request_id=getattr(request.state, "request_id", "-"),
+        message="Message updated successfully.",
+    )
+
+
+@router.delete("/messages/{message_id}", summary="Delete own direct message")
+async def delete_direct_message(
+    request: Request,
+    message_id: uuid.UUID,
+    service: FeedService = Depends(get_feed_service),
+    current_user: CurrentUser = Depends(get_current_user),
+) -> dict:
+    """
+    Soft-delete a direct message. Strictly restricted to the original sender.
+    """
+    await service.delete_message(actor=current_user, message_id=message_id)
+    return build_success_response(
+        data={"id": str(message_id), "deleted": True},
+        request_id=getattr(request.state, "request_id", "-"),
+        message="Message deleted successfully.",
+    )
+
+
+@router.post("/conversations/{conversation_id}/read", summary="Mark conversation as read")
+async def mark_conversation_read(
+    request: Request,
+    conversation_id: uuid.UUID,
+    service: FeedService = Depends(get_feed_service),
+    current_user: CurrentUser = Depends(get_current_user),
+) -> dict:
+    """
+    Explicitly reset unread count and update last_read_at timestamp for current user.
+    """
+    await service.mark_conversation_read(actor=current_user, conversation_id=conversation_id)
+    return build_success_response(
+        data={"conversation_id": str(conversation_id), "is_read": True},
+        request_id=getattr(request.state, "request_id", "-"),
+        message="Conversation marked as read.",
+    )

@@ -561,6 +561,11 @@ export function InquiriesPage() {
 /* Layer 1: company-wise summary                                       */
 /* ------------------------------------------------------------------ */
 
+// In-memory SWR caches for instant 0ms transitions across inquiry views
+const inquiriesCompaniesCache = { current: null as CompanySummary[] | null };
+const inquiriesConsignmentsCache = new Map<string, InquiryListItem[]>();
+const inquiriesDetailCache = new Map<string, Inquiry>();
+
 function CompaniesView({
   onOpenCompany,
   resolveBuyerName,
@@ -582,8 +587,8 @@ function CompaniesView({
   onTabChange?: (tab: "all" | "pending" | "ongoing" | "approved" | "completed") => void;
   onStatsUpdate?: (stats: { pending: number; approved: number; ongoing: number; completed: number; total_order: number }) => void;
 }) {
-  const [summaries, setSummaries] = useState<CompanySummary[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [summaries, setSummaries] = useState<CompanySummary[]>(() => inquiriesCompaniesCache.current || []);
+  const [loading, setLoading] = useState(() => !inquiriesCompaniesCache.current);
   const [selectedBuyerIds, setSelectedBuyerIds] = useState<string[]>([]);
   const [localStatusTab, setLocalStatusTab] = useState<"all" | "pending" | "ongoing" | "approved" | "completed">("all");
 
@@ -591,10 +596,13 @@ function CompaniesView({
   const setStatusTab = onTabChange || setLocalStatusTab;
 
   const loadSummaries = useCallback(async () => {
-    setLoading(true);
+    if (!inquiriesCompaniesCache.current) {
+      setLoading(true);
+    }
     try {
       const { data } = await apiGet<CompanySummary[]>("/inquiries/companies");
       const activeSummaries = data.filter((s) => s.consignment_count > 0);
+      inquiriesCompaniesCache.current = activeSummaries;
       setSummaries(activeSummaries);
 
       let pending = 0;
@@ -968,8 +976,9 @@ function ConsignmentsView({
   codeNames: Record<string, string>;
   onError: (err: unknown) => void;
 }) {
-  const [rows, setRows] = useState<InquiryListItem[]>([]);
-  const [loading, setLoading] = useState(true);
+  const initialConsignments = inquiriesConsignmentsCache.get(buyerId);
+  const [rows, setRows] = useState<InquiryListItem[]>(() => initialConsignments || []);
+  const [loading, setLoading] = useState(() => !initialConsignments);
   const [search, setSearch] = useState("");
   const [addOpen, setAddOpen] = useState(false);
   const [selectedInquiryIds, setSelectedInquiryIds] = useState<string[]>([]);
@@ -979,12 +988,14 @@ function ConsignmentsView({
   const { isPending: isRowActionPending, guard: guardRowAction } = usePendingGuard<string>();
 
   const load = useCallback(async () => {
-    setLoading(true);
+    const cached = inquiriesConsignmentsCache.get(buyerId);
+    if (!cached) setLoading(true);
     try {
       const { data } = await apiGet<InquiryListItem[]>(`/inquiries/companies/${buyerId}`);
+      inquiriesConsignmentsCache.set(buyerId, data);
       setRows(data);
     } catch (err) {
-      onError(err);
+      if (!cached) onError(err);
     } finally {
       setLoading(false);
     }
@@ -1281,9 +1292,10 @@ function ItemsView({
   onError: (err: unknown) => void;
 }) {
   const confirm = useConfirm();
-  const [inquiry, setInquiry] = useState<Inquiry | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
+  const initialDetail = inquiriesDetailCache.get(inquiryId);
+  const [inquiry, setInquiry] = useState<Inquiry | null>(() => initialDetail || null);
+  const [loading, setLoading] = useState(() => !initialDetail);
+  const [selectedItemId, setSelectedItemId] = useState<string | null>(() => initialDetail?.items?.[0]?.id || null);
   const [productTab, setProductTab] = useState<"all" | "approved" | "pending">("all");
   const [productSearch, setProductSearch] = useState("");
   const [quotationSearch, setQuotationSearch] = useState("");
@@ -1367,15 +1379,17 @@ function ItemsView({
   const { guard: guardRowAction } = usePendingGuard<string>();
 
   const load = useCallback(async (silent = false) => {
-    if (!silent) setLoading(true);
+    const cached = inquiriesDetailCache.get(inquiryId);
+    if (!silent && !cached) setLoading(true);
     try {
       const { data } = await apiGet<Inquiry>(`/inquiries/${inquiryId}`);
+      inquiriesDetailCache.set(inquiryId, data);
       setInquiry(data);
       setSelectedItemId((prev) => prev || (data.items && data.items.length > 0 ? data.items[0].id : ""));
     } catch (err: any) {
       if (err?.response?.status === 404 || err?.status === 404 || (typeof err === "object" && err?.message?.includes("not found"))) {
         onBack();
-      } else if (!silent) {
+      } else if (!silent && !cached) {
         onError(err);
       }
     } finally {
@@ -2453,6 +2467,7 @@ function ItemsView({
               filteredProducts.map((item) => {
                 const isSelected = selectedItem?.id === item.id;
                 const isApproved = item.status === "approved";
+                const hasLicense = Boolean(item.requires_license || (item.license_details && item.license_details.trim()));
                 return (
                   <div
                     key={item.id}
@@ -2460,31 +2475,57 @@ function ItemsView({
                     style={{
                       padding: "12px 14px",
                       borderRadius: "10px",
-                      border: isSelected ? "2px solid #2563eb" : "1px solid #e2e8f0",
-                      background: isSelected ? "#f0f7ff" : "#ffffff",
+                      border: isSelected
+                        ? (hasLicense ? "2.5px solid #ef4444" : "2px solid #2563eb")
+                        : (hasLicense ? "1.5px solid #fca5a5" : "1px solid #e2e8f0"),
+                      background: isSelected
+                        ? (hasLicense ? "#fef2f2" : "#f0f7ff")
+                        : (hasLicense ? "#fff5f5" : "#ffffff"),
                       cursor: "pointer",
                       display: "flex",
                       flexDirection: "column",
                       gap: "8px",
                       transition: "all 0.15s ease",
-                      boxShadow: isSelected ? "0 2px 8px rgba(37,99,235,0.08)" : undefined,
+                      boxShadow: isSelected
+                        ? (hasLicense ? "0 2px 10px rgba(239,68,68,0.22)" : "0 2px 8px rgba(37,99,235,0.08)")
+                        : (hasLicense ? "0 1px 4px rgba(239,68,68,0.08)" : undefined),
                     }}
                   >
-                    {/* Top Status Tag & Info Link */}
+                    {/* Top Status Tag, License Badge & Info Link */}
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                      <span
-                        style={{
-                          padding: "2px 8px",
-                          borderRadius: "4px",
-                          fontSize: "11.5px",
-                          fontWeight: 700,
-                          background: isApproved ? "#dcfce7" : "#fef3c7",
-                          color: isApproved ? "#15803d" : "#b45309",
-                          border: `1px solid ${isApproved ? "#bbf7d0" : "#fde68a"}`,
-                        }}
-                      >
-                        {statusLabel(item.status)}
-                      </span>
+                      <div style={{ display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap" }}>
+                        <span
+                          style={{
+                            padding: "2px 8px",
+                            borderRadius: "4px",
+                            fontSize: "11.5px",
+                            fontWeight: 700,
+                            background: isApproved ? "#dcfce7" : "#fef3c7",
+                            color: isApproved ? "#15803d" : "#b45309",
+                            border: `1px solid ${isApproved ? "#bbf7d0" : "#fde68a"}`,
+                          }}
+                        >
+                          {statusLabel(item.status)}
+                        </span>
+                        {hasLicense && (
+                          <span
+                            style={{
+                              padding: "2px 7px",
+                              borderRadius: "4px",
+                              fontSize: "10.5px",
+                              fontWeight: 800,
+                              background: "#fee2e2",
+                              color: "#b91c1c",
+                              border: "1px solid #f87171",
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: "3px",
+                            }}
+                          >
+                            ⚠️ LICENSE NEEDED
+                          </span>
+                        )}
+                      </div>
                       <button
                         type="button"
                         onClick={(e) => {
@@ -2500,14 +2541,14 @@ function ItemsView({
                     {/* Product Name & Code */}
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
                       <div>
-                        <div style={{ fontSize: "14px", fontWeight: 700, color: "#0f172a", lineHeight: 1.3 }}>
+                        <div style={{ fontSize: "14px", fontWeight: 700, color: hasLicense ? "#991b1b" : "#0f172a", lineHeight: 1.3 }}>
                           {item.product_name || item.product_name_tally || productNames[item.product_id] || "Product"}
                         </div>
-                        <div style={{ fontSize: "12px", color: "#64748b", marginTop: "2px" }}>
+                        <div style={{ fontSize: "12px", color: hasLicense ? "#b91c1c" : "#64748b", marginTop: "2px", fontWeight: hasLicense ? 600 : 400 }}>
                           #{item.product_code || "PC1093W40"}
                         </div>
                       </div>
-                      <span style={{ color: "#94a3b8", fontSize: "14px", fontWeight: 700 }}>→</span>
+                      <span style={{ color: hasLicense ? "#ef4444" : "#94a3b8", fontSize: "14px", fontWeight: 700 }}>→</span>
                     </div>
 
                     {/* Quantity & Packaging Qty */}
@@ -2620,6 +2661,35 @@ function ItemsView({
                         </Can>
                       </div>
                     </div>
+
+                    {/* License Remark in List */}
+                    {hasLicense && (
+                      <div
+                        style={{
+                          padding: "6px 8px",
+                          borderRadius: "6px",
+                          background: "#fee2e2",
+                          border: "1px dashed #f87171",
+                          fontSize: "11.5px",
+                          color: "#991b1b",
+                          fontWeight: 600,
+                          display: "flex",
+                          alignItems: "flex-start",
+                          gap: "6px",
+                          lineHeight: 1.35,
+                        }}
+                      >
+                        <span style={{ fontSize: "12px", marginTop: "1px" }}>⚠️</span>
+                        <div>
+                          <span style={{ fontWeight: 700 }}>License Needed:</span>{" "}
+                          <span style={{ fontWeight: 500 }}>
+                            {item.license_details && item.license_details.trim() && item.license_details.toLowerCase() !== "yes"
+                              ? item.license_details
+                              : "Compliance certificate required in master"}
+                          </span>
+                        </div>
+                      </div>
+                    )}
 
                     {/* Quotation Counter & Status */}
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderTop: "1px solid #f1f5f9", paddingTop: "6px", fontSize: "12px" }}>
@@ -3752,6 +3822,34 @@ function ItemsView({
                   </button>
                 </div>
               </div>
+
+              {/* Compliance & License Requirement Warning Banner */}
+              {Boolean(selectedItem.requires_license || (selectedItem.license_details && selectedItem.license_details.trim())) && (
+                <div
+                  style={{
+                    background: "#fef2f2",
+                    border: "1.5px solid #fca5a5",
+                    borderRadius: "8px",
+                    padding: "10px 14px",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "10px",
+                    fontSize: "13px",
+                    color: "#991b1b",
+                    boxShadow: "0 1px 3px rgba(239,68,68,0.08)",
+                  }}
+                >
+                  <span style={{ fontSize: "18px" }}>⚠️</span>
+                  <div>
+                    <strong style={{ color: "#b91c1c" }}>Compliance &amp; License Required:</strong>{" "}
+                    <span style={{ fontWeight: 500 }}>
+                      {selectedItem.license_details && selectedItem.license_details.trim() && selectedItem.license_details.toLowerCase() !== "yes"
+                        ? selectedItem.license_details
+                        : "Mandatory compliance certificate or export/import license required in Product Master before shipment."}
+                    </span>
+                  </div>
+                </div>
+              )}
 
               {/* Product Specs Strip */}
               <div
@@ -6861,6 +6959,7 @@ function AddItemModal({
   const [submitting, setSubmitting] = useState(false);
   const [modalError, setModalError] = useState<string | null>(null);
   const [selectedUom, setSelectedUom] = useState<string>("");
+  const [selectedProductLicense, setSelectedProductLicense] = useState<string | null>(null);
 
   // Sync buyer_id if defaultBuyerId changes
   useEffect(() => {
@@ -6990,6 +7089,11 @@ function AddItemModal({
         if (prod) {
           const uomStr = prod.uom?.name || prod.uom?.code || prod.uom_name || "";
           setSelectedUom(uomStr);
+          if (prod.license_certificate_required && prod.license_certificate_required.trim()) {
+            setSelectedProductLicense(prod.license_certificate_required);
+          } else {
+            setSelectedProductLicense(null);
+          }
           setForm((f) => ({
             ...f,
             product_id: prodId,
@@ -7002,6 +7106,7 @@ function AddItemModal({
       }
     } else {
       setSelectedUom("");
+      setSelectedProductLicense(null);
     }
   };
 
@@ -7048,6 +7153,26 @@ function AddItemModal({
           fetchOptions={productFetcher}
           fetchLabelForValue={productLabel}
         />
+
+        {selectedProductLicense && (
+          <div
+            style={{
+              marginTop: "8px",
+              background: "#fee2e2",
+              border: "1px solid #fca5a5",
+              color: "#b91c1c",
+              padding: "7px 12px",
+              borderRadius: "6px",
+              fontSize: "12px",
+              fontWeight: 700,
+              display: "flex",
+              alignItems: "center",
+              gap: "6px",
+            }}
+          >
+            ⚠️ License / Certificate Needed: {selectedProductLicense}
+          </div>
+        )}
 
         <div style={{ marginTop: 12 }}>
           <TextField
@@ -7286,7 +7411,7 @@ function QuickInquiryDrawer({
     (async () => {
       try {
         const [compRes, uomRes] = await Promise.all([
-          apiGet<any>("/buyers?page_size=200"),
+          apiGet<any>("/buyers?page_size=200&status=active"),
           apiGet<any[]>("/masters/uom"),
         ]);
         const buyersList = Array.isArray(compRes.data) ? compRes.data : compRes.data?.data || [];
@@ -7533,7 +7658,7 @@ function QuickInquiryDrawer({
 
   const buyerFetcher: FetchOptions = useCallback(
     async (term, signal) => {
-      const { data } = await apiGet<any>("/buyers" + toQueryString({ search: term, limit: 20 }), { signal });
+      const { data } = await apiGet<any>("/buyers" + toQueryString({ search: term, limit: 20, status: "active" }), { signal });
       const list = Array.isArray(data) ? data : (data?.data || []);
       return list.map((b: any) => ({
         value: b.id,

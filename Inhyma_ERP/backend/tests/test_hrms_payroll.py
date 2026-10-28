@@ -72,6 +72,8 @@ async def test_hrms_payroll_end_to_end():
         await session.execute(
             delete(HrmsAttendance).where(HrmsAttendance.employee_id.in_([emp_a_id, emp_b_id]))
         )
+        from app.rbac.models import UserRole
+        await session.execute(delete(UserRole).where(UserRole.user_id.in_([admin_id, emp_a_id, emp_b_id])))
         await session.execute(delete(User).where(User.id.in_([admin_id, emp_a_id, emp_b_id])))
         await session.execute(
             update(HrmsPayrollComponent)
@@ -115,6 +117,19 @@ async def test_hrms_payroll_end_to_end():
             password_hash="mockhash",
         )
         session.add_all([admin_user, emp_a, emp_b])
+
+        # Assign super_admin role to admin_user for RBAC resolution
+        from app.rbac.models import Role, UserRole, RoleAssignmentType, RoleAssignmentStatus
+        super_role = (await session.execute(select(Role).where(Role.name == "super_admin"))).scalars().first()
+        if super_role:
+            session.add(
+                UserRole(
+                    user_id=admin_id,
+                    role_id=super_role.id,
+                    assignment_type=RoleAssignmentType.PRIMARY,
+                    status=RoleAssignmentStatus.ACTIVE,
+                )
+            )
 
         # Also add a holiday in October 2026: Gandhi Jayanti on Friday, 2026-10-02
         holiday = HrmsHoliday(

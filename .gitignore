@@ -73,3 +73,10 @@ backups/
 Inhyma_ERP/artifacts/
 artifacts/
 
+
+# Local AI Agent Rules (strictly local per developer - never push to GitHub)
+/AGENTS.md
+/GEMINI.md
+/.agents/
+**/AGENTS.md
+**/GEMINI.md

@@ -14,6 +14,12 @@ from sqlalchemy import Date, ForeignKey, Numeric, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database.base import GUID, Base, SoftDeleteMixin, TimestampMixin, UUIDPrimaryKeyMixin
+import app.users.models  # noqa: F401
+import app.stock.models  # noqa: F401
+import app.masters.company_list.models  # noqa: F401
+import app.planning.models  # noqa: F401
+import app.suppliers.models  # noqa: F401
+import app.masters.products.models  # noqa: F401
 
 
 class LocalPurchase(Base, UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin):
@@ -68,6 +74,10 @@ class LocalPurchase(Base, UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin):
 
     remarks: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(String(30), default="Confirmed", nullable=False, index=True)
+    stock_movement_id: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(), ForeignKey("stock_movements.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    stock_movement_number: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
 
     created_by_id: Mapped[uuid.UUID | None] = mapped_column(
         GUID(), ForeignKey("users.id"), nullable=True
@@ -103,7 +113,7 @@ class LocalPurchaseItem(Base, UUIDPrimaryKeyMixin, TimestampMixin):
 
     quantity: Mapped[float] = mapped_column(Numeric(12, 2), nullable=False)
     unit_rate: Mapped[float] = mapped_column(Numeric(15, 2), nullable=False)
-    vat_rate: Mapped[float] = mapped_column(Numeric(5, 2), default=13.0, nullable=False)
+    vat_rate: Mapped[float] = mapped_column(Numeric(5, 2), default=0.0, nullable=False)
     item_total: Mapped[float] = mapped_column(Numeric(15, 2), nullable=False)  # quantity * unit_rate (Basic)
     vat_amount: Mapped[float] = mapped_column(Numeric(15, 2), default=0.0, nullable=False)
 

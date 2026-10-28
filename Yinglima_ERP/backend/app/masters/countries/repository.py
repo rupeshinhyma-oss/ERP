@@ -51,9 +51,12 @@ class CountryRepository(BaseRepository[Country]):
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 
-    async def list_all(self) -> list[Country]:
-        """Return every non-deleted country, ordered by name (used for cached dropdown data)."""
-        stmt = self._base_select().order_by(Country.name)
+    async def list_all(self, *, active_only: bool = True) -> list[Country]:
+        """Return countries, optionally filtering to active only, ordered by name (used for cached dropdown data)."""
+        stmt = self._base_select()
+        if active_only:
+            stmt = stmt.where(Country.status == "active")
+        stmt = stmt.order_by(Country.name)
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 

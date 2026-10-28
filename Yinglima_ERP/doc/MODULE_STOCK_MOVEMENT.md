@@ -10,29 +10,51 @@ The **Stock Movement** module provides physical warehouse inventory tracking:
 
 ---
 
-## 2. 1-Click Extraction System
+## 2. Inward & Outward Workflow Architecture
 
-### A. Inward 1-Click Extract from Local Purchase
-1. Executive opens **New Inward Entry** and selects **⚡ 1-Click Extract from Local Purchase**.
-2. Selects a confirmed Local Purchase Invoice (e.g., `INV-2026-0045`).
-3. System calls `GET /api/v1/stock/extract/purchase/{purchase_id}` and automatically populates:
+### A. Inward Automation Directly from Local Purchase (Updated 2026-10-24)
+> [!IMPORTANT]
+> **Manual Inward Button Removed from Stock Movement Page:**
+> To eliminate duplicate manual entries and phantom warehouse inventory, the manual `+ New Inward Entry` button in `/inventory/stock-movements` has been removed. All physical inward stock receipts are now initiated strictly from confirmed domestic purchase orders in **Local Purchase** (`/purchases/local`).
+
+1. **Procurement/Warehouse Executive opens Local Purchases** (`/purchases/local`).
+2. Locates the confirmed domestic purchase bill (status: `Confirmed`).
+3. Clicks **`[📦 Inward Stock]`** directly in the Status column (or selects `📦 Inward to Warehouse` from the `⋮` action menu).
+4. System opens the **Local Purchase Inward Modal** (`LocalPurchaseInwardModal.tsx`), pre-populated with:
    - Supplier name and supplier ID.
-   - Reference bill number and date.
-   - Consignment code.
-   - Line items: Product name, product code/SKU, expected quantity, unit rate.
-4. Executive enters **Actual Received Qty** and **Damaged Qty**. Accepted net quantity is automatically computed:
-   $$\text{Accepted Qty} = \text{Received Qty} - \text{Damaged Qty}$$
+   - Reference invoice number and date.
+   - Warehouse location (defaults to `"Main Godown"`).
+   - Goods line items: Product name, expected quantity, default 100% accepted quantity, and unit rates.
+5. Executive verifies received quantities, enters any damaged units (`accepted = received - damaged`), transporter name, and vehicle number, then clicks **Confirm Inward Receipt**.
+6. The system executes `POST /api/v1/purchases/local/{purchase_id}/inward`, automatically:
+   - Creating an official `StockMovement` (type `inward`, slip `INW-YYYY-XXXX`).
+   - Crediting warehouse inventory balances on the live ledger.
+   - Transitioning Local Purchase status to `Inwarded`.
+   - Recording `stock_movement_id` and `stock_movement_number` on the purchase bill.
+   - Displaying an emerald `● Inwarded` badge with direct link to the voucher.
 
-### B. Outward 1-Click Extract from Sale Process
-1. Executive opens **New Outward Entry** and selects **⚡ 1-Click Extract from Sale Process**.
-2. Selects a confirmed Sale Order (e.g., `SO-2026-0012`).
-3. System calls `GET /api/v1/stock/extract/sale-order/{sale_order_id}` and automatically populates:
-   - Buyer/Customer name and buyer ID.
-   - Reference order number and date.
-   - Container number, transporter name, LR number.
-   - Consignment code.
-   - Line items: Product name, SKU, expected quantity, unit rate.
-4. Executive confirms or adjusts dispatched quantity and package details (e.g., 20 boxes).
+### B. Outward Automation Directly from Sales Process (Updated 2026-10-26)
+> [!IMPORTANT]
+> **Manual Outward Button Removed from Stock Movement Page:**
+> In accordance with the system design where Stock Movement acts strictly as a centralized audit ledger, the manual `+ New Outward Entry` button has been removed from `/inventory/stock-movements`. All outward inventory dispatches are now initiated strictly from **Sales Process** (`/sale/process`).
+
+1. **Sales/Warehouse Executive opens Sales Process** (`/sale/process`).
+2. Locates an approved export order (status: `admin_approved` or `sales_confirmed`).
+3. Clicks **`[📤 Outward / Dispatch Stock]`** directly in the Status column (or selects `📤 Outward / Dispatch Stock` from the `⋮` action menu).
+4. System opens the **Sale Process Outward Modal** (`SaleProcessOutwardModal.tsx`), displaying:
+   - Buyer name, order number, currency.
+   - Movement date (defaults to today) and warehouse location (defaults to `"Main Godown"`).
+   - Vehicle number, transporter name, container number.
+   - Goods line items: Product name, SKU, requested dispatch quantity, unit rate.
+5. Executive clicks **Confirm Outward & Dispatch**.
+6. The system executes `POST /api/v1/sales/orders/{id}/dispatch`:
+   - **Strict Stock Availability Validation**: Checks available warehouse inventory for each SKU ($\sum \text{Inward} - \sum \text{Outward}$). If any line item exceeds available inventory, dispatch is **strictly blocked** with an immediate error:
+     $$\text{"Insufficient stock in warehouse (Available: X, Requested: Y) for 'Product Name (SKU)'. Outward dispatch blocked to prevent negative inventory."}$$
+   - **Automated Voucher Generation**: If inventory is sufficient, automatically creates a `StockMovement` (type `outward`, voucher `OUT-YYYY-XXXX`).
+   - **Atomic Stock Deduction**: Automatically deducts quantities from the warehouse stock ledger.
+   - **Order Lifecycle Update**: Marks Sale Order status as `dispatched` and saves `stock_movement_id` and `stock_movement_number`.
+   - **Visual Tracking**: Displays an official purple `● DISPATCHED` badge and clickable link to the outward voucher.
+
 
 ---
 
@@ -103,9 +125,12 @@ The **Stock Movement** module provides physical warehouse inventory tracking:
 - **Sidebar Route**: `INVENTORY` $\rightarrow$ `Stock Movement` (`/inventory/stock-movements`)
 - **Components**:
   - `StockMovements.tsx`: Master tabbed view (Inward Register, Outward Register, Current Stock Ledger) + KPI metrics.
-  - `StockMovementModal.tsx`: Creation modal with 1-click PO/SO extractor and dynamic items grid.
+    - **Inward Register Tab**: Manual `+ New Inward Entry` button removed; replaced with an automated workflow banner: *"Inward Stock movements are now automatically generated directly from Local Purchases. To inward incoming goods, open Local Purchase and click [📦 Inward Stock]."* and a direct link button **`[📦 Inward from Local Purchase →]`**.
+    - **Outward Register Tab**: Retains `+ New Outward Entry` for order dispatches.
+  - `StockMovementModal.tsx`: Creation modal for outward movements with 1-click SO extractor and dynamic items grid.
   - `StockMovementDetailModal.tsx`: Read-only receipt and dispatch voucher inspection.
   - `ProductKardexModal.tsx`: Running balance history drawer for any inventory item.
+
 
 ---
 

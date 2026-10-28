@@ -280,12 +280,19 @@ class ProductService:
         if cbm is None or float(cbm) <= 0:
             raise BadRequestException("Packaging Unit CBM is required (provide Length, Width, Height to calculate automatically or provide Packaging Unit CBM directly).")
 
-        # Auto-inherit refund_vat_percent from HSN if not explicitly set
+        # Auto-inherit refund_vat_percent and purchase_vat_percent from HSN if not explicitly set
         hsn_id = field_values.get("hsn_id")
-        if hsn_id and field_values.get("refund_vat_percent") is None:
+        hsn_obj = None
+        if hsn_id:
             hsn_obj = await self.hsn_repository.get_by_id(hsn_id)
-            if hsn_obj and getattr(hsn_obj, "refund_vat_percent", None) is not None:
-                field_values["refund_vat_percent"] = hsn_obj.refund_vat_percent
+            if hsn_obj:
+                if (field_values.get("purchase_vat_percent") is None or float(field_values.get("purchase_vat_percent", 0) or 0) <= 0) and getattr(hsn_obj, "purchase_vat_percent", None) is not None:
+                    field_values["purchase_vat_percent"] = hsn_obj.purchase_vat_percent
+                if (field_values.get("refund_vat_percent") is None or float(field_values.get("refund_vat_percent", 0) or 0) <= 0) and getattr(hsn_obj, "refund_vat_percent", None) is not None:
+                    field_values["refund_vat_percent"] = hsn_obj.refund_vat_percent
+
+        if field_values.get("purchase_vat_percent") is None:
+            field_values["purchase_vat_percent"] = 0.0
 
         if field_values.get("refund_vat_percent") is None:
             field_values["refund_vat_percent"] = 0.0
@@ -624,6 +631,10 @@ class ProductService:
                 if hsn is None:
                     raise BadRequestException(f"HSN Code '{hsn_code}' does not exist in HSN Master.")
                 field_values["hsn_id"] = hsn.id
+                if (field_values.get("purchase_vat_percent") is None or float(field_values.get("purchase_vat_percent", 0) or 0) <= 0) and getattr(hsn, "purchase_vat_percent", None) is not None:
+                    field_values["purchase_vat_percent"] = hsn.purchase_vat_percent
+                if (field_values.get("refund_vat_percent") is None or float(field_values.get("refund_vat_percent", 0) or 0) <= 0) and getattr(hsn, "refund_vat_percent", None) is not None:
+                    field_values["refund_vat_percent"] = hsn.refund_vat_percent
 
             uom = await self.uom_repository.get_by_code(uom_code)
             if uom is None:

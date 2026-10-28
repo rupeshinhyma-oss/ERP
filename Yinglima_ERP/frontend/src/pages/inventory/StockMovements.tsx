@@ -17,14 +17,15 @@ import { useConfirm } from "@/lib/confirm";
 import type {
   StockBalanceItem,
   StockMovement,
-  StockMovementType,
   StockSummaryMetrics,
 } from "@/types/stockMovement";
-import { StockMovementModal } from "./StockMovementModal";
 import { StockMovementDetailModal } from "./StockMovementDetailModal";
 import { ProductKardexModal } from "./ProductKardexModal";
 
 type ActiveTab = "inward" | "outward" | "balances";
+
+const stockMovementsCache = new Map<string, { items: StockMovement[]; total: number }>();
+const stockBalancesCache = new Map<string, StockBalanceItem[]>();
 
 export function StockMovementsPage() {
   const showToast = useToast();
@@ -34,12 +35,14 @@ export function StockMovementsPage() {
   const [metrics, setMetrics] = useState<StockSummaryMetrics | null>(null);
 
   // Movements state
-  const [movements, setMovements] = useState<StockMovement[]>([]);
+  const initialMovementsCache = stockMovementsCache.get("inward");
+  const [movements, setMovements] = useState<StockMovement[]>(() => initialMovementsCache?.items || []);
   const [loadingMovements, setLoadingMovements] = useState(false);
-  const [totalMovements, setTotalMovements] = useState(0);
+  const [totalMovements, setTotalMovements] = useState(() => initialMovementsCache?.total || 0);
 
   // Balances state
-  const [balances, setBalances] = useState<StockBalanceItem[]>([]);
+  const initialBalancesCache = stockBalancesCache.get("balances");
+  const [balances, setBalances] = useState<StockBalanceItem[]>(() => initialBalancesCache || []);
   const [loadingBalances, setLoadingBalances] = useState(false);
 
   // Filters state
@@ -48,8 +51,6 @@ export function StockMovementsPage() {
   const [dateTo, setDateTo] = useState("");
 
   // Modals state
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [modalType, setModalType] = useState<StockMovementType>("inward");
   const [selectedMovement, setSelectedMovement] = useState<StockMovement | null>(null);
 
   // Kardex modal
@@ -73,7 +74,14 @@ export function StockMovementsPage() {
   // Fetch Inward/Outward movements
   const loadMovements = useCallback(async () => {
     if (activeTab === "balances") return;
-    setLoadingMovements(true);
+    const cacheKey = `${activeTab}:${search}:${dateFrom}:${dateTo}`;
+    const cached = stockMovementsCache.get(cacheKey) || stockMovementsCache.get(activeTab);
+    if (cached) {
+      setMovements(cached.items);
+      setTotalMovements(cached.total);
+    } else {
+      setLoadingMovements(true);
+    }
     try {
       const queryParams = new URLSearchParams({
         movement_type: activeTab,
@@ -86,10 +94,14 @@ export function StockMovementsPage() {
       const res = await apiGet<{ items: StockMovement[]; total: number }>(
         `/stock/movements?${queryParams.toString()}`
       );
-      setMovements(res.data?.items || []);
-      setTotalMovements(res.data?.total || 0);
+      const items = res.data?.items || [];
+      const total = res.data?.total || 0;
+      setMovements(items);
+      setTotalMovements(total);
+      stockMovementsCache.set(cacheKey, { items, total });
+      stockMovementsCache.set(activeTab, { items, total });
     } catch (err) {
-      showToast(errorMessage(err) || "Failed to load movements", "error");
+      if (!cached) showToast(errorMessage(err) || "Failed to load movements", "error");
     } finally {
       setLoadingMovements(false);
     }
@@ -98,7 +110,13 @@ export function StockMovementsPage() {
   // Fetch Live Stock Balances
   const loadBalances = useCallback(async () => {
     if (activeTab !== "balances") return;
-    setLoadingBalances(true);
+    const cacheKey = `balances:${search}`;
+    const cached = stockBalancesCache.get(cacheKey) || stockBalancesCache.get("balances");
+    if (cached) {
+      setBalances(cached);
+    } else {
+      setLoadingBalances(true);
+    }
     try {
       const queryParams = new URLSearchParams({ limit: "100" });
       if (search.trim()) queryParams.set("search", search.trim());
@@ -106,9 +124,12 @@ export function StockMovementsPage() {
       const res = await apiGet<{ items: StockBalanceItem[] }>(
         `/stock/balances?${queryParams.toString()}`
       );
-      setBalances(res.data?.items || []);
+      const items = res.data?.items || [];
+      setBalances(items);
+      stockBalancesCache.set(cacheKey, items);
+      stockBalancesCache.set("balances", items);
     } catch (err) {
-      showToast(errorMessage(err) || "Failed to load stock balances", "error");
+      if (!cached) showToast(errorMessage(err) || "Failed to load stock balances", "error");
     } finally {
       setLoadingBalances(false);
     }
@@ -392,59 +413,123 @@ export function StockMovementsPage() {
             </button>
           </div>
 
-          {/* Action Buttons */}
+          {/* Navigation Shortcuts */}
           <div style={{ display: "flex", gap: "10px" }}>
-            <Can permission="stock_movement.create">
-              <button
-                type="button"
-                onClick={() => {
-                  setModalType("inward");
-                  setIsModalOpen(true);
-                }}
+            {activeTab === "inward" ? (
+              <a
+                href="/purchase/local"
                 style={{
                   display: "flex",
                   alignItems: "center",
                   gap: "6px",
-                  padding: "9px 16px",
+                  padding: "8px 14px",
                   borderRadius: "8px",
-                  fontSize: "13px",
-                  fontWeight: 700,
-                  color: "#ffffff",
-                  border: "none",
-                  background: "linear-gradient(135deg, #16a34a 0%, #15803d 100%)",
-                  cursor: "pointer",
-                  boxShadow: "0 2px 4px rgba(22, 163, 74, 0.2)",
+                  fontSize: "12.5px",
+                  fontWeight: 600,
+                  color: "#047857",
+                  background: "#ecfdf5",
+                  border: "1px solid #a7f3d0",
+                  textDecoration: "none",
                 }}
+                title="Inward stock is strictly generated from Local Purchases"
               >
-                + New Inward Entry
-              </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  setModalType("outward");
-                  setIsModalOpen(true);
-                }}
+                <span>📦</span> Go to Local Purchase &rarr;
+              </a>
+            ) : activeTab === "outward" ? (
+              <a
+                href="/sale/process"
                 style={{
                   display: "flex",
                   alignItems: "center",
                   gap: "6px",
-                  padding: "9px 16px",
+                  padding: "8px 14px",
                   borderRadius: "8px",
-                  fontSize: "13px",
-                  fontWeight: 700,
-                  color: "#ffffff",
-                  border: "none",
-                  background: "linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)",
-                  cursor: "pointer",
-                  boxShadow: "0 2px 4px rgba(37, 99, 235, 0.2)",
+                  fontSize: "12.5px",
+                  fontWeight: 600,
+                  color: "#7e22ce",
+                  background: "#faf5ff",
+                  border: "1px solid #d8b4fe",
+                  textDecoration: "none",
                 }}
+                title="Outward stock is strictly generated from Sales Process upon dispatch"
               >
-                + New Outward Entry
-              </button>
-            </Can>
+                <span>📤</span> Go to Sales Process &rarr;
+              </a>
+            ) : null}
           </div>
         </div>
+
+        {/* Automated Inward Notice */}
+        {activeTab === "inward" && (
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              background: "#f0fdf4",
+              border: "1px solid #bbf7d0",
+              borderRadius: "10px",
+              padding: "10px 16px",
+              marginBottom: "14px",
+              fontSize: "12.5px",
+              color: "#166534",
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              <span style={{ fontSize: "16px" }}>💡</span>
+              <span>
+                <strong>Automated Inward:</strong> Warehouse inward receipts are generated directly from verified <strong>Local Purchases</strong> (/purchase/local).
+              </span>
+            </div>
+            <a
+              href="/purchase/local"
+              style={{
+                fontWeight: 700,
+                color: "#059669",
+                textDecoration: "underline",
+                fontSize: "12px",
+              }}
+            >
+              Open Local Purchases &rarr;
+            </a>
+          </div>
+        )}
+
+        {/* Automated Outward Notice */}
+        {activeTab === "outward" && (
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              background: "#faf5ff",
+              border: "1px solid #e9d5ff",
+              borderRadius: "10px",
+              padding: "10px 16px",
+              marginBottom: "14px",
+              fontSize: "12.5px",
+              color: "#6b21a8",
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              <span style={{ fontSize: "16px" }}>⚡</span>
+              <span>
+                <strong>Automated Outward:</strong> Warehouse outward dispatches are generated directly from <strong>Sales Process</strong> (/sale/process) upon order dispatch.
+              </span>
+            </div>
+            <a
+              href="/sale/process"
+              style={{
+                fontWeight: 700,
+                color: "#7e22ce",
+                textDecoration: "underline",
+                fontSize: "12px",
+              }}
+            >
+              Open Sales Process &rarr;
+            </a>
+          </div>
+        )}
 
         {/* Filter & Search Bar */}
         <div
@@ -679,8 +764,9 @@ export function StockMovementsPage() {
                   ) : movements.length === 0 ? (
                     <tr>
                       <td colSpan={9} style={{ padding: "40px", textAlign: "center", color: "#64748b" }}>
-                        No {activeTab} movements found. Click "+ New{" "}
-                        {activeTab === "inward" ? "Inward" : "Outward"} Entry" to record one.
+                        {activeTab === "inward"
+                          ? "No inward movements found. Inward receipts are automatically generated when receiving stock in Local Purchases (/purchase/local)."
+                          : "No outward movements found. Outward dispatches are automatically generated when dispatching orders in Sales Process (/sale/process)."}
                       </td>
                     </tr>
                   ) : (
@@ -811,19 +897,7 @@ export function StockMovementsPage() {
         </div>
       </div>
 
-      {/* Creation Modal */}
-      {isModalOpen && (
-        <StockMovementModal
-          isOpen={isModalOpen}
-          movementType={modalType}
-          onClose={() => setIsModalOpen(false)}
-          onSuccess={() => {
-            loadMovements();
-            loadMetrics();
-            loadBalances();
-          }}
-        />
-      )}
+
 
       {/* Detail Modal */}
       <StockMovementDetailModal

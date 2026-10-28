@@ -108,6 +108,28 @@ Whenever a buyer submits or an operator logs a new inquiry:
 - Product dropdowns format items as `Product Name (Product Code)` (e.g. `FR400 Band Sealer MSH (DAR-00063)`).
 - When a user places cursor/focus or clicks on an already-selected product item (`inputValue === label`), the dropdown automatically queries with `""` to display all active master products, highlighting the currently selected product with a green checkmark (`✓`).
 - When a user types or pastes a query into the field, the input switches to active search mode (`isUserTyping = true`).
-- `productFetcher` automatically detects and strips composite parentheses `(CODE)` or dashes (`CODE — Name`), querying the database by product code or name so pasted labels resolve immediately without "No matches." errors.
+---
+
+## 9. License & Certificate Compliance Warning Highlighting (Release 2026-10-26)
+
+### Purpose & Architecture
+To prevent shipping delays, customs rejections, or port demurrage when exporting regulated industrial items (e.g. boilers, cooling towers, chemicals, electrical equipment requiring BIS/WPC/special licenses):
+
+1. **Master Field Linkage (`license_certificate_required`):**
+   - In Product Master (`Product.license_certificate_required`), products can be tagged with specific mandatory compliance certificates.
+   - Any product requiring a certificate displays a red badge `⚠️ LICENSE NEEDED` and pink background in the Product Master list.
+2. **Automated Flagging in Inquiries (`requires_license`):**
+   - The moment a product is added to an Inquiry consignment (via Quick Add, Single Add, or Excel Import), the inquiry system reads `license_certificate_required` from the Product Master.
+3. **High-Visibility RED Highlighting on Inquiry List Cards (`Inquiries.tsx`):**
+   - In the left-side product cards list (`ItemsView`), any item requiring a license is highlighted with:
+     - Soft red background (`#fef2f2`).
+     - Distinct red border (`#fca5a5` / `2.5px solid #ef4444` when selected).
+     - Dedicated `⚠️ LICENSE NEEDED` badge in the header.
+     - Red item title (`#991b1b`).
+4. **Prominent Remark in List:**
+   - On the item card itself, a dedicated remark banner is rendered:
+     `⚠️ License Needed: [License Details from Product Master]`
+   - In the right-side detail view header, a compliance warning banner is prominently displayed so sales and procurement teams never miss mandatory export/import licenses.
+
 
 

@@ -78,12 +78,16 @@ export interface SaleOrder {
   total_container_cbm?: number;
 
   container_no?: string | null;
+  vehicle_no?: string | null;
   bl_no?: string | null;
   lr_no?: string | null;
   transporter_name?: string | null;
   port_of_loading?: string | null;
   port_of_discharge?: string | null;
   remarks?: string | null;
+
+  stock_movement_id?: string | null;
+  stock_movement_number?: string | null;
 
   created_by_name?: string | null;
   created_at: string;

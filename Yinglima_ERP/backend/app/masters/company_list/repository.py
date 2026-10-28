@@ -7,6 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common.base_repository import BaseRepository
+from app.core.constants import RecordStatus
 from app.masters.company_list.models import MasterCompany
 
 
@@ -32,8 +33,11 @@ class CompanyRepository(BaseRepository[MasterCompany]):
         res = await self.session.execute(stmt)
         return res.scalar_one_or_none()
 
-    async def list_all(self) -> Sequence[MasterCompany]:
-        """Fetch all companies ordered by name."""
-        stmt = select(MasterCompany).order_by(MasterCompany.name)
+    async def list_all(self, *, active_only: bool = True) -> Sequence[MasterCompany]:
+        """Fetch all non-deleted companies ordered by name, optionally filtering to active only."""
+        stmt = select(MasterCompany).where(MasterCompany.deleted_at.is_(None))
+        if active_only:
+            stmt = stmt.where(MasterCompany.status == RecordStatus.ACTIVE)
+        stmt = stmt.order_by(MasterCompany.name)
         res = await self.session.execute(stmt)
         return res.scalars().all()

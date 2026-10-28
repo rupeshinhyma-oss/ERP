@@ -26,6 +26,10 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import BadRequestException, NotFoundException
+from app.hrms.notifications import (
+    notify_regularization_decision,
+    notify_regularization_requested,
+)
 from app.hrms.models import (
     HrmsAttendance,
     HrmsAttendancePolicy,
@@ -1107,6 +1111,15 @@ class HrmsAttendanceService:
             )
             self.db.add(reg_req)
 
+        await self.db.flush()
+        if not is_direct:
+            await notify_regularization_requested(
+                self.db,
+                employee_id=reg_req.employee_id,
+                attendance_date=reg_req.attendance_date.isoformat(),
+                reason=reg_req.reason,
+                actor_id=user_id,
+            )
         await self.db.commit()
         await self.db.refresh(reg_req)
 
@@ -1286,6 +1299,14 @@ class HrmsAttendanceService:
             att_rec.late_minutes = 0
             att_rec.early_exit_minutes = 0
 
+        await self.db.flush()
+        await notify_regularization_decision(
+            self.db,
+            employee_id=reg_req.employee_id,
+            decision="APPROVED",
+            attendance_date=reg_req.attendance_date.isoformat(),
+            actor_id=reviewer_id,
+        )
         await self.db.commit()
         await self.db.refresh(reg_req)
 
@@ -1377,6 +1398,14 @@ class HrmsAttendanceService:
             att_rec.is_irregular = True
             att_rec.regularization_note = f"Rejected ({action}): {manager_remarks}"
 
+        await self.db.flush()
+        await notify_regularization_decision(
+            self.db,
+            employee_id=reg_req.employee_id,
+            decision="REJECTED",
+            attendance_date=reg_req.attendance_date.isoformat(),
+            actor_id=reviewer_id,
+        )
         await self.db.commit()
         await self.db.refresh(reg_req)
 

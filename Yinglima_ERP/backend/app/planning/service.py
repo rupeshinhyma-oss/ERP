@@ -18,6 +18,7 @@ from __future__ import annotations
 import logging
 import re
 import uuid
+from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
 
@@ -3535,6 +3536,12 @@ class PlanningService:
 
         old_status = cell.status_color.value if (cell and cell.status_color) else None
         new_status = status_color.value if status_color else None
+        old_custom_tag = str(cell.custom_status_tag_id) if (cell and cell.custom_status_tag_id) else None
+        new_custom_tag = str(custom_status_tag_id) if custom_status_tag_id else None
+
+        # Early exit if status and custom tag have not changed
+        if cell is not None and old_status == new_status and old_custom_tag == new_custom_tag:
+            return cell
 
         if cell is None:
             cell = await self.cell_repository.create(
@@ -3550,18 +3557,33 @@ class PlanningService:
             )
 
         if old_status != new_status:
-            await self._record_change(
-                action=PlanningChangeAction.CELL_STATUS_CHANGED,
-                sheet_id=sheet_id,
-                user_id=user_id,
-                username=username,
-                row_id=row_id,
-                column_id=column_id,
-                cell_id=cell.id,
-                old_value=old_status,
-                new_value=new_status,
-                description=f"Changed status on '{row.label}' / '{column.name}' from {old_status!r} to {new_status!r}.",
-            )
+            # Prevent double-click race condition: check if an identical change was recorded in the last 3 seconds
+            recent_logs = await self.change_log_repository.list_for_cell(cell.id, limit=3)
+            is_duplicate = False
+            for rlog in recent_logs:
+                if (
+                    rlog.action == PlanningChangeAction.CELL_STATUS_CHANGED
+                    and rlog.new_value == new_status
+                ):
+                    now_utc = datetime.now(timezone.utc)
+                    log_ts = rlog.created_at if rlog.created_at.tzinfo is not None else rlog.created_at.replace(tzinfo=timezone.utc)
+                    if abs((now_utc - log_ts).total_seconds()) < 3.0:
+                        is_duplicate = True
+                        break
+
+            if not is_duplicate:
+                await self._record_change(
+                    action=PlanningChangeAction.CELL_STATUS_CHANGED,
+                    sheet_id=sheet_id,
+                    user_id=user_id,
+                    username=username,
+                    row_id=row_id,
+                    column_id=column_id,
+                    cell_id=cell.id,
+                    old_value=old_status,
+                    new_value=new_status,
+                    description=f"Changed status on '{row.label}' / '{column.name}' from {old_status!r} to {new_status!r}.",
+                )
 
             if new_status in ("blue_ordered", "green_purchased", "yellow_dispatched"):
                 try:
@@ -3781,38 +3803,56 @@ class PlanningService:
         entries = await self.change_log_repository.list_for_row(row_id, limit=limit)
         results = []
         recorded_col_ids = set()
+        last_seen_by_col: dict[str, dict[str, Any]] = {}
 
         for entry in entries:
             if entry.column_id in mum_column_names:
+                col_id_str = str(entry.column_id)
                 recorded_col_ids.add(entry.column_id)
                 if entry.action == PlanningChangeAction.CELL_STATUS_CHANGED:
-                    results.append(
-                        {
-                            "column_id": str(entry.column_id),
-                            "column_name": mum_column_names[entry.column_id],
-                            "entry_type": "status",
-                            "old_status": entry.old_value,
-                            "new_status": entry.new_value,
-                            "old_value": None,
-                            "new_value": None,
-                            "changed_at": entry.created_at.isoformat() if hasattr(entry.created_at, "isoformat") else str(entry.created_at),
-                            "changed_by_username": entry.changed_by_username_snapshot,
-                        }
-                    )
+                    prev = last_seen_by_col.get(col_id_str)
+                    if (
+                        prev
+                        and prev.get("entry_type") == "status"
+                        and prev.get("new_status") == entry.new_value
+                    ):
+                        continue
+
+                    entry_dict = {
+                        "column_id": col_id_str,
+                        "column_name": mum_column_names[entry.column_id],
+                        "entry_type": "status",
+                        "old_status": entry.old_value,
+                        "new_status": entry.new_value,
+                        "old_value": None,
+                        "new_value": None,
+                        "changed_at": entry.created_at.isoformat() if hasattr(entry.created_at, "isoformat") else str(entry.created_at),
+                        "changed_by_username": entry.changed_by_username_snapshot,
+                    }
+                    results.append(entry_dict)
+                    last_seen_by_col[col_id_str] = entry_dict
                 elif entry.action == PlanningChangeAction.CELL_VALUE_CHANGED:
-                    results.append(
-                        {
-                            "column_id": str(entry.column_id),
-                            "column_name": mum_column_names[entry.column_id],
-                            "entry_type": "value",
-                            "old_status": None,
-                            "new_status": None,
-                            "old_value": entry.old_value,
-                            "new_value": entry.new_value,
-                            "changed_at": entry.created_at.isoformat() if hasattr(entry.created_at, "isoformat") else str(entry.created_at),
-                            "changed_by_username": entry.changed_by_username_snapshot,
-                        }
-                    )
+                    prev = last_seen_by_col.get(col_id_str)
+                    if (
+                        prev
+                        and prev.get("entry_type") == "value"
+                        and prev.get("new_value") == entry.new_value
+                    ):
+                        continue
+
+                    entry_dict = {
+                        "column_id": col_id_str,
+                        "column_name": mum_column_names[entry.column_id],
+                        "entry_type": "value",
+                        "old_status": None,
+                        "new_status": None,
+                        "old_value": entry.old_value,
+                        "new_value": entry.new_value,
+                        "changed_at": entry.created_at.isoformat() if hasattr(entry.created_at, "isoformat") else str(entry.created_at),
+                        "changed_by_username": entry.changed_by_username_snapshot,
+                    }
+                    results.append(entry_dict)
+                    last_seen_by_col[col_id_str] = entry_dict
 
         # Fallback for existing cells that have Mum values (e.g. 9, 7, 5) but no change_log status entry yet
         for col_id, col_name in mum_column_names.items():

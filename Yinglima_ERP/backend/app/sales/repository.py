@@ -11,7 +11,7 @@ import uuid
 from datetime import date, datetime, timezone
 from typing import Any
 
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, exists, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -97,15 +97,32 @@ class SaleRepository:
             conditions.append(SaleOrder.order_date <= date_to)
 
         if search and search.strip():
-            clean_search = f"%{search.strip()}%"
+            clean = search.strip()
+            clean_search = f"%{clean}%"
+            clean_norm = clean.replace(" ", "").replace("-", "").lower()
+            clean_pattern = f"%{clean_norm}%"
             conditions.append(
                 or_(
                     SaleOrder.order_no.ilike(clean_search),
                     SaleOrder.buyer_name.ilike(clean_search),
+                    SaleOrder.organization_name.ilike(clean_search),
+                    SaleOrder.buyer_branch_name.ilike(clean_search),
                     SaleOrder.consignment_code.ilike(clean_search),
                     SaleOrder.container_no.ilike(clean_search),
                     SaleOrder.bl_no.ilike(clean_search),
                     SaleOrder.lr_no.ilike(clean_search),
+                    SaleOrder.transporter_name.ilike(clean_search),
+                    func.lower(func.replace(func.replace(SaleOrder.buyer_name, " ", ""), "-", "")).like(clean_pattern),
+                    func.lower(func.replace(func.replace(SaleOrder.order_no, " ", ""), "-", "")).like(clean_pattern),
+                    exists().where(
+                        SaleOrderItem.order_id == SaleOrder.id,
+                        or_(
+                            SaleOrderItem.product_name.ilike(clean_search),
+                            SaleOrderItem.product_code.ilike(clean_search),
+                            SaleOrderItem.supplier_name.ilike(clean_search),
+                            SaleOrderItem.hsn_code.ilike(clean_search),
+                        ),
+                    ),
                 )
             )
 

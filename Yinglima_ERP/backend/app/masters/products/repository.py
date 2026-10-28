@@ -24,6 +24,96 @@ class ProductRepository(BaseRepository[Product]):
         """Bind to a DB session, operating on the ``Product`` model."""
         super().__init__(session, Product)
 
+    def _apply_search(self, stmt: Select, term: str | None) -> Select:
+        """
+        Deep search matching product identity (code, name, tally, invoice, barcode,
+        spec, description), space/hyphen normalized variants, linked category,
+        linked sub-category, linked brand, linked HSN code, and primary/secondary
+        supplier company name and brand description.
+        """
+        if not term:
+            return stmt
+        clean = term.strip()
+        if not clean:
+            return stmt
+        pattern = f"%{clean}%"
+        clean_norm = clean.replace(" ", "").replace("-", "").lower()
+        clean_pattern = f"%{clean_norm}%"
+
+        from sqlalchemy import exists, func, or_
+        from app.masters.product_categories.models import ProductCategory
+        from app.masters.product_sub_categories.models import ProductSubCategory
+        from app.masters.brands.models import Brand
+        from app.masters.hsn.models import HsnCode
+        from app.suppliers.models import Supplier, SupplierProductLink
+
+        direct_columns = [
+            Product.product_code,
+            Product.product_name,
+            Product.product_name_tally,
+            Product.product_name_invoice,
+            Product.barcode,
+            Product.specification,
+            Product.description,
+        ]
+        conditions: list[Any] = [col.ilike(pattern) for col in direct_columns]
+
+        # Space/hyphen normalized matching on code and names
+        conditions.append(func.lower(func.replace(func.replace(Product.product_code, " ", ""), "-", "")).like(clean_pattern))
+        conditions.append(func.lower(func.replace(func.replace(Product.product_name, " ", ""), "-", "")).like(clean_pattern))
+        conditions.append(func.lower(func.replace(func.replace(Product.product_name_tally, " ", ""), "-", "")).like(clean_pattern))
+
+        # 1. Linked Category (Name / Code)
+        conditions.append(
+            exists().where(
+                ProductCategory.id == Product.category_id,
+                or_(ProductCategory.name.ilike(pattern), ProductCategory.code.ilike(pattern)),
+            )
+        )
+
+        # 2. Linked Sub-Category (Name / Code)
+        conditions.append(
+            exists().where(
+                ProductSubCategory.id == Product.sub_category_id,
+                or_(ProductSubCategory.name.ilike(pattern), ProductSubCategory.code.ilike(pattern)),
+            )
+        )
+
+        # 3. Linked Brand (Name / Code)
+        conditions.append(
+            exists().where(
+                Brand.id == Product.brand_id,
+                or_(Brand.name.ilike(pattern), Brand.code.ilike(pattern)),
+            )
+        )
+
+        # 4. Linked HSN (Code / Description)
+        conditions.append(
+            exists().where(
+                HsnCode.id == Product.hsn_id,
+                or_(HsnCode.code.ilike(pattern), HsnCode.description.ilike(pattern)),
+            )
+        )
+
+        # 5. Primary Supplier
+        conditions.append(
+            exists().where(
+                Supplier.id == Product.supplier_id,
+                or_(Supplier.company_name.ilike(pattern), Supplier.brand_description.ilike(pattern)),
+            )
+        )
+
+        # 6. Secondary Quoting Suppliers
+        conditions.append(
+            exists().where(
+                SupplierProductLink.product_id == Product.id,
+                Supplier.id == SupplierProductLink.supplier_id,
+                or_(Supplier.company_name.ilike(pattern), Supplier.brand_description.ilike(pattern)),
+            )
+        )
+
+        return stmt.where(or_(*conditions))
+
     def _apply_dynamic_filters(self, stmt: Select, filters: Any) -> Select:
         """Apply filters, matching organization_id against both single and multi-org fields, has_images, and is_spare."""
         if not filters:
@@ -252,9 +342,12 @@ class ProductRepository(BaseRepository[Product]):
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none() is not None
 
-    async def list_all(self) -> list[Product]:
-        """Return every non-deleted product, ordered by name."""
-        stmt = self._base_select().order_by(Product.product_name)
+    async def list_all(self, *, active_only: bool = True) -> list[Product]:
+        """Return products, optionally filtering to active only, ordered by name."""
+        stmt = self._base_select()
+        if active_only:
+            stmt = stmt.where(Product.status == "active")
+        stmt = stmt.order_by(Product.product_name)
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 

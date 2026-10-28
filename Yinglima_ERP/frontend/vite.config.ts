@@ -19,6 +19,15 @@ export default defineConfig(({ mode }) => {
           target: target,
           changeOrigin: true,
           ws: true,
+          configure: (proxy) => {
+            proxy.on("error", (err: any) => {
+              const code = err?.code;
+              if (code === "ECONNRESET" || code === "ECONNREFUSED" || err?.message?.includes("socket hang up")) {
+                return;
+              }
+              console.warn("[vite] api proxy error:", err?.message || err);
+            });
+          },
         },
         "/static": {
           target: target,

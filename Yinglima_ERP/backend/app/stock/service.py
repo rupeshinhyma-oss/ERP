@@ -118,8 +118,8 @@ class StockMovementService:
                     if grp["product_code"]:
                         item_desc += f" (SKU: {grp['product_code']})"
                     raise BadRequestException(
-                        f"Insufficient Stock for '{item_desc}'. Available stock in warehouse is {available_stock:g} units, "
-                        f"but requested outward dispatch is {total_req:g} units. Outward dispatch blocked to prevent negative inventory."
+                        f"Insufficient stock in warehouse (Available: {available_stock:g}, Requested: {total_req:g}) "
+                        f"for '{item_desc}'. Outward dispatch blocked to prevent negative inventory."
                     )
 
         movement_no = await self.repository.get_next_movement_no(data.movement_type)

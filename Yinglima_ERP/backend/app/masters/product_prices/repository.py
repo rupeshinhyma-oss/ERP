@@ -50,7 +50,7 @@ class ProductPriceRepository:
         page_size = max(1, min(50000, page_size))
         offset = (page - 1) * page_size
 
-        filter_clauses = ["p.deleted_at IS NULL"]
+        filter_clauses = ["p.deleted_at IS NULL", "(p.status IS NULL OR UPPER(p.status) = 'ACTIVE')"]
         params: dict[str, Any] = {"limit": page_size, "offset": offset}
 
         if category_id:
@@ -75,19 +75,27 @@ class ProductPriceRepository:
             )
 
         if search and search.strip():
-            term = f"%{search.strip()}%"
+            clean = search.strip()
+            term = f"%{clean}%"
+            clean_norm = f"%{clean.replace(' ', '').replace('-', '').lower()}%"
             filter_clauses.append(
                 "("
                 "p.product_code ILIKE :search_term OR "
                 "p.product_name ILIKE :search_term OR "
                 "p.product_name_tally ILIKE :search_term OR "
+                "p.product_name_invoice ILIKE :search_term OR "
                 "p.barcode ILIKE :search_term OR "
+                "LOWER(REPLACE(REPLACE(p.product_code, ' ', ''), '-', '')) LIKE :clean_norm_search OR "
+                "LOWER(REPLACE(REPLACE(p.product_name, ' ', ''), '-', '')) LIKE :clean_norm_search OR "
+                "LOWER(REPLACE(REPLACE(p.product_name_tally, ' ', ''), '-', '')) LIKE :clean_norm_search OR "
+                "EXISTS (SELECT 1 FROM suppliers s WHERE s.id = p.supplier_id AND (s.company_name ILIKE :search_term OR s.brand_description ILIKE :search_term) AND s.deleted_at IS NULL) OR "
                 "EXISTS (SELECT 1 FROM supplier_product_links spl "
                 "JOIN suppliers s ON s.id = spl.supplier_id "
-                "WHERE spl.product_id = p.id AND s.company_name ILIKE :search_term AND s.deleted_at IS NULL)"
+                "WHERE spl.product_id = p.id AND (s.company_name ILIKE :search_term OR s.brand_description ILIKE :search_term) AND s.deleted_at IS NULL)"
                 ")"
             )
             params["search_term"] = term
+            params["clean_norm_search"] = clean_norm
 
         where_sql = " AND ".join(filter_clauses)
 
@@ -513,7 +521,7 @@ class ProductPriceRepository:
         sql = text("""
             SELECT id, company_name, supplier_type, brand_description
             FROM suppliers
-            WHERE is_active = true
+            WHERE is_active = true AND deleted_at IS NULL
             ORDER BY company_name ASC
         """)
         res = await self.session.execute(sql)

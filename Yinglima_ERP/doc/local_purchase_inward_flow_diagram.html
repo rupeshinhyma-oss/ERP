@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Yinglima ERP — Local Purchase to Inward Stock Workflow</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 30px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background-color: #0f172a;
+      color: #f8fafc;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    .header {
+      max-width: 1100px;
+      width: 100%;
+      margin-bottom: 24px;
+      text-align: left;
+    }
+    h1 {
+      margin: 0 0 8px 0;
+      font-size: 26px;
+      color: #ffffff;
+      font-weight: 800;
+    }
+    p {
+      margin: 0;
+      color: #94a3b8;
+      font-size: 14px;
+      line-height: 1.5;
+    }
+    .diagram-container {
+      max-width: 1100px;
+      width: 100%;
+      background: #ffffff;
+      border-radius: 12px;
+      box-shadow: 0 20px 40px rgba(0,0,0,0.4);
+      padding: 10px;
+      box-sizing: border-box;
+      border: 1px solid #334155;
+    }
+    img, svg {
+      width: 100%;
+      height: auto;
+      display: block;
+      border-radius: 8px;
+    }
+    .steps-grid {
+      max-width: 1100px;
+      width: 100%;
+      margin-top: 30px;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+      gap: 16px;
+    }
+    .step-card {
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 8px;
+      padding: 16px;
+    }
+    .step-num {
+      display: inline-block;
+      font-size: 11px;
+      font-weight: 800;
+      padding: 3px 8px;
+      border-radius: 4px;
+      margin-bottom: 8px;
+    }
+    .step-1 { background: #dbeafe; color: #1e40af; }
+    .step-2 { background: #fef3c7; color: #92400e; }
+    .step-3 { background: #dcfce7; color: #166534; }
+    .step-4 { background: #f3e8ff; color: #6b21a8; }
+    .step-title {
+      font-size: 15px;
+      font-weight: 700;
+      color: #ffffff;
+      margin-bottom: 6px;
+    }
+    .step-desc {
+      font-size: 13px;
+      color: #94a3b8;
+      line-height: 1.5;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <h1>Yinglima ERP &bull; Local Purchase to Inward Stock Automation</h1>
+    <p>Visual workflow diagram showing how Local Purchase status triggers seamless Inward Stock Movement into the warehouse ledger without manual re-entry.</p>
+  </div>
+
+  <div class="diagram-container">
+    <img src="assets/04_local_purchase_to_inward_stock_flow.svg" alt="Local Purchase to Inward Stock Workflow">
+  </div>
+
+  <div class="steps-grid">
+    <div class="step-card">
+      <span class="step-num step-1">PHASE 1</span>
+      <div class="step-title">1. Create Local Purchase</div>
+      <div class="step-desc">Create domestic RMB purchase order (/purchase/local/new). System isolates vendor items and saves with initial status: <strong>Confirmed</strong>.</div>
+    </div>
+    <div class="step-card">
+      <span class="step-num step-2">PHASE 2</span>
+      <div class="step-title">2. Inward Trigger in Table</div>
+      <div class="step-desc">When goods arrive at warehouse, user clicks <strong>[📦 Inward Stock]</strong> or changes status from Confirmed &rarr; Inwarded.</div>
+    </div>
+    <div class="step-card">
+      <span class="step-num step-3">PHASE 3</span>
+      <div class="step-title">3. Pre-Filled Inward Slip</div>
+      <div class="step-desc">Modal automatically pre-fills supplier, invoice reference, products, and quantities. User verifies accepted count with 1-click confirmation.</div>
+    </div>
+    <div class="step-card">
+      <span class="step-num step-4">PHASE 4</span>
+      <div class="step-title">4. Real-Time Ledger Posting</div>
+      <div class="step-desc">System records <strong>INW-2026-xxxx</strong> in /inventory/stock-movements, updates live warehouse stock balance, and marks purchase as <strong>Inwarded</strong>.</div>
+    </div>
+  </div>
+
+</body>
+</html>

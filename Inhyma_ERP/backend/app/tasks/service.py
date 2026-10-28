@@ -22,7 +22,7 @@ from app.events.dispatcher import EventDispatcher
 from app.events.models import Event
 from app.notifications.service import NotificationService
 from app.org_structure.models import DepartmentLeadershipAssignment, EmployeeReportingRelationship
-from app.rbac.models import UserRole
+from app.rbac.models import Role, UserRole
 from app.tasks.models import (
     ApprovalStatus,
     DependencyType,
@@ -60,6 +60,8 @@ from app.tasks.repository import TaskRepository
 from app.tasks.schemas import (
     CapacityDayAllocation,
     CapacityViewResponse,
+    TaskAssigneeOptionRead,
+    TaskDepartmentRead,
     TaskApprovalActionRequest,
     TaskBulkActionRequest,
     TaskBulkActionResponse,
@@ -172,6 +174,70 @@ class TaskService:
             return
 
         raise ForbiddenException(f"You do not have permission to {action} this task.")
+
+    async def _assert_can_view_task(self, task: Task, current_user: Any) -> None:
+        """
+        Enforce strict Read Authorization.
+        Allowed viewers:
+          - Super Admin / explicit task.manage / task.organization_view
+          - Creator of the task
+          - Assignees and Watchers on the task
+          - Department Manager of creator or any assignee
+          - Members of the same department as creator or assignees if user has task.department_view
+        """
+        user_perms = set(getattr(current_user, "permissions", []))
+        is_super_admin = (
+            getattr(current_user, "is_super_admin", False)
+            or "super_admin" in user_perms
+            or "task.organization_view" in user_perms
+            or "task.manage" in user_perms
+            or "*" in user_perms
+        )
+        if is_super_admin:
+            return
+
+        actor_id = getattr(current_user, "id", None)
+        if not actor_id:
+            raise ForbiddenException("You do not have permission to view this task.")
+
+        # Creator or Approver can always view
+        if task.created_by == actor_id or getattr(task, "approver_id", None) == actor_id:
+            return
+
+        # Assignees & Watchers can view
+        is_participant = any(getattr(a, "user_id", None) == actor_id for a in (getattr(task, "assignees", []) or [])) or \
+                         any(getattr(w, "user_id", None) == actor_id for w in (getattr(task, "watchers", []) or []))
+        if is_participant:
+            return
+
+        # Check if actor is an authorized department manager for this task's department
+        task_dept_id, _ = await self.repository.get_task_department(task.id)
+        if task_dept_id:
+            managed_depts = await self.repository.get_user_managed_department_ids(actor_id)
+            if task_dept_id in managed_depts:
+                return
+
+        # Target participants: creator + assignees
+        target_user_ids = {task.created_by} if task.created_by else set()
+        for a in getattr(task, "assignees", []):
+            if getattr(a, "user_id", None):
+                target_user_ids.add(a.user_id)
+
+        if target_user_ids:
+            dept_subq = select(UserRole.role_id).where(UserRole.user_id.in_(target_user_ids))
+            mgr_stmt = (
+                select(DepartmentLeadershipAssignment.id)
+                .where(
+                    DepartmentLeadershipAssignment.employee_id == actor_id,
+                    DepartmentLeadershipAssignment.department_id.in_(dept_subq),
+                )
+                .limit(1)
+            )
+            res = await self.repository.session.execute(mgr_stmt)
+            if res.scalar_one_or_none():
+                return
+
+        raise ForbiddenException("You do not have permission to view this task.")
 
     def _to_summary(self, task: Task) -> TaskSummaryRead:
         from sqlalchemy import inspect
@@ -336,13 +402,24 @@ class TaskService:
             page=page,
             page_size=page_size,
         )
-        summaries = [self._to_summary(t) for t in tasks]
+        task_ids = [t.id for t in tasks]
+        dept_map = await self.repository.resolve_tasks_departments(task_ids)
+        summaries: list[TaskSummaryRead] = []
+        for t in tasks:
+            s = self._to_summary(t)
+            d_info = dept_map.get(t.id)
+            if d_info:
+                s.department_id = d_info[0]
+                s.department_name = d_info[1]
+            summaries.append(s)
         return summaries, total
 
-    async def get_task(self, task_id: uuid.UUID) -> Task:
+    async def get_task(self, task_id: uuid.UUID, current_user: Any | None = None) -> Task:
         task = await self.repository.get_task_by_id(task_id)
         if not task:
             raise NotFoundException(f"Task with ID {task_id} not found.")
+        if current_user is not None:
+            await self._assert_can_view_task(task, current_user)
         await self.repository.session.refresh(
             task, [
                 "assignees",
@@ -357,6 +434,9 @@ class TaskService:
                 "reactions",
             ]
         )
+        dept_id, dept_name = await self.repository.get_task_department(task.id)
+        setattr(task, "department_id", dept_id)
+        setattr(task, "department_name", dept_name)
         return task
 
     async def create_task(
@@ -666,7 +746,7 @@ class TaskService:
                 completion_notes=notes,
             )
 
-        task.version += 1
+        task.version = (task.version or 0) + 1
         await self.repository.session.commit()
         refreshed = await self.get_task(task.id)
 
@@ -895,8 +975,36 @@ class TaskService:
         current_user: Any,
         role: str = "ASSIGNEE",
     ) -> Task:
-        task = await self.get_task(task_id)
+        task = await self.get_task(task_id, current_user=current_user)
         await self._assert_can_mutate_task(task, current_user, action="assign users to")
+
+        user_perms = set(getattr(current_user, "permissions", []))
+        is_super = (
+            getattr(current_user, "is_super_admin", False)
+            or "super_admin" in user_perms
+            or "task.manage" in user_perms
+            or "*" in user_perms
+        )
+        if not is_super and user_ids:
+            managed_depts = await self.repository.get_user_managed_department_ids(current_user.id)
+            if managed_depts:
+                dept_users_subq = select(UserRole.user_id).where(UserRole.role_id.in_(managed_depts))
+                lead_users_subq = select(DepartmentLeadershipAssignment.employee_id).where(
+                    DepartmentLeadershipAssignment.department_id.in_(managed_depts),
+                    DepartmentLeadershipAssignment.status == "ACTIVE",
+                )
+                allowed_res = await self.repository.session.execute(dept_users_subq.union(lead_users_subq))
+                allowed_uids = set(allowed_res.scalars().all()) | {current_user.id}
+                if set(user_ids) - allowed_uids:
+                    raise ForbiddenException("Cannot assign users outside your managed department(s).")
+            else:
+                assigned_depts = await self.repository.get_user_assigned_department_ids(current_user.id)
+                dept_users_subq = select(UserRole.user_id).where(UserRole.role_id.in_(assigned_depts))
+                allowed_res = await self.repository.session.execute(dept_users_subq)
+                allowed_uids = set(allowed_res.scalars().all()) | {current_user.id}
+                if set(user_ids) - allowed_uids:
+                    raise ForbiddenException("Cannot assign users outside your department.")
+
         old_ids = {a.user_id for a in task.assignees if a.assignment_role == role}
         await self.repository.set_assignees(task, user_ids, role=role)
         await self.repository.session.commit()
@@ -1012,12 +1120,12 @@ class TaskService:
         audio_url: str | None = None,
         attachments: list[dict[str, Any]] | None = None,
     ) -> TaskComment:
-        task = await self.get_task(task_id)
+        task = await self.get_task(task_id, current_user=current_user)
         comment = await self.repository.add_comment(
             task.id, current_user.id, message, audio_url=audio_url, attachments_data=attachments
         )
         await self.repository.session.commit()
-        await self.repository.session.refresh(comment, ["attachments"])
+        await self.repository.session.refresh(comment, ["user", "attachments", "reactions"])
 
         # Process mentions
         await self._process_mentions(message, task.id, comment.id, current_user, task.title)
@@ -1070,7 +1178,8 @@ class TaskService:
         file_type: str | None,
         current_user: Any,
     ) -> TaskAttachment:
-        task = await self.get_task(task_id)
+        task = await self.get_task(task_id, current_user=current_user)
+        await self._assert_can_mutate_task(task, current_user, action="add attachment to")
         attachment = await self.repository.add_attachment(
             task.id,
             current_user.id,
@@ -1119,7 +1228,10 @@ class TaskService:
         attachment = await self.repository.get_attachment_by_id(attachment_id)
         if not attachment:
             raise NotFoundException(f"Attachment with ID {attachment_id} not found.")
-        task = await self.get_task(attachment.task_id)
+        task = await self.get_task(attachment.task_id, current_user=current_user)
+        is_super = getattr(current_user, "is_superuser", False) or getattr(current_user, "role", "") == "super_admin"
+        if not is_super and attachment.uploaded_by != current_user.id:
+            await self._assert_can_mutate_task(task, current_user, action="delete attachment from")
         await self.repository.delete_attachment(attachment)
         await self.repository.session.commit()
         await self._broadcast_task_event("TASK_UPDATED", task, actor_id=current_user.id)
@@ -1134,7 +1246,8 @@ class TaskService:
         title: str | None,
         current_user: Any,
     ) -> TaskVoiceNote:
-        task = await self.get_task(task_id)
+        task = await self.get_task(task_id, current_user=current_user)
+        await self._assert_can_mutate_task(task, current_user, action="add voice note to")
         vn = await self.repository.add_voice_note(
             task.id,
             current_user.id,
@@ -1190,7 +1303,7 @@ class TaskService:
         subtask = await self.repository.get_subtask_by_id(subtask_id)
         if not subtask:
             raise NotFoundException(f"Subtask with ID {subtask_id} not found.")
-        task = await self.get_task(subtask.task_id)
+        task = await self.get_task(subtask.task_id, current_user=current_user)
 
         sc = await self.repository.add_subtask_comment(
             subtask.id, current_user.id, message, audio_url=audio_url
@@ -1224,10 +1337,12 @@ class TaskService:
         )
         return sc
 
-    async def list_subtask_comments(self, subtask_id: uuid.UUID) -> list[TaskSubtaskComment]:
+    async def list_subtask_comments(self, subtask_id: uuid.UUID, current_user: Any | None = None) -> list[TaskSubtaskComment]:
         subtask = await self.repository.get_subtask_by_id(subtask_id)
         if not subtask:
             raise NotFoundException(f"Subtask with ID {subtask_id} not found.")
+        if current_user is not None:
+            await self.get_task(subtask.task_id, current_user=current_user)
         return await self.repository.list_subtask_comments(subtask_id)
 
     async def add_subtask_attachment(
@@ -1242,7 +1357,8 @@ class TaskService:
         subtask = await self.repository.get_subtask_by_id(subtask_id)
         if not subtask:
             raise NotFoundException(f"Subtask with ID {subtask_id} not found.")
-        task = await self.get_task(subtask.task_id)
+        task = await self.get_task(subtask.task_id, current_user=current_user)
+        await self._assert_can_mutate_task(task, current_user, action="add attachment to subtask on")
 
         sa = await self.repository.add_subtask_attachment(
             subtask.id,
@@ -1263,10 +1379,12 @@ class TaskService:
         )
         return sa
 
-    async def list_subtask_attachments(self, subtask_id: uuid.UUID) -> list[TaskSubtaskAttachment]:
+    async def list_subtask_attachments(self, subtask_id: uuid.UUID, current_user: Any | None = None) -> list[TaskSubtaskAttachment]:
         subtask = await self.repository.get_subtask_by_id(subtask_id)
         if not subtask:
             raise NotFoundException(f"Subtask with ID {subtask_id} not found.")
+        if current_user is not None:
+            await self.get_task(subtask.task_id, current_user=current_user)
         return await self.repository.list_subtask_attachments(subtask_id)
 
     # --- Escalation Discussion ---
@@ -1280,7 +1398,7 @@ class TaskService:
         esc = await self.repository.get_escalation_by_id(escalation_id)
         if not esc:
             raise NotFoundException(f"Escalation with ID {escalation_id} not found.")
-        task = await self.get_task(esc.task_id)
+        task = await self.get_task(esc.task_id, current_user=current_user)
 
         ec = await self.repository.add_escalation_comment(
             esc.id, current_user.id, message, audio_url=audio_url
@@ -1312,10 +1430,12 @@ class TaskService:
         )
         return ec
 
-    async def list_escalation_comments(self, escalation_id: uuid.UUID) -> list[TaskEscalationComment]:
+    async def list_escalation_comments(self, escalation_id: uuid.UUID, current_user: Any | None = None) -> list[TaskEscalationComment]:
         esc = await self.repository.get_escalation_by_id(escalation_id)
         if not esc:
             raise NotFoundException(f"Escalation with ID {escalation_id} not found.")
+        if current_user is not None:
+            await self.get_task(esc.task_id, current_user=current_user)
         return await self.repository.list_escalation_comments(escalation_id)
 
     async def escalate_task(
@@ -1335,7 +1455,7 @@ class TaskService:
         if not due_date:
             raise ValidationException("SLA resolution due date is required for escalation.")
 
-        task = await self.get_task(task_id)
+        task = await self.get_task(task_id, current_user=current_user)
         esc = await self.repository.add_escalation(
             task.id,
             from_user=current_user.id,
@@ -1400,7 +1520,8 @@ class TaskService:
         order_index: int = 0,
         current_user: Any,
     ) -> TaskSubtask:
-        task = await self.get_task(task_id)
+        task = await self.get_task(task_id, current_user=current_user)
+        await self._assert_can_mutate_task(task, current_user, action="create subtask on")
         subtask = await self.repository.create_subtask(
             task.id,
             title,
@@ -1452,8 +1573,14 @@ class TaskService:
         if not subtask:
             raise NotFoundException(f"Subtask with ID {subtask_id} not found.")
 
+        task = await self.get_task(subtask.task_id, current_user=current_user)
+        is_sub_assignee = (subtask.assignee_id == current_user.id) or any(
+            a.user_id == current_user.id for a in getattr(subtask, "assignees", [])
+        )
+        if not is_sub_assignee:
+            await self._assert_can_mutate_task(task, current_user, action="update subtask on")
+
         was_completed = subtask.completed or subtask.status == "DONE"
-        task = await self.get_task(subtask.task_id)
         updated = await self.repository.update_subtask(
             subtask,
             title=title,
@@ -1492,13 +1619,14 @@ class TaskService:
         subtask = await self.repository.get_subtask_by_id(subtask_id)
         if not subtask:
             raise NotFoundException(f"Subtask with ID {subtask_id} not found.")
-        task = await self.get_task(subtask.task_id)
+        task = await self.get_task(subtask.task_id, current_user=current_user)
+        await self._assert_can_mutate_task(task, current_user, action="delete subtask from")
         await self.repository.delete_subtask(subtask)
         await self.repository.session.commit()
         await self._broadcast_task_event("TASK_UPDATED", task, actor_id=current_user.id)
 
     async def soft_delete_task(self, task_id: uuid.UUID, current_user: Any) -> None:
-        task = await self.get_task(task_id)
+        task = await self.get_task(task_id, current_user=current_user)
         await self._assert_can_mutate_task(task, current_user, action="delete")
         task.deleted_at = datetime.now(timezone.utc)
         task.deleted_by = current_user.id
@@ -1516,9 +1644,9 @@ class TaskService:
 
         await self._broadcast_task_event("TASK_UPDATED", task, actor_id=current_user.id)
 
-    async def get_task_timeline(self, task_id: uuid.UUID) -> list[dict[str, Any]]:
+    async def get_task_timeline(self, task_id: uuid.UUID, current_user: Any | None = None) -> list[dict[str, Any]]:
         """Synthesize chronological activity timeline from task creation, assignees, subtasks, escalations, comments, and audits."""
-        task = await self.get_task(task_id)
+        task = await self.get_task(task_id, current_user=current_user)
         timeline: list[dict[str, Any]] = []
 
         # 1. Task Created
@@ -1758,7 +1886,7 @@ class TaskService:
         emoji: str,
         current_user: Any,
     ) -> bool:
-        task = await self.get_task(task_id)
+        task = await self.get_task(task_id, current_user=current_user)
         added = await self.repository.toggle_reaction(
             user_id=current_user.id,
             emoji=emoji,
@@ -1791,7 +1919,7 @@ class TaskService:
             comment_id=comment.id,
         )
         await self.repository.session.commit()
-        task = await self.get_task(comment.task_id)
+        task = await self.get_task(comment.task_id, current_user=current_user)
         await self._broadcast_task_event(
             "TASK_REACTION",
             task,
@@ -1807,7 +1935,7 @@ class TaskService:
         payload: TaskDependencyCreate,
         current_user: Any,
     ) -> TaskDependency:
-        task = await self.get_task(task_id)
+        task = await self.get_task(task_id, current_user=current_user)
         await self._assert_can_mutate_task(task, current_user, action="add dependency to")
         dep_task = await self.repository.get_task_by_id(payload.depends_on_task_id)
         if not dep_task:
@@ -1846,7 +1974,7 @@ class TaskService:
         dep = res.scalar_one_or_none()
         if not dep:
             raise NotFoundException(f"Dependency with ID {dependency_id} not found.")
-        task = await self.get_task(dep.task_id)
+        task = await self.get_task(dep.task_id, current_user=current_user)
         await self._assert_can_mutate_task(task, current_user, action="remove dependency from")
         await self.repository.remove_dependency(dependency_id)
         await self.repository.session.commit()
@@ -1859,7 +1987,10 @@ class TaskService:
         payload: TaskSubmitApprovalRequest,
         current_user: Any,
     ) -> Task:
-        task = await self.get_task(task_id)
+        task = await self.get_task(task_id, current_user=current_user)
+        await self._assert_can_mutate_task(task, current_user, action="submit for approval")
+        if payload.approver_id == current_user.id:
+            raise ValidationException("You cannot submit a task for approval to yourself.")
         approver = await self.repository.session.get(User, payload.approver_id)
         if not approver:
             raise NotFoundException(f"Approver with ID {payload.approver_id} not found.")
@@ -1900,7 +2031,34 @@ class TaskService:
         payload: TaskApprovalActionRequest,
         current_user: Any,
     ) -> Task:
-        task = await self.get_task(task_id)
+        task = await self.get_task(task_id, current_user=current_user)
+
+        user_perms = set(getattr(current_user, "permissions", []))
+        is_super = (
+            getattr(current_user, "is_super_admin", False)
+            or "super_admin" in user_perms
+            or "task.manage" in user_perms
+            or "*" in user_perms
+        )
+
+        # Anti-self-approval rule: users cannot approve tasks they created or are assigned to
+        if (
+            task.created_by == current_user.id
+            or any(getattr(a, "user_id", None) == current_user.id for a in getattr(task, "assignees", []))
+        ) and not is_super:
+            raise ForbiddenException("Anti-self-approval rule: You cannot approve tasks you created or are assigned to.")
+
+        if not is_super:
+            if task.approver_id != current_user.id:
+                raise ForbiddenException("Only the designated approver or a Super Administrator can action this approval.")
+            task_dept_id, _ = await self.repository.get_task_department(task.id)
+            if task_dept_id:
+                managed_depts = await self.repository.get_user_managed_department_ids(current_user.id)
+                if task_dept_id not in managed_depts:
+                    raise ForbiddenException("You do not have approval authority for tasks outside your managed department.")
+
+        if task.status != TaskStatus.PENDING_APPROVAL:
+            raise ValidationException("Task is not currently pending approval.")
 
         if payload.approved:
             task.status = TaskStatus.DONE
@@ -1961,7 +2119,16 @@ class TaskService:
         options: TaskDuplicateRequest,
         current_user: Any,
     ) -> Task:
-        orig = await self.get_task(task_id)
+        orig = await self.get_task(task_id, current_user=current_user)
+        user_perms = set(getattr(current_user, "permissions", []))
+        if not (
+            getattr(current_user, "is_super_admin", False)
+            or "super_admin" in user_perms
+            or "task.create" in user_perms
+            or "task.manage" in user_perms
+            or "*" in user_perms
+        ):
+            raise ForbiddenException("You do not have permission to duplicate tasks.")
         new_title = options.new_title or f"{orig.title} (Copy)"
 
         issue_type_val = getattr(orig, "issue_type", "TASK")
@@ -2046,16 +2213,37 @@ class TaskService:
         payload: TaskBulkActionRequest,
         current_user: Any,
     ) -> TaskBulkActionResponse:
-        success_count, failed_ids = await self.repository.bulk_update_tasks(
-            task_ids=payload.task_ids,
+        authorized_task_ids = []
+        failed_ids = []
+        for tid in payload.task_ids:
+            task = await self.repository.get_task_by_id(tid)
+            if not task:
+                failed_ids.append(tid)
+                continue
+            try:
+                await self._assert_can_mutate_task(task, current_user, action=f"bulk {payload.action.lower()}")
+                authorized_task_ids.append(tid)
+            except ForbiddenException:
+                failed_ids.append(tid)
+
+        if not authorized_task_ids:
+            return TaskBulkActionResponse(
+                success_count=0,
+                failed_ids=payload.task_ids,
+                message=f"No tasks were updated. Permission denied for {len(failed_ids)} tasks.",
+            )
+
+        success_count, more_failed = await self.repository.bulk_update_tasks(
+            task_ids=authorized_task_ids,
             action=payload.action,
             value=payload.value,
             actor_id=current_user.id,
         )
+        failed_ids.extend(more_failed)
         if payload.action == "STATUS" and payload.value == "DONE":
             from app.crm.follow_up_task_sync import sync_task_completion_to_follow_up
-            for tid in payload.task_ids:
-                if tid not in failed_ids:
+            for tid in authorized_task_ids:
+                if tid not in more_failed:
                     await sync_task_completion_to_follow_up(
                         session=self.repository.session,
                         task_id=tid,
@@ -2079,7 +2267,7 @@ class TaskService:
             event_type="TASK_BULK_UPDATED",
             entity="task",
             entity_id="bulk",
-            changes={"action": payload.action, "task_ids": [str(t) for t in payload.task_ids]},
+            changes={"action": payload.action, "task_ids": [str(t) for t in authorized_task_ids]},
         )
         await self.dispatcher.publish_to_channels([module_channel("tasks")], event)
 
@@ -2234,8 +2422,26 @@ class TaskService:
         await self.repository.session.commit()
 
     # --- Workload & Capacity ---
-    async def get_workload_dashboard(self, department_id: uuid.UUID | None = None) -> WorkloadDashboardResponse:
-        data = await self.repository.get_team_workload(department_id=department_id)
+    async def get_workload_dashboard(
+        self,
+        department_id: uuid.UUID | None = None,
+        current_user: Any | None = None,
+    ) -> WorkloadDashboardResponse:
+        target_dept_id = department_id
+        if current_user is not None:
+            is_super = getattr(current_user, "is_superuser", False) or getattr(current_user, "role", "") == "super_admin"
+            user_perms = getattr(current_user, "permissions", set()) or set()
+            if not is_super and "task.organization_view" not in user_perms:
+                permitted_depts = await self.repository.get_user_permitted_department_ids(current_user.id)
+                if not permitted_depts:
+                    return WorkloadDashboardResponse(users=[], total_tasks=0)
+                if department_id:
+                    if department_id not in permitted_depts:
+                        raise ForbiddenException("You do not have permission to view workload for this department.")
+                else:
+                    primary_dept = await self.repository.get_user_primary_department_id(current_user.id)
+                    target_dept_id = primary_dept if (primary_dept and primary_dept in permitted_depts) else sorted(permitted_depts)[0]
+        data = await self.repository.get_team_workload(department_id=target_dept_id)
         users = [UserWorkloadSummary.model_validate(d) for d in data]
         total_tasks = sum(u.open_tasks_count + u.in_progress_tasks_count + u.completed_tasks_count for u in users)
         return WorkloadDashboardResponse(users=users, total_tasks=total_tasks)
@@ -2245,8 +2451,23 @@ class TaskService:
         start_date: date,
         end_date: date,
         department_id: uuid.UUID | None = None,
+        current_user: Any | None = None,
     ) -> CapacityViewResponse:
-        data = await self.repository.get_capacity_grid(start_date=start_date, end_date=end_date, department_id=department_id)
+        target_dept_id = department_id
+        if current_user is not None:
+            is_super = getattr(current_user, "is_superuser", False) or getattr(current_user, "role", "") == "super_admin"
+            user_perms = getattr(current_user, "permissions", set()) or set()
+            if not is_super and "task.organization_view" not in user_perms:
+                permitted_depts = await self.repository.get_user_permitted_department_ids(current_user.id)
+                if not permitted_depts:
+                    return CapacityViewResponse(users=[], start_date=start_date, end_date=end_date)
+                if department_id:
+                    if department_id not in permitted_depts:
+                        raise ForbiddenException("You do not have permission to view capacity for this department.")
+                else:
+                    primary_dept = await self.repository.get_user_primary_department_id(current_user.id)
+                    target_dept_id = primary_dept if (primary_dept and primary_dept in permitted_depts) else sorted(permitted_depts)[0]
+        data = await self.repository.get_capacity_grid(start_date=start_date, end_date=end_date, department_id=target_dept_id)
         users = []
         for d in data:
             allocs = [CapacityDayAllocation(date=a["date"], task_ids=a["task_ids"], task_count=a["task_count"]) for a in d["allocations"]]
@@ -2857,5 +3078,123 @@ class TaskService:
             "reminders_sent": reminders_sent,
             "escalations_triggered": escalations_triggered,
         }
+
+    async def list_task_departments(self, current_user: Any) -> list[TaskDepartmentRead]:
+        """
+        Return authoritative accessible departments.
+        - Super Admin: All departments (is_managed=True).
+        - Department Manager: Only departments they are authorized to manage (is_managed=True).
+        - Employee: Only department(s) they are assigned to (is_managed=False).
+        """
+        user_perms = set(getattr(current_user, "permissions", []))
+        is_super = (
+            getattr(current_user, "is_super_admin", False)
+            or "super_admin" in user_perms
+            or "task.organization_view" in user_perms
+            or "*" in user_perms
+        )
+
+        if is_super:
+            stmt = select(Role).where(Role.name.notin_(["super_admin", "user"])).order_by(Role.name)
+            res = await self.repository.session.execute(stmt)
+            roles = res.scalars().all()
+            return [
+                TaskDepartmentRead(id=r.id, name=r.name, code=r.code, is_managed=True)
+                for r in roles
+            ]
+
+        managed_dept_ids = await self.repository.get_user_managed_department_ids(current_user.id)
+        if managed_dept_ids:
+            stmt = select(Role).where(Role.id.in_(managed_dept_ids)).order_by(Role.name)
+            res = await self.repository.session.execute(stmt)
+            roles = res.scalars().all()
+            return [
+                TaskDepartmentRead(id=r.id, name=r.name, code=r.code, is_managed=True)
+                for r in roles
+            ]
+
+        assigned_dept_ids = await self.repository.get_user_assigned_department_ids(current_user.id)
+        if assigned_dept_ids:
+            stmt = select(Role).where(Role.id.in_(assigned_dept_ids)).order_by(Role.name)
+            res = await self.repository.session.execute(stmt)
+            roles = res.scalars().all()
+            return [
+                TaskDepartmentRead(id=r.id, name=r.name, code=r.code, is_managed=False)
+                for r in roles
+            ]
+
+        return []
+
+    async def list_task_assignees(self, current_user: Any) -> list[TaskAssigneeOptionRead]:
+        """
+        Return assignable users scoped strictly to the user's authority.
+        - Super Admin: all active users.
+        - Department Manager: users in their managed department(s) + themselves.
+        - Employee: users in their assigned department(s) + themselves.
+        """
+        user_perms = set(getattr(current_user, "permissions", []))
+        is_super = (
+            getattr(current_user, "is_super_admin", False)
+            or "super_admin" in user_perms
+            or "task.organization_view" in user_perms
+            or "*" in user_perms
+        )
+
+        if is_super:
+            stmt = (
+                select(User)
+                .where(User.deleted_at.is_(None), User.is_active.is_(True))
+                .order_by(User.first_name, User.last_name)
+            )
+            res = await self.repository.session.execute(stmt)
+            users = res.scalars().all()
+        else:
+            managed_dept_ids = await self.repository.get_user_managed_department_ids(current_user.id)
+            if managed_dept_ids:
+                dept_ids = managed_dept_ids
+            else:
+                dept_ids = await self.repository.get_user_assigned_department_ids(current_user.id)
+
+            dept_users_subq = select(UserRole.user_id).where(UserRole.role_id.in_(dept_ids))
+            lead_users_subq = select(DepartmentLeadershipAssignment.employee_id).where(
+                DepartmentLeadershipAssignment.department_id.in_(dept_ids),
+                DepartmentLeadershipAssignment.status == "ACTIVE",
+            )
+            all_uids_stmt = dept_users_subq.union(lead_users_subq)
+            all_uids_res = await self.repository.session.execute(all_uids_stmt)
+            allowed_uids = set(all_uids_res.scalars().all()) | {current_user.id}
+
+            stmt = (
+                select(User)
+                .where(
+                    User.id.in_(allowed_uids),
+                    User.deleted_at.is_(None),
+                    User.is_active.is_(True),
+                )
+                .order_by(User.first_name, User.last_name)
+            )
+            res = await self.repository.session.execute(stmt)
+            users = res.scalars().all()
+
+        options: list[TaskAssigneeOptionRead] = []
+        for u in users:
+            dept_id = await self.repository.get_user_primary_department_id(u.id)
+            dept_name = None
+            if dept_id:
+                dept_role = await self.repository.session.get(Role, dept_id)
+                dept_name = dept_role.name if dept_role else None
+
+            full_name = f"{u.first_name or ''} {u.last_name or ''}".strip() or u.username or u.email
+            options.append(
+                TaskAssigneeOptionRead(
+                    id=u.id,
+                    full_name=full_name,
+                    username=u.username,
+                    email=u.email,
+                    department=dept_name or "General",
+                    department_id=dept_id,
+                )
+            )
+        return options
 
 

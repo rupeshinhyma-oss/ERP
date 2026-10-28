@@ -5,7 +5,7 @@ import { Banner } from "@/components/ui";
 import { Pagination } from "@/components/Pagination";
 import { useAuth } from "@/lib/hooks";
 import { liveClient } from "@/lib/live/liveClient";
-import { tasksApi } from "@/lib/tasksApi";
+import { tasksApi, type TaskDepartment } from "@/lib/tasksApi";
 import { BulkActionBar } from "@/components/BulkActionBar";
 import { TaskGanttView } from "@/components/TaskGanttView";
 import type {
@@ -69,6 +69,7 @@ export function getDepartmentColor(deptName: string): { bg: string; text: string
 }
 
 export function getTaskDepartment(task: TaskSummary, availableUsers: AvailableUser[] = []): string {
+  if ((task as any).department_name) return (task as any).department_name;
   const INVALID_DEPTS = new Set(["staff", "super_admin", "admin", "user"]);
   const assignees = (task.assignees || []).filter((a) => a.assignment_role !== "WATCHER");
   for (const a of assignees) {
@@ -211,12 +212,15 @@ export const TasksPage: React.FC = () => {
   const [initialDrawerTab, setInitialDrawerTab] = useState<any>(undefined);
   const [escalatingTask, setEscalatingTask] = useState<TaskDetail | null>(null);
 
-  // Deep linking: open TaskDrawer from URL ?id=... or ?taskId=...
+  // Deep linking: open TaskDrawer from URL ?taskId=... or ?id=... or ?task_id=...
   useEffect(() => {
-    const urlTaskId = searchParams.get("taskId") || searchParams.get("id");
+    const urlTaskId =
+      searchParams.get("taskId") ||
+      searchParams.get("id") ||
+      searchParams.get("task_id");
     const drawerTabParam = searchParams.get("drawerTab");
     if (urlTaskId) {
-      setSelectedTaskId(urlTaskId);
+      setSelectedTaskId((prev) => (prev === urlTaskId ? prev : urlTaskId));
       if (drawerTabParam) {
         setInitialDrawerTab(drawerTabParam);
       }
@@ -225,6 +229,7 @@ export const TasksPage: React.FC = () => {
 
   // Users for filter dropdowns
   const [availableUsers, setAvailableUsers] = useState<AvailableUser[]>([]);
+  const [taskDepartments, setTaskDepartments] = useState<TaskDepartment[]>([]);
   const availableUsersRef = React.useRef(availableUsers);
   useEffect(() => {
     availableUsersRef.current = availableUsers;
@@ -233,42 +238,24 @@ export const TasksPage: React.FC = () => {
   // Calendar specific state
   const [calendarDate, setCalendarDate] = useState(() => new Date());
 
-  // User roles & scopes
-  const userRoles = React.useMemo(() => {
-    return (profile?.roles || []).map((x: string) => x.toLowerCase());
-  }, [profile]);
-
-  const isDirector = React.useMemo(() => {
-    return Boolean(
-      userRoles.some((r: string) => r.includes("director")) ||
-      ((profile as any)?.position_name || "").toLowerCase().includes("director")
-    );
-  }, [userRoles, profile]);
-
+  // Authoritative role & scope determination from database leadership/department records
   const isDeptManager = React.useMemo(() => {
     return Boolean(
-      isDirector ||
-      userRoles.some((r: string) => r.includes("manager") || r.includes("lead")) ||
-      hasPermission("task.department_view") ||
+      taskDepartments.some((d) => d.is_managed) ||
       hasPermission("task.manage")
     );
-  }, [isDirector, userRoles, hasPermission]);
+  }, [taskDepartments, hasPermission]);
 
-  const canViewDept =
-    hasPermission("task.department_view") ||
-    hasPermission("task.organization_view") ||
-    hasPermission("task.manage") ||
-    isDeptManager ||
-    isDirector ||
-    isSuperAdmin;
+  const canViewDept = isSuperAdmin || isDeptManager;
+  const canViewOrg = isSuperAdmin || hasPermission("task.organization_view");
 
-  const canViewOrg =
-    hasPermission("task.organization_view") ||
-    hasPermission("task.manage") ||
-    isSuperAdmin;
-
-  // Resolve user's own department
+  // Resolve user's own primary/managed department
   const userDepartment = React.useMemo(() => {
+    if (taskDepartments.length > 0) {
+      const managed = taskDepartments.find((d) => d.is_managed);
+      if (managed) return managed.name;
+      return taskDepartments[0].name;
+    }
     const INVALID_DEPTS = new Set(["staff", "super_admin", "admin", "user", "general"]);
     if (profile?.id && availableUsers.length > 0) {
       const matched = availableUsers.find((u) => u.id === profile.id);
@@ -276,46 +263,45 @@ export const TasksPage: React.FC = () => {
         return matched.department;
       }
     }
-    const rawDept = (profile as any)?.department || (profile as any)?.position_name || "";
-    if (rawDept && !INVALID_DEPTS.has(rawDept.toLowerCase())) {
-      return rawDept;
-    }
     return isSuperAdmin ? "Management" : "";
-  }, [profile, availableUsers, isSuperAdmin]);
+  }, [taskDepartments, profile, availableUsers, isSuperAdmin]);
 
-  // Allowed view options in View Switcher
+  // Allowed view options in View Switcher:
+  // Super Admin -> My, Department, Organization
+  // Department Manager -> My, Department
+  // Employee -> My only (never gets Department view)
   const allowedViews: ScopeViewKey[] = React.useMemo(() => {
     if (isSuperAdmin) {
       return ["my", "department", "organization"];
     }
-    if (isDirector) {
-      const views: ScopeViewKey[] = ["my", "department"];
-      if (canViewOrg) views.push("organization");
-      return views;
-    }
-    if (isDeptManager || canViewDept) {
+    if (isDeptManager) {
       return ["my", "department"];
     }
     return ["my"];
-  }, [isSuperAdmin, isDirector, isDeptManager, canViewDept, canViewOrg]);
+  }, [isSuperAdmin, isDeptManager]);
 
   // Role display label in Permission Banner
   const roleDisplayName = React.useMemo(() => {
     if (isSuperAdmin) return "Super Administrator";
-    if (isDirector) return "Director";
     if (isDeptManager) return "Department Manager";
     return "Employee";
-  }, [isSuperAdmin, isDirector, isDeptManager]);
+  }, [isSuperAdmin, isDeptManager]);
 
   // Access scope display in Permission Banner
   const accessScopeDisplayName = React.useMemo(() => {
     if (isSuperAdmin || canViewOrg) return "All Organization Tasks";
-    if (canViewDept) return "Department Tasks";
+    if (isDeptManager) {
+      const managedNames = taskDepartments.filter((d) => d.is_managed).map((d) => d.name);
+      return managedNames.length > 0 ? `Department Tasks (${managedNames.join(", ")})` : "Department Tasks";
+    }
     return "Personal Tasks Only";
-  }, [isSuperAdmin, canViewOrg, canViewDept]);
+  }, [isSuperAdmin, canViewOrg, isDeptManager, taskDepartments]);
 
-  // Derived list of unique departments from ERP team members + defaults
+  // Derived list of unique departments from authoritative DB records
   const departmentsList = React.useMemo(() => {
+    if (taskDepartments.length > 0) {
+      return taskDepartments.map((d) => d.name).sort();
+    }
     const depts = new Set<string>();
     const INVALID_DEPTS = new Set(["staff", "super_admin", "admin", "user", "general"]);
     availableUsers.forEach((u) => {
@@ -323,11 +309,10 @@ export const TasksPage: React.FC = () => {
         depts.add(u.department);
       }
     });
-    ["Frontend", "Backend", "Cloud Setup", "IT", "Management", "Director"].forEach((d) => depts.add(d));
     return Array.from(depts).sort();
-  }, [availableUsers]);
+  }, [taskDepartments, availableUsers]);
 
-  // Default department filter on initial load (only initialize when in department view, never overwrite user selection)
+  // Default department filter on initial load
   const hasInitializedDept = React.useRef(false);
   useEffect(() => {
     if (!hasInitializedDept.current && departmentsList.length > 0 && (scopeView === "department" || activeTab === "department")) {
@@ -463,16 +448,18 @@ export const TasksPage: React.FC = () => {
     };
   }, []);
 
-  // Load available ERP users and V2.0 options
+  // Load available ERP users, departments, and V2.0 options
   useEffect(() => {
     Promise.all([
-      tasksApi.getAvailableAssignees().catch(() => []),
-      tasksApi.fetchLabels().catch(() => []),
-      tasksApi.fetchSavedFilters().catch(() => []),
-      tasksApi.fetchSprints().catch(() => []),
+      tasksApi.getAvailableAssignees ? tasksApi.getAvailableAssignees().catch(() => []) : Promise.resolve([]),
+      tasksApi.fetchTaskDepartments ? tasksApi.fetchTaskDepartments().catch(() => []) : Promise.resolve([]),
+      tasksApi.fetchLabels ? tasksApi.fetchLabels().catch(() => []) : Promise.resolve([]),
+      tasksApi.fetchSavedFilters ? tasksApi.fetchSavedFilters().catch(() => []) : Promise.resolve([]),
+      tasksApi.fetchSprints ? tasksApi.fetchSprints().catch(() => []) : Promise.resolve([]),
     ])
-      .then(([users, labels, filters, sprints]) => {
+      .then(([users, depts, labels, filters, sprints]) => {
         setAvailableUsers(users);
+        setTaskDepartments(depts);
         setAvailableLabels(labels);
         setSavedFilters(filters);
         setAvailableSprints(sprints);
@@ -1405,6 +1392,28 @@ export const TasksPage: React.FC = () => {
     );
   };
 
+  const hasTaskAccess = hasPermission("task.view") || isSuperAdmin;
+  const canCreateTasks = hasPermission("task.create") || hasPermission("task.manage") || isSuperAdmin;
+  const canManageBulk = hasPermission("task.create") || hasPermission("task.manage") || isSuperAdmin;
+
+  if (!hasTaskAccess) {
+    return (
+      <AppShell activeKey="tasks" pageClassName="page-tasks">
+        <main className="page">
+          <div style={{ textAlign: "center", padding: "80px 20px" }}>
+            <div style={{ fontSize: "48px", marginBottom: "16px" }}>🔒</div>
+            <h2 style={{ fontSize: "20px", fontWeight: 700, color: "#1e293b", marginBottom: "8px" }}>
+              Access Denied
+            </h2>
+            <p style={{ color: "#64748b", maxWidth: "420px", margin: "0 auto 24px" }}>
+              You do not have permission to view or manage tasks. Please contact your system administrator to request access.
+            </p>
+          </div>
+        </main>
+      </AppShell>
+    );
+  }
+
   return (
     <AppShell activeKey="tasks" pageClassName="page-tasks">
       <main className="page">
@@ -1413,18 +1422,20 @@ export const TasksPage: React.FC = () => {
           <div>
             <h1 style={{ margin: 0, fontSize: "20px", fontWeight: 700, color: "#1e293b" }}>Tasks</h1>
           </div>
-          <div className="page-header-actions">
-            <button
-              className="btn btn-primary"
-              onClick={() => {
-                setCreateTaskDates({});
-                setIsCreateOpen(true);
-              }}
-              style={{ display: "inline-flex", alignItems: "center", gap: "6px", fontWeight: 600 }}
-            >
-              + New Task
-            </button>
-          </div>
+          {canCreateTasks && (
+            <div className="page-header-actions">
+              <button
+                className="btn btn-primary"
+                onClick={() => {
+                  setCreateTaskDates({});
+                  setIsCreateOpen(true);
+                }}
+                style={{ display: "inline-flex", alignItems: "center", gap: "6px", fontWeight: 600 }}
+              >
+                + New Task
+              </button>
+            </div>
+          )}
         </div>
 
         <Banner error={error} />
@@ -1572,7 +1583,7 @@ export const TasksPage: React.FC = () => {
               )}
             </div>
 
-            {/* Department Dropdown (Active when in Department view, or accessible for authorized users) */}
+            {/* Department Dropdown (Active when in Department view, showing only authorized departments) */}
             {(scopeView === "department" || activeTab === "department") && departmentsList.length > 0 && (
               <div style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>
                 <span style={{ fontSize: "12px", color: "#64748b", fontWeight: 600 }}>Dept:</span>
@@ -1594,7 +1605,7 @@ export const TasksPage: React.FC = () => {
                   }}
                   title="Switch Active Department"
                 >
-                  <option value="">All Departments</option>
+                  {isSuperAdmin && <option value="">All Departments</option>}
                   {departmentsList.map((d) => (
                     <option key={d} value={d}>
                       {d} {d === userDepartment ? "(Yours)" : ""}
@@ -1781,8 +1792,8 @@ export const TasksPage: React.FC = () => {
               />
             </div>
 
-            {/* Department Filter (Universal Department Picker) */}
-            {departmentsList.length > 0 && (
+            {/* Department Filter (Universal Department Picker - only for Super Admin or multi-department Managers) */}
+            {(isSuperAdmin || (isDeptManager && departmentsList.length > 1)) && (
               <select
                 value={departmentFilter}
                 onChange={(e) => {
@@ -2849,21 +2860,23 @@ export const TasksPage: React.FC = () => {
                       })}
                     </div>
 
-                    <button
-                      type="button"
-                      className="btn btn-primary"
-                      onClick={() => {
-                        setCreateTaskDates({
-                          start: calendarPopoverDay.dateKey,
-                          due: calendarPopoverDay.dateKey,
-                        });
-                        setCalendarPopoverDay(null);
-                        setIsCreateOpen(true);
-                      }}
-                      style={{ marginTop: "4px", fontSize: "12.5px" }}
-                    >
-                      + Add Task for this date
-                    </button>
+                    {canCreateTasks && (
+                      <button
+                        type="button"
+                        className="btn btn-primary"
+                        onClick={() => {
+                          setCreateTaskDates({
+                            start: calendarPopoverDay.dateKey,
+                            due: calendarPopoverDay.dateKey,
+                          });
+                          setCalendarPopoverDay(null);
+                          setIsCreateOpen(true);
+                        }}
+                        style={{ marginTop: "4px", fontSize: "12.5px" }}
+                      >
+                        + Add Task for this date
+                      </button>
+                    )}
                   </div>
                 </div>
               )}
@@ -2927,14 +2940,16 @@ export const TasksPage: React.FC = () => {
         />
 
         {/* Bulk Action Bar */}
-        <BulkActionBar
-          selectedTaskIds={selectedTaskIds}
-          availableSprints={availableSprints}
-          availableLabels={availableLabels}
-          availableUsers={availableUsers}
-          onClearSelection={() => setSelectedTaskIds([])}
-          onExecuteBulkAction={handleExecuteBulkAction}
-        />
+        {canManageBulk && (
+          <BulkActionBar
+            selectedTaskIds={selectedTaskIds}
+            availableSprints={availableSprints}
+            availableLabels={availableLabels}
+            availableUsers={availableUsers}
+            onClearSelection={() => setSelectedTaskIds([])}
+            onExecuteBulkAction={handleExecuteBulkAction}
+          />
+        )}
       </main>
     </AppShell>
   );

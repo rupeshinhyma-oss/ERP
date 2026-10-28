@@ -7,6 +7,7 @@ import uuid
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common.base_repository import BaseRepository
+from app.core.constants import RecordStatus
 from app.masters.buyer_types.models import BuyerType
 
 
@@ -43,9 +44,12 @@ class BuyerTypeRepository(BaseRepository[BuyerType]):
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 
-    async def list_all(self) -> list[BuyerType]:
-        """Return all non-deleted buyer types ordered by name."""
-        stmt = self._base_select().order_by(BuyerType.name)
+    async def list_all(self, *, active_only: bool = True) -> list[BuyerType]:
+        """Return all buyer types, optionally filtering to active only, ordered by name."""
+        stmt = self._base_select()
+        if active_only:
+            stmt = stmt.where(BuyerType.status == RecordStatus.ACTIVE)
+        stmt = stmt.order_by(BuyerType.name)
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 

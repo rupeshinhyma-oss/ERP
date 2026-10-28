@@ -81,11 +81,22 @@ class SupplierRepository(BaseRepository[Supplier]):
         """Exclude soft-deleted suppliers, same as the generic BaseRepository behavior."""
         return super()._base_select()
 
+    def _apply_dynamic_filters(self, stmt: Select, filters: Any) -> Select:
+        """Apply dynamic filters with alias mapping for status -> is_active."""
+        if hasattr(filters, "exact") and "status" in filters.exact:
+            val = str(filters.exact["status"]).lower().strip()
+            if val in ("active", "true", "1"):
+                stmt = stmt.where(Supplier.is_active.is_(True))
+            elif val in ("inactive", "false", "0"):
+                stmt = stmt.where(Supplier.is_active.is_(False))
+        return super()._apply_dynamic_filters(stmt, filters)
+
     def _apply_search(self, stmt: Select, term: str | None) -> Select:
         """
         Comprehensive search matching anything visible on the supplier row / details:
         company name, geography (country name/code, state, city), contacts,
-        phone numbers, emails, websites, tax ID, categories, sub-categories, and products.
+        phone numbers (both formatted and raw digits), emails, websites, tax ID,
+        categories, sub-categories, and products.
         """
         if not term:
             return stmt
@@ -93,6 +104,8 @@ class SupplierRepository(BaseRepository[Supplier]):
         if not clean:
             return stmt
         pattern = f"%{clean}%"
+        clean_norm = clean.replace(" ", "").replace("-", "").lower()
+        clean_pattern = f"%{clean_norm}%"
 
         direct_columns = [
             Supplier.company_name,
@@ -112,6 +125,22 @@ class SupplierRepository(BaseRepository[Supplier]):
             Supplier.overall_remarks,
         ]
         conditions: list[Any] = [col.ilike(pattern) for col in direct_columns]
+
+        # Normalized space/hyphen matching for company and contact names
+        conditions.append(func.lower(func.replace(func.replace(Supplier.company_name, " ", ""), "-", "")).like(clean_pattern))
+        conditions.append(func.lower(func.replace(func.replace(Supplier.contact_full_name, " ", ""), "-", "")).like(clean_pattern))
+
+        # Normalized digits search for phone numbers
+        import re
+        digits = re.sub(r"\D", "", clean)
+        if len(digits) >= 3:
+            digit_pattern = f"%{digits}%"
+            for phone_col in (
+                Supplier.contact_calling_number,
+                Supplier.contact_whatsapp_number,
+                Supplier.contact_wechat_number,
+            ):
+                conditions.append(func.regexp_replace(phone_col, r"\D", "", "g").ilike(digit_pattern))
 
         # 1. Country Name / Code
         conditions.append(
@@ -145,17 +174,28 @@ class SupplierRepository(BaseRepository[Supplier]):
             )
         )
 
-        # 5. Child Contacts (name, phone, email, designation)
+        # 5. Child Contacts (name, phone, email, designation, wechat)
+        contact_conds = [
+            SupplierContact.person_name.ilike(pattern),
+            SupplierContact.calling_number.ilike(pattern),
+            SupplierContact.whatsapp_number.ilike(pattern),
+            SupplierContact.wechat_number.ilike(pattern),
+            SupplierContact.email.ilike(pattern),
+            SupplierContact.designation.ilike(pattern),
+            func.lower(func.replace(func.replace(SupplierContact.person_name, " ", ""), "-", "")).like(clean_pattern),
+        ]
+        if len(digits) >= 3:
+            digit_pattern = f"%{digits}%"
+            contact_conds.extend([
+                func.regexp_replace(SupplierContact.calling_number, r"\D", "", "g").ilike(digit_pattern),
+                func.regexp_replace(SupplierContact.whatsapp_number, r"\D", "", "g").ilike(digit_pattern),
+                func.regexp_replace(SupplierContact.wechat_number, r"\D", "", "g").ilike(digit_pattern),
+            ])
+
         conditions.append(
             exists().where(
                 SupplierContact.supplier_id == Supplier.id,
-                or_(
-                    SupplierContact.person_name.ilike(pattern),
-                    SupplierContact.calling_number.ilike(pattern),
-                    SupplierContact.whatsapp_number.ilike(pattern),
-                    SupplierContact.email.ilike(pattern),
-                    SupplierContact.designation.ilike(pattern),
-                ),
+                or_(*contact_conds),
             )
         )
 

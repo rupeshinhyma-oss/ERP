@@ -7,9 +7,11 @@
  * it stays correct without either.
  */
 
+import { useMemo, useState } from "react";
 import { MasterPage, type FormState } from "@/components/MasterPage";
 import { StatusBadge } from "@/components/ui";
 import { SelectField, TextField } from "@/components/fields";
+import { SearchableFilterDropdown } from "@/components/SearchableDropdown";
 import { useLookup, useNameMap } from "@/lib/lookups";
 import type { City, Country, State } from "@/types";
 
@@ -20,6 +22,21 @@ export function CitiesPage() {
   const states = useLookup<State>("/masters/states", 1000);
   const countryName = useNameMap(countries.items, (c) => c.name);
   const stateName = useNameMap(states.items, (s) => s.name);
+  const [countryFilter, setCountryFilter] = useState("");
+  const [stateFilter, setStateFilter] = useState("");
+
+  const scopedStates = useMemo(() => {
+    return countryFilter
+      ? states.items.filter((s) => s.country_id === countryFilter)
+      : states.items;
+  }, [countryFilter, states.items]);
+
+  const extraFilters = useMemo(() => {
+    const f: Record<string, string> = {};
+    if (countryFilter) f.country_id = countryFilter;
+    if (stateFilter) f.state_id = stateFilter;
+    return Object.keys(f).length ? f : undefined;
+  }, [countryFilter, stateFilter]);
 
   return (
     <MasterPage<City>
@@ -35,6 +52,46 @@ export function CitiesPage() {
       searchPlaceholder="Search city name or Sr. No..."
       hideQuickAdd={true}
       reloadToken={`${countries.loaded}-${states.loaded}`}
+      onResetFilters={() => {
+        setCountryFilter("");
+        setStateFilter("");
+      }}
+      extraFilters={extraFilters}
+      toolbarExtras={
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 300px))", gap: "16px" }}>
+          <div>
+            <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px" }}>
+              Country
+            </label>
+            <SearchableFilterDropdown
+              value={countryFilter || null}
+              onChange={(val) => {
+                setCountryFilter(val || "");
+                setStateFilter("");
+              }}
+              allLabel="All Countries"
+              options={countries.items.map((c) => ({
+                value: c.id,
+                label: c.name,
+              }))}
+            />
+          </div>
+          <div>
+            <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px" }}>
+              Province / Region
+            </label>
+            <SearchableFilterDropdown
+              value={stateFilter || null}
+              onChange={(val) => setStateFilter(val || "")}
+              allLabel="All Provinces / Regions"
+              options={scopedStates.map((s) => ({
+                value: s.id,
+                label: `${s.name}${s.status === "inactive" ? " (Inactive)" : ""}`,
+              }))}
+            />
+          </div>
+        </div>
+      }
       columnHeaders={["CITY", "PROVINCE / REGION", "COUNTRY", "STATUS"]}
       columns={[
         { header: "CITY", render: (c) => <span className="cell-primary">{c.name}</span> },

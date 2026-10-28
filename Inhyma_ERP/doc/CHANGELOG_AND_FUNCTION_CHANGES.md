@@ -198,6 +198,50 @@
 
 ---
 
+## [Release 2026-10-26] — Feed & Employee Messaging: Universal Access & 1-to-1 Private Chat Architecture
+
+### 1. Phase 1 — Open Broadcasting for All Authenticated Employees
+- **Universal Announcement Creation:** Removed arbitrary `feed.create` and `feed.manage` permission barriers from announcement publishing. Every authenticated employee across every department can now create, publish, and target announcements directly from the Feed.
+- **Universal Targeting Support:**
+  - Company-wide broadcast (`ALL` audience).
+  - Multi-department targeting (`SELECTED` audience with `department_ids`).
+  - Individual employee targeting (`SELECTED` audience with `recipient_ids`).
+  - Combined department and individual employee targeting.
+- **Author Ownership Protection:** Authors retain sole permission to update or soft-delete their own announcements. Non-authors and general administrators cannot edit or delete another user's announcements (`HTTP 403 Forbidden`).
+- **Tenant & Entity Integrity:** Preserved company boundaries and verified targeted departments and employees against active database records.
+
+### 2. Phase 2 — 1-to-1 Direct Private Messaging Module
+- **Database Architecture & Alembic Migration:**
+  - Applied migration `u6f7a8b9c0d1_create_feed_direct_messaging_tables.py` creating:
+    - `feed_conversations`: Holds 1-to-1 conversation state with timestamps, soft deletion, and participant tracking.
+    - `feed_conversation_participants`: Tracks member participation (`user_id`), uniqueness (`uq_feed_conv_participant`), and individual read timestamps (`last_read_at`).
+    - `feed_direct_messages`: Stores message body, sender reference (`sender_id`), soft deletion (`deleted_at`), and edited flag (`is_edited`).
+- **Strict Participant-Only Isolation:**
+  - Conversations and messages are visible strictly to the two active participants.
+  - Other employees, department colleagues, and Administrators receive `HTTP 403 Forbidden` on any direct attempt to fetch conversation metadata or message history.
+  - Prevented ID guessing and unauthorized traversal via explicit participant membership enforcement in `FeedService`.
+- **Author-Only Message Lifecycle:**
+  - Senders can edit (`PATCH /api/v1/feed/messages/{id}`) and soft-delete (`DELETE /api/v1/feed/messages/{id}`) their own messages.
+  - Recipients and third parties are strictly prohibited from editing or deleting messages (`HTTP 403 Forbidden`).
+- **Sender Identity Verification:** Authenticated JWT claims (`current_user.id`) strictly determine sender identity; client-supplied sender IDs are completely disallowed.
+
+### 3. Phase 3 — Notifications, Unread Indicators & Read Tracking
+- **ERP Notification Integration:** New private messages dispatch an ERP notification via `NotificationService` without exposing confidential message text to external logging or unauthorized channels.
+- **Unread Badge & Status Tracking:**
+  - `GET /api/v1/feed/conversations/unread-count` delivers real-time unread counts for tab badge indicators.
+  - `POST /api/v1/feed/conversations/{id}/read` automatically updates `last_read_at` when a conversation thread is viewed.
+
+### 4. Phase 4 & 5 — Frontend Split-Pane UI & Comprehensive Test Suite
+- **Interactive UI (`FeedDirectMessages.tsx`):**
+  - Two-pane responsive split layout: conversation thread list on the left with search, active chat view on the right.
+  - Start New Conversation modal using real-time employee typeahead search via `feedApi.getEligibleRecipients()`.
+  - Inline message editing and quick soft-deletion.
+  - Top tab switcher on `FeedPage.tsx` (`📢 Announcements` vs `💬 Direct Messages`).
+- **Automated QA & Security Test Coverage:**
+  - Added master acceptance suite `tests/test_feed_open_access_and_messaging.py` covering all 10 Phase 5 verification scenarios with 3 ordinary employees across 3 departments (Engineering, Sales, HR) with zero feed permissions, plus 1 Admin.
+  - Added frontend test suite `FeedDirectMessages.test.tsx` and updated `FeedPage.test.tsx` and `FeedInteractions.test.tsx`. All 34 Vitest tests passing.
+  - TypeScript build passes cleanly with zero errors (`tsc -b && vite build` built in 16s).
+
 ## [Release 2026-10-23] — Proforma Invoice Address Drawers & Future Dates, Local Purchase Safety & Landing Rate (VB), and Feed & Broadcast Ecosystem Integration
 
 
@@ -1441,6 +1485,30 @@
   - 11 backend tests in [`test_follow_ups.py`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/backend/tests/test_follow_ups.py) and related suites passing 100%.
   - All 350 frontend tests across 45 files passing 100%.
   - Clean production build (`tsc -b && vite build`) with zero TypeScript errors.
+
+---
+
+## [Release 2026-10-26] — HRMS Phases 2–6 Comprehensive Security, Multi-Stage Workflow & RBAC Modernization
+
+### 1. Admin Full Control & Tenant Integrity
+- **Company-Wide Visibility:** Super Admin and designated Admins hold full audit and execution visibility across all 7 HRMS modules (`Attendance`, `Leave`, `Assets`, `Expenses`, `Site Visits`, `Payroll`, `Setup`).
+- **Setup Endpoint Protection:** Hardened `/api/v1/hrms/setup/*`, `/leave/types`, `/expenses/categories`, and `/attendance/policies` to require Admin or `hrms.manage`. Restricted HR users without manage permissions receive `403 Forbidden`.
+
+### 2. Manager-First Approval with Real System Availability & HR Fallback
+- **Availability Determination via System Data:** Verified against active user status and non-overlapping approved leave in `HrmsLeaveRequest`. No synthetic attendance assumptions.
+- **Routing Priority:** Assigned manager is given mandatory first priority. HR fallback can only act if the manager is unassigned, inactive, or on approved leave.
+- **Self-Approval Lockout:** Users cannot approve their own requests across any module (`HTTP 400 Bad Request` "Self-approval is not permitted"), with Super Admin override allowed.
+- **Duplicate & Stale Action Protection:** Duplicate approvals or processing on already-resolved requests return `HTTP 400 Bad Request`.
+
+### 3. Multi-Stage Workflows & Separation of Duties
+- **Expenses Two-Stage Lifecycle:** Enforced strict progression (`PENDING` ➔ Manager `APPROVED` ➔ HR/Finance `REIMBURSED`). Managers cannot reimburse; HR cannot bypass pending status.
+- **Payroll Separation of Duties:** Distinct permissions for salary configuration/batch calculation (`hrms.payroll.configure`) versus batch final approval (`hrms.payroll.approve`).
+- **Data Scoping & Isolation:** Payslips and individual payroll items are isolated per employee (`403 Forbidden` on unauthorized queries).
+
+### 4. Deterministic Canonical RBAC & Deny Precedence
+- **Precedence Model:** `Effective = (Role Permissions ∪ User Grants) \ User Denies`.
+- **Deny-Marker Propagation:** Explicit `deny:<perm>` codes take absolute precedence over role and individual grants across all endpoints.
+- **Privilege Escalation Prevention:** Non-super-admins cannot alter their own roles or permissions (`HTTP 403 Forbidden`).
 
 ---
 

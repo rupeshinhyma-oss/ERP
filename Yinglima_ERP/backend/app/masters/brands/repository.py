@@ -51,9 +51,12 @@ class BrandRepository(BaseRepository[Brand]):
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 
-    async def list_all(self) -> list[Brand]:
-        """Return every non-deleted brand, ordered by name."""
-        stmt = self._base_select().order_by(Brand.name)
+    async def list_all(self, *, active_only: bool = True) -> list[Brand]:
+        """Return brands, optionally filtering to active only, ordered by name."""
+        stmt = self._base_select()
+        if active_only:
+            stmt = stmt.where(Brand.status == "active")
+        stmt = stmt.order_by(Brand.name)
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 

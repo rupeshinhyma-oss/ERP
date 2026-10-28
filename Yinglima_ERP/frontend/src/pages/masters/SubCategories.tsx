@@ -1,5 +1,3 @@
-/** Product Sub-Categories master. Ported from masters-subcategories.html. */
-
 import { useState } from "react";
 import { MasterPage, type FormState } from "@/components/MasterPage";
 import { StatusBadge } from "@/components/ui";
@@ -8,6 +6,7 @@ import {
   TextField,
   nullIfBlank,
 } from "@/components/fields";
+import { SearchableFilterDropdown } from "@/components/SearchableDropdown";
 import { useLookup, useNameMap } from "@/lib/lookups";
 import type { ProductCategory, ProductSubCategory } from "@/types";
 
@@ -37,16 +36,25 @@ export function SubCategoriesPage() {
       hideQuickAdd
       searchPlaceholder="Search name or Sr. No..."
       reloadToken={categories.loaded}
+      onResetFilters={() => setCategoryFilter("")}
       extraFilters={categoryFilter ? { category_id: categoryFilter } : undefined}
       toolbarExtras={
-        <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)}>
-          <option value="">All categories</option>
-          {categories.items.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.name}{c.status === "inactive" ? " (Inactive)" : ""}
-            </option>
-          ))}
-        </select>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 320px))", gap: "16px" }}>
+          <div>
+            <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px" }}>
+              Category
+            </label>
+            <SearchableFilterDropdown
+              value={categoryFilter || null}
+              onChange={(val) => setCategoryFilter(val || "")}
+              allLabel="All Categories"
+              options={categories.items.map((c) => ({
+                value: c.id,
+                label: `${c.name}${c.status === "inactive" ? " (Inactive)" : ""}`,
+              }))}
+            />
+          </div>
+        </div>
       }
       columnHeaders={["Name", "Category", "Status"]}
       columns={[

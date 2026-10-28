@@ -160,6 +160,7 @@ const ACTION_LABELS: Record<string, string> = {
   potential: "Potential",
   clientgrade: "Client Grade",
   cancel: "Cancel / Reverse",
+  inward: "Inward to Warehouse",
 };
 
 export const ACTION_ICONS: Record<string, string> = {
@@ -181,6 +182,7 @@ export const ACTION_ICONS: Record<string, string> = {
   potential: "📈",
   clientgrade: "⭐",
   cancel: "↩️",
+  inward: "📦",
 };
 
 /**
@@ -200,6 +202,7 @@ const FULL_CODE_LABELS: Record<string, string> = {
   "inquiry.approve": "Approve Quotation",
   "inquiry.send_message": "Send Messages (Email/WeChat)",
   "local_purchase.export": "Export / Print",
+  "local_purchase.inward": "Inward to Warehouse",
   "sale_process.approve": "Update Status / Workflow",
   "sale_process.export": "Export Excel & CI/Packing Docs",
   "stock_movement.cancel": "Cancel / Reverse Movement",

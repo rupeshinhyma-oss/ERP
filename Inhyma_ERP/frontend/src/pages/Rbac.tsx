@@ -2181,7 +2181,10 @@ export function RbacPage() {
 
               {/* Permission Groups */}
               {(() => {
-                const groups = groupPermissionsByModule(allPermissions);
+                const assignablePermissions = allPermissions.filter(
+                  (p) => p.module !== "feed" && !p.code.startsWith("feed.")
+                );
+                const groups = groupPermissionsByModule(assignablePermissions);
                 const q = overridesSearch.trim().toLowerCase();
                 const roleGranted = new Set(overridesBreakdown.role_permissions || []);
                 const modKeys = Object.keys(groups)

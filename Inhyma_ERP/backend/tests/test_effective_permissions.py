@@ -27,6 +27,7 @@ async def test_permission_codes_uniqueness_and_deduplication():
 
     # 1. Super admin check -> return None (not super admin)
     mock_res_super = Mock()
+    mock_res_super.scalars.return_value.first.return_value = None
     mock_res_super.scalar_one_or_none.return_value = None
 
     # 2. System roles perms -> duplicate 'employee.read', 'supplier.read'
@@ -44,13 +45,14 @@ async def test_permission_codes_uniqueness_and_deduplication():
 
     effective = await repo.get_permission_codes_for_user(user_id)
 
-    # Expected: ({"employee.read", "supplier.read"} | {"product.create"}) - {"supplier.read"}
-    # => {"employee.read", "product.create"}
+    # Expected: ({"employee.read", "supplier.read"} | {"product.create"}) - {"supplier.read"} + {"deny:supplier.read"}
+    # => {"employee.read", "product.create", "deny:supplier.read"}
     assert isinstance(effective, set)
     assert "employee.read" in effective
     assert "product.create" in effective
     assert "supplier.read" not in effective
-    assert len(effective) == 2
+    assert "deny:supplier.read" in effective
+    assert len(effective) == 3
 
 
 @pytest.mark.asyncio

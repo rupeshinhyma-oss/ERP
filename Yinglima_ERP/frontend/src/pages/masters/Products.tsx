@@ -683,6 +683,7 @@ export function ProductsPage() {
   const [categoryFilter, setCategoryFilter] = useState("");
   const [subCategoryFilter, setSubCategoryFilter] = useState("");
   const [brandFilter, setBrandFilter] = useState("");
+  const [hsnFilter, setHsnFilter] = useState("");
 
   const [drawerProduct, setDrawerProduct] = useState<Product | null>(null);
   const [drawerLoading, setDrawerLoading] = useState(false);
@@ -696,6 +697,7 @@ export function ProductsPage() {
   if (categoryFilter) extraFilters.category_id = categoryFilter;
   if (subCategoryFilter) extraFilters.sub_category_id = subCategoryFilter;
   if (brandFilter) extraFilters.brand_id = brandFilter;
+  if (hsnFilter) extraFilters.hsn_id = hsnFilter;
 
   /** Fetches the product fresh and opens the detail drawer, matching openProductDetailView() in the source. */
   async function openProductDetailView(productId: string, initialProduct?: Product) {
@@ -804,74 +806,71 @@ export function ProductsPage() {
       onItemsLoaded={setCatalogProducts}
       useFullPageForm={true}
       hideQuickAdd={true}
+      hideFilterSearchButton={true}
+      onResetFilters={() => {
+        setCategoryFilter("");
+        setSubCategoryFilter("");
+        setBrandFilter("");
+        setHsnFilter("");
+      }}
       extraFilters={extraFilters}
       toolbarExtras={
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "20px", width: "100%" }}>
-          <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-            <label style={{ fontSize: "13px", fontWeight: 600, color: "#334155" }}>Category</label>
-            <SearchableFilterDropdown
-              value={categoryFilter || null}
-              onChange={(val) => {
-                setCategoryFilter(val || "");
-                if (!val) setSubCategoryFilter("");
-              }}
-              placeholder="All"
-              allLabel="All"
-              fetchOptions={async (term) => {
-                const q = term.toLowerCase().trim();
-                return categories.items
-                  .filter((c) => !q || c.name.toLowerCase().includes(q))
-                  .map((c) => ({ value: c.id, label: c.name }));
-              }}
-              fetchLabelForValue={async (val) => {
-                const c = categories.items.find((item) => item.id === val);
-                return c ? c.name : "";
-              }}
-            />
-          </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "16px", width: "100%", alignItems: "flex-end" }}>
+          <SearchableFilterDropdown
+            label="Category"
+            value={categoryFilter || null}
+            onChange={(val) => {
+              setCategoryFilter(val || "");
+              if (!val) setSubCategoryFilter("");
+            }}
+            placeholder="All"
+            allLabel="All Categories"
+            options={categories.items.map((c) => ({
+              value: c.id,
+              label: c.name,
+            }))}
+          />
 
-          <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-            <label style={{ fontSize: "13px", fontWeight: 600, color: "#334155" }}>Sub Category</label>
-            <SearchableFilterDropdown
-              value={subCategoryFilter || null}
-              onChange={(val) => setSubCategoryFilter(val || "")}
-              placeholder="All"
-              allLabel="All"
-              fetchOptions={async (term) => {
-                const q = term.toLowerCase().trim();
-                const pool = categoryFilter
-                  ? subCategories.items.filter((sc) => sc.category_id === categoryFilter)
-                  : subCategories.items;
-                return pool
-                  .filter((sc) => !q || sc.name.toLowerCase().includes(q) || (sc.code && sc.code.toLowerCase().includes(q)))
-                  .map((sc) => ({ value: sc.id, label: sc.name }));
-              }}
-              fetchLabelForValue={async (val) => {
-                const sc = subCategories.items.find((item) => item.id === val);
-                return sc ? sc.name : "";
-              }}
-            />
-          </div>
+          <SearchableFilterDropdown
+            label="Sub Category"
+            value={subCategoryFilter || null}
+            onChange={(val) => setSubCategoryFilter(val || "")}
+            placeholder="All"
+            allLabel="All Sub Categories"
+            options={(categoryFilter
+              ? subCategories.items.filter((sc) => sc.category_id === categoryFilter)
+              : subCategories.items
+            ).map((sc) => ({
+              value: sc.id,
+              label: sc.name,
+              sublabel: sc.code || undefined,
+            }))}
+          />
 
-          <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-            <label style={{ fontSize: "13px", fontWeight: 600, color: "#334155" }}>Brand</label>
-            <SearchableFilterDropdown
-              value={brandFilter || null}
-              onChange={(val) => setBrandFilter(val || "")}
-              placeholder="All"
-              allLabel="All"
-              fetchOptions={async (term) => {
-                const q = term.toLowerCase().trim();
-                return brands.items
-                  .filter((b) => !q || b.name.toLowerCase().includes(q))
-                  .map((b) => ({ value: b.id, label: b.name }));
-              }}
-              fetchLabelForValue={async (val) => {
-                const b = brands.items.find((item) => item.id === val);
-                return b ? b.name : "";
-              }}
-            />
-          </div>
+          <SearchableFilterDropdown
+            label="Brand"
+            value={brandFilter || null}
+            onChange={(val) => setBrandFilter(val || "")}
+            placeholder="All"
+            allLabel="All Brands"
+            options={brands.items.map((b) => ({
+              value: b.id,
+              label: b.name,
+            }))}
+          />
+
+          <SearchableFilterDropdown
+            label="HSN Code"
+            value={hsnFilter || null}
+            onChange={(val) => setHsnFilter(val || "")}
+            placeholder="All"
+            allLabel="All HSN Codes"
+            options={hsnCodes.items.map((h) => ({
+              value: h.id,
+              label: h.code,
+              sublabel: h.description || undefined,
+            }))}
+          />
         </div>
       }
       /**

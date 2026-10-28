@@ -147,14 +147,43 @@ To support high-density logistics dashboards with 20+ columns:
 
 ---
 
-## 8. Critical Constraints: What to KEEP / What NOT to Break
+---
 
-> [!CAUTION]
-> **Strict rules to observe when modifying Shipment Planning:**
+## 9. Entity Selection & Sheet Creation Architecture (Release 2026-10-27)
 
-1. **Inline Patch Endpoint Granularity:**
-   - Always update cells via cell-level endpoints (`PATCH /sheets/{id}/cells`). Never overwrite entire sheets or rows, as multiple operators concurrently edit logistics data.
-2. **Formula Rounding Integrity:**
-   - Package quantities must evaluate to exact decimals without truncating fractional cartons.
-3. **Product Master Isolation:**
-   - Do not break the foreign key or name link to `Product`; linked lookup columns depend on `Product.product_name` and `Product.id`.
+### Problem Addressed
+Previously, selecting a Buyer or Organization in the top **Entity** filter dropdown that had no existing planning sheets caused the interface to get stuck on the previous entity's sheet. The previous sheet's ID and URL parameter (`?sheet=...`) remained active, causing URL synchronization effects to repeatedly revert the Entity dropdown back to the previous entity.
+
+### Solution Implemented
+1. **Dynamic Entity & URL Clearing (`handleEntityChange`):**
+   - Selecting any Buyer or Organization without existing sheets immediately clears `activeSheetId` to `null`, wipes `grid` to `null`, and clears `sheet` and `sheet_id` URL query parameters.
+   - Preserves `?buyer=<id>` or `?org=<name>` in the URL, enabling reliable deep-linking and browser refreshes without reverting.
+2. **Dedicated Empty State Card with 1-Click Sheet Creation:**
+   - When the selected entity has 0 planning sheets, the interface renders a prominent empty state card:
+     - Header: *"No Planning Sheet Found for [Buyer / Organization Name]"*
+     - Clear description explaining that no planning sheets exist yet for this logistics entity.
+     - Action button: **`[ + Create Planning Sheet for [Entity Name] ]`**.
+3. **Pre-filled Sheet Creation Modal (`handleOpenAddSheet`):**
+   - Clicking either the top `+ Sheet` button or the card's `+ Create Planning Sheet for [Entity Name]` button opens the **Add Sheet (Branch Tab)** modal with the entity type (Buyer Profile vs. Internal Organization) and target ID already pre-selected.
+   - For buyers, the branch name field is pre-filled with `"Main"` by default, allowing 1-click creation without tedious manual selection.
+
+---
+
+## 10. Status Picker Double-Click Protection & History Deduplication (Release 2026-10-27)
+
+### Problem Addressed
+When changing a cell's status tag (e.g. from Blue to Red Requirement), rapid double-clicking on the status option in the popover sent two concurrent mutation requests within milliseconds (~58ms apart). Both backend transactions evaluated `old_status != new_status` as true simultaneously before commit, inserting two duplicate `CELL_STATUS_CHANGED` records into `planning_change_log` and causing identical consecutive tags to appear in the Cell History popover.
+
+### Multi-Tier Safeguard Solution
+1. **Frontend Fast-Lock & Synchronous Dismiss (`Planning.tsx`):**
+   - `StatusPicker` component tracks `submitting` state: upon first click, all status buttons are immediately disabled.
+   - The popover closes synchronously (`setStatusPicker(null)`) on the initial click event.
+   - `pendingStatusCellsRef` guard tracks in-flight requests per `${rowId}:${columnId}` cell, ignoring any duplicate triggers.
+2. **Backend No-Op Return & Debounce Window (`app/planning/service.py`):**
+   - `set_cell_status` verifies if `old_status == new_status` and `old_custom_tag == new_custom_tag`; if identical, it immediately returns without performing any database write, log insertion, or notification dispatch.
+   - Before writing to `planning_change_log`, the service inspects the cell's recent change logs: if an identical status change occurred within the past 3.0 seconds, duplicate logging is suppressed.
+3. **History Deduplication (`get_mum_column_status_history_for_row` & `MumHistoryPopover`):**
+   - Backend `get_mum_column_status_history_for_row` maintains `last_seen_by_col` tracking: consecutive identical status or value events for the same column are deduplicated before payload transmission.
+   - Frontend `groupedEntries` filters out any consecutive changes on the same column with matching status/value occurring within a 5-second interval.
+   - Historical duplicate records in PostgreSQL have been purged.
+

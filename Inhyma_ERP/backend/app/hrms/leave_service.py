@@ -51,6 +51,7 @@ from app.hrms.schemas import (
     LeaveTypeRead,
     LeaveTypeUpdate,
 )
+from app.hrms.notifications import notify_leave_decision, notify_leave_requested
 from app.rbac.models import Permission, Role, RolePermission, UserRole
 from app.users.models import User
 
@@ -1479,6 +1480,15 @@ class HrmsLeaveService:
             updated_by=user_id,
         )
         self.db.add(req)
+        await self.db.flush()
+        await notify_leave_requested(
+            self.db,
+            employee_id=employee_id,
+            from_date=req.from_date.isoformat(),
+            to_date=req.to_date.isoformat(),
+            number_of_days=num_days,
+            actor_id=user_id,
+        )
         await self.db.commit()
         await self.db.refresh(req)
 
@@ -1695,6 +1705,16 @@ class HrmsLeaveService:
         req.approved_by = reviewer_id
         req.approval_remarks = remarks
         req.updated_by = reviewer_id
+        await self.db.flush()
+        await notify_leave_decision(
+            self.db,
+            employee_id=req.employee_id,
+            decision="APPROVED",
+            from_date=req.from_date.isoformat(),
+            to_date=req.to_date.isoformat(),
+            number_of_days=req.number_of_days,
+            actor_id=reviewer_id,
+        )
         await self.db.commit()
         await self.db.refresh(req)
         return await self._to_leave_request_read(req)
@@ -1756,6 +1776,16 @@ class HrmsLeaveService:
         req.approved_by = reviewer_id
         req.approval_remarks = remarks
         req.updated_by = reviewer_id
+        await self.db.flush()
+        await notify_leave_decision(
+            self.db,
+            employee_id=req.employee_id,
+            decision="REJECTED",
+            from_date=req.from_date.isoformat(),
+            to_date=req.to_date.isoformat(),
+            number_of_days=req.number_of_days,
+            actor_id=reviewer_id,
+        )
         await self.db.commit()
         await self.db.refresh(req)
         return await self._to_leave_request_read(req)

@@ -500,22 +500,43 @@ async def test_hrms_asset_maintenance_and_branch_movement(client: AsyncClient):
 @pytest.mark.asyncio
 async def test_hrms_asset_summary_statistics(client: AsyncClient):
     """Validates the GET /summary endpoint querying live PostgreSQL data."""
+    sessionmaker = get_sessionmaker()
     admin_id = uuid.uuid4()
+    async with sessionmaker() as session:
+        session.add(
+            User(
+                id=admin_id,
+                email=f"asset_summary_{uuid.uuid4().hex[:6]}@example.com",
+                username=f"asset_sum_{uuid.uuid4().hex[:4]}",
+                first_name="Summary",
+                last_name="Admin",
+                password_hash="mock",
+                is_active=True,
+                status=UserStatus.ACTIVE,
+            )
+        )
+        await session.commit()
+
     admin_token = create_access_token(admin_id, permissions=["*"]).token
     headers = {"Authorization": f"Bearer {admin_token}"}
 
-    res = await client.get("/api/v1/hrms/assets/summary", headers=headers)
-    assert res.status_code == 200
-    summary = res.json()["data"]
+    try:
+        res = await client.get("/api/v1/hrms/assets/summary", headers=headers)
+        assert res.status_code == 200
+        summary = res.json()["data"]
 
-    assert "total_assets" in summary
-    assert "available" in summary
-    assert "assigned" in summary
-    assert "in_maintenance" in summary
-    assert "damaged" in summary
-    assert "lost" in summary
-    assert "retired" in summary
-    assert isinstance(summary["total_assets"], int)
+        assert "total_assets" in summary
+        assert "available" in summary
+        assert "assigned" in summary
+        assert "in_maintenance" in summary
+        assert "damaged" in summary
+        assert "lost" in summary
+        assert "retired" in summary
+        assert isinstance(summary["total_assets"], int)
+    finally:
+        async with sessionmaker() as session:
+            await session.execute(delete(User).where(User.id == admin_id))
+            await session.commit()
 
 
 @pytest.mark.asyncio

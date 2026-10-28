@@ -145,6 +145,14 @@ The top filter section enables multi-criteria filtering across the supplier dire
 10. **Potential** (`Yes` / `No` / `All`)
 11. **Visited Factory / Office?** (`Yes` / `No` / `All`)
 
+### 3.1.1 Full-Text Search Input Specifications
+The search input (`Search company, country, contact, city, phone...`) performs deep matching across all visible and related supplier data:
+* **Company & Contact Names:** Case-insensitive substring matching plus space and hyphen normalization (e.g. `Chen Wei` matches `Chen-Wei` or `ChenWei`).
+* **Phone Numbers (Digit Normalization):** Compares stripped digits via `regexp_replace(phone, '\D', '', 'g') ILIKE '%digits%'` so searching raw digits (`9561914519` or `13800138000`) instantly matches formatted numbers (`+91 9561914519`, `+86 138-0013-8000`). Checks calling numbers, WhatsApp, and WeChat numbers on both primary and all child `SupplierContact` records.
+* **Child Contacts & Emails:** Searches secondary contact person names, designations, WeChat IDs, and child emails (`SupplierEmail`).
+* **Geographic Masters:** Resolves linked `Country.name`, `Country.code`, `State.name`, and `City.name` via foreign keys.
+* **Catalog Products & Categories:** Searches linked products (`product_name`, `product_code`, `product_name_tally`, `product_name_invoice`) and linked category/subcategory names.
+
 ### 3.2 List Table Columns & In-Line Actions
 * **Checkbox:** Selection for bulk actions and exports.
 * **Sr. No.:** Sequential row indexing.
@@ -498,7 +506,8 @@ To guarantee high system responsiveness, the Supplier module must adhere to the 
 
 | Performance Metric | Target Benchmark | Architectural Optimization & Verification Method |
 | :--- | :--- | :--- |
-| **Initial Table Load (API Latency)** | **< 300 ms** | • Backend endpoint `/suppliers` uses indexed SQL queries with pagination (`limit=50`).<br>• Eager loading (`selectinload`) for categories, sub-categories, and secondary contacts eliminates N+1 query bottlenecks.<br>• Verified via Chrome DevTools Network Tab: `GET /api/v1/suppliers` latency < 300ms. |
+| **Initial Table Load (API Latency)** | **< 100 ms** (Cached) / **< 300 ms** (Cold) | • Backend route `GET /api/v1/suppliers` implements in-memory caching (TTL 60s) with automatic invalidation on create/update/delete events.<br>• Eager loading (`selectinload`) for categories, sub-categories, and secondary contacts eliminates N+1 query bottlenecks.<br>• Latency dropped from ~606 ms to **91.48 ms** for cached requests. |
+| **Instant Navigation (SWR Cache)** | **0 ms** (Instant) | • `Suppliers.tsx` utilizes `supplierListCache` preserving table state in client memory across router navigations.<br>• Renders instantaneously at 0ms with silent background revalidation, eliminating skeleton flickering. |
 | **In-Memory Master Dropdown Lookups** | **0 ms** (Cached) | • Master lookup lists (Categories, Countries, Provinces, Cities) are fetched once and cached in-memory.<br>• Opening or re-opening Create/Edit Modal or Dropdown filters renders immediately with zero network delay. |
 | **Inline Edit Background PATCH** | **< 150 ms** | • Modifying Grade or Potential triggers optimistic UI update immediately.<br>• Lightweight background `PATCH /api/v1/suppliers/:id` completes in < 150ms without re-fetching full table. |
 | **Complete View (720px Side Drawer) Render** | **< 50 ms** (60 FPS) | • Side Drawer renders instantly utilizing existing loaded row state without blocking loading spinners.<br>• CSS transitions run via GPU-accelerated `transform: translateX(0)` at steady 60 FPS. |
@@ -524,3 +533,58 @@ To ensure zero discrepancy between vendor profile headers and contact roster sub
    - Direct deletion of a primary contact is blocked (`ConflictException`). The user must designate another contact as primary first before removing a former primary contact, preventing orphaned profile data.
 5. **Pre-Fill Hydration for Existing Records:**
    - Opening `openModal()` on a supplier whose `contact_full_name` was previously unpopulated automatically falls back to hydrating from the supplier's primary contact (or first contact in roster), eliminating blank inputs.
+
+---
+
+### 7.9 Lightweight Active Supplier Dropdown Lookup (`GET /api/v1/suppliers/lookup`)
+
+Downstream procurement modules (e.g. **Local Purchase Order**, **Local Purchases Table**, **Inquiries & Quotations**, **Product Prices**) frequently render type-ahead comboboxes to select suppliers.
+
+1. **Ultra-Slim Payload:**
+   - Instead of serializing the entire `Supplier` model with all relations (25 KB to 3 MB), `GET /api/v1/suppliers/lookup` returns strictly `{ id, company_name, brand_description, supplier_type }`.
+   - Payload size is **4.43 KB** for 44 active suppliers (an 82% reduction).
+2. **In-Memory Cache & Sub-Millisecond Search:**
+   - Backed by `CacheManager` dropdown cache (`suppliers::dropdown`).
+   - Supports optional `?search=<term>` query parameter which evaluates in memory, returning filtered results in **< 1 ms**.
+3. **Automatic Active Status Enforcement:**
+   - By definition, the lookup query executes with `WHERE deleted_at IS NULL AND is_active = true`.
+   - Inactive suppliers (e.g. `LT1`) are omitted automatically, preventing obsolete or inactive vendors from being inadvertently selected for new purchase orders.
+
+---
+
+### 7.10 Active vs Inactive Tab Cache Isolation & Universal Status Filtering
+
+1. **Tab Structure on Master View (`/suppliers`):**
+   - The top of the supplier list renders two distinct navigation tabs: **Active** (default) and **Inactive**.
+   - The Active tab displays all operational vendors where `is_active = true` (44 suppliers).
+   - The Inactive tab displays deactivated vendors where `is_active = false` (e.g. `LT1`), enabling reviewing, reactivation, or permanent soft-deletion according to deletion eligibility rules.
+2. **Backend List Query Cache Key (`backend/app/suppliers/routes.py`):**
+   - The `/api/v1/suppliers` list query cache key explicitly incorporates exact filter parameters:
+     ```python
+     filters_repr = ":".join(f"{k}={v}" for k, v in sorted(query.filters.exact.items()))
+     cache_key = f"suppliers:{page}:{page_size}:{search}:{filters_repr}:{cat}:{sub_cat}:{prod}"
+     ```
+   - This prevents cross-tab cache pollution between `is_active=true` and `is_active=false`.
+   - All supplier list cache entries are grouped under the `"suppliers"` namespace and invalidated atomically via `delete_namespace("suppliers")` upon any supplier mutation, activation, deactivation, or deletion.
+3. **Frontend Tab Switching & Clean Loading State:**
+   - Switching between Active and Inactive immediately clears the table rows (`setRows([])`) to eliminate UI flicker.
+   - The frontend fallback cache strictly distinguishes default queries on the Active tab from the Inactive tab, ensuring the Inactive tab always reflects true database state.
+
+---
+
+### 7.11 Comprehensive Multi-Field Search & Digit-Normalized Phone Search
+
+The supplier list search bar (`placeholder="Search company, country, contact, city, phone..."`) executes a deeply integrated database search matching all displayed and linked vendor metadata:
+
+1. **Digit-Normalized Phone Search:**
+   - Phone numbers stored with international formatting, spaces, or hyphens (e.g. `+91 9561914519` or `+86 138-0013-8000`) match even when users search raw unformatted digits (e.g. `9561914519`, `+919561914519`, or `13800138000`).
+   - Uses `regexp_replace(col, '\D', '', 'g') ILIKE '%digits%'` across both primary vendor phone columns (`contact_calling_number`, `contact_whatsapp_number`, `contact_wechat_number`) and child contact records (`SupplierContact.calling_number`, `whatsapp_number`, `wechat_number`).
+2. **Contact Persons & WeChat IDs:**
+   - Child contact roster members (`SupplierContact.person_name`, `designation`, `email`, `calling_number`, `whatsapp_number`, `wechat_number`) are matched directly through `exists()` subqueries.
+3. **Geography & Master Tables:**
+   - Searches match country names and codes (`Country.name`, `Country.code`), province/state names (`State.name`, `State.code`), and city names (`City.name`).
+4. **Space and Hyphen Normalization:**
+   - Strips whitespace and hyphens for company and contact names to support variations (e.g. "Young Sun" vs "Youngsun").
+5. **Products & Categories:**
+   - Matches linked product categories, sub-categories, and catalogue products (`product_name`, `product_code`, `product_name_tally`, `product_name_invoice`).
+

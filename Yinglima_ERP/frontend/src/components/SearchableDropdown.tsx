@@ -17,7 +17,7 @@
  * `fetchLabelForValue`, exactly as setValueById() used to.
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchController } from "@/lib/hooks";
 import { autoTitleCase } from "@/components/fields";
 
@@ -1785,28 +1785,36 @@ export function SearchableDropdownMultiPanel({
 /* Single-Select Filter Dropdown with Top Search & "All" Option       */
 /* ------------------------------------------------------------------ */
 
-export interface SearchableFilterDropdownProps extends SharedProps {
+export interface SearchableFilterDropdownProps extends Partial<SharedProps> {
   value: string | null;
   onChange: (value: string | null, label: string) => void;
+  options?: DropdownOption[];
   placeholder?: string;
   allLabel?: string;
   id?: string;
   disabled?: boolean;
+  minWidth?: string | number;
+  width?: string | number;
+  label?: string;
 }
 
 export function SearchableFilterDropdown({
   value,
   onChange,
+  options: directOptions,
   placeholder,
   allLabel = "All",
   fetchOptions,
   fetchLabelForValue,
   id,
   disabled = false,
+  minWidth,
+  width,
+  label: fieldLabel,
 }: SearchableFilterDropdownProps) {
   const [open, setOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
-  const [options, setOptions] = useState<DropdownOption[]>([]);
+  const [asyncOptions, setAsyncOptions] = useState<DropdownOption[]>([]);
   const [label, setLabel] = useState<string>("");
   const [loading, setLoading] = useState(false);
   const [highlightIndex, setHighlightIndex] = useState(-1);
@@ -1816,19 +1824,27 @@ export function SearchableFilterDropdown({
   const fetchLabelRef = useRef(fetchLabelForValue);
   fetchLabelRef.current = fetchLabelForValue;
 
-  // Resolve display label whenever value changes
+  // Resolve display label whenever value or options change
   useEffect(() => {
     if (!value) {
       setLabel("");
       return;
     }
-    // Check in-memory cache first
+    // Check direct options first
+    if (directOptions && directOptions.length > 0) {
+      const found = directOptions.find((o) => o.value === value);
+      if (found && found.label) {
+        setLabel(found.label);
+        return;
+      }
+    }
+    // Check in-memory cache next
     if (labelMemoryCache.has(value)) {
       setLabel(labelMemoryCache.get(value)!);
       return;
     }
-    // Check current loaded options
-    const found = options.find((o) => o.value === value);
+    // Check async loaded options
+    const found = asyncOptions.find((o) => o.value === value);
     if (found && found.label) {
       setLabel(found.label);
       if (!isUUID(found.label)) {
@@ -1836,7 +1852,7 @@ export function SearchableFilterDropdown({
       }
       return;
     }
-    // Fetch label from API
+    // Fetch label from API if fetchLabelForValue is provided
     let cancelled = false;
     const fetchFn = fetchLabelRef.current;
     if (fetchFn) {
@@ -1856,7 +1872,7 @@ export function SearchableFilterDropdown({
     return () => {
       cancelled = true;
     };
-  }, [value, options]);
+  }, [value, directOptions, asyncOptions]);
 
   // Click outside to close dropdown
   useEffect(() => {
@@ -1872,38 +1888,47 @@ export function SearchableFilterDropdown({
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [open]);
 
-  // When opening: focus search bar & fetch initial list
+  // When opening: focus search bar & load options
   useEffect(() => {
     if (open) {
       setTimeout(() => {
         searchInputRef.current?.focus();
-      }, 50);
+      }, 40);
 
-      setLoading(true);
-      void search.run(async (signal) => {
-        try {
-          const found = await fetchOptions("", signal);
-          setOptions(found || []);
-        } finally {
-          setLoading(false);
-        }
-      }, 0);
+      if (directOptions) {
+        setLoading(false);
+      } else if (fetchOptions) {
+        setLoading(true);
+        void search.run(async (signal) => {
+          try {
+            const found = await fetchOptions("", signal);
+            setAsyncOptions(found || []);
+          } finally {
+            setLoading(false);
+          }
+        }, 0);
+      }
+    } else {
+      setSearchTerm("");
+      setHighlightIndex(-1);
     }
-  }, [open]);
+  }, [open, directOptions, fetchOptions]);
 
   // Type in search bar
   function handleSearch(term: string) {
     setSearchTerm(term);
     setHighlightIndex(-1);
-    void search.run(async (signal) => {
-      setLoading(true);
-      try {
-        const found = await fetchOptions(term.trim(), signal);
-        setOptions(found || []);
-      } finally {
-        setLoading(false);
-      }
-    }, 150);
+    if (!directOptions && fetchOptions) {
+      void search.run(async (signal) => {
+        setLoading(true);
+        try {
+          const found = await fetchOptions(term.trim(), signal);
+          setAsyncOptions(found || []);
+        } finally {
+          setLoading(false);
+        }
+      }, 150);
+    }
   }
 
   function handleSelect(val: string | null, lbl: string) {
@@ -1912,6 +1937,17 @@ export function SearchableFilterDropdown({
     setSearchTerm("");
     setHighlightIndex(-1);
   }
+
+  const filteredOptions = useMemo(() => {
+    if (!directOptions) return asyncOptions;
+    const q = searchTerm.toLowerCase().trim();
+    if (!q) return directOptions;
+    return directOptions.filter(
+      (o: DropdownOption) =>
+        o.label.toLowerCase().includes(q) ||
+        (o.sublabel && o.sublabel.toLowerCase().includes(q))
+    );
+  }, [directOptions, asyncOptions, searchTerm]);
 
   // Keyboard navigation inside dropdown
   function handleKeyDown(e: React.KeyboardEvent) {
@@ -1922,7 +1958,7 @@ export function SearchableFilterDropdown({
       setHighlightIndex(-1);
       return;
     }
-    const totalItems = 1 + options.length; // index 0 is "All", indices 1..N are options
+    const totalItems = 1 + filteredOptions.length; // index 0 is "All", indices 1..N are options
     if (e.key === "ArrowDown") {
       e.preventDefault();
       setHighlightIndex((prev) => (prev < totalItems - 1 ? prev + 1 : 0));
@@ -1933,8 +1969,8 @@ export function SearchableFilterDropdown({
       e.preventDefault();
       if (highlightIndex === 0) {
         handleSelect(null, allLabel);
-      } else if (highlightIndex > 0 && options[highlightIndex - 1]) {
-        const opt = options[highlightIndex - 1];
+      } else if (highlightIndex > 0 && filteredOptions[highlightIndex - 1]) {
+        const opt = filteredOptions[highlightIndex - 1];
         handleSelect(opt.value, opt.label);
       }
     }
@@ -1949,10 +1985,29 @@ export function SearchableFilterDropdown({
       id={id}
       style={{
         position: "relative",
-        width: "100%",
+        width: width || (minWidth ? undefined : "100%"),
+        minWidth: minWidth,
         fontFamily: "inherit",
+        display: "flex",
+        flexDirection: "column",
+        justifyContent: "flex-end",
       }}
     >
+      {fieldLabel && (
+        <label
+          style={{
+            fontSize: "12px",
+            fontWeight: 600,
+            color: "#475569",
+            marginBottom: "5px",
+            display: "block",
+            whiteSpace: "nowrap",
+          }}
+        >
+          {fieldLabel}
+        </label>
+      )}
+
       {/* Closed Trigger / Selector Button */}
       <div
         tabIndex={disabled ? -1 : 0}
@@ -1969,7 +2024,8 @@ export function SearchableFilterDropdown({
         style={{
           width: "100%",
           minHeight: "38px",
-          padding: "6px 12px",
+          height: "38px",
+          padding: "0 12px",
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
@@ -2056,7 +2112,9 @@ export function SearchableFilterDropdown({
             position: "absolute",
             top: "calc(100% + 4px)",
             left: 0,
-            right: 0,
+            minWidth: "100%",
+            width: "max-content",
+            maxWidth: "380px",
             zIndex: 9999,
             background: "#ffffff",
             border: "1px solid #cbd5e1",
@@ -2122,12 +2180,12 @@ export function SearchableFilterDropdown({
               <div style={{ padding: "12px", textAlign: "center", color: "#94a3b8", fontSize: "13px" }}>
                 Loading...
               </div>
-            ) : options.length === 0 && searchTerm ? (
+            ) : filteredOptions.length === 0 && searchTerm ? (
               <div style={{ padding: "12px", textAlign: "center", color: "#94a3b8", fontSize: "13px" }}>
                 No matching results
               </div>
             ) : (
-              options.map((opt, idx) => {
+              filteredOptions.map((opt: DropdownOption, idx: number) => {
                 const isSelected = opt.value === value;
                 const isHighlighted = highlightIndex === idx + 1;
                 return (
@@ -2146,6 +2204,10 @@ export function SearchableFilterDropdown({
                         : "#ffffff",
                       color: isSelected ? "#ffffff" : "#1e293b",
                       transition: "background 0.1s ease",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      gap: "8px",
                     }}
                     onMouseEnter={(e) => {
                       if (!isSelected) e.currentTarget.style.background = "#f8fafc";
@@ -2154,7 +2216,17 @@ export function SearchableFilterDropdown({
                       if (!isSelected) e.currentTarget.style.background = "#ffffff";
                     }}
                   >
-                    {opt.label}
+                    <span>{opt.label}</span>
+                    {opt.sublabel && (
+                      <span
+                        style={{
+                          fontSize: "11px",
+                          color: isSelected ? "#e0e7ff" : "#64748b",
+                        }}
+                      >
+                        {opt.sublabel}
+                      </span>
+                    )}
                   </div>
                 );
               })

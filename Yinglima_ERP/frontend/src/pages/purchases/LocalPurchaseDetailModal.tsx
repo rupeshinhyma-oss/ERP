@@ -11,10 +11,15 @@
 
 import { useEffect, useState } from "react";
 import { apiGet, errorMessage } from "@/lib/api";
-import type { LocalPurchaseDetail } from "@/types/localPurchase";
+import type { LocalPurchaseDetail, LocalPurchaseSummary } from "@/types/localPurchase";
+import {
+  getLocalPurchaseDetailCache,
+  updateLocalPurchaseInCache,
+} from "@/lib/localPurchaseCache";
 
 interface LocalPurchaseDetailModalProps {
   purchaseId: string | null;
+  initialSummary?: LocalPurchaseSummary | null;
   isOpen: boolean;
   onClose: () => void;
   onEdit: (id: string) => void;
@@ -22,6 +27,7 @@ interface LocalPurchaseDetailModalProps {
 
 export function LocalPurchaseDetailModal({
   purchaseId,
+  initialSummary,
   isOpen,
   onClose,
   onEdit,
@@ -34,28 +40,60 @@ export function LocalPurchaseDetailModal({
     if (!isOpen || !purchaseId) {
       setDetail(null);
       setError(null);
+      setLoading(false);
       return;
     }
 
-    const fetchDetail = async () => {
+    // 1. Instant 0ms Paint: Check in-memory detail cache first
+    const cached = getLocalPurchaseDetailCache(purchaseId);
+    if (cached) {
+      if (initialSummary && initialSummary.id === purchaseId) {
+        setDetail({
+          ...cached,
+          ...initialSummary,
+          items: cached.items && cached.items.length > 0 ? cached.items : [],
+        });
+      } else {
+        setDetail(cached);
+      }
+      setLoading(false);
+    } else if (initialSummary && initialSummary.id === purchaseId) {
+      // Synthesize lightweight detail from table row summary
+      setDetail({
+        ...initialSummary,
+        packing_forwarding: 0,
+        transport_expense: 0,
+        offloading_expense: 0,
+        other_expense: 0,
+        items: [],
+      });
+      setLoading(true); // background fetch for full items
+    } else {
       setLoading(true);
+    }
+
+    // 2. Fetch fresh data from backend (always verifies latest edits)
+    const fetchDetail = async () => {
       setError(null);
       try {
         const res = await apiGet<LocalPurchaseDetail>(`/purchases/local/${purchaseId}`);
         if (res.data) {
           setDetail(res.data);
-        } else {
+          updateLocalPurchaseInCache(res.data);
+        } else if (!cached && !initialSummary) {
           setError("Purchase order record not found.");
         }
       } catch (err) {
-        setError(errorMessage(err));
+        if (!cached && !initialSummary) {
+          setError(errorMessage(err));
+        }
       } finally {
         setLoading(false);
       }
     };
 
     fetchDetail();
-  }, [isOpen, purchaseId]);
+  }, [isOpen, purchaseId, initialSummary]);
 
   if (!isOpen) return null;
 
@@ -223,14 +261,14 @@ export function LocalPurchaseDetailModal({
             background: "#f8fafc",
           }}
         >
-          {loading && (
+          {loading && !detail && (
             <div style={{ padding: "50px 20px", textAlign: "center", color: "#64748b" }}>
               <div style={{ fontSize: "26px", marginBottom: "8px" }}>⏳</div>
               <div style={{ fontSize: "13.5px", fontWeight: 600 }}>Loading local purchase details...</div>
             </div>
           )}
 
-          {error && !loading && (
+          {error && !detail && !loading && (
             <div
               style={{
                 padding: "18px",
@@ -262,7 +300,7 @@ export function LocalPurchaseDetailModal({
             </div>
           )}
 
-          {detail && !loading && (
+          {detail && (
             <div>
               {/* SECTION 1: Top 2-Column Info Card */}
               <div
@@ -612,8 +650,14 @@ export function LocalPurchaseDetailModal({
                     <tbody>
                       {detail.items.length === 0 ? (
                         <tr>
-                          <td colSpan={9} style={{ padding: "24px", textAlign: "center", color: "#94a3b8" }}>
-                            No line items recorded for this purchase.
+                          <td colSpan={9} style={{ padding: "24px", textAlign: "center", color: "#64748b" }}>
+                            {loading ? (
+                              <div style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>
+                                <span>⏳</span> Loading line items...
+                              </div>
+                            ) : (
+                              <span style={{ color: "#94a3b8" }}>No line items recorded for this purchase.</span>
+                            )}
                           </td>
                         </tr>
                       ) : (

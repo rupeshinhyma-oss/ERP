@@ -47,6 +47,7 @@ NEW_MODULE_PERMISSIONS = [
     ("local_purchase.view", "local_purchase", "local_purchases", "view", "ALL", "View local purchase orders list and detail modal."),
     ("local_purchase.create", "local_purchase", "local_purchases", "create", "ALL", "Create new local purchase orders."),
     ("local_purchase.update", "local_purchase", "local_purchases", "update", "ALL", "Edit local purchase orders and update landing costs."),
+    ("local_purchase.inward", "local_purchase", "local_purchases", "inward", "ALL", "Inward confirmed local purchases into warehouse stock inventory and generate receipt vouchers."),
     ("local_purchase.delete", "local_purchase", "local_purchases", "delete", "ALL", "Delete or cancel local purchase orders."),
     ("local_purchase.export", "local_purchase", "local_purchases", "export", "ALL", "Export or print local purchase orders."),
 

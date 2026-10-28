@@ -27,6 +27,7 @@ from app.purchases.local.schemas import (
     BillExtractionResponse,
     LocalPurchaseCreate,
     LocalPurchaseDetailResponse,
+    LocalPurchaseInwardRequest,
     LocalPurchaseItemCreate,
     LocalPurchaseSummaryResponse,
     LocalPurchaseUpdate,
@@ -105,6 +106,8 @@ async def list_local_purchases(
             items_count=len(r.items),
             remarks=r.remarks,
             status=r.status,
+            stock_movement_id=r.stock_movement_id,
+            stock_movement_number=r.stock_movement_number,
             created_by_name=r.created_by_name,
             created_at=r.created_at,
             updated_at=r.updated_at,
@@ -316,5 +319,28 @@ async def delete_local_purchase(
     return build_success_response(
         data={"id": str(purchase_id)},
         message="Local purchase deleted successfully.",
+        request_id=getattr(request.state, "request_id", "-"),
+    )
+
+
+@router.post("/{purchase_id}/inward", summary="Inward a local purchase into warehouse stock ledger")
+async def inward_local_purchase(
+    purchase_id: uuid.UUID,
+    payload: LocalPurchaseInwardRequest,
+    request: Request,
+    service: LocalPurchaseService = Depends(get_service),
+    current_user: CurrentUser = Depends(require_permission('local_purchase.inward')),
+) -> dict:
+    user_name = current_user.username if current_user and current_user.username else "Admin"
+    updated = await service.inward_purchase(
+        purchase_id=purchase_id,
+        inward_data=payload,
+        created_by_id=current_user.id,
+        created_by_name=user_name,
+    )
+    detail = LocalPurchaseDetailResponse.model_validate(updated)
+    return build_success_response(
+        data=detail.model_dump(),
+        message=f"Local purchase successfully inwarded into warehouse under slip {updated.stock_movement_number}.",
         request_id=getattr(request.state, "request_id", "-"),
     )

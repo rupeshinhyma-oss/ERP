@@ -35,9 +35,12 @@ class HsnRepository(BaseRepository[HsnCode]):
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none() is not None
 
-    async def list_all(self) -> list[HsnCode]:
-        """Return every non-deleted HSN code, ordered by code."""
-        stmt = self._base_select().order_by(HsnCode.code)
+    async def list_all(self, *, active_only: bool = True) -> list[HsnCode]:
+        """Return HSN codes, optionally filtering to active only, ordered by code."""
+        stmt = self._base_select()
+        if active_only:
+            stmt = stmt.where(HsnCode.status == "active")
+        stmt = stmt.order_by(HsnCode.code)
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 

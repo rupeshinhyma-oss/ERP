@@ -3245,7 +3245,66 @@ Positioned directly underneath the collapsible filter panel, these three metric 
 
 ---
 
-## 68. SALE PROCESS: Sale Status Update Side Drawer, Multi-Stage Workflow, PO File & Tally Bill Upload
+## 68. HRMS PHASES 2–6: Granular RBAC, Deny Precedence, Manager-First Real Availability Routing, Two-Stage Approvals & Separation of Duties
+
+### Overview & Architectural Foundation
+- **Mandatory Requirements:** Comprehensive implementation and audit across all 7 HRMS modules (Attendance, Leave, Assets, Expenses, Site Visits, Payroll, Setup).
+- **Core RBAC Precedence:**
+  - Standard Canonical Model: `Effective = (Role Permissions ∪ User Grants) \ User Denies`.
+  - Deterministic Deny-Marker propagation: explicit `deny:<perm>` codes take absolute precedence over role and individual grants across all API endpoints.
+  - Self-Privilege Guard: Non-Super Admins are strictly forbidden from modifying their own roles or permission grants (`HTTP 403 Forbidden`).
+- **Manager-First Routing with System Data Availability:**
+  - Direct manager priority: Requests route to the assigned manager first whenever assigned and available.
+  - Availability is determined via real system data (active user status + non-overlapping approved leave in `HrmsLeaveRequest`).
+  - HR Fallback activation: Routes to authorized HR fallback only when manager is unassigned, inactive, or on approved leave.
+  - Self-Approval Prevention: Users cannot approve their own requests across any module (`HTTP 400 Bad Request` "Self-approval is not permitted"), with Super Admin override allowed.
+  - Duplicate/Stale Action Protection: Approving or rejecting an already processed request returns `HTTP 400 Bad Request`.
+- **Multi-Stage Workflows & Separation of Duties:**
+  - Expenses: Two-stage approval workflow (`PENDING` ➔ Manager `APPROVED` ➔ HR/Finance `REIMBURSED`).
+  - Payroll: Strict separation between calculation/configuration (`hrms.payroll.configure`) and batch approval (`hrms.payroll.approve`). HR users holding only configure permissions cannot approve payroll, and vice versa.
+  - Data Scoping & Employee Isolation: Employees can view only their own records and payslips (`HTTP 403 Forbidden` on forged IDs).
+
+### QA Verification Test Cases
+- [ ] **Admin Full Control:** Super Admin has company-wide visibility and administrative authority across all 7 modules and approval queues.
+- [ ] **Setup Protection:** Regular employees and restricted HR users without `hrms.manage` receive `HTTP 403 Forbidden` when attempting to create leave types, expense categories, or locations.
+- [ ] **Self-Approval Denial:** Employee attempting to approve their own leave, attendance regularization, or expense claim receives `HTTP 400 Bad Request` ("Self-approval is not permitted").
+- [ ] **Manager-First Routing:** When an employee has an active, available manager, the request routes to that manager's approval queue; HR fallback cannot approve while the manager is available.
+- [ ] **Real Availability Fallback:** When the assigned manager is on approved leave (recorded in `hrms_leave_requests`), the system automatically activates the HR fallback queue.
+- [ ] **HR Action Permissions:** HR fallback user lacking action permission (`hrms.approve` or `deny:hrms.approve`) receives `HTTP 403 Forbidden`.
+- [ ] **Two-Stage Expenses:** An expense claim approved by the manager enters `APPROVED` status; manager cannot mark it `REIMBURSED`. Only authorized HR/Finance can reimburse.
+- [ ] **Payroll Separation of Duties:** HR user with `hrms.payroll.configure` can calculate batches but receives `HTTP 403 Forbidden` on batch approval. HR user with `hrms.payroll.approve` can approve batches but cannot run batch recalculations.
+- [ ] **Employee Isolation:** Employee A cannot view Employee B's monthly payroll items or payslips (`HTTP 403 Forbidden`).
+- [ ] **Self-Escalation Prevention:** Restricted HR or normal users cannot grant themselves permissions or alter their roles via `/api/v1/rbac/users/{id}/roles` or `/permissions` (`HTTP 403 Forbidden`).
+
+---
+
+## 69. FEED: Open Broadcasting & 1-to-1 Private Employee Messaging
+
+### Overview & Architectural Foundation
+- **Mandatory Requirements:**
+  - Universal announcement publishing for all authenticated ERP employees without requiring `feed.create` or `feed.manage` permissions.
+  - 1-to-1 private messaging module integrated within the Feed page with real-time employee search.
+  - Strict privacy: only conversation participants can view conversation threads and messages. Admins and third parties receive `HTTP 403 Forbidden`.
+  - Author-only edit and soft-delete controls across announcements and direct messages.
+  - Notification integration without leaking message content.
+  - Read tracking and unread count badges.
+
+### QA Verification Test Cases
+- [ ] **Open Broadcasting:** Any authenticated employee with zero special feed permissions can publish company-wide (`ALL`) announcements.
+- [ ] **Targeted Announcements:** Any authenticated employee can target one or more departments (`SELECTED` + `department_ids`), specific employees (`SELECTED` + `recipient_ids`), or combined.
+- [ ] **Author-Only Announcement Management:** Only the post author can edit (`PATCH /api/v1/feed/posts/{id}`) or delete (`DELETE /api/v1/feed/posts/{id}`). Non-authors receive `HTTP 403 Forbidden`.
+- [ ] **Direct Conversation Initialization:** Any employee can start a 1-to-1 conversation with any eligible active employee in the tenant via `POST /api/v1/feed/conversations`. Self-conversations return `HTTP 400 Bad Request`.
+- [ ] **Strict Participant Isolation:** Only participants in the conversation can list messages via `GET /api/v1/feed/conversations/{id}/messages`. Third-party employees receive `HTTP 403 Forbidden`.
+- [ ] **Admin Privacy Enforcement:** Administrators cannot automatically access or inject messages into another employee's private conversation (`HTTP 403 Forbidden`).
+- [ ] **Author-Only Message Lifecycle:** Senders can edit (`PATCH /api/v1/feed/messages/{id}`) and delete (`DELETE /api/v1/feed/messages/{id}`) their own messages. Intended recipients cannot edit or delete the sender's messages (`HTTP 403 Forbidden`).
+- [ ] **Unread Tracking:** Unread message count increments for the recipient on new messages (`GET /api/v1/feed/conversations/unread-count`), and clears when conversation is marked read (`POST /api/v1/feed/conversations/{id}/read`).
+- [ ] **Security & Validation:** Non-existent IDs return `HTTP 404 Not Found`; unauthenticated requests return `HTTP 401 Unauthorized`; client sender ID spoofing is prevented by deriving identity strictly from authentication tokens.
+- [ ] **Existing Features Preserved:** Existing reactions (Like, Celebrate, Support), comments, drafts, readership tracking, CRM, and ERP login continue operating normally.
+
+
+---
+
+## 70. SALE PROCESS: Sale Status Update Side Drawer, Multi-Stage Workflow, PO File & Tally Bill Upload
 
 ### Module Identification & Location
 - **Module Name:** Sale Status Update Slide-Over Drawer & Multi-Stage Document Workflow
@@ -3292,7 +3351,4 @@ Positioned directly underneath the collapsible filter panel, these three metric 
 - [ ] **TC-SP-13 (Admin Approved ➔ Acc. Confirmed / Cancel):** Click `[✎]` on an `Admin Approved` order. Verify `Invoice Date*`, `Invoice No *`, `Tally Bill *`, and `E-Way Bill` fields render when `Acc. Confirmed` is selected, and required field validation blocks empty submission. Upload a Tally Bill, enter Invoice Date & No, select E-Way Bill `Yes`, and click `Submit`. Verify `POST /api/v1/sales/upload-tally-bill` succeeds, order moves to `Acc. Confirmed`, and `📎 Bill` badge renders in the table and detail modal.
 
 ---
-*End of Master Features & Testing Specification Manual. Maintained for Inhyma Solutions Enterprise ERP. Last updated: October 28, 2026 (Sections 61-68: Dynamic Organization Company Logo, Product Master Category Rewiring & Floating Duplicate Overlay, Platform Migration Idempotency, Sales Process Add New Form Full Parity with Proforma, Sales Process Live KPI Metrics & Status Tabs Dynamic Calculation Engine, Sales Process 9-Status Action Menu Matrix, Sales Process 13-Field Filter Panel, and Sale Status Update Side Drawer with PO & Tally Bill Uploads).*
-
-
-
+*End of Master Features & Testing Specification Manual. Maintained for Inhyma Solutions Enterprise ERP. Last updated: October 28, 2026 (Sections 61-70: Dynamic Organization Company Logo, Product Master Category Rewiring & Floating Duplicate Overlay, Platform Migration Idempotency, Sales Process Workflow & 13-Field Filter Grid, HRMS Phases 2-6 RBAC & Approval Architecture, Feed & Broadcast Open Access & 1-to-1 Employee Messaging, and Sale Status Update Side Drawer with PO & Tally Bill Uploads).*

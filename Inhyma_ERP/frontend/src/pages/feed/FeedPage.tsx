@@ -1,4 +1,5 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { useSearchParams } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
 import { Pagination } from "@/components/Pagination";
 import { Modal } from "@/components/ui";
@@ -13,10 +14,18 @@ import type { FeedPost } from "@/types/feed";
 import "@/styles/feed.css";
 
 export function FeedPage() {
-  const { profile, hasPermission, isSuperAdmin } = useAuth();
+  const [searchParams] = useSearchParams();
+  const targetPostId = searchParams.get("post_id");
+  const { profile } = useAuth();
   const showToast = useToast();
 
-  const canCreate = isSuperAdmin || hasPermission("feed.create") || hasPermission("feed.manage");
+  // Deep-link target post highlight & resolution state
+  const [highlightedPostId, setHighlightedPostId] = useState<string | null>(null);
+  const [targetPostLoading, setTargetPostLoading] = useState(false);
+  const resolvedTargetRef = useRef<string | null>(null);
+
+  // Every authenticated employee can create announcements (Phase 1)
+  const canCreate = Boolean(profile?.id);
 
   // Posts state
   const [posts, setPosts] = useState<FeedPost[]>([]);
@@ -71,7 +80,87 @@ export function FeedPage() {
   useEffect(() => {
     setPosts([]);
     setPage(1);
+    resolvedTargetRef.current = null;
+    setHighlightedPostId(null);
   }, [profile?.id]);
+
+  // Deep-link resolution for /feed?post_id={id}
+  useEffect(() => {
+    if (!targetPostId) {
+      resolvedTargetRef.current = null;
+      setHighlightedPostId(null);
+      return;
+    }
+
+    if (resolvedTargetRef.current === targetPostId && highlightedPostId === targetPostId) {
+      return;
+    }
+
+    // Wait if initial page load is still underway
+    if (loading) return;
+
+    let isMounted = true;
+
+    const resolveTarget = async () => {
+      // 1. Check if post is already present in current page items
+      const found = posts.some((p) => p.id === targetPostId);
+      if (found) {
+        resolvedTargetRef.current = targetPostId;
+        setHighlightedPostId(targetPostId);
+        setTimeout(() => {
+          const el = document.getElementById(`feed-post-${targetPostId}`);
+          if (el && typeof el.scrollIntoView === "function") {
+            el.scrollIntoView({ behavior: "smooth", block: "center" });
+          }
+        }, 150);
+        return;
+      }
+
+      // 2. Fetch directly by ID if not in the current page
+      setTargetPostLoading(true);
+      try {
+        const res = await feedApi.getPost(targetPostId);
+        const singlePost: FeedPost = (res as any)?.data ?? res;
+        if (!isMounted) return;
+
+        if (singlePost && singlePost.id) {
+          resolvedTargetRef.current = targetPostId;
+          setPosts((prev) => {
+            if (prev.some((p) => p.id === singlePost.id)) return prev;
+            return [singlePost, ...prev];
+          });
+          setHighlightedPostId(singlePost.id);
+          setTimeout(() => {
+            const el = document.getElementById(`feed-post-${singlePost.id}`);
+            if (el && typeof el.scrollIntoView === "function") {
+              el.scrollIntoView({ behavior: "smooth", block: "center" });
+            }
+          }, 150);
+        }
+      } catch (err: any) {
+        if (!isMounted) return;
+        resolvedTargetRef.current = targetPostId;
+        const status = err?.status ?? err?.response?.status;
+        if (status === 403) {
+          showToast("You do not have permission to view this announcement.", "error");
+        } else if (status === 404) {
+          showToast("The requested announcement could not be found or has been removed.", "error");
+        } else {
+          showToast(errorMessage(err) || "Failed to load the requested announcement.", "error");
+        }
+      } finally {
+        if (isMounted) {
+          setTargetPostLoading(false);
+        }
+      }
+    };
+
+    void resolveTarget();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [targetPostId, loading, posts, highlightedPostId, showToast]);
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -171,112 +260,133 @@ export function FeedPage() {
 
         {/* Feed List */}
         <section aria-label="Announcements Feed">
-          {loading ? (
-            <div className="feed-posts-list" data-testid="feed-loading-state">
-              {[1, 2, 3].map((n) => (
-                <div key={n} className="feed-skeleton-card">
-                  <div style={{ display: "flex", gap: "12px", alignItems: "center" }}>
-                    <div className="feed-skeleton-line" style={{ width: "36px", height: "36px", borderRadius: "50%" }} />
-                    <div style={{ display: "flex", flexDirection: "column", gap: "6px", width: "180px" }}>
-                      <div className="feed-skeleton-line" style={{ height: "14px", width: "100%" }} />
-                      <div className="feed-skeleton-line" style={{ height: "10px", width: "60%" }} />
+              {loading ? (
+                <div className="feed-posts-list" data-testid="feed-loading-state">
+                  {[1, 2, 3].map((n) => (
+                    <div key={n} className="feed-skeleton-card">
+                      <div style={{ display: "flex", gap: "12px", alignItems: "center" }}>
+                        <div className="feed-skeleton-line" style={{ width: "36px", height: "36px", borderRadius: "50%" }} />
+                        <div style={{ display: "flex", flexDirection: "column", gap: "6px", width: "180px" }}>
+                          <div className="feed-skeleton-line" style={{ height: "14px", width: "100%" }} />
+                          <div className="feed-skeleton-line" style={{ height: "10px", width: "60%" }} />
+                        </div>
+                      </div>
+                      <div className="feed-skeleton-line" style={{ height: "18px", width: "70%", marginTop: "6px" }} />
+                      <div className="feed-skeleton-line" style={{ height: "48px", width: "100%" }} />
                     </div>
-                  </div>
-                  <div className="feed-skeleton-line" style={{ height: "18px", width: "70%", marginTop: "6px" }} />
-                  <div className="feed-skeleton-line" style={{ height: "48px", width: "100%" }} />
+                  ))}
                 </div>
-              ))}
-            </div>
-          ) : error ? (
-            <div className="feed-error-state" data-testid="feed-error-state">
-              <div style={{ fontWeight: 600, fontSize: "15px", marginBottom: "8px" }}>
-                Unable to load feed
-              </div>
-              <p style={{ margin: "0 0 16px 0", fontSize: "13.5px" }}>{error}</p>
-              <button
-                type="button"
-                className="btn btn-secondary"
-                onClick={fetchPosts}
-                data-testid="feed-retry-btn"
-              >
-                Try Again
-              </button>
-            </div>
-          ) : posts.length === 0 ? (
-            <div className="feed-empty-state" data-testid="feed-empty-state">
-              <div className="feed-empty-icon">
-                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
-                </svg>
-              </div>
-              <div className="feed-empty-title">
-                {appliedSearch ? "No announcements matching your search" : "No announcements yet"}
-              </div>
-              <div className="feed-empty-desc">
-                {appliedSearch
-                  ? `We couldn't find any announcements matching "${appliedSearch}". Try clearing your search filter.`
-                  : "Broadcast announcements and targeted updates published to you or everyone in the company will appear here."}
-              </div>
-              {appliedSearch ? (
-                <button
-                  type="button"
-                  className="btn btn-secondary"
-                  onClick={handleClearSearch}
-                >
-                  Clear Search
-                </button>
-              ) : canCreate && !composerOpen ? (
-                <button
-                  type="button"
-                  className="btn btn-primary"
-                  onClick={() => setComposerOpen(true)}
-                  style={{ background: "#0061f2", color: "#ffffff" }}
-                >
-                  Create First Announcement
-                </button>
-              ) : null}
-            </div>
-          ) : (
-            <div className="feed-posts-list" data-testid="feed-posts-list">
-              {posts.map((post) => {
-                const isAuthor = Boolean(post.is_author);
-                const userCanEdit = isAuthor;
-                const userCanDelete = isAuthor;
+              ) : error ? (
+                <div className="feed-error-state" data-testid="feed-error-state">
+                  <div style={{ fontWeight: 600, fontSize: "15px", marginBottom: "8px" }}>
+                    Unable to load feed
+                  </div>
+                  <p style={{ margin: "0 0 16px 0", fontSize: "13.5px" }}>{error}</p>
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={fetchPosts}
+                    data-testid="feed-retry-btn"
+                  >
+                    Try Again
+                  </button>
+                </div>
+              ) : posts.length === 0 ? (
+                <div className="feed-empty-state" data-testid="feed-empty-state">
+                  <div className="feed-empty-icon">
+                    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+                    </svg>
+                  </div>
+                  <div className="feed-empty-title">
+                    {appliedSearch ? "No announcements matching your search" : "No announcements yet"}
+                  </div>
+                  <div className="feed-empty-desc">
+                    {appliedSearch
+                      ? `We couldn't find any announcements matching "${appliedSearch}". Try clearing your search filter.`
+                      : "Broadcast announcements and targeted updates published to you or everyone in the company will appear here."}
+                  </div>
+                  {appliedSearch ? (
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      onClick={handleClearSearch}
+                    >
+                      Clear Search
+                    </button>
+                  ) : canCreate && !composerOpen ? (
+                    <button
+                      type="button"
+                      className="btn btn-primary"
+                      onClick={() => setComposerOpen(true)}
+                      style={{ background: "#0061f2", color: "#ffffff" }}
+                    >
+                      Create First Announcement
+                    </button>
+                  ) : null}
+                </div>
+              ) : (
+                <div className="feed-posts-list" data-testid="feed-posts-list">
+                  {targetPostLoading && (
+                    <div
+                      style={{
+                        padding: "12px 16px",
+                        marginBottom: "16px",
+                        background: "#eff6ff",
+                        border: "1px solid #bfdbfe",
+                        borderRadius: "8px",
+                        fontSize: "13px",
+                        color: "#1d4ed8",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "8px",
+                      }}
+                      data-testid="target-post-loading"
+                    >
+                      <span>🔍</span>
+                      <span>Locating linked announcement...</span>
+                    </div>
+                  )}
+                  {posts.map((post) => {
+                    const isAuthor = Boolean(post.is_author);
+                    const userCanEdit = isAuthor;
+                    const userCanDelete = isAuthor;
 
-                return (
-                  <FeedPostCard
-                    key={post.id}
-                    post={post}
-                    canEdit={userCanEdit}
-                    canDelete={userCanDelete}
-                    onEdit={(p) => setEditingPost(p)}
-                    onDelete={(p) => setDeletingPost(p)}
+                    return (
+                      <FeedPostCard
+                        key={post.id}
+                        post={post}
+                        isHighlighted={post.id === highlightedPostId}
+                        canEdit={userCanEdit}
+                        canDelete={userCanDelete}
+                        onEdit={(p) => setEditingPost(p)}
+                        onDelete={(p) => setDeletingPost(p)}
+                      />
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* Pagination */}
+              {!loading && !error && total > 0 && (
+                <div style={{ marginTop: "24px" }} data-testid="feed-pagination">
+                  <Pagination
+                    pagination={{
+                      current_page: page,
+                      total_pages: totalPages,
+                      total_records: total,
+                      page_size: pageSize,
+                    }}
+                    pageSize={pageSize}
+                    onPageChange={(newPage) => setPage(newPage)}
+                    onPageSizeChange={(newSize) => {
+                      setPageSize(newSize);
+                      setPage(1);
+                    }}
                   />
-                );
-              })}
-            </div>
-          )}
-
-          {/* Pagination */}
-          {!loading && !error && total > 0 && (
-            <div style={{ marginTop: "24px" }} data-testid="feed-pagination">
-              <Pagination
-                pagination={{
-                  current_page: page,
-                  total_pages: totalPages,
-                  total_records: total,
-                  page_size: pageSize,
-                }}
-                pageSize={pageSize}
-                onPageChange={(newPage) => setPage(newPage)}
-                onPageSizeChange={(newSize) => {
-                  setPageSize(newSize);
-                  setPage(1);
-                }}
-              />
-            </div>
-          )}
-        </section>
+                </div>
+              )}
+            </section>
 
         {/* Edit Modal */}
         <FeedEditModal
@@ -331,3 +441,4 @@ export function FeedPage() {
   );
 }
 export default FeedPage;
+

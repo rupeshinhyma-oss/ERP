@@ -37,13 +37,13 @@ export const NAV_SECTIONS: NavSection[] = [
     label: "DASHBOARD",
     items: [
       { key: "dashboard", label: "Dashboard", path: "/dashboard", icon: "dashboard" },
-      { key: "feed", label: "Feed", path: "/feed", icon: "messageSquare", permission: "feed.view" },
+      { key: "feed", label: "Feed", path: "/feed", icon: "messageSquare" },
     ],
   },
   {
     label: "TASK",
     items: [
-      { key: "tasks", label: "Tasks", path: "/tasks", icon: "task" },
+      { key: "tasks", label: "Tasks", path: "/tasks", icon: "task", permission: "task.view" },
       { key: "technical-tasks", label: "Technical Tasks", path: "/technical-task/list", icon: "wrench" },
       { key: "payments", label: "Payments", path: "/payments", icon: "currency" },
       { key: "technician-operations", label: "Technician Ops & Wallet", path: "/technician-operations", icon: "truck" },

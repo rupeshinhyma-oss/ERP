@@ -98,6 +98,11 @@ The **Buyers** module tracks international importers, buying agents, and corpora
 - **Database Column:** `created_by_id UUID NULL REFERENCES users(id)` added via migration [`8b9c0d1e2f3a_add_created_by_to_buyers.py`](file:///d:/Om%20work1/ERP/Yinglima_ERP/backend/alembic/versions/8b9c0d1e2f3a_add_created_by_to_buyers.py).
 - **Table Column Header:** **Added On / By** displaying the formatted registration date and the creator user name (e.g. `2026-10-15 by Admin User`).
 
+### 3. Full-Text Search Input Specifications & Digit Normalization:
+- **Search Field Placeholder:** `Search company, country, contact, city, phone...`
+- **Phone Digit Matching (`func.regexp_replace`):** Searching bare digits (e.g. `7738417257` or `865641654651`) matches formatted numbers (`+91 7738417257`, `+86 5641654651`) on both primary contacts and child `BuyerContact` records.
+- **Geographic & Contact Coverage:** Searches Company Name, Country (`Country.name`, `code`), State (`State.name`), City, Address, Primary & Secondary Contacts (`person_name`, `designation`), emails (`BuyerEmail`), and product range.
+
 ---
 
 ## 7. What Needs to Be Verified (Testing Checklist)
@@ -139,3 +144,19 @@ The **Buyers** module tracks international importers, buying agents, and corpora
    - Editing special fields (Grade, Potential, Status) is gated by individual fine-grained permissions (`buyer.clientgrade`, `buyer.potential`, `buyer.currentstatus`).
 2. **Consignee Consistency:**
    - In Sales Process and Shipment Planning, changing buyer contact details must not retroactively corrupt historical, closed shipment documents.
+
+---
+
+## 9. Comprehensive Multi-Field Search & Digit-Normalized Phone Search
+
+The buyer list search bar (`placeholder="Search company, country, contact, city, phone..."`) executes a multi-table database query matching:
+1. **Digit-Normalized Phone Search:**
+   - Supports search across primary calling/WhatsApp numbers and child `BuyerContact` numbers with automated non-digit stripping (`regexp_replace(col, '\D', '', 'g') ILIKE '%digits%'`).
+   - Searching `9561914519` or `+919561914519` finds buyers whose contacts are stored as `+91 9561914519`.
+2. **City & Address Fields:**
+   - Directly matches `Buyer.city` (e.g. `Mumbai`, `Thane`, `Indore`) and `Buyer.address`.
+3. **Country & Province / State:**
+   - Matches linked `Country.name`, `Country.code`, `State.name`, and `State.code` via subqueries.
+4. **Contacts & Roster:**
+   - Queries `BuyerContact.person_name`, `designation`, `email`, and phone numbers.
+

@@ -86,3 +86,18 @@ The HSN Codes Master (`/masters/hsn`) provides a unified, cross-border tax taxon
    - Number inputs (e.g. exchange rates, VAT refund percentages) must respect the project's global wheel scroll blocker (`autocompleteBlocker.ts`) so accidental scrolling does not corrupt numeric rates.
 3. **Lookup Caching:**
    - Lookup endpoints (e.g. `/api/v1/lookups/currencies`, `/api/v1/lookups/categories`) are cached on the frontend via `lookups.ts`. When creating a new master record, invalidate or refetch the lookup cache so forms show the new item immediately.
+
+---
+
+## 6. Top Filter Options Card & Searchable Dropdowns (2026-10-27 Release)
+
+All Master pages featuring top toolbar filters (Provinces, Sub-Categories, Cities, Product Master, Product Prices) now use the standardized **`Filter Options`** card layout matching Suppliers and Buyers:
+1. **Unified Header Row:**
+   - **Top-Left:** `<svg>` Funnel icon with bold title `Filter Options`.
+   - **Top-Right:** Permanent, prominent `Reset Filters` button (`background: #f1f5f9`, border `#cbd5e1`, slate text `#475569`, bold, rounded 6px).
+   - Clicking `Reset Filters` resets all active dropdowns, clears the table search term, and returns to Page 1.
+2. **Embedded Search Bar (`Search / Type here...`):** Clicking open any filter dropdown reveals an interactive text input pinned at the top of the popover menu that filters options in real time (0ms client-side matching).
+3. **Structured Title-Cased Field Labels:** Each filter dropdown features a clean label positioned above the input (e.g. `Country / National Level` in Provinces, `Country` and `Province / Region` in Cities, `Category` in Sub-Categories).
+4. **Instant Reactive Filtering (No Search Button):** The obsolete orange "Search" button has been completely eliminated. Selecting an option instantly applies the filter via `extraFilters` reactive query parameters.
+5. **Aligned Layout & Uniform 38px Heights:** Uniform 38px component height across all dropdown triggers and inputs ensures a clean, straight, and uncluttered layout with zero visual skewing.
+6. **Quick Clear Trigger (✕):** When an active selection is made, a subtle hover circular clear icon allows 1-click reset to "All".

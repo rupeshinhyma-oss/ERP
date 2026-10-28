@@ -20,7 +20,7 @@ class LocalPurchaseItemBase(BaseModel):
     hsn_code: str | None = Field(default=None, max_length=50)
     quantity: float = Field(..., gt=0)
     unit_rate: float = Field(..., gt=0)
-    vat_rate: float = Field(default=13.0, ge=0, le=100)
+    vat_rate: float = Field(default=0.0, ge=0, le=100)
 
 
 class LocalPurchaseItemCreate(LocalPurchaseItemBase):
@@ -153,6 +153,8 @@ class LocalPurchaseSummaryResponse(BaseModel):
     items_count: int = 0
     remarks: str | None = None
     status: str
+    stock_movement_id: uuid.UUID | None = None
+    stock_movement_number: str | None = None
     created_by_name: str | None = None
     created_at: datetime
     updated_at: datetime
@@ -166,6 +168,29 @@ class LocalPurchaseDetailResponse(LocalPurchaseSummaryResponse):
     offloading_expense: float = 0.0
     other_expense: float = 0.0
     items: list[LocalPurchaseItemResponse] = Field(default_factory=list)
+
+
+class LocalPurchaseInwardItem(BaseModel):
+    """Line item receipt in an Inward stock movement from a purchase."""
+    product_id: uuid.UUID | None = None
+    product_name: str
+    product_code: str | None = None
+    expected_quantity: float
+    quantity: float
+    damaged_quantity: float = 0.0
+    unit_rate: float = 0.0
+    remarks: str | None = None
+
+
+class LocalPurchaseInwardRequest(BaseModel):
+    """Request payload to inward a local purchase into warehouse stock."""
+    movement_date: date | None = None
+    warehouse_location: str = Field(default="Main Godown", max_length=150)
+    vehicle_no: str | None = Field(default=None, max_length=100)
+    transporter_name: str | None = Field(default=None, max_length=150)
+    container_no: str | None = Field(default=None, max_length=100)
+    remarks: str | None = None
+    items: list[LocalPurchaseInwardItem] | None = None
 
 
 class ConsignmentColumnInfo(BaseModel):
@@ -216,7 +241,7 @@ class BillExtractionItem(BaseModel):
     hsn_code: str | None = None
     quantity: float = 1.0
     unit_rate: float = 0.0
-    vat_rate: float = 13.0
+    vat_rate: float = 0.0
     item_total: float = 0.0
     matched_product_id: uuid.UUID | None = None
 

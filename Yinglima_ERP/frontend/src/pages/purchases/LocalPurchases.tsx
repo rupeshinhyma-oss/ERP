@@ -15,8 +15,13 @@ import { useLookup } from "@/lib/lookups";
 import { useToast } from "@/lib/toast";
 import { useConfirm } from "@/lib/confirm";
 import type { LocalPurchaseSummary } from "@/types/localPurchase";
+import {
+  getLocalPurchasesListCache,
+  setLocalPurchasesListCache,
+  removeLocalPurchaseFromCache,
+} from "@/lib/localPurchaseCache";
 import { LocalPurchaseDetailModal } from "./LocalPurchaseDetailModal";
-import { SearchableFilterDropdown } from "@/components/SearchableDropdown";
+import { LocalPurchaseInwardModal } from "./LocalPurchaseInwardModal";
 
 export function LocalPurchasesPage() {
   const navigate = useNavigate();
@@ -25,23 +30,43 @@ export function LocalPurchasesPage() {
   const toast = useToast();
   const confirm = useConfirm();
 
-  const [purchases, setPurchases] = useState<LocalPurchaseSummary[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [total, setTotal] = useState(0);
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(50);
-
   // Filters state
-  const [search, setSearch] = useState("");
+  const [searchInput, setSearchInput] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [filterOpen, setFilterOpen] = useState(false);
   const [selectedSupplierId, setSelectedSupplierId] = useState("");
   const [selectedStatus, setSelectedStatus] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(50);
+
+  // In-memory cache key & cache-first instant render (0ms transition on back/re-entry)
+  const cacheKey = useMemo(() => {
+    return `${page}_${pageSize}_${debouncedSearch.trim()}_${selectedSupplierId}_${selectedStatus}_${dateFrom}_${dateTo}`;
+  }, [page, pageSize, debouncedSearch, selectedSupplierId, selectedStatus, dateFrom, dateTo]);
+
+  const initialCached = useMemo(() => getLocalPurchasesListCache(cacheKey), [cacheKey]);
+
+  const [purchases, setPurchases] = useState<LocalPurchaseSummary[]>(() => initialCached?.items || []);
+  const [loading, setLoading] = useState(() => !initialCached);
+  const [total, setTotal] = useState(() => initialCached?.total || 0);
+
+  // Selected purchase summary for instant modal painting
+  const [selectedSummary, setSelectedSummary] = useState<LocalPurchaseSummary | null>(null);
+
+  // Debounce search input by 300ms to eliminate redundant network calls
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(searchInput);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [searchInput]);
 
   // Action Menu State
   const [openActionId, setOpenActionId] = useState<string | null>(null);
   const [viewPurchaseId, setViewPurchaseId] = useState<string | null>(null);
+  const [inwardPurchaseId, setInwardPurchaseId] = useState<string | null>(null);
   const [exportOpen, setExportOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
 
@@ -50,7 +75,8 @@ export function LocalPurchasesPage() {
     const s = searchParams.get("search");
     const id = searchParams.get("id");
     if (s) {
-      setSearch(s);
+      setSearchInput(s);
+      setDebouncedSearch(s);
     }
     if (id) {
       setViewPurchaseId(id);
@@ -67,19 +93,27 @@ export function LocalPurchasesPage() {
 
   // Lookups
   const supplierLookup = useLookup<{ id: string; company_name: string }>(
-    "/suppliers",
-    500
+    "/suppliers/lookup",
+    1000
   );
 
-  // Fetch Purchases
+  // Fetch Purchases with SWR background revalidation
   const fetchPurchases = useCallback(async () => {
-    setLoading(true);
+    const cached = getLocalPurchasesListCache(cacheKey);
+    if (cached) {
+      setPurchases(cached.items);
+      setTotal(cached.total);
+      setLoading(false);
+    } else {
+      setLoading(true);
+    }
+
     try {
       const params = new URLSearchParams({
         page: String(page),
         page_size: String(pageSize),
       });
-      if (search.trim()) params.set("search", search.trim());
+      if (debouncedSearch.trim()) params.set("search", debouncedSearch.trim());
       if (selectedSupplierId) params.set("supplier_id", selectedSupplierId);
       if (selectedStatus) params.set("status", selectedStatus);
       if (dateFrom) params.set("date_from", dateFrom);
@@ -96,13 +130,17 @@ export function LocalPurchasesPage() {
       if (res.data) {
         setPurchases(res.data.items);
         setTotal(res.data.total);
+        setLocalPurchasesListCache(cacheKey, {
+          items: res.data.items,
+          total: res.data.total,
+        });
       }
     } catch (err) {
       toast(errorMessage(err), "error");
     } finally {
       setLoading(false);
     }
-  }, [page, pageSize, search, selectedSupplierId, selectedStatus, dateFrom, dateTo, toast]);
+  }, [cacheKey, page, pageSize, debouncedSearch, selectedSupplierId, selectedStatus, dateFrom, dateTo, toast]);
 
   useEffect(() => {
     fetchPurchases();
@@ -130,6 +168,9 @@ export function LocalPurchasesPage() {
     if (!confirmed) return;
     try {
       await apiDelete(`/purchases/local/${id}`);
+      removeLocalPurchaseFromCache(id);
+      setPurchases((prev) => prev.filter((p) => p.id !== id));
+      setTotal((prev) => Math.max(0, prev - 1));
       toast(`Purchase invoice "${invoiceNo}" deleted successfully.`, "success");
       fetchPurchases();
     } catch (err) {
@@ -142,7 +183,7 @@ export function LocalPurchasesPage() {
     setExporting(true);
     try {
       const params = new URLSearchParams();
-      if (search.trim()) params.set("search", search.trim());
+      if (debouncedSearch.trim()) params.set("search", debouncedSearch.trim());
       if (selectedSupplierId) params.set("supplier_id", selectedSupplierId);
       if (selectedStatus) params.set("status", selectedStatus);
       if (dateFrom) params.set("date_from", dateFrom);
@@ -201,13 +242,13 @@ export function LocalPurchasesPage() {
 
           {/* Action Buttons */}
           <div className="page-header-actions" style={{ display: "flex", gap: "10px", alignItems: "center", flexWrap: "wrap" }}>
-            {/* Filter Toggle Button (Matching Products Master) */}
+            {/* Filter Toggle Button (Matching Products Master Style) */}
             <button
               type="button"
               className={`btn btn-header-filter ${filterOpen ? "active" : ""}`}
-              onClick={() => setFilterOpen((prev) => !prev)}
+              onClick={() => setFilterOpen((v) => !v)}
               style={{
-                background: filterOpen ? "#0061f2" : "#475569",
+                background: filterOpen || activeFiltersCount > 0 ? "#0061f2" : "#475569",
                 color: "#ffffff",
                 padding: "8px 12px",
                 borderRadius: "6px",
@@ -215,31 +256,60 @@ export function LocalPurchasesPage() {
                 display: "inline-flex",
                 alignItems: "center",
                 justifyContent: "center",
-                gap: "6px",
                 cursor: "pointer",
                 boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
+                position: "relative",
               }}
               title="Toggle Filter Options"
             >
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon>
               </svg>
               {activeFiltersCount > 0 && (
                 <span
                   style={{
+                    position: "absolute",
+                    top: "-5px",
+                    right: "-5px",
                     background: "#ef4444",
                     color: "#ffffff",
-                    fontSize: "10px",
-                    fontWeight: 800,
                     borderRadius: "10px",
                     padding: "1px 5px",
-                    lineHeight: 1,
+                    fontSize: "10px",
+                    fontWeight: 700,
+                    lineHeight: "1.2",
+                    boxShadow: "0 1px 3px rgba(0,0,0,0.2)",
                   }}
                 >
                   {activeFiltersCount}
                 </span>
               )}
             </button>
+
+            {/* Add New Local Purchase Button */}
+            {hasPermission("local_purchase.create") && (
+            <button
+              type="button"
+              className="btn btn-add-new"
+              onClick={() => navigate("/purchase/local/new")}
+              style={{
+                background: "#0061f2",
+                color: "#ffffff",
+                border: "none",
+                padding: "8px 18px",
+                borderRadius: "6px",
+                fontWeight: 700,
+                fontSize: "13px",
+                cursor: "pointer",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "6px",
+                boxShadow: "0 2px 4px rgba(0,97,242,0.2)",
+              }}
+            >
+              <span>+</span> ADD LOCAL PURCHASE
+            </button>
+            )}
 
             {/* Export Dropdown (Matching Products Master Orange Imp/Exp Style) */}
             {hasPermission("local_purchase.export") && (
@@ -340,32 +410,6 @@ export function LocalPurchasesPage() {
               )}
             </div>
             )}
-
-
-            {/* Add New Local Purchase Button */}
-            {hasPermission("local_purchase.create") && (
-            <button
-              type="button"
-              className="btn btn-add-new"
-              onClick={() => navigate("/purchase/local/new")}
-              style={{
-                background: "#0061f2",
-                color: "#ffffff",
-                border: "none",
-                padding: "8px 18px",
-                borderRadius: "6px",
-                fontWeight: 700,
-                fontSize: "13px",
-                cursor: "pointer",
-                display: "inline-flex",
-                alignItems: "center",
-                gap: "6px",
-                boxShadow: "0 2px 4px rgba(0,97,242,0.2)",
-              }}
-            >
-              <span>+</span> ADD LOCAL PURCHASE
-            </button>
-            )}
           </div>
         </div>
 
@@ -406,37 +450,34 @@ export function LocalPurchasesPage() {
           </div>
         </div>
 
-        {/* Expandable Filter Box */}
+        {/* Expandable Filter Box matching Products Master ERP Standard (Above the table card) */}
         {filterOpen && (
           <div
             className="card"
             style={{
-              background: "#ffffff",
-              padding: "18px 20px",
-              borderRadius: "10px",
-              border: "1px solid #cbd5e1",
+              padding: "16px 20px",
               marginBottom: "16px",
-              boxShadow: "0 4px 6px -1px rgba(0, 0, 0, 0.05)",
+              background: "#ffffff",
+              borderRadius: "10px",
+              border: "1.5px solid #cbd5e1",
+              boxShadow: "0 1px 3px rgba(0,0,0,0.05)",
             }}
           >
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "14px" }}>
-              <div style={{ fontWeight: 700, fontSize: "14px", color: "#0f172a", display: "flex", alignItems: "center", gap: "8px" }}>
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#0061f2" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+              <div style={{ fontWeight: 600, fontSize: "14px", color: "#0f172a", display: "flex", alignItems: "center", gap: "6px" }}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon>
                 </svg>
-                Filter Options {activeFiltersCount > 0 && <span style={{ color: "#0061f2" }}>({activeFiltersCount} Active)</span>}
+                Filter Options
+                {activeFiltersCount > 0 && (
+                  <span style={{ background: "#2563eb", color: "#ffffff", padding: "1px 7px", borderRadius: "10px", fontSize: "11px", fontWeight: 700, marginLeft: "4px" }}>
+                    {activeFiltersCount}
+                  </span>
+                )}
               </div>
               <button
                 type="button"
                 className="btn btn-small"
-                onClick={() => {
-                  setSelectedSupplierId("");
-                  setSelectedStatus("");
-                  setDateFrom("");
-                  setDateTo("");
-                  setSearch("");
-                  setPage(1);
-                }}
                 style={{
                   background: "#f1f5f9",
                   color: "#475569",
@@ -444,45 +485,68 @@ export function LocalPurchasesPage() {
                   borderRadius: "6px",
                   cursor: "pointer",
                   fontWeight: 600,
+                  padding: "5px 14px",
                   fontSize: "12px",
-                  padding: "5px 12px",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "6px",
+                }}
+                onClick={() => {
+                  setSelectedSupplierId("");
+                  setSelectedStatus("");
+                  setDateFrom("");
+                  setDateTo("");
+                  setSearchInput("");
+                  setPage(1);
                 }}
               >
                 Reset Filters
               </button>
             </div>
 
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: "12px" }}>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
+                gap: "14px",
+                alignItems: "flex-end",
+              }}
+            >
               {/* Supplier Filter */}
               <div>
-                <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px", display: "block" }}>
+                <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px" }}>
                   Supplier
                 </label>
-                <SearchableFilterDropdown
-                  value={selectedSupplierId || null}
-                  onChange={(val) => {
-                    setSelectedSupplierId(val || "");
+                <select
+                  value={selectedSupplierId}
+                  onChange={(e) => {
+                    setSelectedSupplierId(e.target.value);
                     setPage(1);
                   }}
-                  placeholder="All Suppliers"
-                  allLabel="All Suppliers"
-                  fetchOptions={async (term) => {
-                    const q = term.toLowerCase().trim();
-                    const items = (supplierLookup.items || []) as { id: string; company_name: string }[];
-                    return items
-                      .filter((s) => !q || s.company_name.toLowerCase().includes(q))
-                      .map((s) => ({ value: s.id, label: s.company_name }));
+                  style={{
+                    width: "100%",
+                    height: "38px",
+                    padding: "7px 10px",
+                    borderRadius: "6px",
+                    border: "1px solid #cbd5e1",
+                    fontSize: "13px",
+                    background: "#ffffff",
+                    color: "#1e293b",
+                    boxSizing: "border-box",
                   }}
-                  fetchLabelForValue={async (val) => {
-                    const s = (supplierLookup.items || []).find((item: { id: string }) => item.id === val);
-                    return s ? (s as any).company_name : "";
-                  }}
-                />
+                >
+                  <option value="">All Suppliers</option>
+                  {(supplierLookup.items || []).map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.company_name}
+                    </option>
+                  ))}
+                </select>
               </div>
 
               {/* Status Filter */}
               <div>
-                <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px", display: "block" }}>
+                <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px" }}>
                   Status
                 </label>
                 <select
@@ -491,18 +555,29 @@ export function LocalPurchasesPage() {
                     setSelectedStatus(e.target.value);
                     setPage(1);
                   }}
-                  style={{ width: "100%", padding: "7px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "13px", background: "#ffffff" }}
+                  style={{
+                    width: "100%",
+                    height: "38px",
+                    padding: "7px 10px",
+                    borderRadius: "6px",
+                    border: "1px solid #cbd5e1",
+                    fontSize: "13px",
+                    background: "#ffffff",
+                    color: "#1e293b",
+                    boxSizing: "border-box",
+                  }}
                 >
                   <option value="">All Statuses</option>
                   <option value="Confirmed">Confirmed</option>
+                  <option value="Inwarded">Inwarded</option>
                   <option value="Pending">Pending</option>
                   <option value="Cancelled">Cancelled</option>
                 </select>
               </div>
 
-              {/* Date From */}
+              {/* From Date */}
               <div>
-                <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px", display: "block" }}>
+                <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px" }}>
                   From Date
                 </label>
                 <input
@@ -512,13 +587,23 @@ export function LocalPurchasesPage() {
                     setDateFrom(e.target.value);
                     setPage(1);
                   }}
-                  style={{ width: "100%", padding: "6px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "13px", background: "#ffffff", boxSizing: "border-box" }}
+                  style={{
+                    width: "100%",
+                    height: "38px",
+                    padding: "7px 10px",
+                    borderRadius: "6px",
+                    border: "1px solid #cbd5e1",
+                    fontSize: "13px",
+                    background: "#ffffff",
+                    color: "#1e293b",
+                    boxSizing: "border-box",
+                  }}
                 />
               </div>
 
-              {/* Date To */}
+              {/* To Date */}
               <div>
-                <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px", display: "block" }}>
+                <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px" }}>
                   To Date
                 </label>
                 <input
@@ -528,7 +613,17 @@ export function LocalPurchasesPage() {
                     setDateTo(e.target.value);
                     setPage(1);
                   }}
-                  style={{ width: "100%", padding: "6px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "13px", background: "#ffffff", boxSizing: "border-box" }}
+                  style={{
+                    width: "100%",
+                    height: "38px",
+                    padding: "7px 10px",
+                    borderRadius: "6px",
+                    border: "1px solid #cbd5e1",
+                    fontSize: "13px",
+                    background: "#ffffff",
+                    color: "#1e293b",
+                    boxSizing: "border-box",
+                  }}
                 />
               </div>
             </div>
@@ -592,9 +687,9 @@ export function LocalPurchasesPage() {
               <input
                 type="text"
                 placeholder="Search invoice, supplier, org..."
-                value={search}
+                value={searchInput}
                 onChange={(e) => {
-                  setSearch(e.target.value);
+                  setSearchInput(e.target.value);
                   setPage(1);
                 }}
                 style={{
@@ -608,11 +703,12 @@ export function LocalPurchasesPage() {
                   outline: "none",
                 }}
               />
-              {search ? (
+              {searchInput ? (
                 <button
                   type="button"
                   onClick={() => {
-                    setSearch("");
+                    setSearchInput("");
+                    setDebouncedSearch("");
                     setPage(1);
                   }}
                   style={{
@@ -690,12 +786,8 @@ export function LocalPurchasesPage() {
                 ) : (
                   purchases.map((p, idx) => {
                     const srNo = (page - 1) * pageSize + idx + 1;
-                    const statusClass =
-                      p.status.toLowerCase() === "confirmed"
-                        ? "badge-active"
-                        : p.status.toLowerCase() === "pending"
-                        ? "badge-warning"
-                        : "badge-neutral";
+                    const isAlreadyInwarded =
+                      p.status.toLowerCase() === "inwarded" || !!p.stock_movement_id;
 
                     return (
                       <tr key={p.id}>
@@ -709,7 +801,10 @@ export function LocalPurchasesPage() {
                           <div style={{ display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap" }}>
                             <button
                               type="button"
-                              onClick={() => setViewPurchaseId(p.id)}
+                              onClick={() => {
+                                setSelectedSummary(p);
+                                setViewPurchaseId(p.id);
+                              }}
                               title="Click to view purchase details"
                               style={{
                                 background: "none",
@@ -842,9 +937,84 @@ export function LocalPurchasesPage() {
 
                         {/* Status */}
                         <td style={{ textAlign: "center" }}>
-                          <span className={`badge ${statusClass}`}>
-                            {p.status}
-                          </span>
+                          {isAlreadyInwarded ? (
+                            <div>
+                              <span
+                                style={{
+                                  display: "inline-flex",
+                                  alignItems: "center",
+                                  gap: "4px",
+                                  background: "#ecfdf5",
+                                  color: "#059669",
+                                  border: "1px solid #a7f3d0",
+                                  padding: "3px 8px",
+                                  borderRadius: "12px",
+                                  fontSize: "11.5px",
+                                  fontWeight: 700,
+                                }}
+                              >
+                                ● Inwarded
+                              </span>
+                              {p.stock_movement_number && (
+                                <div style={{ marginTop: "3px", fontSize: "11px" }}>
+                                  <a
+                                    href="/inventory/stock-movements"
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    style={{ color: "#0284c7", fontWeight: 600, textDecoration: "none" }}
+                                    title="View Inward Stock Movement"
+                                  >
+                                    Slip: {p.stock_movement_number}
+                                  </a>
+                                </div>
+                              )}
+                            </div>
+                          ) : (
+                            <div>
+                              <span
+                                style={{
+                                  display: "inline-flex",
+                                  alignItems: "center",
+                                  gap: "4px",
+                                  background: "#fef3c7",
+                                  color: "#b45309",
+                                  border: "1px solid #fde68a",
+                                  padding: "3px 8px",
+                                  borderRadius: "12px",
+                                  fontSize: "11.5px",
+                                  fontWeight: 700,
+                                }}
+                              >
+                                ● {p.status || "Confirmed"}
+                              </span>
+                              {hasPermission("local_purchase.inward") && (
+                                <div style={{ marginTop: "4px" }}>
+                                  <button
+                                    type="button"
+                                    onClick={() => setInwardPurchaseId(p.id)}
+                                    title="Inward this purchase into warehouse stock"
+                                    style={{
+                                      background: "#f0fdf4",
+                                      border: "1px solid #86efac",
+                                      color: "#166534",
+                                      fontSize: "11px",
+                                      fontWeight: 700,
+                                      borderRadius: "4px",
+                                      padding: "2px 7px",
+                                      cursor: "pointer",
+                                      display: "inline-flex",
+                                      alignItems: "center",
+                                      gap: "3px",
+                                    }}
+                                    onMouseEnter={(e) => (e.currentTarget.style.background = "#dcfce7")}
+                                    onMouseLeave={(e) => (e.currentTarget.style.background = "#f0fdf4")}
+                                  >
+                                    📦 Inward Stock
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+                          )}
                         </td>
 
                         {/* Actions (Kebab Menu) */}
@@ -891,29 +1061,72 @@ export function LocalPurchasesPage() {
                                 }}
                               >
                                 <button
-                                type="button"
-                                onClick={() => {
-                                  setOpenActionId(null);
-                                  setViewPurchaseId(p.id);
-                                }}
-                                style={{
-                                  width: "100%",
-                                  textAlign: "left",
-                                  padding: "8px 12px",
-                                  fontSize: "12.5px",
-                                  color: "#0f172a",
-                                  background: "none",
-                                  border: "none",
-                                  cursor: "pointer",
-                                  display: "flex",
-                                  alignItems: "center",
-                                  gap: "6px",
-                                }}
-                                onMouseEnter={(e) => (e.currentTarget.style.background = "#f1f5f9")}
-                                onMouseLeave={(e) => (e.currentTarget.style.background = "none")}
-                              >
-                                👁️ View Details
-                              </button>
+                                  type="button"
+                                  onClick={() => {
+                                    setOpenActionId(null);
+                                    setSelectedSummary(p);
+                                    setViewPurchaseId(p.id);
+                                  }}
+                                  style={{
+                                    width: "100%",
+                                    textAlign: "left",
+                                    padding: "8px 12px",
+                                    fontSize: "12.5px",
+                                    color: "#0f172a",
+                                    background: "none",
+                                    border: "none",
+                                    cursor: "pointer",
+                                    display: "flex",
+                                    alignItems: "center",
+                                    gap: "6px",
+                                  }}
+                                  onMouseEnter={(e) => (e.currentTarget.style.background = "#f1f5f9")}
+                                  onMouseLeave={(e) => (e.currentTarget.style.background = "none")}
+                                >
+                                  👁️ View Details
+                                </button>
+                                {!isAlreadyInwarded ? (
+                                  hasPermission("local_purchase.inward") && (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setOpenActionId(null);
+                                        setInwardPurchaseId(p.id);
+                                      }}
+                                      style={{
+                                        width: "100%",
+                                        textAlign: "left",
+                                        padding: "8px 12px",
+                                        fontSize: "12.5px",
+                                        color: "#166534",
+                                        fontWeight: 700,
+                                        background: "#f0fdf4",
+                                        border: "none",
+                                        cursor: "pointer",
+                                        display: "flex",
+                                        alignItems: "center",
+                                        gap: "6px",
+                                      }}
+                                      onMouseEnter={(e) => (e.currentTarget.style.background = "#dcfce7")}
+                                      onMouseLeave={(e) => (e.currentTarget.style.background = "#f0fdf4")}
+                                    >
+                                      📦 Inward to Warehouse
+                                    </button>
+                                  )
+                                ) : (
+                                  <div
+                                    style={{
+                                      padding: "6px 12px",
+                                      fontSize: "11.5px",
+                                      color: "#059669",
+                                      fontWeight: 600,
+                                      background: "#f0fdf4",
+                                      borderBottom: "1px solid #e2e8f0",
+                                    }}
+                                  >
+                                    ✓ Inwarded: {p.stock_movement_number || "Complete"}
+                                  </div>
+                                )}
                               {p.bill_file_url ? (
                                 <a
                                   href={p.bill_file_url}
@@ -1106,11 +1319,26 @@ export function LocalPurchasesPage() {
       {/* Local Purchase Details Preview Modal */}
       <LocalPurchaseDetailModal
         purchaseId={viewPurchaseId}
+        initialSummary={selectedSummary}
         isOpen={!!viewPurchaseId}
-        onClose={() => setViewPurchaseId(null)}
+        onClose={() => {
+          setViewPurchaseId(null);
+          setSelectedSummary(null);
+        }}
         onEdit={(id) => {
           setViewPurchaseId(null);
+          setSelectedSummary(null);
           navigate(`/purchase/local/${id}/edit`);
+        }}
+      />
+
+      {/* Inward Stock Receiving Modal */}
+      <LocalPurchaseInwardModal
+        isOpen={!!inwardPurchaseId}
+        purchaseId={inwardPurchaseId}
+        onClose={() => setInwardPurchaseId(null)}
+        onSuccess={() => {
+          fetchPurchases();
         }}
       />
     </AppShell>

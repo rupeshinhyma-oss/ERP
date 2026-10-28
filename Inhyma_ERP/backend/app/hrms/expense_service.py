@@ -28,6 +28,10 @@ from app.hrms.schemas import (
     ExpenseSummaryRead,
     ExpenseUpdate,
 )
+from app.hrms.notifications import (
+    notify_expense_decision,
+    notify_expense_submitted,
+)
 from app.users.models import User
 
 
@@ -166,6 +170,17 @@ class HrmsExpenseService:
             submitted_at=submitted_at,
         )
         self.db.add(expense)
+        await self.db.flush()
+        if should_submit:
+            await notify_expense_submitted(
+                self.db,
+                employee_id=expense.employee_id,
+                expense_code=expense.expense_code,
+                category=expense.category,
+                amount=expense.amount,
+                currency=expense.currency or "INR",
+                actor_id=employee_id,
+            )
         await self.db.commit()
         await self.db.refresh(expense)
         return expense
@@ -370,6 +385,16 @@ class HrmsExpenseService:
 
         expense.status = "PENDING"
         expense.submitted_at = datetime.now(timezone.utc)
+        await self.db.flush()
+        await notify_expense_submitted(
+            self.db,
+            employee_id=expense.employee_id,
+            expense_code=expense.expense_code,
+            category=expense.category,
+            amount=expense.amount,
+            currency=expense.currency or "INR",
+            actor_id=current_user_id,
+        )
         await self.db.commit()
         await self.db.refresh(expense)
         return expense
@@ -418,6 +443,15 @@ class HrmsExpenseService:
         expense.reviewed_by = reviewer_id
         expense.reviewed_at = datetime.now(timezone.utc)
         expense.rejection_reason = None
+        await self.db.flush()
+        await notify_expense_decision(
+            self.db,
+            employee_id=expense.employee_id,
+            decision="APPROVED",
+            expense_code=expense.expense_code,
+            category=expense.category,
+            actor_id=reviewer_id,
+        )
         await self.db.commit()
         await self.db.refresh(expense)
         return expense
@@ -467,6 +501,15 @@ class HrmsExpenseService:
         expense.reviewed_by = reviewer_id
         expense.reviewed_at = datetime.now(timezone.utc)
         expense.rejection_reason = rejection_reason.strip()
+        await self.db.flush()
+        await notify_expense_decision(
+            self.db,
+            employee_id=expense.employee_id,
+            decision="REJECTED",
+            expense_code=expense.expense_code,
+            category=expense.category,
+            actor_id=reviewer_id,
+        )
         await self.db.commit()
         await self.db.refresh(expense)
         return expense

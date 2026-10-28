@@ -13,6 +13,7 @@ composition root of the application is easy to find and reason about.
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -114,7 +115,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     # Eagerly initialize the engine to fail fast on misconfiguration.
     engine = get_engine()
-    try:
+    async def _run_startup_schema() -> None:
         from sqlalchemy import text
         from app.database.base import Base
         from app.leads.models import Lead
@@ -139,6 +140,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         from app.sales.models import DiscountPayment
         from app.suppliers.models import Supplier, SupplierContact
         from app.purchase.models import LocalPurchase, LocalPurchaseItem, ImportPurchase, ImportPurchaseItem
+        from app.feed.models import FeedConversation, FeedConversationParticipant, FeedDirectMessage
 
         required_column_ddls = [
             ("organizations", "logo_data", "ALTER TABLE organizations ADD COLUMN IF NOT EXISTS logo_data TEXT;"),
@@ -189,6 +191,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             LocalPurchaseItem.__table__,
             ImportPurchase.__table__,
             ImportPurchaseItem.__table__,
+            FeedConversation.__table__,
+            FeedConversationParticipant.__table__,
+            FeedDirectMessage.__table__,
         ]
 
         # Read-only metadata check first so we NEVER acquire ACCESS EXCLUSIVE locks on `users` / `organizations`
@@ -222,6 +227,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 if missing_tables:
                     await conn.run_sync(Base.metadata.create_all, tables=missing_tables)
 
+    try:
+        await asyncio.wait_for(_run_startup_schema(), timeout=8.0)
     except Exception as e:
         logger.warning(f"Startup schema initialization notice: {e}")
 

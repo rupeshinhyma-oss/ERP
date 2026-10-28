@@ -13,6 +13,7 @@ Enforces the HRMS Access Model:
 
 from __future__ import annotations
 
+from datetime import date
 import uuid
 from dataclasses import dataclass, field
 from typing import Optional, Set
@@ -70,7 +71,10 @@ class HrmsUserContext:
         # HR has permissions seeded in role_permissions (hrms.attendance, hrms.leave, hrms.assets, hrms.expenses, hrms.site_visits, hrms.payroll).
         # If Admin explicitly revoked a module permission from HR, it is subtracted from self.permissions.
         if self.is_hr:
-            mod_perms = {f"hrms.{mod}", f"hrms.{mod}.view", f"hrms.{mod}s"}
+            if mod == "payroll":
+                mod_perms = {"hrms.payroll", "hrms.payroll.view", "hrms.payroll.configure", "hrms.payroll.approve", "hrms.manage"}
+            else:
+                mod_perms = {f"hrms.{mod}", f"hrms.{mod}.view", f"hrms.{mod}s"}
             if not any(p in self.permissions for p in mod_perms):
                 return False
             return True
@@ -80,8 +84,12 @@ class HrmsUserContext:
         if mod in ("attendance", "leave", "assets", "expenses", "site_visits", "payroll"):
             return True
 
-        # Setup / Global Configuration is strictly Admin / HR only
+        # Setup / Global Configuration is strictly Admin / HR with manage
         if mod in ("setup", "payroll_setup"):
+            if self.is_admin:
+                return True
+            if self.is_hr and ("hrms.manage" in self.permissions or "hrms.setup" in self.permissions):
+                return True
             return False
 
         return False
@@ -116,7 +124,11 @@ class HrmsUserContext:
         """Only Admin or HR with granted salary configuration permission."""
         if self.is_admin:
             return True
-        if self.is_hr and ("hrms.payroll.configure" in self.permissions or "hrms.manage" in self.permissions or "hrms.payroll.manage" in self.permissions or "hrms.payroll" in self.permissions):
+        if "deny:hrms.payroll.configure" in self.permissions:
+            return False
+        if self.is_hr and (
+            "hrms.payroll.configure" in self.permissions or "hrms.manage" in self.permissions
+        ):
             return True
         return False
 
@@ -124,9 +136,114 @@ class HrmsUserContext:
         """Only Admin or HR with granted payroll approval permission."""
         if self.is_admin:
             return True
-        if self.is_hr and ("hrms.payroll.approve" in self.permissions or "hrms.manage" in self.permissions or "hrms.approve" in self.permissions or "hrms.payroll.manage" in self.permissions or "hrms.payroll" in self.permissions):
+        if "deny:hrms.payroll.approve" in self.permissions:
+            return False
+        if self.is_hr and (
+            "hrms.payroll.approve" in self.permissions or "hrms.manage" in self.permissions
+        ):
             return True
         return False
+
+
+async def check_manager_availability(
+    db: AsyncSession, manager_id: uuid.UUID | None, on_date: Optional[date] = None
+) -> tuple[bool, str]:
+    """
+    Check if manager is assigned and available based on real system data:
+    1. Manager ID is assigned
+    2. Manager user is active and not soft-deleted
+    3. Manager does not have an active approved leave on the given date (default today)
+    Returns: (is_available: bool, reason: str)
+    """
+    if not manager_id:
+        return False, "NO_MANAGER_ASSIGNED"
+
+    manager = await db.get(User, manager_id)
+    if not manager or manager.deleted_at is not None or not manager.is_active:
+        return False, "MANAGER_INACTIVE"
+
+    check_date = on_date or date.today()
+    from app.hrms.models import HrmsLeaveRequest
+    leave_stmt = (
+        select(func.count(HrmsLeaveRequest.id))
+        .where(
+            HrmsLeaveRequest.employee_id == manager_id,
+            HrmsLeaveRequest.approval_status == "APPROVED",
+            HrmsLeaveRequest.from_date <= check_date,
+            HrmsLeaveRequest.to_date >= check_date,
+        )
+    )
+    leave_count = (await db.execute(leave_stmt)).scalar() or 0
+    if leave_count > 0:
+        return False, "MANAGER_ON_LEAVE"
+
+    return True, "AVAILABLE"
+
+
+async def verify_approval_authorization(
+    db: AsyncSession,
+    ctx: HrmsUserContext,
+    target_employee_id: uuid.UUID,
+    module_name: str,
+    action_label: str = "approve",
+) -> None:
+    """
+    Enforce Manager-First Approval with HR Fallback / Admin full control:
+    1. Caller cannot approve their own request (unless Admin override).
+    2. Admin/Super Admin has authorized full company-wide approval access.
+    3. If employee's manager is assigned and available, ONLY that manager (or Admin) can approve.
+       HR fallback cannot act while assigned manager is available.
+    4. If manager is unassigned, inactive, or unavailable (on leave), authorized HR fallback can act.
+       HR must hold both module permission (e.g. hrms.expenses, hrms.leave) and hrms.approve (or hrms.manage).
+    5. Cross-department or unassigned managers cannot approve other employees' requests.
+    """
+    if ctx.user_id == target_employee_id and not ctx.is_admin:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Self-approval is not permitted. You cannot {action_label} your own {module_name} request.",
+        )
+
+    # 1. Admin/Super Admin full company-wide override
+    if ctx.is_admin:
+        return
+
+    # 2. Check if caller is the employee's responsible manager
+    emp = await db.get(User, target_employee_id)
+    if not emp:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Employee record not found for approval validation.",
+        )
+
+    is_direct_manager = (emp.manager_id == ctx.user_id) or (target_employee_id in ctx.managed_employee_ids)
+    if is_direct_manager:
+        # Caller is the assigned manager!
+        return
+
+    # 3. Caller is NOT the manager. Check if caller qualifies as authorized HR Fallback.
+    is_hr_fallback = (
+        ctx.is_hr
+        and ("hrms.approve" in ctx.permissions or "hrms.manage" in ctx.permissions)
+        and ("deny:hrms.approve" not in ctx.permissions)
+        and ctx.can_access_module(module_name)
+    )
+
+    if not is_hr_fallback:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Permission denied. You are not authorized to {action_label} {module_name} requests for this employee.",
+        )
+
+    # 4. Caller is HR fallback. Verify manager availability:
+    mgr_available, reason = await check_manager_availability(db, emp.manager_id)
+    if mgr_available:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"This request is routed to the responsible manager first. HR fallback can only act if the manager is unassigned or unavailable.",
+        )
+
+    # Manager is unavailable / unassigned -> HR Fallback is authorized!
+    return
 
 
 async def get_hrms_user_context(
@@ -178,7 +295,6 @@ async def get_hrms_user_context(
     perms = set(current_user.permissions or [])
 
     is_super_admin = bool(current_user.is_super_admin or getattr(user, "is_super_admin", False))
-    uname = (user.username or "").lower()
 
     is_admin = bool(
         is_super_admin
@@ -186,15 +302,13 @@ async def get_hrms_user_context(
         or "admin" in perms
         or "super_admin" in roles
         or "admin" in roles
-        or uname in ("admin", "superadmin", "super_admin")
     )
 
     is_hr = bool(
         is_admin
         or "HR" in roles
-        or any(r.lower() == "hr" for r in roles)
+        or any(r.upper() == "HR" or r.lower() == "human_resources" for r in roles)
         or "hrms.manage" in perms
-        or uname in ("hr", "hrmanager", "alice")
     )
 
     # Primary Department resolution:
@@ -215,9 +329,7 @@ async def get_hrms_user_context(
         managed_ids.add(uid)
 
     is_manager = bool(
-        is_admin
-        or is_hr
-        or "department_manager" in roles
+        "department_manager" in roles
         or any("manager" in r.lower() for r in roles)
         or len(managed_ids) > 1
     )

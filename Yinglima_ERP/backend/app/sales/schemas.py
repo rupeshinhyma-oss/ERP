@@ -202,6 +202,10 @@ class SaleOrderResponse(BaseModel):
 
     remarks: str | None = None
 
+    # Outward Stock Movement Linkage
+    stock_movement_id: uuid.UUID | None = None
+    stock_movement_number: str | None = None
+
     created_by_name: str | None = None
     created_at: datetime
     updated_at: datetime
@@ -211,6 +215,28 @@ class SaleOrderResponse(BaseModel):
 
 class SaleOrderDetailResponse(SaleOrderResponse):
     items: list[SaleOrderItemResponse] = []
+
+
+# ---------------------------------------------------------------------------
+# Outward Stock Movement Dispatch Schemas
+# ---------------------------------------------------------------------------
+
+class SaleOrderDispatchItem(BaseModel):
+    product_id: uuid.UUID | None = None
+    product_name: str
+    product_code: str | None = None
+    quantity: float = Field(..., gt=0)
+    remarks: str | None = None
+
+
+class SaleOrderDispatchRequest(BaseModel):
+    movement_date: date = Field(default_factory=date.today)
+    warehouse_location: str | None = "Main Godown"
+    transporter_name: str | None = None
+    vehicle_no: str | None = None
+    container_no: str | None = None
+    remarks: str | None = None
+    items: list[SaleOrderDispatchItem] | None = None
 
 
 # ---------------------------------------------------------------------------

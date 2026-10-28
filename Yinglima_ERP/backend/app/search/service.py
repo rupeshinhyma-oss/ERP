@@ -57,9 +57,10 @@ three real fixes applied while restoring, not just a verbatim copy:
 from __future__ import annotations
 
 import logging
+import re
 from typing import List, Type
 
-from sqlalchemy import ColumnElement, or_, select, true
+from sqlalchemy import ColumnElement, exists, func, or_, select, true
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database.base import SoftDeleteMixin
@@ -76,8 +77,8 @@ from app.masters.uom.models import UnitOfMeasurement
 from app.organizations.models import Organization
 from app.inquiries.models import ConsignmentCode, Inquiry, InquiryItem
 from app.search.schemas import SearchResultItem, UniversalSearchResponse
-from app.buyers.models import Buyer
-from app.suppliers.models import Supplier
+from app.buyers.models import Buyer, BuyerContact
+from app.suppliers.models import Supplier, SupplierContact
 from app.trash.service import MODEL_MAP
 from app.users.models import User
 
@@ -119,6 +120,8 @@ async def search_universal(db: AsyncSession, query_str: str) -> UniversalSearchR
         return UniversalSearchResponse(query="", total_hits=0, results=[])
 
     pattern = f"%{escape_like_wildcards(clean_q)}%"
+    digits = re.sub(r"\D", "", clean_q)
+    digit_pattern = f"%{digits}%" if len(digits) >= 3 else None
     results: List[SearchResultItem] = []
 
     # 1. Organization / Company Profile
@@ -180,15 +183,40 @@ async def search_universal(db: AsyncSession, query_str: str) -> UniversalSearchR
 
     # 3. Suppliers
     try:
+        supplier_conds = [
+            Supplier.company_name.ilike(pattern),
+            Supplier.brand_description.ilike(pattern),
+            Supplier.contact_full_name.ilike(pattern),
+            Supplier.contact_calling_number.ilike(pattern),
+            Supplier.contact_whatsapp_number.ilike(pattern),
+            Supplier.address.ilike(pattern),
+            Supplier.tax_id_number.ilike(pattern),
+        ]
+        if digit_pattern:
+            supplier_conds.extend([
+                func.regexp_replace(Supplier.contact_calling_number, r"\D", "", "g").ilike(digit_pattern),
+                func.regexp_replace(Supplier.contact_whatsapp_number, r"\D", "", "g").ilike(digit_pattern),
+            ])
+        contact_conds = [
+            SupplierContact.person_name.ilike(pattern),
+            SupplierContact.calling_number.ilike(pattern),
+            SupplierContact.whatsapp_number.ilike(pattern),
+            SupplierContact.email.ilike(pattern),
+        ]
+        if digit_pattern:
+            contact_conds.extend([
+                func.regexp_replace(SupplierContact.calling_number, r"\D", "", "g").ilike(digit_pattern),
+                func.regexp_replace(SupplierContact.whatsapp_number, r"\D", "", "g").ilike(digit_pattern),
+            ])
+        supplier_conds.append(
+            exists().where(
+                SupplierContact.supplier_id == Supplier.id,
+                or_(*contact_conds),
+            )
+        )
         stmt = select(Supplier).where(
             _not_deleted(Supplier),
-            or_(
-                Supplier.company_name.ilike(pattern),
-                Supplier.brand_description.ilike(pattern),
-                Supplier.contact_full_name.ilike(pattern),
-                Supplier.address.ilike(pattern),
-                Supplier.tax_id_number.ilike(pattern),
-            ),
+            or_(*supplier_conds),
         ).limit(LIMIT_PER_ENTITY)
         suppliers = (await db.execute(stmt)).scalars().all()
         for s in suppliers:
@@ -207,17 +235,43 @@ async def search_universal(db: AsyncSession, query_str: str) -> UniversalSearchR
 
     # 3b. Buyers (Clients)
     try:
+        buyer_conds = [
+            Buyer.company_name.ilike(pattern),
+            Buyer.contact_full_name.ilike(pattern),
+            Buyer.contact_calling_number.ilike(pattern),
+            Buyer.contact_whatsapp_number.ilike(pattern),
+            Buyer.city.ilike(pattern),
+            Buyer.address.ilike(pattern),
+            Buyer.product_range.ilike(pattern),
+            Buyer.currently_buying_from.ilike(pattern),
+            Buyer.overall_remarks.ilike(pattern),
+            Buyer.tax_id_number.ilike(pattern),
+        ]
+        if digit_pattern:
+            buyer_conds.extend([
+                func.regexp_replace(Buyer.contact_calling_number, r"\D", "", "g").ilike(digit_pattern),
+                func.regexp_replace(Buyer.contact_whatsapp_number, r"\D", "", "g").ilike(digit_pattern),
+            ])
+        b_contact_conds = [
+            BuyerContact.person_name.ilike(pattern),
+            BuyerContact.calling_number.ilike(pattern),
+            BuyerContact.whatsapp_number.ilike(pattern),
+            BuyerContact.email.ilike(pattern),
+        ]
+        if digit_pattern:
+            b_contact_conds.extend([
+                func.regexp_replace(BuyerContact.calling_number, r"\D", "", "g").ilike(digit_pattern),
+                func.regexp_replace(BuyerContact.whatsapp_number, r"\D", "", "g").ilike(digit_pattern),
+            ])
+        buyer_conds.append(
+            exists().where(
+                BuyerContact.buyer_id == Buyer.id,
+                or_(*b_contact_conds),
+            )
+        )
         stmt = select(Buyer).where(
             _not_deleted(Buyer),
-            or_(
-                Buyer.company_name.ilike(pattern),
-                Buyer.contact_full_name.ilike(pattern),
-                Buyer.city.ilike(pattern),
-                Buyer.product_range.ilike(pattern),
-                Buyer.currently_buying_from.ilike(pattern),
-                Buyer.overall_remarks.ilike(pattern),
-                Buyer.tax_id_number.ilike(pattern),
-            ),
+            or_(*buyer_conds),
         ).limit(LIMIT_PER_ENTITY)
         buyers = (await db.execute(stmt)).scalars().all()
         for b in buyers:

@@ -142,3 +142,45 @@ export interface FeedPostUpdatePayload {
   department_ids?: string[];
   recipient_ids?: string[];
 }
+
+export interface ConversationParticipant {
+  user_id: string;
+  display_name: string;
+  email: string;
+  department_name?: string | null;
+  last_read_at?: string | null;
+}
+
+export interface DirectMessage {
+  id: string;
+  conversation_id: string;
+  sender_id: string;
+  sender_display_name: string;
+  sender_email: string;
+  content: string;
+  is_edited: boolean;
+  is_sender: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Conversation {
+  id: string;
+  created_at: string;
+  updated_at: string;
+  participants: ConversationParticipant[];
+  other_participant?: ConversationParticipant | null;
+  last_message?: DirectMessage | null;
+  unread_count: number;
+}
+
+export interface ConversationListResponse {
+  items: Conversation[];
+  total: number;
+}
+
+export interface DirectMessageListResponse {
+  items: DirectMessage[];
+  total: number;
+}
+

@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import TYPE_CHECKING
 
-from sqlalchemy import DateTime, ForeignKey, Index, String, Text, UniqueConstraint
+from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database.base import GUID, Base, SoftDeleteMixin, TimestampMixin, UUIDPrimaryKeyMixin, _utcnow
@@ -262,4 +262,106 @@ class FeedPostReadRecord(Base, UUIDPrimaryKeyMixin):
 
     def __repr__(self) -> str:
         return f"<FeedPostReadRecord id={self.id} post_id={self.post_id} user_id={self.user_id}>"
+
+
+# ==============================================================================
+# Employee-to-Employee Direct Messaging Models
+# ==============================================================================
+
+class FeedConversation(Base, UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin):
+    """
+    Direct messaging conversation thread between employees.
+    Strictly isolated to participants.
+    """
+
+    __tablename__ = "feed_conversations"
+
+    last_message_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
+    last_message_preview: Mapped[str | None] = mapped_column(Text, nullable=True)
+    last_message_sender_id: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+
+    # Relationships
+    participants: Mapped[list["FeedConversationParticipant"]] = relationship(
+        "FeedConversationParticipant",
+        back_populates="conversation",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+        order_by="FeedConversationParticipant.created_at",
+    )
+    messages: Mapped[list["FeedDirectMessage"]] = relationship(
+        "FeedDirectMessage",
+        back_populates="conversation",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+        order_by="FeedDirectMessage.created_at",
+    )
+
+    def __repr__(self) -> str:
+        return f"<FeedConversation id={self.id} last_message_at={self.last_message_at}>"
+
+
+class FeedConversationParticipant(Base, UUIDPrimaryKeyMixin):
+    """
+    Authorized participant link in a direct messaging conversation.
+    """
+
+    __tablename__ = "feed_conversation_participants"
+
+    conversation_id: Mapped[uuid.UUID] = mapped_column(
+        GUID(), ForeignKey("feed_conversations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        GUID(), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    last_read_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    unread_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, nullable=False
+    )
+
+    # Relationships
+    conversation: Mapped["FeedConversation"] = relationship("FeedConversation", back_populates="participants")
+    user: Mapped["User"] = relationship("User", foreign_keys=[user_id], lazy="selectin")
+
+    __table_args__ = (
+        UniqueConstraint("conversation_id", "user_id", name="uq_feed_conv_participant"),
+        Index("ix_feed_conv_participants_user_conv", "user_id", "conversation_id"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<FeedConversationParticipant id={self.id} conversation_id={self.conversation_id} user_id={self.user_id}>"
+
+
+class FeedDirectMessage(Base, UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin):
+    """
+    Individual private message sent within a conversation.
+    """
+
+    __tablename__ = "feed_direct_messages"
+
+    conversation_id: Mapped[uuid.UUID] = mapped_column(
+        GUID(), ForeignKey("feed_conversations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    sender_id: Mapped[uuid.UUID] = mapped_column(
+        GUID(), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+
+    # Relationships
+    conversation: Mapped["FeedConversation"] = relationship("FeedConversation", back_populates="messages")
+    sender: Mapped["User"] = relationship("User", foreign_keys=[sender_id], lazy="selectin")
+
+    __table_args__ = (
+        Index("ix_feed_direct_messages_conv_created", "conversation_id", "created_at"),
+        Index("ix_feed_direct_messages_sender", "sender_id"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<FeedDirectMessage id={self.id} conversation_id={self.conversation_id} sender_id={self.sender_id}>"
 

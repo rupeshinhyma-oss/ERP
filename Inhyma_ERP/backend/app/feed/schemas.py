@@ -223,3 +223,93 @@ class EligibleRecipientRead(BaseModel):
     employee_code: str | None = None
     department_name: str | None = None
     profile_picture_url: str | None = None
+
+
+# ==============================================================================
+# Direct Messaging Pydantic Schemas
+# ==============================================================================
+
+class ConversationCreate(BaseModel):
+    """Payload to start a private conversation with an employee."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    recipient_id: uuid.UUID = Field(..., description="Target employee user ID")
+
+
+class DirectMessageCreate(BaseModel):
+    """Payload to send a private message in a conversation."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    content: str = Field(..., min_length=1, max_length=5000, description="Message content")
+
+
+class DirectMessageUpdate(BaseModel):
+    """Payload to edit an existing private message."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    content: str = Field(..., min_length=1, max_length=5000, description="Updated message content")
+
+
+class ConversationParticipantRead(BaseModel):
+    """Participant information for conversation details."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    user_id: uuid.UUID
+    display_name: str | None = None
+    full_name: str
+    email: str | None = None
+    employee_code: str | None = None
+    department_name: str | None = None
+    profile_picture_url: str | None = None
+    last_read_at: datetime | None = None
+    unread_count: int = 0
+
+
+class DirectMessageRead(BaseModel):
+    """Single direct message representation."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    conversation_id: uuid.UUID
+    sender_id: uuid.UUID
+    sender: FeedAuthorRead
+    content: str
+    is_sender: bool = False
+    is_edited: bool = False
+    created_at: datetime
+    updated_at: datetime | None = None
+
+
+class ConversationRead(BaseModel):
+    """Conversation summary and participants representation."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    participants: list[ConversationParticipantRead] = Field(default_factory=list)
+    other_participant: ConversationParticipantRead | None = None
+    last_message_at: datetime | None = None
+    last_message_preview: str | None = None
+    last_message_sender_id: uuid.UUID | None = None
+    unread_count: int = 0
+    created_at: datetime
+    updated_at: datetime
+
+
+class ConversationListResponse(BaseModel):
+    """List of conversations for the current employee."""
+
+    items: list[ConversationRead]
+    total: int
+
+
+class DirectMessageListResponse(BaseModel):
+    """List of private messages in a conversation."""
+
+    items: list[DirectMessageRead]
+    total: int

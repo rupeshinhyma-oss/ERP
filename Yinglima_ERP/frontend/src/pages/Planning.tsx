@@ -842,10 +842,29 @@ function MumStatusHistoryPopover({
     }
     unGrouped.sort((a, b) => new Date(b.changed_at).getTime() - new Date(a.changed_at).getTime());
 
+    const dedupe = (items: MumColumnStatusHistoryEntry[]) => {
+      const deduped: MumColumnStatusHistoryEntry[] = [];
+      for (const item of items) {
+        const last = deduped[deduped.length - 1];
+        if (
+          last &&
+          last.column_name === item.column_name &&
+          (last.entry_type ?? "status") === (item.entry_type ?? "status") &&
+          last.new_status === item.new_status &&
+          last.new_value === item.new_value &&
+          Math.abs(new Date(last.changed_at).getTime() - new Date(item.changed_at).getTime()) < 5000
+        ) {
+          continue;
+        }
+        deduped.push(item);
+      }
+      return deduped;
+    };
+
     const grouped = [...byGroup.entries()]
       .sort((a, b) => a[0] - b[0])
-      .map(([groupNum, groupEntries]) => ({ groupNum, entries: groupEntries }));
-    if (unGrouped.length > 0) grouped.push({ groupNum: 9000, entries: unGrouped });
+      .map(([groupNum, groupEntries]) => ({ groupNum, entries: dedupe(groupEntries) }));
+    if (unGrouped.length > 0) grouped.push({ groupNum: 9000, entries: dedupe(unGrouped) });
     return grouped;
   }, [entries, visibleMumGroupNumbers, mumGroupLabel]);
 
@@ -1252,12 +1271,19 @@ function StatusPicker({
   canPickCustom: boolean;
   canClearStatus: boolean;
 }) {
+  const [submitting, setSubmitting] = useState(false);
   const rect = anchor.getBoundingClientRect();
   const top =
     rect.bottom + 250 > window.innerHeight && rect.top > 260
       ? Math.max(10, rect.top - 250)
       : Math.max(10, Math.min(rect.bottom + 6, window.innerHeight - 250));
   const left = Math.max(10, Math.min(rect.left, window.innerWidth - 230));
+
+  const handlePick = (color: PlanningCellStatusColor | null, tagId: string | null) => {
+    if (submitting) return;
+    setSubmitting(true);
+    onPick(color, tagId);
+  };
 
   return createPortal(
     <>
@@ -1280,6 +1306,7 @@ function StatusPicker({
         {(Object.entries(BUILTIN_STATUS_COLORS) as [PlanningCellStatusColor, { label: string; hex: string }][]).map(
           ([key, { label, hex }]) => {
             const isBlocked =
+              submitting ||
               (key === "red_requirement" && !canPickRed) ||
               (key === "green_purchased" && !canPickGreen) ||
               (key === "blue_ordered" && !canPickBlue);
@@ -1291,7 +1318,7 @@ function StatusPicker({
                 title={isBlocked ? "You don't have permission to set this status color." : undefined}
                 onClick={() => {
                   if (isBlocked) return;
-                  onPick(key, null);
+                  handlePick(key, null);
                 }}
                 style={{
                   display: "flex",
@@ -1323,11 +1350,11 @@ function StatusPicker({
           <button
             key={tag.id}
             type="button"
-            disabled={!canPickCustom}
+            disabled={!canPickCustom || submitting}
             title={!canPickCustom ? "You don't have permission to set custom status tags." : undefined}
             onClick={() => {
-              if (!canPickCustom) return;
-              onPick("custom", tag.id);
+              if (!canPickCustom || submitting) return;
+              handlePick("custom", tag.id);
             }}
             style={{
               display: "flex",
@@ -1338,13 +1365,13 @@ function StatusPicker({
               border: "none",
               background: "transparent",
               borderRadius: 6,
-              cursor: !canPickCustom ? "not-allowed" : "pointer",
+              cursor: (!canPickCustom || submitting) ? "not-allowed" : "pointer",
               fontSize: 13,
               textAlign: "left",
-              opacity: !canPickCustom ? 0.4 : 1,
+              opacity: (!canPickCustom || submitting) ? 0.4 : 1,
             }}
             onMouseEnter={(e) => {
-              if (canPickCustom) e.currentTarget.style.background = "#F1F5F9";
+              if (canPickCustom && !submitting) e.currentTarget.style.background = "#F1F5F9";
             }}
             onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
           >
@@ -1355,11 +1382,11 @@ function StatusPicker({
         <div style={{ borderTop: "1px solid #EEF2F6", margin: "6px 0" }} />
         <button
           type="button"
-          disabled={!canClearStatus}
+          disabled={!canClearStatus || submitting}
           title={!canClearStatus ? "You don't have permission to clear status." : undefined}
           onClick={() => {
-            if (!canClearStatus) return;
-            onPick(null, null);
+            if (!canClearStatus || submitting) return;
+            handlePick(null, null);
           }}
           style={{
             width: "100%",
@@ -1367,14 +1394,14 @@ function StatusPicker({
             border: "none",
             background: "transparent",
             borderRadius: 6,
-            cursor: !canClearStatus ? "not-allowed" : "pointer",
+            cursor: (!canClearStatus || submitting) ? "not-allowed" : "pointer",
             fontSize: 13,
             color: "#94A3B8",
             textAlign: "left",
-            opacity: !canClearStatus ? 0.4 : 1,
+            opacity: (!canClearStatus || submitting) ? 0.4 : 1,
           }}
           onMouseEnter={(e) => {
-            if (canClearStatus) e.currentTarget.style.background = "#F1F5F9";
+            if (canClearStatus && !submitting) e.currentTarget.style.background = "#F1F5F9";
           }}
           onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
         >
@@ -2179,10 +2206,14 @@ export function PlanningPage() {
   const setSheetUrlParam = useCallback(
     (sheetName: string, orgName?: string | null) => {
       const next: Record<string, string> = { sheet: sheetName };
-      // Only include org in URL if an entity filter is actually active (not "All Entities")
+      // Only include org or buyer in URL if an entity filter is actually active (not "All Entities")
       if (tabOrganizationFilterId) {
-        const effectiveOrgName = orgName !== undefined ? orgName : searchParams.get("org");
-        if (effectiveOrgName) next.org = effectiveOrgName;
+        if (tabOrganizationFilterId.startsWith("buyer:")) {
+          next.buyer = tabOrganizationFilterId.replace("buyer:", "");
+        } else {
+          const effectiveOrgName = orgName !== undefined ? orgName : searchParams.get("org");
+          if (effectiveOrgName) next.org = effectiveOrgName;
+        }
       }
       setSearchParams(next, { replace: true });
     },
@@ -2207,6 +2238,17 @@ export function PlanningPage() {
       if (matched) {
         if (activeOrganizationId === null) setActiveOrganizationId(matched.id);
         setTabOrganizationFilterId(matched.id);
+        hasInitializedOrgRef.current = true;
+        return;
+      }
+    }
+    const urlBuyerParam = searchParams.get("buyer");
+    if (urlBuyerParam && buyersLookup.loaded && buyersLookup.items.length > 0) {
+      const matched = buyersLookup.items.find(
+        (b) => b.id === urlBuyerParam || b.company_name.toLowerCase() === urlBuyerParam.toLowerCase()
+      );
+      if (matched) {
+        setTabOrganizationFilterId(`buyer:${matched.id}`);
         hasInitializedOrgRef.current = true;
         return;
       }
@@ -2326,12 +2368,107 @@ export function PlanningPage() {
    * blank" behavior asked for, rather than silently falling back to some
    * unrelated organization's sheet.
    */
+  /**
+   * Helper names and actions for the currently-filtered entity (Organization or Buyer)
+   */
+  const selectedBuyerName = useMemo(() => {
+    if (!tabOrganizationFilterId?.startsWith("buyer:")) return null;
+    const bId = tabOrganizationFilterId.replace("buyer:", "");
+    return buyersLookup.items.find((b) => b.id === bId)?.company_name ?? null;
+  }, [tabOrganizationFilterId, buyersLookup.items]);
+
+  const selectedEntityName = useMemo(() => {
+    if (!tabOrganizationFilterId) return "All Entities";
+    if (tabOrganizationFilterId.startsWith("buyer:")) {
+      const bId = tabOrganizationFilterId.replace("buyer:", "");
+      return buyersLookup.items.find((b) => b.id === bId)?.company_name ?? "Selected Buyer";
+    }
+    return organizations.items.find((o) => o.id === tabOrganizationFilterId)?.name ?? "Selected Organization";
+  }, [tabOrganizationFilterId, buyersLookup.items, organizations.items]);
+
+  const handleOpenAddSheet = useCallback(() => {
+    setNewSheetGroupLabel("Mum");
+    if (tabOrganizationFilterId?.startsWith("buyer:")) {
+      const bId = tabOrganizationFilterId.replace("buyer:", "");
+      setNewSheetType("buyer");
+      setNewSheetBuyerId(bId);
+      setNewSheetBuyerBranch("Main");
+    } else {
+      setNewSheetType("organization");
+      const inhymaOrg = organizations.items.find((o) => o.name.toLowerCase().includes("inhyma"));
+      setNewSheetOrganizationId(tabOrganizationFilterId || inhymaOrg?.id || "");
+      setNewSheetBranchId("");
+    }
+    setAddSheetOpen(true);
+  }, [tabOrganizationFilterId, organizations.items]);
+
+  const handleEntityChange = useCallback(
+    (val: string | null) => {
+      setTabOrganizationFilterId(val);
+
+      let targetSheets: PlanningSheet[] = [];
+      if (!val) {
+        setActiveOrganizationId(null);
+        targetSheets = sheets;
+      } else if (val.startsWith("buyer:")) {
+        const buyerId = val.replace("buyer:", "");
+        setActiveOrganizationId(null);
+        targetSheets = sheets.filter((s) => s.buyer_id === buyerId);
+      } else {
+        setActiveOrganizationId(val);
+        targetSheets = sheets.filter((s) => s.organization_id === val);
+      }
+
+      if (targetSheets.length > 0) {
+        // If current active sheet is in targetSheets, stay on it; otherwise switch to the first sheet
+        const currentStillValid = targetSheets.some((s) => s.id === activeSheetId);
+        const nextSheet = currentStillValid
+          ? targetSheets.find((s) => s.id === activeSheetId)!
+          : targetSheets[0];
+        setActiveSheetId(nextSheet.id);
+        setGrid(null);
+
+        const next: Record<string, string> = { sheet: nextSheet.name };
+        if (val && !val.startsWith("buyer:")) {
+          const orgObj = organizations.items.find((o) => o.id === val);
+          if (orgObj) next.org = orgObj.name;
+        } else if (val && val.startsWith("buyer:")) {
+          next.buyer = val.replace("buyer:", "");
+        }
+        setSearchParams(next, { replace: true });
+      } else {
+        // Target entity has no sheets created yet
+        setActiveSheetId(null);
+        setGrid(null);
+        const next: Record<string, string> = {};
+        if (val && !val.startsWith("buyer:")) {
+          const orgObj = organizations.items.find((o) => o.id === val);
+          if (orgObj) next.org = orgObj.name;
+        } else if (val && val.startsWith("buyer:")) {
+          next.buyer = val.replace("buyer:", "");
+        }
+        setSearchParams(next, { replace: true });
+      }
+    },
+    [sheets, activeSheetId, organizations.items, setSearchParams]
+  );
+
   useEffect(() => {
     if (visibleSheets.some((s) => s.id === activeSheetId)) return;
     const next = visibleSheets[0] ?? null;
     setGrid(null);
     setActiveSheetId(next?.id ?? null);
-    if (next) setSheetUrlParam(next.name);
+    if (next) {
+      setSheetUrlParam(next.name);
+    } else {
+      setSearchParams((prev) => {
+        if (!prev.has("sheet") && !prev.has("sheet_id")) return prev;
+        const copy = new URLSearchParams(prev);
+        copy.delete("sheet");
+        copy.delete("sheet_id");
+        return copy;
+      }, { replace: true });
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visibleSheets]);
 
@@ -2366,6 +2503,9 @@ export function PlanningPage() {
   /** Rows per page for the grid -- matches Product Master's own default page size. */
   const GRID_PAGE_SIZE = 50;
 
+  /** In-memory cache for planning sheets to enable 0ms instant tab switching */
+  const planningGridCacheRef = useRef<Map<string, PlanningGrid>>(new Map());
+
   /**
    * Load (or reload) a sheet's grid, always starting from page 1.
    *
@@ -2378,21 +2518,30 @@ export function PlanningPage() {
    */
   const loadGrid = useCallback(
     async (sheetId: string, organizationIdOverride?: string | null) => {
-      setLoading(true);
+      const organizationId =
+        organizationIdOverride !== undefined ? organizationIdOverride : activeOrganizationId;
+      const qs = toQueryString({
+        offset: 0,
+        limit: GRID_PAGE_SIZE,
+        ...(organizationId ? { organization_id: organizationId } : {}),
+        ...(searchQueryParam ? { search: searchQueryParam } : {}),
+      });
+      const cacheKey = `${sheetId}:${qs}`;
+      const cached = planningGridCacheRef.current.get(cacheKey) || planningGridCacheRef.current.get(sheetId);
+      if (cached) {
+        setGrid(cached);
+        setLoading(false);
+      } else {
+        setLoading(true);
+      }
       setError(null);
       try {
-        const organizationId =
-          organizationIdOverride !== undefined ? organizationIdOverride : activeOrganizationId;
-        const qs = toQueryString({
-          offset: 0,
-          limit: GRID_PAGE_SIZE,
-          ...(organizationId ? { organization_id: organizationId } : {}),
-          ...(searchQueryParam ? { search: searchQueryParam } : {}),
-        });
         const { data } = await apiGet<PlanningGrid>(`/planning/sheets/${sheetId}/grid${qs}`);
         setGrid(data);
+        planningGridCacheRef.current.set(cacheKey, data);
+        planningGridCacheRef.current.set(sheetId, data);
       } catch (err) {
-        setError(err);
+        if (!cached) setError(err);
       } finally {
         setLoading(false);
       }
@@ -2466,6 +2615,7 @@ export function PlanningPage() {
   const loadMoreRowsRef = useRef(loadMoreRows);
   loadMoreRowsRef.current = loadMoreRows;
   const isFetchingMoreRef = useRef(false);
+  const pendingStatusCellsRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     const sentinel = scrollSentinelRef.current;
@@ -3192,12 +3342,13 @@ export function PlanningPage() {
           buyer_branch_name: branchName,
           mum_group_label: newSheetGroupLabel.trim(),
         });
+        const createdBuyerId = newSheetBuyerId;
         setNewSheetGroupLabel("Mum");
         setNewSheetBuyerId("");
         setNewSheetBuyerBranch("");
         setAddSheetOpen(false);
         await loadSheets();
-        setTabOrganizationFilterId(`buyer:${newSheetBuyerId}`);
+        setTabOrganizationFilterId(`buyer:${createdBuyerId}`);
         setActiveSheetId(data.id);
         setSheetUrlParam(data.name);
       } catch (err) {
@@ -3704,6 +3855,11 @@ export function PlanningPage() {
     customTagId: string | null
   ) {
     if (!activeSheetId) return;
+    const cellKey = `${rowId}:${columnId}`;
+    if (pendingStatusCellsRef.current.has(cellKey)) return;
+    pendingStatusCellsRef.current.add(cellKey);
+    setStatusPicker(null);
+
     if (statusColor !== null) {
       const targetCell = (grid?.rows.find((r) => r.id === rowId)?.cells ?? []).find((c) => c.column_id === columnId);
       const cellVal = (targetCell?.value ?? "").trim();
@@ -3711,7 +3867,7 @@ export function PlanningPage() {
       const hasActiveNumber = cellVal !== "" && cellVal !== "0" && (!isNaN(num) ? num > 0 : true);
       if (!hasActiveNumber) {
         showToast("Cannot set status color on an empty cell. Enter a quantity first.", "warning");
-        setStatusPicker(null);
+        pendingStatusCellsRef.current.delete(cellKey);
         return;
       }
     }
@@ -3720,7 +3876,6 @@ export function PlanningPage() {
         status_color: statusColor,
         custom_status_tag_id: customTagId,
       });
-      setStatusPicker(null);
       setGrid((prev) => {
         if (!prev) return prev;
         return {
@@ -3752,6 +3907,8 @@ export function PlanningPage() {
       });
     } catch (err) {
       setError(err);
+    } finally {
+      pendingStatusCellsRef.current.delete(cellKey);
     }
   }
 
@@ -3798,12 +3955,14 @@ export function PlanningPage() {
       <main className="page">
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, flexWrap: "wrap", gap: 12 }}>
           <h1 className="page-title" style={{ flexShrink: 0 }}>
-            Shipment Planning{activeSheet ? ` / ${activeSheet.name}` : ""}
-            {activeOrganizationId && (
-              <span style={{ fontSize: 13, fontWeight: 500, color: "#2563EB" }}>
-                {" "}/ Filter Organization: {organizations.items.find((o) => o.id === activeOrganizationId)?.name ?? ""}
-              </span>
-            )}
+            Shipment Planning
+            {activeSheet
+              ? ` / ${activeSheet.name}`
+              : selectedBuyerName
+              ? ` / ${selectedBuyerName}`
+              : activeOrganizationId
+              ? ` / ${organizations.items.find((o) => o.id === activeOrganizationId)?.name ?? ""}`
+              : ""}
           </h1>
 
           {/* Org-Wide Cross-Branch Search Bar */}
@@ -4195,20 +4354,7 @@ export function PlanningPage() {
               <button
                 type="button"
                 className="btn btn-secondary"
-                onClick={() => {
-                  setNewSheetGroupLabel("Mum");
-                  if (tabOrganizationFilterId?.startsWith("buyer:")) {
-                    setNewSheetType("buyer");
-                    setNewSheetBuyerId(tabOrganizationFilterId.replace("buyer:", ""));
-                    setNewSheetBuyerBranch("");
-                  } else {
-                    setNewSheetType("organization");
-                    const inhymaOrg = organizations.items.find((o) => o.name.toLowerCase().includes("inhyma"));
-                    setNewSheetOrganizationId(tabOrganizationFilterId || inhymaOrg?.id || "");
-                    setNewSheetBranchId("");
-                  }
-                  setAddSheetOpen(true);
-                }}
+                onClick={handleOpenAddSheet}
               >
                 + Sheet
               </button>
@@ -4227,23 +4373,7 @@ export function PlanningPage() {
           </label>
           <SearchableEntityDropdown
             value={tabOrganizationFilterId}
-            onChange={(val) => {
-              setTabOrganizationFilterId(val);
-              if (!val) {
-                setActiveOrganizationId(null);
-                const next: Record<string, string> = {};
-                const currentSheet = searchParams.get("sheet");
-                if (currentSheet) next.sheet = currentSheet;
-                setSearchParams(next, { replace: true });
-              } else if (!val.startsWith("buyer:")) {
-                const orgObj = organizations.items.find((o) => o.id === val);
-                const next: Record<string, string> = {};
-                const currentSheet = searchParams.get("sheet");
-                if (currentSheet) next.sheet = currentSheet;
-                if (orgObj) next.org = orgObj.name;
-                setSearchParams(next, { replace: true });
-              }
-            }}
+            onChange={handleEntityChange}
             organizations={organizations.items}
             buyers={buyersLookup.items}
           />
@@ -4314,13 +4444,74 @@ export function PlanningPage() {
             </div>
           ))}
           {visibleSheets.length === 0 && !loading && (
-            <div className="muted" style={{ padding: "8px 4px" }}>
-              {sheets.length === 0
-                ? "No sheets yet. Add one to get started."
-                : `No sheets yet for ${organizations.items.find((o) => o.id === tabOrganizationFilterId)?.name ?? "this organization"}.`}
+            <div className="muted" style={{ padding: "8px 4px", fontSize: 12 }}>
+              No sheets created yet for {selectedEntityName}.
             </div>
           )}
         </div>
+
+        {visibleSheets.length === 0 && !loading && (
+          <div
+            className="card"
+            style={{
+              padding: "48px 24px",
+              textAlign: "center",
+              background: "#FFFFFF",
+              borderRadius: "12px",
+              border: "1.5px dashed #CBD5E1",
+              marginTop: "16px",
+              marginBottom: "24px",
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: "12px",
+            }}
+          >
+            <div
+              style={{
+                width: "56px",
+                height: "56px",
+                borderRadius: "50%",
+                background: tabOrganizationFilterId?.startsWith("buyer:") ? "#F0FDF4" : "#EFF6FF",
+                color: tabOrganizationFilterId?.startsWith("buyer:") ? "#16A34A" : "#2563EB",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontSize: "26px",
+              }}
+            >
+              {tabOrganizationFilterId?.startsWith("buyer:") ? "👤" : "📋"}
+            </div>
+            <h3 style={{ margin: 0, fontSize: "17px", fontWeight: 700, color: "#1E293B" }}>
+              No Planning Sheet Found for {selectedEntityName}
+            </h3>
+            <p style={{ margin: 0, fontSize: "13.5px", color: "#64748B", maxWidth: "480px", lineHeight: "1.5" }}>
+              {tabOrganizationFilterId?.startsWith("buyer:")
+                ? "This buyer does not have any shipment planning sheets yet. Create the first sheet to start tracking machine lines, Mum shipments, and order requirements."
+                : "This organization does not have any planning sheets yet. Create a sheet to start planning machine lines."}
+            </p>
+            <Can permission="planning.sheet.manage">
+              <button
+                type="button"
+                className="btn btn-primary"
+                style={{
+                  marginTop: "8px",
+                  padding: "9px 20px",
+                  fontSize: "13.5px",
+                  fontWeight: 600,
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "8px",
+                  cursor: "pointer",
+                }}
+                onClick={handleOpenAddSheet}
+              >
+                <span>+</span> Create Planning Sheet for {selectedEntityName}
+              </button>
+            </Can>
+          </div>
+        )}
 
         {activeSheetId && (
           <>
@@ -4866,7 +5057,11 @@ export function PlanningPage() {
             anchor={statusPicker.anchor}
             customTags={customTags}
             onClose={() => setStatusPicker(null)}
-            onPick={(color, tagId) => handleSetCellStatus(statusPicker.rowId, statusPicker.columnId, color, tagId)}
+            onPick={(color, tagId) => {
+              const { rowId, columnId } = statusPicker;
+              setStatusPicker(null);
+              void handleSetCellStatus(rowId, columnId, color, tagId);
+            }}
             canPickRed={canSetRedStatus}
             canPickGreen={canSetGreenStatus}
             canPickBlue={canEditCells}
@@ -6080,7 +6275,7 @@ function LinkRecordModal({
     async (term: string, signal: AbortSignal): Promise<DropdownOption[]> => {
       if (!apiBase) return [];
       const { data } = await apiGet<Record<string, unknown>[]>(
-        apiBase + toQueryString({ search: term, page: 1, page_size: 20 }),
+        apiBase + toQueryString({ search: term, page: 1, page_size: 20, status: "active" }),
         { signal }
       );
       const labelField = SOURCE_MODULE_LABEL_FIELD[column.source_module || ""] || "name";

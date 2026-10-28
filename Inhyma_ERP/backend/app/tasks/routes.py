@@ -33,6 +33,8 @@ from app.tasks.schemas import (
     RecurrencePreviewResponse,
     TaskApprovalActionRequest,
     TaskAssignRequest,
+    TaskAssigneeOptionRead,
+    TaskDepartmentRead,
     TaskAttachmentCreateInput,
     TaskAttachmentRead,
     TaskBulkActionRequest,
@@ -171,7 +173,7 @@ async def list_tasks(
 async def create_task(
     payload: TaskCreate,
     request: Request,
-    current_user: CurrentUser = Depends(require_any_permission("task.view", "task.create", "task.assign")),
+    current_user: CurrentUser = Depends(require_any_permission("task.create", "task.manage")),
     service: TaskService = Depends(get_task_service),
 ) -> dict:
     task = await service.create_task(payload, current_user)
@@ -208,7 +210,7 @@ async def list_labels(
 async def create_label(
     payload: TaskLabelCreate,
     request: Request,
-    current_user: CurrentUser = Depends(require_permission("task.view")),
+    current_user: CurrentUser = Depends(require_any_permission("task.create", "task.manage")),
     service: TaskService = Depends(get_task_service),
 ) -> dict:
     label = await service.create_label(payload, current_user)
@@ -300,7 +302,7 @@ async def update_template(
 async def delete_template(
     template_id: uuid.UUID,
     request: Request,
-    current_user: CurrentUser = Depends(require_any_permission("task.create", "task.manage")),
+    current_user: CurrentUser = Depends(require_any_permission("task.delete", "task.manage")),
     service: TaskService = Depends(get_task_service),
 ) -> dict:
     await service.delete_template(template_id, current_user)
@@ -357,7 +359,7 @@ async def delete_saved_filter(
 async def bulk_action(
     payload: TaskBulkActionRequest,
     request: Request,
-    current_user: CurrentUser = Depends(require_any_permission("task.view", "task.create", "task.manage")),
+    current_user: CurrentUser = Depends(require_any_permission("task.create", "task.manage")),
     service: TaskService = Depends(get_task_service),
 ) -> dict:
     res = await service.bulk_action(payload, current_user)
@@ -372,7 +374,7 @@ async def get_workload(
     current_user: CurrentUser = Depends(require_permission("task.view")),
     service: TaskService = Depends(get_task_service),
 ) -> dict:
-    res = await service.get_workload_dashboard(department_id=department_id)
+    res = await service.get_workload_dashboard(department_id=department_id, current_user=current_user)
     return build_success_response(data=res.model_dump(), request_id=getattr(request.state, "request_id", "-"))
 
 
@@ -385,7 +387,7 @@ async def get_capacity(
     current_user: CurrentUser = Depends(require_permission("task.view")),
     service: TaskService = Depends(get_task_service),
 ) -> dict:
-    res = await service.get_capacity_view(start_date=start_date, end_date=end_date, department_id=department_id)
+    res = await service.get_capacity_view(start_date=start_date, end_date=end_date, department_id=department_id, current_user=current_user)
     return build_success_response(data=res.model_dump(), request_id=getattr(request.state, "request_id", "-"))
 
 
@@ -478,7 +480,7 @@ async def update_recurring_schedule(
 async def delete_recurring_schedule(
     schedule_id: uuid.UUID,
     request: Request,
-    current_user: CurrentUser = Depends(require_any_permission("task.create", "task.manage")),
+    current_user: CurrentUser = Depends(require_any_permission("task.delete", "task.manage")),
     service: TaskService = Depends(get_task_service),
 ) -> dict:
     await service.delete_recurring_schedule(schedule_id, current_user)
@@ -568,6 +570,32 @@ async def check_recurring_reminders(
     return build_success_response(data=stats, request_id=getattr(request.state, "request_id", "-"))
 
 
+@router.get("/departments", summary="List accessible departments based on user role and assignments")
+async def list_task_departments(
+    request: Request,
+    current_user: CurrentUser = Depends(require_permission("task.view")),
+    service: TaskService = Depends(get_task_service),
+) -> dict:
+    data = await service.list_task_departments(current_user)
+    return build_success_response(
+        data=[d.model_dump() for d in data],
+        request_id=getattr(request.state, "request_id", "-"),
+    )
+
+
+@router.get("/assignees", summary="List assignable users scoped to user department authority")
+async def list_task_assignees(
+    request: Request,
+    current_user: CurrentUser = Depends(require_permission("task.view")),
+    service: TaskService = Depends(get_task_service),
+) -> dict:
+    data = await service.list_task_assignees(current_user)
+    return build_success_response(
+        data=[a.model_dump() for a in data],
+        request_id=getattr(request.state, "request_id", "-"),
+    )
+
+
 @router.get("/{id}", summary="Get task by ID with assignees, subtasks, comments, escalations")
 async def get_task_by_id(
     id: uuid.UUID,
@@ -575,7 +603,7 @@ async def get_task_by_id(
     current_user: CurrentUser = Depends(require_permission("task.view")),
     service: TaskService = Depends(get_task_service),
 ) -> dict:
-    task = await service.get_task(id)
+    task = await service.get_task(id, current_user=current_user)
     serialized = TaskRead.model_validate(task).model_dump()
     return build_success_response(data=serialized, request_id=getattr(request.state, "request_id", "-"))
 
@@ -597,7 +625,7 @@ async def update_task(
 async def delete_task(
     id: uuid.UUID,
     request: Request,
-    current_user: CurrentUser = Depends(require_any_permission("task.manage", "task.delete", "task.create")),
+    current_user: CurrentUser = Depends(require_any_permission("task.manage", "task.delete")),
     service: TaskService = Depends(get_task_service),
 ) -> dict:
     await service.soft_delete_task(id, current_user)
@@ -611,7 +639,7 @@ async def assign_task(
     id: uuid.UUID,
     payload: TaskAssignRequest,
     request: Request,
-    current_user: CurrentUser = Depends(require_any_permission("task.assign", "task.manage", "task.view")),
+    current_user: CurrentUser = Depends(require_any_permission("task.assign", "task.manage")),
     service: TaskService = Depends(get_task_service),
 ) -> dict:
     task = await service.assign_task(
@@ -706,7 +734,7 @@ async def escalate_task(
     id: uuid.UUID,
     payload: TaskEscalateRequest,
     request: Request,
-    current_user: CurrentUser = Depends(require_any_permission("task.escalate", "task.manage", "task.view")),
+    current_user: CurrentUser = Depends(require_any_permission("task.escalate", "task.manage")),
     service: TaskService = Depends(get_task_service),
 ) -> dict:
     esc = await service.escalate_task(
@@ -730,7 +758,7 @@ async def get_task_timeline(
     current_user: CurrentUser = Depends(require_permission("task.view")),
     service: TaskService = Depends(get_task_service),
 ) -> dict:
-    events = await service.get_task_timeline(id)
+    events = await service.get_task_timeline(id, current_user=current_user)
     return build_success_response(data=events, request_id=getattr(request.state, "request_id", "-"))
 
 
@@ -812,7 +840,7 @@ async def get_subtask_comments(
     current_user: CurrentUser = Depends(require_permission("task.view")),
     service: TaskService = Depends(get_task_service),
 ) -> dict:
-    comments = await service.list_subtask_comments(subtask_id)
+    comments = await service.list_subtask_comments(subtask_id, current_user=current_user)
     serialized = [TaskSubtaskCommentRead.model_validate(c).model_dump() for c in comments]
     return build_success_response(data=serialized, request_id=getattr(request.state, "request_id", "-"))
 
@@ -841,7 +869,7 @@ async def get_subtask_attachments(
     current_user: CurrentUser = Depends(require_permission("task.view")),
     service: TaskService = Depends(get_task_service),
 ) -> dict:
-    attachments = await service.list_subtask_attachments(subtask_id)
+    attachments = await service.list_subtask_attachments(subtask_id, current_user=current_user)
     serialized = [TaskSubtaskAttachmentRead.model_validate(a).model_dump() for a in attachments]
     return build_success_response(data=serialized, request_id=getattr(request.state, "request_id", "-"))
 
@@ -876,7 +904,7 @@ async def get_escalation_comments(
     current_user: CurrentUser = Depends(require_permission("task.view")),
     service: TaskService = Depends(get_task_service),
 ) -> dict:
-    comments = await service.list_escalation_comments(escalation_id)
+    comments = await service.list_escalation_comments(escalation_id, current_user=current_user)
     serialized = [TaskEscalationCommentRead.model_validate(c).model_dump() for c in comments]
     return build_success_response(data=serialized, request_id=getattr(request.state, "request_id", "-"))
 
@@ -930,7 +958,7 @@ async def duplicate_task(
     id: uuid.UUID,
     payload: TaskDuplicateRequest,
     request: Request,
-    current_user: CurrentUser = Depends(require_any_permission("task.view", "task.create")),
+    current_user: CurrentUser = Depends(require_any_permission("task.create", "task.manage")),
     service: TaskService = Depends(get_task_service),
 ) -> dict:
     task = await service.duplicate_task(id, payload, current_user)
@@ -982,6 +1010,7 @@ async def submit_approval(
 
 
 @router.post("/{id}/action-approval", summary="Approve or reject pending task")
+@router.post("/{id}/approval", summary="Approve or reject pending task (alias)")
 async def action_approval(
     id: uuid.UUID,
     payload: TaskApprovalActionRequest,

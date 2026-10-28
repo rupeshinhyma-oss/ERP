@@ -47,7 +47,9 @@ export interface LocalPurchaseSummary {
   total_quantity: number;
   items_count: number;
   remarks?: string | null;
-  status: "Pending" | "Confirmed" | "Cancelled" | string;
+  status: "Pending" | "Confirmed" | "Inwarded" | "Cancelled" | string;
+  stock_movement_id?: string | null;
+  stock_movement_number?: string | null;
   created_by_name?: string | null;
   created_at: string;
   updated_at: string;
