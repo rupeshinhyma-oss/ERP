@@ -13,7 +13,7 @@ Handles:
 
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 import uuid
 from typing import List, Optional
 
@@ -21,7 +21,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import func, select, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.hrms.models import HrmsExpense
+from app.hrms.models import HrmsExpense, HrmsExpenseSettings
 from app.hrms.schemas import (
     ExpenseCreate,
     ExpenseRead,
@@ -38,6 +38,57 @@ from app.users.models import User
 class HrmsExpenseService:
     def __init__(self, db: AsyncSession):
         self.db = db
+
+    async def _get_settings(self) -> HrmsExpenseSettings:
+        res = await self.db.execute(select(HrmsExpenseSettings).limit(1))
+        settings = res.scalars().first()
+        if not settings:
+            settings = HrmsExpenseSettings(
+                approval_team_lead=True,
+                approval_manager=True,
+                approval_accounts=True,
+                max_claim_amount=50000.0,
+                receipt_required=True,
+                auto_approval_limit=500.0,
+                submission_window_days=30,
+            )
+            self.db.add(settings)
+            await self.db.flush()
+        return settings
+
+    def _validate_claim_policies(
+        self,
+        settings: HrmsExpenseSettings,
+        amount: float,
+        expense_date: date,
+        receipt_url: Optional[str],
+    ) -> None:
+        if amount > settings.max_claim_amount:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Expense claim amount ₹{amount:,.2f} exceeds configured maximum limit of ₹{settings.max_claim_amount:,.2f}.",
+            )
+
+        if settings.receipt_required and not receipt_url:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Receipt attachment is mandatory for expense claim submission under current policy.",
+            )
+
+        today = date.today()
+        if expense_date > today:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Expense date cannot be in the future.",
+            )
+
+        if settings.submission_window_days > 0:
+            min_date = today - timedelta(days=settings.submission_window_days)
+            if expense_date < min_date:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Expense date ({expense_date}) is outside the allowable submission window of {settings.submission_window_days} days.",
+                )
 
     async def _generate_expense_code(self) -> str:
         """Generate unique sequential expense code e.g. EXP-0005."""
@@ -150,8 +201,19 @@ class HrmsExpenseService:
                 detail="Invalid employee account.",
             )
 
-        code = await self._generate_expense_code()
         should_submit = is_submit or payload.is_submit
+
+        settings = await self._get_settings()
+        if should_submit:
+            self._validate_claim_policies(
+                settings=settings,
+                amount=round(float(payload.amount), 2),
+                expense_date=payload.expense_date,
+                receipt_url=payload.receipt_url.strip() if payload.receipt_url else None,
+            )
+
+        code = await self._generate_expense_code()
+
         initial_status = "PENDING" if should_submit else "DRAFT"
         submitted_at = datetime.now(timezone.utc) if should_submit else None
 
@@ -383,6 +445,14 @@ class HrmsExpenseService:
                 detail=f"Cannot submit expense with status '{expense.status}'. Only DRAFT expenses can be submitted.",
             )
 
+        settings = await self._get_settings()
+        self._validate_claim_policies(
+            settings=settings,
+            amount=round(float(expense.amount), 2),
+            expense_date=expense.expense_date,
+            receipt_url=expense.receipt_url,
+        )
+
         expense.status = "PENDING"
         expense.submitted_at = datetime.now(timezone.utc)
         await self.db.flush()
@@ -427,7 +497,7 @@ class HrmsExpenseService:
                 detail="You do not have permission to approve expenses for this employee.",
             )
 
-        if not is_admin and expense.employee_id == reviewer_id:
+        if expense.employee_id == reviewer_id:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Self-approval is not permitted.",
@@ -539,6 +609,12 @@ class HrmsExpenseService:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Cannot reimburse expense with status '{expense.status}'. Only APPROVED expenses can be reimbursed.",
+            )
+
+        if expense.employee_id == user_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Self-reimbursement is not permitted.",
             )
 
         expense.status = "REIMBURSED"

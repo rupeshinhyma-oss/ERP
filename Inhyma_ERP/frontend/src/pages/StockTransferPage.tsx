@@ -874,27 +874,37 @@ export function StockTransferPage({
               + ADD NEW
             </button>
 
-            {/* Imp / Exp Dropdown Button */}
+            {/* Export Button (matches Companies & Product Stock golden-amber theme) */}
             <button
               type="button"
-              className="btn btn-warning"
+              className="btn btn-imp-exp"
+              title="Export stock transfers"
               style={{
-                background: "#f59e0b",
-                color: "#ffffff",
-                padding: "8px 16px",
-                borderRadius: "6px",
-                fontWeight: 700,
-                fontSize: "13px",
                 border: "none",
                 cursor: "pointer",
                 display: "inline-flex",
                 alignItems: "center",
                 gap: "6px",
-                boxShadow: "0 2px 4px rgba(245, 158, 11, 0.25)",
+                boxShadow: "0 1px 2px rgba(0, 0, 0, 0.05)",
               }}
               onClick={handleExportAllCsv}
             >
-              Imp / Exp ▾
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                <polyline points="7 10 12 15 17 10" />
+                <line x1="12" y1="15" x2="12" y2="3" />
+              </svg>
+              <span>Export</span>
             </button>
 
             {/* Bulk Actions Dropdown */}

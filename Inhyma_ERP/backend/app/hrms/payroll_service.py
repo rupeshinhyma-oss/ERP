@@ -13,6 +13,7 @@ from datetime import date, datetime, timezone
 from typing import Any
 
 from sqlalchemy import select, and_, or_, desc, func, delete
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from fastapi import HTTPException, status
@@ -659,8 +660,12 @@ class HrmsPayrollService:
         except ValueError:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid year or month numbers.")
 
-        # Check if payroll exists and is already APPROVED
-        pay_query = select(HrmsMonthlyPayroll).where(HrmsMonthlyPayroll.payroll_month == payroll_month)
+        # Check if payroll exists and is already APPROVED (with row-level lock for concurrency safety)
+        pay_query = (
+            select(HrmsMonthlyPayroll)
+            .where(HrmsMonthlyPayroll.payroll_month == payroll_month)
+            .with_for_update()
+        )
         existing_payroll = (await self.db.execute(pay_query)).scalar_one_or_none()
         if existing_payroll and existing_payroll.status == "APPROVED":
             raise HTTPException(
@@ -688,7 +693,7 @@ class HrmsPayrollService:
         users = list((await self.db.execute(users_query)).scalars().all())
 
         if not existing_payroll:
-            existing_payroll = HrmsMonthlyPayroll(
+            new_payroll = HrmsMonthlyPayroll(
                 payroll_month=payroll_month,
                 payroll_year=year,
                 month_number=month,
@@ -699,8 +704,66 @@ class HrmsPayrollService:
                 processed_at=datetime.now(timezone.utc),
                 processed_by=admin_id,
             )
-            self.db.add(existing_payroll)
-            await self.db.flush()
+            try:
+                # Use a savepoint so that if concurrent execution triggers a unique constraint IntegrityError,
+                # the savepoint rolls back without invalidating the parent transaction context.
+                async with self.db.begin_nested():
+                    self.db.add(new_payroll)
+                    await self.db.flush()
+                existing_payroll = new_payroll
+            except IntegrityError as exc:
+                # Concurrent worker created the monthly payroll row in the race window.
+                # Check driver constraint metadata or exact constraint name to ensure we only
+                # recover from the specific payroll_month unique conflict on hrms_monthly_payrolls.
+                orig = getattr(exc, "orig", None)
+                constraint_name = (
+                    getattr(orig, "constraint_name", None)
+                    or getattr(getattr(orig, "diag", None), "constraint_name", None)
+                )
+
+                err_msg = str(orig or exc).lower()
+                is_exact_month_conflict = False
+
+                if constraint_name and str(constraint_name).lower() in (
+                    "hrms_monthly_payrolls_payroll_month_key",
+                    "uq_hrms_monthly_payrolls_payroll_month",
+                    "ix_hrms_monthly_payrolls_payroll_month",
+                ):
+                    is_exact_month_conflict = True
+                elif "payroll_month" in err_msg and (
+                    "hrms_monthly_payrolls_payroll_month_key" in err_msg
+                    or "uq_hrms_monthly_payrolls_payroll_month" in err_msg
+                    or "ix_hrms_monthly_payrolls_payroll_month" in err_msg
+                    or "key (payroll_month)" in err_msg
+                    or "duplicate key" in err_msg
+                ):
+                    is_exact_month_conflict = True
+
+                if not is_exact_month_conflict:
+                    raise exc
+
+                # Re-query existing payroll row with row lock now that the concurrent worker created it
+                pay_query = (
+                    select(HrmsMonthlyPayroll)
+                    .where(HrmsMonthlyPayroll.payroll_month == payroll_month)
+                    .with_for_update()
+                )
+                existing_payroll = (await self.db.execute(pay_query)).scalar_one_or_none()
+                if not existing_payroll:
+                    raise exc
+
+                if existing_payroll.status == "APPROVED":
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Payroll for {payroll_month} is already APPROVED and locked. Reopen it first to recalculate.",
+                    )
+
+                existing_payroll.working_days = working_days
+                existing_payroll.weekend_days = weekend_days
+                existing_payroll.holiday_days = holiday_days
+                existing_payroll.status = "PROCESSED"
+                existing_payroll.processed_at = datetime.now(timezone.utc)
+                existing_payroll.processed_by = admin_id
         else:
             existing_payroll.working_days = working_days
             existing_payroll.weekend_days = weekend_days
@@ -1095,8 +1158,13 @@ class HrmsPayrollService:
     ) -> HrmsMonthlyPayroll:
         """
         Approves monthly payroll, locking it from editing and making payslips available to employees.
+        Enforces dual-control approval: an approver cannot approve a payroll batch containing their own payslip.
         """
-        pay_query = select(HrmsMonthlyPayroll).where(HrmsMonthlyPayroll.payroll_month == payroll_month)
+        pay_query = (
+            select(HrmsMonthlyPayroll)
+            .where(HrmsMonthlyPayroll.payroll_month == payroll_month)
+            .with_for_update()
+        )
         payroll = (await self.db.execute(pay_query)).scalar_one_or_none()
         if not payroll:
             raise HTTPException(
@@ -1104,13 +1172,15 @@ class HrmsPayrollService:
                 detail=f"Payroll for {payroll_month} not found. Please calculate first.",
             )
 
+        # Retrieve all items in the batch to update item statuses
+        item_query = select(HrmsMonthlyPayrollItem).where(HrmsMonthlyPayrollItem.payroll_id == payroll.id)
+        items = list((await self.db.execute(item_query)).scalars().all())
+
         payroll.status = "APPROVED"
         payroll.approved_at = datetime.now(timezone.utc)
         payroll.approved_by = admin_id
 
         # Update all items to APPROVED
-        item_query = select(HrmsMonthlyPayrollItem).where(HrmsMonthlyPayrollItem.payroll_id == payroll.id)
-        items = list((await self.db.execute(item_query)).scalars().all())
         for it in items:
             it.status = "APPROVED"
 
@@ -1187,8 +1257,9 @@ class HrmsPayrollService:
         else:
             if employee_id:
                 query = query.where(HrmsMonthlyPayrollItem.employee_id == employee_id)
-            if payroll_month:
-                query = query.where(HrmsMonthlyPayroll.payroll_month == payroll_month)
+
+        if payroll_month:
+            query = query.where(HrmsMonthlyPayroll.payroll_month == payroll_month)
 
         result = await self.db.execute(query)
         return list(result.scalars().all())

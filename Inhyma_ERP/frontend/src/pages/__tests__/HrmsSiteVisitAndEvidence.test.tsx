@@ -76,6 +76,44 @@ describe("Site Visit + Live Tracking + Attendance Regularization Tests", () => {
       full_name: "Admin User",
     };
 
+    const mockGeolocation = {
+      getCurrentPosition: vi.fn((success) => {
+        success({
+          coords: {
+            latitude: 19.0760,
+            longitude: 72.8777,
+            accuracy: 15,
+            altitude: null,
+            altitudeAccuracy: null,
+            heading: null,
+            speed: null,
+          },
+          timestamp: Date.now(),
+        });
+      }),
+      watchPosition: vi.fn((success) => {
+        success({
+          coords: {
+            latitude: 19.0760,
+            longitude: 72.8777,
+            accuracy: 15,
+            altitude: null,
+            altitudeAccuracy: null,
+            heading: null,
+            speed: null,
+          },
+          timestamp: Date.now(),
+        });
+        return 1;
+      }),
+      clearWatch: vi.fn(),
+    };
+    Object.defineProperty(global.navigator, "geolocation", {
+      value: mockGeolocation,
+      configurable: true,
+      writable: true,
+    });
+
     (apiModule.apiGet as any).mockImplementation((url: string) => {
       // 1. Evidence endpoint (matches both regularization evidence and site-visit evidence)
       if (url.includes("/evidence")) {
@@ -393,5 +431,148 @@ describe("Site Visit + Live Tracking + Attendance Regularization Tests", () => {
         })
       );
     });
+  });
+
+  it("6. GPS permission denial shows clear error and prevents check-in submission with synthetic coordinates", async () => {
+    mockCurrentUser = {
+      id: "emp-uuid-1",
+      username: "rahul",
+      role: "EMPLOYEE",
+      full_name: "Rahul Sharma",
+    };
+
+    // Mock permission denied (code: 1)
+    const mockGeolocation = {
+      getCurrentPosition: vi.fn((_success, error) => {
+        if (error) error({ code: 1, message: "User denied Geolocation" });
+      }),
+      watchPosition: vi.fn((_success, error) => {
+        if (error) error({ code: 1, message: "User denied Geolocation" });
+        return 1;
+      }),
+      clearWatch: vi.fn(),
+    };
+    Object.defineProperty(global.navigator, "geolocation", {
+      value: mockGeolocation,
+      configurable: true,
+      writable: true,
+    });
+
+    render(
+      <MemoryRouter>
+        <SiteVisitPage />
+      </MemoryRouter>
+    );
+
+    const checkInBtns = await screen.findAllByRole("button", { name: "Check In" });
+    fireEvent.click(checkInBtns[0]);
+
+    // Error message should be rendered in modal
+    await waitFor(() => {
+      expect(screen.getByText(/Location permission denied/i)).toBeDefined();
+    });
+
+    // Confirm button should be disabled
+    const confirmBtn = screen.getByRole("button", { name: /confirm check in/i });
+    expect((confirmBtn as HTMLButtonElement).disabled).toBe(true);
+
+    // Even if user clicks, no API request with Pune coordinates (18.5204, 73.8567) is sent
+    fireEvent.click(confirmBtn);
+    expect(apiModule.apiPost).not.toHaveBeenCalledWith(
+      "/hrms/site-visits/visit-1/check-in",
+      expect.anything()
+    );
+  });
+
+  it("7. GPS timeout shows clear error and prevents check-in submission", async () => {
+    mockCurrentUser = {
+      id: "emp-uuid-1",
+      username: "rahul",
+      role: "EMPLOYEE",
+      full_name: "Rahul Sharma",
+    };
+
+    // Mock timeout (code: 3)
+    const mockGeolocation = {
+      getCurrentPosition: vi.fn((_success, error) => {
+        if (error) error({ code: 3, message: "Timeout expired" });
+      }),
+      watchPosition: vi.fn((_success, error) => {
+        if (error) error({ code: 3, message: "Timeout expired" });
+        return 1;
+      }),
+      clearWatch: vi.fn(),
+    };
+    Object.defineProperty(global.navigator, "geolocation", {
+      value: mockGeolocation,
+      configurable: true,
+      writable: true,
+    });
+
+    render(
+      <MemoryRouter>
+        <SiteVisitPage />
+      </MemoryRouter>
+    );
+
+    const checkInBtns = await screen.findAllByRole("button", { name: "Check In" });
+    fireEvent.click(checkInBtns[0]);
+
+    await waitFor(() => {
+      expect(screen.getByText(/Location request timed out/i)).toBeDefined();
+    });
+
+    const confirmBtn = screen.getByRole("button", { name: /confirm check in/i });
+    expect((confirmBtn as HTMLButtonElement).disabled).toBe(true);
+    expect(apiModule.apiPost).not.toHaveBeenCalledWith(
+      "/hrms/site-visits/visit-1/check-in",
+      expect.anything()
+    );
+  });
+
+  it("8. GPS position unavailable shows clear error and prevents check-in submission", async () => {
+    mockCurrentUser = {
+      id: "emp-uuid-1",
+      username: "rahul",
+      role: "EMPLOYEE",
+      full_name: "Rahul Sharma",
+    };
+
+    // Mock position unavailable (code: 2)
+    const mockGeolocation = {
+      getCurrentPosition: vi.fn((_success, error) => {
+        if (error) error({ code: 2, message: "Position unavailable" });
+      }),
+      watchPosition: vi.fn((_success, error) => {
+        if (error) error({ code: 2, message: "Position unavailable" });
+        return 1;
+      }),
+      clearWatch: vi.fn(),
+    };
+    Object.defineProperty(global.navigator, "geolocation", {
+      value: mockGeolocation,
+      configurable: true,
+      writable: true,
+    });
+
+    render(
+      <MemoryRouter>
+        <SiteVisitPage />
+      </MemoryRouter>
+    );
+
+    const checkInBtns = await screen.findAllByRole("button", { name: "Check In" });
+    fireEvent.click(checkInBtns[0]);
+
+    await waitFor(() => {
+      expect(screen.getByText(/Location position is currently unavailable/i)).toBeDefined();
+    });
+
+    const confirmBtn = screen.getByRole("button", { name: /confirm check in/i });
+    expect((confirmBtn as HTMLButtonElement).disabled).toBe(true);
+    expect(apiModule.apiPost).not.toHaveBeenCalledWith(
+      "/hrms/site-visits/visit-1/check-in",
+      expect.anything()
+    );
   });
 });

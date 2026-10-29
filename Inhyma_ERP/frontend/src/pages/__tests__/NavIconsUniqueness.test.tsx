@@ -53,6 +53,7 @@ describe("Sidebar Navigation Icons Uniqueness", () => {
     expect(findItem("import-purchases")?.icon).toBe("ship");
     expect(findItem("reports-re-order")?.icon).toBe("reorder");
     expect(findItem("reports-stock-transactions")?.icon).toBe("refresh");
+    expect(findItem("reports-goods-expected")).toBeUndefined();
     expect(findItem("reports-deleted-orders")?.icon).toBe("fileX");
     expect(findItem("reports-general")?.icon).toBe("pieChart");
     expect(findItem("hrms-attendance")?.icon).toBe("userCheck");

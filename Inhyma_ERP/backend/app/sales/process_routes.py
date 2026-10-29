@@ -17,7 +17,7 @@ import uuid
 from datetime import date
 from typing import Any
 
-from fastapi import APIRouter, Depends, Query, Request, Response, status
+from fastapi import APIRouter, Depends, File, Form, Query, Request, Response, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import get_current_user
@@ -277,6 +277,175 @@ async def update_order_status(
 ) -> dict:
     req_id = getattr(request.state, "request_id", "-")
     order = await service.update_status(id, payload, current_user)
+    loaded = await service.repo.get_by_id(order.id)
+    if not loaded:
+        raise NotFoundException("Order could not be reloaded.")
+    return build_success_response(
+        data=SaleOrderDetailResponse.model_validate(loaded).model_dump(),
+        request_id=req_id,
+    )
+
+
+@router.post("/upload-po", summary="Upload Purchase Order (PO) document")
+async def upload_po_document(
+    request: Request,
+    file: UploadFile = File(...),
+    current_user: CurrentUser = Depends(get_current_user),
+) -> dict:
+    req_id = getattr(request.state, "request_id", "-")
+    from app.common.storage import save_uploaded_file
+
+    content = await file.read()
+    url, filename = await save_uploaded_file(
+        content=content,
+        original_filename=file.filename or "purchase_order.pdf",
+        bucket="inhyma-sales-docs",
+        local_subfolder="sales_po",
+        content_type=file.content_type,
+    )
+    return build_success_response(
+        data={"url": url, "filename": file.filename or filename},
+        request_id=req_id,
+    )
+
+
+@router.post("/upload-tally-bill", summary="Upload Tally Bill document")
+async def upload_tally_bill(
+    request: Request,
+    file: UploadFile = File(...),
+    current_user: CurrentUser = Depends(get_current_user),
+) -> dict:
+    req_id = getattr(request.state, "request_id", "-")
+    from app.common.storage import save_uploaded_file
+
+    content = await file.read()
+    url, filename = await save_uploaded_file(
+        content=content,
+        original_filename=file.filename or "tally_bill.pdf",
+        bucket="inhyma-sales-docs",
+        local_subfolder="sales_tally_bills",
+        content_type=file.content_type,
+    )
+    return build_success_response(
+        data={"url": url, "filename": file.filename or filename},
+        request_id=req_id,
+    )
+
+
+@router.post("/upload-eway-bill", summary="Upload E-Way Bill document")
+async def upload_eway_bill(
+    request: Request,
+    file: UploadFile = File(...),
+    current_user: CurrentUser = Depends(get_current_user),
+) -> dict:
+    req_id = getattr(request.state, "request_id", "-")
+    from app.common.storage import save_uploaded_file
+
+    content = await file.read()
+    url, filename = await save_uploaded_file(
+        content=content,
+        original_filename=file.filename or "eway_bill.pdf",
+        bucket="inhyma-sales-docs",
+        local_subfolder="sales_eway_bills",
+        content_type=file.content_type,
+    )
+    return build_success_response(
+        data={"url": url, "filename": file.filename or filename},
+        request_id=req_id,
+    )
+
+
+@router.post("/upload-lr", summary="Upload Lorry Receipt (LR) document")
+async def upload_lr_document(
+    request: Request,
+    file: UploadFile = File(...),
+    current_user: CurrentUser = Depends(get_current_user),
+) -> dict:
+    req_id = getattr(request.state, "request_id", "-")
+    from app.common.storage import save_uploaded_file
+
+    content = await file.read()
+    url, filename = await save_uploaded_file(
+        content=content,
+        original_filename=file.filename or "lr_document.pdf",
+        bucket="inhyma-sales-docs",
+        local_subfolder="sales_lr",
+        content_type=file.content_type,
+    )
+    return build_success_response(
+        data={"url": url, "filename": file.filename or filename},
+        request_id=req_id,
+    )
+
+
+@router.post("/upload-dispatch-media", summary="Upload multiple dispatch images/videos")
+async def upload_dispatch_media(
+    request: Request,
+    files: list[UploadFile] = File(...),
+    current_user: CurrentUser = Depends(get_current_user),
+) -> dict:
+    req_id = getattr(request.state, "request_id", "-")
+    from app.common.storage import guess_content_type, save_uploaded_file
+
+    uploaded_items: list[dict[str, Any]] = []
+    for f in files:
+        content = await f.read()
+        orig_name = f.filename or "dispatch_media.jpg"
+        url, stored_name = await save_uploaded_file(
+            content=content,
+            original_filename=orig_name,
+            bucket="inhyma-sales-docs",
+            local_subfolder="sales_dispatch_media",
+            content_type=f.content_type,
+        )
+        uploaded_items.append(
+            {
+                "url": url,
+                "filename": orig_name or stored_name,
+                "content_type": f.content_type or guess_content_type(orig_name),
+                "size": len(content),
+            }
+        )
+    return build_success_response(
+        data={"files": uploaded_items},
+        request_id=req_id,
+    )
+
+
+@router.post("/orders/{id}/status-with-po", summary="Update sale order status with optional PO file upload")
+async def update_order_status_with_po(
+    id: uuid.UUID,
+    request: Request,
+    status: str = Form("sales_confirmed"),
+    remarks: str | None = Form(None),
+    po_file: UploadFile | None = File(None),
+    service: SaleService = Depends(get_sale_service),
+    current_user: CurrentUser = Depends(get_current_user),
+) -> dict:
+    req_id = getattr(request.state, "request_id", "-")
+    po_url: str | None = None
+    po_name: str | None = None
+    if po_file and po_file.filename:
+        from app.common.storage import save_uploaded_file
+
+        content = await po_file.read()
+        if content:
+            po_url, _ = await save_uploaded_file(
+                content=content,
+                original_filename=po_file.filename,
+                bucket="inhyma-sales-docs",
+                local_subfolder="sales_po",
+                content_type=po_file.content_type,
+            )
+            po_name = po_file.filename
+
+    status_payload = SaleOrderStatusUpdate(
+        status=status,
+        remarks=remarks,
+        po_file_url=po_url,
+        po_file_name=po_name,
+    )
+    order = await service.update_status(id, status_payload, current_user)
     loaded = await service.repo.get_by_id(order.id)
     if not loaded:
         raise NotFoundException("Order could not be reloaded.")

@@ -109,7 +109,7 @@ vi.mock("@/lib/toast", () => ({
 // Mock auth
 vi.mock("@/lib/hooks", () => ({
   useAuth: () => ({
-    profile: { id: "user-1", username: "admin", email: "admin@inhyma.com" },
+    profile: { id: "user-approver", username: "admin", email: "admin@inhyma.com" },
     isSuperAdmin: true,
     hasPermission: () => true,
   }),

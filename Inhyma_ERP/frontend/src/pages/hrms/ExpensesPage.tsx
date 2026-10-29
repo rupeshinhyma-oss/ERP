@@ -109,8 +109,12 @@ export function ExpensesPage() {
 
   // RBAC: Check approval and admin permissions
   const canApprove = useMemo(() => {
+    const roleUpper = profile?.role?.toUpperCase();
     return Boolean(
       isSuperAdmin ||
+      roleUpper === "ADMIN" ||
+      roleUpper === "MANAGER" ||
+      roleUpper === "HR" ||
       hasPermission?.("*") ||
       hasPermission?.("hrms.manage") ||
       hasPermission?.("hrms.approve") ||
@@ -397,6 +401,10 @@ export function ExpensesPage() {
   // ---------------------------------------------------------------------------
 
   const handleApproveExpense = async (exp: ExpenseItem) => {
+    if (exp.employee_id === profile?.id) {
+      toast("Self-approval is not permitted.", "error");
+      return;
+    }
     if (!window.confirm(`Approve claim ${exp.expense_code} for ₹${exp.amount.toFixed(2)}?`)) return;
     setIsLoading(true);
     try {
@@ -449,6 +457,10 @@ export function ExpensesPage() {
   // ---------------------------------------------------------------------------
 
   const openReimburseModal = (exp: ExpenseItem) => {
+    if (exp.employee_id === profile?.id) {
+      toast("Self-reimbursement is not permitted.", "error");
+      return;
+    }
     setReimbursingExpense(exp);
     setReimbursementNotes("");
   };
@@ -967,8 +979,14 @@ export function ExpensesPage() {
                               <button
                                 type="button"
                                 className="hrms-btn-action"
-                                style={{ background: "#ecfdf5", color: "#065f46", borderColor: "#a7f3d0" }}
-                                title="Approve claim"
+                                style={{
+                                  background: exp.employee_id === profile?.id ? "#f3f4f6" : "#ecfdf5",
+                                  color: exp.employee_id === profile?.id ? "#9ca3af" : "#065f46",
+                                  borderColor: exp.employee_id === profile?.id ? "#e5e7eb" : "#a7f3d0",
+                                  cursor: exp.employee_id === profile?.id ? "not-allowed" : "pointer",
+                                }}
+                                disabled={exp.employee_id === profile?.id}
+                                title={exp.employee_id === profile?.id ? "Self-approval is not permitted" : "Approve claim"}
                                 onClick={() => handleApproveExpense(exp)}
                               >
                                 Approve
@@ -976,7 +994,12 @@ export function ExpensesPage() {
                               <button
                                 type="button"
                                 className="hrms-btn-action btn-danger"
-                                title="Reject claim"
+                                style={{
+                                  opacity: exp.employee_id === profile?.id ? 0.5 : 1,
+                                  cursor: exp.employee_id === profile?.id ? "not-allowed" : "pointer",
+                                }}
+                                disabled={exp.employee_id === profile?.id}
+                                title={exp.employee_id === profile?.id ? "Self-rejection is not permitted" : "Reject claim"}
                                 onClick={() => openRejectModal(exp)}
                               >
                                 Reject
@@ -989,8 +1012,14 @@ export function ExpensesPage() {
                             <button
                               type="button"
                               className="hrms-btn-action"
-                              style={{ background: "#eff6ff", color: "#1e40af", borderColor: "#bfdbfe" }}
-                              title="Mark Reimbursed"
+                              style={{
+                                background: exp.employee_id === profile?.id ? "#f3f4f6" : "#eff6ff",
+                                color: exp.employee_id === profile?.id ? "#9ca3af" : "#1e40af",
+                                borderColor: exp.employee_id === profile?.id ? "#e5e7eb" : "#bfdbfe",
+                                cursor: exp.employee_id === profile?.id ? "not-allowed" : "pointer",
+                              }}
+                              disabled={exp.employee_id === profile?.id}
+                              title={exp.employee_id === profile?.id ? "Self-reimbursement is not permitted" : "Mark Reimbursed"}
                               onClick={() => openReimburseModal(exp)}
                             >
                               Mark Reimbursed
@@ -1597,6 +1626,7 @@ export function ExpensesPage() {
                       type="button"
                       className="btn btn-outline"
                       style={{ color: "#dc2626" }}
+                      disabled={detailExpense.employee_id === profile?.id}
                       onClick={() => {
                         const exp = detailExpense;
                         setDetailExpense(null);
@@ -1608,6 +1638,8 @@ export function ExpensesPage() {
                     <button
                       type="button"
                       className="btn btn-primary"
+                      disabled={detailExpense.employee_id === profile?.id}
+                      title={detailExpense.employee_id === profile?.id ? "Self-approval is not permitted" : "Approve claim"}
                       onClick={() => handleApproveExpense(detailExpense)}
                     >
                       Approve Claim
@@ -1619,6 +1651,8 @@ export function ExpensesPage() {
                   <button
                     type="button"
                     className="btn btn-primary"
+                    disabled={detailExpense.employee_id === profile?.id}
+                    title={detailExpense.employee_id === profile?.id ? "Self-reimbursement is not permitted" : "Mark Reimbursed"}
                     onClick={() => {
                       const exp = detailExpense;
                       setDetailExpense(null);

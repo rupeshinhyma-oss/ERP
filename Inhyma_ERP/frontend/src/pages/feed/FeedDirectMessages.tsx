@@ -19,6 +19,10 @@ export function FeedDirectMessages({
   onUnreadCountChange,
 }: FeedDirectMessagesProps) {
   const showToast = useToast();
+  const showToastRef = useRef(showToast);
+  showToastRef.current = showToast;
+  const onUnreadCountChangeRef = useRef(onUnreadCountChange);
+  onUnreadCountChangeRef.current = onUnreadCountChange;
 
   // Conversations list state
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -65,13 +69,13 @@ export function FeedDirectMessages({
   const refreshUnreadCount = useCallback(async () => {
     try {
       const res = await feedApi.getUnreadDirectMessagesCount();
-      if (onUnreadCountChange && typeof res.data?.unread_count === "number") {
-        onUnreadCountChange(res.data.unread_count);
+      if (onUnreadCountChangeRef.current && typeof res.data?.unread_count === "number") {
+        onUnreadCountChangeRef.current(res.data.unread_count);
       }
     } catch {
       // Non-fatal background fetch
     }
-  }, [onUnreadCountChange]);
+  }, []);
 
   // Load conversations
   const loadConversations = useCallback(async (selectFirstIfNone = false) => {
@@ -85,11 +89,11 @@ export function FeedDirectMessages({
         setSelectedConvId(items[0].id);
       }
     } catch (err) {
-      showToast(errorMessage(err) || "Failed to load direct messages.", "error");
+      showToastRef.current(errorMessage(err) || "Failed to load direct messages.", "error");
     } finally {
       setLoadingConversations(false);
     }
-  }, [selectedConvId, showToast, refreshUnreadCount]);
+  }, [selectedConvId, refreshUnreadCount]);
 
   // Initial load
   useEffect(() => {
@@ -124,11 +128,11 @@ export function FeedDirectMessages({
       refreshUnreadCount();
       setTimeout(() => scrollToBottom(false), 50);
     } catch (err) {
-      showToast(errorMessage(err) || "Failed to load messages.", "error");
+      showToastRef.current(errorMessage(err) || "Failed to load messages.", "error");
     } finally {
       setLoadingMessages(false);
     }
-  }, [showToast, scrollToBottom, refreshUnreadCount]);
+  }, [scrollToBottom, refreshUnreadCount]);
 
   useEffect(() => {
     if (selectedConvId) {

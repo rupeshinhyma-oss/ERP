@@ -189,15 +189,15 @@ async def verify_approval_authorization(
 ) -> None:
     """
     Enforce Manager-First Approval with HR Fallback / Admin full control:
-    1. Caller cannot approve their own request (unless Admin override).
-    2. Admin/Super Admin has authorized full company-wide approval access.
+    1. Caller cannot approve their own request (including Administrators).
+    2. Admin/Super Admin has authorized full company-wide approval access for other employees.
     3. If employee's manager is assigned and available, ONLY that manager (or Admin) can approve.
        HR fallback cannot act while assigned manager is available.
     4. If manager is unassigned, inactive, or unavailable (on leave), authorized HR fallback can act.
        HR must hold both module permission (e.g. hrms.expenses, hrms.leave) and hrms.approve (or hrms.manage).
     5. Cross-department or unassigned managers cannot approve other employees' requests.
     """
-    if ctx.user_id == target_employee_id and not ctx.is_admin:
+    if ctx.user_id == target_employee_id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Self-approval is not permitted. You cannot {action_label} your own {module_name} request.",

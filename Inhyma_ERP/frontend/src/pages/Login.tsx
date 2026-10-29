@@ -4,7 +4,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Link, Navigate, useNavigate } from "react-router-dom";
-import { apiGet, apiPost } from "@/lib/api";
+import { ApiError, apiGet, apiPost, isAbortError, isNetworkError } from "@/lib/api";
 import { Auth } from "@/lib/auth";
 import { setBrandName, getCachedBrandLogo, setBrandLogo, resolveImageUrl, subscribeBrandLogo } from "@/lib/brand";
 import { controlPlaneUrl, createSsoHandoverUrlFromSession, processIncomingSsoHandover, routeForCentralSession } from "@/lib/ssoBridge";
@@ -79,6 +79,7 @@ export function LoginPage() {
   });
   const [brandLogo, setBrandLogoState] = useState<string | null>(() => getCachedBrandLogo());
   const identifierRef = useRef<HTMLInputElement>(null);
+  const noticeProtectedUntilRef = useRef<number>(0);
 
   useEffect(() => {
     return subscribeBrandLogo(setBrandLogoState);
@@ -125,6 +126,7 @@ export function LoginPage() {
       const notice = sessionStorage.getItem("ihm_login_notice");
       if (notice) {
         sessionStorage.removeItem("ihm_login_notice");
+        noticeProtectedUntilRef.current = Date.now() + 1000;
         setError(new Error(notice));
       }
     } catch {
@@ -168,6 +170,7 @@ export function LoginPage() {
       sessionStorage.removeItem("ihm_explicit_logout");
     }
 
+    noticeProtectedUntilRef.current = 0;
     setError(null);
     setSubmitting(true);
 
@@ -177,13 +180,32 @@ export function LoginPage() {
 
     try {
       // 1. Local sign-in on THIS ERP (works for anyone provisioned here).
+      //    Guard with a 15s timeout so a hung/restarting backend never freezes "Signing In..." forever.
       let tokens: TokenPair | null = null;
       let localError: unknown = null;
+      let backendUnreachable = false;
+      const loginController = typeof AbortController !== "undefined" ? new AbortController() : null;
+      const loginTimer = loginController ? setTimeout(() => loginController.abort(), 15_000) : null;
       try {
-        const { data } = await apiPost<TokenPair>("/auth/login", { identifier: typed, password });
+        const { data } = await apiPost<TokenPair>(
+          "/auth/login",
+          { identifier: typed, password },
+          loginController ? { signal: loginController.signal } : {},
+        );
         tokens = data;
       } catch (e) {
-        localError = e;
+        if (isAbortError(e)) {
+          backendUnreachable = true;
+          localError = new Error(
+            "Inhyma ERP backend service (port 8002) timed out. Please ensure the backend server is running and try again.",
+          );
+        } else {
+          backendUnreachable =
+            isNetworkError(e) || (e instanceof ApiError && e.status >= 500);
+          localError = e;
+        }
+      } finally {
+        if (loginTimer) clearTimeout(loginTimer);
       }
 
       // 2. Ask ERP_Main who this person is and which ERPs they may use.
@@ -221,7 +243,15 @@ export function LoginPage() {
         }
         // This ERP is allowed.  If the local password did not match (for example a password change that has
         // not reached this ERP yet) the verified central session is enough: sign in through the handover.
+        // However, if THIS ERP's backend itself was unreachable/timed out/5xx, redirecting into sso-handover on
+        // this same origin will fail on the same unreachable backend and bounce right back to /login.
         if (!tokens) {
+          if (backendUnreachable) {
+            throw (
+              localError ??
+              new Error("Inhyma ERP backend service (port 8002) is currently unavailable. Please try again.")
+            );
+          }
           window.location.href = createSsoHandoverUrlFromSession(`${window.location.origin}/dashboard`, central);
           return;
         }
@@ -313,7 +343,7 @@ export function LoginPage() {
                   value={identifier}
                   onChange={(e) => {
                     setIdentifier(e.target.value);
-                    if (error) setError(null);
+                    if (error && Date.now() >= noticeProtectedUntilRef.current) setError(null);
                   }}
                 />
               </div>
@@ -344,7 +374,7 @@ export function LoginPage() {
                     value={password}
                     onChange={(e) => {
                       setPassword(e.target.value);
-                      if (error) setError(null);
+                      if (error && Date.now() >= noticeProtectedUntilRef.current) setError(null);
                     }}
                   />
                   <button

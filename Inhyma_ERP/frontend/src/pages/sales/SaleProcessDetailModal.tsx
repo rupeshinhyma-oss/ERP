@@ -42,6 +42,15 @@ function formatCurrency(amount?: number): string {
   });
 }
 
+function resolveDetailFileHref(url?: string | null): string {
+  if (!url) return "#";
+  if (url.startsWith("/uploads/private/")) {
+    const token = typeof localStorage !== "undefined" ? localStorage.getItem("erp_access_token") || "" : "";
+    return token ? `${url}${url.includes("?") ? "&" : "?"}token=${encodeURIComponent(token)}` : url;
+  }
+  return url;
+}
+
 export function SaleProcessDetailModal({
   orderId,
   onClose,
@@ -145,12 +154,55 @@ export function SaleProcessDetailModal({
           size: "132 KB",
           type: "application/pdf",
         },
-        {
-          name: `Buyer_Purchase_Order_${(ord.company_name || ord.buyer_name || "Buyer").replace(/[\s/]/g, "_")}.pdf`,
-          size: "215 KB",
-          type: "application/pdf",
-        },
+        ord.po_file_url
+          ? {
+              name: ord.po_file_name || "Purchase_Order.pdf",
+              size: "Uploaded PO",
+              type: "application/pdf",
+              url: ord.po_file_url,
+            }
+          : {
+              name: `Buyer_Purchase_Order_${(ord.company_name || ord.buyer_name || "Buyer").replace(/[\s/]/g, "_")}.pdf`,
+              size: "215 KB",
+              type: "application/pdf",
+            },
       ];
+      if (ord.tally_bill_url) {
+        defaultFiles.push({
+          name: ord.tally_bill_name || "Tally_Bill.pdf",
+          size: "Tally Bill",
+          type: "application/pdf",
+          url: ord.tally_bill_url,
+        });
+      }
+      if (ord.eway_bill_url) {
+        defaultFiles.push({
+          name: ord.eway_bill_name || "EWay_Bill.pdf",
+          size: "E-Way Bill",
+          type: "application/pdf",
+          url: ord.eway_bill_url,
+        });
+      }
+      if (ord.lr_file_url) {
+        defaultFiles.push({
+          name: ord.lr_file_name || "LR_Document.pdf",
+          size: "LR File",
+          type: "application/pdf",
+          url: ord.lr_file_url,
+        });
+      }
+      if (Array.isArray(ord.dispatch_media)) {
+        for (const m of ord.dispatch_media) {
+          if (m && m.url) {
+            defaultFiles.push({
+              name: m.filename || "Dispatch_Media",
+              size: m.size ? `${(m.size / 1024).toFixed(1)} KB` : "Dispatch Media",
+              type: m.content_type || "image/jpeg",
+              url: m.url,
+            });
+          }
+        }
+      }
       if (ord.gatepass && ord.gatepass !== "Pending") {
         defaultFiles.push({
           name: `Gatepass_${ord.gatepass.replace(/[/]/g, "_")}.pdf`,
@@ -252,7 +304,11 @@ export function SaleProcessDetailModal({
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
-  const handleDownloadFile = (fileName: string) => {
+  const handleDownloadFile = (fileName: string, fileUrl?: string) => {
+    if (fileUrl) {
+      window.open(resolveDetailFileHref(fileUrl), "_blank", "noopener,noreferrer");
+      return;
+    }
     toast(`Downloading ${fileName}...`, "info");
     if (order && (fileName.includes("Warehouse_Copy") || fileName.includes("Warehouse"))) {
       generateSalesOrderPdf(order, { saveFile: true, hidePricing: true });
@@ -647,9 +703,53 @@ export function SaleProcessDetailModal({
                     <div>
                       Created: <strong>{createdDate}</strong>
                     </div>
+                    {order?.po_file_url && (
+                      <div style={{ color: "#15803d", marginTop: "4px" }}>
+                        PO File:{" "}
+                        <a
+                          href={resolveDetailFileHref(order.po_file_url)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          style={{ color: "#0061f2", textDecoration: "underline", fontWeight: 700 }}
+                        >
+                          📎 {order.po_file_name || "Download PO"}
+                        </a>
+                      </div>
+                    )}
                     {order?.invoice_no && (
                       <div style={{ color: "#059669", marginTop: "4px" }}>
                         Invoice: <strong>{order.invoice_no}</strong> ({order.invoice_date || "—"})
+                      </div>
+                    )}
+                    {order?.tally_bill_url && (
+                      <div style={{ color: "#15803d", marginTop: "4px" }}>
+                        Tally Bill:{" "}
+                        <a
+                          href={resolveDetailFileHref(order.tally_bill_url)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          style={{ color: "#0061f2", textDecoration: "underline", fontWeight: 700 }}
+                        >
+                          📎 {order.tally_bill_name || "Download Tally Bill"}
+                        </a>
+                      </div>
+                    )}
+                    {order?.eway_bill && order.eway_bill !== "No" && (
+                      <div style={{ color: "#475569", marginTop: "2px" }}>
+                        E-Way Bill: <strong>{order.eway_bill}</strong>
+                        {order.eway_bill_url && (
+                          <>
+                            {" "}
+                            <a
+                              href={resolveDetailFileHref(order.eway_bill_url)}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              style={{ color: "#0061f2", textDecoration: "underline", fontWeight: 700 }}
+                            >
+                              📎 {order.eway_bill_name || "Download E-Way Bill"}
+                            </a>
+                          </>
+                        )}
                       </div>
                     )}
                     {order?.gatepass_no && (
@@ -1054,7 +1154,7 @@ export function SaleProcessDetailModal({
                       <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
                         <button
                           type="button"
-                          onClick={() => handleDownloadFile(file.name)}
+                          onClick={() => handleDownloadFile(file.name, file.url)}
                           style={{
                             background: "none",
                             border: "none",

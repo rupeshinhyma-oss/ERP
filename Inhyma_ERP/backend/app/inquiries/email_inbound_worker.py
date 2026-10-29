@@ -237,7 +237,7 @@ class EmailInboundWorker:
             """Synchronous IMAP connection and recent email retrieval (both INBOX and Sent Mail)."""
             results = []
             try:
-                mail = imaplib.IMAP4_SSL(imap_host, imap_port)
+                mail = imaplib.IMAP4_SSL(imap_host, imap_port, timeout=15)
                 mail.login(smtp_user, smtp_pass)
 
                 folders_to_poll = ["INBOX"]

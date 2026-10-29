@@ -312,10 +312,24 @@ class SaleOrderCreate(BaseModel):
     container_no: str | None = None
     bl_no: str | None = None
     lr_no: str | None = None
+    lr_date: str | None = None
+    lr_file_url: str | None = None
+    lr_file_name: str | None = None
+    dispatch_media: list[dict[str, Any]] | None = None
+    timeline: list[dict[str, Any]] | None = None
     transporter_name: str | None = None
     port_of_loading: str | None = None
     port_of_discharge: str | None = None
     remarks: str | None = None
+    po_file_url: str | None = None
+    po_file_name: str | None = None
+    invoice_no: str | None = None
+    invoice_date: str | None = None
+    tally_bill_url: str | None = None
+    tally_bill_name: str | None = None
+    eway_bill: str | None = None
+    eway_bill_url: str | None = None
+    eway_bill_name: str | None = None
 
     items: list[SaleOrderItemCreate] = Field(..., min_length=1)
 
@@ -351,9 +365,16 @@ class SaleOrderUpdate(BaseModel):
     amount_inc_gst: float | None = None
     discount: float | None = None
 
-    # Invoicing & Gate Pass
+    # Invoicing, PO & Gate Pass
+    po_file_url: str | None = None
+    po_file_name: str | None = None
     invoice_no: str | None = None
     invoice_date: str | None = None
+    tally_bill_url: str | None = None
+    tally_bill_name: str | None = None
+    eway_bill: str | None = None
+    eway_bill_url: str | None = None
+    eway_bill_name: str | None = None
     gatepass: str | None = None
     gatepass_no: str | None = None
     gatepass_date: str | None = None
@@ -372,6 +393,10 @@ class SaleOrderUpdate(BaseModel):
     container_no: str | None = None
     bl_no: str | None = None
     lr_no: str | None = None
+    lr_date: str | None = None
+    lr_file_url: str | None = None
+    lr_file_name: str | None = None
+    dispatch_media: list[dict[str, Any]] | None = None
     transporter_name: str | None = None
     port_of_loading: str | None = None
     port_of_discharge: str | None = None
@@ -388,18 +413,31 @@ class SaleOrderUpdate(BaseModel):
 class SaleOrderStatusUpdate(BaseModel):
     status: str = Field(..., min_length=1, max_length=30)
     remarks: str | None = None
+    po_file_url: str | None = None
+    po_file_name: str | None = None
     invoice_no: str | None = None
     invoice_date: str | None = None
+    tally_bill_url: str | None = None
+    tally_bill_name: str | None = None
+    eway_bill: str | None = None
+    eway_bill_url: str | None = None
+    eway_bill_name: str | None = None
     third_party_invoice: str | None = None
     gatepass: str | None = None
     gatepass_no: str | None = None
     gatepass_date: str | None = None
     gatepass_handled_by: str | None = None
+    transport_name: str | None = None
     transporter_name: str | None = None
     transport_destination: str | None = None
     delivery_type: str | None = None
     delivery_charge: str | None = None
+    change_transport_info: bool | None = None
     lr_no: str | None = None
+    lr_date: str | None = None
+    lr_file_url: str | None = None
+    lr_file_name: str | None = None
+    dispatch_media: list[dict[str, Any]] | None = None
 
 
 class SaleOrderResponse(BaseModel):
@@ -430,8 +468,15 @@ class SaleOrderResponse(BaseModel):
     amount_inc_gst: float | None = None
     discount: float | None = None
 
+    po_file_url: str | None = None
+    po_file_name: str | None = None
     invoice_no: str | None = None
     invoice_date: str | None = None
+    tally_bill_url: str | None = None
+    tally_bill_name: str | None = None
+    eway_bill: str | None = None
+    eway_bill_url: str | None = None
+    eway_bill_name: str | None = None
     gatepass: str | None = None
     gatepass_no: str | None = None
     gatepass_date: str | None = None
@@ -460,6 +505,11 @@ class SaleOrderResponse(BaseModel):
     container_no: str | None = None
     bl_no: str | None = None
     lr_no: str | None = None
+    lr_date: str | None = None
+    lr_file_url: str | None = None
+    lr_file_name: str | None = None
+    dispatch_media: list[dict[str, Any]] | None = None
+    timeline: list[dict[str, Any]] | None = None
     transporter_name: str | None = None
     port_of_loading: str | None = None
     port_of_discharge: str | None = None

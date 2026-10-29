@@ -84,6 +84,28 @@ const SYNONYMS: Record<string, string[]> = {
   standard_price: ["price", "selling price", "unit price", "mrp"],
   minimum_order_quantity: ["moq", "min order qty", "min qty"],
   reorder_level: ["reorder point", "reorder qty"],
+  invoice_no: ["invoice number", "inv no", "bill no"],
+  invoice_date: ["invoice date", "bill date", "date"],
+  supplier_name: ["supplier", "vendor", "vendor name", "party name"],
+  warehouse: ["warehouse name", "location", "godown"],
+  unit_rate: ["rate", "unit price", "basic rate", "price"],
+  invoice_value_ex_gst: ["basic value", "basic amount", "amount ex gst", "taxable value"],
+  invoice_value_inc_gst: ["invoice total", "total value", "amount inc gst", "gross total"],
+  packing_forwarding: ["packing and forwarding", "p&f", "pf"],
+  transport: ["transport expense", "freight"],
+  offloading: ["offloading expense", "unloading"],
+  consignment_no: ["invoice consignment no", "inv con no", "consignment number", "consignment", "bl no"],
+  ordered_date: ["order date"],
+  etd_origin_date: ["etd", "etd date", "etd origin"],
+  eta_port_date: ["eta", "eta date", "eta port"],
+  expected_arrival_date: ["arrival date", "exp arrival date", "expected arrival"],
+  conversion_rate: ["con rate", "usd to inr", "exchange rate", "fx rate"],
+  customs_conversion_rate: ["customs rate", "custom con rate", "customs fx rate"],
+  unit_rate_usd: ["rate usd", "usd rate", "unit price usd", "fob rate"],
+  invoice_total_usd: ["inv total usd", "total usd", "purchase invoice total value usd"],
+  total_import_duty: ["import duty", "customs duty", "duty inr"],
+  shipping_line_charges: ["shipping charges", "liner charges"],
+  clearing_transport: ["cha transport", "clearing and transport"],
 };
 
 /**
@@ -244,6 +266,8 @@ function mergeSummaries(
 function labelForRow(rowData?: Record<string, unknown>): string | null {
   if (!rowData) return null;
   const candidates = [
+    "consignment_no",
+    "invoice_no",
     "company_name",
     "product_name",
     "name",
@@ -267,7 +291,7 @@ function labelForRow(rowData?: Record<string, unknown>): string | null {
  */
 function idLabelForRow(rowData?: Record<string, unknown> | null): string | null {
   if (!rowData) return null;
-  const candidates = ["product_code", "code", "employee_code"];
+  const candidates = ["consignment_no", "invoice_no", "product_code", "code", "employee_code"];
   for (const key of candidates) {
     if (rowData[key]) return String(rowData[key]);
   }
@@ -1478,10 +1502,113 @@ const ORGANIZATION_SAMPLES: Record<string, string> = {
   "Status (active/inactive)": "Active",
 };
 
+const LOCAL_PURCHASE_SAMPLES: Record<string, string> = {
+  "Invoice No.": "LP/26-27/0101",
+  invoice_no: "LP/26-27/0101",
+  "Invoice Date (DD-MM-YYYY)": "26-10-2026",
+  invoice_date: "26-10-2026",
+  Supplier: "Darsh Impex",
+  supplier_name: "Darsh Impex",
+  Warehouse: "Mumbai",
+  warehouse: "Mumbai",
+  "Product Name": "FR900 Continuous Band Sealer",
+  product_name: "FR900 Continuous Band Sealer",
+  "Product Code": "INH-00101",
+  product_code: "INH-00101",
+  Quantity: "2",
+  quantity: "2",
+  "Unit Rate (INR)": "25000",
+  unit_rate: "25000",
+  "Invoice Total Value (Basic Without GST)": "50000",
+  invoice_value_ex_gst: "50000",
+  "Invoice Total Value (Including GST)": "59000",
+  invoice_value_inc_gst: "59000",
+  "Packing & Forwarding": "0",
+  packing_forwarding: "0",
+  Transport: "1000",
+  transport: "1000",
+  Offloading: "0",
+  offloading: "0",
+  Remarks: "Local purchase stock inward",
+  remarks: "Local purchase stock inward",
+};
+
+function getImportPurchaseSamples(): Record<string, string> {
+  const fmt = (offsetDays: number) => {
+    const d = new Date();
+    d.setDate(d.getDate() + offsetDays);
+    const dd = String(d.getDate()).padStart(2, "0");
+    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    return `${dd}-${mm}-${d.getFullYear()}`;
+  };
+  const ordered = fmt(0);
+  const etd = fmt(7);
+  const eta = fmt(21);
+  const arrival = fmt(28);
+  return {
+    "Invoice / Consignment No.": "IMP-2026-001",
+    consignment_no: "IMP-2026-001",
+    Supplier: "Yinglima Packaging Machinery Co., Ltd.",
+    supplier_name: "Yinglima Packaging Machinery Co., Ltd.",
+    Warehouse: "Mumbai Ordered",
+    warehouse: "Mumbai Ordered",
+    "Ordered Date (DD-MM-YYYY)": ordered,
+    ordered_date: ordered,
+    "ETD Origin Date (DD-MM-YYYY)": etd,
+    etd_origin_date: etd,
+    "ETA Port Date (DD-MM-YYYY)": eta,
+    eta_port_date: eta,
+    "Expected Arrival Date (DD-MM-YYYY)": arrival,
+    expected_arrival_date: arrival,
+    "Invoice Date (DD-MM-YYYY)": ordered,
+    invoice_date: ordered,
+    "Conversion Rate (USD to INR)": "83.50",
+    conversion_rate: "83.50",
+    "Customs Conversion Rate (USD to INR)": "84.20",
+    customs_conversion_rate: "84.20",
+    "Product Name": "FR900 Continuous Band Sealer",
+    product_name: "FR900 Continuous Band Sealer",
+    "Product Code": "INH-00101",
+    product_code: "INH-00101",
+    Quantity: "10",
+    quantity: "10",
+    "Unit Rate (USD)": "60.00",
+    unit_rate_usd: "60.00",
+    "Purchase Invoice Total Value (USD)": "600.00",
+    invoice_total_usd: "600.00",
+    "Total CBM": "1.2852",
+    total_cbm: "1.2852",
+    "Total Import Duty (INR)": "5052.00",
+    total_import_duty: "5052.00",
+    Freight: "4000",
+    freight: "4000",
+    Insurance: "400",
+    insurance: "400",
+    "Stamp Duty": "100",
+    stamp_duty: "100",
+    "Shipping Line Charges": "1000",
+    shipping_line_charges: "1000",
+    "CFS Charges": "1500",
+    cfs_charges: "1500",
+    "Clearing & Transport": "2000",
+    clearing_transport: "2000",
+    Offloading: "500",
+    offloading: "500",
+    Miscellaneous: "0",
+    misc_charges: "0",
+    Remarks: "Import consignment sample",
+    remarks: "Import consignment sample",
+  };
+}
+
 export function downloadSampleCsv(entityName: string, headers: ImportHeader[]) {
   const ent = entityName.toLowerCase();
   let sampleMap: Record<string, string> = PRODUCT_SAMPLES;
-  if (ent.includes("buyer type") || ent === "buyertype") {
+  if (ent.includes("import purchase") || ent.includes("import_purchase")) {
+    sampleMap = getImportPurchaseSamples();
+  } else if (ent.includes("local purchase") || ent.includes("local_purchase")) {
+    sampleMap = LOCAL_PURCHASE_SAMPLES;
+  } else if (ent.includes("buyer type") || ent === "buyertype") {
     sampleMap = BUYER_TYPE_SAMPLES;
   } else if (ent.includes("supplier type") || ent === "suppliertype") {
     sampleMap = SUPPLIER_TYPE_SAMPLES;
@@ -1553,7 +1680,11 @@ export async function downloadSampleExcel(entityName: string, headers: ImportHea
   const XLSX = await import("xlsx");
   const ent = entityName.toLowerCase();
   let sampleMap: Record<string, string> = PRODUCT_SAMPLES;
-  if (ent.includes("buyer type") || ent === "buyertype") {
+  if (ent.includes("import purchase") || ent.includes("import_purchase")) {
+    sampleMap = getImportPurchaseSamples();
+  } else if (ent.includes("local purchase") || ent.includes("local_purchase")) {
+    sampleMap = LOCAL_PURCHASE_SAMPLES;
+  } else if (ent.includes("buyer type") || ent === "buyertype") {
     sampleMap = BUYER_TYPE_SAMPLES;
   } else if (ent.includes("supplier type") || ent === "suppliertype") {
     sampleMap = SUPPLIER_TYPE_SAMPLES;
@@ -1667,18 +1798,51 @@ export function ImpExpDropdown({
 
   if (!showImport && !showExport) return null;
 
-  const buttonLabel = showImport && showExport ? "Imp / Exp ▾" : showImport ? "Import ▾" : "Export ▾";
+  const buttonLabel = showImport && showExport ? "Imp / Exp" : showImport ? "Import" : "Export";
+
+  const sampleFileIcon = (
+    <span className="imp-exp-icon-badge imp-exp-icon-badge--sample" aria-hidden="true">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+        <polyline points="14 2 14 8 20 8" />
+        <line x1="16" y1="13" x2="8" y2="13" />
+        <line x1="16" y1="17" x2="8" y2="17" />
+      </svg>
+    </span>
+  );
+
+  const importIcon = (
+    <span className="imp-exp-icon-badge imp-exp-icon-badge--import" aria-hidden="true">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+        <polyline points="17 8 12 3 7 8" />
+        <line x1="12" y1="3" x2="12" y2="15" />
+      </svg>
+    </span>
+  );
+
+  const exportIcon = (
+    <span className="imp-exp-icon-badge imp-exp-icon-badge--export" aria-hidden="true">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+        <polyline points="7 10 12 15 17 10" />
+        <line x1="12" y1="15" x2="12" y2="3" />
+      </svg>
+    </span>
+  );
 
   return (
     <div ref={menuRef} style={{ position: "relative", display: "inline-block" }}>
       <button
         type="button"
         className="btn btn-imp-exp"
+        aria-haspopup="menu"
+        aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
         style={{
           background: "#f59e0b",
           color: "#ffffff",
-          padding: "8px 16px",
+          padding: "8px 14px",
           borderRadius: "6px",
           border: "none",
           fontWeight: 700,
@@ -1689,91 +1853,54 @@ export function ImpExpDropdown({
           gap: "6px",
         }}
       >
-        {buttonLabel}
+        <span>{buttonLabel}</span>
+        <svg
+          className="imp-exp-chevron"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
+        >
+          <polyline points="6 9 12 15 18 9" />
+        </svg>
       </button>
 
       {open && (
-        <div
-          style={{
-            position: "absolute",
-            top: "100%",
-            right: 0,
-            marginTop: "4px",
-            background: "#ffffff",
-            borderRadius: "6px",
-            boxShadow: "0 10px 25px rgba(0,0,0,0.15)",
-            border: "1px solid #e2e8f0",
-            zIndex: 1000,
-            minWidth: "160px",
-            overflow: "hidden",
-          }}
-        >
+        <div className="imp-exp-menu" role="menu">
           {showImport && (
             <button
               type="button"
+              role="menuitem"
+              className="imp-exp-menu-item"
               onClick={() => {
                 setOpen(false);
                 downloadSampleCsv(entityName, importHeaders);
               }}
-              style={{
-                width: "100%",
-                textAlign: "left",
-                padding: "10px 14px",
-                fontSize: "13.5px",
-                color: "#334155",
-                fontWeight: 600,
-                background: "none",
-                border: "none",
-                cursor: "pointer",
-                display: "flex",
-                alignItems: "center",
-                gap: "8px",
-              }}
             >
-              📄 SAMPLE FILE
+              {sampleFileIcon}
+              <span>SAMPLE FILE</span>
             </button>
           )}
           {showImport && onOpenImportPage ? (
             <button
               type="button"
+              role="menuitem"
+              className="imp-exp-menu-item"
               onClick={() => {
                 setOpen(false);
                 onOpenImportPage();
               }}
-              style={{
-                width: "100%",
-                textAlign: "left",
-                padding: "10px 14px",
-                fontSize: "13.5px",
-                color: "#334155",
-                fontWeight: 600,
-                background: "none",
-                border: "none",
-                borderTop: "1px solid #f1f5f9",
-                cursor: "pointer",
-                display: "flex",
-                alignItems: "center",
-                gap: "8px",
-              }}
             >
-              📥 IMPORT
+              {importIcon}
+              <span>IMPORT</span>
             </button>
           ) : showImport ? (
-            <label
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: "8px",
-                padding: "10px 14px",
-                fontSize: "13.5px",
-                color: "#334155",
-                fontWeight: 600,
-                cursor: "pointer",
-                margin: 0,
-                borderTop: "1px solid #f1f5f9",
-              }}
-            >
-              📥 IMPORT
+            <label role="menuitem" className="imp-exp-menu-item">
+              {importIcon}
+              <span>IMPORT</span>
               <input
                 ref={inputRef}
                 type="file"
@@ -1786,27 +1913,15 @@ export function ImpExpDropdown({
           {showExport && (
             <button
               type="button"
+              role="menuitem"
+              className="imp-exp-menu-item"
               onClick={() => {
                 setOpen(false);
                 onExportCsv();
               }}
-              style={{
-                width: "100%",
-                textAlign: "left",
-                padding: "10px 14px",
-                fontSize: "13.5px",
-                color: "#334155",
-                fontWeight: 600,
-                background: "none",
-                border: "none",
-                borderTop: showImport ? "1px solid #f1f5f9" : "none",
-                cursor: "pointer",
-                display: "flex",
-                alignItems: "center",
-                gap: "8px",
-              }}
             >
-              📤 EXPORT
+              {exportIcon}
+              <span>EXPORT</span>
             </button>
           )}
         </div>

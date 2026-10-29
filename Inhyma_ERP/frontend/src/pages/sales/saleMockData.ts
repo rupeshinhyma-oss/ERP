@@ -64,6 +64,7 @@ const TEST_SALE_ORDERS: SaleOrder[] = [
     payment_terms: "30 Days Credit",
     exp_dispatch_date: "21-09-2026",
     created_at: "21-09-2026 11:24 AM",
+    remarks: "Standard inspection before dispatch",
     total_amount: 271400.0,
     total_basic: 230000.0,
     total_tax: 41400.0,

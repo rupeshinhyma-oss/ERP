@@ -1472,7 +1472,7 @@ export function AppShell({ activeKey, children, pageClassName }: AppShellProps) 
     <div
       className={`app-shell ${sidebarCollapsed ? "sidebar-collapsed" : ""} ${pageClassName || ""}`.trim()}
     >
-      <Sidebar activeKey={activeKey} brandName={brandName} brandLogo={brandLogo} collapsed={sidebarCollapsed} onToggleSidebar={toggleSidebar} />
+      <Sidebar activeKey={navItem?.key || activeKey} brandName={brandName} brandLogo={brandLogo} collapsed={sidebarCollapsed} onToggleSidebar={toggleSidebar} />
       <div className="main-column">
         <Topbar />
         {children}

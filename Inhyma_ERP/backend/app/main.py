@@ -34,6 +34,32 @@ from app.core.exception_handlers import register_exception_handlers
 from app.core.logging import configure_logging, get_logger
 from app.database.engine import dispose_engine, get_engine
 
+
+def _disable_windows_console_quick_edit() -> None:
+    """Prevent accidental clicks inside a Windows terminal from freezing stdout and hanging Uvicorn."""
+    import sys
+
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+
+        kernel32 = ctypes.windll.kernel32
+        stdin_handle = kernel32.GetStdHandle(-10)  # STD_INPUT_HANDLE
+        if stdin_handle in (0, -1):
+            return
+        mode = ctypes.c_uint32()
+        if not kernel32.GetConsoleMode(stdin_handle, ctypes.byref(mode)):
+            return
+        enable_quick_edit = 0x0040
+        enable_extended_flags = 0x0080
+        new_mode = (mode.value & ~enable_quick_edit) | enable_extended_flags
+        kernel32.SetConsoleMode(stdin_handle, new_mode)
+    except Exception:
+        pass
+
+
+_disable_windows_console_quick_edit()
 install_dns_resilience()
 from app.integration import jobs as _integration_jobs  # noqa: F401 - import registers the dispatch_integration_event handler
 from app.integration import handlers as _integration_handlers  # noqa: F401 - import registers consumer handlers
@@ -89,96 +115,120 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     # Eagerly initialize the engine to fail fast on misconfiguration.
     engine = get_engine()
-    from sqlalchemy import text
-    from app.database.base import Base
-    from app.leads.models import Lead
-    from app.follow_ups.models import FollowUp
-    from app.hrms.models import (
-        HrmsLeavePlan,
-        HrmsLeavePlanType,
-        HrmsHoliday,
-        HrmsEmployeeLeaveBalance,
-        HrmsLeaveAdjustment,
-        HrmsLeaveRequest,
-        HrmsAsset,
-        HrmsAssetHistory,
-        HrmsAssetAssignment,
-        HrmsAssetMaintenance,
-        HrmsExpense,
-        HrmsSiteVisit,
-        HrmsLiveTrackingSession,
-        HrmsTrackingPoint,
-    )
-    async def _run_startup_schema():
+    async def _run_startup_schema() -> None:
+        from sqlalchemy import text
+        from app.database.base import Base
+        from app.leads.models import Lead
+        from app.follow_ups.models import FollowUp
+        from app.hrms.models import (
+            HrmsLeavePlan,
+            HrmsLeavePlanType,
+            HrmsHoliday,
+            HrmsEmployeeLeaveBalance,
+            HrmsLeaveAdjustment,
+            HrmsLeaveRequest,
+            HrmsAsset,
+            HrmsAssetHistory,
+            HrmsAssetAssignment,
+            HrmsAssetMaintenance,
+            HrmsExpense,
+            HrmsSiteVisit,
+            HrmsLiveTrackingSession,
+            HrmsTrackingPoint,
+        )
+        from app.users.models import User
+        from app.sales.models import DiscountPayment
+        from app.suppliers.models import Supplier, SupplierContact
+        from app.purchase.models import LocalPurchase, LocalPurchaseItem, ImportPurchase, ImportPurchaseItem
+        from app.feed.models import FeedConversation, FeedConversationParticipant, FeedDirectMessage
+
+        required_column_ddls = [
+            ("organizations", "logo_data", "ALTER TABLE organizations ADD COLUMN IF NOT EXISTS logo_data TEXT;"),
+            ("products", "organization_ids", "ALTER TABLE products ADD COLUMN IF NOT EXISTS organization_ids JSON;"),
+            ("hrms_leave_types", "carry_forward_allowed", "ALTER TABLE hrms_leave_types ADD COLUMN IF NOT EXISTS carry_forward_allowed BOOLEAN DEFAULT false;"),
+            ("hrms_leave_types", "description", "ALTER TABLE hrms_leave_types ADD COLUMN IF NOT EXISTS description TEXT;"),
+            ("hrms_leave_types", "accrual_amount", "ALTER TABLE hrms_leave_types ADD COLUMN IF NOT EXISTS accrual_amount FLOAT DEFAULT 1.0;"),
+            ("hrms_leave_types", "min_notice_days", "ALTER TABLE hrms_leave_types ADD COLUMN IF NOT EXISTS min_notice_days INTEGER DEFAULT 0;"),
+            ("hrms_leave_types", "allow_half_day", "ALTER TABLE hrms_leave_types ADD COLUMN IF NOT EXISTS allow_half_day BOOLEAN DEFAULT true;"),
+            ("hrms_leave_types", "allow_backdated", "ALTER TABLE hrms_leave_types ADD COLUMN IF NOT EXISTS allow_backdated BOOLEAN DEFAULT false;"),
+            ("hrms_leave_types", "require_attachment", "ALTER TABLE hrms_leave_types ADD COLUMN IF NOT EXISTS require_attachment BOOLEAN DEFAULT false;"),
+            ("hrms_leave_types", "attendance_based_accrual", "ALTER TABLE hrms_leave_types ADD COLUMN IF NOT EXISTS attendance_based_accrual BOOLEAN DEFAULT false;"),
+            ("hrms_leave_types", "attendance_based_condition", "ALTER TABLE hrms_leave_types ADD COLUMN IF NOT EXISTS attendance_based_condition VARCHAR(100) DEFAULT 'FULL_MONTH_PRESENT';"),
+            ("hrms_leave_types", "attendance_based_reward", "ALTER TABLE hrms_leave_types ADD COLUMN IF NOT EXISTS attendance_based_reward FLOAT DEFAULT 1.0;"),
+            ("hrms_leave_types", "attendance_based_departments", "ALTER TABLE hrms_leave_types ADD COLUMN IF NOT EXISTS attendance_based_departments VARCHAR(500) DEFAULT 'ALL';"),
+            ("hrms_leave_types", "min_attendance_percentage", "ALTER TABLE hrms_leave_types ADD COLUMN IF NOT EXISTS min_attendance_percentage FLOAT;"),
+            ("hrms_leave_types", "min_working_days", "ALTER TABLE hrms_leave_types ADD COLUMN IF NOT EXISTS min_working_days INTEGER;"),
+            ("hrms_holidays", "department_scope", "ALTER TABLE hrms_holidays ADD COLUMN IF NOT EXISTS department_scope VARCHAR(255) DEFAULT 'ALL';"),
+            ("hrms_expenses", "currency", "ALTER TABLE hrms_expenses ADD COLUMN IF NOT EXISTS currency VARCHAR(10) DEFAULT 'INR';"),
+            ("hrms_expenses", "reimbursed_at", "ALTER TABLE hrms_expenses ADD COLUMN IF NOT EXISTS reimbursed_at TIMESTAMP WITH TIME ZONE;"),
+            ("hrms_expenses", "reimbursed_by", "ALTER TABLE hrms_expenses ADD COLUMN IF NOT EXISTS reimbursed_by UUID REFERENCES users(id) ON DELETE SET NULL;"),
+            ("hrms_expenses", "reimbursement_notes", "ALTER TABLE hrms_expenses ADD COLUMN IF NOT EXISTS reimbursement_notes TEXT;"),
+            ("hrms_expenses", "receipt_filename", "ALTER TABLE hrms_expenses ADD COLUMN IF NOT EXISTS receipt_filename VARCHAR(255);"),
+            ("users", "has_login", "ALTER TABLE users ADD COLUMN IF NOT EXISTS has_login BOOLEAN DEFAULT false;"),
+        ]
+        startup_tables = [
+            User.__table__,
+            Lead.__table__,
+            FollowUp.__table__,
+            HrmsLeavePlan.__table__,
+            HrmsLeavePlanType.__table__,
+            HrmsHoliday.__table__,
+            HrmsEmployeeLeaveBalance.__table__,
+            HrmsLeaveAdjustment.__table__,
+            HrmsLeaveRequest.__table__,
+            HrmsAsset.__table__,
+            HrmsAssetHistory.__table__,
+            HrmsAssetAssignment.__table__,
+            HrmsAssetMaintenance.__table__,
+            HrmsExpense.__table__,
+            HrmsSiteVisit.__table__,
+            HrmsLiveTrackingSession.__table__,
+            HrmsTrackingPoint.__table__,
+            DiscountPayment.__table__,
+            Supplier.__table__,
+            SupplierContact.__table__,
+            LocalPurchase.__table__,
+            LocalPurchaseItem.__table__,
+            ImportPurchase.__table__,
+            ImportPurchaseItem.__table__,
+            FeedConversation.__table__,
+            FeedConversationParticipant.__table__,
+            FeedDirectMessage.__table__,
+        ]
+
+        # Read-only metadata check first so we NEVER acquire ACCESS EXCLUSIVE locks on `users` / `organizations`
+        # during normal boots or --reload restarts when columns and tables already exist.
+        async with engine.connect() as conn:
+            col_rows = (
+                await conn.execute(
+                    text(
+                        "SELECT table_name, column_name, data_type "
+                        "FROM information_schema.columns WHERE table_schema = 'public'"
+                    )
+                )
+            ).fetchall()
+            existing_cols = {(r[0], r[1]): (r[2] or "").lower() for r in col_rows}
+            existing_tables = {r[0] for r in col_rows}
+
+        pending_ddls = [
+            ddl
+            for tbl, col, ddl in required_column_ddls
+            if tbl in existing_tables and (tbl, col) not in existing_cols
+        ]
+        if ("organizations", "logo_url") in existing_cols and existing_cols[("organizations", "logo_url")] != "text":
+            pending_ddls.append("ALTER TABLE organizations ALTER COLUMN logo_url TYPE TEXT;")
+        missing_tables = [t for t in startup_tables if t.name not in existing_tables]
+
+        if pending_ddls or missing_tables:
             async with engine.begin() as conn:
-                await conn.execute(text("ALTER TABLE organizations ADD COLUMN IF NOT EXISTS logo_data TEXT;"))
-                await conn.execute(text("ALTER TABLE organizations ALTER COLUMN logo_url TYPE TEXT;"))
-                await conn.execute(text("ALTER TABLE products ADD COLUMN IF NOT EXISTS organization_ids JSON;"))
-                await conn.execute(text("ALTER TABLE hrms_leave_types ADD COLUMN IF NOT EXISTS carry_forward_allowed BOOLEAN DEFAULT false;"))
-                await conn.execute(text("ALTER TABLE hrms_leave_types ADD COLUMN IF NOT EXISTS description TEXT;"))
-                await conn.execute(text("ALTER TABLE hrms_leave_types ADD COLUMN IF NOT EXISTS accrual_amount FLOAT DEFAULT 1.0;"))
-                await conn.execute(text("ALTER TABLE hrms_leave_types ADD COLUMN IF NOT EXISTS min_notice_days INTEGER DEFAULT 0;"))
-                await conn.execute(text("ALTER TABLE hrms_leave_types ADD COLUMN IF NOT EXISTS allow_half_day BOOLEAN DEFAULT true;"))
-                await conn.execute(text("ALTER TABLE hrms_leave_types ADD COLUMN IF NOT EXISTS allow_backdated BOOLEAN DEFAULT false;"))
-                await conn.execute(text("ALTER TABLE hrms_leave_types ADD COLUMN IF NOT EXISTS require_attachment BOOLEAN DEFAULT false;"))
-                await conn.execute(text("ALTER TABLE hrms_leave_types ADD COLUMN IF NOT EXISTS attendance_based_accrual BOOLEAN DEFAULT false;"))
-                await conn.execute(text("ALTER TABLE hrms_leave_types ADD COLUMN IF NOT EXISTS attendance_based_condition VARCHAR(100) DEFAULT 'FULL_MONTH_PRESENT';"))
-                await conn.execute(text("ALTER TABLE hrms_leave_types ADD COLUMN IF NOT EXISTS attendance_based_reward FLOAT DEFAULT 1.0;"))
-                await conn.execute(text("ALTER TABLE hrms_leave_types ADD COLUMN IF NOT EXISTS attendance_based_departments VARCHAR(500) DEFAULT 'ALL';"))
-                await conn.execute(text("ALTER TABLE hrms_leave_types ADD COLUMN IF NOT EXISTS min_attendance_percentage FLOAT;"))
-                await conn.execute(text("ALTER TABLE hrms_leave_types ADD COLUMN IF NOT EXISTS min_working_days INTEGER;"))
-                await conn.execute(text("ALTER TABLE hrms_holidays ADD COLUMN IF NOT EXISTS department_scope VARCHAR(255) DEFAULT 'ALL';"))
-                await conn.execute(text("ALTER TABLE hrms_expenses ADD COLUMN IF NOT EXISTS currency VARCHAR(10) DEFAULT 'INR';"))
-                await conn.execute(text("ALTER TABLE hrms_expenses ADD COLUMN IF NOT EXISTS reimbursed_at TIMESTAMP WITH TIME ZONE;"))
-                await conn.execute(text("ALTER TABLE hrms_expenses ADD COLUMN IF NOT EXISTS reimbursed_by UUID REFERENCES users(id) ON DELETE SET NULL;"))
-                await conn.execute(text("ALTER TABLE hrms_expenses ADD COLUMN IF NOT EXISTS reimbursement_notes TEXT;"))
-                await conn.execute(text("ALTER TABLE hrms_expenses ADD COLUMN IF NOT EXISTS receipt_filename VARCHAR(255);"))
-                await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS has_login BOOLEAN DEFAULT false;"))
-                from app.users.models import User
-                from app.sales.models import DiscountPayment
-                from app.suppliers.models import Supplier, SupplierContact
-                from app.purchase.models import LocalPurchase, LocalPurchaseItem, ImportPurchase, ImportPurchaseItem
-                await conn.run_sync(
-                    Base.metadata.create_all,
-                    tables=[
-                        User.__table__,
-                        Lead.__table__,
-                        FollowUp.__table__,
-                        HrmsLeavePlan.__table__,
-                        HrmsLeavePlanType.__table__,
-                        HrmsHoliday.__table__,
-                        HrmsEmployeeLeaveBalance.__table__,
-                        HrmsLeaveAdjustment.__table__,
-                        HrmsLeaveRequest.__table__,
-                        HrmsAsset.__table__,
-                        HrmsAssetHistory.__table__,
-                        HrmsAssetAssignment.__table__,
-                        HrmsAssetMaintenance.__table__,
-                        HrmsExpense.__table__,
-                        HrmsSiteVisit.__table__,
-                        HrmsLiveTrackingSession.__table__,
-                        HrmsTrackingPoint.__table__,
-                        DiscountPayment.__table__,
-                        Supplier.__table__,
-                        SupplierContact.__table__,
-                        LocalPurchase.__table__,
-                        LocalPurchaseItem.__table__,
-                        ImportPurchase.__table__,
-                        ImportPurchaseItem.__table__,
-                    ],
-                )
-                from app.feed.models import FeedConversation, FeedConversationParticipant, FeedDirectMessage
-                await conn.run_sync(
-                    Base.metadata.create_all,
-                    tables=[
-                        FeedConversation.__table__,
-                        FeedConversationParticipant.__table__,
-                        FeedDirectMessage.__table__,
-                    ],
-                )
+                await conn.execute(text("SET LOCAL lock_timeout = '5s';"))
+                for ddl in pending_ddls:
+                    await conn.execute(text(ddl))
+                if missing_tables:
+                    await conn.run_sync(Base.metadata.create_all, tables=missing_tables)
 
     try:
-        await asyncio.wait_for(_run_startup_schema(), timeout=4.0)
+        await asyncio.wait_for(_run_startup_schema(), timeout=8.0)
     except Exception as e:
         logger.warning(f"Startup schema initialization notice: {e}")
 
@@ -323,6 +373,8 @@ def create_application() -> FastAPI:
     (uploads_dir / "suppliers").mkdir(exist_ok=True)
     (uploads_dir / "private").mkdir(exist_ok=True)
     (uploads_dir / "private" / "quotations").mkdir(parents=True, exist_ok=True)
+    (uploads_dir / "private" / "sales_po").mkdir(parents=True, exist_ok=True)
+    (uploads_dir / "private" / "sales_tally_bills").mkdir(parents=True, exist_ok=True)
 
     @app.get("/uploads/quotations/{filename}", summary="Download quotation attachment (authenticated)")
     async def download_quotation_attachment(

@@ -18,8 +18,9 @@ vi.mock("@/lib/feedApi", () => ({
   },
 }));
 
+const mockShowToast = vi.fn();
 vi.mock("@/lib/toast", () => ({
-  useToast: () => vi.fn(),
+  useToast: () => mockShowToast,
 }));
 
 afterEach(() => {
@@ -102,8 +103,8 @@ describe("FeedDirectMessages Component", () => {
     render(<FeedDirectMessages currentUserId="user-1" />);
 
     await waitFor(() => {
-      expect(screen.getByText("Bob Colleague")).toBeDefined();
-      expect(screen.getByText("Sales")).toBeDefined();
+      expect(screen.getAllByText("Bob Colleague").length).toBeGreaterThanOrEqual(1);
+      expect(screen.getAllByText("Sales").length).toBeGreaterThanOrEqual(1);
       expect(screen.getByText("2")).toBeDefined(); // unread badge
     });
   });
@@ -112,7 +113,7 @@ describe("FeedDirectMessages Component", () => {
     render(<FeedDirectMessages currentUserId="user-1" />);
 
     await waitFor(() => {
-      expect(screen.getByText("Hey, do you have a minute?")).toBeDefined();
+      expect(screen.getAllByText("Hey, do you have a minute?").length).toBeGreaterThanOrEqual(1);
       expect(screen.getByText("Yes, I am available now.")).toBeDefined();
     });
 

@@ -33,11 +33,82 @@ import type { PaginationMeta } from "@/types";
 import { SortHeader } from "@/components/SortHeader";
 import { DatePicker } from "@/components/DatePicker";
 import { DateRangePicker } from "@/components/DateRangePicker";
-import { apiGet, apiPatch } from "@/lib/api";
+import { apiGet, apiPatch, errorMessage } from "@/lib/api";
+import { Auth } from "@/lib/auth";
 import { useToast } from "@/lib/toast";
 import { getCachedBrandName } from "@/lib/brand";
 
+export interface DiscountPaymentEntry {
+  id: string;
+  date: string;
+  title: string;
+  amount: number;
+  adjusted_by: string;
+}
+
+export function getTodayDdMmYyyy(): string {
+  const now = new Date();
+  const dd = String(now.getDate()).padStart(2, "0");
+  const mm = String(now.getMonth() + 1).padStart(2, "0");
+  const yyyy = now.getFullYear();
+  return `${dd}-${mm}-${yyyy}`;
+}
+
+function extractOrderShortNo(orderNo?: string | null): string {
+  const s = (orderNo || "").trim();
+  if (s.includes("/")) {
+    const tail = s.split("/").pop()?.trim();
+    if (tail) return tail;
+  }
+  return s || "0001";
+}
+
+function getCurrentUserDisplayName(): string {
+  try {
+    const profile = Auth.getProfile();
+    if (profile) {
+      const p = profile as unknown as Record<string, unknown>;
+      const disp = typeof p.display_name === "string" ? p.display_name.trim() : "";
+      if (disp) return disp;
+      const full = [p.first_name, p.last_name]
+        .filter((x): x is string => typeof x === "string" && x.trim().length > 0)
+        .map((x) => x.trim())
+        .join(" ");
+      if (full) return full;
+      const uname = typeof p.username === "string" ? p.username.trim() : "";
+      if (uname) return uname;
+    }
+  } catch {
+    // Ignore storage errors
+  }
+  return "Admin";
+}
+
+function resolveDiscountFileHref(url?: string | null): string {
+  if (!url) return "#";
+  if (url.startsWith("/uploads/private/")) {
+    const token = typeof localStorage !== "undefined" ? localStorage.getItem("erp_access_token") : null;
+    return token ? `${url}${url.includes("?") ? "&" : "?"}token=${encodeURIComponent(token)}` : url;
+  }
+  return url;
+}
+
+function getDiscountStatusBadgeStyle(statusLabel: string): { bg: string; color: string; border: string } {
+  const key = (statusLabel || "").trim().toLowerCase();
+  if (key === "cancelled" || key === "gatepass cancelled") {
+    return { bg: "#fee2e2", color: "#b91c1c", border: "#fecaca" };
+  }
+  if (key === "sales confirmed") {
+    return { bg: "#dbeafe", color: "#1d4ed8", border: "#bfdbfe" };
+  }
+  if (key === "pending" || key === "admin approved") {
+    return { bg: "#fef3c7", color: "#b45309", border: "#fde68a" };
+  }
+  return { bg: "#dcfce7", color: "#15803d", border: "#bbf7d0" };
+}
+
 export interface DiscountOrderRecord {
+  order_id?: string;
   id: string;
   order_no: string;
   order_date: string;
@@ -81,9 +152,12 @@ export interface DiscountOrderRecord {
   delivery_charge?: string;
   lr_file_name?: string;
 
-  // Sale Order Detail attributes for List Payments modal
+  lr_file_url?: string | null;
+
+  // Sale Order Detail & multi-installment ledger for List Payments modal
   invoice_id?: string;
   created_at?: string;
+  payments?: DiscountPaymentEntry[];
 }
 
 export function formatIndianCurrency(amount: number | null | undefined): string {
@@ -244,6 +318,24 @@ export const INITIAL_DISCOUNT_ORDERS: DiscountOrderRecord[] = [
     business_categories: "Manufacturer",
     machines_currently_buying_from: "Global",
     products_interested_to_buy_from_us: "Vacuum Packing",
+    invoice_id: "3563",
+    created_at: "29-07-2026 05:04 PM",
+    payments: [
+      {
+        id: "pay-0560-1",
+        date: "12-08-2026",
+        title: "GPAY 20000 /- Inhyma MP",
+        amount: 20000.0,
+        adjusted_by: "Archana Bhure",
+      },
+      {
+        id: "pay-0560-2",
+        date: "13-08-2026",
+        title: "34000/- Recvd Inhyma Gujarat Account Dhairya Shaha",
+        amount: 34000.0,
+        adjusted_by: "Archana Bhure",
+      },
+    ],
   },
   {
     id: "so-0038",
@@ -315,6 +407,17 @@ export const INITIAL_DISCOUNT_ORDERS: DiscountOrderRecord[] = [
     business_categories: "Manufacturer",
     machines_currently_buying_from: "PackTech",
     products_interested_to_buy_from_us: "Coding Machine",
+    invoice_id: "3500",
+    created_at: "25-08-2026 10:15 AM",
+    payments: [
+      {
+        id: "pay-3500-1",
+        date: "26-08-2026",
+        title: "Full discount credited upon delivery confirmation",
+        amount: 15000.0,
+        adjusted_by: "Archana Bhure",
+      },
+    ],
   },
   {
     id: "so-3420",
@@ -350,6 +453,17 @@ export const INITIAL_DISCOUNT_ORDERS: DiscountOrderRecord[] = [
     business_categories: "Manufacturer",
     machines_currently_buying_from: "Techno",
     products_interested_to_buy_from_us: "Continuous Band Sealer",
+    invoice_id: "3420",
+    created_at: "18-08-2026 02:40 PM",
+    payments: [
+      {
+        id: "pay-3420-1",
+        date: "19-08-2026",
+        title: "Discount settled through direct ledger credit",
+        amount: 22500.0,
+        adjusted_by: "Archana Bhure",
+      },
+    ],
   },
 ];
 
@@ -374,26 +488,6 @@ const DiscountPaymentsSkeletonRows: React.FC<{ count?: number }> = ({ count = 8 
   </>
 );
 
-const DiscountClientSummarySkeletonRows: React.FC<{ count?: number }> = ({ count = 8 }) => (
-  <>
-    {Array.from({ length: count }).map((_, index) => (
-      <tr key={`disc-client-skeleton-${index}`} className="table-skeleton-row">
-        <td style={{ padding: "12px" }}><div className="skeleton-line" style={{ width: 24 }} /></td>
-        <td style={{ padding: "12px" }}><div className="skeleton-line" style={{ width: "75%" }} /></td>
-        <td style={{ padding: "12px" }}><div className="skeleton-line" style={{ width: "55%" }} /></td>
-        <td style={{ padding: "12px", textAlign: "center" }}><div className="skeleton-line" style={{ width: 30, margin: "0 auto" }} /></td>
-        <td style={{ padding: "12px" }}><div className="skeleton-line" style={{ width: "60%", marginLeft: "auto" }} /></td>
-        <td style={{ padding: "12px" }}><div className="skeleton-line" style={{ width: "60%", marginLeft: "auto" }} /></td>
-        <td style={{ padding: "12px" }}><div className="skeleton-line" style={{ width: "60%", marginLeft: "auto" }} /></td>
-        <td style={{ padding: "12px", textAlign: "center" }}><div className="skeleton-badge" style={{ width: 80, margin: "0 auto" }} /></td>
-        <td style={{ padding: "12px", textAlign: "center" }}>
-          <div className="skeleton-box" style={{ width: 80, height: 26, borderRadius: 4, margin: "0 auto" }} />
-        </td>
-      </tr>
-    ))}
-  </>
-);
-
 export interface DiscountPaymentsPageProps {
   initialFilterOpen?: boolean;
   initialLoading?: boolean;
@@ -409,7 +503,7 @@ export function DiscountPaymentsPage({
   const isTestMode = import.meta.env.MODE === "test";
   const [orders, setOrders] = useState<DiscountOrderRecord[]>(isTestMode ? INITIAL_DISCOUNT_ORDERS : []);
   const [loading, setLoading] = useState<boolean>(initialLoading !== undefined ? initialLoading : !isTestMode);
-  const [activeTab, setActiveTab] = useState<"all" | "pending" | "completed" | "client_summary">("pending");
+  const [activeTab, setActiveTab] = useState<"all" | "pending" | "completed">("pending");
   const [search, setSearch] = useState("");
   const [perPage, setPerPage] = useState<number>(50);
   const [currentPage, setCurrentPage] = useState<number>(1);
@@ -435,8 +529,10 @@ export function DiscountPaymentsPage({
   const [selectedCompanyOrder, setSelectedCompanyOrder] = useState<DiscountOrderRecord | null>(null);
   const [selectedGatepassOrder, setSelectedGatepassOrder] = useState<DiscountOrderRecord | null>(null);
   const [settleAmount, setSettleAmount] = useState<string>("");
-  const [settleDate, setSettleDate] = useState<string>("22-09-2026");
+  const [settleDate, setSettleDate] = useState<string>(() => getTodayDdMmYyyy());
   const [settleRemarks, setSettleRemarks] = useState<string>("");
+  const [settleError, setSettleError] = useState<string>("");
+  const [submittingSettle, setSubmittingSettle] = useState<boolean>(false);
   const [openActionId, setOpenActionId] = useState<string | null>(null);
   const [actionMenuPos, setActionMenuPos] = useState<{
     top?: number;
@@ -697,125 +793,181 @@ export function DiscountPaymentsPage({
   }, [sortedOrders, currentPage, perPage]);
 
 
-  // Top KPI Metrics
+  const warehouseOptions = useMemo(() => {
+    const base = ["Mumbai", "Ahmedabad", "Indore", "Mumbai Transit"];
+    const seen = new Set(base.map((w) => w.toLowerCase()));
+    orders.forEach((o) => {
+      const w = (o.warehouse || "").trim();
+      if (w && !seen.has(w.toLowerCase())) {
+        seen.add(w.toLowerCase());
+        base.push(w);
+      }
+    });
+    return base;
+  }, [orders]);
+
+  const salesPersonOptions = useMemo(() => {
+    const base = [
+      "Abhishek Patel",
+      "Dhairya Shah",
+      "Bhavin Suthar",
+      "Deepika Samel",
+      "Sunita Pawar",
+      "Gayatri Pandey",
+      "Rupesh Malia",
+    ];
+    const seen = new Set(base.map((s) => s.toLowerCase()));
+    orders.forEach((o) => {
+      const sp = (o.sales_person || "").trim();
+      if (sp && !seen.has(sp.toLowerCase())) {
+        seen.add(sp.toLowerCase());
+        base.push(sp);
+      }
+    });
+    return base;
+  }, [orders]);
+
+  // Top KPI Metrics (reactively updates when adjustments are submitted)
   const metrics = useMemo(() => {
+    const sumTotal = orders.reduce((sum, o) => sum + (o.total_discount || 0), 0);
+    const sumPaid = orders.reduce((sum, o) => sum + (o.paid_discount || 0), 0);
+    const sumDue = orders.reduce((sum, o) => sum + (o.due_discount || 0), 0);
     if (isTestMode) {
+      const seedTotal = INITIAL_DISCOUNT_ORDERS.reduce((s, o) => s + o.total_discount, 0);
+      const seedPaid = INITIAL_DISCOUNT_ORDERS.reduce((s, o) => s + o.paid_discount, 0);
       return {
-        total_discount: 806895.0,
-        paid: 765225.0,
-        due: 41670.0,
+        total_discount: 806895.0 - seedTotal + sumTotal,
+        paid: 765225.0 - seedPaid + sumPaid,
+        due: sumDue,
       };
     }
-    const total = orders.reduce((sum, o) => sum + (o.total_discount || 0), 0);
-    const paid = orders.reduce((sum, o) => sum + (o.paid_discount || 0), 0);
-    const due = orders.reduce((sum, o) => sum + (o.due_discount || 0), 0);
     return {
-      total_discount: total,
-      paid: paid,
-      due: due,
+      total_discount: sumTotal,
+      paid: sumPaid,
+      due: sumDue,
     };
   }, [orders, isTestMode]);
 
   // Counts for tabs
-  const allCount = useMemo(() => (isTestMode ? 26 : orders.length), [orders, isTestMode]);
   const pendingCount = useMemo(() => orders.filter((o) => !o.settled).length, [orders]);
-  const completedCount = useMemo(
-    () => (isTestMode ? 21 : orders.filter((o) => o.settled).length),
-    [orders, isTestMode]
+  const completedCount = useMemo(() => {
+    const actualSettled = orders.filter((o) => o.settled).length;
+    if (isTestMode) {
+      const seedSettled = INITIAL_DISCOUNT_ORDERS.filter((o) => o.settled).length;
+      return 21 - seedSettled + actualSettled;
+    }
+    return actualSettled;
+  }, [orders, isTestMode]);
+  const allCount = useMemo(
+    () => (isTestMode ? pendingCount + completedCount : orders.length),
+    [orders.length, pendingCount, completedCount, isTestMode]
   );
 
-  // Client Monitoring Report aggregation (Cash discount / under-invoice per client)
-  const clientSummaries = useMemo(() => {
-    const map = new Map<string, {
-      company_name: string;
-      gst_no?: string;
-      city?: string;
-      state?: string;
-      orders_count: number;
-      total_discount: number;
-      paid_discount: number;
-      due_discount: number;
-      all_settled: boolean;
-      sample_order: DiscountOrderRecord;
-    }>();
+  const resolveOrderPayments = (order: DiscountOrderRecord): DiscountPaymentEntry[] => {
+    if (Array.isArray(order.payments) && order.payments.length > 0) {
+      return order.payments;
+    }
+    if ((order.paid_discount || 0) > 0.009) {
+      return [
+        {
+          id: `${order.id}-legacy-1`,
+          date: (order.status_updated_at || order.order_date || "").split(" ")[0] || getTodayDdMmYyyy(),
+          title: "Discount Adjustment",
+          amount: order.paid_discount,
+          adjusted_by: order.sales_person || "Admin",
+        },
+      ];
+    }
+    return [];
+  };
 
-    orders.forEach((o) => {
-      const key = (o.company_name || "Unknown").trim();
-      const existing = map.get(key);
-      if (!existing) {
-        map.set(key, {
-          company_name: key,
-          gst_no: o.gst_no,
-          city: o.city,
-          state: o.state,
-          orders_count: 1,
-          total_discount: o.total_discount || 0,
-          paid_discount: o.paid_discount || 0,
-          due_discount: o.due_discount || 0,
-          all_settled: !!o.settled,
-          sample_order: o,
-        });
-      } else {
-        existing.orders_count += 1;
-        existing.total_discount += o.total_discount || 0;
-        existing.paid_discount += o.paid_discount || 0;
-        existing.due_discount += o.due_discount || 0;
-        if (!o.settled) existing.all_settled = false;
-        if (!existing.gst_no && o.gst_no) existing.gst_no = o.gst_no;
-        if (!existing.city && o.city) existing.city = o.city;
-        if (!existing.state && o.state) existing.state = o.state;
-      }
-    });
-
-    const list = Array.from(map.values()).sort((a, b) => b.total_discount - a.total_discount);
-    if (!search.trim()) return list;
-    const q = search.toLowerCase();
-    return list.filter(
-      (c) =>
-        c.company_name.toLowerCase().includes(q) ||
-        (c.gst_no && c.gst_no.toLowerCase().includes(q)) ||
-        (c.city && c.city.toLowerCase().includes(q))
-    );
-  }, [orders, search]);
-
-  // Handle Record Settlement
+  // Handle Record Settlement / Discount Adjustment
   const handleConfirmSettle = async () => {
-    if (!settleOrder) return;
-    const parsedAmt = parseFloat(settleAmount);
-    const amt = isNaN(parsedAmt) || parsedAmt <= 0 ? settleOrder.due_discount : Math.min(parsedAmt, settleOrder.due_discount);
-    const remainingDue = Math.max(0, settleOrder.due_discount - amt);
-
-    setOrders((prev) =>
-      prev.map((it) => {
-        if (it.id === settleOrder.id) {
-          return {
-            ...it,
-            paid_discount: it.paid_discount + amt,
-            due_discount: remainingDue,
-            settled: remainingDue === 0,
-            remark: settleRemarks ? `${it.remark ? it.remark + " | " : ""}${settleRemarks}` : it.remark,
-          };
-        }
-        return it;
-      })
-    );
-
-    try {
-      await apiPatch(`/sales/discount-payments/${settleOrder.id}`, {
-        paid_discount: settleOrder.paid_discount + amt,
-        due_discount: remainingDue,
-        settled: remainingDue === 0,
-        settle_date: settleDate,
-        settle_remarks: settleRemarks,
-      });
-    } catch {
-      // Local fallback
+    if (!settleOrder || submittingSettle) return;
+    const cleanDate = settleDate.trim();
+    if (!cleanDate) {
+      const msg = "Date is required.";
+      setSettleError(msg);
+      toast(msg, "error");
+      return;
+    }
+    const rawAmtStr = settleAmount.trim();
+    const parsedAmt = Number(rawAmtStr);
+    if (!rawAmtStr || Number.isNaN(parsedAmt) || parsedAmt <= 0) {
+      const msg = "Please enter an adjustment amount greater than 0.";
+      setSettleError(msg);
+      toast(msg, "error");
+      return;
+    }
+    const maxDue = Math.round((settleOrder.due_discount || 0) * 100) / 100;
+    if (parsedAmt > maxDue + 0.009) {
+      const msg = `Amount cannot exceed remaining due (${formatIndianCurrency(maxDue)}).`;
+      setSettleError(msg);
+      toast(msg, "error");
+      return;
     }
 
-    toast(`Settlement of ₹ ${amt.toLocaleString("en-IN")} recorded`, "success");
-    setSettleOrder(null);
-    setSettleAmount("");
-    setSettleRemarks("");
+    setSettleError("");
+    setSubmittingSettle(true);
+    const amt = Math.round(Math.min(parsedAmt, maxDue) * 100) / 100;
+    const newPaid = Math.round(((settleOrder.paid_discount || 0) + amt) * 100) / 100;
+    const remainingDue = Math.max(0, Math.round((maxDue - amt) * 100) / 100);
+    const isNowSettled = remainingDue <= 0.009;
+    const actorName = getCurrentUserDisplayName();
+    const cleanRemark = settleRemarks.trim();
+    const newEntry: DiscountPaymentEntry = {
+      id: `pay-${Date.now()}`,
+      date: cleanDate,
+      title: cleanRemark || "Discount Adjustment",
+      amount: amt,
+      adjusted_by: actorName,
+    };
+
+    try {
+      const res = await apiPatch<DiscountOrderRecord>(
+        `/sales/discount-payments/${settleOrder.id}`,
+        {
+          amount: amt,
+          paid_discount: newPaid,
+          due_discount: isNowSettled ? 0 : remainingDue,
+          settled: isNowSettled,
+          settle_date: cleanDate,
+          settle_remarks: cleanRemark,
+          adjusted_by: actorName,
+        }
+      );
+      const serverItem = res?.data && typeof res.data === "object" && "order_no" in res.data ? res.data : null;
+
+      setOrders((prev) =>
+        prev.map((it) => {
+          if (it.id !== settleOrder.id) return it;
+          if (serverItem) {
+            return { ...it, ...serverItem };
+          }
+          const priorPayments = resolveOrderPayments(it);
+          return {
+            ...it,
+            paid_discount: newPaid,
+            due_discount: isNowSettled ? 0 : remainingDue,
+            settled: isNowSettled,
+            payments: [...priorPayments, newEntry],
+            remark: it.remark || cleanRemark || null,
+          };
+        })
+      );
+
+      toast(`Discount adjustment of ${formatIndianCurrency(amt)} recorded`, "success");
+      setSettleOrder(null);
+      setSettleAmount("");
+      setSettleRemarks("");
+      setSettleError("");
+    } catch (err) {
+      const msg = errorMessage(err);
+      setSettleError(msg);
+      toast(msg, "error");
+    } finally {
+      setSubmittingSettle(false);
+    }
   };
 
   return (
@@ -952,10 +1104,11 @@ export function DiscountPaymentsPage({
                   }}
                 >
                   <option value="">All.</option>
-                  <option value="Mumbai">Mumbai</option>
-                  <option value="Ahmedabad">Ahmedabad</option>
-                  <option value="Indore">Indore</option>
-                  <option value="Mumbai Transit">Mumbai Transit</option>
+                  {warehouseOptions.map((wh) => (
+                    <option key={wh} value={wh}>
+                      {wh}
+                    </option>
+                  ))}
                 </select>
               </div>
 
@@ -989,13 +1142,11 @@ export function DiscountPaymentsPage({
                   }}
                 >
                   <option value="">All.</option>
-                  <option value="Abhishek Patel">Abhishek Patel</option>
-                  <option value="Dhairya Shah">Dhairya Shah</option>
-                  <option value="Bhavin Suthar">Bhavin Suthar</option>
-                  <option value="Deepika Samel">Deepika Samel</option>
-                  <option value="Sunita Pawar">Sunita Pawar</option>
-                  <option value="Gayatri Pandey">Gayatri Pandey</option>
-                  <option value="Rupesh Malia">Rupesh Malia</option>
+                  {salesPersonOptions.map((sp) => (
+                    <option key={sp} value={sp}>
+                      {sp}
+                    </option>
+                  ))}
                 </select>
               </div>
             </div>
@@ -1224,27 +1375,6 @@ export function DiscountPaymentsPage({
             Completed ({completedCount})
           </button>
 
-          <button
-            type="button"
-            data-testid="tab-client-summary"
-            onClick={() => {
-              setActiveTab("client_summary");
-              setCurrentPage(1);
-            }}
-            style={{
-              background: "none",
-              border: "none",
-              borderBottom: activeTab === "client_summary" ? "2px solid #0061f2" : "2px solid transparent",
-              color: activeTab === "client_summary" ? "#0061f2" : "#64748b",
-              fontWeight: activeTab === "client_summary" ? 700 : 500,
-              fontSize: "13px",
-              padding: "8px 16px",
-              cursor: "pointer",
-              transition: "all 0.15s ease",
-            }}
-          >
-            📊 Client Monitoring Report ({clientSummaries.length})
-          </button>
         </div>
 
         {/* Controls Toolbar matching Screenshot */}
@@ -1300,124 +1430,11 @@ export function DiscountPaymentsPage({
         </div>
 
         {/* Table matching Screenshot */}
-        {activeTab === "client_summary" ? (
-          /* Client-wise Monitoring Report Table */
-          <div
-            data-testid="client-monitoring-report-table"
-            style={{
-              backgroundColor: "#ffffff",
-              borderRadius: "6px",
-              border: "1px solid #e2e8f0",
-              boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
-              overflowX: "auto",
-              marginBottom: "16px",
-            }}
-          >
-            <table style={{ width: "100%", borderCollapse: "collapse", textAlign: "left", fontSize: "12.5px" }}>
-              <thead>
-                <tr style={{ background: "#f8fafc", borderBottom: "1px solid #e2e8f0" }}>
-                  <th style={{ padding: "10px 12px", fontWeight: 700, color: "#475569", width: "5%" }}>#</th>
-                  <th style={{ padding: "10px 12px", fontWeight: 700, color: "#475569", width: "25%" }}>Client / Company Name</th>
-                  <th style={{ padding: "10px 12px", fontWeight: 700, color: "#475569", width: "15%" }}>City / State</th>
-                  <th style={{ padding: "10px 12px", fontWeight: 700, color: "#475569", textAlign: "center", width: "8%" }}>Orders</th>
-                  <th style={{ padding: "10px 12px", fontWeight: 700, color: "#475569", textAlign: "right", width: "15%" }}>Total Cash Discount</th>
-                  <th style={{ padding: "10px 12px", fontWeight: 700, color: "#475569", textAlign: "right", width: "12%" }}>Paid / Settled</th>
-                  <th style={{ padding: "10px 12px", fontWeight: 700, color: "#475569", textAlign: "right", width: "12%" }}>Balance Due</th>
-                  <th style={{ padding: "10px 12px", fontWeight: 700, color: "#475569", textAlign: "center", width: "10%" }}>Status</th>
-                  <th style={{ padding: "10px 12px", fontWeight: 700, color: "#475569", textAlign: "center", width: "8%" }}>Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {loading ? (
-                  <DiscountClientSummarySkeletonRows count={perPage > 10 ? 8 : perPage} />
-                ) : clientSummaries.length === 0 ? (
-                  <tr>
-                    <td colSpan={9} style={{ padding: "32px", textAlign: "center", color: "#64748b" }}>
-                      No Data
-                    </td>
-                  </tr>
-                ) : (
-                  clientSummaries.map((c, idx) => (
-                    <tr
-                      key={c.company_name}
-                      style={{
-                        borderBottom: "1px solid #f1f5f9",
-                        backgroundColor: idx % 2 === 0 ? "#ffffff" : "#fafbfc",
-                      }}
-                    >
-                      <td style={{ padding: "10px 12px", color: "#64748b" }}>{idx + 1}</td>
-                      <td style={{ padding: "10px 12px" }}>
-                        <div style={{ fontWeight: 700, color: "#1e293b" }}>{c.company_name}</div>
-                        {c.gst_no && (
-                          <div style={{ fontSize: "11px", color: "#64748b", fontFamily: "monospace" }}>
-                            GST: {c.gst_no}
-                          </div>
-                        )}
-                      </td>
-                      <td style={{ padding: "10px 12px", color: "#475569" }}>
-                        {[c.city, c.state].filter(Boolean).join(", ") || "—"}
-                      </td>
-                      <td style={{ padding: "10px 12px", textAlign: "center", fontWeight: 600 }}>
-                        {c.orders_count}
-                      </td>
-                      <td style={{ padding: "10px 12px", textAlign: "right", fontWeight: 700, color: "#0061f2" }}>
-                        {formatIndianCurrency(c.total_discount)}
-                      </td>
-                      <td style={{ padding: "10px 12px", textAlign: "right", fontWeight: 600, color: "#16a34a" }}>
-                        {formatIndianCurrency(c.paid_discount)}
-                      </td>
-                      <td style={{ padding: "10px 12px", textAlign: "right", fontWeight: 700, color: c.due_discount > 0 ? "#dc2626" : "#64748b" }}>
-                        {formatIndianCurrency(c.due_discount)}
-                      </td>
-                      <td style={{ padding: "10px 12px", textAlign: "center" }}>
-                        <span
-                          style={{
-                            display: "inline-block",
-                            padding: "3px 8px",
-                            borderRadius: "12px",
-                            fontSize: "11px",
-                            fontWeight: 700,
-                            backgroundColor: c.due_discount === 0 ? "#dcfce7" : "#fee2e2",
-                            color: c.due_discount === 0 ? "#15803d" : "#b91c1c",
-                          }}
-                        >
-                          {c.due_discount === 0 ? "Fully Settled" : "Pending Due"}
-                        </span>
-                      </td>
-                      <td style={{ padding: "10px 12px", textAlign: "center" }}>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setSearch(c.company_name);
-                            setActiveTab("all");
-                          }}
-                          style={{
-                            padding: "4px 8px",
-                            fontSize: "11.5px",
-                            background: "#eff6ff",
-                            color: "#0061f2",
-                            border: "1px solid #bfdbfe",
-                            borderRadius: "4px",
-                            fontWeight: 600,
-                            cursor: "pointer",
-                          }}
-                          title="View all orders for this client"
-                        >
-                          View Orders
-                        </button>
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-        ) : (
-          <div
-            style={{
-              backgroundColor: "#ffffff",
-              borderRadius: "6px",
-              border: "1px solid #e2e8f0",
+        <div
+          style={{
+            backgroundColor: "#ffffff",
+            borderRadius: "6px",
+            border: "1px solid #e2e8f0",
               boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
               overflowX: "auto",
               minHeight: "320px",
@@ -1488,19 +1505,20 @@ export function DiscountPaymentsPage({
                       {/* Order No */}
                       <td style={{ padding: "8px 12px", verticalAlign: "top" }}>
                         <a
-                          href={`/sale-order/invoice/${o.id}`}
+                          href={`/sale-order/invoice/${o.order_id || o.id}`}
                           data-testid={`order-no-btn-${o.id}`}
                           target="_blank"
+                          rel="noreferrer"
                           onClick={(e) => {
                             e.preventDefault();
-                            window.open(`/sale-order/invoice/${o.id}`, "_blank");
+                            window.open(`/sale-order/invoice/${o.order_id || o.id}`, "_blank");
                           }}
                           style={{
                             background: "none",
                             border: "none",
                             padding: 0,
                             color: "#0061f2",
-                            fontWeight: 600,
+                            fontWeight: 500,
                             textDecoration: "none",
                             cursor: "pointer",
                             fontSize: "12.5px",
@@ -1512,7 +1530,7 @@ export function DiscountPaymentsPage({
                         >
                           {o.order_no}
                         </a>
-                        <div style={{ fontSize: "11px", color: "#64748b", marginTop: "2px" }}>
+                        <div style={{ fontSize: "12px", color: "#0061f2", marginTop: "2px" }}>
                           {o.order_date}
                         </div>
                       </td>
@@ -1533,7 +1551,7 @@ export function DiscountPaymentsPage({
                             border: "none",
                             padding: 0,
                             color: "#0061f2",
-                            fontWeight: 600,
+                            fontWeight: 500,
                             textDecoration: "none",
                             cursor: "pointer",
                             fontSize: "12.5px",
@@ -1545,11 +1563,6 @@ export function DiscountPaymentsPage({
                         >
                           {o.company_name}
                         </button>
-                        {o.gst_no && (
-                          <div style={{ fontSize: "11px", color: "#64748b", fontFamily: "monospace", marginTop: "1px" }}>
-                            GST: {o.gst_no}
-                          </div>
-                        )}
                         {o.contact_name && (
                           <button
                             type="button"
@@ -1559,15 +1572,15 @@ export function DiscountPaymentsPage({
                               background: "none",
                               border: "none",
                               padding: 0,
-                              fontSize: "11px",
-                              color: "#64748b",
+                              fontSize: "12px",
+                              color: "#0061f2",
                               marginTop: "2px",
                               cursor: "pointer",
                               textAlign: "left",
                               display: "block",
                             }}
-                            onMouseEnter={(e) => (e.currentTarget.style.color = "#0061f2")}
-                            onMouseLeave={(e) => (e.currentTarget.style.color = "#64748b")}
+                            onMouseEnter={(e) => (e.currentTarget.style.textDecoration = "underline")}
+                            onMouseLeave={(e) => (e.currentTarget.style.textDecoration = "none")}
                           >
                             {o.contact_name}
                           </button>
@@ -1578,9 +1591,9 @@ export function DiscountPaymentsPage({
                       <td style={{ padding: "8px 12px", verticalAlign: "top" }}>
                         {o.contact_person_name ? (
                           <>
-                            <div style={{ color: "#334155" }}>{o.contact_person_name}</div>
+                            <div style={{ color: "#1e293b" }}>{o.contact_person_name}</div>
                             {o.contact_person_mobile && (
-                              <div style={{ fontSize: "11px", color: "#64748b", marginTop: "2px" }}>
+                              <div style={{ fontSize: "12px", color: "#334155", marginTop: "2px" }}>
                                 {o.contact_person_mobile}
                               </div>
                             )}
@@ -1603,20 +1616,16 @@ export function DiscountPaymentsPage({
                       {/* Paid/Due Dis. Amount */}
                       <td style={{ padding: "8px 12px", verticalAlign: "top" }}>
                         {o.paid_discount > 0 && (
-                          <div style={{ color: "#16a34a", fontWeight: 600, marginBottom: "2px" }}>
-                            Paid {o.paid_discount.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+                          <div style={{ color: "#1e293b", fontWeight: 500, marginBottom: "2px" }}>
+                            Paid {formatIndianCurrency(o.paid_discount)}
                           </div>
                         )}
-                        {o.due_discount > 0 ? (
-                          <div style={{ color: "#dc2626", fontWeight: 600 }}>
+                        {!o.settled && o.due_discount > 0 ? (
+                          <div style={{ color: "#ef4444", fontWeight: 500 }}>
                             Due {formatIndianCurrency(o.due_discount)}
                           </div>
                         ) : (
-                          <div style={{ color: "#16a34a", fontWeight: 600 }}>Settled</div>
-                        )}
-                        {/* Visual indicator badge for partial vs fully settled payments (Discount.docx) */}
-                        <div>
-                          {o.settled || o.due_discount <= 0 ? (
+                          <div>
                             <span
                               data-testid={`badge-settled-${o.id}`}
                               style={{
@@ -1630,70 +1639,37 @@ export function DiscountPaymentsPage({
                                 background: "#dcfce7",
                                 color: "#15803d",
                                 border: "1px solid #86efac",
-                                marginTop: "4px",
+                                marginTop: "2px",
                               }}
                             >
-                              ✓ Fully Settled
+                              ✓ Completed
                             </span>
-                          ) : o.paid_discount > 0 ? (
-                            <span
-                              data-testid={`badge-partial-${o.id}`}
-                              style={{
-                                display: "inline-flex",
-                                alignItems: "center",
-                                gap: "4px",
-                                padding: "2px 8px",
-                                borderRadius: "10px",
-                                fontSize: "10.5px",
-                                fontWeight: 700,
-                                background: "#fef3c7",
-                                color: "#b45309",
-                                border: "1px solid #fcd34d",
-                                marginTop: "4px",
-                              }}
-                            >
-                              ⏳ Partial Payment
-                            </span>
-                          ) : (
-                            <span
-                              data-testid={`badge-unpaid-${o.id}`}
-                              style={{
-                                display: "inline-flex",
-                                alignItems: "center",
-                                gap: "4px",
-                                padding: "2px 8px",
-                                borderRadius: "10px",
-                                fontSize: "10.5px",
-                                fontWeight: 700,
-                                background: "#fee2e2",
-                                color: "#b91c1c",
-                                border: "1px solid #fca5a5",
-                                marginTop: "4px",
-                              }}
-                            >
-                              ⚠️ Unpaid
-                            </span>
-                          )}
-                        </div>
+                          </div>
+                        )}
                       </td>
 
                       {/* Status (Badge + Date + Remark) */}
                       <td style={{ padding: "8px 12px", verticalAlign: "top" }}>
-                        <span
-                          style={{
-                            background: "#dcfce7",
-                            color: "#15803d",
-                            borderRadius: "12px",
-                            padding: "2px 8px",
-                            fontSize: "11px",
-                            fontWeight: 700,
-                            display: "inline-block",
-                            border: "1px solid #bbf7d0",
-                          }}
-                        >
-                          {o.status}
-                        </span>
-                        <div style={{ fontSize: "11px", color: "#64748b", marginTop: "3px" }}>
+                        {(() => {
+                          const st = getDiscountStatusBadgeStyle(o.status);
+                          return (
+                            <span
+                              style={{
+                                background: st.bg,
+                                color: st.color,
+                                borderRadius: "12px",
+                                padding: "2px 8px",
+                                fontSize: "11px",
+                                fontWeight: 600,
+                                display: "inline-block",
+                                border: `1px solid ${st.border}`,
+                              }}
+                            >
+                              {o.status}
+                            </span>
+                          );
+                        })()}
+                        <div style={{ fontSize: "11.5px", color: "#334155", marginTop: "3px" }}>
                           {o.status_updated_at}
                         </div>
                         <button
@@ -1702,9 +1678,9 @@ export function DiscountPaymentsPage({
                           style={{
                             background: "none",
                             border: "none",
-                            color: "#dc2626",
-                            fontSize: "11px",
-                            fontWeight: 600,
+                            color: "#ef4444",
+                            fontSize: "11.5px",
+                            fontWeight: 500,
                             cursor: "pointer",
                             padding: 0,
                             marginTop: "2px",
@@ -1730,7 +1706,7 @@ export function DiscountPaymentsPage({
                                 border: "none",
                                 padding: 0,
                                 color: "#0061f2",
-                                fontWeight: 600,
+                                fontWeight: 500,
                                 textDecoration: "none",
                                 cursor: "pointer",
                                 fontSize: "12.5px",
@@ -1751,15 +1727,15 @@ export function DiscountPaymentsPage({
                                   background: "none",
                                   border: "none",
                                   padding: 0,
-                                  fontSize: "11px",
-                                  color: "#64748b",
+                                  fontSize: "12px",
+                                  color: "#0061f2",
                                   marginTop: "2px",
                                   cursor: "pointer",
                                   textAlign: "left",
                                   display: "block",
                                 }}
-                                onMouseEnter={(e) => (e.currentTarget.style.color = "#0061f2")}
-                                onMouseLeave={(e) => (e.currentTarget.style.color = "#64748b")}
+                                onMouseEnter={(e) => (e.currentTarget.style.textDecoration = "underline")}
+                                onMouseLeave={(e) => (e.currentTarget.style.textDecoration = "none")}
                               >
                                 {o.gatepass_date}
                               </button>
@@ -1849,49 +1825,52 @@ export function DiscountPaymentsPage({
                                 padding: "4px 0",
                               }}
                             >
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setSettleOrder(o);
-                                  setSettleAmount("");
-                                  setSettleDate("22-09-2026");
-                                  setSettleRemarks("");
-                                  setOpenActionId(null);
-                                  setActionMenuPos(null);
-                                }}
-                                style={{
-                                  width: "100%",
-                                  padding: "8px 14px",
-                                  background: "none",
-                                  border: "none",
-                                  textAlign: "left",
-                                  fontSize: "13px",
-                                  fontWeight: 500,
-                                  cursor: "pointer",
-                                  color: "#334155",
-                                  display: "flex",
-                                  alignItems: "center",
-                                  gap: "10px",
-                                  whiteSpace: "nowrap",
-                                  transition: "background-color 0.15s ease",
-                                }}
-                                onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#f1f5f9")}
-                                onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "transparent")}
-                              >
-                                <span
-                                  style={{
-                                    fontSize: "14px",
-                                    fontWeight: 700,
-                                    color: "#475569",
-                                    width: "14px",
-                                    textAlign: "center",
-                                    display: "inline-block",
+                              {!o.settled && o.due_discount > 0 && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setSettleOrder(o);
+                                    setSettleAmount("");
+                                    setSettleDate(getTodayDdMmYyyy());
+                                    setSettleRemarks("");
+                                    setSettleError("");
+                                    setOpenActionId(null);
+                                    setActionMenuPos(null);
                                   }}
+                                  style={{
+                                    width: "100%",
+                                    padding: "8px 14px",
+                                    background: "none",
+                                    border: "none",
+                                    textAlign: "left",
+                                    fontSize: "13px",
+                                    fontWeight: 500,
+                                    cursor: "pointer",
+                                    color: "#334155",
+                                    display: "flex",
+                                    alignItems: "center",
+                                    gap: "10px",
+                                    whiteSpace: "nowrap",
+                                    transition: "background-color 0.15s ease",
+                                  }}
+                                  onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#f1f5f9")}
+                                  onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "transparent")}
                                 >
-                                  $
-                                </span>
-                                <span>Adjust Discount</span>
-                              </button>
+                                  <span
+                                    style={{
+                                      fontSize: "14px",
+                                      fontWeight: 700,
+                                      color: "#475569",
+                                      width: "14px",
+                                      textAlign: "center",
+                                      display: "inline-block",
+                                    }}
+                                  >
+                                    $
+                                  </span>
+                                  <span>Adjust Discount</span>
+                                </button>
+                              )}
 
                               <button
                                 type="button"
@@ -1950,7 +1929,6 @@ export function DiscountPaymentsPage({
             </tbody>
           </table>
         </div>
-        )}
 
         {/* Pagination Footer matching Companies design */}
         <div className="pagination" style={{ padding: "8px 16px 16px" }}>
@@ -2178,7 +2156,7 @@ export function DiscountPaymentsPage({
                 {/* Discount Summary Card */}
                 <div
                   style={{
-                    backgroundColor: "#f8fafc",
+                    backgroundColor: "#ffffff",
                     border: "1px solid #e2e8f0",
                     borderRadius: "6px",
                     padding: "16px 20px",
@@ -2297,10 +2275,15 @@ export function DiscountPaymentsPage({
                       id="adjust-discount-amount"
                       aria-label="Amount"
                       type="number"
+                      min="0.01"
+                      max={settleOrder.due_discount}
                       step="any"
                       placeholder={`Max: ${settleOrder.due_discount}`}
                       value={settleAmount}
-                      onChange={(e) => setSettleAmount(e.target.value)}
+                      onChange={(e) => {
+                        setSettleAmount(e.target.value);
+                        if (settleError) setSettleError("");
+                      }}
                       style={{
                         width: "100%",
                         padding: "8px 12px",
@@ -2333,7 +2316,7 @@ export function DiscountPaymentsPage({
                   <textarea
                     id="adjust-discount-remarks"
                     aria-label="Remarks/Feedback"
-                    rows={5}
+                    rows={4}
                     value={settleRemarks}
                     onChange={(e) => setSettleRemarks(e.target.value)}
                     style={{
@@ -2347,11 +2330,28 @@ export function DiscountPaymentsPage({
                       boxSizing: "border-box",
                       backgroundColor: "#ffffff",
                       resize: "vertical",
-                      minHeight: "110px",
+                      minHeight: "96px",
                       fontFamily: "inherit",
                     }}
                   />
                 </div>
+
+                {settleError && (
+                  <div
+                    role="alert"
+                    data-testid="adjust-discount-error"
+                    style={{
+                      fontSize: "12px",
+                      color: "#dc2626",
+                      backgroundColor: "#fef2f2",
+                      border: "1px solid #fecaca",
+                      borderRadius: "4px",
+                      padding: "8px 12px",
+                    }}
+                  >
+                    {settleError}
+                  </div>
+                )}
               </div>
 
               {/* Drawer Footer / Submit */}
@@ -2473,120 +2473,124 @@ export function DiscountPaymentsPage({
                     backgroundColor: "#ffffff",
                   }}
                 >
-                  <div style={{ fontSize: "13.5px", fontWeight: 700, color: "#1e293b", marginBottom: "2px" }}>
+                  <div style={{ fontSize: "14px", fontWeight: 700, color: "#1e293b", marginBottom: "3px" }}>
                     Sale Order Detail
                   </div>
-                  <div style={{ fontSize: "12.5px", fontWeight: 700, color: "#1e293b", marginBottom: "16px" }}>
-                    #{listPaymentsOrder.invoice_id || (listPaymentsOrder.id === "so-3826" ? "5125" : listPaymentsOrder.gatepass_id || "5125")}
+                  <div style={{ fontSize: "12px", fontWeight: 700, color: "#1e293b", marginBottom: "14px" }}>
+                    #{listPaymentsOrder.invoice_id || extractOrderShortNo(listPaymentsOrder.order_no)}
                   </div>
 
-                  {/* Customer Name & Created Date */}
-                  <div
-                    style={{
-                      display: "grid",
-                      gridTemplateColumns: "1fr 1fr",
-                      rowGap: "14px",
-                      columnGap: "24px",
-                      marginBottom: "16px",
-                    }}
-                  >
-                    <div>
-                      <div style={{ fontSize: "11.5px", color: "#64748b", marginBottom: "4px" }}>
-                        Customer Name
-                      </div>
-                      <div style={{ fontSize: "12.5px", color: "#1e293b", fontWeight: 500 }}>
-                        {listPaymentsOrder.contact_person_name || listPaymentsOrder.contact_name?.replace(/^Mr\s+/, "") || listPaymentsOrder.company_name}
-                      </div>
-                    </div>
-                    <div>
-                      <div style={{ fontSize: "11.5px", color: "#64748b", marginBottom: "4px" }}>
-                        Created Date
-                      </div>
-                      <div style={{ fontSize: "12.5px", color: "#1e293b" }}>
-                        {listPaymentsOrder.created_at || `${listPaymentsOrder.order_date} 11:26 AM`}
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Total Discount, Paid Amount, Due Amount */}
+                  {/* Customer Name & Created Date (aligned on same 3-col grid as amounts below) */}
                   <div
                     style={{
                       display: "grid",
                       gridTemplateColumns: "1fr 1fr 1fr",
+                      rowGap: "18px",
                       columnGap: "24px",
                     }}
                   >
                     <div>
-                      <div style={{ fontSize: "11.5px", color: "#64748b", marginBottom: "4px" }}>
+                      <div style={{ fontSize: "12px", fontWeight: 600, color: "#1e293b", marginBottom: "3px" }}>
+                        Customer Name
+                      </div>
+                      <div style={{ fontSize: "12px", color: "#334155" }}>
+                        {listPaymentsOrder.contact_person_name || listPaymentsOrder.contact_name?.replace(/^Mr\s+/, "") || listPaymentsOrder.company_name}
+                      </div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: "12px", fontWeight: 600, color: "#1e293b", marginBottom: "3px" }}>
+                        Created Date
+                      </div>
+                      <div style={{ fontSize: "12px", color: "#334155" }}>
+                        {listPaymentsOrder.created_at || `${listPaymentsOrder.order_date} 11:26 AM`}
+                      </div>
+                    </div>
+                    <div />
+
+                    <div>
+                      <div style={{ fontSize: "12px", fontWeight: 600, color: "#1e293b", marginBottom: "3px" }}>
                         Total Discount
                       </div>
-                      <div style={{ fontSize: "13px", fontWeight: 700, color: "#1e293b" }}>
+                      <div style={{ fontSize: "12.5px", fontWeight: 600, color: "#1e293b" }}>
                         {formatIndianCurrency(listPaymentsOrder.total_discount)}
                       </div>
                     </div>
                     <div>
-                      <div style={{ fontSize: "11.5px", color: "#64748b", marginBottom: "4px" }}>
+                      <div style={{ fontSize: "12px", fontWeight: 600, color: "#1e293b", marginBottom: "3px" }}>
                         Paid Amount
                       </div>
-                      <div style={{ fontSize: "13px", fontWeight: 700, color: "#1e293b" }}>
+                      <div style={{ fontSize: "12.5px", fontWeight: 600, color: "#1e293b" }}>
                         {formatIndianCurrency(listPaymentsOrder.paid_discount)}
                       </div>
                     </div>
                     <div>
-                      <div style={{ fontSize: "11.5px", color: "#64748b", marginBottom: "4px" }}>
+                      <div style={{ fontSize: "12px", fontWeight: 600, color: "#1e293b", marginBottom: "3px" }}>
                         Due Amount
                       </div>
-                      <div style={{ fontSize: "13px", fontWeight: 700, color: "#1e293b" }}>
+                      <div style={{ fontSize: "12.5px", fontWeight: 600, color: "#1e293b" }}>
                         {formatIndianCurrency(listPaymentsOrder.due_discount)}
                       </div>
                     </div>
                   </div>
                 </div>
 
-                {/* Payments Table matching Screenshot */}
+                {/* Multi-row Installment Payments Table matching Screenshot 4 */}
                 <div style={{ border: "1px solid #e2e8f0", borderRadius: "4px", overflow: "hidden" }}>
                   <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "12px" }}>
                     <thead>
                       <tr style={{ background: "#ffffff", borderBottom: "1px solid #e2e8f0" }}>
-                        <th style={{ width: "40px", padding: "10px 12px", textAlign: "center", color: "#475569", fontWeight: 600, borderRight: "1px solid #e2e8f0" }}>#</th>
-                        <th style={{ padding: "10px 14px", textAlign: "left", color: "#475569", fontWeight: 600, borderRight: "1px solid #e2e8f0" }}>Date</th>
-                        <th style={{ padding: "10px 14px", textAlign: "left", color: "#475569", fontWeight: 600, borderRight: "1px solid #e2e8f0" }}>Title</th>
-                        <th style={{ padding: "10px 14px", textAlign: "left", color: "#475569", fontWeight: 600, borderRight: "1px solid #e2e8f0" }}>Amount</th>
-                        <th style={{ padding: "10px 14px", textAlign: "left", color: "#475569", fontWeight: 600 }}>Adjustment By</th>
+                        <th style={{ width: "44px", padding: "10px 12px", textAlign: "left", color: "#1e293b", fontWeight: 700, borderRight: "1px solid #e2e8f0" }}>#</th>
+                        <th style={{ width: "115px", padding: "10px 14px", textAlign: "left", color: "#1e293b", fontWeight: 700, borderRight: "1px solid #e2e8f0" }}>Date</th>
+                        <th style={{ padding: "10px 14px", textAlign: "left", color: "#1e293b", fontWeight: 700, borderRight: "1px solid #e2e8f0" }}>Title</th>
+                        <th style={{ width: "125px", padding: "10px 14px", textAlign: "left", color: "#1e293b", fontWeight: 700, borderRight: "1px solid #e2e8f0" }}>Amount</th>
+                        <th style={{ width: "150px", padding: "10px 14px", textAlign: "left", color: "#1e293b", fontWeight: 700 }}>Adjustment By</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {listPaymentsOrder.paid_discount > 0 ? (
-                        <tr style={{ borderBottom: "1px solid #f1f5f9" }}>
-                          <td style={{ padding: "10px 12px", textAlign: "center", color: "#334155", borderRight: "1px solid #f1f5f9" }}>1</td>
-                          <td style={{ padding: "10px 14px", color: "#334155", borderRight: "1px solid #f1f5f9" }}>
-                            {listPaymentsOrder.status_updated_at.split(" ")[0]}
-                          </td>
-                          <td style={{ padding: "10px 14px", color: "#334155", borderRight: "1px solid #f1f5f9" }}>
-                            Discount Adjustment
-                          </td>
-                          <td style={{ padding: "10px 14px", color: "#1e293b", fontWeight: 600, borderRight: "1px solid #f1f5f9" }}>
-                            {formatIndianCurrency(listPaymentsOrder.paid_discount)}
-                          </td>
-                          <td style={{ padding: "10px 14px", color: "#334155" }}>
-                            {listPaymentsOrder.sales_person}
-                          </td>
-                        </tr>
-                      ) : (
-                        <tr>
-                          <td
-                            colSpan={5}
+                      {(() => {
+                        const paymentRows = resolveOrderPayments(listPaymentsOrder);
+                        if (paymentRows.length === 0) {
+                          return (
+                            <tr>
+                              <td
+                                colSpan={5}
+                                style={{
+                                  padding: "16px 14px",
+                                  textAlign: "center",
+                                  color: "#64748b",
+                                  fontSize: "12px",
+                                }}
+                              >
+                                No Payment Found
+                              </td>
+                            </tr>
+                          );
+                        }
+                        return paymentRows.map((entry, pIdx) => (
+                          <tr
+                            key={entry.id || pIdx}
                             style={{
-                              padding: "16px 14px",
-                              textAlign: "center",
-                              color: "#64748b",
-                              fontSize: "12px",
+                              borderBottom: pIdx < paymentRows.length - 1 ? "1px solid #e2e8f0" : "none",
                             }}
                           >
-                            No Payment Found
-                          </td>
-                        </tr>
-                      )}
+                            <td style={{ padding: "10px 12px", color: "#1e293b", borderRight: "1px solid #e2e8f0" }}>
+                              {pIdx + 1}
+                            </td>
+                            <td style={{ padding: "10px 14px", color: "#334155", borderRight: "1px solid #e2e8f0" }}>
+                              {entry.date}
+                            </td>
+                            <td style={{ padding: "10px 14px", color: "#334155", borderRight: "1px solid #e2e8f0" }}>
+                              {entry.title}
+                            </td>
+                            <td style={{ padding: "10px 14px", color: "#1e293b", fontWeight: 500, borderRight: "1px solid #e2e8f0" }}>
+                              {formatIndianCurrency(entry.amount)}
+                            </td>
+                            <td style={{ padding: "10px 14px", color: "#334155" }}>
+                              {entry.adjusted_by}
+                            </td>
+                          </tr>
+                        ));
+                      })()}
                     </tbody>
                   </table>
                 </div>
@@ -3294,7 +3298,10 @@ export function DiscountPaymentsPage({
                         type="button"
                         title="Download LR File"
                         onClick={() => {
-                          window.open(`/sale-order/invoice/${selectedGatepassOrder.id}`, "_blank");
+                          const targetHref = selectedGatepassOrder.lr_file_url
+                            ? resolveDiscountFileHref(selectedGatepassOrder.lr_file_url)
+                            : `/sale-order/invoice/${selectedGatepassOrder.order_id || selectedGatepassOrder.id}`;
+                          window.open(targetHref, "_blank");
                         }}
                         style={{
                           display: "inline-flex",

@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { BrowserRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DiscountPaymentsPage } from "../sales/DiscountPaymentsPage";
+import { DiscountPaymentsPage, getTodayDdMmYyyy } from "../sales/DiscountPaymentsPage";
 
 // Mock AppShell
 vi.mock("@/components/AppShell", () => ({
@@ -75,6 +75,8 @@ describe("DiscountPaymentsPage (/sale-discount/list & /discount-payments/list)",
     expect(allTab).toBeTruthy();
     expect(pendingTab).toBeTruthy();
     expect(completedTab).toBeTruthy();
+    expect(screen.queryByTestId("tab-client-summary")).toBeNull();
+    expect(screen.queryByText(/Client Monitoring Report/i)).toBeNull();
 
     // Default Pending shows Garuda Engineers
     expect(screen.getByText("GARUDA ENGINEERS")).toBeTruthy();
@@ -130,9 +132,9 @@ describe("DiscountPaymentsPage (/sale-discount/list & /discount-payments/list)",
     expect(screen.getByText("Due ₹ 35,000.00")).toBeTruthy();
     expect(screen.getByText("ID: 4539")).toBeTruthy();
 
-    // Row 4: GLOBAL IMPEX with Paid 54,000 and Due 2,000
+    // Row 4: GLOBAL IMPEX with Paid ₹ 54,000.00 and Due ₹ 2,000.00
     expect(screen.getByText("GLOBAL IMPEX MACHINERY")).toBeTruthy();
-    expect(screen.getByText("Paid 54,000.00")).toBeTruthy();
+    expect(screen.getByText("Paid ₹ 54,000.00")).toBeTruthy();
     expect(screen.getByText("Due ₹ 2,000.00")).toBeTruthy();
   });
 
@@ -275,22 +277,24 @@ describe("DiscountPaymentsPage (/sale-discount/list & /discount-payments/list)",
       expect(screen.getByRole("button", { name: "Submit" })).toBeTruthy();
     });
 
-    // Verify fields
+    // Verify Date defaults dynamically to today's DD-MM-YYYY date
+    const todayStr = getTodayDdMmYyyy();
+    const [, mmStr, yyyyStr] = todayStr.split("-");
     const dateInput = screen.getByLabelText("Date");
-    expect((dateInput as HTMLInputElement).value).toBe("22-09-2026");
+    expect((dateInput as HTMLInputElement).value).toBe(todayStr);
 
     // Click Date input to open the interactive calendar dropdown
     fireEvent.click(dateInput);
     const dateDropdown = screen.getByTestId("datepicker-dropdown");
     expect(dateDropdown).toBeTruthy();
-    expect(screen.getByText(/SEPTEMBER 2026/i)).toBeTruthy();
+    expect(within(dateDropdown).getByText(new RegExp(yyyyStr, "i"))).toBeTruthy();
     expect(screen.getByText("SU")).toBeTruthy();
     expect(screen.getByText("MO")).toBeTruthy();
 
     // Select day 25 from calendar
-    const day25Btn = screen.getByRole("button", { name: "25" });
+    const day25Btn = within(dateDropdown).getByRole("button", { name: "25" });
     fireEvent.click(day25Btn);
-    expect((dateInput as HTMLInputElement).value).toBe("25-09-2026");
+    expect((dateInput as HTMLInputElement).value).toBe(`25-${mmStr}-${yyyyStr}`);
 
     const amountInput = screen.getByPlaceholderText("Max: 35000");
     expect(amountInput).toBeTruthy();
@@ -298,7 +302,17 @@ describe("DiscountPaymentsPage (/sale-discount/list & /discount-payments/list)",
     const remarksTextarea = screen.getByLabelText("Remarks/Feedback");
     expect(remarksTextarea).toBeTruthy();
 
-    // Test typing amount & remarks
+    // Validation: empty amount should show validation error and keep drawer open
+    fireEvent.click(screen.getByRole("button", { name: "Submit" }));
+    expect(screen.getByTestId("adjust-discount-error")).toBeTruthy();
+    expect(screen.getByTestId("discount-adjustment-drawer")).toBeTruthy();
+
+    // Validation: amount exceeding due_discount should show validation error
+    fireEvent.change(amountInput, { target: { value: "40000" } });
+    fireEvent.click(screen.getByRole("button", { name: "Submit" }));
+    expect(screen.getByTestId("adjust-discount-error").textContent).toMatch(/cannot exceed remaining due/i);
+
+    // Test typing valid partial amount & remarks
     fireEvent.change(amountInput, { target: { value: "15000" } });
     fireEvent.change(remarksTextarea, { target: { value: "Partial adjustment verified" } });
 
@@ -307,6 +321,18 @@ describe("DiscountPaymentsPage (/sale-discount/list & /discount-payments/list)",
 
     await waitFor(() => {
       expect(screen.queryByTestId("discount-adjustment-drawer")).toBeNull();
+    });
+
+    // Verify KPI cards updated dynamically (+15,000 Paid, -15,000 Due) and installment recorded in List Payments
+    expect(screen.getByText("₹ 7,80,225.00")).toBeTruthy();
+    expect(screen.getByText("₹ 26,670.00")).toBeTruthy();
+
+    fireEvent.click(screen.getAllByRole("button", { name: "⋮" })[0]);
+    fireEvent.click(screen.getByRole("button", { name: /List Payments/i }));
+    await waitFor(() => {
+      const modal = screen.getByTestId("list-payments-modal");
+      expect(within(modal).getByText("Partial adjustment verified")).toBeTruthy();
+      expect(within(modal).getAllByText("₹ 15,000.00").length).toBeGreaterThan(0);
     });
   });
 
@@ -390,16 +416,23 @@ describe("DiscountPaymentsPage (/sale-discount/list & /discount-payments/list)",
       expect(screen.queryByTestId("list-payments-modal")).toBeNull();
     });
 
-    // Test Row 4: GLOBAL IMPEX MACHINERY (paid_discount === 54,000)
+    // Test Row 4: GLOBAL IMPEX MACHINERY (multi-installment history matching Screenshot 4)
     fireEvent.click(kebabBtns[3]);
     fireEvent.click(screen.getByRole("button", { name: /List Payments/i }));
 
     await waitFor(() => {
       const modal4 = screen.getByTestId("list-payments-modal");
       expect(modal4).toBeTruthy();
+      expect(within(modal4).getByText("#3563")).toBeTruthy();
+      expect(within(modal4).getByText("29-07-2026 05:04 PM")).toBeTruthy();
       expect(within(modal4).getAllByText("₹ 54,000.00").length).toBeGreaterThan(0);
-      expect(within(modal4).getByText("Dhairya Shah")).toBeTruthy();
-      expect(within(modal4).getByText("Discount Adjustment")).toBeTruthy();
+      expect(within(modal4).getByText("12-08-2026")).toBeTruthy();
+      expect(within(modal4).getByText("GPAY 20000 /- Inhyma MP")).toBeTruthy();
+      expect(within(modal4).getByText("₹ 20,000.00")).toBeTruthy();
+      expect(within(modal4).getByText("13-08-2026")).toBeTruthy();
+      expect(within(modal4).getByText("34000/- Recvd Inhyma Gujarat Account Dhairya Shaha")).toBeTruthy();
+      expect(within(modal4).getByText("₹ 34,000.00")).toBeTruthy();
+      expect(within(modal4).getAllByText("Archana Bhure").length).toBe(2);
     });
 
     // Close via Escape key
@@ -558,5 +591,62 @@ describe("DiscountPaymentsPage (/sale-discount/list & /discount-payments/list)",
     await waitFor(() => {
       expect(screen.queryByText("Gate Pass Detail #4539")).toBeNull();
     });
+  });
+
+  it("moves fully adjusted order to Completed tab, shows Completed badge, hides Adjust Discount, and lists all installments", async () => {
+    localStorage.setItem(
+      "erp_profile",
+      JSON.stringify({ display_name: "Archana Bhure", username: "archana" })
+    );
+
+    render(
+      <BrowserRouter>
+        <DiscountPaymentsPage />
+      </BrowserRouter>
+    );
+
+    // Row 4 (GLOBAL IMPEX MACHINERY) starts in Pending with Paid ₹ 54,000.00 and Due ₹ 2,000.00 (2 existing installments)
+    const kebabBtns = screen.getAllByRole("button", { name: "⋮" });
+    fireEvent.click(kebabBtns[3]);
+    fireEvent.click(screen.getByRole("button", { name: /Adjust Discount/i }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("discount-adjustment-drawer")).toBeTruthy();
+      expect(screen.getByPlaceholderText("Max: 2000")).toBeTruthy();
+    });
+
+    fireEvent.change(screen.getByPlaceholderText("Max: 2000"), { target: { value: "2000" } });
+    fireEvent.change(screen.getByLabelText("Remarks/Feedback"), {
+      target: { value: "Final 2000 balance received via NEFT" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Submit" }));
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("discount-adjustment-drawer")).toBeNull();
+    });
+
+    // Should no longer appear in Pending tab
+    expect(screen.queryByText("GLOBAL IMPEX MACHINERY")).toBeNull();
+
+    // Switch to Completed tab: GLOBAL IMPEX MACHINERY is now there with ✓ Completed badge
+    fireEvent.click(screen.getByRole("button", { name: /Completed/i }));
+    expect(screen.getByText("GLOBAL IMPEX MACHINERY")).toBeTruthy();
+    expect(screen.getByTestId("badge-settled-so-0560")).toBeTruthy();
+
+    // Open Action menu on completed GLOBAL IMPEX MACHINERY row: Adjust Discount should be hidden, List Payments visible
+    const globalActionBtn = screen.getByTestId("action-btn-so-0560");
+    fireEvent.click(globalActionBtn);
+    expect(screen.queryByRole("button", { name: /Adjust Discount/i })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /List Payments/i }));
+
+    await waitFor(() => {
+      const modal = screen.getByTestId("list-payments-modal");
+      expect(within(modal).getByText("GPAY 20000 /- Inhyma MP")).toBeTruthy();
+      expect(within(modal).getByText("34000/- Recvd Inhyma Gujarat Account Dhairya Shaha")).toBeTruthy();
+      expect(within(modal).getByText("Final 2000 balance received via NEFT")).toBeTruthy();
+      expect(within(modal).getAllByText("Archana Bhure").length).toBe(3);
+    });
+
+    localStorage.removeItem("erp_profile");
   });
 });

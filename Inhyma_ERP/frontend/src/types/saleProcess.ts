@@ -44,9 +44,27 @@ export interface SaleOrderItem {
 
 export interface SaleTimelineEvent {
   status: string;
+  status_key?: string | null;
   date: string;
   by: string;
   remark?: string | null;
+  invoice_no?: string | null;
+  invoice_date?: string | null;
+  eway_bill_url?: string | null;
+  eway_bill_name?: string | null;
+  tally_bill_url?: string | null;
+  tally_bill_name?: string | null;
+  po_file_url?: string | null;
+  po_file_name?: string | null;
+  lr_file_url?: string | null;
+  lr_file_name?: string | null;
+}
+
+export interface DispatchMediaItem {
+  url: string;
+  filename: string;
+  content_type?: string | null;
+  size?: number | null;
 }
 
 export interface SaleOrder {
@@ -78,9 +96,19 @@ export interface SaleOrder {
   gatepass_no?: string | null;
   gatepass_date?: string | null;
   gatepass_handled_by?: string | null;
+  po_file_url?: string | null;
+  po_file_name?: string | null;
   invoice_no?: string | null;
   invoice_date?: string | null;
+  tally_bill_url?: string | null;
+  tally_bill_name?: string | null;
+  eway_bill?: string | null;
+  eway_bill_url?: string | null;
+  eway_bill_name?: string | null;
   lr_date?: string | null;
+  lr_file_url?: string | null;
+  lr_file_name?: string | null;
+  dispatch_media?: DispatchMediaItem[] | null;
   billing_address?: string | null;
   shipping_address?: string | null;
   phone?: string | null;

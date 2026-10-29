@@ -241,6 +241,12 @@ async def assign_salary(
             detail="Permission denied. Only Admin or authorized HR can configure employee salary.",
         )
 
+    if payload.employee_id == ctx.user_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Self-assignment of salary structures is prohibited. Another authorized administrator must configure your salary.",
+        )
+
     salary = await service.assign_employee_salary(payload, ctx.user_id)
     return build_success_response(
         data={
@@ -407,8 +413,10 @@ async def approve_monthly_payroll(
     month = _validate_payroll_month(raw_month)
 
     payroll = await service.approve_monthly_payroll(month, ctx.user_id)
+    full_payroll = await service.get_monthly_payroll(month)
+    allowed_ids = None if (ctx.is_admin or ctx.is_hr) else ctx.managed_employee_ids
     return build_success_response(
-        data={"payroll_month": payroll.payroll_month, "status": payroll.status},
+        data=_serialize_payroll(full_payroll or payroll, allowed_employee_ids=allowed_ids),
         message=f"Payroll for {month} approved successfully.",
     )
 
@@ -426,6 +434,15 @@ async def edit_payroll_item(
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Permission denied. Salary configuration rights required to edit payroll items.",
+        )
+
+    item_record = await service.db.get(HrmsMonthlyPayrollItem, item_id)
+    if not item_record:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Payroll item not found.")
+    if item_record.employee_id == ctx.user_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Self-editing of payroll items is prohibited. Another authorized administrator must adjust your payroll.",
         )
 
     item = await service.edit_payroll_item(item_id, payload, ctx.user_id)
@@ -474,6 +491,12 @@ async def create_adjustment(
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Permission denied. Salary configuration rights required.",
+        )
+
+    if payload.employee_id == ctx.user_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Self-adjustment of payroll bonuses/deductions is prohibited. Another authorized administrator must adjust your payroll.",
         )
 
     adj = await service.create_adjustment(payload, ctx.user_id)
@@ -588,17 +611,31 @@ async def get_payslips(
                     detail="You can only access your own salary slips.",
                 )
 
-    target_emp_id = resolved_emp_id if (ctx.is_admin or ctx.is_hr or (ctx.is_manager and resolved_emp_id)) else ctx.user_id
-
-    items = await service.get_employee_payslips(
-        employee_id=target_emp_id,
-        is_admin=ctx.is_admin or ctx.is_hr,
-        payroll_month=payroll_month,
-    )
-
-    # For department manager viewing all dept payslips:
-    if ctx.is_manager and not (ctx.is_admin or ctx.is_hr) and not employee_id:
-        items = [i for i in items if i.employee_id in ctx.managed_employee_ids]
+    if ctx.is_manager and not (ctx.is_admin or ctx.is_hr) and employee_id and employee_id.strip().upper() == "ALL":
+        query = (
+            select(HrmsMonthlyPayrollItem)
+            .options(
+                selectinload(HrmsMonthlyPayrollItem.employee),
+                selectinload(HrmsMonthlyPayrollItem.payroll),
+            )
+            .join(HrmsMonthlyPayroll, HrmsMonthlyPayrollItem.payroll_id == HrmsMonthlyPayroll.id)
+            .where(
+                HrmsMonthlyPayrollItem.employee_id.in_(ctx.managed_employee_ids),
+                HrmsMonthlyPayrollItem.status == "APPROVED",
+            )
+            .order_by(HrmsMonthlyPayroll.payroll_month.desc())
+        )
+        if payroll_month:
+            query = query.where(HrmsMonthlyPayroll.payroll_month == payroll_month)
+        result = await db.execute(query)
+        items = list(result.scalars().all())
+    else:
+        target_emp_id = resolved_emp_id if (ctx.is_admin or ctx.is_hr or (ctx.is_manager and resolved_emp_id)) else ctx.user_id
+        items = await service.get_employee_payslips(
+            employee_id=target_emp_id,
+            is_admin=ctx.is_admin or ctx.is_hr,
+            payroll_month=payroll_month,
+        )
 
     # Non-admin non-HR callers must ONLY see APPROVED payslips
     if not (ctx.is_admin or ctx.is_hr):
@@ -799,7 +836,20 @@ def _serialize_payroll(payroll: HrmsMonthlyPayroll, allowed_employee_ids: Option
     if allowed_employee_ids is not None:
         items = [i for i in items if i.employee_id in allowed_employee_ids]
 
-    serialized_items = [_serialize_payroll_item(item, fallback_month=payroll.payroll_month) for item in items]
+    # Deduplicate items by employee_id to prevent duplicate payroll records on screen
+    seen_emp_ids = set()
+    deduped_items = []
+    for item in items:
+        if item.employee_id not in seen_emp_ids:
+            seen_emp_ids.add(item.employee_id)
+            deduped_items.append(item)
+
+    serialized_items = [_serialize_payroll_item(item, fallback_month=payroll.payroll_month) for item in deduped_items]
+
+    # Ensure all serialized items reflect APPROVED status if parent payroll is APPROVED
+    if payroll.status == "APPROVED":
+        for it in serialized_items:
+            it["status"] = "APPROVED"
 
     return {
         "id": str(payroll.id),

@@ -638,11 +638,15 @@ export function PayrollPage() {
     }
     try {
       setApproving(true);
-      await apiPost(`/hrms/payroll/monthly/${month}/approve`, {
+      const res = await apiPost<MonthlyPayrollRecord>(`/hrms/payroll/monthly/${month}/approve`, {
         payroll_month: month,
       });
+      if (res.data && res.data.items && res.data.items.length > 0) {
+        setMonthlyPayroll(res.data);
+      } else {
+        await fetchMonthlyPayroll(month);
+      }
       showToast(`Payroll for ${month} approved and locked. Payslips published to employees.`, "success");
-      fetchMonthlyPayroll(month);
     } catch (err) {
       showToast(errorMessage(err) || "Failed to approve payroll", "error");
     } finally {
@@ -675,6 +679,23 @@ export function PayrollPage() {
       setSubmittingReopen(false);
     }
   };
+
+  const displayedItems = useMemo(() => {
+    if (!monthlyPayroll || !monthlyPayroll.items) return [];
+    const seen = new Set<string>();
+    const result: MonthlyPayrollItem[] = [];
+    for (const it of monthlyPayroll.items) {
+      const key = it.employee_id || it.id;
+      if (!seen.has(key)) {
+        seen.add(key);
+        result.push({
+          ...it,
+          status: (monthlyPayroll.status === "APPROVED" || it.status === "APPROVED") ? "APPROVED" : (it.status || "REVIEW"),
+        });
+      }
+    }
+    return result;
+  }, [monthlyPayroll]);
 
   // ---------------------------------------------------------------------------
   // Right-Side Details Drawer & Edit Payroll State
@@ -843,6 +864,7 @@ export function PayrollPage() {
 
   useEffect(() => {
     if (isAdmin && activeTab === "monthly") {
+      setMonthlyPayroll(null);
       fetchMonthlyPayroll(selectedMonth);
     }
   }, [isAdmin, activeTab, selectedMonth, fetchMonthlyPayroll]);
@@ -1823,7 +1845,10 @@ export function PayrollPage() {
                     type="month"
                     value={selectedMonth}
                     onChange={(e) => {
-                      if (e.target.value) setSelectedMonth(e.target.value);
+                      if (e.target.value) {
+                        setMonthlyPayroll(null);
+                        setSelectedMonth(e.target.value);
+                      }
                     }}
                     className="form-control"
                     style={{ fontWeight: 600, padding: "6px 12px", width: "170px" }}
@@ -1999,7 +2024,7 @@ export function PayrollPage() {
                   <tbody>
                     {loadingPayroll ? (
                       <MonthlyPayrollSkeletonRows />
-                    ) : !monthlyPayroll || monthlyPayroll.items.length === 0 ? (
+                    ) : displayedItems.length === 0 ? (
                       <tr>
                         <td colSpan={11} style={{ textAlign: "center", padding: "36px", color: "#64748b" }}>
                           {employeeSalaries.length === 0
@@ -2010,7 +2035,7 @@ export function PayrollPage() {
                         </td>
                       </tr>
                     ) : (
-                      monthlyPayroll.items.map((it) => (
+                      displayedItems.map((it) => (
                         <tr key={it.id}>
                           <td>
                             <div style={{ fontWeight: 600, color: "#1e293b" }}>{it.employee_name}</div>

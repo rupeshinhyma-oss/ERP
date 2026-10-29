@@ -3376,7 +3376,12 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
                     cursor: "pointer",
                   }}
                 >
-                  📥 Download Sample CSV Template
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#2563eb" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                    <polyline points="7 10 12 15 17 10" />
+                    <line x1="12" y1="15" x2="12" y2="3" />
+                  </svg>
+                  <span>Download Sample CSV Template</span>
                 </button>
               </div>
               <div style={{ fontSize: "12px", color: "#64748b", marginTop: "6px" }}>

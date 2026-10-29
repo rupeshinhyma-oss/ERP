@@ -3,7 +3,8 @@
 > **Document Type:** Master Regression Testing Specification & Feature Catalog  
 > **Location:** Root Workspace (`/MODULES_AND_FEATURES_TEST_MANUAL.md`)  
 > **Purpose:** Exhaustive reference catalog detailing every single module, page layout, table column, action button, modal window, drawer, form tab, and form field across the entire ERP. Designed for developers, QA testers, and autonomous AI agents to execute manual and automated regression tests before and after code changes.  
-> **Strict Policy:** When developing or modifying features, no existing module, form, or field listed in this document may be removed, broken, or regressed.
+> **Strict Policy:** When developing or modifying features, no existing module, form, or field listed in this document may be removed, broken, or regressed.  
+> **Last Updated:** October 29, 2026
 
 ---
 
@@ -76,6 +77,12 @@
 65. [SALE: Sales Process Live KPI Metrics & Status Tabs Dynamic Calculation Engine](#65-sale-sales-process-live-kpi-metrics--status-tabs-dynamic-calculation-engine)
 66. [SALE: Sales Process 9-Status Action Menu Matrix, LR Duplicate, Direct Cancellation & SO Files Deletion](#66-sale-sales-process-9-status-action-menu-matrix-lr-duplicate-direct-cancellation--so-files-deletion)
 67. [SALE PROCESS: Collapsible Filter Panel 13-Field Grid & Dropdown Sales Person Selection](#67-sale-process-collapsible-filter-panel-13-field-grid--dropdown-sales-person-selection)
+68. [HRMS PHASES 2–6: Granular RBAC, Deny Precedence, Manager-First Real Availability Routing, Two-Stage Approvals & Separation of Duties](#68-hrms-phases-26-granular-rbac-deny-precedence-manager-first-real-availability-routing-two-stage-approvals--separation-of-duties)
+69. [FEED: Open Broadcasting & 1-to-1 Private Employee Messaging](#69-feed-open-broadcasting--1-to-1-private-employee-messaging)
+70. [SALE PROCESS: Sale Status Update Side Drawer, Multi-Stage Workflow, PO File & Tally Bill Upload](#70-sale-process-sale-status-update-side-drawer-multi-stage-workflow-po-file--tally-bill-upload)
+71. [SALE: Discount Payments Ledger, Multi-Installment Adjustment Drawer & Payment List Modal](#71-sale-discount-payments-ledger-multi-installment-adjustment-drawer--payment-list-modal)
+72. [REPORTS: Product Re-Order Matrix, Branch-Scoped Shortfall Engine & FIFO Stock Breakup](#72-reports-product-re-order-matrix-branch-scoped-shortfall-engine--fifo-stock-breakup)
+73. [REPORTS: Product Stock Transactions Master List & Per-Product Stock Transaction Ledger](#73-reports-product-stock-transactions-master-list--per-product-stock-transaction-ledger)
 
 ---
 
@@ -117,6 +124,11 @@
 | **PURCHASE** | Local Purchase | `/purchase/localpurchase` | `local-purchases` | `shoppingBag` | `purchase.view` |
 | **PURCHASE** | Import Purchase | `/purchase/importpurchase` | `import-purchases` | `ship` | `purchase.view` |
 | **PURCHASE** | Purchase Suppliers | `/purchase/suppliers` | `purchase-suppliers` | `factory` | `supplier.view` |
+| **REPORTS** | Re-Order | `/reports/re-order` (`/product-reorder/list`) | `reports-reorder` | `refreshCw` | `product.view` |
+| **REPORTS** | Stock Transactions | `/reports/stock-transactions` (`/transaction-report/list`) | `reports-stock-transactions` | `activity` | `product.view` |
+| **REPORTS** | Stock Transaction Detail | `/stock-transaction/list/:id` | `reports-stock-transactions` | `activity` | `product.view` |
+| **REPORTS** | Deleted Orders | `/reports/deleted-orders` | `reports-deleted-orders` | `fileX` | `saleorder.view` |
+| **REPORTS** | General Reports | `/reports/general` | `reports-general` | `pieChart` | Authenticated |
 | **TASK** | Tasks | `/tasks` | `tasks` | `checkSquare` | `task.view` |
 | **TASK** | Technical Tasks | `/technical-task/list` | `technical-tasks` | `wrench` | `technicaltask.view` |
 | **USER MANAGEMENT** | Users | `/users` | `users` | `user` | `user.view` |
@@ -170,7 +182,7 @@
 
 ## 4. CONTACT: Suppliers Module
 
-- **Route:** `/suppliers`
+- **Route:** `/purchase/suppliers` (legacy redirects: `/suppliers`, `/supplier/list`; Sidebar `activeKey`: `purchase-suppliers` under **PURCHASE**)
 - **Purpose:** Comprehensive vendor directory, sourcing management, factory visit logs, and public quote token dispatching.
 
 ### 4.1. Screen Layout & Header Actions
@@ -298,7 +310,7 @@ Manage complete vendor team directory:
 - **Sections:** Identity, Geography, Contact Persons Grid, Sourcing Status, Factory Visit Photos Gallery, Notes.
 
 ### Test Cases
-- [ ] Open `/suppliers` and confirm active list loads.
+- [ ] Open `/purchase/suppliers` and confirm active list loads and `Suppliers` under `PURCHASE` in the left sidebar is highlighted active (`.nav-item.active`).
 - [ ] Click `+ QUICK ADD`, fill Company Name, Country, State, City and save. Verify record appears in table.
 - [ ] Click `+ ADD NEW`, navigate all 3 tabs, upload factory visit photo, add contact person, and save.
 - [ ] Test Country Dial Code Auto-Update: Change Country (e.g. China -> India) and verify Calling Number, WhatsApp Number, and WeChat Number dialing codes automatically update (e.g. `+86` -> `+91`) while resetting Province/City dropdowns.
@@ -1062,10 +1074,13 @@ Manage complete vendor team directory:
 
 ## 25. AUTHENTICATION: Login & Session Recovery
 
-- **Route:** `/login`
-- **Form Fields:** Username or Corporate Email (*Required*), Password (*Required*), "Remember Me" checkbox, `Sign In` button.
-- **Security Logic:** Rate-limiting protection on failed attempts; automated single-flight token refresh upon access token expiration (`/auth/refresh`).
-- **Deactivated Account Immunity & Permanent Deletion Retirement:** User deletion is completely disabled across the system. Deactivated accounts (`is_active=False`, `status=INACTIVE`) cannot log in under any circumstances. Submitting credentials for a deactivated user fails immediately with `403 Forbidden: Account is inactive or locked.`, preventing authentication. Any existing active JWT access tokens are immediately rejected on API calls, and clicking `Force Logout` instantly expels active sessions via real-time WebSocket termination and token invalidation.
+- **Route:** `/login` (`frontend/src/pages/Login.tsx`)
+- **Form Fields:** Username, Email or Mobile Number (*Required*), Password (*Required*, with show/hide eye toggle), "Remember Me" checkbox, `Sign In` button.
+- **Security & Reliability Logic:**
+  - Rate-limiting protection on failed attempts; automated single-flight token refresh upon access token expiration (`/auth/refresh`).
+  - **Bounded Login Timeout & Reachability Guard:** `POST /auth/login` uses a `15s` `AbortController` timeout (paired with a `30s` Vite `/api` proxy timeout in `vite.config.ts`). If the local `Inhyma_ERP` backend (port `8002`) is unreachable or returns `5xx`, `LoginPage` surfaces the error banner directly on `/login` instead of redirecting into `/dashboard?sso_handover=...`.
+  - **Autofill-Safe Session Notice Preservation:** Incoming `ihm_login_notice` messages from `sessionStorage` are protected from immediate browser password-manager autofill `onChange` events for `1000ms` after mount so SSO/session failure banners remain visible.
+- **Deactivated Account Immunity & Permanent Deletion Retirement:** User deletion is completely disabled across the system. Deactivated accounts (`is_active=False`, `status=INACTIVE`) cannot log in under any circumstances. Submitting credentials for a deactivated user fails immediately with `403 Forbidden` / `401 Unauthorized`, preventing authentication. Any existing active JWT access tokens are immediately rejected on API calls, and clicking `Force Logout` instantly expels active sessions via real-time WebSocket termination and token invalidation.
 
 ---
 
@@ -1572,7 +1587,7 @@ Checklist to execute:
 3. **Subtitle:** `Manage corporate business accounts, credit terms, multi-contact directories, and client potential ratings.`
 4. **Action Buttons:**
    - `+ ADD NEW` (Primary blue button) — Opens company creation drawer or navigates to `/companies/add`.
-   - `Import` / `Export` — Universal Excel/CSV import wizard and export utilities.
+   - `Imp / Exp` Dropdown — Amber action dropdown (`ImpExpDropdown`) with professional SVG icon badges for `SAMPLE FILE` (slate document template icon), `IMPORT` (blue upload icon), and `EXPORT` (emerald download icon).
    - `Bulk Actions` — Bulk status activation, deactivation, and soft-deletion for selected companies.
 5. **Filter Toolbar:**
    - Real-time search bar querying legal name, trade name, GSTIN, PAN, and contact persons.
@@ -1640,63 +1655,37 @@ Checklist to execute:
 - **Route:** `/product-stock/list`
 - **Legacy Redirects:** `/product-stock`, `/product_stock/list`, `/product_stock`
 - **Required Permission:** `product.view`
-- **Purpose:** Centralized warehouse inventory ledger providing real-time visibility into physical on-hand stock, reserved order allocations, net available quantities, and monetary inventory valuation across all storage facilities.
+- **Purpose:** Centralized 15-column multi-warehouse inventory matrix (`Mumbai`, `Ahmedabad`, `Indore` physical, transit, and ordered pipelines) outer-joined directly from Product Master (`limit: 2500`, `le=5000`) with live breakup drawers and Product Master detail view.
 
 ### Visual Elements & Layout
 1. **Breadcrumbs:** `Inventory` > `Product Stock`
 2. **Page Title:** `Product Stock`
-3. **Subtitle:** `Real-time physical stock counts, warehouse allocation, and inventory valuation across storage depots.`
-4. **Top Action Controls:**
-   - `Export CSV`: Downloads inventory balance dataset in CSV format.
-   - `Export Excel`: Downloads formatted `.xlsx` workbook with formulas.
-   - `Import Stock`: Launches the universal bulk import wizard for opening balance reconciliation.
-   - `Refresh`: Clears local caches and refetches real-time stock balances from backend.
-5. **Multi-Warehouse Dropdown Selector:**
-   - Prominently positioned in the filter bar.
-   - Options dynamically loaded from Warehouses Master: `All Warehouses` (default) plus each configured warehouse (e.g. *Main Depot - Bhiwandi*, *Ahmedabad Hub*, *Mumbai Transit Depot*).
-   - Selecting a warehouse filters table rows and recalculates the 3,3,3 stat cards instantly.
-6. **Grouped 3,3,3 in 1 Summary Metric Cards (with Crimson Status Badges):**
-   - Distinctive 3-group layout styled with elegant dark cards and deep red/crimson accent badges matching the system design specification:
-     - **Card 1 (Catalog & Line Items):**
-       - Metric A: `Total Registered Products` count.
-       - Metric B: `Active Stock Lines` count (products with positive inventory).
-       - Metric C: `Inactive / Discontinued SKUs` count.
-     - **Card 2 (Physical Quantities):**
-       - Metric A: `Total On Hand Quantity` (cumulative physical units in warehouse).
-       - Metric B: `Total Reserved Quantity` (units committed to pending sales consignments).
-       - Metric C: `Net Available Quantity` (free units ready for immediate sale or dispatch).
-     - **Card 3 (Financial Valuation & Health Alerts):**
-       - Metric A: `Total Inventory Valuation` (calculated as $\sum (\text{On Hand} \times \text{Unit Price})$ with dynamic currency formatting).
-       - Metric B: `Low Stock Alert Lines` count (inventory below reorder threshold).
-       - Metric C: `Out of Stock Alerts` count (inventory exhausted or zero).
-7. **Live Debounced Search Bar:**
-   - Text input with instant debounced filtering across Product Name, Product SKU/Code, Category, and Warehouse Name.
-8. **Master Product Stock Table:**
-   - Columns:
-     - `Sr No.`: 1-indexed sequential counter.
-     - `Product Name & Code`: Displays product name in bold with internal SKU code below in secondary badge.
-     - `Category`: Product categorization name.
-     - `Warehouse`: Warehouse facility name holding the stock.
-     - `On Hand Qty`: Total physical count in warehouse.
-     - `Reserved Qty`: Units reserved for active inquiries or orders.
-     - `Available Qty`: Net available units ($\text{On Hand} - \text{Reserved}$).
-     - `Unit Price`: Unit cost rate formatted in currency.
-     - `Total Valuation`: Product line monetary value ($\text{On Hand} \times \text{Unit Price}$).
-     - `Status`: High-contrast pill badge:
-       - `In Stock` (Emerald green badge `#10b981`).
-       - `Low Stock` (Amber warning badge `#f59e0b`).
-       - `Out of Stock` (Crimson red badge `#ef4444`).
+3. **Top Action Controls:**
+   - Dark slate Funnel filter toggle button (`#556987`, filter panel collapsed by default on `/product-stock/list`).
+   - Golden-amber `Export` button (`#f59e0b`, hover `#d97706`, `.btn-imp-exp.stock-btn-export` with vector download icon matching Companies `Imp / Exp`): Downloads `Product_Stock_List.xlsx` workbook for the active filtered dataset.
+4. **Collapsible 4-Column Filter Panel:**
+   - `Category` (`All` + active `ProductCategory` masters).
+   - `Sub Category` (`All` + `ProductSubCategory` masters dynamically narrowed when `Category` is selected).
+   - `Brand` (`All` + active `Brand` masters).
+   - `Is Negative Stock` (`Select`, `Yes`, `No`).
+   - Dark slate `Reset` and golden-amber `Search` buttons.
+5. **Live Search Input:**
+   - Instant client-side search across `Product Name (As Per Tally)`, `Product Code`, `Brand`, and `Sub Category`.
+6. **15-Column Title-Case Product Stock Table (Default `50` Rows/Page):**
+   - `Sr. No.` | `Product Name (As Per Tally)` (blue clickable hyperlink opening the `Product Details` `SideDrawer` with real Packaging Quantity, Minimum Price, CBM Dimensions, HSN, GST %, UOM, and 9-column warehouse breakdown) | `Product Code` | `Brand` | `Sub Category`
+   - **Physical Columns (Soft Pink `#f9e7e9`):** `Mumbai`, `Ahmedabad`, `Indore`
+   - **Transit Columns (Warm Beige-Grey `#efece6`):** `Mumbai Transit`, `Ahmedabad Transit`, `Indore Transit`
+   - **Ordered Columns (Medium Grey `#dedede`):** `Mumbai Ordered`, `Ahmedabad Ordered`, `Indore Ordered`
+   - **Summary Column:** `Total Qty` ($\sum \text{Physical} + \sum \text{Transit} + \sum \text{Ordered}$)
+   - **Transaction-Driven `ⓘ` Breakup Buttons (`breakup_flags`):** Opens right-hand `Sale Order Information` drawer (for physical stock) or `Consignment Breakup` drawer with `Booked Sale Orders (FIFO Deducted)` & clickable `Consignment Details` modal (for transit/ordered stock), without hardcoded fallback rows.
 
 ### Test Cases
-- [ ] Verify navigating to `/product-stock`, `/product_stock`, or `/product_stock/list` redirects automatically to `/product-stock/list`.
-- [ ] Verify the 3,3,3 in 1 summary cards render in 3 balanced columns with deep red/crimson accents.
-- [ ] Verify selecting a specific warehouse in the warehouse dropdown filters both the table and the summary stat card totals.
-- [ ] Verify typing in the search bar dynamically filters matching product names, codes, or categories without full page reload.
-- [ ] Verify table column sorting works as expected on Product Name, On Hand Qty, Available Qty, and Total Valuation.
-- [ ] Verify `Available Qty` mathematically equals `On Hand Qty - Reserved Qty`.
-- [ ] Verify `Total Valuation` mathematically equals `On Hand Qty * Unit Price`.
-- [ ] Verify Status pill renders `In Stock` (green) when available > reorder level, `Low Stock` (amber) when available <= reorder level, and `Out of Stock` (red) when available <= 0.
-- [ ] Verify Export CSV and Export Excel generate valid spreadsheets matching the active filtered dataset.
+- [ ] Verify navigating to `/product-stock`, `/product_stock`, or `/product_stock/list` resolves to `/product-stock/list` with filter panel collapsed by default.
+- [ ] Verify all active Product Master SKUs load (even products with `0` stock and no `product_stocks` row yet) with populated `Brand`, `Category`, and `Sub Category`.
+- [ ] Verify selecting a `Category` dynamically narrows `Sub Category` options and clicking `Search` / `Reset` applies and resets filters accurately.
+- [ ] Verify `Is Negative Stock` (`Yes` / `No` / `Select`) filters products with any negative warehouse or total balance.
+- [ ] Verify clicking `Product Name (As Per Tally)` on `/product-stock/list` opens the `Product Details` `SideDrawer` displaying real Packaging Quantity, Minimum Price, and `L × W × H cm` CBM dimensions.
+- [ ] Verify clicking `ⓘ` opens live `Sale Order Information` or `Consignment Breakup` (with FIFO booked Sale Orders) and `Export` downloads `Product_Stock_List.xlsx`.
 
 ---
 
@@ -1713,8 +1702,9 @@ Checklist to execute:
 2. **Page Title:** `Stock Adjustment`
 3. **Subtitle:** `Record physical inventory count adjustments, reconciliations, split orders, and damage deductions.`
 4. **Header Action Controls:**
-   - `+ New Adjustment` (Primary blue button) — Opens adjustment creation modal.
-   - `Refresh` — Refetches adjustment records and resets filter caches.
+   - Dark slate Funnel filter toggle button (`#556987`, filter panel collapsed by default).
+   - `+ Add New ▾` (Primary blue dropdown button) — Opens `Stock IN Adjustment` or `Stock OUT Adjustment` form.
+   - Golden-amber `Export` button (`#f59e0b` / hover `#d97706`, `.btn-imp-exp` with vector download icon; replaces legacy `Imp / Exp` and omits `Bulk Actions`) — Exports filtered adjustments to `stock_adjustments.csv`.
 5. **Search & Comprehensive Filter Toolbar:**
    - Live text search bar querying Invoice Number, Client Name, Warehouse, or Remarks.
    - Adjustment Type dropdown filter: `All Types`, `Stock IN` (green), `Stock OUT` (red).
@@ -2326,6 +2316,9 @@ Checklist to execute:
    - Unauthorized users cannot trigger state changes outside configured transitions.
 6. **Atomic Warehouse Stock-In:**
    - Executing Stock-In (`POST /api/v1/purchase/local-orders/{id}/stock-in`) atomically increments warehouse inventory ledgers with unit landed cost valuation and locks the purchase order against subsequent modifications.
+7. **Header Action Bar & Import / Export (`Imp / Exp`):**
+   - Top-right header displays Filter Toggle (funnel), `+ ADD NEW`, `Imp / Exp` dropdown (`btn-imp-exp` golden-amber button with `SAMPLE FILE`, `IMPORT` column-mapping wizard posting to `POST /api/v1/purchase/local-orders/import`, and UTF-8 BOM `EXPORT` CSV download), and `Bulk Actions`.
+   - `ImportSummaryPanel` displays created count, duplicate invoice alerts, and per-row validation errors directly below the page header.
 
 ### Test Cases
 - [ ] Verify navigating to `/purchase/localpurchase` renders the Local Purchase orders table with all KPI summary cards.
@@ -2339,7 +2332,9 @@ Checklist to execute:
 - [ ] Verify status transition buttons strictly obey database workflow rules and user permissions.
 - [ ] Verify executing Stock-In updates the warehouse stock ledger and marks the order status as completed.
 - [ ] Verify clicking "Download PDF" streams a valid print-ready Purchase Order document.
-- [ ] Verify all 16 automated tests in `LocalPurchasePage.test.tsx` pass without errors.
+- [ ] Verify clicking `Imp / Exp` opens the dropdown menu with professional SVG icon badges for `SAMPLE FILE`, `IMPORT`, and `EXPORT`.
+- [ ] Verify `SAMPLE FILE` downloads `Sample_Local_Purchase_Template.csv`, `IMPORT` opens the column-mapping wizard and imports valid rows via `POST /api/v1/purchase/local-orders/import` as `Pending` orders, and `EXPORT` downloads the filtered Local Purchase CSV with UTF-8 BOM.
+- [ ] Verify all 32 automated tests in `LocalPurchasePage.test.tsx` and 11 local purchase route tests in `test_purchase_routes.py` pass without errors.
 
 ---
 
@@ -2385,6 +2380,9 @@ Checklist to execute:
    - When an import consignment reaches `Closed` status, the row action menu (`⋮`) strictly displays **ONLY `Download Purchase`**.
    - `Edit`, `Confirm`, and `Delete` actions are suppressed.
    - Client-side navigation to `/addedit/:id` for closed consignments is blocked, and backend endpoint `PUT /purchase/import-orders/{id}` enforces `edit: "none"`.
+8. **Header Action Bar & Import / Export (`Imp / Exp`):**
+   - Top-right header displays Filter Toggle (funnel), `ADD NEW`, `Imp / Exp` dropdown (`btn-imp-exp` golden-amber button with `SAMPLE FILE`, `IMPORT` column-mapping wizard posting to `POST /api/v1/purchase/import-orders/import`, and UTF-8 BOM `EXPORT` CSV download), and `Bulk Actions`.
+   - `ImportSummaryPanel` displays created count, duplicate consignment alerts, and per-row validation errors directly below the page header.
 
 ### Test Cases
 - [ ] Verify navigating to `/purchase/importpurchase` loads import consignments table with foreign currency and INR totals.
@@ -2400,7 +2398,9 @@ Checklist to execute:
 - [ ] Verify clicking the uploaded PDF invoice in the INVOICE column opens `/purchase-order/import-bill-file/:id` and renders the actual uploaded file inside an iframe without generating synthetic PDF.
 - [ ] Verify clicking an uploaded docx invoice displays the document card with file size and download button.
 - [ ] Verify that on a consignment with `Closed` status, clicking the Action menu (`⋮`) displays strictly ONLY `Download Purchase` (Edit is removed).
-- [ ] Verify all 45 automated tests in `ImportPurchasePage.test.tsx` and 6 tests in `ImportPurchasePdfPage.test.tsx` pass without errors.
+- [ ] Verify clicking `Imp / Exp` opens the dropdown menu with professional SVG icon badges for `SAMPLE FILE`, `IMPORT`, and `EXPORT`.
+- [ ] Verify `SAMPLE FILE` downloads `Sample_Import_Purchase_Template.csv` with valid dynamic dates, `IMPORT` opens the column-mapping wizard and imports valid consignments via `POST /api/v1/purchase/import-orders/import`, and `EXPORT` downloads the filtered Import Purchase CSV with UTF-8 BOM.
+- [ ] Verify all 45 automated tests in `ImportPurchasePage.test.tsx`, 6 tests in `ImportPurchasePdfPage.test.tsx`, and 23 purchase route tests in `test_purchase_routes.py` pass without errors.
 
 ---
 
@@ -2604,8 +2604,8 @@ Checklist to execute:
 
 ### Modules Covered by Universal Standard
 - **Contact:** `Companies.tsx`, `Suppliers.tsx`, `AgentsPage.tsx`, `FollowUpsPage.tsx`, `IndustrialZonesPage.tsx`, `LeadsPage.tsx`.
-- **Inventory:** `ProductStockPage.tsx`, `StockAdjustmentPage.tsx`, `StockTransferPage.tsx`, `ProductReorderPage.tsx`, `PriceListPage.tsx`, `masters/Products.tsx`.
-- **Sales & Commercial:** `sales/SaleProcessList.tsx`, `sales/DiscountPaymentsPage.tsx`, `ProformaInvoicesPage.tsx`, `DeletedOrdersPage.tsx`.
+- **Inventory:** `ProductStockPage.tsx`, `StockAdjustmentPage.tsx`, `StockTransferPage.tsx` (header action bar with Funnel filter toggle, `+ ADD NEW`, golden-amber `Export` `.btn-imp-exp` button with download SVG icon, and `Bulk Actions ▾`), `ProductReorderPage.tsx`, `PriceListPage.tsx`, `masters/Products.tsx`.
+- **Sales & Commercial:** `sales/SaleProcessList.tsx` (top header with `Including GST` toggle, Funnel filter toggle, `+ ADD NEW`, and golden-amber `Export` `.btn-imp-exp` button with download SVG icon), `sales/DiscountPaymentsPage.tsx`, `ProformaInvoicesPage.tsx`, `DeletedOrdersPage.tsx`.
 - **Tasks & Engineering:** `technicalTasks/TechnicalTasksPage.tsx`.
 - **Generic Masters:** `components/MasterPage.tsx` (applies to Brands, Categories, UOM, Taxes, Warehouses, Call Types, Buyer Types, etc.).
 
@@ -3297,8 +3297,202 @@ Positioned directly underneath the collapsible filter panel, these three metric 
 - [ ] **Security & Validation:** Non-existent IDs return `HTTP 404 Not Found`; unauthenticated requests return `HTTP 401 Unauthorized`; client sender ID spoofing is prevented by deriving identity strictly from authentication tokens.
 - [ ] **Existing Features Preserved:** Existing reactions (Like, Celebrate, Support), comments, drafts, readership tracking, CRM, and ERP login continue operating normally.
 
+
 ---
-*End of Master Features & Testing Specification Manual. Maintained for Inhyma Solutions Enterprise ERP. Last updated: October 2026 (Sections 61-69: Dynamic Organization Company Logo, Product Master Category Rewiring & Floating Duplicate Overlay, Platform Migration Idempotency, Sales Process Workflow & 13-Field Filter Grid, HRMS Phases 2-6 RBAC & Approval Architecture, Feed & Broadcast Open Access & 1-to-1 Employee Messaging).*
 
+## 70. SALE PROCESS: Sale Status Update Side Drawer, Multi-Stage Workflow, PO File & Tally Bill Upload
 
+### Module Identification & Location
+- **Module Name:** Sale Status Update Slide-Over Drawer & Multi-Stage Document Workflow
+- **Routes:** `/sales/process`
+- **Files:**
+  - Frontend List & Drawer: `frontend/src/pages/sales/SaleProcessList.tsx`
+  - Frontend Detail Modal: `frontend/src/pages/sales/SaleProcessDetailModal.tsx`
+  - Backend Models, Schemas, Service & Routes: `backend/app/sales/models.py`, `backend/app/sales/schemas.py`, `backend/app/sales/service.py`, `backend/app/sales/process_routes.py`
+  - Database Migrations: `backend/alembic/versions/v7a8b9c0d1e2_add_po_and_tally_bill_fields_to_sales_orders.py`, `backend/alembic/versions/w8b9c0d1e2f3_add_lr_file_and_dispatch_media_to_sales_orders.py`, `backend/alembic/versions/x9c0d1e2f3a4_add_eway_bill_file_fields_to_sales_orders.py`, `backend/alembic/versions/y0d1e2f3a4b5_add_timeline_to_sales_orders.py`
+  - Test Suites: `frontend/src/pages/__tests__/SaleProcessListPage.test.tsx`, `backend/tests/test_sale_order_workflow.py`
 
+### Feature Overview & UI Specifications
+1. **Status Column Action & Badges (`SaleProcessList.tsx`):**
+   - Every row renders its status pill (`Admin Approved`, `Acc. Confirmed`, `Gatepass Created`, and `Dispatched` use soft green `#dcfce7` / `#15803d`), a blue square edit icon button (`title="Update Status"`), optional `📎 PO` chip on upstream stages (`Sales Confirmed` / `Admin Approved`), and a `DD-MM-YYYY hh:mm A` timestamp below the row.
+   - In the **`Acc. Dep.`** column above `Timeline`, invoiced orders display orange `#f59e0b` square chips: **`i`** (instant dark hover tooltip `Tally Bill`, direct link to `tally_bill_url`) and **`E`** (instant dark hover tooltip `E-Way Bill`, direct link to `eway_bill_url` when `E-Way Bill` = `Yes`).
+   - The `PO` column also renders `Yes 📎` as a direct clickable download link when `po_file_url` is present.
+2. **Sale Status Update Side Drawer (`<SideDrawer title="Sale Status Update" width="480px" maxWidth="95vw">`):**
+   - **Green Current Status Banner:** `Current Status: <Stage Label>` (`#dcfce7` background, `#15803d` text).
+   - **Stage 1 (`Pending`):**
+     - `Status` `<select>` options: `Sales Confirmed` (default) and `Cancel`.
+     - `PO File` upload input accepting `.pdf,.png,.jpg,.jpeg,.xlsx,.xls,.doc,.docx` with selected filename/KB preview and `Clear` button.
+   - **Stage 2 (`Sales Confirmed`):**
+     - `Status` `<select>` options: `Admin Approved` (default) and `Cancel`.
+     - `PO File` upload input is hidden.
+   - **Stage 3 (`Admin Approved`):**
+     - `Status` `<select>` options: `Acc. Confirmed` (default) and `Cancel`.
+     - When `Acc. Confirmed` is selected, renders:
+       - `Invoice Date*` (`type="date"`, required)
+       - `Invoice No *` (`type="text"`, required)
+       - `Tally Bill *` (file upload accepting `.pdf,.png,.jpg,.jpeg,.xlsx,.xls,.doc,.docx`, required unless already uploaded)
+       - `E-Way Bill` (`No` / `Yes`, default `No`)
+       - `E-Way Bill *` (`data-testid="input-status-eway-bill-file"`, conditional file upload shown only when `E-Way Bill` = `Yes`; mandatory when `Yes`, uploaded via `POST /api/v1/sales/upload-eway-bill` and persisted to `eway_bill_url` / `eway_bill_name`; renders orange `[E]` chip in `Acc. Dep.` column and download link in `SaleProcessDetailModal` & `Upload Files`)
+       - `Third Party Invoice / Reference *` (shown & required when Third-Party Delivery is `Yes`).
+   - **Stage 4 (`Acc. Confirmed`):**
+     - Green banner `Current Status: Acc. Confirmed`, `Status` field locked to `Gatepass Created`, clean `Remarks` textarea, and bottom full-width `Submit` button (no extra Outward Gate Pass Details inputs inside the drawer; Gatepass number & metadata are auto-assigned on submission).
+   - **Downstream Stages (`Gatepass Created`, `Gatepass Cancelled`, `Dispatched`):**
+     - `Gatepass Created` ➔ `Dispatched` / `Gatepass Cancelled`.
+     - `Gatepass Cancelled` ➔ `Gatepass Created` / `Cancel`.
+     - **Stage 6 (`Dispatched`):**
+       - Green banner `Current Status: Dispatched`.
+       - `Status` `<select>` options: `LR` (`value="lr"`, default) and `Gatepass Cancel` (`value="gatepass_cancelled"`).
+       - When `Status` = `LR` is selected:
+          - `[ ] Change Transport Info` checkbox (`data-testid="checkbox-change-transport-info"`): unchecked by default; when checked, expands a clean frameless 2×2 grid (`data-testid="section-change-transport-fields"`, `gridTemplateColumns: "1fr 1fr"`) directly on the white drawer surface:
+            - Row 1: `Transport Name` (`<select>` from `/masters/transports` + `Self Pickup`, pre-selected from order or first transport) | `Transport Destination` (`<input type="text">`, empty placeholder, initialized strictly from `order.transport_destination` without falling back to `order.city`).
+            - Row 2: `Delivery Type` (`<select>` from `delivery.type` option group, defaulting to `Door`) | `Delivery Charge` (`<select>` from `delivery.charge` option group, defaulting to `To Pay`).
+            - Selecting `Self Pickup` automatically hides `Transport Destination`, `Delivery Type`, and `Delivery Charge`.
+         - `LR File *` (`data-testid="input-status-lr-file"`): mandatory file upload input (`Choose File | No file chosen`) accepting `.pdf,.png,.jpg,.jpeg,.webp,.doc,.docx,.xlsx,.xls`, uploaded via `POST /api/v1/sales/upload-lr` with filename/KB preview & `Clear` button.
+         - `Images/Videos (Upload Multiple)` (`data-testid="dropzone-dispatch-media"`): rectangular drag-and-drop + click-to-browse dropzone (`Drag files here to upload`) accepting multiple `image/*,video/*` files, uploaded via `POST /api/v1/sales/upload-dispatch-media` with per-file remove (`✕`) buttons.
+         - `Remarks`: multi-line textarea (clean empty placeholder).
+       - When `Status` = `Gatepass Cancel` is selected: hides `Change Transport Info`, `LR File *`, and `Images/Videos (Upload Multiple)`, showing only `Status`, `Remarks`, and `Submit`.
+   - **Remarks & Submit:** Multi-line `Remarks` textarea and full-width primary blue `Submit` button (`#0061f2`, `Submitting...` feedback).
+3. **Sales Details Modal Integration (`SaleProcessDetailModal.tsx`):**
+   - Displays clickable `PO File` link, `Invoice` (`invoice_no` & `invoice_date`), clickable `Tally Bill` link, `E-Way Bill` status & clickable file link, plus uploaded `LR File` and `Dispatch Media` (images/videos) in `Attached Files & Documents`.
+4. **Sale Order Time Line Side Drawer (`<SideDrawer title="Sale Order Time Line #<OrderSuffix>" width="480px">`):**
+   - Triggered by clicking the blue `Timeline` button in the `Acc. Dep.` column.
+   - Renders newest-to-oldest stage nodes connected by a continuous `#cbd5e1` vertical line and `34px` `#dbeafe` clock circles:
+     - Pill badges: `LR Mandatory`, `Dispatched`, `Gatepass Created`, and `Account Confirmed` in soft green (`#dcfce7` / `#15803d`); `Sales Confirmed` in soft blue (`#dbeafe` / `#1d4ed8`); `Admin Approval` and `Pending` in soft amber (`#fef3c7` / `#b45309`); `Gatepass Cancelled` / `Cancelled` in soft red (`#fee2e2` / `#dc2626`).
+     - Every stage displays calendar icon + `DD-MM-YYYY hh:mm AM/PM` timestamp and user icon + `By : <Actor Name>`, plus optional `Remark : <note>` only when a remark was entered.
+     - The `Account Confirmed` node additionally renders `Invoice No : <invoice_no>`, `Invoice Date : <DD-MM-YYYY>`, conditional `E-Way Bill : [⬇]` blue download icon link (`data-testid="timeline-download-eway-bill"`, shown only when an E-Way Bill file was uploaded), and `Tally Bill : [⬇]` blue download icon link (`data-testid="timeline-download-tally-bill"`).
+
+### QA Verification Test Cases
+- [ ] **TC-SP-11 (Pending ➔ Sales Confirmed with PO File):** On `/sales/process`, click `[✎]` (`Update Status`) on a `Pending` order. Verify `Sale Status Update` drawer opens with `Current Status: Pending` and `Sales Confirmed` selected. Choose a PO file, verify filename/KB preview and `Clear` button, enter remarks, and click `Submit`. Verify PO uploads via `POST /api/v1/sales/upload-po`, status updates to `Sales Confirmed`, `📎 PO` badge appears, and timestamp updates.
+- [ ] **TC-SP-12 (Sales Confirmed ➔ Admin Approved / Cancel):** Click `[✎]` on a `Sales Confirmed` order. Verify `Current Status: Sales Confirmed`, options `Admin Approved` (default) and `Cancel`, and confirm `PO File` input is hidden. Submit and verify status transitions cleanly.
+ - [ ] **TC-SP-13 (Admin Approved ➔ Acc. Confirmed / Cancel & Conditional E-Way Bill *):** Click `[✎]` on an `Admin Approved` order. Verify `Invoice Date*`, `Invoice No *`, `Tally Bill *`, and `E-Way Bill` (`No` default, with `E-Way Bill *` file upload hidden) render when `Acc. Confirmed` is selected. Switch `E-Way Bill` to `Yes` and verify the `E-Way Bill *` file upload field (`Choose File | No file chosen`) appears immediately below and blocks submission if empty. Attach both Tally Bill and E-Way Bill files, enter Invoice Date & No, and click `Submit`. Verify `POST /api/v1/sales/upload-tally-bill` and `POST /api/v1/sales/upload-eway-bill` succeed, order moves to `Acc. Confirmed`, and `[i]` + `[E]` chips render in `Acc. Dep.` alongside clickable links in the detail modal.
+- [ ] **TC-SP-14 (Acc. Confirmed ➔ Gatepass Created):** Click `[✎]` on an `Acc. Confirmed` order. Verify soft green `Acc. Confirmed` pill in table and drawer displaying `Current Status: Acc. Confirmed`, `Status: Gatepass Created`, `Remarks`, and `Submit` only.
+- [ ] **TC-SP-15 (Dispatched ➔ LR / Gatepass Cancel):** Click `[✎]` on a `Dispatched` order. Verify `Current Status: Dispatched` banner and `Status` dropdown containing `LR` and `Gatepass Cancel`. Under `LR`, verify `[ ] Change Transport Info` toggles transport inputs, `LR File *` blocks empty submission and uploads via `POST /api/v1/sales/upload-lr`, and `Images/Videos (Upload Multiple)` dropzone accepts drag-and-drop/browse of multiple photos & videos via `POST /api/v1/sales/upload-dispatch-media`. Verify switching `Status` to `Gatepass Cancel` hides LR fields and transitions the order to `gatepass_cancelled`.
+- [ ] **TC-SP-16 (Sale Order Time Line Drawer — Full 7-Stage Chain & Account Confirmed Downloads):** Click `Timeline` in the `Acc. Dep.` column across `Gatepass Created`, `Dispatched`, and `LR` tabs. Verify header `Sale Order Time Line #<OrderSuffix>`, newest-first stage pills (`LR Mandatory` ➔ `Dispatched` ➔ `Gatepass Created` ➔ `Account Confirmed` ➔ `Admin Approval` ➔ `Sales Confirmed` ➔ `Pending`), `DD-MM-YYYY hh:mm AM/PM` timestamps, `By : <Actor>` rows, and on `Account Confirmed`: `Invoice No`, `DD-MM-YYYY` `Invoice Date`, `E-Way Bill` download icon (shown only when E-Way Bill was uploaded), and `Tally Bill` download icon.
+
+---
+
+## 71. SALE: Discount Payments Ledger, Multi-Installment Adjustment Drawer & Payment List Modal
+
+- **Module Name:** Discount Payments (`Discount.docx` & `Completed/Sales & PI Process.docx` L102)
+- **Routes:** `/sale-discount/list`, `/discount-payments/list`, `/sales/discount-payments`
+- **Files:**
+  - Frontend Page: `frontend/src/pages/sales/DiscountPaymentsPage.tsx`
+  - Backend Model, Service & Routes: `backend/app/sales/models.py` (`DiscountPayment`), `backend/app/sales/service.py` (`_sync_discount_payment`), `backend/app/sales/routes.py` (`GET / POST / PATCH /api/v1/sales/discount-payments`)
+  - Database Migration: `backend/alembic/versions/z1e2f3a4b5c6_add_payments_history_to_discount_payments.py`
+  - Test Suites: `frontend/src/pages/__tests__/DiscountPaymentsPage.test.tsx`, `backend/tests/test_discount_payments.py`
+
+### Feature Overview & UI Specifications
+1. **Collapsible Filter Panel (Above KPI Cards):**
+   - Toggled via top-right `#556987` funnel button (`data-testid="btn-toggle-filter"`, collapsed by default).
+   - Fields: `Order Date Range` (`DateRangePicker`), `Warehouse` (`All.` + dynamic warehouses), `Sales Person` (`All.` + dynamic sales persons), `Dispatch` (`All`, `LR`, `Dispatched`, `Pending`, `Gatepass Created`), with `Reset` and `Search` buttons.
+2. **Reactive Top 3 KPI Summary Cards:**
+   - `TOTAL DISCOUNT` (blue `#0061f2` label), `PAID` (green `#16a34a` label), and `DUE` (red `#ef4444` label), dynamically updating immediately upon submitting partial or full discount adjustments.
+3. **Top Stage Tabs (`Discount.docx`):**
+   - `All (<count>)`, `Pending (<count>)` (default active tab), and `Completed (<count>)` (completed rows render `✓ Completed` green badge `data-testid="badge-settled-<id>"`).
+4. **10-Column Discount Payments Table:**
+   - `Order No` (clickable blue `SO-...` link opening `/sale-order/invoice/<order_id>` + blue `DD-MM-YYYY` order date), `Warehouse`, `Company` (blue clickable company name + blue `Mr <Contact>` opening `Company Detail #<code` right drawer), `Contact Person` (name + mobile), `Sales Person`, `Total Discount`, `Paid/Due Dis. Amount` (`Paid ₹ <amount>` when `paid > 0`, red `Due ₹ <amount>` when `due > 0`, or green `✓ Completed` badge when settled), `Status` (live SaleOrder workflow stage badge e.g. `LR` + `DD-MM-YYYY hh:mm AM/PM` + red `Remark` button), `Gatepass` (blue `ID: <no>` + blue `DD-MM-YYYY` opening `Gate Pass Detail #<id>` right drawer), and `Action` (`⋮`).
+5. **Action (`⋮`) Menu:**
+   - Pending rows (`due_discount > 0`): `$ Adjust Discount` and `☰ List Payments`.
+   - Completed rows (`settled` / `due_discount === 0`): `☰ List Payments` only (`$ Adjust Discount` hidden to prevent over-adjustment).
+6. **`Discount Adjustment` Right-Side Drawer (`data-testid="discount-adjustment-drawer"`):**
+   - White `Discount Summary` card (`Total Discount:`, green `Total Discount Paid:`, red `Total Discount Due:`).
+   - `Date *` (`DatePicker`, defaults dynamically to current `DD-MM-YYYY` date), `Amount *` (`type="number"`, `placeholder="Max: <due_discount>"`, strictly validated `0 < amount <= due_discount` with inline alert `data-testid="adjust-discount-error"`), `Remarks/Feedback` textarea, and full-width blue `Submit` button.
+7. **`Discount Adjustment Payment List` Modal (`data-testid="list-payments-modal"`):**
+   - `Sale Order Detail` `#<OrderShortNo>` card with 3-column aligned grid (`Customer Name` / `Created Date` above `Total Discount` / `Paid Amount` / `Due Amount`).
+   - Multi-row installment table `# | Date | Title | Amount | Adjustment By` rendering every partial/full installment from `payments` (`Title` populated from `Remarks/Feedback`, `Adjustment By` populated from the authenticated user's full display name, or `No Payment Found` when `0` payments exist).
+
+### QA Verification Test Cases
+- [ ] **TC-DP-01 (Auto-Sync from Sale Process):** Create a Sale Order on `/sales/process/add` with a line-item `Unit Discount > 0` and advance its workflow status to `LR` with a Gatepass. Navigate to `/sale-discount/list` and verify the order automatically appears under `Pending` with accurate `Total Discount`, `Due ₹ <amount>`, `LR` status badge, Company contact details, and `ID: <gatepass_no>`.
+- [ ] **TC-DP-02 (Partial Discount Adjustment & Validation):** Click `⋮` ➔ `$ Adjust Discount`. Verify `Date *` defaults to today's `DD-MM-YYYY` date and `Amount *` displays `Max: <due>`. Attempt submitting empty/`0` or `> due` and verify inline error blocks submission. Submit a partial amount with `Remarks/Feedback` and verify `PAID` / `DUE` KPI cards and row `Paid ₹ ...` / `Due ₹ ...` update immediately.
+- [ ] **TC-DP-03 (Multi-Installment Payment List & Completion):** Click `⋮` ➔ `☰ List Payments` and verify `Sale Order Detail #<no>` and every recorded installment row (`#`, `Date`, `Title`, `Amount`, `Adjustment By`). Adjust the remaining balance to `0` and verify the record moves from `Pending` to `Completed` with `✓ Completed` badge, `$ Adjust Discount` hidden in `⋮`, and all installments preserved in `List Payments`.
+
+---
+
+## 72. REPORTS: Product Re-Order Matrix, Branch-Scoped Shortfall Engine & FIFO Stock Breakup
+
+- **Module Name:** Product Re-Order (`General New points inhyma.docx` L30/L69/L84/L103, `Phase 2/Stock Transactions.docx` L1-L36, `Phase 2/Reports.docx` L19-L20, `Completed/Product Stock 26-4-25.docx` L23-L24)
+- **Routes:** `/product-reorder/list`, `/reports/reorder`
+- **Files:**
+  - Frontend Page & Styles: `frontend/src/pages/ProductReorderPage.tsx`, `frontend/src/styles/productReorder.css`
+  - Frontend API Client: `frontend/src/lib/api.ts` (`ProductReorderItem`, `InventoryApi.listProductReorder`, `InventoryApi.updateProductReorder`, `InventoryApi.getStockBreakup`)
+  - Backend Schemas & Routes: `backend/app/inventory/schemas.py` (`ProductReorderItemRead`, `ProductReorderUpdateSchema`), `backend/app/inventory/routes.py` (`GET /api/v1/inventory/product-reorder`, `PATCH /api/v1/inventory/product-reorder/{product_id}`, `GET /api/v1/inventory/product-stock/breakup`)
+  - Test Suites: `frontend/src/pages/__tests__/ProductReorderPage.test.tsx`, `backend/tests/test_inventory_integrity.py`, `backend/tests/test_inventory_and_stock_adjustments.py`
+
+### Feature Overview & UI Specifications
+1. **Top Page Header & Collapsible 4-Column Filter Panel:**
+   - Title `Product Re-Order` on left; dark slate `#5a6d87` funnel toggle button first, followed by golden-amber `#f59e0b` standalone `Export` CSV button (`btn btn-imp-exp reorder-btn-export`) on the right.
+   - **Row 1 (4 Columns):** `Category` (`All` + active `ProductCategory` masters), `Sub Category` (`All` + `ProductSubCategory` masters dynamically narrowed when `Category` is selected), `Brand` (`All` + active `Brand` masters), `Short Fall` (`All`, `0`, `Greater Than 0`).
+   - **Row 2 (Column 1):** `Re-Order` (`All`, `0`, `Greater Than 0`).
+   - **Bottom-Right Filter Actions:** Dark slate `Reset` button (`#5c6f88`) and golden-amber `Search` button (`#f7b919`).
+2. **Search + Branch Warehouse Selector Card:**
+   - Dedicated white card between Filter Panel and Table Card containing:
+     - Left `[ 🔍 | Search products by name, code, brand, sub-category... ]` input.
+     - Right Warehouse `<select>` (`Mumbai` default, `Ahmedabad`, `Indore`, `All Warehouses`).
+   - Changing the Warehouse selector dynamically scopes Columns 13-16 (`Re-Order`, `Short Fall`, `MOQ`, `Order To Be Place`), `Short Fall` / `Re-Order` filter evaluation, sorting, and inline threshold edits to that branch's net pipeline (`<city> + <city>_transit + <city>_ordered` and per-branch thresholds stored in `ProductStock.orders_info` under `_type == "wh_reorder"`), while `All Warehouses` evaluates against global `Total Qty` and global `Product` / `ProductStock` thresholds.
+3. **16-Column Color-Coded Product Re-Order Table (Default `50` Rows/Page, Full Catalog Load up to `2500`+ SKUs):**
+   - `Sr. No.` | `Product Name (As Per Tally)` (blue clickable hyperlink)
+   - **Physical Columns (Soft Rose-Pink `#f4dce0` header / `#f6dfe2` cells):** `Mumbai` (Col 3), `Ahmadabad` (Col 6), `Indore` (Col 9).
+   - **Transit Columns (Warm Beige-Grey `#edeae4` header / `#efece6` cells):** `Mumbai Transit` (Col 4), `Ahmedabad Transit` (Col 7), `Indore Transit` (Col 10).
+   - **Ordered Columns (Medium Neutral Grey `#dcdcdc` header / `#dedede` cells):** `Mumbai Ordered` (Col 5), `Ahmedabad Ordered` (Col 8), `Indore Ordered` (Col 11).
+   - **Summary & Replenishment Columns:** `Total Qty` (Col 12), `Re-Order` (Col 13, clickable blue inline-editable value), `Short Fall` (Col 14, `max(0, Re-Order - EffectivePipeline)`), `MOQ` (Col 15, clickable blue inline-editable value), `Order To Be Place` (Col 16, `0` when `Short Fall == 0`, else `max(Short Fall, MOQ)`).
+4. **Backend-Driven Circular Slate `ⓘ` Breakup Badges (`breakup_flags`):**
+   - Driven by live open transactions rather than `qty !== 0` alone:
+     - Physical cell (`Mumbai`, `Ahmadabad`, `Indore`) shows `ⓘ` whenever an open `SaleOrder` (`OPEN_SALE_ORDER_STATUSES`) exists for that product & branch—even when physical balance is `0` (`0 ⓘ`), and omits `ⓘ` on positive physical stock (e.g. `41`) when zero open Sale Orders exist.
+     - Transit / Ordered cell shows `ⓘ` when active `ImportPurchase` consignments, in-transit `StockTransfer`s (`pending` / `confirmed` / `in transit`), `orders_info` entries, or advance-booked `SaleOrder`s exist.
+5. **Interactive Drawers, Modals & Role-Safe PDF Integration:**
+   - **Physical `ⓘ` ➔ `Sale Order Information` Drawer:** Displays `SO No & Date` (clickable blue SO number fetching `/api/v1/sales/orders/{order_id}` to open the real Sale Order PDF, automatically enforcing `hidePricing: true` for Warehouse role users), `Company Name` (shown in Re-Order breakup), `City / State`, `Qty`, `Sales Person`, `Exp. Del. Date`, and clean workflow `Status` (`unit_price` strictly excluded).
+   - **Transit / Ordered `ⓘ` ➔ `Purchase Order Information` Drawer & `Consignment Details` Modal:** Combines incoming `ImportPurchase` containers and active inter-warehouse `StockTransfer`s, applies FIFO deduction against open `SaleOrder` bookings on `<City> Transit` / `<City> Ordered`, lists `Open Sale Order Bookings (FIFO Deducted)`, and makes every `Inv. / Cons No` clickable to open the `Consignment Details` modal (`Product Name`, `Qty`, `Warehouse`, `Inv. / Cons No`, `Inv. Date`, `Exp. Arri. Date`, `ETD Origin Date`, `ETA Port Date`, `Status`).
+   - **Clickable `Product Name` ➔ `Product Master View Window` Drawer:** Displays `Product Name (Tally)` & `Invoice Name`, `Category`, `Sub Category`, `Brand`, `HSN Code`, `GST %`, `Import Duty %`, `UOM`, `Min. Selling Price`, `Packaging` (`Qty/Box`, `Net Wt`, `Gross Wt`), `Dimensions For CBM` (`L × W × H cm` & `Unit CBM`), 9-column warehouse breakdown, `Specifications`, and `Open in Product Master ↗`.
+
+### QA Verification Test Cases
+- [ ] **TC-RO-01 (Master Joins, 4-Column Filter Panel, Title-Case Headers & Pagination Summary):** Navigate to `/product-reorder/list` (or `/reports/re-order`). Verify all active catalog products load (default `50` per page), Title-Case column headers (`Sr. No.`, `Product Name (As Per Tally)`, `Mumbai`, etc.) render without forced uppercase, bottom pagination displays `Showing 1–50 of <total> total (Page 1 of <pages>)`, `Category` / `Sub Category` / `Brand` dropdowns populate from master tables, and clicking `Search` / `Reset` filters and resets rows accurately.
+- [ ] **TC-RO-02 (Branch Warehouse Selector & Inline Threshold Persistence):** With `Mumbai` selected in the Warehouse bar, click a product's blue `Re-Order` and `MOQ` numbers, save new values, and verify `Short Fall` and `Order To Be Place` recalculate against `Mumbai + Mumbai Transit + Mumbai Ordered`. Switch Warehouse selector to `Indore` or `All Warehouses` and verify branch-isolated vs global pipeline shortfall calculation.
+- [ ] **TC-RO-03 (`0 ⓘ` Open Sale Order Breakup & Real Sale Order PDF):** For a product with `0` physical stock in Mumbai and an open Sale Order, verify `0 ⓘ` renders. Click `ⓘ`, verify `Company Name`, clean `Status`, and zero `unit_price` leakage, then click the blue `SO-...` link and confirm the real Sale Order PDF opens (with pricing hidden for Warehouse role).
+- [ ] **TC-RO-04 (Transit/Ordered FIFO Breakup, Stock Transfer Inclusion & Consignment Modal):** Click `ⓘ` on a Transit/Ordered cell with incoming Import Purchase or Stock Transfer entries and advance Sale Order bookings. Verify FIFO net available deduction across consignments, `Open Sale Order Bookings` table, and clicking `Inv. / Cons No` opens the `Consignment Details` modal with ETD/ETA dates.
+- [ ] **TC-RO-05 (Product Master View Window):** Click any blue `Product Name (As Per Tally)` hyperlink and verify the `Product Master View Window` drawer displays HSN, GST %, UOM, CBM dimensions, 9-column stock matrix, specifications, and `Open in Product Master ↗`.
+
+---
+
+## 73. REPORTS: Product Stock Transactions Master List & Per-Product Stock Transaction Ledger
+
+- **Module Name:** Stock Transactions (`Completed/Product Stock 26-4-25.docx` L27, `General New points inhyma.docx` L132, `Phase 2/Stock Transactions.docx`)
+- **Routes:**
+  - **Screen 1 (Master List):** `/reports/stock-transactions`, `/transaction-report/list`, `/transaction_report/list`, `/stock-transactions`
+  - **Screen 2 (Per-Product Ledger):** `/stock-transaction/list/:id`, `/stock_transaction/list/:id`, `/reports/stock-transactions/:id`
+- **Files:**
+  - Frontend Pages & Styles: `frontend/src/pages/ProductStockPage.tsx`, `frontend/src/pages/StockTransactionDetailPage.tsx`, `frontend/src/styles/productStock.css`
+  - Frontend API Client & Routing: `frontend/src/lib/api.ts` (`StockTransactionLedgerEntry`, `ProductStockLedgerResponse`, `InventoryApi.getProductStockTransactions`), `frontend/src/App.tsx`
+  - Backend Schemas & Routes: `backend/app/inventory/schemas.py` (`StockTransactionLedgerItemRead`), `backend/app/inventory/routes.py` (`GET /api/v1/inventory/stock-transactions/{product_ref}`, `/api/v1/stock-transaction/list/{product_ref}`)
+  - Test Suites: `frontend/src/pages/__tests__/ProductStockPage.test.tsx`, `frontend/src/pages/__tests__/StockTransactionDetailPage.test.tsx`, `backend/tests/test_inventory_integrity.py`, `backend/tests/test_inventory_and_stock_adjustments.py`
+
+### Feature Overview & UI Specifications
+1. **Screen 1 — `Product Stock Transactions` Master List (`/reports/stock-transactions` / `/transaction-report/list`):**
+   - Sidebar active navigation key: `REPORTS` ➔ `Stock Transactions` (`reports-stock-transactions`).
+   - Top Page Header: `Product Stock Transactions` on left; dark slate Funnel filter toggle `[▼]` + `Export` (`Product_Stock_Transactions.xlsx`) on right.
+   - **4-Column Filter Panel (Off / Collapsed by Default; Toggled via Funnel Button):** `Category` (`All`), cascading `Sub Category` (`All`), `Brand` (`All`), `Is Negative Stock` (`Select` / `Yes` / `No`), with dark slate `Reset` and golden-amber `Search` buttons.
+   - **Right-Aligned Search Card:** Dedicated white card with `[ 🔍 | Search products by name, code, brand, sub-category... ]`.
+   - **15-Column Title-Case Warehouse Matrix:** `Sr. No.` | `Product Name (As Per Tally)` | `Product Code` | `Brand` | `Sub Category` | `Mumbai` (soft pink) | `Mumbai Transit` (warm beige-grey) | `Mumbai Ordered` (medium grey) | `Ahmedabad` (soft pink) | `Ahmedabad Transit` (warm beige-grey) | `Ahmedabad Ordered` (medium grey) | `Indore` (soft pink) | `Indore Transit` (warm beige-grey) | `Indore Ordered` (medium grey) | `Total Qty`.
+   - **Drill-Down Navigation:** Clicking any blue `Product Name (As Per Tally)` hyperlink navigates directly to `/stock-transaction/list/:id` (whereas `/product-stock/list` opens the `Product Details` `SideDrawer`).
+2. **Screen 2 — `<Product Name> Stock` Per-Product Transaction Ledger (`/stock-transaction/list/:id`):**
+   - **Top Header:** `<Product Name> Stock` (e.g., `Air Timer (PFS) Stock`) on left; right side displays dark slate Funnel filter button `[▼]` (collapsible 4-column `Warehouse`, `Type`, `From Date`, `To Date` filter panel with `Reset` & `Search`) and golden-amber `Action ▾` dropdown button (`Export to Excel (.xlsx)`, `Export to CSV (.csv)`, `Add Stock Adjustment`, `Add Stock Transfer`, `← Back to Stock Transactions`).
+   - **KPI Card:** White card displaying `AVAILABLE QTY` label and live numeric balance (defaults to `total_qty` across warehouses; dynamically updates to the selected warehouse balance when filtered by a specific `Warehouse`).
+   - **Ledger Table Card:**
+     - **Toolbar:** Left `[ 10 ▾ ]` `<select>` (`10` default, `25`, `50`, `100`) + `Items/Page` stacked label; right `[ Search... ]` live filter input.
+     - **7 Sortable Title-Case Columns:**
+       1. `ID`: Sequential chronological movement ID (oldest = `1`, rendered newest-first).
+       2. `Title`: Line 1 clickable movement description navigating to the underlying Sale Order / Adjustment PDF / Local Purchase Bill / Import Consignment Bill / Transfer PDF + Line 2 **bold party/company/supplier name** (e.g. **`VRO MACHINES PVT.LTD.`** below `Sale Order #SO-MH/26-27/4987 Confirm`).
+       3. `Type`: Color-coded pill badge (`Sale` soft blue, `Stock IN` soft slate-grey, `Stock OUT` soft red, `Sale Cancel` soft amber, `Local Purchase` / `Import Purchase` soft green, `Transfer IN` / `Transfer OUT` soft indigo).
+       4. `Warehouse`: Target physical, transit, or ordered warehouse (`Mumbai`, `Mumbai Transit`, `Mumbai Ordered`, `Ahmedabad`, `Indore`, etc.).
+       5. `Quantity`: Signed delta with green `+` or red `-` (`- 1`, `+ 1`, `+ 50`, etc.).
+       6. `Created By`: Actor / sales person / creator name (`Bhavin Suthar`, `Akshata Wadekar`, etc.).
+       7. `Transaction Date`: IST timestamp formatted as `DD-MM-YYYY hh:mm AM/PM` (`28-10-2026 12:10 PM`).
+     - **Footer:** `Showing X To Y Of Z Entries` on left | `Previous | 1 | Next` pager on right.
+
+### QA Verification Test Cases
+- [ ] **TC-ST-01 (Master List Layout, Collapsed Filter Toggle & Full Catalog Load):** Navigate to `REPORTS` ➔ `Stock Transactions` (`/reports/stock-transactions` or `/transaction-report/list`). Verify heading `Product Stock Transactions`, filter panel off (collapsed) by default and expandable via the top-right Funnel button, right-aligned search card, 15 Title-Case columns with distinct pink/transit-beige/ordered-grey tints, and all active Product Master SKUs loaded with populated `Brand` and `Sub Category`.
+- [ ] **TC-ST-02 (Product Name Click ➔ Per-Product Ledger Navigation):** Click any product name in `Product Stock Transactions` (e.g. `Air Timer (PFS)` or `Vertical Stand Economy`). Verify browser navigates to `/stock-transaction/list/<id>`, sidebar highlights `REPORTS` ➔ `Stock Transactions`, heading displays `<Product Name> Stock`, and `AVAILABLE QTY` matches the product's net stock.
+- [ ] **TC-ST-03 (All 5 Transactional Sources & Bold Party Name):** Verify movements from Sale Orders (`Sale` `- qty` with bold company name on line 2, plus `Sale Cancel` `+ qty`), Stock Adjustments (`Stock IN` / `Stock OUT` formatted as `Stock In/Out For Purpose <Purpose> (Adjustment Order #<No>)`), Confirmed Local Purchases (`Local Purchase` `+ qty`), Import Purchases (`Import Purchase` `+ qty`), and Stock Transfers (`Transfer OUT` `- qty` & `Transfer IN` `+ qty`) appear newest-first with IST `DD-MM-YYYY hh:mm AM/PM` timestamps.
+- [ ] **TC-ST-04 (Toolbar Pagination, Live Search, Filter Panel & Action Menu):** On `/stock-transaction/list/:id`, verify default `10` `Items/Page`, `Showing X To Y Of Z Entries` footer, live `Search...` filtering by company/SO#/actor, Funnel filter updating `AVAILABLE QTY` when scoped to a warehouse, clickable `Title` links opening underlying documents, and `Action ▾` exporting `.xlsx` / `.csv` or navigating to `Add Stock Adjustment` / `Add Stock Transfer`.
+
+---
+*End of Master Features & Testing Specification Manual. Maintained for Inhyma Solutions Enterprise ERP. Last updated: October 29, 2026 (Sections 61-73: Dynamic Organization Company Logo, Product Master Category Rewiring & Floating Duplicate Overlay, Platform Migration Idempotency, Sales Process Workflow & 13-Field Filter Grid, HRMS Phases 2-6 RBAC & Approval Architecture, Feed & Broadcast Open Access & 1-to-1 Employee Messaging, Sale Status Update Side Drawer & Chronological Timeline, Discount Payments Multi-Installment Ledger, Product Re-Order Branch-Scoped Matrix & FIFO Stock Breakup, and Product Stock Transactions Master List & Per-Product Stock Transaction Ledger).*

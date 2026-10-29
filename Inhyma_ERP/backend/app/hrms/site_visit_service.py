@@ -439,6 +439,23 @@ class HrmsSiteVisitService:
                 detail="You can only check into your own assigned visits.",
             )
 
+        # Enforce valid state transitions
+        if visit.status == "COMPLETED":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Site visit is already completed. Check-in is not permitted on completed visits.",
+            )
+        if visit.status == "CANCELLED":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Site visit has been cancelled. Check-in is not permitted.",
+            )
+        if visit.status == "CHECKED_IN" or visit.check_in_time is not None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Site visit is already checked in. Duplicate check-in is not permitted.",
+            )
+
         now = datetime.now(timezone.utc)
         visit.check_in_time = now
         visit.check_in_latitude = payload.latitude
@@ -478,6 +495,23 @@ class HrmsSiteVisitService:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="You can only check out of your own assigned visits.",
+            )
+
+        # Enforce valid state transitions
+        if visit.status == "COMPLETED" or visit.check_out_time is not None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Site visit is already completed. Repeated check-out is not permitted.",
+            )
+        if visit.status == "CANCELLED":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Site visit has been cancelled. Check-out is not permitted.",
+            )
+        if visit.status != "CHECKED_IN" or visit.check_in_time is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Cannot check out of a site visit that has not been checked into yet.",
             )
 
         now = datetime.now(timezone.utc)

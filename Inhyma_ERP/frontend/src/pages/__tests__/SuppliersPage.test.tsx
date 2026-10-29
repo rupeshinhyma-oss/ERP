@@ -6,7 +6,9 @@ import { apiGet, apiPost } from "@/lib/api";
 
 // Mock AppShell
 vi.mock("@/components/AppShell", () => ({
-  AppShell: ({ children }: { children: React.ReactNode }) => <div data-testid="app-shell">{children}</div>,
+  AppShell: ({ children, activeKey }: { children: React.ReactNode; activeKey?: string }) => (
+    <div data-testid="app-shell" data-active-key={activeKey}>{children}</div>
+  ),
 }));
 
 // Real helpers stay (toQueryString); only the network functions are faked
@@ -73,6 +75,7 @@ const renderPage = () =>
 describe("SuppliersPage (/suppliers & /supplier/list)", () => {
   it("renders page title Suppliers, Active/Inactive tabs, and action buttons", () => {
     renderPage();
+    expect(screen.getByTestId("app-shell").getAttribute("data-active-key")).toBe("purchase-suppliers");
     expect(screen.getByRole("heading", { name: /^Suppliers$/i })).toBeTruthy();
     expect(screen.getByRole("button", { name: /^Active$/i })).toBeTruthy();
     expect(screen.getByRole("button", { name: /^Inactive$/i })).toBeTruthy();

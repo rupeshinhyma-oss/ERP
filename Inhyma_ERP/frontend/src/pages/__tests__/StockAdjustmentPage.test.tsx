@@ -37,6 +37,12 @@ describe("StockAdjustmentPage", () => {
     expect(screen.getByRole("heading", { name: "Stock Adjustment" })).toBeTruthy();
     expect(screen.getByTitle("Filter stock adjustments")).toBeTruthy();
     expect(screen.getByRole("button", { name: /Add New/i })).toBeTruthy();
+    const exportBtn = screen.getByRole("button", { name: /^Export$/i });
+    expect(exportBtn).toBeTruthy();
+    expect(exportBtn.classList.contains("btn-imp-exp")).toBe(true);
+    expect(exportBtn.querySelector("svg")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Imp \/ Exp/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Bulk Actions/i })).toBeNull();
   });
 
   it("filter panel is off by default until filter button is clicked", () => {

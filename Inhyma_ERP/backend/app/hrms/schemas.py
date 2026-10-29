@@ -867,6 +867,10 @@ class AssetAssign(BaseModel):
         if isinstance(data, dict):
             if "user_id" in data and "employee_id" not in data:
                 data["employee_id"] = data["user_id"]
+            if "assigned_to" in data and "employee_id" not in data:
+                data["employee_id"] = data["assigned_to"]
+            if "allocated_to" in data and "employee_id" not in data:
+                data["employee_id"] = data["allocated_to"]
             if "allocated_from" in data and "assigned_date" not in data:
                 data["assigned_date"] = data["allocated_from"]
             if "condition" in data and "condition_at_assignment" not in data:
@@ -883,6 +887,18 @@ class AssetReturn(BaseModel):
     return_location_id: uuid.UUID | None = None
     location_id: uuid.UUID | None = None
     notes: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def handle_return_aliases(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            if "condition" in data and "condition_after_return" not in data:
+                data["condition_after_return"] = data["condition"]
+            if "location_id" in data and "return_location_id" not in data:
+                data["return_location_id"] = data["location_id"]
+            if "branch_id" in data and "return_location_id" not in data:
+                data["return_location_id"] = data["branch_id"]
+        return data
 
 
 class AssetMove(BaseModel):

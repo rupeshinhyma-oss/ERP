@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import re
 import uuid
 from datetime import date, datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
 from fastapi.responses import FileResponse, RedirectResponse
@@ -16,9 +17,11 @@ from app.auth.dependencies import get_auth_service, get_current_user
 from app.auth.service import AuthService, CurrentUser
 from app.common import workflow as wf
 from app.common.storage import guess_content_type, save_uploaded_file
-from app.core.exceptions import BadRequestException, ConflictException, NotFoundException
+from app.core.exceptions import AppException, BadRequestException, ConflictException, NotFoundException
 from app.core.responses import build_success_response
 from app.database.session import get_db_session
+from app.masters.import_export import ImportSummary, model_to_dict, parse_rows_from_file
+from app.masters.products.models import Product
 from app.purchase import costing
 from app.purchase.common import load_parties, party_fields, move_stock, product_defaults, require_physical_warehouse, resolve_supplier
 from app.purchase.models import LocalPurchase, LocalPurchaseItem
@@ -183,6 +186,256 @@ async def list_local_purchases(
     return build_success_response(
         data={"items": await _present(db, list(rows)), "tab_counts": tab_counts, "status_rules": rules},
         meta={"total": int(filtered), "skip": skip, "limit": limit},
+        request_id=_rid(request),
+    )
+
+
+class _InFileDuplicateRowError(Exception):
+    """Raised when an identical invoice line item row is repeated in the same import file."""
+
+
+def _norm_col(name: str) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", (name or "").lower()).strip()
+
+
+def _cell(norm_row: dict[str, str], *aliases: str) -> str:
+    for alias in aliases:
+        val = norm_row.get(_norm_col(alias), "")
+        if val != "":
+            return val
+    return ""
+
+
+def _num_field(raw: str, label: str, *, required: bool = False, positive: bool = False) -> float:
+    cleaned = raw.replace(",", "").strip()
+    if cleaned == "":
+        if required:
+            raise BadRequestException(f"{label} is required.")
+        return 0.0
+    try:
+        value = float(cleaned)
+    except ValueError as exc:
+        raise BadRequestException(f"{label} must be a valid number.") from exc
+    if positive and value <= 0:
+        raise BadRequestException(f"{label} must be greater than 0.")
+    if not positive and value < 0:
+        raise BadRequestException(f"{label} cannot be negative.")
+    return value
+
+
+async def _resolve_import_product(db: AsyncSession, product_name: str, product_code: str) -> dict:
+    if product_name:
+        try:
+            return await product_defaults(db, product_name)
+        except BadRequestException:
+            if not product_code:
+                prod_by_code = (
+                    await db.execute(select(Product).where(func.lower(Product.product_code) == product_name.lower()))
+                ).scalars().first()
+                if prod_by_code is not None:
+                    return await product_defaults(db, prod_by_code.product_name)
+                raise
+    if product_code:
+        prod = (
+            await db.execute(select(Product).where(func.lower(Product.product_code) == product_code.lower()))
+        ).scalars().first()
+        if prod is not None:
+            return await product_defaults(db, prod.product_name)
+        raise BadRequestException(f"Product code '{product_code}' is not in the Product Master.")
+    raise BadRequestException("Product Name or Product Code is required.")
+
+
+@router.post("/import", summary="Import local purchases from CSV/Excel")
+async def import_local_purchases(
+    request: Request,
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db_session),
+    user: CurrentUser = Depends(get_current_user),
+) -> dict:
+    raw_bytes = await file.read()
+    rows = parse_rows_from_file(file.filename or "import.csv", raw_bytes)
+    rules = await wf.load_status_rules(db, GROUP)
+    initial_st = wf.initial_status(rules)
+
+    summary = ImportSummary(total_rows=len(rows))
+    batch_invoices: dict[tuple[str, str], dict[str, Any]] = {}
+
+    for index, raw_row in enumerate(rows, start=2):
+        norm = {_norm_col(k): str(v).strip() for k, v in raw_row.items() if k is not None and v is not None}
+        try:
+            async with db.begin_nested():
+                invoice_no = _cell(norm, "invoice_no", "invoice no", "invoice number", "bill no")
+                if not invoice_no:
+                    raise BadRequestException("Invoice No. is required.")
+
+                invoice_date_raw = _cell(norm, "invoice_date", "invoice date dd mm yyyy", "invoice date", "bill date", "date")
+                if not invoice_date_raw:
+                    raise BadRequestException("Invoice Date is required.")
+                try:
+                    inv_date = parse_date(invoice_date_raw)
+                except ValueError as exc:
+                    raise BadRequestException(str(exc)) from exc
+                if inv_date is None:
+                    raise BadRequestException("Invoice Date is required.")
+
+                supplier_raw = _cell(norm, "supplier_name", "supplier", "vendor", "vendor name", "party name")
+                supplier = await resolve_supplier(db, supplier_raw, None)
+
+                warehouse_raw = _cell(norm, "warehouse", "warehouse name", "location")
+                if not warehouse_raw:
+                    raise BadRequestException("Warehouse is required.")
+                warehouse = await require_physical_warehouse(db, warehouse_raw)
+
+                product_name_raw = _cell(norm, "product_name", "product name", "product name as per tally", "item name", "product")
+                product_code_raw = _cell(norm, "product_code", "product code", "sku", "item code")
+                prod_info = await _resolve_import_product(db, product_name_raw, product_code_raw)
+
+                qty = _num_field(_cell(norm, "quantity", "qty"), "Quantity", required=True, positive=True)
+                unit_rate = _num_field(_cell(norm, "unit_rate", "unit rate inr", "unit rate", "rate", "basic rate"), "Unit Rate", required=True)
+                ex_gst = _num_field(
+                    _cell(norm, "invoice_value_ex_gst", "invoice total value basic without gst", "basic value", "basic amount"),
+                    "Invoice Total Value (Basic Without GST)",
+                )
+                inc_gst_cell = _cell(
+                    norm,
+                    "invoice_value_inc_gst",
+                    "invoice total value including gst",
+                    "invoice total value inr",
+                    "invoice total",
+                )
+                inc_gst_explicit = _num_field(inc_gst_cell, "Invoice Total Value (Including GST)") if inc_gst_cell != "" else None
+                pf = _num_field(_cell(norm, "packing_forwarding", "packing forwarding"), "Packing & Forwarding")
+                tr = _num_field(_cell(norm, "transport", "transport expense"), "Transport")
+                off = _num_field(_cell(norm, "offloading", "offloading expense"), "Offloading")
+                remarks = _cell(norm, "remarks", "remark", "notes") or None
+
+                inv_key = (supplier.company_name.lower(), invoice_no.lower())
+                line_sig = (prod_info["name"].lower(), round(qty, 6), round(unit_rate, 6))
+                item_in = costing.LocalItemIn(
+                    prod_info["name"],
+                    qty,
+                    unit_rate,
+                    prod_info["uom"],
+                    product_code_raw or prod_info["code"],
+                )
+
+                if inv_key in batch_invoices:
+                    entry = batch_invoices[inv_key]
+                    if line_sig in entry["seen_lines"]:
+                        raise _InFileDuplicateRowError(
+                            f"Duplicate of an earlier row in this file (Invoice '{invoice_no}', Product '{prod_info['name']}'); skipped."
+                        )
+                    entry["seen_lines"].add(line_sig)
+                    entry["items_in"].append(item_in)
+                    record: LocalPurchase = entry["record"]
+                    result = costing.compute_local(
+                        invoice_value_ex_gst=entry["explicit_ex_gst"],
+                        packing_forwarding=record.packing_forwarding,
+                        transport=record.transport,
+                        offloading=record.offloading,
+                        items=entry["items_in"],
+                    )
+                    record.invoice_value_ex_gst = result.invoice_value_ex_gst
+                    record.invoice_value_inc_gst = (
+                        entry["explicit_inc_gst"] if entry["explicit_inc_gst"] is not None else result.invoice_value_ex_gst
+                    )
+                    record.total_expenses = result.total_expenses
+                    record.loading_percent = result.loading_percent
+                    record.items.clear()
+                    for ln in result.items:
+                        record.items.append(
+                            LocalPurchaseItem(
+                                product_name=ln.product_name,
+                                product_code=ln.product_code,
+                                uom=ln.uom,
+                                quantity=ln.quantity,
+                                unit_rate=ln.unit_rate,
+                                item_total=ln.item_total,
+                                expense_per_unit=ln.expense_per_unit,
+                                unit_landing_value=ln.unit_landing_value,
+                            )
+                        )
+                    await db.flush()
+                else:
+                    existing_po = (
+                        await db.execute(
+                            select(LocalPurchase).where(
+                                LocalPurchase.deleted_at.is_(None),
+                                func.lower(LocalPurchase.supplier_name) == inv_key[0],
+                                func.lower(LocalPurchase.invoice_no) == inv_key[1],
+                            )
+                        )
+                    ).scalars().first()
+                    if existing_po is not None:
+                        raise ConflictException(
+                            f"Invoice '{invoice_no}' from {supplier.company_name} is already recorded.",
+                            details={"existing": model_to_dict(existing_po)},
+                        )
+
+                    items_in = [item_in]
+                    result = costing.compute_local(
+                        invoice_value_ex_gst=ex_gst,
+                        packing_forwarding=pf,
+                        transport=tr,
+                        offloading=off,
+                        items=items_in,
+                    )
+                    record = LocalPurchase(status=initial_st, created_by=user.username)
+                    record.supplier_name, record.supplier_id = supplier.company_name, supplier.id
+                    record.warehouse = warehouse.name
+                    record.invoice_no = invoice_no
+                    record.invoice_date = inv_date
+                    record.invoice_value_ex_gst = result.invoice_value_ex_gst
+                    record.invoice_value_inc_gst = inc_gst_explicit if inc_gst_explicit is not None else result.invoice_value_ex_gst
+                    record.packing_forwarding = pf
+                    record.transport = tr
+                    record.offloading = off
+                    record.total_expenses = result.total_expenses
+                    record.loading_percent = result.loading_percent
+                    record.remarks = remarks
+                    for ln in result.items:
+                        record.items.append(
+                            LocalPurchaseItem(
+                                product_name=ln.product_name,
+                                product_code=ln.product_code,
+                                uom=ln.uom,
+                                quantity=ln.quantity,
+                                unit_rate=ln.unit_rate,
+                                item_total=ln.item_total,
+                                expense_per_unit=ln.expense_per_unit,
+                                unit_landing_value=ln.unit_landing_value,
+                            )
+                        )
+                    db.add(record)
+                    await db.flush()
+                    batch_invoices[inv_key] = {
+                        "record": record,
+                        "items_in": items_in,
+                        "explicit_ex_gst": ex_gst,
+                        "explicit_inc_gst": inc_gst_explicit,
+                        "seen_lines": {line_sig},
+                    }
+
+            summary.created += 1
+        except _InFileDuplicateRowError as exc:
+            summary.failed += 1
+            summary.in_file_duplicate_count += 1
+            summary.in_file_duplicates.append({"row": index, "error": str(exc), "row_data": dict(raw_row)})
+        except ConflictException as exc:
+            summary.failed += 1
+            summary.duplicate_count += 1
+            existing = exc.details.get("existing") if isinstance(exc.details, dict) else None
+            summary.duplicates.append({"row": index, "error": str(exc), "row_data": dict(raw_row), "existing": existing})
+        except AppException as exc:
+            summary.failed += 1
+            summary.errors.append({"row": index, "error": str(exc), "row_data": dict(raw_row)})
+        except Exception as exc:  # noqa: BLE001
+            summary.failed += 1
+            summary.errors.append({"row": index, "error": str(exc), "row_data": dict(raw_row)})
+
+    return build_success_response(
+        data=summary.as_dict(),
+        message=f"Imported local purchases: {summary.created} created, {summary.failed} failed.",
         request_id=_rid(request),
     )
 

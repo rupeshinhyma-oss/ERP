@@ -1763,7 +1763,7 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
   /* ------------------------------------------------------------------------- */
   if (isImportPageOpen) {
     return (
-      <AppShell activeKey="suppliers" pageClassName="page-suppliers">
+      <AppShell activeKey="purchase-suppliers" pageClassName="page-suppliers">
         <main className="page">
           <Breadcrumb trail={["Purchase", "Suppliers", "Import Suppliers"]} />
 
@@ -2037,7 +2037,7 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
 
 
   return (
-    <AppShell activeKey="suppliers" pageClassName="page-suppliers">
+    <AppShell activeKey="purchase-suppliers" pageClassName="page-suppliers">
       {modalOpen ? (
         <main className="page">
           {/* Header Bar with Back Button */}

@@ -469,3 +469,311 @@ async def test_list_sale_orders_metrics_calculation(factory):
         # Basic amount should be less than GST-inclusive amount
         assert no_gst_metrics["all"]["amount"] < metrics["all"]["amount"]
 
+
+@pytest.mark.asyncio
+async def test_po_and_tally_bill_uploads_and_multi_stage_status_drawer_fields(factory, monkeypatch):
+    from app.common import storage
+
+    async def _fake_supabase_none(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr(storage, "upload_to_supabase", _fake_supabase_none)
+
+    async with _client(factory, SALES) as sales, _client(factory, APPROVER) as approver, _client(factory, ACCOUNTS) as accounts:
+        oid = (await _create(sales))["id"]
+
+        # 1. Upload PO document via POST /sales/upload-po
+        po_res = await sales.post(
+            "/sales/upload-po",
+            files={"file": ("client_po_2026.pdf", b"%PDF-1.4 test po", "application/pdf")},
+        )
+        assert po_res.status_code == 200, po_res.text
+        po_data = po_res.json()["data"]
+        assert po_data["filename"] == "client_po_2026.pdf"
+        assert "/sales_po/" in po_data["url"]
+
+        # 2. Pending -> Sales Confirmed with PO metadata
+        sc_res = await _status(
+            sales,
+            oid,
+            "sales_confirmed",
+            remarks="Client PO verified",
+            po_file_url=po_data["url"],
+            po_file_name=po_data["filename"],
+        )
+        assert sc_res.status_code == 200, sc_res.text
+        sc_order = sc_res.json()["data"]
+        assert sc_order["status"] == "sales_confirmed"
+        assert sc_order["po_file_url"] == po_data["url"]
+        assert sc_order["po_file_name"] == "client_po_2026.pdf"
+
+        # 3. Sales Confirmed -> Admin Approved
+        aa_res = await _status(approver, oid, "admin_approved", remarks="Approved by admin")
+        assert aa_res.status_code == 200, aa_res.text
+        assert aa_res.json()["data"]["status"] == "admin_approved"
+
+        # 4. Upload Tally Bill via POST /sales/upload-tally-bill
+        tb_res = await accounts.post(
+            "/sales/upload-tally-bill",
+            files={"file": ("tally_invoice_101.pdf", b"%PDF-1.4 test tally bill", "application/pdf")},
+        )
+        assert tb_res.status_code == 200, tb_res.text
+        tb_data = tb_res.json()["data"]
+        assert tb_data["filename"] == "tally_invoice_101.pdf"
+        assert "/sales_tally_bills/" in tb_data["url"]
+
+        # 5a. Attempting Acc. Confirmed with E-Way Bill = Yes and NO E-Way Bill file returns 400
+        missing_ewb_res = await _status(
+            accounts,
+            oid,
+            "acc_confirmed",
+            remarks="Missing E-Way Bill doc",
+            invoice_date="2026-10-28",
+            invoice_no="INV-INH/26-27/0101",
+            tally_bill_url=tb_data["url"],
+            tally_bill_name=tb_data["filename"],
+            eway_bill="Yes",
+        )
+        assert missing_ewb_res.status_code == 400, missing_ewb_res.text
+
+        # 5b. Upload E-Way Bill via POST /sales/upload-eway-bill
+        ewb_res = await accounts.post(
+            "/sales/upload-eway-bill",
+            files={"file": ("eway_bill_101.pdf", b"%PDF-1.4 test eway bill", "application/pdf")},
+        )
+        assert ewb_res.status_code == 200, ewb_res.text
+        ewb_data = ewb_res.json()["data"]
+        assert ewb_data["filename"] == "eway_bill_101.pdf"
+        assert "/sales_eway_bills/" in ewb_data["url"]
+
+        # 5c. Admin Approved -> Acc. Confirmed with Invoice Date, Invoice No, Tally Bill & E-Way Bill file
+        ac_res = await _status(
+            accounts,
+            oid,
+            "acc_confirmed",
+            remarks="Invoiced in Tally with E-Way Bill",
+            invoice_date="2026-10-28",
+            invoice_no="INV-INH/26-27/0101",
+            tally_bill_url=tb_data["url"],
+            tally_bill_name=tb_data["filename"],
+            eway_bill="Yes",
+            eway_bill_url=ewb_data["url"],
+            eway_bill_name=ewb_data["filename"],
+        )
+        assert ac_res.status_code == 200, ac_res.text
+        ac_order = ac_res.json()["data"]
+        assert ac_order["status"] == "acc_confirmed"
+        assert ac_order["invoice_date"] == "2026-10-28"
+        assert ac_order["invoice_no"] == "INV-INH/26-27/0101"
+        assert ac_order["tally_bill_url"] == tb_data["url"]
+        assert ac_order["tally_bill_name"] == "tally_invoice_101.pdf"
+        assert ac_order["eway_bill"] == "Yes"
+        assert ac_order["eway_bill_url"] == ewb_data["url"]
+        assert ac_order["eway_bill_name"] == "eway_bill_101.pdf"
+        assert ac_order["po_file_url"] == po_data["url"]
+
+        # 6. Verify list endpoint also serializes PO, Tally Bill & E-Way Bill fields
+        listed = (await accounts.get("/sales/orders")).json()["data"]["items"]
+        matched = next(item for item in listed if item["id"] == oid)
+        assert matched["po_file_url"] == po_data["url"]
+        assert matched["tally_bill_url"] == tb_data["url"]
+        assert matched["eway_bill"] == "Yes"
+        assert matched["eway_bill_url"] == ewb_data["url"]
+        assert matched["eway_bill_name"] == "eway_bill_101.pdf"
+
+
+@pytest.mark.asyncio
+async def test_atomic_status_with_po_endpoint_and_migration_idempotency(factory, monkeypatch):
+    from app.common import storage
+
+    async def _fake_supabase_none(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr(storage, "upload_to_supabase", _fake_supabase_none)
+
+    async with _client(factory, SALES) as sales:
+        oid = (await _create(sales))["id"]
+        res = await sales.post(
+            f"/sales/orders/{oid}/status-with-po",
+            data={"status": "sales_confirmed", "remarks": "Atomic PO attach"},
+            files={"po_file": ("atomic_po.pdf", b"%PDF-1.4 atomic", "application/pdf")},
+        )
+        assert res.status_code == 200, res.text
+        data = res.json()["data"]
+        assert data["status"] == "sales_confirmed"
+        assert data["po_file_name"] == "atomic_po.pdf"
+        assert data["po_file_url"] and "/sales_po/" in data["po_file_url"]
+
+
+@pytest.mark.asyncio
+async def test_dispatched_drawer_lr_file_multiple_media_transport_update_and_gatepass_cancel(factory, monkeypatch):
+    from app.common import storage
+
+    async def _fake_supabase_none(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr(storage, "upload_to_supabase", _fake_supabase_none)
+
+    # Ensure migration w8b9c0d1e2f3 is also idempotent on the test DB
+    engine = factory.kw["bind"]
+    async with engine.begin() as conn:
+        await conn.run_sync(_migrate, "w8b9c0d1e2f3_add_lr_file_and_dispatch_media_to_sales_orders.py")
+        await conn.run_sync(_migrate, "w8b9c0d1e2f3_add_lr_file_and_dispatch_media_to_sales_orders.py")
+
+    async with _client(factory, SALES) as sales, _client(factory, APPROVER) as approver, \
+            _client(factory, ACCOUNTS) as accounts, _client(factory, WAREHOUSE) as warehouse:
+        oid = (await _create(sales, transporter_name="VRL Logistics", transport_destination="Pune"))["id"]
+        assert (await _status(sales, oid, "sales_confirmed")).status_code == 200
+        assert (await _status(approver, oid, "admin_approved")).status_code == 200
+        assert (await _status(accounts, oid, "acc_confirmed", invoice_no="INV-5845", invoice_date="2026-10-28")).status_code == 200
+        assert (await _status(warehouse, oid, "gatepass_created", gatepass_no="NO: 5845")).status_code == 200
+        assert (await _status(warehouse, oid, "dispatched")).status_code == 200
+
+        # Verify status_rules on dispatched allow both lr and gatepass_cancelled
+        rules = (await warehouse.get("/sales/orders")).json()["data"]["status_rules"]
+        assert rules["dispatched"]["next"] == ["lr", "gatepass_cancelled"]
+
+        # Dispatched -> Gatepass Cancel -> Gatepass Created -> Dispatched
+        gp_cancel = await _status(warehouse, oid, "gatepass_cancelled", remarks="Vehicle swapped")
+        assert gp_cancel.status_code == 200, gp_cancel.text
+        assert gp_cancel.json()["data"]["status"] == "gatepass_cancelled"
+        assert (await _status(warehouse, oid, "gatepass_created", gatepass_no="NO: 5846")).status_code == 200
+        assert (await _status(warehouse, oid, "dispatched")).status_code == 200
+
+        # Upload LR File * via POST /sales/upload-lr
+        lr_res = await warehouse.post(
+            "/sales/upload-lr",
+            files={"file": ("lr_receipt_5846.pdf", b"%PDF-1.4 lr receipt", "application/pdf")},
+        )
+        assert lr_res.status_code == 200, lr_res.text
+        lr_data = lr_res.json()["data"]
+        assert lr_data["filename"] == "lr_receipt_5846.pdf"
+        assert "/sales_lr/" in lr_data["url"]
+
+        # Upload multiple dispatch Images/Videos via POST /sales/upload-dispatch-media
+        media_res = await warehouse.post(
+            "/sales/upload-dispatch-media",
+            files=[
+                ("files", ("box_photo_1.jpg", b"\xff\xd8\xff\xe0testjpg", "image/jpeg")),
+                ("files", ("loading_clip.mp4", b"\x00\x00\x00\x18ftypmp42", "video/mp4")),
+            ],
+        )
+        assert media_res.status_code == 200, media_res.text
+        media_files = media_res.json()["data"]["files"]
+        assert len(media_files) == 2
+        assert media_files[0]["filename"] == "box_photo_1.jpg"
+        assert media_files[1]["filename"] == "loading_clip.mp4"
+        assert all("/sales_dispatch_media/" in m["url"] for m in media_files)
+
+        # Complete Dispatched -> LR using lr_file_url (without lr_no) + Change Transport Info + dispatch_media
+        done_res = await _status(
+            warehouse,
+            oid,
+            "lr",
+            lr_file_url=lr_data["url"],
+            lr_file_name=lr_data["filename"],
+            dispatch_media=media_files,
+            change_transport_info=True,
+            transport_name="TCI Freight",
+            transport_destination="Kandivali East",
+            delivery_type="Door Delivery",
+            delivery_charge="Paid",
+            remarks="Dispatched with LR and loading videos",
+        )
+        assert done_res.status_code == 200, done_res.text
+        done = done_res.json()["data"]
+        assert done["status"] == "lr"
+        assert done["lr_file_url"] == lr_data["url"]
+        assert done["lr_file_name"] == "lr_receipt_5846.pdf"
+        assert len(done["dispatch_media"]) == 2
+        assert done["transporter_name"] == "TCI Freight"
+        assert done["transport_destination"] == "Kandivali East"
+        assert done["delivery_type"] == "Door Delivery"
+        assert done["delivery_charge"] == "Paid"
+
+
+@pytest.mark.asyncio
+async def test_sale_order_timeline_persists_full_lifecycle_and_account_confirmed_documents(factory, monkeypatch):
+    from app.common import storage
+
+    async def _fake_supabase_none(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr(storage, "upload_to_supabase", _fake_supabase_none)
+
+    engine = factory.kw["bind"]
+    async with engine.begin() as conn:
+        await conn.run_sync(_migrate, "y0d1e2f3a4b5_add_timeline_to_sales_orders.py")
+        await conn.run_sync(_migrate, "y0d1e2f3a4b5_add_timeline_to_sales_orders.py")
+
+    async with _client(factory, SALES) as sales, _client(factory, APPROVER) as approver, \
+            _client(factory, ACCOUNTS) as accounts, _client(factory, WAREHOUSE) as warehouse:
+        created = await _create(sales, remarks="Initial booking note")
+        oid = created["id"]
+        assert len(created["timeline"]) == 1
+        assert created["timeline"][0]["status"] == "Pending"
+        assert created["timeline"][0]["by"] == "marketing"
+        assert created["timeline"][0]["remark"] == "Initial booking note"
+
+        assert (await _status(sales, oid, "sales_confirmed")).status_code == 200
+        assert (await _status(approver, oid, "admin_approved")).status_code == 200
+
+        tb_url = "/uploads/private/sales_tally_bills/tally_887.pdf"
+        ewb_url = "/uploads/private/sales_eway_bills/eway_887.pdf"
+        ac_res = await _status(
+            accounts,
+            oid,
+            "acc_confirmed",
+            invoice_no="887/26-27",
+            invoice_date="2026-10-28",
+            eway_bill="Yes",
+            eway_bill_url=ewb_url,
+            eway_bill_name="eway_887.pdf",
+            tally_bill_url=tb_url,
+            tally_bill_name="tally_887.pdf",
+        )
+        assert ac_res.status_code == 200, ac_res.text
+
+        assert (await _status(warehouse, oid, "gatepass_created", gatepass_no="NO: 6673")).status_code == 200
+        assert (await _status(warehouse, oid, "dispatched")).status_code == 200
+        lr_res = await _status(
+            warehouse,
+            oid,
+            "lr",
+            lr_file_url="/uploads/private/sales_lr/lr_6673.pdf",
+            lr_file_name="lr_6673.pdf",
+        )
+        assert lr_res.status_code == 200, lr_res.text
+        final_order = lr_res.json()["data"]
+
+        tl = final_order["timeline"]
+        assert [ev["status"] for ev in tl] == [
+            "LR Mandatory",
+            "Dispatched",
+            "Gatepass Created",
+            "Account Confirmed",
+            "Admin Approval",
+            "Sales Confirmed",
+            "Pending",
+        ]
+        acc_ev = next(ev for ev in tl if ev["status"] == "Account Confirmed")
+        assert acc_ev["by"] == "accounts"
+        assert acc_ev["invoice_no"] == "887/26-27"
+        assert acc_ev["invoice_date"] == "28-10-2026"
+        assert acc_ev["eway_bill_url"] == ewb_url
+        assert acc_ev["tally_bill_url"] == tb_url
+        assert "remark" not in acc_ev
+
+        # Verify GET /sales/orders list endpoint also exposes timeline
+        listed = (await accounts.get("/sales/orders")).json()["data"]["items"]
+        matched = next(item for item in listed if item["id"] == oid)
+        assert [ev["status"] for ev in matched["timeline"]] == [
+            "LR Mandatory",
+            "Dispatched",
+            "Gatepass Created",
+            "Account Confirmed",
+            "Admin Approval",
+            "Sales Confirmed",
+            "Pending",
+        ]
+

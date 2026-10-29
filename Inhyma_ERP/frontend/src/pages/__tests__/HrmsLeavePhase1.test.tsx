@@ -8,7 +8,14 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-// Mock AppShell
+vi.mock("@/lib/hooks", () => ({
+  useAuth: () => ({
+    profile: { id: "u-admin", username: "admin", role: "ADMIN", permissions: ["*"], roles: ["admin"] },
+    isSuperAdmin: true,
+    hasPermission: () => true,
+  }),
+}));
+
 vi.mock("@/components/AppShell", () => ({
   AppShell: ({ children, activeKey }: { children: React.ReactNode; activeKey: string }) => (
     <div data-testid="app-shell" data-active-key={activeKey}>

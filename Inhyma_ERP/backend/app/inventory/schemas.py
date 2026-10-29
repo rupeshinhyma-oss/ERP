@@ -38,11 +38,32 @@ class ProductStockFilterParams(BaseModel):
     """Query parameters for filtering product stock."""
     warehouse: Optional[str] = None
     category: Optional[str] = None
+    sub_category: Optional[str] = None
     brand: Optional[str] = None
+    negative_stock: Optional[str] = None
     status: Optional[str] = None
     search: Optional[str] = None
     skip: int = Field(0, ge=0)
-    limit: int = Field(50, ge=1, le=500)
+    limit: int = Field(50, ge=1, le=5000)
+
+
+class StockTransactionLedgerItemRead(BaseModel):
+    """Single chronological stock movement row in the per-product Stock Transactions ledger."""
+    id: int = Field(..., description="Sequential ledger entry ID (newest has highest ID)")
+    entry_uid: str = Field(..., description="Deterministic unique entry key")
+    title: str = Field(..., description="Human-readable movement description (e.g. 'Sale Order #SO-... Confirm')")
+    party_name: Optional[str] = Field(None, description="Company or supplier name shown in bold beneath SO/PO line")
+    type: str = Field(..., description="'Sale' | 'Sale Cancel' | 'Stock IN' | 'Stock OUT' | 'Local Purchase' | 'Import Purchase' | 'Transfer IN' | 'Transfer OUT'")
+    warehouse: str = Field(..., description="Affected warehouse (e.g. 'Mumbai', 'Mumbai Transit', 'Mumbai Ordered')")
+    quantity: float = Field(..., description="Signed stock delta (+ve inward, -ve outward)")
+    quantity_display: str = Field(..., description="Formatted signed delta (e.g. '- 1', '+ 1')")
+    created_by: str = Field(..., description="User who performed the transaction")
+    transaction_date: str = Field(..., description="Formatted IST timestamp 'DD-MM-YYYY hh:mm AM/PM'")
+    iso_date: str = Field(..., description="ISO YYYY-MM-DD date in IST for date range filtering")
+    sort_epoch: float = Field(..., description="Unix timestamp for accurate chronological sorting")
+    ref_type: str = Field(..., description="Origin document type ('sale_order', 'stock_adjustment', 'local_purchase', 'import_purchase', 'stock_transfer')")
+    ref_id: str = Field(..., description="Origin document UUID")
+    ref_no: Optional[str] = Field(None, description="Origin document number (e.g. SO number, Adjustment #, Invoice #)")
 
 
 class ProductReorderItemRead(BaseModel):
@@ -51,12 +72,25 @@ class ProductReorderItemRead(BaseModel):
     sr_no: int = Field(..., description="Sequential row index")
     product_id: Optional[str] = Field(None, description="Linked product master ID")
     product_name_tally: str = Field(..., description="Product name as per Tally")
+    product_name_invoice: Optional[str] = Field(None, description="Product name as per Invoice")
     product_code: str = Field("-", description="SKU / product code")
     brand: str = Field("-", description="Brand name")
     category: Optional[str] = Field(None, description="Product category")
     sub_category: Optional[str] = Field(None, description="Sub-category")
     hsn_code: Optional[str] = Field(None, description="HSN code")
+    gst_percent: Optional[float] = Field(None, description="GST percentage from Tax master")
+    import_duty_percent: Optional[float] = Field(None, description="Import duty percentage from Tax master")
     uom: Optional[str] = Field("SET", description="Unit of measurement")
+    minimum_price: Optional[float] = Field(None, description="Minimum selling price without GST")
+    packaging_quantity: Optional[float] = Field(None, description="Packaging quantity per unit")
+    packaging_net_weight: Optional[float] = Field(None, description="Packaging net weight (kg)")
+    packaging_gross_weight: Optional[float] = Field(None, description="Packaging gross weight (kg)")
+    length_cm: Optional[float] = Field(None, description="Length in cm for CBM")
+    width_cm: Optional[float] = Field(None, description="Width in cm for CBM")
+    height_cm: Optional[float] = Field(None, description="Height in cm for CBM")
+    packaging_unit_cbm: Optional[float] = Field(None, description="Auto-computed CBM per package")
+    specification: Optional[str] = Field(None, description="Product specifications")
+    description: Optional[str] = Field(None, description="Product description")
     mumbai: float = Field(0.0, description="Mumbai physical stock")
     mumbai_transit: float = Field(0.0, description="Mumbai transit container stock")
     mumbai_ordered: float = Field(0.0, description="Mumbai factory ordered stock")
@@ -71,12 +105,15 @@ class ProductReorderItemRead(BaseModel):
     short_fall: float = Field(0.0, description="Shortfall quantity requiring restock")
     moq: float = Field(0.0, description="Minimum order quantity")
     order_to_be_place: float = Field(0.0, description="Recommended order quantity to place")
+    breakup_flags: List[str] = Field(default_factory=list, description="Columns with active SO/PO/Transfer breakup")
+    warehouse_thresholds: dict[str, Any] = Field(default_factory=dict, description="Optional per-warehouse reorder/MOQ overrides")
 
 
 class ProductReorderUpdateSchema(BaseModel):
-    """Payload to update reorder level and MOQ for a product."""
+    """Payload to update reorder level and MOQ for a product (global or branch-scoped)."""
     reorder_level: Optional[float] = Field(None, ge=0)
     minimum_order_quantity: Optional[float] = Field(None, ge=0)
+    warehouse: Optional[str] = Field(None, description="Optional warehouse scope: Mumbai | Ahmedabad | Indore | All")
 
 
 # ==============================================================================

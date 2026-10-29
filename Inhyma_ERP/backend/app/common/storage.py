@@ -32,11 +32,11 @@ _VERIFIED_BUCKETS: set[str] = set()
 # Whitelist of allowed file extensions
 ALLOWED_EXTENSIONS: set[str] = {
     # Images
-    "png", "jpg", "jpeg", "webp", "gif",
+    "png", "jpg", "jpeg", "webp", "gif", "heic",
     # Documents
     "pdf", "csv", "xlsx", "xls", "doc", "docx", "txt",
     # Media
-    "mp4", "webm", "mov",
+    "mp4", "webm", "mov", "avi", "mkv", "m4v",
 }
 
 # Maximum allowed file size: 50MB

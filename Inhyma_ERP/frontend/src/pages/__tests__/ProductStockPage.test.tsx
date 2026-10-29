@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor, cleanup } from "@testing-library/react";
-import { BrowserRouter } from "react-router-dom";
+import { BrowserRouter, MemoryRouter, Route, Routes } from "react-router-dom";
 import { ProductStockPage, INITIAL_STOCK_ITEMS, INITIAL_GOODS_EXPECTED_ITEMS } from "../ProductStockPage";
 import { InventoryApi } from "@/lib/api";
 
@@ -99,7 +99,11 @@ describe("ProductStockPage", () => {
 
     expect(screen.getByRole("heading", { name: /Product Stock/i })).toBeTruthy();
     expect(screen.getByTitle("Filter stock list")).toBeTruthy();
-    expect(screen.getByTitle("Export to Excel")).toBeTruthy();
+    const exportBtn = screen.getByTitle("Export to Excel");
+    expect(exportBtn).toBeTruthy();
+    expect(exportBtn.classList.contains("btn-imp-exp")).toBe(true);
+    expect(exportBtn.classList.contains("stock-btn-export")).toBe(true);
+    expect(exportBtn.querySelector("svg")).toBeTruthy();
   });
 
   it("renders search input with placeholder matching screenshot", () => {
@@ -464,6 +468,36 @@ describe("ProductStockPage", () => {
       expect(screen.getByText(/Consignment Details: CON-INHYMA-2026-004/i)).toBeTruthy();
       expect(screen.getByText(/ETD Origin Date:/i)).toBeTruthy();
       expect(screen.getByText(/ETA Port Date:/i)).toBeTruthy();
+    });
+  });
+
+  it("renders Product Stock Transactions report mode with filter panel off by default and navigates to /stock-transaction/list/:id on product click", async () => {
+    render(
+      <MemoryRouter initialEntries={["/transaction-report/list"]}>
+        <Routes>
+          <Route path="/transaction-report/list" element={<ProductStockPage />} />
+          <Route
+            path="/stock-transaction/list/:id"
+            element={<div data-testid="ledger-route-target">Ledger View</div>}
+          />
+        </Routes>
+      </MemoryRouter>
+    );
+
+    expect(screen.getByTestId("app-shell").getAttribute("data-active-key")).toBe(
+      "reports-stock-transactions"
+    );
+    expect(screen.getByRole("heading", { name: "Product Stock Transactions" })).toBeTruthy();
+    // Filter panel is off by default on Stock Transactions report and opens on click
+    expect(screen.queryByTestId("stock-filter-panel")).toBeNull();
+    fireEvent.click(screen.getByTitle("Filter stock list"));
+    expect(screen.getByTestId("stock-filter-panel")).toBeTruthy();
+
+    // Clicking product name navigates to per-product ledger page instead of opening SideDrawer
+    fireEvent.click(screen.getByText("Sensor (Banding)"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("ledger-route-target")).toBeTruthy();
     });
   });
 });

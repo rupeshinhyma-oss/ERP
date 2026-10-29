@@ -18,6 +18,8 @@ export interface OrderDetail {
 
 export interface StockBreakupRow {
   sr_no: number;
+  order_id?: string;
+  source_type?: string;
   order_no?: string;
   consignment_no?: string;
   invoice_no?: string;
@@ -27,6 +29,8 @@ export interface StockBreakupRow {
   gst_no?: string;
   supplier_name?: string;
   city_state?: string;
+  gross_quantity?: number;
+  booked_quantity?: number;
   quantity: number;
   status: string;
   sales_person?: string;
@@ -46,12 +50,15 @@ export interface ActiveBreakupState {
   count: number;
   loading?: boolean;
   rows: StockBreakupRow[];
+  bookedOrders?: StockBreakupRow[];
 }
 
 export interface ProductStockItem {
   id: string;
   sr_no: number;
+  product_id?: string | null;
   product_name_tally: string;
+  product_name_invoice?: string | null;
   product_code: string;
   brand: string;
   category?: string;
@@ -69,8 +76,18 @@ export interface ProductStockItem {
   indore_ordered: number;
   total_qty: number;
   uom?: string;
+  minimum_price?: number | null;
+  packaging_quantity?: number | null;
+  packaging_net_weight?: number | null;
+  packaging_gross_weight?: number | null;
+  length_cm?: number | null;
+  width_cm?: number | null;
+  height_cm?: number | null;
+  packaging_unit_cbm?: number | null;
+  specification?: string | null;
   description?: string;
   orders_info?: OrderDetail[];
+  breakup_flags?: string[];
 }
 
 export const INITIAL_STOCK_ITEMS: ProductStockItem[] = [
@@ -759,7 +776,12 @@ export function ProductStockPage({
     location.pathname.startsWith("/stock-transactions");
   const activeNavKey = isTransactionReport ? "reports-stock-transactions" : "product-stock";
   const stockTabLabel = isTransactionReport ? "Stock Transactions" : "Product Stock";
-  const pageHeading = activeTab === "goods-expected" ? "Goods Expected Date Report (Marketing)" : stockTabLabel;
+  const pageHeading =
+    activeTab === "goods-expected"
+      ? "Goods Expected Date Report (Marketing)"
+      : isTransactionReport
+      ? "Product Stock Transactions"
+      : "Product Stock";
 
   const isTestMode = import.meta.env.MODE === "test";
   // Goods Expected Date Report tab is kept in the codebase but hidden from the general UI as requested.
@@ -770,6 +792,15 @@ export function ProductStockPage({
     defaultTab === "goods-expected";
   const [loading, setLoading] = useState<boolean>(initialLoading);
   const [items, setItems] = useState<ProductStockItem[]>(isTestMode ? INITIAL_STOCK_ITEMS : []);
+  const [serverFilterOptions, setServerFilterOptions] = useState<{
+    categories: string[];
+    sub_categories: Array<{ name: string; category?: string | null }>;
+    brands: string[];
+  }>({
+    categories: [],
+    sub_categories: [],
+    brands: [],
+  });
 
   // Fetch live inventory balances from PostgreSQL database
   useEffect(() => {
@@ -777,10 +808,25 @@ export function ProductStockPage({
     if (initialLoading) {
       setLoading(true);
     }
-    InventoryApi.listProductStock({ limit: 200 })
+    InventoryApi.listProductStock({ limit: 2500 })
       .then((res) => {
-        if (!cancelled && res?.data?.items && Array.isArray(res.data.items)) {
-          setItems(res.data.items);
+        if (!cancelled && res?.data) {
+          if (Array.isArray(res.data.items)) {
+            setItems(res.data.items);
+          }
+          if (res.data.filter_options) {
+            setServerFilterOptions({
+              categories: Array.isArray(res.data.filter_options.categories)
+                ? res.data.filter_options.categories
+                : [],
+              sub_categories: Array.isArray(res.data.filter_options.sub_categories)
+                ? res.data.filter_options.sub_categories
+                : [],
+              brands: Array.isArray(res.data.filter_options.brands)
+                ? res.data.filter_options.brands
+                : [],
+            });
+          }
         }
       })
       .catch((err) => {
@@ -802,8 +848,12 @@ export function ProductStockPage({
   const [searchTerm, setSearchTerm] = useState("");
   const [perPage, setPerPage] = useState(50);
   const [currentPage, setCurrentPage] = useState(1);
-  // Collapsible inline filter panel - off by default until clicked
-  const [showFilterPanel, setShowFilterPanel] = useState(false);
+  // Collapsible inline filter panel - off by default across both Product Stock and Stock Transactions; toggles via Filter button
+  const [showFilterPanel, setShowFilterPanel] = useState<boolean>(false);
+
+  useEffect(() => {
+    setShowFilterPanel(false);
+  }, [isTransactionReport]);
 
   // Filter draft input states (for the filter panel controls)
   const [categoryFilter, setCategoryFilter] = useState("All");
@@ -843,6 +893,7 @@ export function ProductStockPage({
         count,
         loading: true,
         rows: [],
+        bookedOrders: [],
       });
 
       InventoryApi.getProductStockBreakup({
@@ -852,27 +903,14 @@ export function ProductStockPage({
       })
         .then((res) => {
           const rows = res?.data?.items || [];
-          setActiveBreakup((prev) => (prev ? { ...prev, loading: false, rows } : null));
+          const bookedOrders = res?.data?.booked_orders || [];
+          setActiveBreakup((prev) =>
+            prev ? { ...prev, loading: false, rows, bookedOrders } : null
+          );
         })
         .catch((err) => {
           console.warn("Failed to load stock breakup:", err);
-          if (stockType === "physical") {
-            const fallbackRows: StockBreakupRow[] = [
-              {
-                sr_no: 1,
-                order_no: "SO-MH/26-27/0432",
-                order_date: "12-04-2026",
-                company_name: "VN GOURMET LLT",
-                gst_no: "27AABCV1234F1Z5",
-                city_state: `${location}, Maharashtra`,
-                quantity: Math.min(count, 5) || 2,
-                status: "Confirmed",
-                sales_person: "Rupesh Malia",
-                delivery_date: "20-04-2026",
-              },
-            ];
-            setActiveBreakup((prev) => (prev ? { ...prev, loading: false, rows: fallbackRows } : null));
-          } else if (stockType === "ordered" && item.orders_info && item.orders_info.length > 0) {
+          if (stockType === "ordered" && item.orders_info && item.orders_info.length > 0) {
             const fallbackRows: StockBreakupRow[] = item.orders_info.map((o, idx) => ({
               sr_no: idx + 1,
               consignment_no: o.po_number,
@@ -883,9 +921,13 @@ export function ProductStockPage({
               arrival_date: o.expected_date,
               status: "Ordered",
             }));
-            setActiveBreakup((prev) => (prev ? { ...prev, loading: false, rows: fallbackRows } : null));
+            setActiveBreakup((prev) =>
+              prev ? { ...prev, loading: false, rows: fallbackRows, bookedOrders: [] } : null
+            );
           } else {
-            setActiveBreakup((prev) => (prev ? { ...prev, loading: false, rows: [] } : null));
+            setActiveBreakup((prev) =>
+              prev ? { ...prev, loading: false, rows: [], bookedOrders: [] } : null
+            );
           }
         });
     },
@@ -990,32 +1032,41 @@ export function ProductStockPage({
     XLSX.writeFile(wb, "Goods_Expected_Date_Report.xlsx");
   }, [filteredExpectedItems]);
 
-  // Extract unique Category options
+  // Extract unique Category options (server master + loaded items)
   const categoryOptions = useMemo(() => {
-    const cats = new Set<string>();
+    const cats = new Set<string>(serverFilterOptions.categories.filter((c) => c && c !== "-"));
     items.forEach((item) => {
       if (item.category && item.category !== "-") cats.add(item.category);
     });
     return Array.from(cats).sort();
-  }, [items]);
+  }, [items, serverFilterOptions.categories]);
 
-  // Extract unique Brand options
+  // Extract unique Brand options (server master + loaded items)
   const brandOptions = useMemo(() => {
-    const brands = new Set<string>();
+    const brands = new Set<string>(serverFilterOptions.brands.filter((b) => b && b !== "-"));
     items.forEach((item) => {
       if (item.brand && item.brand !== "-") brands.add(item.brand);
     });
     return Array.from(brands).sort();
-  }, [items]);
+  }, [items, serverFilterOptions.brands]);
 
-  // Extract unique Sub Category options
+  // Extract unique Sub Category options (narrowed by selected Category when applicable)
   const subCategoryOptions = useMemo(() => {
     const subs = new Set<string>();
+    serverFilterOptions.sub_categories.forEach((sub) => {
+      if (!sub?.name || sub.name === "-") return;
+      if (categoryFilter === "All" || !sub.category || sub.category === categoryFilter) {
+        subs.add(sub.name);
+      }
+    });
     items.forEach((item) => {
-      if (item.sub_category && item.sub_category !== "-") subs.add(item.sub_category);
+      if (!item.sub_category || item.sub_category === "-") return;
+      if (categoryFilter === "All" || item.category === categoryFilter) {
+        subs.add(item.sub_category);
+      }
     });
     return Array.from(subs).sort();
-  }, [items]);
+  }, [items, serverFilterOptions.sub_categories, categoryFilter]);
 
   // Apply filters button action
   const handleApplyFilters = useCallback(() => {
@@ -1023,6 +1074,7 @@ export function ProductStockPage({
     setAppliedSubCategory(subCategoryFilter);
     setAppliedBrand(brandFilter);
     setAppliedNegativeStock(negativeStockFilter);
+    setCurrentPage(1);
   }, [categoryFilter, subCategoryFilter, brandFilter, negativeStockFilter]);
 
   // Reset filters button action
@@ -1035,6 +1087,7 @@ export function ProductStockPage({
     setAppliedSubCategory("All");
     setAppliedBrand("All");
     setAppliedNegativeStock("Select");
+    setCurrentPage(1);
   }, []);
 
   // Filter items based on search and applied panel filters
@@ -1043,10 +1096,10 @@ export function ProductStockPage({
       // Search term matching: name, code, brand, sub-category
       if (searchTerm.trim()) {
         const query = searchTerm.toLowerCase().trim();
-        const matchName = item.product_name_tally.toLowerCase().includes(query);
-        const matchCode = item.product_code.toLowerCase().includes(query);
-        const matchBrand = item.brand.toLowerCase().includes(query);
-        const matchSub = item.sub_category.toLowerCase().includes(query);
+        const matchName = (item.product_name_tally || "").toLowerCase().includes(query);
+        const matchCode = (item.product_code || "").toLowerCase().includes(query);
+        const matchBrand = (item.brand || "").toLowerCase().includes(query);
+        const matchSub = (item.sub_category || "").toLowerCase().includes(query);
         if (!matchName && !matchCode && !matchBrand && !matchSub) return false;
       }
 
@@ -1224,7 +1277,7 @@ export function ProductStockPage({
       "Product Name (As Per Tally)": item.product_name_tally,
       "Product Code": item.product_code,
       "Brand": item.brand,
-      "Category": item.category || "Machines",
+      "Category": item.category || "—",
       "Sub Category": item.sub_category,
       "HSN": item.hsn_code || "—",
       "GST": item.gst_rate || "18%",
@@ -1242,9 +1295,22 @@ export function ProductStockPage({
 
     const ws = XLSX.utils.json_to_sheet(exportData);
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Product Stock");
-    XLSX.writeFile(wb, "Product_Stock_List.xlsx");
-  }, [filteredItems]);
+    XLSX.utils.book_append_sheet(
+      wb,
+      ws,
+      isTransactionReport ? "Stock Transactions" : "Product Stock"
+    );
+    XLSX.writeFile(
+      wb,
+      isTransactionReport ? "Product_Stock_Transactions.xlsx" : "Product_Stock_List.xlsx"
+    );
+  }, [filteredItems, isTransactionReport]);
+
+  const hasCellBreakup = useCallback(
+    (it: ProductStockItem, colKey: string, qty: number): boolean =>
+      Array.isArray(it.breakup_flags) ? it.breakup_flags.includes(colKey) : qty !== 0,
+    []
+  );
 
   return (
     <AppShell activeKey={activeNavKey}>
@@ -1288,24 +1354,29 @@ export function ProductStockPage({
                   </svg>
                 </button>
 
-                {/* Export Button */}
+                {/* Export Button (matches Companies Imp/Exp golden-amber theme) */}
                 <button
                   type="button"
-                  className="btn stock-btn-export"
-                  style={{
-                    background: "#5c6f84",
-                    color: "#ffffff",
-                    padding: "8px 16px",
-                    borderRadius: "4px",
-                    fontWeight: 600,
-                    fontSize: "13px",
-                    border: "none",
-                    cursor: "pointer",
-                  }}
+                  className="btn btn-imp-exp stock-btn-export"
                   onClick={handleExport}
                   title="Export to Excel"
                 >
-                  Export
+                  <svg
+                    width="14"
+                    height="14"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    aria-hidden="true"
+                  >
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                    <polyline points="7 10 12 15 17 10" />
+                    <line x1="12" y1="15" x2="12" y2="3" />
+                  </svg>
+                  <span>Export</span>
                 </button>
               </>
             ) : (
@@ -1429,7 +1500,10 @@ export function ProductStockPage({
                   id="stock-filter-category"
                   className="stock-filter-select"
                   value={categoryFilter}
-                  onChange={(e) => setCategoryFilter(e.target.value)}
+                  onChange={(e) => {
+                    setCategoryFilter(e.target.value);
+                    setSubCategoryFilter("All");
+                  }}
                   style={{ width: "100%", height: "36px", borderRadius: "4px", border: "1px solid #cbd5e1", padding: "0 10px", fontSize: "13px" }}
                 >
                   <option value="All">All</option>
@@ -1514,43 +1588,96 @@ export function ProductStockPage({
         )}
 
         {/* Search Row matching Screenshot 1 */}
-        <div style={{ position: "relative", marginBottom: "16px" }}>
-          <span style={{ position: "absolute", left: "14px", top: "50%", transform: "translateY(-50%)", color: "#64748b", display: "flex", alignItems: "center" }}>
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="11" cy="11" r="8"></circle>
-              <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
-            </svg>
-          </span>
-          <input
-            type="text"
-            className="stock-search-input"
-            placeholder="Search products by name, code, brand, sub-category..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            style={{ width: "100%", height: "38px", padding: "6px 36px 6px 38px", borderRadius: "5px", border: "1px solid #cbd5e1", fontSize: "13px", boxSizing: "border-box" }}
-          />
-          {searchTerm && (
-            <button
-              type="button"
-              className="stock-search-clear"
-              onClick={() => setSearchTerm("")}
-              title="Clear search"
-              style={{
-                position: "absolute",
-                right: "12px",
-                top: "50%",
-                transform: "translateY(-50%)",
-                background: "none",
-                border: "none",
-                cursor: "pointer",
-                color: "#94a3b8",
-                fontSize: "16px",
+        {isTransactionReport ? (
+          <div className="stock-tx-search-card">
+            <div className="stock-tx-search-group">
+              <span className="stock-tx-search-addon" aria-hidden="true">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="11" cy="11" r="8"></circle>
+                  <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                </svg>
+              </span>
+              <input
+                type="text"
+                className="stock-search-input"
+                placeholder="Search products by name, code, brand, sub-category..."
+                value={searchTerm}
+                onChange={(e) => {
+                  setSearchTerm(e.target.value);
+                  setCurrentPage(1);
+                }}
+              />
+              {searchTerm && (
+                <button
+                  type="button"
+                  className="stock-search-clear"
+                  onClick={() => {
+                    setSearchTerm("");
+                    setCurrentPage(1);
+                  }}
+                  title="Clear search"
+                  style={{
+                    position: "absolute",
+                    right: "10px",
+                    top: "50%",
+                    transform: "translateY(-50%)",
+                    background: "none",
+                    border: "none",
+                    cursor: "pointer",
+                    color: "#94a3b8",
+                    fontSize: "15px",
+                  }}
+                >
+                  ✕
+                </button>
+              )}
+            </div>
+          </div>
+        ) : (
+          <div style={{ position: "relative", marginBottom: "16px" }}>
+            <span style={{ position: "absolute", left: "14px", top: "50%", transform: "translateY(-50%)", color: "#64748b", display: "flex", alignItems: "center" }}>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="11" cy="11" r="8"></circle>
+                <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+              </svg>
+            </span>
+            <input
+              type="text"
+              className="stock-search-input"
+              placeholder="Search products by name, code, brand, sub-category..."
+              value={searchTerm}
+              onChange={(e) => {
+                setSearchTerm(e.target.value);
+                setCurrentPage(1);
               }}
-            >
-              ✕
-            </button>
-          )}
-        </div>
+              style={{ width: "100%", height: "38px", padding: "6px 36px 6px 38px", borderRadius: "5px", border: "1px solid #cbd5e1", fontSize: "13px", boxSizing: "border-box" }}
+            />
+            {searchTerm && (
+              <button
+                type="button"
+                className="stock-search-clear"
+                onClick={() => {
+                  setSearchTerm("");
+                  setCurrentPage(1);
+                }}
+                title="Clear search"
+                style={{
+                  position: "absolute",
+                  right: "12px",
+                  top: "50%",
+                  transform: "translateY(-50%)",
+                  background: "none",
+                  border: "none",
+                  cursor: "pointer",
+                  color: "#94a3b8",
+                  fontSize: "16px",
+                }}
+              >
+                ✕
+              </button>
+            )}
+          </div>
+        )}
 
         {/* Main Data Card */}
         <div className="card" style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "6px", boxShadow: "0 1px 3px rgba(0,0,0,0.04)" }}>
@@ -1577,28 +1704,28 @@ export function ProductStockPage({
                   <th className="th-pink" style={{ minWidth: "75px", textAlign: "center" }}>
                     <SortHeader label="Mumbai" isSorted={sortColIndex === 5} sortDirection={sortDirection} onSort={() => handleHeaderSort(5)} align="center" />
                   </th>
-                  <th className="th-grey" style={{ minWidth: "85px", textAlign: "center" }}>
+                  <th className="th-transit" style={{ minWidth: "85px", textAlign: "center" }}>
                     <SortHeader label="Mumbai Transit" isSorted={sortColIndex === 6} sortDirection={sortDirection} onSort={() => handleHeaderSort(6)} align="center" />
                   </th>
-                  <th className="th-grey" style={{ minWidth: "85px", textAlign: "center" }}>
+                  <th className="th-ordered" style={{ minWidth: "85px", textAlign: "center" }}>
                     <SortHeader label="Mumbai Ordered" isSorted={sortColIndex === 7} sortDirection={sortDirection} onSort={() => handleHeaderSort(7)} align="center" />
                   </th>
                   <th className="th-pink" style={{ minWidth: "85px", textAlign: "center" }}>
                     <SortHeader label="Ahmedabad" isSorted={sortColIndex === 8} sortDirection={sortDirection} onSort={() => handleHeaderSort(8)} align="center" />
                   </th>
-                  <th className="th-grey" style={{ minWidth: "90px", textAlign: "center" }}>
+                  <th className="th-transit" style={{ minWidth: "90px", textAlign: "center" }}>
                     <SortHeader label="Ahmedabad Transit" isSorted={sortColIndex === 9} sortDirection={sortDirection} onSort={() => handleHeaderSort(9)} align="center" />
                   </th>
-                  <th className="th-grey" style={{ minWidth: "90px", textAlign: "center" }}>
+                  <th className="th-ordered" style={{ minWidth: "90px", textAlign: "center" }}>
                     <SortHeader label="Ahmedabad Ordered" isSorted={sortColIndex === 10} sortDirection={sortDirection} onSort={() => handleHeaderSort(10)} align="center" />
                   </th>
                   <th className="th-pink" style={{ minWidth: "75px", textAlign: "center" }}>
                     <SortHeader label="Indore" isSorted={sortColIndex === 11} sortDirection={sortDirection} onSort={() => handleHeaderSort(11)} align="center" />
                   </th>
-                  <th className="th-grey" style={{ minWidth: "85px", textAlign: "center" }}>
+                  <th className="th-transit" style={{ minWidth: "85px", textAlign: "center" }}>
                     <SortHeader label="Indore Transit" isSorted={sortColIndex === 12} sortDirection={sortDirection} onSort={() => handleHeaderSort(12)} align="center" />
                   </th>
-                  <th className="th-grey" style={{ minWidth: "85px", textAlign: "center" }}>
+                  <th className="th-ordered" style={{ minWidth: "85px", textAlign: "center" }}>
                     <SortHeader label="Indore Ordered" isSorted={sortColIndex === 13} sortDirection={sortDirection} onSort={() => handleHeaderSort(13)} align="center" />
                   </th>
                   <th style={{ width: "90px", textAlign: "center" }}>
@@ -1616,18 +1743,28 @@ export function ProductStockPage({
                     </td>
                   </tr>
                 ) : (
-                  paginatedItems.map((item) => (
+                  paginatedItems.map((item) => {
+                    const ledgerTarget = `/stock-transaction/list/${encodeURIComponent(String(item.product_id || item.id))}`;
+                    return (
                     <tr key={item.id}>
                       <td className="td-center">{item.sr_no}</td>
                       <td>
                         <a
-                          href="#view-product"
+                          href={isTransactionReport ? ledgerTarget : "#view-product"}
                           className="product-link"
                           onClick={(e) => {
                             e.preventDefault();
-                            setActiveItem(item);
+                            if (isTransactionReport) {
+                              navigate(ledgerTarget);
+                            } else {
+                              setActiveItem(item);
+                            }
                           }}
-                          title="Click to view details in Product Master View Window"
+                          title={
+                            isTransactionReport
+                              ? "Click to view Stock Transaction Ledger"
+                              : "Click to view details in Product Master View Window"
+                          }
                         >
                           {item.product_name_tally}
                         </a>
@@ -1639,7 +1776,7 @@ export function ProductStockPage({
                       <td className="td-pink">
                         <span className="stock-cell-value">
                           <span>{item.mumbai}</span>
-                          {item.mumbai !== 0 && (
+                          {hasCellBreakup(item, "mumbai", item.mumbai) && (
                             <button
                               type="button"
                               className="info-icon-btn"
@@ -1655,10 +1792,10 @@ export function ProductStockPage({
                           )}
                         </span>
                       </td>
-                      <td className="td-grey">
+                      <td className="td-transit">
                         <span className="stock-cell-value">
                           <span>{item.mumbai_transit}</span>
-                          {item.mumbai_transit !== 0 && (
+                          {hasCellBreakup(item, "mumbai_transit", item.mumbai_transit) && (
                             <button
                               type="button"
                               className="info-icon-btn"
@@ -1674,10 +1811,10 @@ export function ProductStockPage({
                           )}
                         </span>
                       </td>
-                      <td className="td-grey">
+                      <td className="td-ordered">
                         <span className="stock-cell-value">
                           <span>{item.mumbai_ordered}</span>
-                          {item.mumbai_ordered !== 0 && (
+                          {hasCellBreakup(item, "mumbai_ordered", item.mumbai_ordered) && (
                             <button
                               type="button"
                               className="info-icon-btn"
@@ -1697,7 +1834,7 @@ export function ProductStockPage({
                       <td className="td-pink">
                         <span className="stock-cell-value">
                           <span>{item.ahmedabad}</span>
-                          {item.ahmedabad !== 0 && (
+                          {hasCellBreakup(item, "ahmedabad", item.ahmedabad) && (
                             <button
                               type="button"
                               className="info-icon-btn"
@@ -1713,10 +1850,10 @@ export function ProductStockPage({
                           )}
                         </span>
                       </td>
-                      <td className="td-grey">
+                      <td className="td-transit">
                         <span className="stock-cell-value">
                           <span>{item.ahmedabad_transit}</span>
-                          {item.ahmedabad_transit !== 0 && (
+                          {hasCellBreakup(item, "ahmedabad_transit", item.ahmedabad_transit) && (
                             <button
                               type="button"
                               className="info-icon-btn"
@@ -1732,10 +1869,10 @@ export function ProductStockPage({
                           )}
                         </span>
                       </td>
-                      <td className="td-grey">
+                      <td className="td-ordered">
                         <span className="stock-cell-value">
                           <span>{item.ahmedabad_ordered}</span>
-                          {item.ahmedabad_ordered !== 0 && (
+                          {hasCellBreakup(item, "ahmedabad_ordered", item.ahmedabad_ordered) && (
                             <button
                               type="button"
                               className="info-icon-btn"
@@ -1755,7 +1892,7 @@ export function ProductStockPage({
                       <td className="td-pink">
                         <span className="stock-cell-value">
                           <span>{item.indore}</span>
-                          {item.indore !== 0 && (
+                          {hasCellBreakup(item, "indore", item.indore) && (
                             <button
                               type="button"
                               className="info-icon-btn"
@@ -1771,10 +1908,10 @@ export function ProductStockPage({
                           )}
                         </span>
                       </td>
-                      <td className="td-grey">
+                      <td className="td-transit">
                         <span className="stock-cell-value">
                           <span>{item.indore_transit}</span>
-                          {item.indore_transit !== 0 && (
+                          {hasCellBreakup(item, "indore_transit", item.indore_transit) && (
                             <button
                               type="button"
                               className="info-icon-btn"
@@ -1790,10 +1927,10 @@ export function ProductStockPage({
                           )}
                         </span>
                       </td>
-                      <td className="td-grey">
+                      <td className="td-ordered">
                         <span className="stock-cell-value">
                           <span>{item.indore_ordered}</span>
-                          {item.indore_ordered !== 0 && (
+                          {hasCellBreakup(item, "indore_ordered", item.indore_ordered) && (
                             <button
                               type="button"
                               className="info-icon-btn"
@@ -1813,7 +1950,8 @@ export function ProductStockPage({
                         {item.total_qty}
                       </td>
                     </tr>
-                  ))
+                    );
+                  })
                 )}
               </tbody>
             </table>
@@ -2330,6 +2468,7 @@ export function ProductStockPage({
                   </table>
                 ) : (
                   /* Transit / Ordered Stock: Consignment Breakup */
+                  <>
                   <table className="stock-breakup-table" aria-label="Consignment Breakup Table">
                     <thead>
                       <tr>
@@ -2396,6 +2535,46 @@ export function ProductStockPage({
                       )}
                     </tbody>
                   </table>
+
+                  {activeBreakup.bookedOrders && activeBreakup.bookedOrders.length > 0 && (
+                    <div style={{ marginTop: "18px" }}>
+                      <h4 style={{ margin: "0 0 8px", fontSize: "13px", fontWeight: 700, color: "#334155" }}>
+                        Booked Sale Orders (FIFO Deducted)
+                      </h4>
+                      <table className="stock-breakup-table" aria-label="Booked Sale Orders Table">
+                        <thead>
+                          <tr>
+                            <th style={{ width: "45px", textAlign: "center" }}>#</th>
+                            <th style={{ minWidth: "160px" }}>Sale Order No &amp; Date</th>
+                            <th style={{ minWidth: "180px" }}>Company Name</th>
+                            <th style={{ width: "90px", textAlign: "right" }}>Booked Qty</th>
+                            <th style={{ width: "110px", textAlign: "center" }}>Status</th>
+                            <th style={{ minWidth: "130px" }}>Sales Person</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {activeBreakup.bookedOrders.map((bo, bIdx) => (
+                            <tr key={bIdx}>
+                              <td style={{ textAlign: "center", color: "#64748b" }}>{bo.sr_no || bIdx + 1}</td>
+                              <td>
+                                <strong style={{ color: "#0284c7" }}>{bo.order_no || "-"}</strong>
+                                {bo.order_date && <div style={{ fontSize: "11.5px", color: "#64748b" }}>{bo.order_date}</div>}
+                              </td>
+                              <td style={{ fontWeight: 600 }}>{bo.company_name || "-"}</td>
+                              <td style={{ textAlign: "right", fontWeight: 700, color: "#dc2626" }}>
+                                - {bo.quantity}
+                              </td>
+                              <td style={{ textAlign: "center" }}>
+                                <span className="stock-status-pill pending">{bo.status || "Booked"}</span>
+                              </td>
+                              <td>{bo.sales_person || "-"}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                  </>
                 )}
               </div>
             </div>
@@ -2528,8 +2707,11 @@ export function ProductStockPage({
                   Packaging &amp; Pricing
                 </h4>
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px 16px", fontSize: "13px" }}>
-                  <div><strong>Packaging Quantity:</strong> 1</div>
+                  <div><strong>Packaging Quantity:</strong> {activeItem.packaging_quantity ?? 1}</div>
                   <div><strong>Unit of Measure:</strong> {activeItem.uom || "SET"}</div>
+                  {activeItem.minimum_price != null && (
+                    <div><strong>Minimum Price:</strong> ₹{Number(activeItem.minimum_price).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+                  )}
                   <div><strong>Total Net Stock:</strong> {activeItem.total_qty} units</div>
                   <div><strong>Stock Status:</strong> {activeItem.total_qty > 0 ? "Available" : activeItem.total_qty < 0 ? "Negative Stock" : "Zero Stock"}</div>
                 </div>
@@ -2540,10 +2722,10 @@ export function ProductStockPage({
                   Dimensions For CBM
                 </h4>
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: "8px", fontSize: "13px" }}>
-                  <div><strong>Length:</strong> — cm</div>
-                  <div><strong>Width:</strong> — cm</div>
-                  <div><strong>Height:</strong> — cm</div>
-                  <div><strong>Packaging Unit CBM:</strong> —</div>
+                  <div><strong>Length:</strong> {activeItem.length_cm != null ? `${activeItem.length_cm} cm` : "— cm"}</div>
+                  <div><strong>Width:</strong> {activeItem.width_cm != null ? `${activeItem.width_cm} cm` : "— cm"}</div>
+                  <div><strong>Height:</strong> {activeItem.height_cm != null ? `${activeItem.height_cm} cm` : "— cm"}</div>
+                  <div><strong>Packaging Unit CBM:</strong> {activeItem.packaging_unit_cbm != null ? activeItem.packaging_unit_cbm : "—"}</div>
                 </div>
               </div>
 

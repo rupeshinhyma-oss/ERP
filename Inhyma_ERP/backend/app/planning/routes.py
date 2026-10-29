@@ -14,7 +14,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Query, Request, WebSocket, WebSocketDisconnect, status
 
-from app.auth.dependencies import get_auth_service
+from app.auth.dependencies import get_auth_service, verify_websocket_token
 from app.auth.service import AuthService, CurrentUser
 from app.core.exceptions import UnauthorizedException
 from app.core.logging import get_logger
@@ -77,7 +77,6 @@ async def sheet_live_updates(
     websocket: WebSocket,
     sheet_id: uuid.UUID,
     token: str = Query(..., description="Access token (same one used for Authorization: Bearer)."),
-    auth_service: AuthService = Depends(get_auth_service),
 ) -> None:
     """
     Push every change made to this sheet to every other open tab, live.
@@ -96,7 +95,7 @@ async def sheet_live_updates(
     sites.
     """
     try:
-        current_user = await auth_service.verify_access_token(token)
+        current_user = await verify_websocket_token(websocket, token)
     except UnauthorizedException:
         await websocket.accept()
         await websocket.close(code=4401, reason="Invalid or expired token.")

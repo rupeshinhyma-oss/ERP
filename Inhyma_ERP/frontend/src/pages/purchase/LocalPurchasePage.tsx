@@ -20,8 +20,26 @@ import {
 
 // The record types live in the shared data layer; re-exported so existing imports keep working.
 export type { LocalPurchaseItem, PurchaseOrderRecord } from "@/lib/purchaseApi";
+import { ImpExpDropdown, ImportSummaryPanel, type ImportHeader, type ImportSummary } from "@/components/ImportWizard";
 import type { PaginationMeta } from "@/types";
 import { prefetchMasterProducts, fetchMasterProducts, filterCachedProducts } from "@/lib/productSearchCache";
+
+const LOCAL_PURCHASE_IMPORT_HEADERS: ImportHeader[] = [
+  { key: "invoice_no", label: "Invoice No.", required: true },
+  { key: "invoice_date", label: "Invoice Date (DD-MM-YYYY)", required: true },
+  { key: "supplier_name", label: "Supplier", required: true },
+  { key: "warehouse", label: "Warehouse", required: true },
+  { key: "product_name", label: "Product Name", required: true },
+  { key: "product_code", label: "Product Code" },
+  { key: "quantity", label: "Quantity", required: true },
+  { key: "unit_rate", label: "Unit Rate (INR)", required: true },
+  { key: "invoice_value_ex_gst", label: "Invoice Total Value (Basic Without GST)" },
+  { key: "invoice_value_inc_gst", label: "Invoice Total Value (Including GST)" },
+  { key: "packing_forwarding", label: "Packing & Forwarding" },
+  { key: "transport", label: "Transport" },
+  { key: "offloading", label: "Offloading" },
+  { key: "remarks", label: "Remarks" },
+];
 
 type CatalogProduct = { product_name: string; product_code?: string | null; uom?: string | null; rate: number };
 
@@ -471,6 +489,9 @@ export function LocalPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean
   const [bulkMenuOpen, setBulkMenuOpen] = useState(false);
 
   // Import states
+  const [importSummary, setImportSummary] = useState<ImportSummary | null>(null);
+  const [importError, setImportError] = useState<string | null>(null);
+
   const handleResetFilters = () => {
     setFilterSupplier("");
     setFilterWarehouse("");
@@ -801,6 +822,7 @@ export function LocalPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean
   };
 
   const handleExport = () => {
+    const csvCell = (val: unknown) => `"${String(val ?? "").replace(/"/g, '""')}"`;
     const headers = [
       "Invoice No",
       "Invoice Date",
@@ -822,15 +844,17 @@ export function LocalPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean
       o.status,
     ]);
     const csvContent =
-      "data:text/csv;charset=utf-8," +
-      [headers.join(","), ...rows.map((e) => e.map((val) => `"${val}"`).join(","))].join("\n");
-    const encodedUri = encodeURI(csvContent);
+      "\uFEFF" +
+      [headers.map(csvCell).join(","), ...rows.map((r) => r.map(csvCell).join(","))].join("\n");
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
-    link.setAttribute("href", encodedUri);
+    link.href = url;
     link.setAttribute("download", `local_purchase_list_${new Date().toISOString().slice(0, 10)}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    URL.revokeObjectURL(url);
   };
 
   const resetFormFields = () => {
@@ -2047,26 +2071,20 @@ export function LocalPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean
               + ADD NEW
             </button>
 
-            {/* Export Button */}
-            <button
-              type="button"
-              className="btn btn-export"
-              data-testid="btn-export"
-              onClick={handleExport}
-              style={{
-                background: "#f59e0b",
-                color: "#ffffff",
-                padding: "8px 16px",
-                borderRadius: "6px",
-                fontWeight: 600,
-                fontSize: "13px",
-                border: "none",
-                cursor: "pointer",
-                boxShadow: "0 2px 4px rgba(245,158,11,0.2)",
+            {/* Imp / Exp Dropdown (Sample File, Import, Export) */}
+            <ImpExpDropdown
+              apiBase={LOCAL_PURCHASE_API}
+              entityName="Local Purchase"
+              importHeaders={LOCAL_PURCHASE_IMPORT_HEADERS}
+              onSummary={setImportSummary}
+              onError={setImportError}
+              onComplete={() => {
+                void loadOrders();
               }}
-            >
-              Export
-            </button>
+              onExportCsv={handleExport}
+              showImport={true}
+              showExport={true}
+            />
 
             {/* Bulk Actions Button */}
             <div style={{ position: "relative" }}>
@@ -2147,6 +2165,8 @@ export function LocalPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean
             </div>
           </div>
         </div>
+
+        <ImportSummaryPanel summary={importSummary} error={importError} />
 
         {/* TOGGLABLE TOP FILTER PANEL matching Companies */}
         {isFilterOpen && (

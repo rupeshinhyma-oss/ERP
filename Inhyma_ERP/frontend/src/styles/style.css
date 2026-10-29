@@ -897,6 +897,105 @@ svg {
   border-color: #d97706;
 }
 
+.btn-imp-exp .imp-exp-chevron {
+  width: 13px;
+  height: 13px;
+  flex-shrink: 0;
+  transition: transform 0.15s ease;
+}
+
+.btn-imp-exp[aria-expanded="true"] .imp-exp-chevron {
+  transform: rotate(180deg);
+}
+
+.imp-exp-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  background: #ffffff;
+  border-radius: 8px;
+  padding: 5px;
+  box-shadow: 0 10px 25px -5px rgba(15, 23, 42, 0.14), 0 4px 10px -4px rgba(15, 23, 42, 0.08);
+  border: 1px solid #e2e8f0;
+  z-index: 1000;
+  min-width: 184px;
+}
+
+.imp-exp-menu-item {
+  width: 100%;
+  box-sizing: border-box;
+  text-align: left;
+  padding: 8px 10px;
+  border-radius: 6px;
+  font-size: 12.5px;
+  letter-spacing: 0.02em;
+  color: #1e293b;
+  font-weight: 600;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.imp-exp-menu-item + .imp-exp-menu-item {
+  margin-top: 2px;
+}
+
+.imp-exp-menu-item:hover {
+  background: #f1f5f9;
+  color: #0f172a;
+}
+
+.imp-exp-icon-badge {
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.imp-exp-icon-badge svg {
+  width: 15px;
+  height: 15px;
+}
+
+.imp-exp-icon-badge--sample {
+  background: #f1f5f9;
+  color: #475569;
+}
+
+.imp-exp-menu-item:hover .imp-exp-icon-badge--sample {
+  background: #e2e8f0;
+  color: #334155;
+}
+
+.imp-exp-icon-badge--import {
+  background: #eff6ff;
+  color: #2563eb;
+}
+
+.imp-exp-menu-item:hover .imp-exp-icon-badge--import {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
+.imp-exp-icon-badge--export {
+  background: #ecfdf5;
+  color: #059669;
+}
+
+.imp-exp-menu-item:hover .imp-exp-icon-badge--export {
+  background: #d1fae5;
+  color: #047857;
+}
+
 .btn-bulk-actions {
   background: #10b981;
   border-color: #10b981;

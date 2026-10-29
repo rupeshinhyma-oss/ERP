@@ -109,6 +109,12 @@ describe("StockTransferPage", () => {
     expect(screen.getByRole("heading", { name: "Stock Transfer" })).toBeTruthy();
     expect(screen.getByTitle("Filter stock transfers")).toBeTruthy();
     expect(screen.getByRole("button", { name: /\+ ADD NEW/i })).toBeTruthy();
+    const exportBtn = screen.getByRole("button", { name: /^Export$/i });
+    expect(exportBtn).toBeTruthy();
+    expect(exportBtn.classList.contains("btn-imp-exp")).toBe(true);
+    expect(exportBtn.querySelector("svg")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Imp \/ Exp/i })).toBeNull();
+    expect(screen.getByRole("button", { name: /^Bulk Actions ▾$/i })).toBeTruthy();
     expect(screen.getByTestId("app-shell").getAttribute("data-active-key")).toBe("stock-transfer");
   });
 

@@ -280,6 +280,37 @@ async def test_local_list_counts_and_authentication(factory):
         assert (await anon.get("/purchase/local-orders")).status_code in (401, 403)
 
 
+@pytest.mark.asyncio
+async def test_local_csv_import_creates_pending_orders_and_reports_duplicates_and_errors(factory):
+    async with _client(factory, NORMAL) as c:
+        await _new_local(c, invoice_no="INV-EXISTING")
+        csv_text = "\n".join([
+            "invoice_no,invoice_date,supplier_name,warehouse,product_name,quantity,unit_rate,invoice_value_ex_gst,invoice_value_inc_gst,transport",
+            f"INV-IMP-1,{PAST},Local Traders,Mumbai,Band Sealer,10,100,10000,11800,1000",
+            f"INV-IMP-1,{PAST},Local Traders,Mumbai,Teflon Belt,36,250,10000,11800,1000",
+            f"INV-EXISTING,{PAST},Local Traders,Mumbai,Band Sealer,2,100,200,236,0",
+            f"INV-BAD,{PAST},Ghost Co,Mumbai,Band Sealer,2,100,200,236,0",
+        ])
+        res = await c.post(
+            "/purchase/local-orders/import",
+            files={"file": ("local_purchases.csv", csv_text.encode("utf-8"), "text/csv")},
+        )
+        assert res.status_code == 200, res.text
+        summary = res.json()["data"]
+        assert summary["total_rows"] == 4
+        assert summary["created"] == 2
+        assert summary["duplicate_count"] == 1
+        assert summary["failed"] == 2
+        assert len(summary["errors"]) == 1 and "Supplier master" in summary["errors"][0]["error"]
+
+        listed = (await c.get("/purchase/local-orders")).json()["data"]["items"]
+        imp_order = next(o for o in listed if o["invoice_no"] == "INV-IMP-1")
+        assert imp_order["status"] == "pending"
+        assert len(imp_order["items"]) == 2
+        assert imp_order["total_expenses"] == 1000.0
+        assert imp_order["loading_percent"] == 10.0
+
+
 # ----------------------------------------------------------------------------------- import
 def _import(**over):
     body = {
@@ -537,3 +568,36 @@ async def test_late_expense_editing_after_inward_and_partial_sales(factory):
         assert final["misc_remarks"] == "Late port clearance fee"
         assert (await _stock(factory))["mumbai"] == 4.0
 
+@pytest.mark.asyncio
+async def test_import_csv_upload_creates_consignments_applies_stock_and_reports_duplicates(factory):
+    async with _client(factory, NORMAL) as c:
+        await _new_import(c, consignment_no="EXP-EXISTING")
+        csv_text = "\n".join([
+            "consignment_no,supplier_name,warehouse,ordered_date,etd_origin_date,conversion_rate,customs_conversion_rate,invoice_total_usd,total_cbm,freight,product_name,quantity,unit_rate_usd",
+            f"EXP-CSV-1,Yinglima,Mumbai Ordered,{PAST},{FUTURE},80,82,1000,20,10000,Band Sealer,10,60",
+            f"EXP-CSV-1,Yinglima,Mumbai Ordered,{PAST},{FUTURE},80,82,1000,20,10000,Teflon Belt,20,40",
+            f"EXP-EXISTING,Yinglima,Mumbai Ordered,{PAST},{FUTURE},80,82,500,5,0,Band Sealer,5,60",
+            f"EXP-BAD-SUP,Ghost Co,Mumbai Ordered,{PAST},{FUTURE},80,82,500,5,0,Band Sealer,5,60",
+        ])
+        res = await c.post(
+            "/purchase/import-orders/import",
+            files={"file": ("import_purchases.csv", csv_text.encode("utf-8"), "text/csv")},
+        )
+        assert res.status_code == 200, res.text
+        summary = res.json()["data"]
+        assert summary["total_rows"] == 4
+        assert summary["created"] == 2
+        assert summary["duplicate_count"] == 1
+        assert summary["failed"] == 2
+        assert len(summary["errors"]) == 1 and "Supplier master" in summary["errors"][0]["error"]
+
+        listed = (await c.get("/purchase/import-orders")).json()["data"]["items"]
+        imp = next(o for o in listed if o["consignment_no"] == "EXP-CSV-1")
+        assert imp["status"] == "pending" and imp["stock_applied"] is True
+        assert len(imp["items"]) == 2
+        assert imp["invoice_total_inr"] == 80000.0
+        assert imp["total_expenses"] == 10000.0
+        assert imp["gross_total_landing"] == 90000.0
+        # EXP-EXISTING had 10 Band Sealer + 20 Teflon Belt; EXP-CSV-1 added 10 Band Sealer + 20 Teflon Belt
+        assert (await _stock(factory))["mumbai_ordered"] == 20.0
+        assert (await _stock(factory, "Teflon Belt"))["mumbai_ordered"] == 40.0

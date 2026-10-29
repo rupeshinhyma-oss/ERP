@@ -73,6 +73,12 @@ async def get_assets_summary(
     ctx: tuple[uuid.UUID, bool] = Depends(get_current_user_context),
 ):
     """Retrieve aggregate counts directly from the PostgreSQL database."""
+    user_id, is_admin_or_hr = ctx
+    if not is_admin_or_hr:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Permission denied. Only Admin or HR can view company-wide asset summary statistics.",
+        )
     summary = await service.get_summary()
     return build_success_response(
         data=summary.model_dump(mode="json"),
@@ -180,7 +186,12 @@ async def update_asset_patch(
     ctx: tuple[uuid.UUID, bool] = Depends(get_current_user_context),
 ):
     """Update asset metadata and condition/status via PATCH."""
-    user_id, _ = ctx
+    user_id, is_admin_or_hr = ctx
+    if not is_admin_or_hr:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Permission denied. Only Admin or HR can modify asset metadata or status.",
+        )
     updated = await service.update_asset(asset_id, payload, actor_id=user_id)
     return build_success_response(
         data=updated.model_dump(mode="json"),
@@ -196,7 +207,12 @@ async def update_asset_put(
     ctx: tuple[uuid.UUID, bool] = Depends(get_current_user_context),
 ):
     """Update asset metadata via PUT."""
-    user_id, _ = ctx
+    user_id, is_admin_or_hr = ctx
+    if not is_admin_or_hr:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Permission denied. Only Admin or HR can modify asset metadata or status.",
+        )
     updated = await service.update_asset(asset_id, payload, actor_id=user_id)
     return build_success_response(
         data=updated.model_dump(mode="json"),
@@ -212,7 +228,12 @@ async def update_asset_status_endpoint(
     ctx: tuple[uuid.UUID, bool] = Depends(get_current_user_context),
 ):
     """Change asset status directly (e.g. Under Maintenance, Damaged, Lost, Retired)."""
-    user_id, _ = ctx
+    user_id, is_admin_or_hr = ctx
+    if not is_admin_or_hr:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Permission denied. Only Admin or HR can modify asset metadata or status.",
+        )
     updated = await service.update_asset_status(asset_id, payload, actor_id=user_id)
     return build_success_response(
         data=updated.model_dump(mode="json"),

@@ -13,16 +13,19 @@ Welcome to the dedicated documentation directory for **Inhyma_ERP** (India Distr
   - Purchase Orders (Local & Import) costing engine and dual landed valuation.
   - Proforma Invoices commercial terms and dynamic tax routing.
   - Database-driven workflow status transition engine.
-  - Inventory stock adjustments, A4 PDF engine, and technical tasks dispatch.
+  - Multi-warehouse Product Stock matrix (9 warehouse columns across Mumbai, Ahmedabad, Indore), Branch-Scoped Product Re-Order engine with FIFO consignment breakup, Per-Product 5-source Stock Transaction Ledger, Stock Adjustments/Transfers, A4 PDF engine, and technical tasks dispatch.
   - Global autocomplete blocker and mouse wheel scroll value protection.
   - Universal page header geometry (`.page { padding: 12px 20px }`), 35px action button standard (`.page-header-actions`), and filter-above-KPI layout hierarchy.
 
 - 🔌 **[API Design & Endpoints](API_DESIGN_AND_ENDPOINTS.md)**:
-  - Complete endpoint reference for Local Purchase, Import Purchase, Proforma Invoices, Suppliers, Companies, Masters, Geography, Inventory, Payments, and Tasks.
+  - Complete endpoint reference for Local Purchase, Import Purchase, Proforma Invoices, Sales Orders & Discount Payments, Suppliers, Companies, Masters, Geography, Inventory (Product Stock, Re-Order, Stock Transactions Ledger, Adjustments & Transfers), Payments, and Tasks.
   - Workflow transition rules and internal spoke deprovisioning endpoint specifications.
 
 - 📜 **[Changelog & Function Changes](CHANGELOG_AND_FUNCTION_CHANGES.md)**:
   - Chronological history of all functional updates, migrations, and bug fixes.
+  - Release October 29, 2026: Product Stock Transactions Master List & Master-Joined 9-Warehouse Stock Matrix (`881` active products, cascading filters, `(i)` breakup flags, FIFO booked orders modal); Per-Product 5-Source Stock Transaction Ledger (`/stock-transaction/list/:id`, `StockTransactionDetailPage.tsx` with `.xlsx`/`.csv` export); Product Re-Order 16-Column Branch-Scoped Matrix & inline `Re-Order`/`MOQ` editing; Discount Payments Multi-Installment Ledger & Sale Order E-Way Bill upload / Status Timeline.
+  - Release October 28, 2026: Interactive Sale Status Update Side Drawer across all Sale Process stages (`Pending` -> `Sales Confirmed` -> `Admin Approved` -> `Acc. Confirmed` -> `Gatepass Created` -> `Dispatched` -> `LR`), PO / Tally Bill / LR / Dispatch Media uploads, and Alembic migrations `v7a8b9c0d1e2` & `w8b9c0d1e2f3`.
+  - Release October 27, 2026: Sales Process Add New Parity with Proforma Invoice, 100% Dynamic Masters, Warehouse Stock Exceeded Alerts, Upward Comboboxes, Live KPI Metrics, and Dynamic Organization Logo in Proforma PDF.
   - Release October 23, 2026: Machine Spare Parts Dedicated Management (dual tabs `Selected` and `All Spare Parts`, 11-column data table, multi-machine shared & unique compatibility mapping); SideDrawer Header Action Button Architecture (`headerActions` slot elevation, bottom button elimination, dedicated Machine Spare Parts drawer section with direct navigation); Product Master Deletion Safety (removed row `Delete` action to guard master catalog); Alembic Migration Chain Merge & Container Startup Hardening (unified head `d32a657d3f2f`, idempotent DDL inspection checks, and `alembic upgrade heads` startup resilience).
   - Release October 22, 2026 (Part 2): Import Purchase: Real Uploaded Invoice File Display, Zero-Synthetic-PDF Policy & Dedicated Streaming Endpoint (`GET /purchase/import-orders/{id}/bill-file` with Bearer & `?token=` query auth), Closed Consignment Action Menu Lock (strictly displays `Download Purchase` only, removing Edit/Confirm/Delete).
   - Release October 22, 2026 (Part 1): CRM Full Suite (Phases 1–6: dynamic pipeline stages, drag-and-drop Kanban board, bulk CSV import wizard with auto-mapping & deduplication, round-robin salesperson lead distribution, 360° lead timeline, company master linking, follow-up sync to workforce tasks, and branded ReportLab Quotation PDF); Workforce Recurring Tasks Scheduling Engine (recurring sub-tab in `/tasks`, modal scheduler, `recurring_worker.py` daemon); Product Sync Adapter (Yinglima -> Inhyma with auto-provisioning of missing relational dependencies).

@@ -43,15 +43,24 @@
 
 ---
 
-## 3. Inventory & Stock Adjustments (`/inventory`)
+## 3. Inventory, Product Stock, Re-Order & Stock Transactions (`/inventory`)
 
 | Method | Endpoint URI | Description | Permission Gate |
 | :--- | :--- | :--- | :--- |
+| `GET` | `/api/v1/inventory/product-stock` | Master-joined 9-warehouse Product Stock & Stock Transactions list (`limit` up to `5000`, `category`, `sub_category`, `brand`, `warehouse`, `negative_stock`, `low_stock`, `machine_id`, `search`; returns `filter_options` & `breakup_flags`) | `product.view` |
+| `GET` | `/api/v1/inventory/product-stock/{id}` | Inspect single product's multi-warehouse stock record (resolves either `ProductStock.id` or `Product.id` with zero-stock fallback) | `product.view` |
+| `GET` | `/api/v1/inventory/product-stock/breakup` | Inspect warehouse cell breakup (`physical` adjustments/transfers, or `transit` / `ordered` expected consignments + FIFO `booked_orders` queue) | `product.view` |
+| `GET` | `/api/v1/inventory/stock-transactions/{product_ref}` | Chronological 5-source Per-Product Stock Transaction Ledger (`Sale`, `Stock IN`, `Stock OUT`, `Local Purchase`, `Import Purchase`, `Transfer IN`, `Transfer OUT`) with `available_qty`, `warehouse`, `tx_type`, `date_from`, `date_to`, and `search` filters. Aliased at `/api/v1/stock-transaction/list/{product_ref}`, `/api/v1/stock_transaction/list/{product_ref}`, and `/api/v1/inventory/product-stock/{product_ref}/transactions` | `product.view` |
+| `GET` | `/api/v1/inventory/product-reorder` | 16-column branch-scoped Product Re-Order matrix (`warehouse=Mumbai|Ahmedabad|Indore|All`, `category`, `sub_category`, `brand`, `shortfall`, `reorder`, `search`) | `product.view` |
+| `PATCH` | `/api/v1/inventory/product-reorder/{product_id}` | Inline update `reorder_level` (`Re-Order`) and/or `minimum_order_quantity` (`MOQ`) on `Product` master | `product.update` |
+| `GET` | `/api/v1/inventory/goods-expected-report` | Expected incoming consignments report across Import Purchases and Shipment Planning | `product.view` |
 | `GET` | `/api/v1/inventory/stock-adjustment` | Paginated stock adjustment vouchers with type/date filters | `product.view` |
 | `GET` | `/api/v1/inventory/stock-adjustment/{id}` | Detailed voucher with multi-product line items | `product.view` |
 | `POST` | `/api/v1/inventory/stock-adjustment` | Create adjustment voucher and update warehouse balances | `product.create` |
 | `DELETE`| `/api/v1/inventory/stock-adjustment/{id}`| Soft-delete voucher and reverse inventory adjustments | `product.delete` |
 | `GET` | `/api/v1/adjustment/adjustment-order-pdf/{id}` | Stream A4 adjustment order PDF document | `product.view` |
+| `GET` | `/api/v1/inventory/stock-transfer` | Paginated inter-warehouse stock transfer orders | `product.view` |
+| `POST` | `/api/v1/inventory/stock-transfer` | Create atomic inter-warehouse stock transfer (`from_warehouse` -> `to_warehouse`) | `product.create` |
 
 ---
 
@@ -295,7 +304,13 @@ Machine-to-machine internal service endpoints invoked by `ERP_Main` over authent
 | `POST` | `/api/v1/sales/orders` | Create Sales Order defaulting to `pending` status with line items & commercial terms | `saleorder.create` |
 | `GET` | `/api/v1/sales/orders/{id}` | Inspect detailed Sales Order record with line items, tax, and address breakdown | `saleorder.view` |
 | `PATCH`| `/api/v1/sales/orders/{id}` | Update Sales Order details, line items, and commercial fields | `saleorder.update` |
-| `PATCH`| `/api/v1/sales/orders/{id}/status` | Advance Sales Order stage (`pending` -> `sales_confirmed` -> `admin_approved` -> `dispatched` -> `lr_uploaded`) | `saleorder.approve` |
+| `PATCH`| `/api/v1/sales/orders/{id}/status` | Advance Sales Order stage (`pending` -> `sales_confirmed` -> `admin_approved` -> `acc_confirmed` -> `gatepass_created` -> `dispatched` -> `lr`) with PO & Tally Bill metadata | Authenticated (Workflow RBAC) |
+| `POST` | `/api/v1/sales/upload-po` | Upload client Purchase Order (PO) document (`inhyma-sales-docs` / `/uploads/private/sales_po/`) | Authenticated |
+| `POST` | `/api/v1/sales/upload-tally-bill` | Upload Tally Bill document (`inhyma-sales-docs` / `/uploads/private/sales_tally_bills/`) | Authenticated |
+| `POST` | `/api/v1/sales/upload-eway-bill` | Upload E-Way Bill document when `E-Way Bill = Yes` (`inhyma-sales-docs` / `/uploads/private/sales_eway_bills/`) | Authenticated |
+| `POST` | `/api/v1/sales/upload-lr` | Upload Lorry Receipt (LR) file (`inhyma-sales-docs` / `/uploads/private/sales_lr/`) | Authenticated |
+| `POST` | `/api/v1/sales/upload-dispatch-media` | Upload multiple dispatch photos/videos (`inhyma-sales-docs` / `/uploads/private/sales_dispatch_media/`) | Authenticated |
+| `POST` | `/api/v1/sales/orders/{id}/status-with-po` | Atomic multipart status update with optional PO file upload | Authenticated (Workflow RBAC) |
 | `DELETE`| `/api/v1/sales/orders/{id}` | Soft-delete Sales Order and revert inventory stock deductions | `saleorder.delete` |
 | `POST` | `/api/v1/sales/orders/{id}/restore` | Restore soft-deleted Sales Order (Admin only) | `saleorder.manage` |
 | `GET` | `/api/v1/sales/metrics` | Grouped sales order KPI metrics by status tabs | `saleorder.view` |
@@ -305,8 +320,9 @@ Machine-to-machine internal service endpoints invoked by `ERP_Main` over authent
 | `GET` | `/api/v1/sales/export` | Export Sales Orders dataset to Excel spreadsheet | `saleorder.view` |
 | `POST` | `/api/v1/sales/gate-pass` | Create dispatch Gate Pass with logistics metadata and transporter carrier | `saleorder.update` |
 | `POST` | `/api/v1/sales/orders/{id}/upload-lr` | Attach transporter LR document and multi-photo delivery proof | `saleorder.update` |
-| `GET` | `/api/v1/sales/discount-payments` | List under-invoicing cash discount payment ledger entries | `saleorder.view` |
-| `POST` | `/api/v1/sales/discount-payments` | Record discount payment settlement | `saleorder.update` |
+| `GET` | `/api/v1/sales/discount-payments` | List under-invoicing cash discount payment ledger entries and multi-installment history | `saleorder.view` |
+| `POST` | `/api/v1/sales/discount-payments` | Record discount payment installment settlement (with optional receipt & remarks) | `saleorder.update` |
+| `PATCH` | `/api/v1/sales/discount-payments/{payment_id}` | Update existing discount payment installment (amount, mode, date, receipt, remarks) | `saleorder.update` |
 
 > **Sales Process Add/Edit Architecture (`SaleProcessForm.tsx`):**
 > - **100% Parity with Proforma Invoice:** Full alignment with Proforma's Add New form structure, validation rules, drawer slides, and calculation engine.

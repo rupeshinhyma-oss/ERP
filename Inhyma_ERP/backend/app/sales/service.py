@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import io
 import uuid
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 from openpyxl import Workbook
@@ -52,6 +52,160 @@ APPROVE_PERMISSION = "saleorder.approve"
 RESTRICTED_VIEW_PERMISSIONS = {"saleorder.accounts", "saleorder.warehouse"}
 
 
+IST = timezone(timedelta(hours=5, minutes=30))
+
+_TIMELINE_STAGE_LABELS: dict[str, str] = {
+    "pending": "Pending",
+    "sales_confirmed": "Sales Confirmed",
+    "admin_approved": "Admin Approval",
+    "acc_confirmed": "Account Confirmed",
+    "gatepass_created": "Gatepass Created",
+    "dispatched": "Dispatched",
+    "lr": "LR Mandatory",
+    "gatepass_cancelled": "Gatepass Cancelled",
+    "cancelled": "Cancelled",
+}
+
+_TIMELINE_STAGE_SEQUENCE: list[str] = [
+    "pending",
+    "sales_confirmed",
+    "admin_approved",
+    "acc_confirmed",
+    "gatepass_created",
+    "dispatched",
+    "lr",
+]
+
+
+def _timeline_stage_label(status_key: str) -> str:
+    clean = (status_key or "pending").strip().lower().replace(" ", "_").replace("-", "_")
+    if clean in _TIMELINE_STAGE_LABELS:
+        return _TIMELINE_STAGE_LABELS[clean]
+    return status_key.strip().replace("_", " ").title()
+
+
+def _format_ist_timeline_dt(dt: datetime | None = None) -> str:
+    now_dt = dt or datetime.now(IST)
+    if now_dt.tzinfo is None:
+        now_dt = now_dt.replace(tzinfo=timezone.utc).astimezone(IST)
+    else:
+        now_dt = now_dt.astimezone(IST)
+    return now_dt.strftime("%d-%m-%Y %I:%M %p")
+
+
+def _format_ddmmyyyy(value: Any) -> str | None:
+    if value in (None, ""):
+        return None
+    if isinstance(value, datetime):
+        return value.strftime("%d-%m-%Y")
+    if isinstance(value, date):
+        return value.strftime("%d-%m-%Y")
+    raw = str(value).strip()
+    if not raw:
+        return None
+    for fmt in ("%d-%m-%Y", "%Y-%m-%d", "%d/%m/%Y"):
+        try:
+            return datetime.strptime(raw[:10], fmt).strftime("%d-%m-%Y")
+        except ValueError:
+            continue
+    return raw
+
+
+def _discount_status_label(status_key: str | None) -> str:
+    clean = (status_key or "pending").strip().lower().replace(" ", "_").replace("-", "_").replace(".", "")
+    mapping = {
+        "pending": "Pending",
+        "sales_confirmed": "Sales Confirmed",
+        "confirmed": "Sales Confirmed",
+        "admin_approved": "Admin Approved",
+        "acc_confirmed": "Acc. Confirmed",
+        "account_confirmed": "Acc. Confirmed",
+        "gatepass_created": "Gatepass Created",
+        "gatepass_cancelled": "Gatepass Cancelled",
+        "dispatched": "Dispatched",
+        "lr": "LR",
+        "lr_mandatory": "LR",
+        "cancelled": "Cancelled",
+    }
+    return mapping.get(clean, (status_key or "Pending").strip() or "Pending")
+
+
+def _clean_gatepass_id(raw: Any) -> str | None:
+    if raw is None:
+        return None
+    s = str(raw).strip()
+    if not s or s.lower() == "pending":
+        return None
+    for prefix in ("NO:", "No:", "no:", "ID:", "Id:", "id:", "#"):
+        if s.startswith(prefix):
+            s = s[len(prefix):].strip()
+    return s or None
+
+
+def _build_acc_confirmed_meta(order: SaleOrder) -> dict[str, Any]:
+    meta: dict[str, Any] = {}
+    inv_no = (order.invoice_no or "").strip()
+    if inv_no:
+        meta["invoice_no"] = inv_no
+    inv_date = _format_ddmmyyyy(order.invoice_date)
+    if inv_date:
+        meta["invoice_date"] = inv_date
+    if _yes(order.eway_bill) and order.eway_bill_url:
+        meta["eway_bill_url"] = order.eway_bill_url
+        if order.eway_bill_name:
+            meta["eway_bill_name"] = order.eway_bill_name
+    if order.tally_bill_url:
+        meta["tally_bill_url"] = order.tally_bill_url
+        if order.tally_bill_name:
+            meta["tally_bill_name"] = order.tally_bill_name
+    return meta
+
+
+def _backfill_upstream_timeline(order: SaleOrder, fallback_actor: str) -> list[dict[str, Any]]:
+    cur = (order.status or "pending").strip().lower().replace(" ", "_").replace("-", "_")
+    if cur in _TIMELINE_STAGE_SEQUENCE:
+        idx = _TIMELINE_STAGE_SEQUENCE.index(cur)
+        chain = list(reversed(_TIMELINE_STAGE_SEQUENCE[: idx + 1]))
+    elif cur == "gatepass_cancelled":
+        chain = [
+            "gatepass_cancelled",
+            "gatepass_created",
+            "acc_confirmed",
+            "admin_approved",
+            "sales_confirmed",
+            "pending",
+        ]
+    elif cur == "cancelled":
+        chain = ["cancelled", "pending"]
+    else:
+        chain = ["pending"]
+
+    actor = (order.sales_person or order.created_by_name or fallback_actor or "Admin").strip()
+    created_ts = _format_ist_timeline_dt(getattr(order, "created_at", None))
+    updated_ts = _format_ist_timeline_dt(getattr(order, "updated_at", None))
+
+    events: list[dict[str, Any]] = []
+    for pos, stage_key in enumerate(chain):
+        ev: dict[str, Any] = {
+            "status": _timeline_stage_label(stage_key),
+            "status_key": stage_key,
+            "date": updated_ts if pos == 0 else created_ts,
+            "by": actor,
+        }
+        if stage_key == "acc_confirmed":
+            ev.update(_build_acc_confirmed_meta(order))
+        elif stage_key == "sales_confirmed" and order.po_file_url:
+            ev["po_file_url"] = order.po_file_url
+            if order.po_file_name:
+                ev["po_file_name"] = order.po_file_name
+        elif stage_key == "lr" and order.lr_file_url:
+            ev["lr_file_url"] = order.lr_file_url
+            if order.lr_file_name:
+                ev["lr_file_name"] = order.lr_file_name
+        events.append(ev)
+    return events
+
+
 def _yes(value: Any) -> bool:
     return str(value or "").strip().lower() in {"yes", "y", "true", "1"}
 
@@ -60,6 +214,43 @@ class SaleService:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
         self.repo = SaleRepository(session)
+
+    async def _resolve_actor_name(
+        self,
+        current_user: Any = None,
+        fallback: str | None = None,
+    ) -> str:
+        if current_user is not None:
+            uid = getattr(current_user, "id", None)
+            if uid is not None:
+                try:
+                    from app.users.models import User
+
+                    async with self.session.begin_nested():
+                        user_row = await self.session.get(User, uid)
+                    if user_row is not None:
+                        disp = (user_row.display_name or "").strip()
+                        if disp:
+                            return disp
+                        full = " ".join(
+                            p.strip()
+                            for p in (user_row.first_name, user_row.last_name)
+                            if p and p.strip()
+                        ).strip()
+                        if full:
+                            return full
+                        uname = (user_row.username or "").strip()
+                        if uname:
+                            return uname
+                except Exception:
+                    pass
+            for attr in ("display_name", "full_name", "name", "username"):
+                val = getattr(current_user, attr, None)
+                if val and str(val).strip():
+                    return str(val).strip()
+        if fallback and fallback.strip():
+            return fallback.strip()
+        return "Admin"
 
     # -----------------------------------------------------------------------
     # Workflow rules, stock and visibility (all rule-driven; nothing about a status is hardcoded here)
@@ -456,6 +647,19 @@ class SaleService:
         order_no = await self.repo.generate_order_no(payload.order_date)
 
         item_entities, totals = await self._price_and_build(payload.items)
+        initial_status = wf.initial_status(rules)
+        creator_name = await self._resolve_actor_name(
+            current_user, fallback=payload.sales_person or "Admin"
+        )
+        initial_remark = (payload.remarks or "").strip() or None
+        initial_event: dict[str, Any] = {
+            "status": _timeline_stage_label(initial_status),
+            "status_key": initial_status,
+            "date": _format_ist_timeline_dt(),
+            "by": creator_name,
+        }
+        if initial_remark:
+            initial_event["remark"] = initial_remark
 
         order = SaleOrder(
             order_no=order_no,
@@ -491,7 +695,7 @@ class SaleService:
             order_date=payload.order_date.isoformat() if hasattr(payload.order_date, "isoformat") else str(payload.order_date),
             delivery_date=payload.delivery_date.isoformat() if hasattr(payload.delivery_date, "isoformat") and payload.delivery_date else (str(payload.delivery_date) if payload.delivery_date else None),
             currency=payload.currency or "INR",
-            status=wf.initial_status(rules),  # server-controlled: a client cannot start an order half-way through the workflow
+            status=initial_status,  # server-controlled: a client cannot start an order half-way through the workflow
             total_basic=totals["total_basic"],
             total_tax=totals["total_tax"],
             total_amount=totals["total_amount"],
@@ -503,8 +707,22 @@ class SaleService:
             port_of_loading=payload.port_of_loading,
             port_of_discharge=payload.port_of_discharge,
             remarks=payload.remarks,
+            po_file_url=payload.po_file_url,
+            po_file_name=payload.po_file_name,
+            invoice_no=payload.invoice_no,
+            invoice_date=payload.invoice_date,
+            tally_bill_url=payload.tally_bill_url,
+            tally_bill_name=payload.tally_bill_name,
+            eway_bill=payload.eway_bill or "No",
+            eway_bill_url=payload.eway_bill_url,
+            eway_bill_name=payload.eway_bill_name,
+            lr_date=payload.lr_date,
+            lr_file_url=payload.lr_file_url,
+            lr_file_name=payload.lr_file_name,
+            dispatch_media=payload.dispatch_media,
+            timeline=[initial_event],
             created_by_id=getattr(current_user, "id", None),
-            created_by_name=getattr(current_user, "name", getattr(current_user, "username", "Admin")),
+            created_by_name=creator_name,
             items=item_entities,
         )
 
@@ -533,69 +751,134 @@ class SaleService:
         return created
 
     async def _sync_discount_payment(self, order: SaleOrder) -> None:
-        """Spec (Completed/Sales & PI Process.docx L98, Discount.docx):
-        Cash Amount or Under Invoice Value is shown in PI as 'Discount'.
-        Automatically maintain a record in discount_payments for tracking and receipt monitoring.
+        """Spec (Completed/Sales & PI Process.docx L102, Discount.docx):
+        Cash Amount or Under Invoice Value is shown in PI/SO as 'Discount'.
+        Automatically maintain a synchronized record in discount_payments for receipt monitoring.
         """
-        disc = float(order.discount or 0.0)
-        if disc <= 0:
-            return
+        disc = round(float(order.discount or 0.0), 2)
+        is_cancelled = (order.status or "").strip().lower() == "cancelled"
         try:
             from app.sales.models import DiscountPayment
-            stmt = select(DiscountPayment).where(
-                DiscountPayment.order_ref == order.order_no,
-                DiscountPayment.deleted_at.is_(None),
-            ).limit(1)
-            res = await self.session.execute(stmt)
-            existing = res.scalar_one_or_none()
 
-            tot = float(order.total_amount or order.amount_inc_gst or 0.0)
-            disc_pct = (disc / (tot + disc) * 100.0) if (tot + disc) > 0 else 0.0
-            order_date_str = (
-                order.order_date.strftime("%d-%m-%Y")
-                if isinstance(order.order_date, date)
-                else str(order.order_date or date.today().strftime("%d-%m-%Y"))
-            )
+            async with self.session.begin_nested():
+                stmt = select(DiscountPayment).where(
+                    DiscountPayment.order_ref == order.order_no,
+                    DiscountPayment.deleted_at.is_(None),
+                ).limit(1)
+                res = await self.session.execute(stmt)
+                existing = res.scalar_one_or_none()
 
-            if existing:
-                existing.discount_amount = disc
-                existing.due_discount = max(0.0, disc - float(existing.paid_discount or 0.0))
-                existing.total_order_amount = tot
-                existing.net_payable = tot
-                existing.customer_name = order.company_name or order.buyer_name or ""
-                existing.sales_person = order.sales_person
-                existing.warehouse = order.warehouse
-                if getattr(order, "gatepass_no", None):
-                    existing.gatepass_id = str(order.gatepass_no)
-                await self.session.flush()
-            else:
-                p_no = f"DP-{order.order_no}"
-                dp = DiscountPayment(
-                    payment_no=p_no,
-                    payment_date=order_date_str,
-                    order_ref=order.order_no,
-                    customer_name=order.company_name or order.buyer_name or "",
-                    sales_person=order.sales_person,
-                    warehouse=order.warehouse or "Mumbai",
-                    contact_person_name=order.contact_person_name,
-                    contact_person_mobile=order.contact_person_mobile,
-                    total_order_amount=tot,
-                    discount_percent=round(disc_pct, 2),
-                    discount_amount=disc,
-                    paid_discount=0.0,
-                    due_discount=disc,
-                    net_payable=tot,
-                    status="pending",
-                    settled=False,
-                    gatepass_id=str(getattr(order, "gatepass_no", None) or ""),
-                    gatepass_date=str(getattr(order, "gatepass_date", "") or ""),
-                    remarks=f"Automatic discount record from Sale Order {order.order_no}",
-                    created_by=order.sales_person or "Sales System",
+                if disc <= 0 or is_cancelled:
+                    if existing and float(existing.paid_discount or 0.0) <= 0:
+                        existing.deleted_at = datetime.now(timezone.utc)
+                        await self.session.flush()
+                    return
+
+                contact_name: str | None = None
+                contact_mobile: str | None = None
+                comp_name = (order.company_name or order.buyer_name or "").strip()
+                if comp_name:
+                    try:
+                        from sqlalchemy.orm import noload
+                        from app.companies.models import Company
+
+                        async with self.session.begin_nested():
+                            c_res = await self.session.execute(
+                                select(Company)
+                                .options(noload("*"))
+                                .where(
+                                    Company.deleted_at.is_(None),
+                                    func.lower(Company.company_name) == comp_name.lower(),
+                                )
+                                .limit(1)
+                            )
+                            comp = c_res.scalar_one_or_none()
+                            if comp is not None:
+                                contact_name = (comp.contact_full_name or "").strip() or None
+                                contact_mobile = (
+                                    (comp.contact_calling_number or "").strip()
+                                    or (comp.contact_whatsapp_number or "").strip()
+                                    or None
+                                )
+                    except Exception:
+                        pass
+
+                tot = float(order.total_amount or order.amount_inc_gst or 0.0)
+                disc_pct = (disc / (tot + disc) * 100.0) if (tot + disc) > 0 else 0.0
+                order_date_str = (
+                    _format_ddmmyyyy(order.order_date)
+                    or datetime.now(IST).strftime("%d-%m-%Y")
                 )
-                self.session.add(dp)
-                await self.session.flush()
+                stage_label = _discount_status_label(order.status)
+                timeline_list = order.timeline if isinstance(order.timeline, list) else []
+                latest_dt = (
+                    str(timeline_list[0].get("date") or "").strip()
+                    if timeline_list and isinstance(timeline_list[0], dict)
+                    else ""
+                ) or _format_ist_timeline_dt()
+                gp_id = _clean_gatepass_id(getattr(order, "gatepass_no", None) or getattr(order, "gatepass", None))
+                gp_date = _format_ddmmyyyy(getattr(order, "gatepass_date", None))
+                order_remark = (order.booking_remarks or order.remarks or "").strip() or None
+
+                if existing:
+                    paid = round(float(existing.paid_discount or 0.0), 2)
+                    due = round(max(0.0, disc - paid), 2)
+                    existing.discount_amount = disc
+                    existing.discount_percent = round(disc_pct, 2)
+                    existing.due_discount = due
+                    existing.settled = due <= 0.009
+                    existing.total_order_amount = tot
+                    existing.net_payable = tot
+                    existing.payment_date = order_date_str
+                    existing.customer_name = comp_name
+                    existing.sales_person = order.sales_person
+                    existing.warehouse = order.warehouse or existing.warehouse or "Mumbai"
+                    if contact_name and not existing.contact_person_name:
+                        existing.contact_person_name = contact_name
+                    if contact_mobile and not existing.contact_person_mobile:
+                        existing.contact_person_mobile = contact_mobile
+                    existing.status = stage_label
+                    existing.status_updated_at = latest_dt
+                    if gp_id:
+                        existing.gatepass_id = gp_id
+                    if gp_date:
+                        existing.gatepass_date = gp_date
+                    if order_remark and (
+                        not existing.remarks
+                        or existing.remarks.startswith("Automatic discount record")
+                    ):
+                        existing.remarks = order_remark
+                    await self.session.flush()
+                else:
+                    p_no = f"DP-{order.order_no}"
+                    dp = DiscountPayment(
+                        payment_no=p_no,
+                        payment_date=order_date_str,
+                        order_ref=order.order_no,
+                        customer_name=comp_name,
+                        sales_person=order.sales_person,
+                        warehouse=order.warehouse or "Mumbai",
+                        contact_person_name=contact_name,
+                        contact_person_mobile=contact_mobile,
+                        total_order_amount=tot,
+                        discount_percent=round(disc_pct, 2),
+                        discount_amount=disc,
+                        paid_discount=0.0,
+                        due_discount=disc,
+                        net_payable=tot,
+                        status=stage_label,
+                        status_updated_at=latest_dt,
+                        settled=False,
+                        gatepass_id=gp_id,
+                        gatepass_date=gp_date,
+                        payments=[],
+                        remarks=order_remark,
+                        created_by=order.sales_person or order.created_by_name or "Sales System",
+                    )
+                    self.session.add(dp)
+                    await self.session.flush()
         except Exception:
-            # Tolerant if discount payment synchronization fails
+            # Tolerant if discount_payments table is omitted in isolated unit tests
             pass
 
     async def _transition_company_to_existing(self, company_name: str | None) -> None:
@@ -683,10 +966,24 @@ class SaleService:
         if payload.discount is not None:
             order.discount = payload.discount
 
+        if "po_file_url" in payload.model_fields_set:
+            order.po_file_url = payload.po_file_url or None
+        if "po_file_name" in payload.model_fields_set:
+            order.po_file_name = payload.po_file_name or None
         if payload.invoice_no is not None:
             order.invoice_no = payload.invoice_no
         if payload.invoice_date is not None:
             order.invoice_date = payload.invoice_date
+        if "tally_bill_url" in payload.model_fields_set:
+            order.tally_bill_url = payload.tally_bill_url or None
+        if "tally_bill_name" in payload.model_fields_set:
+            order.tally_bill_name = payload.tally_bill_name or None
+        if payload.eway_bill is not None:
+            order.eway_bill = payload.eway_bill
+        if "eway_bill_url" in payload.model_fields_set:
+            order.eway_bill_url = payload.eway_bill_url or None
+        if "eway_bill_name" in payload.model_fields_set:
+            order.eway_bill_name = payload.eway_bill_name or None
         if payload.gatepass is not None:
             order.gatepass = payload.gatepass
         if payload.gatepass_no is not None:
@@ -716,6 +1013,14 @@ class SaleService:
             order.bl_no = payload.bl_no
         if payload.lr_no is not None:
             order.lr_no = payload.lr_no
+        if payload.lr_date is not None:
+            order.lr_date = payload.lr_date
+        if "lr_file_url" in payload.model_fields_set:
+            order.lr_file_url = payload.lr_file_url or None
+        if "lr_file_name" in payload.model_fields_set:
+            order.lr_file_name = payload.lr_file_name or None
+        if "dispatch_media" in payload.model_fields_set:
+            order.dispatch_media = payload.dispatch_media
         if payload.transporter_name is not None:
             order.transporter_name = payload.transporter_name
         if payload.port_of_loading is not None:
@@ -791,16 +1096,41 @@ class SaleService:
         if target == "acc_confirmed":
             if not invoice_no:
                 raise BadRequestException("Invoice number is required to confirm an order at the accounts stage.")
+            effective_eway = payload.eway_bill if getattr(payload, "eway_bill", None) is not None else order.eway_bill
+            if _yes(effective_eway) and not (getattr(payload, "eway_bill_url", None) or getattr(order, "eway_bill_url", None)):
+                raise BadRequestException("E-Way Bill file is required when E-Way Bill is set to Yes.")
             if _yes(order.third_party_delivery) and not (payload.third_party_invoice or order.third_party_invoice):
                 raise BadRequestException("The third-party invoice must be attached to confirm a third-party delivery.")
-        if target == "lr" and not (payload.lr_no or order.lr_no):
-            raise BadRequestException("The LR number is required to complete the order.")
+        if target == "lr" and not (
+            payload.lr_no
+            or order.lr_no
+            or getattr(payload, "lr_file_url", None)
+            or getattr(order, "lr_file_url", None)
+        ):
+            raise BadRequestException("The LR file or LR number is required to complete the order.")
 
         # Details supplied with this step
+        if getattr(payload, "po_file_url", None):
+            order.po_file_url = payload.po_file_url
+        if getattr(payload, "po_file_name", None):
+            order.po_file_name = payload.po_file_name
         if payload.invoice_no:
             order.invoice_no = payload.invoice_no
         if payload.invoice_date:
             order.invoice_date = payload.invoice_date
+        if getattr(payload, "tally_bill_url", None):
+            order.tally_bill_url = payload.tally_bill_url
+        if getattr(payload, "tally_bill_name", None):
+            order.tally_bill_name = payload.tally_bill_name
+        if getattr(payload, "eway_bill", None) is not None:
+            order.eway_bill = payload.eway_bill
+            if not _yes(payload.eway_bill):
+                order.eway_bill_url = None
+                order.eway_bill_name = None
+        if getattr(payload, "eway_bill_url", None):
+            order.eway_bill_url = payload.eway_bill_url
+        if getattr(payload, "eway_bill_name", None):
+            order.eway_bill_name = payload.eway_bill_name
         if payload.third_party_invoice:
             order.third_party_invoice = payload.third_party_invoice
         if payload.gatepass or payload.gatepass_no:
@@ -809,16 +1139,44 @@ class SaleService:
             order.gatepass_date = payload.gatepass_date
         if payload.gatepass_handled_by:
             order.gatepass_handled_by = payload.gatepass_handled_by
-        if payload.transporter_name:
-            order.transporter_name = payload.transporter_name
-        if payload.transport_destination:
-            order.transport_destination = payload.transport_destination
-        if payload.delivery_type:
-            order.delivery_type = payload.delivery_type
-        if payload.delivery_charge:
-            order.delivery_charge = payload.delivery_charge
+        if getattr(payload, "change_transport_info", None):
+            new_transporter = (
+                getattr(payload, "transporter_name", None)
+                or getattr(payload, "transport_name", None)
+                or ""
+            ).strip()
+            if new_transporter:
+                order.transporter_name = new_transporter
+            is_self_pickup = (
+                new_transporter.lower().replace(" ", "").replace("-", "").replace("_", "") == "selfpickup"
+            )
+            if is_self_pickup:
+                order.transport_destination = None
+                order.delivery_type = None
+                order.delivery_charge = None
+            else:
+                order.transport_destination = (payload.transport_destination or "").strip() or None
+                order.delivery_type = (payload.delivery_type or "").strip() or None
+                order.delivery_charge = (payload.delivery_charge or "").strip() or None
+        else:
+            if getattr(payload, "transporter_name", None) or getattr(payload, "transport_name", None):
+                order.transporter_name = payload.transporter_name or getattr(payload, "transport_name", None)
+            if payload.transport_destination:
+                order.transport_destination = payload.transport_destination
+            if payload.delivery_type:
+                order.delivery_type = payload.delivery_type
+            if payload.delivery_charge:
+                order.delivery_charge = payload.delivery_charge
         if payload.lr_no:
             order.lr_no = payload.lr_no
+        if getattr(payload, "lr_date", None):
+            order.lr_date = payload.lr_date
+        if getattr(payload, "lr_file_url", None):
+            order.lr_file_url = payload.lr_file_url
+        if getattr(payload, "lr_file_name", None):
+            order.lr_file_name = payload.lr_file_name
+        if getattr(payload, "dispatch_media", None) is not None:
+            order.dispatch_media = payload.dispatch_media
 
         # Stock follows the target status: cancelling returns the quantities, un-cancelling would take them again
         wants_stock = bool(rules[target].get("stock_out"))
@@ -826,6 +1184,37 @@ class SaleService:
             await self._take_stock(order)
         elif not wants_stock and order.stock_applied:
             await self._release_stock(order)
+
+        actor_name = await self._resolve_actor_name(
+            current_user, fallback=order.sales_person or "Admin"
+        )
+        existing_timeline = (
+            list(order.timeline)
+            if order.timeline
+            else _backfill_upstream_timeline(
+                order,
+                order.sales_person or order.created_by_name or actor_name,
+            )
+        )
+        new_event: dict[str, Any] = {
+            "status": _timeline_stage_label(target),
+            "status_key": target,
+            "date": _format_ist_timeline_dt(),
+            "by": actor_name,
+        }
+        if reason:
+            new_event["remark"] = reason
+        if target == "acc_confirmed":
+            new_event.update(_build_acc_confirmed_meta(order))
+        elif target == "sales_confirmed" and order.po_file_url:
+            new_event["po_file_url"] = order.po_file_url
+            if order.po_file_name:
+                new_event["po_file_name"] = order.po_file_name
+        elif target == "lr" and order.lr_file_url:
+            new_event["lr_file_url"] = order.lr_file_url
+            if order.lr_file_name:
+                new_event["lr_file_name"] = order.lr_file_name
+        order.timeline = [new_event, *existing_timeline]
 
         previous = order.status
         order.status = target
@@ -850,6 +1239,21 @@ class SaleService:
         wf.check_deletable(rules, order.status, current_user)
         await self._release_stock(order)
         await self.repo.soft_delete(order, deleted_by=current_user.username)
+        try:
+            from app.sales.models import DiscountPayment
+
+            async with self.session.begin_nested():
+                dp_res = await self.session.execute(
+                    select(DiscountPayment).where(
+                        DiscountPayment.order_ref == order.order_no,
+                        DiscountPayment.deleted_at.is_(None),
+                    )
+                )
+                for dp in dp_res.scalars().all():
+                    dp.deleted_at = datetime.now(timezone.utc)
+                await self.session.flush()
+        except Exception:
+            pass
 
     async def restore_order(self, order_id: uuid.UUID, current_user: CurrentUser) -> None:
         """Bring a deleted order back (administrators only); its stock is taken again if its status holds stock."""
@@ -864,6 +1268,20 @@ class SaleService:
         if order and rules.get(order.status, {}).get("stock_out") and not order.stock_applied:
             await self._take_stock(order)
             await self.repo.update(order)
+        if order:
+            try:
+                from app.sales.models import DiscountPayment
+
+                async with self.session.begin_nested():
+                    dp_res = await self.session.execute(
+                        select(DiscountPayment).where(DiscountPayment.order_ref == order.order_no)
+                    )
+                    for dp in dp_res.scalars().all():
+                        dp.deleted_at = None
+                    await self.session.flush()
+            except Exception:
+                pass
+            await self._sync_discount_payment(order)
 
     def export_excel(self, records: list[SaleOrder]) -> io.BytesIO:
         """Export Sale Process orders to styled Excel workbook."""

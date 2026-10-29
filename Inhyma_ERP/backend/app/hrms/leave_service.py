@@ -13,6 +13,7 @@ Handles:
 
 from __future__ import annotations
 
+import logging
 import uuid
 from datetime import date, datetime, timedelta, timezone
 from typing import List, Optional
@@ -20,6 +21,8 @@ from typing import List, Optional
 from fastapi import HTTPException, status
 from sqlalchemy import func, select, or_, and_, not_
 from sqlalchemy.ext.asyncio import AsyncSession
+
+logger = logging.getLogger(__name__)
 
 from app.hrms.models import (
     HrmsAttendancePolicy,
@@ -957,6 +960,8 @@ class HrmsLeaveService:
         ).all()
         bal_by_lt = {b.leave_type_id: b for b in existing_balances}
 
+        has_mutations = False
+
         # Initialize any missing leave balance records
         for lt in target_lts:
             if lt.id not in bal_by_lt:
@@ -972,16 +977,52 @@ class HrmsLeaveService:
                 self.db.add(new_bal)
                 await self.db.flush()
                 bal_by_lt[lt.id] = new_bal
+                has_mutations = True
+
+        # Map all leave types by id to resolve policy rules (including allow_negative_balance)
+        lt_map = {lt.id: lt for lt in all_lts}
+        missing_lt_ids = set(bal_by_lt.keys()) - set(lt_map.keys())
+        if missing_lt_ids:
+            extra_lts = (
+                await self.db.scalars(
+                    select(HrmsLeaveType).where(HrmsLeaveType.id.in_(missing_lt_ids))
+                )
+            ).all()
+            for elt in extra_lts:
+                lt_map[elt.id] = elt
 
         # Ensure all balances have accurate available synchronized
         for bal in bal_by_lt.values():
             calc_avail = round(bal.allocated + bal.adjusted - bal.consumed, 2)
+            lt = lt_map.get(bal.leave_type_id)
+            allow_negative = getattr(lt, "allow_negative_balance", False) if lt else False
+
+            if not allow_negative and calc_avail < 0:
+                lt_name = getattr(lt, "name", str(bal.leave_type_id))
+                logger.error(
+                    "Leave balance integrity error: employee=%s, leave_type=%s (%s), year=%s, "
+                    "recomputed available=%s is negative when allow_negative_balance is False "
+                    "(allocated=%s, adjusted=%s, consumed=%s). Commit aborted.",
+                    employee_id,
+                    bal.leave_type_id,
+                    lt_name,
+                    bal.year,
+                    calc_avail,
+                    bal.allocated,
+                    bal.adjusted,
+                    bal.consumed,
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=f"Leave balance integrity error: recalculation resulted in negative balance ({calc_avail}) for {lt_name}, which is prohibited by policy.",
+                )
+
             if bal.available != calc_avail:
                 bal.available = calc_avail
+                has_mutations = True
 
-        await self.db.commit()
-
-        lt_map = {lt.id: lt for lt in all_lts}
+        if has_mutations:
+            await self.db.commit()
         emp_name = user.display_name or f"{user.first_name or ''} {user.last_name or ''}".strip() or user.username or "Employee"
 
         out: List[EmployeeLeaveBalanceRead] = []
@@ -1242,7 +1283,7 @@ class HrmsLeaveService:
                 HrmsEmployeeLeaveBalance.employee_id == payload.employee_id,
                 HrmsEmployeeLeaveBalance.leave_type_id == payload.leave_type_id,
                 HrmsEmployeeLeaveBalance.year == payload.year,
-            )
+            ).with_for_update()
         )
         if not balance:
             lt = await self.get_leave_type(payload.leave_type_id)
@@ -1269,6 +1310,13 @@ class HrmsLeaveService:
             audit_type = "MANUAL_DEBIT" if "DEBIT" in adj_type else "DEDUCT"
         elif adj_type == "CORRECTION":
             # Target is payload.amount
+            if payload.amount < 0:
+                lt_corr = await self.get_leave_type(payload.leave_type_id)
+                if lt_corr and not getattr(lt_corr, "allow_negative_balance", False):
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Negative balance is not allowed for {lt_corr.name}. Correction target cannot be negative.",
+                    )
             delta = payload.amount - prev_available
             audit_type = "CORRECTION"
         else:
@@ -1454,16 +1502,52 @@ class HrmsLeaveService:
                     detail=f"Supporting document attachment is required for {lt.name}.",
                 )
 
-        # Validate available balance for paid leave
+        # Validate available balance for paid leave, factoring in pending requests
         if lt.is_paid and not getattr(lt, "allow_negative_balance", False):
             balances = await self.get_or_create_employee_balances(employee_id, year=payload.from_date.year)
-            cur_bal = next((b for b in balances if b.leave_type_id == payload.leave_type_id), None)
-            cur_available = cur_bal.available if cur_bal else 0.0
-            if cur_available < num_days:
-                avail_disp = int(cur_available) if cur_available.is_integer() else cur_available
+            cur_bal_read = next((b for b in balances if b.leave_type_id == payload.leave_type_id), None)
+            if not cur_bal_read:
                 raise HTTPException(
                     status_code=400,
-                    detail=f"Insufficient {lt.name} balance. Available: {avail_disp} days.",
+                    detail=f"No leave balance record found for {lt.name}.",
+                )
+
+            # Serialize reservation: acquire an exclusive row lock on HrmsEmployeeLeaveBalance
+            # inside the current transaction before summing pending requests and inserting the request.
+            lock_stmt = (
+                select(HrmsEmployeeLeaveBalance)
+                .where(HrmsEmployeeLeaveBalance.id == cur_bal_read.id)
+                .with_for_update()
+            )
+            locked_bal = (await self.db.execute(lock_stmt)).scalar_one_or_none()
+            if not locked_bal:
+                raise HTTPException(
+                    status_code=404,
+                    detail="Employee leave balance record not found for reservation.",
+                )
+
+            cur_available = (
+                locked_bal.available
+                if locked_bal.available is not None
+                else round(locked_bal.allocated + locked_bal.adjusted - locked_bal.consumed, 2)
+            )
+
+            # Sum pending requested days within the same locked transaction
+            pending_res = await self.db.execute(
+                select(func.coalesce(func.sum(HrmsLeaveRequest.number_of_days), 0.0)).where(
+                    HrmsLeaveRequest.employee_id == employee_id,
+                    HrmsLeaveRequest.leave_type_id == payload.leave_type_id,
+                    HrmsLeaveRequest.status == "PENDING",
+                )
+            )
+            pending_days = float(pending_res.scalar() or 0.0)
+            effective_available = max(0.0, round(cur_available - pending_days, 2))
+
+            if effective_available < num_days:
+                avail_disp = int(effective_available) if effective_available.is_integer() else effective_available
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Insufficient {lt.name} balance. Available: {avail_disp} days (including pending requests).",
                 )
 
         req = HrmsLeaveRequest(
@@ -1671,7 +1755,9 @@ class HrmsLeaveService:
         bal = next((b for b in balances if b.leave_type_id == req.leave_type_id), None)
         if bal:
             raw_bal = await self.db.scalar(
-                select(HrmsEmployeeLeaveBalance).where(HrmsEmployeeLeaveBalance.id == bal.id)
+                select(HrmsEmployeeLeaveBalance)
+                .where(HrmsEmployeeLeaveBalance.id == bal.id)
+                .with_for_update()
             )
             if raw_bal:
                 lt = await self.get_leave_type(req.leave_type_id)
