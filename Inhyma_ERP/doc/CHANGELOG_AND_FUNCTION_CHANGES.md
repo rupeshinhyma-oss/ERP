@@ -3,7 +3,7 @@
 **System:** Inhyma_ERP (India Distribution)  
 **Scope:** Functional updates, schema migrations, UI hardening, and bug fixes.
 
-## [Release 2026-10-29] — Purchase Bulk Import/Export, Standardized Golden-Amber Export Controls, Sidebar Navigation Polish, HRMS Integrity & Payroll Persistence, Product Stock Transactions Ledger, Re-Order Matrix & Discount Payments
+## [Release 2026-10-29] — `.env`-Driven Cross-ERP Switching & Local/Render Environment Isolation, Purchase Bulk Import/Export, Standardized Golden-Amber Export Controls, Sidebar Navigation Polish, HRMS Integrity & Payroll Persistence, Product Stock Transactions Ledger, Re-Order Matrix & Discount Payments
 
 ### 1. Product Stock Transactions Master List & Master-Joined 9-Warehouse Stock Matrix (`ProductStockPage.tsx`, `routes.py`, `schemas.py`, `productStock.css`)
 - **Master-Catalog Outer Join (`GET /api/v1/inventory/product-stock`):**
@@ -71,6 +71,12 @@
   - Updated `POST /hrms/payroll/{month}/approve` to return the full serialized `_serialize_payroll` payload with employee-level deduplication and automatic `APPROVED` status propagation across all child items when the parent payroll is `APPROVED`.
   - Enabled department managers querying `GET /hrms/payroll/payslips?employee_id=ALL` to view `APPROVED` payslips strictly for their `managed_employee_ids`.
 - **Attendance Geolocation, Leave, Site Visit & Regression Suite:** Hardened attendance GPS/geofence validation, leave balance & UI state handling, and site-visit lifecycle tracking, backed by comprehensive backend (`test_hrms_batch1_security.py`, `test_hrms_batch2_security.py`, `test_hrms_batch3_integrity.py`, `test_hrms_site_visit_lifecycle.py`) and frontend (`HrmsAttendanceGeolocationSecurity.test.tsx`, `HrmsPayroll.test.tsx`, `HrmsSiteVisitAndEvidence.test.tsx`) test suites.
+
+### 9. `.env`-Driven Cross-ERP Switching, Zero Hardcoded Ports & Strict Local/Render Isolation (`ssoBridge.ts`, `ecosystemSession.ts`, `EcosystemSwitcher.tsx`, `vite.config.ts`, `config.py`, `inquiries/routes.py`, `render.yaml`)
+- **Zero Hardcoded Localhost/Port Links:** Removed all hardcoded `localhost`, `127.0.0.1`, and port (`5170`, `5173`, `5174`, `8000`, `8001`, `8002`) fallbacks across `frontend/vite.config.ts` (`loadEnv`), `frontend/src/lib/ssoBridge.ts`, `frontend/src/lib/ecosystemSession.ts`, `frontend/src/components/EcosystemSwitcher.tsx`, `frontend/src/pages/Login.tsx`, `backend/app/core/config.py`, and `backend/app/inquiries/routes.py`.
+- **`.env` Locally vs Render Environment in Cloud:** Peer frontend/backend URLs (`VITE_CONTROL_PLANE_URL`, `VITE_CONTROL_PLANE_API_URL`, `VITE_CENTRAL_AUTH_API`, `VITE_YINGLIMA_URL`, `VITE_YINGLIMA_API_URL`, `VITE_INHYMA_URL`, `VITE_INHYMA_API_URL`, `VITE_PORT`, `VITE_API_PROXY_TARGET`) are loaded strictly from `.env` / `.env.defaults` in local development and from Render environment variables when deployed on Render.
+- **Strict Cross-Environment Leak Guard (`sanitizeEnvMatchedUrl`):** Updated `routeForCentralSession()`, `enforceCentralLanding()`, `erpUrlFor()`, `controlPlaneUrl()`, and `planSwitch()` so a `localhost`/LAN browser tab never redirects or switches to a hosted `*.onrender.com` URL (even if the shared `ERP_Main` database `erp_instances.base_url` stores Render URLs), and hosted tabs never redirect to `localhost`/LAN.
+- **Render Static Build (`tsc -b`) Cleanliness:** Resolved strict `TS6133` / `TS2339` checks in `AttendancePage.tsx` and `ExpensesPage.tsx` so `npm run build` (`tsc -b && vite build`) compiles with zero errors on Render.
 
 ---
 

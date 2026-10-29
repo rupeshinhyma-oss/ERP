@@ -1121,5 +1121,12 @@ All module page headers utilize a uniform filter toggle button matching the Comp
 - **Initial State Invariant:** All filter panels and drawers initialize collapsed (`useState(false)`).
 
 ---
-*Maintained and verified for Inhyma Solutions Enterprise ERP (Yinglima Node). Last updated: October 2026 (Federation Resilience, Winsock DNS Platform Gating, Inbound Email DB Deduplication, Seed First-Install Protection, SSO Deactivated Account Guards, Database-Backed Branding, Universal Filter Standardization).*
+### 16.7. Environment-Isolated Cross-ERP URL Resolution & Zero-Hardcoded-Port Architecture
+To guarantee that local development (`localhost` / LAN) and cloud deployments (`Render.com`) never cross-redirect users even when sharing a central PostgreSQL registry:
+- **Zero Hardcoded Host/Port Links:** Removed all hardcoded `localhost`, `127.0.0.1`, and port (`5170`, `5173`, `5174`, `8000`, `8001`, `8002`) fallbacks across `vite.config.ts`, `src/lib/ssoBridge.ts`, `src/lib/ecosystemSession.ts`, `src/components/EcosystemSwitcher.tsx`, `app/core/config.py`, and `app/inquiries/routes.py`.
+- **Environment-First Peer Discovery:** Reads `VITE_CONTROL_PLANE_URL`, `VITE_CONTROL_PLANE_API_URL`, `VITE_CENTRAL_AUTH_API`, `VITE_YINGLIMA_URL`, `VITE_YINGLIMA_API_URL`, `VITE_INHYMA_URL`, and `VITE_INHYMA_API_URL` from `.env` / `.env.defaults` locally and from Render environment variables in production.
+- **Strict Origin Parity (`sanitizeEnvMatchedUrl`):** `routeForCentralSession()`, `enforceCentralLanding()`, `erpUrlFor()`, `controlPlaneUrl()`, and `planSwitch()` reject cross-environment (`localhost` <-> `*.onrender.com`) URLs while automatically adapting `localhost` hostnames to the active LAN IP when accessed over Wi-Fi/LAN.
+
+---
+*Maintained and verified for Inhyma Solutions Enterprise ERP (Yinglima Node). Last updated: October 29, 2026 (Environment-Isolated Cross-ERP URL Resolution & Zero-Hardcoded-Port Architecture, Sale Process Inwarded Local Purchase Costing, Multi-Field Digit-Normalized Search, Federation Resilience, Winsock DNS Platform Gating, Inbound Email DB Deduplication, Seed First-Install Protection, SSO Deactivated Account Guards, Database-Backed Branding, Universal Filter Standardization).*
 

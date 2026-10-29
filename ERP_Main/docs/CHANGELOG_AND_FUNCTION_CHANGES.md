@@ -3,6 +3,24 @@
 **System:** ERP_Main Control Plane  
 **Scope:** Chronological engineering changes, function updates, UI hardening, and bug fixes.
 
+## [Release 2026-10-29] — `.env`-First Peer ERP URL Resolution, Zero Hardcoded Ports & Strict Local/Render Isolation
+
+### 1. Root Cause Fixed
+- When local developer instances and live Render deployments shared the same `ERP_Main` PostgreSQL database (`erp_instances.base_url` holding `https://*.onrender.com/dashboard`), `load_registry()` returned those Render URLs directly in `session.landing`, causing single-ERP users on `localhost` (e.g. `User D` opening `http://localhost:5173`) to jump to `https://inhyma-erp-frontend.onrender.com/dashboard`.
+
+### 2. Backend Changes (`config.py`, `landing.py`, `http_adapter.py`, `federation/routes.py`, `federation/security.py`, `seed_registry.py`)
+- **Zero Hardcoded Localhost/Port Defaults:** Removed hardcoded `http://localhost:8000`, `http://localhost:5170`, `http://127.0.0.1:8001/8002`, and `:5173/:5174` defaults across `app/core/config.py`, `app/identity_linking/adapters/http_adapter.py`, `app/federation/routes.py`, and `app/federation/security.py`.
+- **Environment-First Peer Resolution:** Added `YINGLIMA_FRONTEND_URL`, `INHYMA_FRONTEND_URL`, `get_erp_frontend_url(key)`, and `get_erp_api_url(key)` in `config.py`. `landing.py` resolves `<KEY>_FRONTEND_URL` from `.env` (locally) or Render environment variables (in production) **before** consulting `erp_instances.base_url`, and caches raw DB rows so environment changes apply immediately.
+- **Control Plane URL Resolution on Render:** `control_plane_url()` in `landing.py` reads `FRONTEND_URL` first and falls back to deducing the single non-spoke origin from `CORS_ALLOWED_ORIGINS` when `FRONTEND_URL` is omitted in Render's environment.
+- **Strict Environment Class Guard (`_matches_current_environment`):** When `ENVIRONMENT=local`, public hosted URLs (`*.onrender.com`) from `erp_instances.base_url` are rejected; when `ENVIRONMENT=production`, loopback and RFC-1918 LAN URLs are rejected.
+
+### 3. Frontend Changes (`vite.config.ts`, `ssoBridge.ts`, `ecosystemSession.ts`, `EcosystemSwitcher.tsx`, `AppShell.tsx`, `ErpDetail.tsx`, `ErpRegistry.tsx`)
+- Removed all hardcoded `:5170`, `:5173`, `:5174`, `:8000`, `:8001`, `:8002`, `localhost`, and `127.0.0.1` URLs; `vite.config.ts` loads `VITE_PORT` and `VITE_API_PROXY_TARGET` from `.env` / `.env.defaults` via `loadEnv`.
+- Added `sanitizeEnvMatchedUrl()` across `ssoBridge.ts`, `EcosystemSwitcher.tsx`, `ecosystemSession.ts`, and `AppShell.tsx` so `localhost`/LAN tabs never redirect or switch to hosted domains (`*.onrender.com`) and hosted tabs never redirect to `localhost`/LAN.
+- Verified with expanded unit/integration tests in `backend/tests/test_landing_decision.py` (`13/13` passed, `373/373` backend suite passed) and `frontend/src/tests/AppShell.test.tsx` + `ssoHandoverSession.test.ts` (`105/105` frontend suite passed).
+
+---
+
 ## [Release 2026-10-24b] — One server-made decision for where a signed-in person belongs
 
 **Rules (any login page, localhost or hosted, current or future ERPs):** no ERP access -> the ERP Dashboard; exactly one ERP -> that ERP only;

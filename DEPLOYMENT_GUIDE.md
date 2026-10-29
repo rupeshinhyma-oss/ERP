@@ -37,6 +37,12 @@ Under this topology:
 - Backend must set `CORS_ALLOWED_ORIGINS=https://inhyma.yourcompany.com`.
 - Auth cookies must set `AUTH_USE_SECURE_COOKIES=true` and `VITE_COOKIE_DOMAIN=.yourcompany.com`.
 
+### Strict Local (`.env`) vs Cloud (Render Environment) URL Isolation
+- **Zero Hardcoded Host/Port Links:** No source file hardcodes `localhost`, `127.0.0.1`, or dev ports (`5170`, `5173`, `5174`, `8000`, `8001`, `8002`).
+- **Local Development:** Local `.env` / `.env.defaults` files hold local URLs (`http://localhost:5170`, `http://localhost:5173`, `http://localhost:5174`, `http://127.0.0.1:8000/8001/8002`).
+- **Cloud / Render Deployment:** Render services extract `YINGLIMA_FRONTEND_URL`, `INHYMA_FRONTEND_URL`, `YINGLIMA_API_URL`, `INHYMA_API_URL`, `FRONTEND_URL` / `CORS_ALLOWED_ORIGINS`, and `VITE_*_URL` from Render's environment configuration.
+- **Cross-Environment Guard:** Both `ERP_Main` (`_matches_current_environment` in `landing.py` / `http_adapter.py`) and all 3 frontends (`sanitizeEnvMatchedUrl` in `ssoBridge.ts` / `EcosystemSwitcher.tsx` / `ecosystemSession.ts`) strictly block `localhost <-> *.onrender.com` redirects even when sharing a common PostgreSQL database.
+
 ---
 
 ## 3. Production Environment Variables Reference
@@ -80,6 +86,10 @@ VITE_API_ORIGIN=https://inhyma-api.yourcompany.com
 VITE_CONTROL_PLANE_URL=https://admin.yourcompany.com/dashboard
 VITE_CONTROL_PLANE_API_URL=https://admin-api.yourcompany.com/api/v1
 VITE_CENTRAL_AUTH_API=https://admin-api.yourcompany.com/api/v1/global/ecosystem-session
+VITE_YINGLIMA_URL=https://yinglima.yourcompany.com/dashboard
+VITE_YINGLIMA_API_URL=https://yinglima-api.yourcompany.com/api/v1
+VITE_INHYMA_URL=https://inhyma.yourcompany.com/dashboard
+VITE_INHYMA_API_URL=https://inhyma-api.yourcompany.com/api/v1
 VITE_COOKIE_DOMAIN=.yourcompany.com
 VITE_GOOGLE_MAPS_API_KEY=<restricted-google-maps-api-key>
 ```
@@ -129,7 +139,9 @@ PORT=8000
 BACKEND_URL=https://admin-api.yourcompany.com
 FRONTEND_URL=https://admin.yourcompany.com
 
-# Peer ERP Internal Endpoints (Container or API routes)
+# Peer ERP Frontend & Internal API Endpoints
+YINGLIMA_FRONTEND_URL=https://yinglima.yourcompany.com
+INHYMA_FRONTEND_URL=https://inhyma.yourcompany.com
 YINGLIMA_API_URL=https://yinglima-api.yourcompany.com/api/v1
 INHYMA_API_URL=https://inhyma-api.yourcompany.com/api/v1
 

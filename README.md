@@ -217,12 +217,16 @@ A comprehensive, production-tested deployment manual is available in **[`DEPLOYM
 
 ### D. Idempotent Deployment & Seed First-Install Protection
 - **Bootstrap Guard (`BOOTSTRAP_FORCE_RESET`):** All `seed.py` scripts across `Inhyma_ERP`, `Yinglima_ERP`, and `ERP_Main` halt automatically if existing records are detected. Live accounts, credentials, and master geographies are never overwritten unless `BOOTSTRAP_FORCE_RESET=true` is explicitly provided.
-- **Registry Host Safety (`seed_registry.py`):** Spoke instance URLs are updated only if explicit environment variables (`INHYMA_ERP_URL`, `YINGLIMA_ERP_URL`) are provided, preventing local developer runs from overwriting production cloud URLs with localhost.
+- **Registry Host Safety (`seed_registry.py`):** Spoke instance URLs are resolved from `INHYMA_FRONTEND_URL` and `YINGLIMA_FRONTEND_URL`, and local runs (`ENVIRONMENT=local`) never overwrite production cloud URLs in `erp_instances.base_url` with localhost.
 - **SSO Handover Inactive User Guards:** `POST /api/v1/auth/sso-handover` verifies local account status; incoming SSO handovers for users with `is_active=False` or `deleted_at IS NOT NULL` are rejected with `401 Unauthorized` ("Account is inactive or disabled on this ERP instance").
 
 ### E. Database-Backed Organization Branding & Storage Quota Guards
 - **Versioned Logo Streaming (`GET /api/v1/organizations/logo?v={sha1}`):** Streams high-resolution organization logos directly from PostgreSQL with `Cache-Control: public, max-age=86400, immutable`. The `v` query hash forces immediate browser cache refresh on logo update.
 - **Client Storage Quota Protection:** `try/catch` handlers around `localStorage.setItem` in `brand.ts` and `Organization.tsx` eliminate mobile browser `QuotaExceededError` crashes when handling large base64 logo strings.
+
+### F. Environment-Isolated Cross-ERP URL Resolution (`.env` Locally vs Cloud Env in Production)
+- **Zero Hardcoded Host/Port Links:** All peer ERP frontend/backend URLs and Vite dev server ports across `ERP_Main`, `Inhyma_ERP`, and `Yinglima_ERP` resolve exclusively from `.env` / `.env.defaults` in local development and from Render environment variables in production (`YINGLIMA_FRONTEND_URL`, `INHYMA_FRONTEND_URL`, `YINGLIMA_API_URL`, `INHYMA_API_URL`, `FRONTEND_URL`, `VITE_CONTROL_PLANE_URL`, `VITE_YINGLIMA_URL`, `VITE_INHYMA_URL`, `VITE_CENTRAL_AUTH_API`).
+- **Strict Local vs Hosted Origin Guard:** Backend `_matches_current_environment()` (`ERP_Main/backend/app/global_auth/landing.py`) and frontend `sanitizeEnvMatchedUrl()` (`ssoBridge.ts`, `EcosystemSwitcher.tsx`, `ecosystemSession.ts`, `AppShell.tsx`) prevent `localhost`/LAN sessions from ever redirecting or switching to `*.onrender.com` URLs (and vice versa), even when sharing a common central PostgreSQL database.
 
 
 

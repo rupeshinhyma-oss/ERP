@@ -195,7 +195,7 @@ Automated deployment environments (Render, container boot hooks) execute databas
    - If existing records are detected, `seed.py` terminates safely without modifying live accounts, credentials, or permissions.
    - Destructive re-initialization is strictly blocked unless `BOOTSTRAP_FORCE_RESET=true` is explicitly provided.
 2. **Registry Protection on Local Runs (`backend/scripts/seed_registry.py`):**
-   - When developers execute registry seeding locally, `seed_registry.py` preserves cloud production URLs (`https://inhyma-erp-backend.onrender.com`, etc.) unless override environment variables (`INHYMA_ERP_URL`, `YINGLIMA_ERP_URL`) are explicitly provided.
+   - When developers execute registry seeding locally (`ENVIRONMENT=local`), `seed_registry.py` reads `YINGLIMA_FRONTEND_URL` and `INHYMA_FRONTEND_URL` from `.env` and never overwrites existing cloud `base_url` entries in the shared database with `http://localhost`.
    - Prevents local developer runs from overwriting production routing entries with `http://localhost`.
 
 ---
@@ -209,4 +209,15 @@ In mixed multi-service development environments (running `ERP_Main` on `:8000`, 
    - Linux production containers run unaffected with native kernel glibc resolvers.
 2. **Port-Sensitive 5-Tuple DNS Cache Key:**
    - Caches `(host, port, family, type, proto)`, preserving exact port destinations and preventing localhost cross-port routing collisions.
+
+---
+
+## 8. Environment-First Spoke Discovery & Strict Local vs Cloud Isolation
+
+1. **Environment-First Resolution (`landing.py` & `http_adapter.py`):**
+   - Peer dashboard destinations resolve first from `<KEY>_FRONTEND_URL` (`YINGLIMA_FRONTEND_URL`, `INHYMA_FRONTEND_URL`) and `FRONTEND_URL` (with single-origin deduction from `CORS_ALLOWED_ORIGINS` when `FRONTEND_URL` is unset on Render), falling back to `erp_instances.base_url` only when compatible with the active `ENVIRONMENT`.
+   - Peer backend M2M endpoints resolve first from `<KEY>_API_URL` (`YINGLIMA_API_URL`, `INHYMA_API_URL`), eliminating all hardcoded `localhost` or port defaults.
+2. **Zero Cross-Environment Redirects (`_matches_current_environment` & `sanitizeEnvMatchedUrl`):**
+   - `ENVIRONMENT=local` rejects public hosted URLs (`*.onrender.com`) and `ENVIRONMENT=production` rejects loopback/RFC-1918 LAN URLs on the server.
+   - Frontend `sanitizeEnvMatchedUrl()` enforces browser-origin parity across `AppShell.tsx`, `ssoBridge.ts`, `EcosystemSwitcher.tsx`, and `ecosystemSession.ts`, guaranteeing local tabs stay on local `.env` URLs and Render tabs stay on Render URLs.
 

@@ -65,6 +65,8 @@ Welcome to the dedicated documentation directory for **Yinglima_ERP** (China Pro
 
 - 📜 **[Changelog & Function Changes](CHANGELOG_AND_FUNCTION_CHANGES.md)**:
   - Chronological history of functional updates, migrations, and bug fixes.
+  - Release October 29, 2026: `.env`-driven cross-ERP URL resolution (`VITE_*_URL`), zero hardcoded localhost/ports, and strict local-vs-Render routing isolation (`sanitizeEnvMatchedUrl` in `ssoBridge.ts`, `ecosystemSession.ts`, `EcosystemSwitcher.tsx`, `vite.config.ts`).
+  - Release October 28, 2026: Sale Process costing resolution for `Received / Inwarded` Local Purchases and Product Prices Add Quote modal 100% zoom visibility fix.
   - Release October 10, 2026 (Part 2): Spoke multi-identifier resolution (`erp-02` / `yinglima`), super administrator unrestricted ecosystem access, watcher infinite loop prevention, and graceful SSO switching fallbacks.
   - Release October 10, 2026: Production HTTPS mixed content elimination (`isLocalhost()`), Supabase PgBouncer statement cache auto-disable (`_statement_cache_must_be_disabled`), cascading category enforcement (Products, Suppliers, Buyers), bi-directional password sync federation, fail-closed SSO central session verification, and central identity locks.
   - Release October 5, 2026: Commercial Invoice (CI) 16-column costing engine, confirmed Local Purchase supplier sourcing, dynamic HSN refund VAT sync, and Excel export.

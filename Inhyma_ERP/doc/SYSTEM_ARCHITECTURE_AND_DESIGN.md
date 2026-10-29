@@ -468,3 +468,14 @@ During Render/Docker container boot, `python server.py` executes a four-phase in
    - Provisions roles, permissions, geography, and default super-admin credentials if not already present.
 4. **ASGI Process Launch (`uvicorn app.main:app`):**
    - Starts API server with DNS resilience and graceful shutdown signal handlers.
+
+---
+
+## 15. Environment-Isolated Cross-ERP URL Resolution & Zero-Hardcoded-Port Architecture
+
+1. **Zero Hardcoded Host or Port Fallbacks:**
+   - Neither backend (`app/core/config.py`, `app/inquiries/routes.py`) nor frontend (`vite.config.ts`, `src/lib/ssoBridge.ts`, `src/lib/ecosystemSession.ts`, `src/components/EcosystemSwitcher.tsx`) embeds hardcoded `localhost`, `127.0.0.1`, or port (`5170`, `5173`, `5174`, `8000`, `8001`, `8002`) URLs.
+   - Local development reads peer addresses from `.env` / `.env.defaults` (`VITE_CONTROL_PLANE_URL`, `VITE_CONTROL_PLANE_API_URL`, `VITE_CENTRAL_AUTH_API`, `VITE_YINGLIMA_URL`, `VITE_YINGLIMA_API_URL`, `VITE_INHYMA_URL`, `VITE_INHYMA_API_URL`, `VITE_PORT`, `VITE_API_PROXY_TARGET`); Render deployments read from Render's injected environment variables.
+2. **Strict Local vs Cloud Origin Parity (`sanitizeEnvMatchedUrl`):**
+   - Even when local developers and Render cloud instances share a single `ERP_Main` database whose `erp_instances.base_url` rows hold `https://*.onrender.com/dashboard`, `ERP_Main` (`landing.py`) prioritizes `<KEY>_FRONTEND_URL` from its active environment and rejects cross-environment DB URLs (`LOCAL` vs `PRODUCTION`).
+   - On the client, `sanitizeEnvMatchedUrl()` verifies that every SSO landing redirect (`routeForCentralSession`, `enforceCentralLanding`) and switcher target (`planSwitch`, `erpUrlFor`, `controlPlaneUrl`) belongs to the same network class as `window.location.hostname`—blocking `localhost` <-> `*.onrender.com` jumps while adapting `localhost` hostnames to the active LAN IP when accessed over Wi-Fi/LAN.

@@ -3,6 +3,19 @@
 **System:** Yinglima_ERP (China Procurement)  
 **Scope:** Functional updates, schema changes, UI hardening, and bug fixes.
 
+## [Release 2026-10-29] — `.env`-Driven Cross-ERP Switching, Zero Hardcoded Ports & Strict Local/Render Isolation
+
+### 1. Zero Hardcoded Localhost/Port Links (`ssoBridge.ts`, `ecosystemSession.ts`, `EcosystemSwitcher.tsx`, `vite.config.ts`, `config.py`, `inquiries/routes.py`)
+- Removed all hardcoded `localhost`, `127.0.0.1`, and port (`5170`, `5173`, `5174`, `8000`, `8001`, `8002`) fallbacks across `frontend/vite.config.ts` (`loadEnv`), `frontend/src/lib/ssoBridge.ts`, `frontend/src/lib/ecosystemSession.ts`, `frontend/src/components/EcosystemSwitcher.tsx`, `backend/app/core/config.py`, and `backend/app/inquiries/routes.py`.
+- Peer frontend and API addresses (`VITE_CONTROL_PLANE_URL`, `VITE_CONTROL_PLANE_API_URL`, `VITE_CENTRAL_AUTH_API`, `VITE_YINGLIMA_URL`, `VITE_YINGLIMA_API_URL`, `VITE_INHYMA_URL`, `VITE_INHYMA_API_URL`, `VITE_PORT`, `VITE_API_PROXY_TARGET`) are loaded strictly from `.env` / `.env.defaults` locally and from Render environment variables when deployed on Render.
+
+### 2. Strict Local vs Hosted Origin Guard (`sanitizeEnvMatchedUrl`)
+- Fixed the cross-ERP switching bug where opening `http://localhost:5173` while signed in as an Inhyma-only user (`User D`) redirected to `https://inhyma-erp-frontend.onrender.com/dashboard` due to shared `erp_instances.base_url` entries.
+- `routeForCentralSession()`, `enforceCentralLanding()`, `erpUrlFor()`, `controlPlaneUrl()`, and `planSwitch()` now prioritize `.env` (`VITE_*_URL`) and validate target URLs through `sanitizeEnvMatchedUrl()` so `localhost`/LAN tabs never jump to `*.onrender.com` and hosted tabs never jump to `localhost`/LAN.
+- Verified with expanded unit tests in `frontend/src/tests/ssoHandoverSession.test.ts` (`89/89` frontend tests passed) and backend federation suites (`26/26` passed).
+
+---
+
 ## [Release 2026-10-28] — Sale Process Local Purchase Costing Resolution & Product Prices Quote Modal 100% Zoom Fix
 
 ### 0. Product Prices "+ Add New Supplier Quotation" Modal 100% Zoom Footer Visibility Fix (`ProductPrices.tsx` & `style.css`)
