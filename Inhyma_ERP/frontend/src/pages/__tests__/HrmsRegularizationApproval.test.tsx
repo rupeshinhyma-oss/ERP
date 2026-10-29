@@ -247,9 +247,9 @@ describe("HRMS Regularization → Approval Integration Tests", () => {
     });
   });
 
-  it("allows Admin to regularize directly from the drawer", async () => {
+  it("allows Admin to regularize directly from the drawer when viewing another employee", async () => {
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/hrms/attendance?employee_id=emp-101"]}>
         <AttendancePage />
       </MemoryRouter>
     );
@@ -274,6 +274,28 @@ describe("HRMS Regularization → Approval Integration Tests", () => {
         "/hrms/attendance/regularization",
         expect.objectContaining({ direct_regularize: true })
       );
+    });
+  });
+
+  it("disables direct regularization action when Admin views their own calendar", async () => {
+    render(
+      <MemoryRouter initialEntries={["/hrms/attendance"]}>
+        <AttendancePage />
+      </MemoryRouter>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("regularize-btn-2026-09-02")).toBeDefined();
+    });
+
+    const regBtn = screen.getByTestId("regularize-btn-2026-09-02");
+    fireEvent.click(regBtn);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("regularization-drawer")).toBeDefined();
+      expect(screen.getByTestId("direct-regularize-self-blocked-btn")).toBeDefined();
+      expect(screen.getByTestId("direct-regularize-self-blocked-btn")).toHaveProperty("disabled", true);
+      expect(screen.queryByTestId("direct-regularize-btn")).toBeNull();
     });
   });
 });

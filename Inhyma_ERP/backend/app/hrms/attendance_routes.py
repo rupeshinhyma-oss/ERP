@@ -304,7 +304,18 @@ async def submit_regularization(
 ):
     ctx.require_module_access("attendance")
     target_id = payload.employee_id if (payload.employee_id and (ctx.is_admin or ctx.is_hr)) else ctx.user_id
-    record = await service.submit_regularization(target_id, payload, is_admin=ctx.is_admin)
+    if payload.direct_regularize:
+        if not ctx.is_admin:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Permission denied. Only administrators can perform direct attendance regularization.",
+            )
+        if target_id == ctx.user_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Self-approval is not permitted. Administrators cannot directly regularize their own attendance.",
+            )
+    record = await service.submit_regularization(target_id, payload, is_admin=ctx.is_admin, actor_id=ctx.user_id)
     return build_success_response(
         data=record.model_dump(mode="json"),
         message="Regularization request submitted successfully.",

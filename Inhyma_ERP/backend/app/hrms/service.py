@@ -18,8 +18,9 @@ from typing import List, Optional
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.exceptions import NotFoundException
+from app.core.exceptions import BadRequestException, NotFoundException
 from app.hrms.models import (
+    HrmsAsset,
     HrmsEmployeeLocation,
     HrmsExpenseCategory,
     HrmsExpenseSettings,
@@ -381,8 +382,34 @@ class HrmsSetupService:
         )
 
     async def delete_location(self, location_id: uuid.UUID) -> None:
-        """Soft delete office location."""
+        """Soft delete office location, preventing deletion if employees or assets are actively mapped."""
         loc = await self.get_location(location_id)
+
+        # Check for active employee mappings to prevent orphaned mappings and silent office fallback
+        emp_count_res = await self.db.execute(
+            select(func.count(HrmsEmployeeLocation.id)).where(
+                HrmsEmployeeLocation.location_id == location_id
+            )
+        )
+        emp_count = emp_count_res.scalar() or 0
+        if emp_count > 0:
+            raise BadRequestException(
+                f"Cannot delete office location '{loc.name}'. There are {emp_count} employee(s) currently assigned to this location. Reassign them before deleting."
+            )
+
+        # Check for assets assigned to this location
+        asset_count_res = await self.db.execute(
+            select(func.count(HrmsAsset.id)).where(
+                HrmsAsset.location_id == location_id,
+                HrmsAsset.deleted_at.is_(None),
+            )
+        )
+        asset_count = asset_count_res.scalar() or 0
+        if asset_count > 0:
+            raise BadRequestException(
+                f"Cannot delete office location '{loc.name}'. There are {asset_count} asset(s) currently located here. Relocate them before deleting."
+            )
+
         loc.deleted_at = _utcnow()
         loc.is_active = False
         loc.version += 1

@@ -502,6 +502,13 @@ async def create_leave_adjustment(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Employees cannot adjust leave balances.",
         )
+
+    if payload.employee_id == user_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Self-adjustment of leave balances is prohibited. Another authorized administrator must adjust your leave.",
+        )
+
     audit = await service.create_adjustment(payload, adjusted_by=user_id)
     return build_success_response(
         data=audit.model_dump(mode="json"),
@@ -616,10 +623,12 @@ async def get_leave_request(
     user_id, is_admin = ctx
     req = await service.get_leave_request(request_id)
     if not is_admin and req.employee_id != user_id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="You cannot view another employee's leave request.",
-        )
+        is_mgr = await service.is_reviewer_authorized_for_employee(user_id, req.employee_id)
+        if not is_mgr:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You cannot view another employee's leave request.",
+            )
     return build_success_response(
         data=req.model_dump(mode="json"),
         message="Leave request retrieved successfully.",
@@ -720,7 +729,6 @@ async def list_leave_approvals(
 async def approve_leave_request(
     request_id: uuid.UUID,
     payload: LeaveApprovalAction = LeaveApprovalAction(),
-    reviewer_id: Optional[uuid.UUID] = None,
     service: HrmsLeaveService = Depends(get_leave_service),
     ctx: HrmsUserContext = Depends(get_hrms_user_context),
     db: AsyncSession = Depends(get_db_session),
@@ -736,28 +744,24 @@ async def approve_leave_request(
             detail=f"Leave request is already {req.approval_status}.",
         )
 
-    effective_reviewer = reviewer_id or ctx.user_id
-    effective_is_admin = ctx.is_admin and (reviewer_id is None or reviewer_id == ctx.user_id)
-
-    # Check self-approval for effective reviewer
-    if effective_reviewer == req.employee_id and not effective_is_admin:
+    # Check self-approval: strictly forbidden for all users
+    if ctx.user_id == req.employee_id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Self-approval is not permitted. Employees cannot approve their own leave request.",
         )
 
-    if reviewer_id is None:
-        await verify_approval_authorization(
-            db=db,
-            ctx=ctx,
-            target_employee_id=req.employee_id,
-            module_name="leave",
-            action_label="approve",
-        )
+    await verify_approval_authorization(
+        db=db,
+        ctx=ctx,
+        target_employee_id=req.employee_id,
+        module_name="leave",
+        action_label="approve",
+    )
 
     approved = await service.approve_leave_request(
         request_id,
-        reviewer_id=effective_reviewer,
+        reviewer_id=ctx.user_id,
         remarks=payload.approval_remarks,
         is_admin=ctx.is_admin,
     )
@@ -772,7 +776,6 @@ async def approve_leave_request(
 async def reject_leave_request(
     request_id: uuid.UUID,
     payload: LeaveApprovalAction = LeaveApprovalAction(),
-    reviewer_id: Optional[uuid.UUID] = None,
     service: HrmsLeaveService = Depends(get_leave_service),
     ctx: HrmsUserContext = Depends(get_hrms_user_context),
     db: AsyncSession = Depends(get_db_session),
@@ -788,27 +791,23 @@ async def reject_leave_request(
             detail=f"Leave request is already {req.approval_status}.",
         )
 
-    effective_reviewer = reviewer_id or ctx.user_id
-    effective_is_admin = ctx.is_admin and (reviewer_id is None or reviewer_id == ctx.user_id)
-
-    if effective_reviewer == req.employee_id and not effective_is_admin:
+    if ctx.user_id == req.employee_id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Self-approval is not permitted. Employees cannot reject their own leave request.",
         )
 
-    if reviewer_id is None:
-        await verify_approval_authorization(
-            db=db,
-            ctx=ctx,
-            target_employee_id=req.employee_id,
-            module_name="leave",
-            action_label="reject",
-        )
+    await verify_approval_authorization(
+        db=db,
+        ctx=ctx,
+        target_employee_id=req.employee_id,
+        module_name="leave",
+        action_label="reject",
+    )
 
     rejected = await service.reject_leave_request(
         request_id,
-        reviewer_id=effective_reviewer,
+        reviewer_id=ctx.user_id,
         remarks=payload.approval_remarks,
         is_admin=ctx.is_admin,
     )

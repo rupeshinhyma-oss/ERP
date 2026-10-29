@@ -687,37 +687,32 @@ export function SiteVisitPage() {
             });
           }
         },
-        () => {
+        (err) => {
           if (!hasResolved) {
-            finalizeReading({
-              coords: {
-                latitude: 18.5204,
-                longitude: 73.8567,
-                accuracy: 18,
-                altitude: null,
-                altitudeAccuracy: null,
-                heading: null,
-                speed: null,
-              },
-              timestamp: Date.now(),
-            } as GeolocationPosition);
+            hasResolved = true;
+            try {
+              navigator.geolocation.clearWatch(watchId);
+            } catch {}
+            setGpsCaptureStatus("ERROR");
+            let msg = "Failed to acquire location. Please enable GPS permissions.";
+            if (err?.code === 1) {
+              msg = "Location permission denied. Please allow GPS access in your browser to check in/out.";
+            } else if (err?.code === 2) {
+              msg = "Location position is currently unavailable. Please check your device GPS signal.";
+            } else if (err?.code === 3) {
+              msg = "Location request timed out. Please click Retry Location.";
+            }
+            setGpsStatusText(msg);
+            setGpsReading(null);
           }
         },
         { enableHighAccuracy: true, timeout: 8000, maximumAge: 0 }
       );
     } catch {
-      finalizeReading({
-        coords: {
-          latitude: 18.5204,
-          longitude: 73.8567,
-          accuracy: 18,
-          altitude: null,
-          altitudeAccuracy: null,
-          heading: null,
-          speed: null,
-        },
-        timestamp: Date.now(),
-      } as GeolocationPosition);
+      hasResolved = true;
+      setGpsCaptureStatus("ERROR");
+      setGpsStatusText("Geolocation is not supported by your browser or failed to initialize.");
+      setGpsReading(null);
       return () => {};
     }
 
@@ -727,21 +722,13 @@ export function SiteVisitPage() {
         navigator.geolocation.clearWatch(watchId);
       } catch {}
       if (!hasResolved) {
+        hasResolved = true;
         if (bestFix) {
           finalizeReading(bestFix);
         } else {
-          finalizeReading({
-            coords: {
-              latitude: 18.5204,
-              longitude: 73.8567,
-              accuracy: 22,
-              altitude: null,
-              altitudeAccuracy: null,
-              heading: null,
-              speed: null,
-            },
-            timestamp: Date.now(),
-          } as GeolocationPosition);
+          setGpsCaptureStatus("ERROR");
+          setGpsStatusText("Location request timed out. No GPS fix acquired. Please click Retry Location.");
+          setGpsReading(null);
         }
       }
     }, 5000);
@@ -772,9 +759,9 @@ export function SiteVisitPage() {
       });
     }
 
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
       if (!("geolocation" in navigator)) {
-        resolve({ latitude: 18.5204, longitude: 73.8567, accuracy: 25 });
+        reject(new Error("Geolocation is not supported by your browser."));
         return;
       }
       navigator.geolocation.getCurrentPosition(
@@ -785,8 +772,16 @@ export function SiteVisitPage() {
             accuracy: pos.coords.accuracy || 15,
           });
         },
-        () => {
-          resolve({ latitude: 18.5204, longitude: 73.8567, accuracy: 30 });
+        (err) => {
+          let msg = "Failed to acquire GPS location.";
+          if (err?.code === 1) {
+            msg = "Location permission denied. Please enable GPS permissions.";
+          } else if (err?.code === 2) {
+            msg = "Location unavailable. Please check device GPS.";
+          } else if (err?.code === 3) {
+            msg = "Location request timed out. Please retry.";
+          }
+          reject(new Error(msg));
         },
         { enableHighAccuracy: true, timeout: 8000, maximumAge: 0 }
       );
@@ -847,7 +842,11 @@ export function SiteVisitPage() {
   };
 
   const handleConfirmCheckInOut = async () => {
-    if (!checkInOutModal || !gpsReading) return;
+    if (!checkInOutModal) return;
+    if (!gpsReading || gpsCaptureStatus !== "SUCCESS" || !gpsReading.latitude || !gpsReading.longitude) {
+      toast.error("Valid GPS coordinates are required. Please acquire a GPS fix before proceeding.");
+      return;
+    }
     const { visit, type } = checkInOutModal;
     setActionLoading(true);
     try {
@@ -2764,12 +2763,16 @@ export function SiteVisitPage() {
                         ? "#f0fdf4"
                         : gpsCaptureStatus === "REFINING"
                         ? "#fffbeb"
+                        : gpsCaptureStatus === "ERROR"
+                        ? "#fef2f2"
                         : "#f8fafc",
                     border: `1px solid ${
                       gpsCaptureStatus === "SUCCESS"
                         ? "#86efac"
                         : gpsCaptureStatus === "REFINING"
                         ? "#fde68a"
+                        : gpsCaptureStatus === "ERROR"
+                        ? "#fecaca"
                         : "#e2e8f0"
                     }`,
                     borderRadius: "8px",
@@ -2787,6 +2790,9 @@ export function SiteVisitPage() {
                       {gpsCaptureStatus === "SUCCESS" && (
                         <span style={{ color: "#16a34a", fontSize: "18px", fontWeight: "bold" }}>✓</span>
                       )}
+                      {gpsCaptureStatus === "ERROR" && (
+                        <span style={{ color: "#dc2626", fontSize: "18px", fontWeight: "bold" }}>⚠️</span>
+                      )}
                       <span
                         style={{
                           fontSize: "14px",
@@ -2796,6 +2802,8 @@ export function SiteVisitPage() {
                               ? "#15803d"
                               : gpsCaptureStatus === "REFINING"
                               ? "#b45309"
+                              : gpsCaptureStatus === "ERROR"
+                              ? "#b91c1c"
                               : "#334155",
                         }}
                       >
@@ -2803,7 +2811,7 @@ export function SiteVisitPage() {
                       </span>
                     </div>
 
-                    {gpsReading && (
+                    {(gpsReading || gpsCaptureStatus === "ERROR") && (
                       <button
                         type="button"
                         className="btn btn-outline"

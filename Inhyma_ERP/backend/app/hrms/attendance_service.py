@@ -34,9 +34,11 @@ from app.hrms.models import (
     HrmsAttendance,
     HrmsAttendancePolicy,
     HrmsAttendanceRegularization,
+    HrmsEmployeeLeaveBalance,
     HrmsEmployeeLocation,
     HrmsGeofenceViolation,
     HrmsHoliday,
+    HrmsLeaveAdjustment,
     HrmsLeaveRequest,
     HrmsLeaveType,
     HrmsLocation,
@@ -479,11 +481,9 @@ class HrmsAttendanceService:
         policy = await self.get_policy()
         office = await self.get_assigned_office(user_id)
 
-        # 1. Determine punch timestamp & local date
-        raw_time = payload.timestamp or datetime.now(timezone.utc)
-        if raw_time.tzinfo is None:
-            raw_time = raw_time.replace(tzinfo=IST)
-        local_dt = raw_time.astimezone(IST)
+        # 1. Authoritative server timestamp & local date (ignore untrusted client timestamp)
+        now_utc = datetime.now(timezone.utc)
+        local_dt = now_utc.astimezone(IST)
         today = local_dt.date()
 
         # 2. Geofence Distance Validation
@@ -640,10 +640,9 @@ class HrmsAttendanceService:
         policy = await self.get_policy()
         office = await self.get_assigned_office(user_id)
 
-        raw_time = payload.timestamp or datetime.now(timezone.utc)
-        if raw_time.tzinfo is None:
-            raw_time = raw_time.replace(tzinfo=IST)
-        local_dt = raw_time.astimezone(IST)
+        # 1. Authoritative server timestamp & local date (ignore untrusted client timestamp)
+        now_utc = datetime.now(timezone.utc)
+        local_dt = now_utc.astimezone(IST)
         today = local_dt.date()
 
         # 1. Fetch active punch in
@@ -987,18 +986,30 @@ class HrmsAttendanceService:
         user_id: uuid.UUID,
         payload: RegularizationRequest,
         is_admin: bool = False,
+        actor_id: Optional[uuid.UUID] = None,
     ) -> RegularizationRead:
         req_date = date.fromisoformat(payload.date)
         notes = payload.notes or payload.note or ""
         req_type = payload.request_type or "LATE_PUNCH"
         now_ist = datetime.now(IST)
-        is_direct = bool(payload.direct_regularize and is_admin)
+
+        if payload.direct_regularize:
+            if not is_admin:
+                raise BadRequestException("Direct regularization requires administrator privileges.")
+            if actor_id is not None and actor_id == user_id:
+                raise BadRequestException("Self-approval is not permitted. Administrators cannot directly regularize their own attendance.")
+
+        is_direct = bool(payload.direct_regularize and is_admin and (actor_id != user_id if actor_id is not None else True))
 
         punch_in_dt = parse_time_on_date(req_date, payload.punch_in)
         punch_out_dt = parse_time_on_date(req_date, payload.punch_out)
         working_mins = None
         if punch_in_dt and punch_out_dt and punch_out_dt > punch_in_dt:
             working_mins = int((punch_out_dt - punch_in_dt).total_seconds() // 60)
+
+        # Block regularization for future dates
+        if req_date > now_ist.date():
+            raise BadRequestException("Attendance cannot be regularized for future dates.")
 
         # Block regularization on holidays
         holiday_res = await self.db.execute(
@@ -1278,9 +1289,109 @@ class HrmsAttendanceService:
             )
             att_rec = att_res.scalar_one_or_none()
 
+        if action == "ADJUST_LEAVE":
+            target_lt_id = payload.leave_type_id if payload else None
+            if not target_lt_id:
+                # Find default applicable paid leave type
+                lt_query = select(HrmsLeaveType).where(
+                    HrmsLeaveType.deleted_at.is_(None),
+                    HrmsLeaveType.is_active == True,
+                    HrmsLeaveType.is_paid == True,
+                ).order_by(HrmsLeaveType.created_at.asc())
+                default_lt = (await self.db.execute(lt_query)).scalars().first()
+                if default_lt:
+                    target_lt_id = default_lt.id
+                else:
+                    any_lt = (await self.db.execute(
+                        select(HrmsLeaveType).where(
+                            HrmsLeaveType.deleted_at.is_(None),
+                            HrmsLeaveType.is_active == True,
+                        )
+                    )).scalars().first()
+                    target_lt_id = any_lt.id if any_lt else None
+
+            if target_lt_id:
+                lt = await self.db.get(HrmsLeaveType, target_lt_id)
+                year = reg_req.attendance_date.year
+                bal_query = (
+                    select(HrmsEmployeeLeaveBalance)
+                    .where(
+                        HrmsEmployeeLeaveBalance.employee_id == reg_req.employee_id,
+                        HrmsEmployeeLeaveBalance.leave_type_id == target_lt_id,
+                        HrmsEmployeeLeaveBalance.year == year,
+                    )
+                    .with_for_update()
+                )
+                bal = (await self.db.execute(bal_query)).scalar_one_or_none()
+                if not bal:
+                    bal = HrmsEmployeeLeaveBalance(
+                        employee_id=reg_req.employee_id,
+                        leave_type_id=target_lt_id,
+                        year=year,
+                        allocated=lt.annual_balance if lt else 0.0,
+                        consumed=0.0,
+                        adjusted=0.0,
+                        available=lt.annual_balance if lt else 0.0,
+                    )
+                    self.db.add(bal)
+                    await self.db.flush()
+
+                new_avail = round(bal.allocated + bal.adjusted - (bal.consumed + 1.0), 2)
+                if lt and not getattr(lt, "allow_negative_balance", False) and new_avail < 0:
+                    raise BadRequestException(
+                        f"Adjust leave failed: insufficient {lt.name} balance (available: {bal.available}). Cannot deduct 1 day."
+                    )
+
+                prev_available = bal.available
+                bal.consumed = round(bal.consumed + 1.0, 2)
+                bal.available = round(bal.allocated + bal.adjusted - bal.consumed, 2)
+
+                # Create linked approved HrmsLeaveRequest
+                existing_req = (
+                    await self.db.execute(
+                        select(HrmsLeaveRequest).where(
+                            HrmsLeaveRequest.employee_id == reg_req.employee_id,
+                            HrmsLeaveRequest.from_date <= reg_req.attendance_date,
+                            HrmsLeaveRequest.to_date >= reg_req.attendance_date,
+                        )
+                    )
+                ).scalar_one_or_none()
+
+                if not existing_req:
+                    leave_req = HrmsLeaveRequest(
+                        employee_id=reg_req.employee_id,
+                        leave_type_id=target_lt_id,
+                        from_date=reg_req.attendance_date,
+                        to_date=reg_req.attendance_date,
+                        number_of_days=1.0,
+                        reason=f"Attendance Regularization #{reg_req.id} adjusted against leave",
+                        status="APPROVED",
+                        approval_status="APPROVED",
+                        approved_by=reviewer_id,
+                        approval_remarks=manager_remarks,
+                        created_by=reviewer_id,
+                        updated_by=reviewer_id,
+                    )
+                    self.db.add(leave_req)
+
+                audit = HrmsLeaveAdjustment(
+                    employee_id=reg_req.employee_id,
+                    leave_type_id=target_lt_id,
+                    adjustment_type="LEAVE_APPROVED",
+                    amount=-1.0,
+                    previous_balance=prev_available,
+                    new_balance=bal.available,
+                    reason=f"Attendance Regularization #{reg_req.id} adjusted against leave",
+                    remarks=manager_remarks,
+                    source="REGULARIZATION",
+                    effective_date=reg_req.attendance_date,
+                    adjusted_by=reviewer_id,
+                )
+                self.db.add(audit)
+
         if att_rec:
             att_rec.regularization_status = "APPROVED"
-            att_rec.status = "PRESENT"
+            att_rec.status = "LEAVE" if action == "ADJUST_LEAVE" else "PRESENT"
             att_rec.is_irregular = False
             att_rec.regularization_reason = reg_req.reason
             att_rec.regularization_note = f"Approved ({action}): {manager_remarks}"

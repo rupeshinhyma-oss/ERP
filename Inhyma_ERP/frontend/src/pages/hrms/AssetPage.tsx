@@ -9,6 +9,7 @@ import {
   IconWrench,
 } from "@/components/icons";
 import { apiDelete, apiGet, apiPatch, apiPost } from "@/lib/api";
+import { useAuth } from "@/lib/hooks";
 import { useToast } from "@/lib/toast";
 import "./hrms.css";
 
@@ -277,6 +278,20 @@ export function AssetPage() {
     notes: "",
   });
 
+  // RBAC / User Permissions
+  const { profile, isSuperAdmin, hasPermission } = useAuth();
+  const canManageAssets = Boolean(
+    isSuperAdmin ||
+    profile?.role === "ADMIN" ||
+    profile?.role === "HR" ||
+    profile?.role === "super_admin" ||
+    profile?.username === "admin" ||
+    hasPermission?.("*") ||
+    hasPermission?.("hrms.manage") ||
+    hasPermission?.("hrms:admin") ||
+    hasPermission?.("hrms.assets.manage")
+  );
+
   // 1. Fetch Assets and Summary
   const fetchAssets = useCallback(async () => {
     try {
@@ -293,6 +308,10 @@ export function AssetPage() {
   }, []);
 
   const fetchSummary = useCallback(async () => {
+    if (!canManageAssets) {
+      setBackendSummary(null);
+      return;
+    }
     try {
       const sumRes = await apiGet<AssetSummaryData>("/hrms/assets/summary");
       if (sumRes.data) {
@@ -301,7 +320,7 @@ export function AssetPage() {
     } catch (err) {
       console.warn("Could not load backend summary metrics:", err);
     }
-  }, []);
+  }, [canManageAssets]);
 
   // 2. Fetch Supporting Data (Locations & Active Employees from users DB)
   const fetchSupportingData = useCallback(async () => {
@@ -694,29 +713,32 @@ export function AssetPage() {
             </div>
 
             <div className="page-header-actions">
-              <button
-                type="button"
-                className="btn btn-primary"
-                onClick={() => setIsAddOpen(true)}
-              >
-                <IconPlus style={{ width: 15, height: 15 }} />
-                <span>Add Asset</span>
-              </button>
+              {canManageAssets && (
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={() => setIsAddOpen(true)}
+                >
+                  <IconPlus style={{ width: 15, height: 15 }} />
+                  <span>Add Asset</span>
+                </button>
+              )}
             </div>
           </div>
         </div>
 
-        {/* 4 Focused Summary Cards */}
-        <div className="stat-grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 14, marginBottom: 16 }}>
-          <div className="stat-card">
-            <div>
-              <div className="stat-value">{totalCount}</div>
-              <div className="stat-label">Total Assets</div>
+        {/* 4 Focused Summary Cards (Admin/HR only) */}
+        {canManageAssets && (
+          <div className="stat-grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 14, marginBottom: 16 }}>
+            <div className="stat-card">
+              <div>
+                <div className="stat-value">{totalCount}</div>
+                <div className="stat-label">Total Assets</div>
+              </div>
+              <div className="stat-icon">
+                <IconBox style={{ width: 20, height: 20 }} />
+              </div>
             </div>
-            <div className="stat-icon">
-              <IconBox style={{ width: 20, height: 20 }} />
-            </div>
-          </div>
 
           <div className="stat-card tone-success">
             <div>
@@ -748,6 +770,7 @@ export function AssetPage() {
             </div>
           </div>
         </div>
+      )}
 
         {/* Search + Filters Row */}
         <div className="card" style={{ padding: "14px 18px", marginBottom: 16 }}>
@@ -873,7 +896,7 @@ export function AssetPage() {
                   ? "Get started by registering a new company asset."
                   : "No assets match your search or filter criteria."}
               </div>
-              {assets.length === 0 && (
+              {assets.length === 0 && canManageAssets && (
                 <div style={{ marginTop: 10 }}>
                   <button
                     type="button"
@@ -950,58 +973,62 @@ export function AssetPage() {
                         <ConditionBadge condition={asset.condition} />
                       </td>
                       <td style={{ textAlign: "right" }}>
-                        <div style={{ display: "inline-flex", gap: 6, justifyContent: "flex-end", flexWrap: "wrap" }}>
-                          <button
-                            type="button"
-                            onClick={() => openEditModal(asset)}
-                            title="Edit Asset Details"
-                            className="hrms-btn-action"
-                          >
-                            Edit
-                          </button>
-
-                          {isAssigned ? (
+                        {canManageAssets ? (
+                          <div style={{ display: "inline-flex", gap: 6, justifyContent: "flex-end", flexWrap: "wrap" }}>
                             <button
                               type="button"
-                              onClick={() => openReturnModal(asset)}
-                              title="Return Asset"
+                              onClick={() => openEditModal(asset)}
+                              title="Edit Asset Details"
                               className="hrms-btn-action"
-                              style={{ color: "#d97706", borderColor: "#fde68a", background: "#fffbeb" }}
                             >
-                              Return
+                              Edit
                             </button>
-                          ) : canAssign ? (
+
+                            {isAssigned ? (
+                              <button
+                                type="button"
+                                onClick={() => openReturnModal(asset)}
+                                title="Return Asset"
+                                className="hrms-btn-action"
+                                style={{ color: "#d97706", borderColor: "#fde68a", background: "#fffbeb" }}
+                              >
+                                Return
+                              </button>
+                            ) : canAssign ? (
+                              <button
+                                type="button"
+                                onClick={() => openAssignModal(asset)}
+                                title="Assign to Employee"
+                                className="hrms-btn-action"
+                                style={{ color: "#0061f2", borderColor: "#bfdbfe", background: "#eff6ff" }}
+                              >
+                                Assign
+                              </button>
+                            ) : null}
+
                             <button
                               type="button"
-                              onClick={() => openAssignModal(asset)}
-                              title="Assign to Employee"
+                              onClick={() => openStatusModal(asset)}
+                              title="Change Status"
                               className="hrms-btn-action"
-                              style={{ color: "#0061f2", borderColor: "#bfdbfe", background: "#eff6ff" }}
                             >
-                              Assign
+                              Status
                             </button>
-                          ) : null}
 
-                          <button
-                            type="button"
-                            onClick={() => openStatusModal(asset)}
-                            title="Change Status"
-                            className="hrms-btn-action"
-                          >
-                            Status
-                          </button>
-
-                          {rawStatus !== "RETIRED" && (
-                            <button
-                              type="button"
-                              onClick={() => handleDeleteAsset(asset)}
-                              title="Delete / Retire Asset"
-                              className="hrms-btn-action btn-danger"
-                            >
-                              Delete
-                            </button>
-                          )}
-                        </div>
+                            {rawStatus !== "RETIRED" && (
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteAsset(asset)}
+                                title="Delete / Retire Asset"
+                                className="hrms-btn-action btn-danger"
+                              >
+                                Delete
+                              </button>
+                            )}
+                          </div>
+                        ) : (
+                          <span style={{ color: "var(--color-text-muted, #94a3b8)" }}>—</span>
+                        )}
                       </td>
                     </tr>
                   );

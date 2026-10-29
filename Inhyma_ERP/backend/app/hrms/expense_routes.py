@@ -375,6 +375,12 @@ async def reimburse_expense(
             detail=f"Only approved expenses can be reimbursed. Current status is {exp.status}.",
         )
 
+    if exp.employee_id == ctx.user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Self-reimbursement is not permitted. Reimbursements must be processed by another authorized officer.",
+        )
+
     exp_reimbursed = await service.reimburse_expense(
         expense_id=expense_id,
         user_id=ctx.user_id,

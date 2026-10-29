@@ -363,7 +363,12 @@ async def build_monthly_payroll_excel(
         row_values.append((other_adjustments, "right", "#,##0.00"))
         row_values.append((it.total_deductions, "right", "#,##0.00"))
         row_values.append((it.net_salary, "right", "#,##0.00"))
-        row_values.append((it.status or payroll.status, "center", "@"))
+        emp_status = (
+            "APPROVED"
+            if (getattr(payroll, "status", None) == "APPROVED" or getattr(it, "status", None) == "APPROVED")
+            else (it.status or payroll.status or "REVIEW")
+        )
+        row_values.append((emp_status, "center", "@"))
         row_values.append((approval_str, "left", "@"))
 
         for col_idx, (val, col_align, num_fmt) in enumerate(row_values, start=1):

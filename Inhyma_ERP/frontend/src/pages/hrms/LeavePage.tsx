@@ -260,14 +260,15 @@ export function LeavePage() {
   // RBAC / User Permissions
   const { profile, isSuperAdmin, hasPermission } = useAuth();
   const isAdmin = Boolean(
-    !profile ||
-    isSuperAdmin ||
-    profile?.role === "ADMIN" ||
-    profile?.role === "super_admin" ||
-    profile?.username === "admin" ||
-    hasPermission?.("*") ||
-    hasPermission?.("hrms.manage") ||
-    hasPermission?.("hrms:admin")
+    profile && (
+      isSuperAdmin ||
+      profile?.role === "ADMIN" ||
+      profile?.role === "super_admin" ||
+      profile?.username === "admin" ||
+      hasPermission?.("*") ||
+      hasPermission?.("hrms.manage") ||
+      hasPermission?.("hrms:admin")
+    )
   );
 
   const isManager = Boolean(
@@ -278,7 +279,6 @@ export function LeavePage() {
   );
 
   const canApprove = Boolean(
-    !profile ||
     isAdmin ||
     isManager ||
     hasPermission?.("hrms.approve") ||
@@ -286,21 +286,18 @@ export function LeavePage() {
   );
 
   const canManageHolidays = Boolean(
-    !profile ||
     isAdmin ||
     hasPermission?.("hrms.manage") ||
     hasPermission?.("hrms.leave.manage_holidays")
   );
 
   const canAdjustBalances = Boolean(
-    !profile ||
     isAdmin ||
     hasPermission?.("hrms.manage") ||
     hasPermission?.("hrms.leave.adjust_balance")
   );
 
   const canManageLeaveTypes = Boolean(
-    !profile ||
     isAdmin ||
     hasPermission?.("hrms.manage") ||
     hasPermission?.("hrms.leave.manage_types")

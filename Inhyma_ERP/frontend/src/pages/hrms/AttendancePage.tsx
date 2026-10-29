@@ -666,15 +666,6 @@ export function AttendancePage() {
       }
       if (officeRes?.data) {
         setOffice(officeRes.data);
-        if (typeof officeRes.data.latitude === "number" && typeof officeRes.data.longitude === "number") {
-          setCoords((prev) => {
-            if (!prev) {
-              setGpsStatus("connected");
-              return { lat: officeRes.data.latitude, lng: officeRes.data.longitude };
-            }
-            return prev;
-          });
-        }
       }
       await Promise.all([
         loadTodayRecord(selectedEmployeeId || undefined),
@@ -781,7 +772,7 @@ export function AttendancePage() {
         setGpsStatus("denied");
         setAlert({
           type: "warning",
-          message: "Location permission denied. Please allow GPS access in your browser or use the testing simulator.",
+          message: "Location permission denied. Please allow GPS access in your browser to record attendance.",
         });
       },
       { enableHighAccuracy: true, timeout: 8000 }
@@ -890,7 +881,7 @@ export function AttendancePage() {
   // 7. Punch In Handler
   const handlePunchIn = async () => {
     if (!coords) {
-      setAlert({ type: "error", message: "Please enable GPS or select a simulator preset before punching in." });
+      setAlert({ type: "error", message: "Please enable browser GPS before punching in. Location is required for attendance." });
       return;
     }
     if (!isInsideGeofence) {
@@ -926,12 +917,12 @@ export function AttendancePage() {
 
   // 8. Punch Out Handler
   const handlePunchOut = async () => {
-    const lat = coords?.lat ?? office?.latitude ?? 19.199824;
-    const lng = coords?.lng ?? office?.longitude ?? 72.956795;
-    if (!coords && !office) {
-      setAlert({ type: "error", message: "Please enable GPS before punching out." });
+    if (!coords) {
+      setAlert({ type: "error", message: "Please enable browser GPS before punching out. Location is required for attendance." });
       return;
     }
+    const lat = coords.lat;
+    const lng = coords.lng;
 
     setActionLoading(true);
     setAlert(null);
@@ -1029,6 +1020,14 @@ export function AttendancePage() {
         payload.request_type = regRequestType;
       }
       if (isDirect) {
+        if (!isViewingOtherEmployee) {
+          setAlert({
+            type: "error",
+            message: "Self-approval is not permitted. You cannot directly regularize your own attendance.",
+          });
+          setRegSubmitting(false);
+          return;
+        }
         payload.direct_regularize = true;
       }
 
@@ -1396,11 +1395,6 @@ export function AttendancePage() {
                           : `Outside (${currentDistance}m)`
                         : "Acquiring GPS..."}
                     </span>
-                    {simulatorMode !== "real" && (
-                      <span style={{ fontSize: "10px", background: "#f59e0b", color: "#fff", padding: "1px 5px", borderRadius: 4 }}>
-                        Simulated
-                      </span>
-                    )}
                   </div>
 
                   {/* Refresh / Retry Location Button */}
@@ -1414,56 +1408,6 @@ export function AttendancePage() {
                     🔄 Refresh GPS
                   </button>
                 </div>
-              </div>
-
-              {/* ================================================================
-                  Location Simulator (Admin / Testing Requirement)
-                  ================================================================ */}
-              <div className="hrms-simulator-panel">
-                <div className="hrms-simulator-header">
-                  <div className="hrms-simulator-title">
-                    <span>🧪 Testing Location Simulator</span>
-                    <span style={{ fontSize: "11px", fontWeight: "normal", color: "#92400e" }}>
-                      (QA Tool — Test attendance geofencing without physical movement)
-                    </span>
-                  </div>
-                  <div className="hrms-simulator-actions">
-                    <button
-                      type="button"
-                      className={`hrms-sim-btn ${simulatorMode === "inside" ? "active" : ""}`}
-                      onClick={() => applySimulator("inside")}
-                    >
-                      📍 Inside (10m)
-                    </button>
-                    <button
-                      type="button"
-                      className={`hrms-sim-btn ${simulatorMode === "edge" ? "active" : ""}`}
-                      onClick={() => applySimulator("edge")}
-                    >
-                      ⚠️ Edge (135m)
-                    </button>
-                    <button
-                      type="button"
-                      className={`hrms-sim-btn ${simulatorMode === "outside" ? "active" : ""}`}
-                      onClick={() => applySimulator("outside")}
-                    >
-                      🚫 Outside (500m)
-                    </button>
-                    <button
-                      type="button"
-                      className={`hrms-sim-btn ${simulatorMode === "real" ? "active" : ""}`}
-                      onClick={requestRealGps}
-                    >
-                      📡 Real GPS
-                    </button>
-                  </div>
-                </div>
-                {coords && typeof coords.lat === "number" && typeof coords.lng === "number" && (
-                  <div className="hrms-simulator-status">
-                    Coordinates: <strong>{coords.lat.toFixed(6)}, {coords.lng.toFixed(6)}</strong> | Distance to Office:{" "}
-                    <strong>{currentDistance ?? "—"} meters</strong> (Allowed: {allowedRadius}m)
-                  </div>
-                )}
               </div>
 
               {/* ================================================================
@@ -2597,16 +2541,29 @@ export function AttendancePage() {
                           >
                             Send Request
                           </button>
-                          <button
-                            type="button"
-                            className="hrms-sim-btn active"
-                            disabled={regSubmitting}
-                            onClick={(e) => handleSubmitRegularization(e, true)}
-                            data-testid="direct-regularize-btn"
-                            style={{ padding: "8px 18px", fontSize: "13px" }}
-                          >
-                            {regSubmitting ? "Processing..." : "Regularize Directly"}
-                          </button>
+                          {isViewingOtherEmployee ? (
+                            <button
+                              type="button"
+                              className="hrms-sim-btn active"
+                              disabled={regSubmitting}
+                              onClick={(e) => handleSubmitRegularization(e, true)}
+                              data-testid="direct-regularize-btn"
+                              style={{ padding: "8px 18px", fontSize: "13px" }}
+                            >
+                              {regSubmitting ? "Processing..." : "Regularize Directly"}
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              className="hrms-cal-nav-btn"
+                              disabled={true}
+                              title="Self-approval is not permitted. Administrators cannot directly regularize their own attendance."
+                              data-testid="direct-regularize-self-blocked-btn"
+                              style={{ opacity: 0.5, cursor: "not-allowed", fontSize: "12px", padding: "8px 14px" }}
+                            >
+                              Direct Regularize (Disabled for Self)
+                            </button>
+                          )}
                         </>
                       ) : (
                         <button
@@ -2702,59 +2659,76 @@ export function AttendancePage() {
                                 <span className="status-badge-pending">PENDING</span>
                               </td>
                               <td>
-                                <div className="hrms-approval-actions">
-                                  <button
-                                    type="button"
-                                    className="hrms-cal-nav-btn"
-                                    onClick={() => handleOpenEvidenceModal(item)}
-                                    data-testid={`review-evidence-btn-${item.id}`}
-                                    title="Review site visit and live tracking evidence"
+                                {item.employee_id === (profile as any)?.id ? (
+                                  <span
+                                    className="status-badge-pending"
                                     style={{
-                                      display: "inline-flex",
-                                      alignItems: "center",
-                                      gap: "5px",
-                                      background: item.reason === "Customer site visit" ? "#ecfdf5" : undefined,
-                                      borderColor: item.reason === "Customer site visit" ? "#10b981" : undefined,
-                                      color: item.reason === "Customer site visit" ? "#065f46" : undefined,
-                                      fontWeight: 600,
-                                      fontSize: "12px",
-                                      padding: "5px 10px",
+                                      background: "#fef3c7",
+                                      color: "#92400e",
+                                      borderColor: "#fde68a",
+                                      fontSize: "11px",
+                                      padding: "4px 8px",
+                                      display: "inline-block",
                                     }}
+                                    data-testid={`self-approval-blocked-${item.id}`}
                                   >
-                                    📍 Evidence
-                                  </button>
-                                  <button
-                                    type="button"
-                                    className="hrms-btn-approve"
-                                    disabled={actionLoading}
-                                    onClick={() => handleApproveRequest(item.id, "Approved by Supervisor")}
-                                    data-testid={`approve-btn-${item.id}`}
-                                    title="Approve regularization"
-                                  >
-                                    <IconCheckSquare />
-                                    <span>Approve</span>
-                                  </button>
-                                  <button
-                                    type="button"
-                                    className="hrms-btn-reject"
-                                    disabled={actionLoading}
-                                    onClick={() => handleRejectRequest(item.id, "Rejected (Mark LOP)")}
-                                    data-testid={`reject-btn-${item.id}`}
-                                    title="Reject and mark Loss of Pay"
-                                  >
-                                    <span>Reject</span>
-                                  </button>
-                                  <button
-                                    type="button"
-                                    className="hrms-btn-adjust"
-                                    disabled={actionLoading}
-                                    onClick={() => handleAdjustLeaveRequest(item.id, "Adjusted Against Leave Balance")}
-                                    data-testid={`adjust-leave-btn-${item.id}`}
-                                    title="Adjust against leave balance"
-                                  >
-                                    <span>Adjust Leave</span>
-                                  </button>
-                                </div>
+                                    Self-Request (Cannot Self-Approve)
+                                  </span>
+                                ) : (
+                                  <div className="hrms-approval-actions">
+                                    <button
+                                      type="button"
+                                      className="hrms-cal-nav-btn"
+                                      onClick={() => handleOpenEvidenceModal(item)}
+                                      data-testid={`review-evidence-btn-${item.id}`}
+                                      title="Review site visit and live tracking evidence"
+                                      style={{
+                                        display: "inline-flex",
+                                        alignItems: "center",
+                                        gap: "5px",
+                                        background: item.reason === "Customer site visit" ? "#ecfdf5" : undefined,
+                                        borderColor: item.reason === "Customer site visit" ? "#10b981" : undefined,
+                                        color: item.reason === "Customer site visit" ? "#065f46" : undefined,
+                                        fontWeight: 600,
+                                        fontSize: "12px",
+                                        padding: "5px 10px",
+                                      }}
+                                    >
+                                      📍 Evidence
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="hrms-btn-approve"
+                                      disabled={actionLoading}
+                                      onClick={() => handleApproveRequest(item.id, "Approved by Supervisor")}
+                                      data-testid={`approve-btn-${item.id}`}
+                                      title="Approve regularization"
+                                    >
+                                      <IconCheckSquare />
+                                      <span>Approve</span>
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="hrms-btn-reject"
+                                      disabled={actionLoading}
+                                      onClick={() => handleRejectRequest(item.id, "Rejected (Mark LOP)")}
+                                      data-testid={`reject-btn-${item.id}`}
+                                      title="Reject and mark Loss of Pay"
+                                    >
+                                      <span>Reject</span>
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="hrms-btn-adjust"
+                                      disabled={actionLoading}
+                                      onClick={() => handleAdjustLeaveRequest(item.id, "Adjusted Against Leave Balance")}
+                                      data-testid={`adjust-leave-btn-${item.id}`}
+                                      title="Adjust against leave balance"
+                                    >
+                                      <span>Adjust Leave</span>
+                                    </button>
+                                  </div>
+                                )}
                               </td>
                             </tr>
                           ))}

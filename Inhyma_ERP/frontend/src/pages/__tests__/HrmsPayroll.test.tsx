@@ -462,5 +462,160 @@ describe("HRMS Payroll Module — Comprehensive Frontend Tests", () => {
     const headerStr = String.fromCharCode(...new Uint8Array(arrayBuf.slice(0, 5)));
     expect(headerStr).toBe("%PDF-");
   });
+
+  it("Monthly Payroll Tab: approving payroll retains records on screen and updates status to APPROVED immediately", async () => {
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+
+    // Initial load: PROCESSED / REVIEW status
+    const reviewPayroll = {
+      id: "pay-oct-2026",
+      payroll_month: "2026-10",
+      payroll_year: 2026,
+      month_number: 10,
+      status: "REVIEW",
+      working_days: 26,
+      weekend_days: 4,
+      holiday_days: 1,
+      total_employees: 1,
+      total_gross: 535000,
+      total_deductions: 475969.23,
+      total_net: 59030.77,
+      items: [
+        {
+          id: "item-101",
+          payroll_id: "pay-oct-2026",
+          employee_id: "emp-101",
+          employee_code: "EMP-001",
+          employee_name: "Rahul Sharma",
+          department: "Engineering",
+          designation: "Software Engineer",
+          annual_ctc: 6420000,
+          monthly_ctc: 535000,
+          working_days: 26,
+          present_days: 3,
+          paid_leave_days: 0,
+          holiday_days: 1,
+          weekend_days: 4,
+          lop_days: 23,
+          gross_amount: 535000,
+          lop_deduction: 473269.23,
+          total_deductions: 475969.23,
+          net_salary: 59030.77,
+          status: "REVIEW",
+          earnings_breakdown: [{ name: "Basic Salary", monthly_amount: 267500 }],
+          deductions_breakdown: [{ name: "PF", monthly_amount: 2500 }, { name: "PT", monthly_amount: 200 }],
+          additions_breakdown: [],
+        },
+      ],
+    };
+
+    const approvedPayroll = {
+      ...reviewPayroll,
+      status: "APPROVED",
+      items: [
+        {
+          ...reviewPayroll.items[0],
+          status: "APPROVED",
+        },
+      ],
+    };
+
+    (apiGet as any).mockImplementation((url: string) => {
+      if (url.includes("/monthly/")) {
+        return Promise.resolve({ data: reviewPayroll });
+      }
+      return Promise.resolve({ data: [] });
+    });
+
+    (apiPost as any).mockImplementation((url: string) => {
+      if (url.includes("/approve")) {
+        return Promise.resolve({ data: approvedPayroll });
+      }
+      return Promise.resolve({ data: { success: true } });
+    });
+
+    render(
+      <MemoryRouter>
+        <PayrollPage />
+      </MemoryRouter>
+    );
+
+    fireEvent.click(document.getElementById("tab-monthly-btn")!);
+
+    await waitFor(() => {
+      expect(screen.getByText("Rahul Sharma")).toBeDefined();
+      expect(document.getElementById("btn-approve-payroll")).toBeDefined();
+    });
+
+    // Click Approve Payroll button
+    fireEvent.click(document.getElementById("btn-approve-payroll")!);
+
+    // Verify status updates immediately to APPROVED / LOCKED without losing rows
+    await waitFor(() => {
+      expect(screen.getByText(/STATUS: APPROVED \/ LOCKED/i)).toBeDefined();
+    });
+
+    // Employee row and figures remain visible and show APPROVED
+    expect(screen.getByText("Rahul Sharma")).toBeDefined();
+    expect(screen.getAllByText("APPROVED").length).toBeGreaterThan(0);
+    expect(screen.getByText("Reopen Payroll")).toBeDefined();
+    expect(document.getElementById("btn-approve-payroll")).toBeNull();
+  });
+
+  it("Monthly Payroll Tab: changing month resets stale payroll data and loads selected month", async () => {
+    (apiGet as any).mockImplementation((url: string) => {
+      if (url.includes("/monthly/2026-11")) {
+        return Promise.resolve({
+          data: {
+            id: "pay-nov-2026",
+            payroll_month: "2026-11",
+            status: "REVIEW",
+            working_days: 25,
+            total_employees: 1,
+            total_gross: 40000,
+            total_deductions: 2000,
+            total_net: 38000,
+            items: [
+              {
+                id: "item-nov-1",
+                employee_id: "emp-202",
+                employee_name: "Anita Verma",
+                employee_code: "EMP-002",
+                department: "Sales",
+                working_days: 25,
+                present_days: 25,
+                paid_leave_days: 0,
+                lop_days: 0,
+                gross_amount: 40000,
+                total_deductions: 2000,
+                net_salary: 38000,
+                status: "REVIEW",
+              },
+            ],
+          },
+        });
+      }
+      return Promise.resolve({ data: [] });
+    });
+
+    render(
+      <MemoryRouter>
+        <PayrollPage />
+      </MemoryRouter>
+    );
+
+    fireEvent.click(document.getElementById("tab-monthly-btn")!);
+
+    const monthInput = document.getElementById("payroll-month-select") as HTMLInputElement;
+    expect(monthInput).toBeDefined();
+
+    // Change month to 2026-11
+    fireEvent.change(monthInput, { target: { value: "2026-11" } });
+
+    await waitFor(() => {
+      expect(screen.getByText("Anita Verma")).toBeDefined();
+      expect(screen.queryByText("Rahul Sharma")).toBeNull();
+    });
+  });
 });
 

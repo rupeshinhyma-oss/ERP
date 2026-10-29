@@ -379,6 +379,25 @@ class UserService:
         if employee_code and isinstance(employee_code, str) and await self.user_repository.employee_code_exists(employee_code, exclude_user_id=user_id):
             raise ConflictException("An account is already linked to that employee code.")
 
+        manager_id = fields.get("manager_id")
+        if manager_id is not None:
+            if manager_id == user_id:
+                raise ConflictException("An employee cannot be assigned as their own manager.")
+            mgr = await self.user_repository.get_by_id(manager_id)
+            if not mgr or mgr.deleted_at is not None or not mgr.is_active or mgr.status != UserStatus.ACTIVE:
+                raise ConflictException("Assigned manager must be an active, non-deleted user.")
+
+            # Circular reporting cycle detection: traverse upwards
+            curr = mgr
+            visited = {user_id, mgr.id}
+            while curr and curr.manager_id:
+                if curr.manager_id == user_id:
+                    raise ConflictException("Manager assignment would create a circular reporting relationship.")
+                if curr.manager_id in visited:
+                    break
+                visited.add(curr.manager_id)
+                curr = await self.user_repository.get_by_id(curr.manager_id)
+
         changes: dict[str, Any] = dict(fields)
         if changes:
             changes["updated_by"] = updated_by
