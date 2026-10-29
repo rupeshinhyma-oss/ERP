@@ -338,7 +338,7 @@ async def test_generated_task_appears_in_tasks_list_and_my_tasks(
     task_id = res_fu.json()["data"]["task_id"]
 
     # 1. Admin views all tasks -> task appears
-    res_all = await client.get("/api/v1/tasks?view=all", headers=admin_headers)
+    res_all = await client.get(f"/api/v1/tasks?view=all&search={lead.name}", headers=admin_headers)
     assert res_all.status_code == 200
     all_task_ids = [t["id"] for t in res_all.json()["data"]["items"]]
     assert task_id in all_task_ids

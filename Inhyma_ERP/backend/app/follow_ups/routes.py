@@ -22,6 +22,7 @@ from app.follow_ups.schemas import (
     FollowUpUpdate,
 )
 from app.follow_ups.service import FollowUpService
+from app.rbac.dependencies import require_any_permission
 
 router = APIRouter(prefix="", tags=["Follow Ups"])
 
@@ -67,6 +68,9 @@ async def list_follow_ups(
     page: int | None = Query(default=None, ge=1),
     page_size: int | None = Query(default=None, ge=1, le=500),
     service: FollowUpService = Depends(get_service),
+    current_user: CurrentUser = Depends(
+        require_any_permission("crm.leads.view", "crm.leads.manage", "leads.view", "leads.manage")
+    ),
 ) -> dict:
     effective_limit = page_size if page_size is not None else (limit if limit is not None else 50)
     effective_offset = (
@@ -77,6 +81,7 @@ async def list_follow_ups(
     effective_status = current_status or status
 
     items, total = await service.list_follow_ups(
+        actor=current_user,
         search=search,
         call_type=call_type,
         marketing_person=marketing_person,
@@ -129,8 +134,11 @@ async def list_follow_ups(
 async def create_follow_up(
     payload: FollowUpCreate,
     service: FollowUpService = Depends(get_service),
+    current_user: CurrentUser = Depends(
+        require_any_permission("crm.leads.manage", "leads.manage")
+    ),
 ) -> dict:
-    item = await service.create(payload)
+    item = await service.create(payload, actor=current_user)
     return {
         "success": True,
         "message": "Follow-up log created successfully.",
@@ -142,8 +150,11 @@ async def create_follow_up(
 async def bulk_delete_follow_ups(
     payload: FollowUpBulkDeleteRequest,
     service: FollowUpService = Depends(get_service),
+    current_user: CurrentUser = Depends(
+        require_any_permission("crm.leads.manage", "leads.manage")
+    ),
 ) -> dict:
-    deleted_count = await service.bulk_delete(payload.ids)
+    deleted_count = await service.bulk_delete(payload.ids, actor=current_user)
     return {
         "success": True,
         "message": f"Successfully deleted {deleted_count} follow-up log(s).",
@@ -155,8 +166,11 @@ async def bulk_delete_follow_ups(
 async def get_follow_up(
     item_id: uuid.UUID,
     service: FollowUpService = Depends(get_service),
+    current_user: CurrentUser = Depends(
+        require_any_permission("crm.leads.view", "crm.leads.manage", "leads.view", "leads.manage")
+    ),
 ) -> dict:
-    item = await service.get_by_id(item_id)
+    item = await service.get_by_id(item_id, actor=current_user)
     return {
         "success": True,
         "data": _to_dict(item),
@@ -168,8 +182,11 @@ async def update_follow_up(
     item_id: uuid.UUID,
     payload: FollowUpUpdate,
     service: FollowUpService = Depends(get_service),
+    current_user: CurrentUser = Depends(
+        require_any_permission("crm.leads.manage", "leads.manage")
+    ),
 ) -> dict:
-    item = await service.update(item_id, payload)
+    item = await service.update(item_id, payload, actor=current_user)
     return {
         "success": True,
         "message": "Follow-up log updated successfully.",
@@ -181,8 +198,11 @@ async def update_follow_up(
 async def delete_follow_up(
     item_id: uuid.UUID,
     service: FollowUpService = Depends(get_service),
+    current_user: CurrentUser = Depends(
+        require_any_permission("crm.leads.manage", "leads.manage")
+    ),
 ) -> dict:
-    await service.delete(item_id)
+    await service.delete(item_id, actor=current_user)
     return {
         "success": True,
         "message": "Follow-up log deleted successfully.",

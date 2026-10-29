@@ -639,6 +639,15 @@ class TaskRepository(BaseRepository[Task]):
         res = await self.session.execute(stmt)
         return list(res.scalars().all())
 
+    async def get_voice_note_by_id(self, voice_note_id: uuid.UUID) -> TaskVoiceNote | None:
+        stmt = select(TaskVoiceNote).where(TaskVoiceNote.id == voice_note_id)
+        res = await self.session.execute(stmt)
+        return res.scalar_one_or_none()
+
+    async def delete_voice_note(self, voice_note: TaskVoiceNote) -> None:
+        await self.session.delete(voice_note)
+        await self.session.flush()
+
     # --- Subtask Collaboration (Independent Comments & Attachments) ---
     async def add_subtask_comment(
         self,
@@ -1443,6 +1452,7 @@ class TaskRepository(BaseRepository[Task]):
                 Task.deleted_at.is_(None),
             )
             .options(
+                selectinload(Task.recurring_schedule),
                 selectinload(Task.assignees).selectinload(TaskAssignee.user),
                 selectinload(Task.approver),
                 selectinload(Task.creator),

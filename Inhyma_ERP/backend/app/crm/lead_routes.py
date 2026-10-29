@@ -621,6 +621,10 @@ async def list_follow_ups(
     "/crm/leads/{lead_id}/stage",
     summary="Transition lead to a new stage",
 )
+@router.post(
+    "/crm/leads/{lead_id}/stage-transition",
+    summary="Transition lead to a new stage (alias)",
+)
 async def transition_lead_stage(
     request: Request,
     lead_id: uuid.UUID,

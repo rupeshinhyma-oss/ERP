@@ -562,11 +562,14 @@ async def list_recurring_task_instances(
 @router.post("/recurring/check-reminders", summary="Check and process reminders and escalations for recurring tasks")
 async def check_recurring_reminders(
     request: Request,
+    schedule_id: uuid.UUID | None = None,
     as_of_date: date | None = None,
     current_user: CurrentUser = Depends(require_any_permission("task.create", "task.manage")),
     service: TaskService = Depends(get_task_service),
 ) -> dict:
-    stats = await service.check_recurring_reminders_and_escalations(as_of_date=as_of_date)
+    stats = await service.check_recurring_reminders_and_escalations(
+        schedule_id=schedule_id, as_of_date=as_of_date
+    )
     return build_success_response(data=stats, request_id=getattr(request.state, "request_id", "-"))
 
 
@@ -726,6 +729,19 @@ async def add_task_voice_note(
     serialized = TaskVoiceNoteRead.model_validate(vn).model_dump()
     return build_success_response(
         data=serialized, status_code=201, request_id=getattr(request.state, "request_id", "-")
+    )
+
+
+@router.delete("/voice-notes/{voice_note_id}", summary="Delete a voice note from task")
+async def delete_task_voice_note(
+    voice_note_id: uuid.UUID,
+    request: Request,
+    current_user: CurrentUser = Depends(require_permission("task.view")),
+    service: TaskService = Depends(get_task_service),
+) -> dict:
+    await service.delete_voice_note(voice_note_id, current_user)
+    return build_success_response(
+        data={"deleted": True}, request_id=getattr(request.state, "request_id", "-")
     )
 
 

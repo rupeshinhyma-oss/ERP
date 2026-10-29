@@ -104,6 +104,8 @@ def mock_repo(mock_session):
     repo = MagicMock(spec=TaskRepository)
     repo.session = mock_session
     repo.get_user_permitted_department_ids = AsyncMock(return_value=[uuid.uuid4()])
+    repo.get_task_department = AsyncMock(return_value=(None, None))
+    repo.get_user_managed_department_ids = AsyncMock(return_value=set())
     return repo
 
 
@@ -264,6 +266,7 @@ async def test_effective_permissions_role_and_user_overrides():
 
     # 1. Not super admin
     res_admin = MagicMock()
+    res_admin.scalars.return_value.first.return_value = None
     res_admin.scalar_one_or_none.return_value = None
 
     # 2. Role permissions
@@ -423,9 +426,11 @@ async def test_unauthorized_user_cannot_approve(task_service, sales_employee_use
         version=1,
     )
     assignee_mock = MagicMock()
-    assignee_mock.user_id = sales_employee_user.id
+    assignee_mock.user_id = uuid.uuid4()
     task.assignees = [assignee_mock]
-    task.watchers = []
+    watcher_mock = MagicMock()
+    watcher_mock.user_id = sales_employee_user.id
+    task.watchers = [watcher_mock]
     task_service.repository.get_task_by_id = AsyncMock(return_value=task)
 
     with pytest.raises(ForbiddenException) as exc_info:
@@ -435,6 +440,34 @@ async def test_unauthorized_user_cannot_approve(task_service, sales_employee_use
             current_user=sales_employee_user,
         )
     assert "Only the designated approver" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_assignee_cannot_self_approve(task_service, sales_employee_user):
+    """Task assignee attempting to approve own assigned task is blocked by anti-self-approval."""
+    actual_approver_id = uuid.uuid4()
+    task = Task(
+        id=uuid.uuid4(),
+        title="Assigned Task Approval",
+        created_by=uuid.uuid4(),
+        status=TaskStatus.PENDING_APPROVAL,
+        approval_status="PENDING_APPROVAL",
+        approver_id=actual_approver_id,
+        version=1,
+    )
+    assignee_mock = MagicMock()
+    assignee_mock.user_id = sales_employee_user.id
+    task.assignees = [assignee_mock]
+    task.watchers = []
+    task_service.repository.get_task_by_id = AsyncMock(return_value=task)
+
+    with pytest.raises(ForbiddenException) as exc_info:
+        await task_service.action_approval(
+            task.id,
+            TaskApprovalActionRequest(approved=True, notes="Self approval attempt"),
+            current_user=sales_employee_user,
+        )
+    assert "Anti-self-approval rule" in str(exc_info.value)
 
 
 @pytest.mark.asyncio
@@ -721,4 +754,206 @@ async def test_unauthorized_user_cannot_toggle_reactions(task_service, other_emp
             emoji="👍",
             current_user=other_employee_user,
         )
+
+
+# =========================================================================
+# TEST 9 — Regression: Department Resolution & Sub-resource Authorization
+# =========================================================================
+
+@pytest.mark.asyncio
+async def test_task_view_with_legitimate_missing_department(task_service, sales_employee_user):
+    """Task with no department associated resolves safely to None without errors."""
+    task = Task(
+        id=uuid.uuid4(),
+        title="No Dept Task",
+        created_by=sales_employee_user.id,
+        status=TaskStatus.TODO,
+    )
+    task.assignees = []
+    task.watchers = []
+    task_service.repository.get_task_by_id = AsyncMock(return_value=task)
+    task_service.repository.get_task_department = AsyncMock(return_value=(None, None))
+
+    retrieved = await task_service.get_task(task.id, current_user=sales_employee_user)
+    assert retrieved.id == task.id
+    assert getattr(retrieved, "department_id", None) is None
+    assert getattr(retrieved, "department_name", None) is None
+
+    # Also test repo returning None directly
+    task_service.repository.get_task_department = AsyncMock(return_value=None)
+    retrieved_2 = await task_service.get_task(task.id, current_user=sales_employee_user)
+    assert retrieved_2.id == task.id
+
+
+@pytest.mark.asyncio
+async def test_task_view_propagates_repository_exception(task_service, sales_employee_user):
+    """Unexpected repository database failure is not swallowed and propagates cleanly."""
+    task = Task(
+        id=uuid.uuid4(),
+        title="Failing Task",
+        created_by=sales_employee_user.id,
+        status=TaskStatus.TODO,
+    )
+    task.assignees = []
+    task.watchers = []
+    task_service.repository.get_task_by_id = AsyncMock(return_value=task)
+    task_service.repository.get_task_department = AsyncMock(side_effect=RuntimeError("DB query timeout"))
+
+    with pytest.raises(RuntimeError, match="DB query timeout"):
+        await task_service.get_task(task.id, current_user=sales_employee_user)
+
+
+@pytest.mark.asyncio
+async def test_task_view_rejects_malformed_repository_department_response(task_service, sales_employee_user):
+    """Malformed return values from repository trigger a descriptive ValueError."""
+    task = Task(
+        id=uuid.uuid4(),
+        title="Malformed Dept Task",
+        created_by=sales_employee_user.id,
+        status=TaskStatus.TODO,
+    )
+    task.assignees = []
+    task.watchers = []
+    task_service.repository.get_task_by_id = AsyncMock(return_value=task)
+
+    # 1. Non-tuple scalar
+    task_service.repository.get_task_department = AsyncMock(return_value="malformed_string")
+    with pytest.raises(ValueError, match="Malformed task department response"):
+        await task_service.get_task(task.id, current_user=sales_employee_user)
+
+    # 2. Tuple of wrong length
+    task_service.repository.get_task_department = AsyncMock(return_value=(uuid.uuid4(), "Dept", "Extra"))
+    with pytest.raises(ValueError, match="expected 2-tuple"):
+        await task_service.get_task(task.id, current_user=sales_employee_user)
+
+    # 3. Tuple with wrong type for department ID
+    task_service.repository.get_task_department = AsyncMock(return_value=(12345, "Sales"))
+    with pytest.raises(ValueError, match="expected UUID or None"):
+        await task_service.get_task(task.id, current_user=sales_employee_user)
+
+
+@pytest.mark.asyncio
+async def test_unauthorized_cross_department_attachment_deletion_denied(task_service, other_employee_user):
+    """User without access to the parent task cannot delete an attachment even with known ID."""
+    att_id = uuid.uuid4()
+    parent_task_id = uuid.uuid4()
+    mock_att = MagicMock(id=att_id, task_id=parent_task_id, uploaded_by=uuid.uuid4())
+    task_service.repository.get_attachment_by_id = AsyncMock(return_value=mock_att)
+
+    restricted_task = Task(
+        id=parent_task_id,
+        title="Confidential Parent Task",
+        created_by=uuid.uuid4(),
+        status=TaskStatus.TODO,
+    )
+    restricted_task.assignees = []
+    restricted_task.watchers = []
+    task_service.repository.get_task_by_id = AsyncMock(return_value=restricted_task)
+
+    with pytest.raises(ForbiddenException):
+        await task_service.delete_attachment(att_id, current_user=other_employee_user)
+
+
+@pytest.mark.asyncio
+async def test_unauthorized_user_cannot_delete_peer_attachment(task_service, sales_employee_user):
+    """Assignee cannot delete an attachment uploaded by another user without manager/creator/admin role."""
+    att_id = uuid.uuid4()
+    parent_task_id = uuid.uuid4()
+    mock_att = MagicMock(id=att_id, task_id=parent_task_id, uploaded_by=uuid.uuid4())
+    task_service.repository.get_attachment_by_id = AsyncMock(return_value=mock_att)
+
+    task = Task(
+        id=parent_task_id,
+        title="Team Task",
+        created_by=uuid.uuid4(),
+        status=TaskStatus.IN_PROGRESS,
+    )
+    assignee_mock = MagicMock()
+    assignee_mock.user_id = sales_employee_user.id
+    task.assignees = [assignee_mock]
+    task.watchers = []
+    task_service.repository.get_task_by_id = AsyncMock(return_value=task)
+
+    with pytest.raises(ForbiddenException, match="You do not have permission to delete this attachment"):
+        await task_service.delete_attachment(att_id, current_user=sales_employee_user)
+
+
+@pytest.mark.asyncio
+async def test_authorized_attachment_uploader_or_admin_can_delete(task_service, sales_employee_user, super_admin_user):
+    """Uploader or Super Admin can delete their attachment."""
+    att_id = uuid.uuid4()
+    parent_task_id = uuid.uuid4()
+    mock_att = MagicMock(id=att_id, task_id=parent_task_id, uploaded_by=sales_employee_user.id)
+    task_service.repository.get_attachment_by_id = AsyncMock(return_value=mock_att)
+    task_service.repository.delete_attachment = AsyncMock()
+
+    task = Task(
+        id=parent_task_id,
+        title="Team Task",
+        created_by=sales_employee_user.id,
+        status=TaskStatus.IN_PROGRESS,
+    )
+    task.assignees = []
+    task.watchers = []
+    task_service.repository.get_task_by_id = AsyncMock(return_value=task)
+
+    # Allowed for original uploader
+    await task_service.delete_attachment(att_id, current_user=sales_employee_user)
+    assert task_service.repository.delete_attachment.called
+
+    # Allowed for Super Admin even if uploaded by someone else
+    mock_att.uploaded_by = uuid.uuid4()
+    task_service.repository.delete_attachment.reset_mock()
+    await task_service.delete_attachment(att_id, current_user=super_admin_user)
+    assert task_service.repository.delete_attachment.called
+
+
+@pytest.mark.asyncio
+async def test_delete_missing_attachment_raises_not_found(task_service, sales_employee_user):
+    """Deleting a non-existent attachment returns 404 NotFound."""
+    task_service.repository.get_attachment_by_id = AsyncMock(return_value=None)
+    with pytest.raises(NotFoundException):
+        await task_service.delete_attachment(uuid.uuid4(), current_user=sales_employee_user)
+
+
+@pytest.mark.asyncio
+async def test_voice_note_authorization_and_deletion(task_service, sales_employee_user, other_employee_user, super_admin_user):
+    """Test voice note creation authorization, cross-department deletion denial, and owner deletion."""
+    vn_id = uuid.uuid4()
+    parent_task_id = uuid.uuid4()
+    mock_vn = MagicMock(id=vn_id, task_id=parent_task_id, uploaded_by=sales_employee_user.id, created_by=sales_employee_user.id)
+    task_service.repository.get_voice_note_by_id = AsyncMock(return_value=mock_vn)
+    task_service.repository.delete_voice_note = AsyncMock()
+
+    task = Task(
+        id=parent_task_id,
+        title="Voice Note Task",
+        created_by=sales_employee_user.id,
+        status=TaskStatus.IN_PROGRESS,
+    )
+    task.assignees = []
+    task.watchers = []
+    task_service.repository.get_task_by_id = AsyncMock(return_value=task)
+
+    # 1. Non-existent voice note raises NotFoundException
+    task_service.repository.get_voice_note_by_id = AsyncMock(return_value=None)
+    with pytest.raises(NotFoundException):
+        await task_service.delete_voice_note(uuid.uuid4(), current_user=sales_employee_user)
+
+    # 2. Unauthorized cross-department user denied
+    task_service.repository.get_voice_note_by_id = AsyncMock(return_value=mock_vn)
+    with pytest.raises(ForbiddenException):
+        await task_service.delete_voice_note(vn_id, current_user=other_employee_user)
+
+    # 3. Uploader can delete
+    await task_service.delete_voice_note(vn_id, current_user=sales_employee_user)
+    assert task_service.repository.delete_voice_note.called
+
+    # 4. Super Admin can delete
+    task_service.repository.delete_voice_note.reset_mock()
+    mock_vn.uploaded_by = uuid.uuid4()
+    mock_vn.created_by = mock_vn.uploaded_by
+    await task_service.delete_voice_note(vn_id, current_user=super_admin_user)
+    assert task_service.repository.delete_voice_note.called
+
 

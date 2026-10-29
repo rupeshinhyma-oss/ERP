@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useCallback, useRef } from "react";
+import { useSearchParams } from "react-router-dom";
 import type {
   TaskSummary,
   TaskStatus,
@@ -14,6 +15,7 @@ import { liveClient } from "@/lib/live/liveClient";
 import { CreateTaskModal } from "./CreateTaskModal";
 import { EscalateTaskModal } from "./EscalateTaskModal";
 import { TaskDrawer } from "./TaskDrawer";
+import { getTaskIdFromSearchParams } from "@/lib/tasksDeepLink";
 import {
   IconCheckSquare,
   IconClock,
@@ -61,6 +63,16 @@ export const KanbanPage: React.FC = () => {
 
   // Drag-and-drop state
   const [draggedTaskId, setDraggedTaskId] = useState<string | null>(null);
+
+  const [searchParams] = useSearchParams();
+
+  // Deep linking: open TaskDrawer from URL ?taskId=... or ?id=... or ?task_id=...
+  useEffect(() => {
+    const urlTaskId = getTaskIdFromSearchParams(searchParams);
+    if (urlTaskId) {
+      setSelectedTaskId((prev) => (prev === urlTaskId ? prev : urlTaskId));
+    }
+  }, [searchParams]);
 
   const loadUsers = async () => {
     try {
