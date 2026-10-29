@@ -101,7 +101,6 @@
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | **DASHBOARD** | Dashboard | `/dashboard` | `dashboard` | `dashboard` | Public Authenticated |
 | **CONTACT** | Companies | `/companies` | `companies` | `building` | `company.view` |
-| **CONTACT** | Suppliers | `/suppliers` | `suppliers` | `factory` | `supplier.view` |
 | **CONTACT** | Buyers | `/buyers` | `buyers` | `shoppingBag` | `buyer.view` |
 | **INVENTORY** | Product Stock | `/product-stock/list` | `product-stock` | `stock` | `product.view` |
 | **INVENTORY** | Stock Adjustment | `/stock-adjustment` | `stock-adjustment` | `sliders` | `product.view` |
@@ -123,7 +122,7 @@
 | **COMMUNICATION** | Feed & Announcements | `/feed` | `feed` | `messageSquare` | Authenticated |
 | **PURCHASE** | Local Purchase | `/purchase/localpurchase` | `local-purchases` | `shoppingBag` | `purchase.view` |
 | **PURCHASE** | Import Purchase | `/purchase/importpurchase` | `import-purchases` | `ship` | `purchase.view` |
-| **PURCHASE** | Purchase Suppliers | `/purchase/suppliers` | `purchase-suppliers` | `factory` | `supplier.view` |
+| **PURCHASE** | Suppliers | `/purchase/suppliers` (`/suppliers` redirect) | `purchase-suppliers` | `factory` | `supplier.view` |
 | **REPORTS** | Re-Order | `/reports/re-order` (`/product-reorder/list`) | `reports-reorder` | `refreshCw` | `product.view` |
 | **REPORTS** | Stock Transactions | `/reports/stock-transactions` (`/transaction-report/list`) | `reports-stock-transactions` | `activity` | `product.view` |
 | **REPORTS** | Stock Transaction Detail | `/stock-transaction/list/:id` | `reports-stock-transactions` | `activity` | `product.view` |
@@ -3075,8 +3074,8 @@ Positioned directly underneath the collapsible filter panel, these three metric 
    - Tabs: `All`, `Pending`, `Sales Confirmed`, `Admin Approved`, `Acc. Confirmed`, `Gatepass Created`, `Dispatched`, `Gatepass Cancelled`, `LR`, `Cancelled`.
    - Each tab renders a badge with the exact count of orders matching that status.
    - Clicking a status tab filters the orders list and persists the selected tab in `sessionStorage("sales_process_active_tab")`.
-4. **Including GST Toggle:**
-   - Switch toggle in the header (`Including GST`).
+4. **Top Header Controls (`Including GST` Toggle, Filter, `+ ADD NEW`, & `Export`):**
+   - Switch toggle in the header (`Including GST`), followed by dark slate `#556987` Filter funnel button (collapsed by default), `+ ADD NEW`, and standalone golden-amber `#f59e0b` `Export` button (`.btn.btn-imp-exp` with 14×14 vector download SVG and UTF-8 BOM CSV export).
    - When enabled (default): Amounts display GST-inclusive figures (`amount_inc_gst` / `total_amount`) and the table header displays `Amount (Inc.GST)`.
    - When disabled: Amounts display basic figures (`total_basic`) and the table header switches to `Amount (Ex.GST)`.
    - Flips both KPI card amounts and table column amounts dynamically.
@@ -3271,6 +3270,9 @@ Positioned directly underneath the collapsible filter panel, these three metric 
 - [ ] **Payroll Separation of Duties:** HR user with `hrms.payroll.configure` can calculate batches but receives `HTTP 403 Forbidden` on batch approval. HR user with `hrms.payroll.approve` can approve batches but cannot run batch recalculations.
 - [ ] **Employee Isolation:** Employee A cannot view Employee B's monthly payroll items or payslips (`HTTP 403 Forbidden`).
 - [ ] **Self-Escalation Prevention:** Restricted HR or normal users cannot grant themselves permissions or alter their roles via `/api/v1/rbac/users/{id}/roles` or `/permissions` (`HTTP 403 Forbidden`).
+- [ ] **Asset Summary & Mutation Admin/HR Gate:** Non-Admin/non-HR employees calling `GET /api/v1/hrms/assets/summary` or `PATCH`/`PUT /api/v1/hrms/assets/{id}` (`/status`) receive `HTTP 403 Forbidden`.
+- [ ] **Self-Action Prohibitions (Attendance, Expenses & Payroll):** Admin attempting `direct_regularize=True` on their own attendance receives `HTTP 400 Bad Request`; user attempting to reimburse their own expense (`POST /hrms/expenses/{id}/reimburse`) receives `HTTP 403 Forbidden`; user attempting to edit their own payroll item (`PATCH /hrms/payroll/items/{id}`) or add a self-adjustment (`POST /hrms/payroll/adjustments`) receives `HTTP 400 Bad Request`.
+- [ ] **Payroll Approval Persistence, Deduplication & Manager `"ALL"` Payslip Scope:** Approving monthly payroll (`POST /hrms/payroll/{month}/approve`) returns deduplicated employee rows with `APPROVED` propagated to every child item, and department managers requesting `GET /hrms/payroll/payslips?employee_id=ALL` see `APPROVED` payslips strictly for their managed employees.
 
 ---
 
@@ -3495,4 +3497,35 @@ Positioned directly underneath the collapsible filter panel, these three metric 
 - [ ] **TC-ST-04 (Toolbar Pagination, Live Search, Filter Panel & Action Menu):** On `/stock-transaction/list/:id`, verify default `10` `Items/Page`, `Showing X To Y Of Z Entries` footer, live `Search...` filtering by company/SO#/actor, Funnel filter updating `AVAILABLE QTY` when scoped to a warehouse, clickable `Title` links opening underlying documents, and `Action ▾` exporting `.xlsx` / `.csv` or navigating to `Add Stock Adjustment` / `Add Stock Transfer`.
 
 ---
-*End of Master Features & Testing Specification Manual. Maintained for Inhyma Solutions Enterprise ERP. Last updated: October 29, 2026 (Sections 61-73: Dynamic Organization Company Logo, Product Master Category Rewiring & Floating Duplicate Overlay, Platform Migration Idempotency, Sales Process Workflow & 13-Field Filter Grid, HRMS Phases 2-6 RBAC & Approval Architecture, Feed & Broadcast Open Access & 1-to-1 Employee Messaging, Sale Status Update Side Drawer & Chronological Timeline, Discount Payments Multi-Installment Ledger, Product Re-Order Branch-Scoped Matrix & FIFO Stock Breakup, and Product Stock Transactions Master List & Per-Product Stock Transaction Ledger).*
+
+## 74. PLATFORM ECOSYSTEM: `.env`-Driven Cross-ERP Switching & Strict Local/Hosted Environment Isolation
+
+- **Module Name:** Multi-ERP SSO Routing, Ecosystem Switcher & Environment Configuration
+- **Routes:** `/login`, `/auth/sso-handover`, Topbar `<EcosystemSwitcher />`, Automatic Central Session Landing (`runIncomingSsoHandover` / `enforceCentralLanding`)
+- **Files:**
+  - Frontend Config & Vite: `frontend/.env`, `frontend/.env.defaults`, `frontend/.env.example`, `frontend/vite.config.ts`
+  - Frontend SSO & Switcher: `frontend/src/lib/ssoBridge.ts`, `frontend/src/lib/ecosystemSession.ts`, `frontend/src/components/EcosystemSwitcher.tsx`, `frontend/src/pages/Login.tsx`
+  - Backend Config & Portal Links: `backend/app/core/config.py`, `backend/app/inquiries/routes.py`
+  - Ecosystem Peers (`ERP_Main` & `Yinglima_ERP`): `ERP_Main/backend/app/core/config.py`, `ERP_Main/backend/app/global_auth/landing.py`, `ERP_Main/backend/app/identity_linking/adapters/http_adapter.py`, `ERP_Main/frontend/src/lib/ssoBridge.ts`, `ERP_Main/frontend/src/components/EcosystemSwitcher.tsx`, `ERP_Main/frontend/src/components/AppShell.tsx`, `Yinglima_ERP/frontend/src/lib/ssoBridge.ts`, `Yinglima_ERP/frontend/src/components/EcosystemSwitcher.tsx`
+  - Test Suites: `frontend/src/tests/ssoHandoverSession.test.ts`, `ERP_Main/backend/tests/test_landing_decision.py`, `ERP_Main/frontend/src/tests/AppShell.test.tsx`, `ERP_Main/frontend/src/tests/ssoHandoverSession.test.ts`, `Yinglima_ERP/frontend/src/tests/ssoHandoverSession.test.ts`
+
+### Feature Overview & Specifications
+1. **Zero Hardcoded Localhost or Port Fallbacks:**
+   - All peer ERP frontend/backend URLs and dev server ports are read strictly from environment configuration (`.env` / `.env.defaults` locally; Render environment variables in production).
+   - Local `.env` keys (`Inhyma_ERP/frontend/.env`): `VITE_DEV_PORT=5174`, `VITE_API_BASE_URL=http://127.0.0.1:8002/api/v1`, `VITE_CENTRAL_AUTH_API=http://127.0.0.1:8000/api/v1`, `VITE_CONTROL_PLANE_URL=http://localhost:5170`, `VITE_CONTROL_PLANE_API_URL=http://127.0.0.1:8000`, `VITE_YINGLIMA_URL=http://localhost:5173`, `VITE_YINGLIMA_API_URL=http://127.0.0.1:8001`, `VITE_INHYMA_URL=http://localhost:5174`, `VITE_INHYMA_API_URL=http://127.0.0.1:8002`.
+   - `ERP_Main/backend/.env` local keys: `FRONTEND_URL=http://localhost:5170`, `YINGLIMA_FRONTEND_URL=http://localhost:5173`, `INHYMA_FRONTEND_URL=http://localhost:5174`, `YINGLIMA_API_URL=http://127.0.0.1:8001`, `INHYMA_API_URL=http://127.0.0.1:8002`.
+2. **Environment-First Resolution & Shared-DB Protection:**
+   - When local developers and Render cloud deployments share a single `ERP_Main` database where `erp_instances.base_url` stores `https://*.onrender.com/dashboard`, `ERP_Main` resolves `<KEY>_FRONTEND_URL` from its active environment first and rejects any DB URL belonging to a different environment class (`LOCAL` vs `PRODUCTION`).
+   - On Render (`ENVIRONMENT=production`), `ERP_Main` extracts `YINGLIMA_FRONTEND_URL`, `INHYMA_FRONTEND_URL`, `YINGLIMA_API_URL`, `INHYMA_API_URL`, and deduces `control_plane_url` from `FRONTEND_URL` or `CORS_ALLOWED_ORIGINS`.
+3. **Strict Frontend Cross-Environment Guard (`sanitizeEnvMatchedUrl`):**
+   - `routeForCentralSession()`, `enforceCentralLanding()`, `erpUrlFor()`, `controlPlaneUrl()`, and `planSwitch()` validate every target URL against the current browser hostname (`isLocalNetworkHost`).
+   - A `localhost` or LAN (`192.168.x.x`) tab **never** redirects or switches to a hosted domain (`*.onrender.com`), and a hosted tab **never** redirects or switches to `localhost`/LAN.
+
+### QA Verification Test Cases
+- [ ] **TC-ENV-01 (Single-ERP Local User Cross-Port Redirect Stays Local):** Sign in locally as an Inhyma-only user (e.g. `User D` with `Yinglima: None`, `Inhyma: Active`), then paste `http://localhost:5173` (or `http://localhost:5170`) into a local browser tab. Verify the browser redirects to `http://localhost:5174/dashboard` from `.env` and **never** jumps to `https://inhyma-erp-frontend.onrender.com/dashboard`.
+- [ ] **TC-ENV-02 (Ecosystem Switcher Local vs Hosted Parity):** Sign in locally as a multi-ERP user or Super Admin and switch between `ERP Dashboard`, `Yinglima ERP`, and `Inhyma ERP` via `<EcosystemSwitcher />`. Verify every switch stays on local `.env` URLs (`localhost:5170`, `localhost:5173`, `localhost:5174`). Repeat on Render (`*.onrender.com`) and verify every switch uses the Render `.onrender.com` URLs.
+- [ ] **TC-ENV-03 (Cross-Environment Leak Block):** Verify that even if `erp_instances.base_url` in the shared database contains `https://inhyma-erp-frontend.onrender.com/dashboard`, `planSwitch()` and `routeForCentralSession()` on `localhost` reject hosted URLs and resolve local `.env` targets (or show a clear configuration notice if `.env` is intentionally blank).
+- [ ] **TC-ENV-04 (LAN Hostname Adaptation):** When opening any local ERP frontend over LAN IP (`http://192.168.x.x:5174`), verify cross-ERP links configured as `http://localhost:5173` or `http://localhost:5170` in `.env` automatically adapt their hostname to `192.168.x.x` so LAN devices stay on the LAN network.
+
+---
+*End of Master Features & Testing Specification Manual. Maintained for Inhyma Solutions Enterprise ERP. Last updated: October 29, 2026 (Sections 61-74 & Global Updates: `.env`-Driven Cross-ERP Switching & Strict Local/Hosted Environment Isolation, Local & Import Purchase Multi-Line CSV/Excel Bulk Import, Standardized Golden-Amber Export & Vector SVG Imp/Exp Controls, Suppliers Sidebar Active Highlight & Goods Expected Report Removal, HRMS Integrity Remediation & Payroll Approval Persistence, Dynamic Organization Company Logo, Product Master Category Rewiring & Floating Duplicate Overlay, Platform Migration Idempotency, Sales Process Workflow & 13-Field Filter Grid, Feed & Broadcast Open Access & 1-to-1 Employee Messaging, Sale Status Update Side Drawer & Chronological Timeline, Discount Payments Multi-Installment Ledger, Product Re-Order Branch-Scoped Matrix & FIFO Stock Breakup, and Product Stock Transactions Master List & Per-Product Stock Transaction Ledger).*

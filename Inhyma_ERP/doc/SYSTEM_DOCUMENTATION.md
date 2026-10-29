@@ -1056,6 +1056,7 @@ A user may be assigned any number of Roles simultaneously (`POST /users/{id}/rol
   - `GET /api/v1/sales/discount-payments`: List under-invoicing discount ledger entries.
   - `POST /api/v1/sales/discount-payments`: Record cash discount settlement against a Sales Order reference.
 - **Sale Status Update Side Drawer, Persistent Timeline & Document Badges (`SaleProcessList.tsx`, `SaleProcessDetailModal.tsx`, Migrations `v7a8b9c0d1e2`, `w8b9c0d1e2f3`, `x9c0d1e2f3a4` & `y0d1e2f3a4b5`):**
+  - **Top Header Actions (`SaleProcessList.tsx`):** Displays `Including GST` toggle switch, dark slate `#556987` Filter funnel button (collapsed by default), `+ ADD NEW` button, and standalone golden-amber `#f59e0b` `Export` button (`.btn.btn-imp-exp` with 14×14 vector download SVG icon and UTF-8 BOM CSV export).
   - **Interactive Edit Action:** Clicking the square blue pen button (`title="Update Status"`) next to any row's status badge opens the right-hand **Sale Status Update** `SideDrawer` (`width="480px"`).
   - **Multi-Stage Conditional Controls:**
     - **Pending:** Green banner `Current Status: Pending`, target status options `Sales Confirmed` (default) / `Cancel`, plus **PO File** upload (`.pdf,.png,.jpg,.jpeg,.xlsx,.xls,.doc,.docx`) with size preview & `Clear` action.
@@ -1663,8 +1664,15 @@ SUPABASE_URL=https://mpvzjzunkiqchhhvxrza.supabase.co
 
 ### Frontend Environment Variables (`frontend/.env`)
 ```env
-VITE_API_BASE_URL=http://localhost:8000/api/v1
-VITE_WS_BASE_URL=ws://localhost:8000/api/v1/events/ws
+VITE_DEV_PORT=5174
+VITE_API_BASE_URL=http://127.0.0.1:8002/api/v1
+VITE_CENTRAL_AUTH_API=http://127.0.0.1:8000/api/v1
+VITE_CONTROL_PLANE_URL=http://localhost:5170
+VITE_CONTROL_PLANE_API_URL=http://127.0.0.1:8000
+VITE_YINGLIMA_URL=http://localhost:5173
+VITE_YINGLIMA_API_URL=http://127.0.0.1:8001
+VITE_INHYMA_URL=http://localhost:5174
+VITE_INHYMA_API_URL=http://127.0.0.1:8002
 ```
 
 ### Supabase Storage & Media Asset Persistence Architecture
@@ -1801,6 +1809,16 @@ To eliminate ambiguity between user-editable inputs and system-calculated or for
   - Company-wide export: `Payroll_Export_All_Employees_YYYY_MM.xlsx` (includes summary totals row, auto-fitted columns, bold header styling, and currency formatting).
   - Single employee export: `Payroll_Export_{Employee_Code}_{Name}_YYYY_MM.xlsx`.
   - Empty month safeguard: Returns clean `404 Not Found` with explanatory error if payroll has not been generated for the target period.
+
+#### 3. HRMS Integrity Remediation, Separation-of-Duties & Payroll Approval Persistence (`backend/app/hrms/*`, `frontend/src/pages/hrms/*`)
+- **Strict Separation-of-Duties & Self-Action Guards:**
+  - **Assets (`asset_routes.py`):** `GET /api/v1/hrms/assets/summary`, `PATCH`/`PUT /api/v1/hrms/assets/{id}`, and `PATCH /api/v1/hrms/assets/{id}/status` strictly require Admin or HR privileges (`403 Forbidden` for non-Admin/HR callers).
+  - **Attendance Direct Regularization (`attendance_routes.py`):** `POST /api/v1/hrms/attendance/regularizations` with `direct_regularize=True` is restricted to Administrators (`403 Forbidden` otherwise) and blocks self-regularization (`target_id == ctx.user_id` -> `400 Bad Request`).
+  - **Expense Reimbursement (`expense_routes.py`):** `POST /api/v1/hrms/expenses/{id}/reimburse` strictly forbids self-reimbursement (`exp.employee_id == ctx.user_id` -> `403 Forbidden`).
+  - **Payroll Self-Modification Blocks (`payroll_routes.py`):** `PATCH /api/v1/hrms/payroll/items/{item_id}` and `POST /api/v1/hrms/payroll/adjustments` reject self-edits and self-adjustments (`400 Bad Request`) so another authorized administrator must adjust an operator's own payroll.
+- **Payroll Approval Persistence, Deduplication & Manager Scoping:**
+  - `POST /api/v1/hrms/payroll/{month}/approve` returns the full `_serialize_payroll` payload with employee-level row deduplication and propagates `status = "APPROVED"` across all serialized line items whenever the parent payroll is `APPROVED`.
+  - Department managers querying `GET /api/v1/hrms/payroll/payslips?employee_id=ALL` receive `APPROVED` payslips scoped strictly to `ctx.managed_employee_ids`.
 - **Payroll Privacy & Approval Safeguards**:
   - Unapproved or draft payroll is restricted from standard employees.
   - Employees can only download their own approved payslip data.
@@ -1878,6 +1896,17 @@ Enterprise logos and branding assets are stored directly in PostgreSQL with publ
   - Storing massive Base64 strings in browser `localStorage` causes `QuotaExceededError` crashes on mobile or restricted webview browsers.
   - All brand caching operations are wrapped in graceful quota guards that safely degrade to in-memory state or remote streaming without throwing unhandled exceptions.
 
+### 16.7. Environment-Isolated Cross-ERP URL Resolution & Zero-Hardcoded-Port Architecture
+To guarantee that local development (`localhost` / LAN) and cloud deployments (`Render.com`) can safely operate even when sharing a common central PostgreSQL database without cross-redirecting users between environments:
+- **Zero Hardcoded Host/Port Links:**
+  - Removed all hardcoded `localhost`, `127.0.0.1`, and port (`5170`, `5173`, `5174`, `8000`, `8001`, `8002`) fallbacks across `vite.config.ts`, `src/lib/ssoBridge.ts`, `src/lib/ecosystemSession.ts`, `src/components/EcosystemSwitcher.tsx`, `app/core/config.py`, `app/inquiries/routes.py`, and `ERP_Main` (`landing.py`, `http_adapter.py`, `federation/routes.py`, `federation/security.py`, `AppShell.tsx`).
+- **Environment-First Peer Discovery (`.env` Locally, Platform Env in Cloud):**
+  - **Central Control Plane (`ERP_Main`):** `landing.py` resolves peer dashboard destinations from `<KEY>_FRONTEND_URL` (`YINGLIMA_FRONTEND_URL`, `INHYMA_FRONTEND_URL`) and `FRONTEND_URL` (with `CORS_ALLOWED_ORIGINS` single-origin deduction when `FRONTEND_URL` is omitted on Render) before consulting `erp_instances.base_url`. `http_adapter.py` resolves spoke backend URLs from `<KEY>_API_URL` (`YINGLIMA_API_URL`, `INHYMA_API_URL`) first.
+  - **Spoke & Control-Plane Frontends:** `ssoBridge.ts`, `ecosystemSession.ts`, and `EcosystemSwitcher.tsx` read `VITE_CONTROL_PLANE_URL`, `VITE_CONTROL_PLANE_API_URL`, `VITE_CENTRAL_AUTH_API`, `VITE_YINGLIMA_URL`, `VITE_YINGLIMA_API_URL`, `VITE_INHYMA_URL`, and `VITE_INHYMA_API_URL` from `.env` / `.env.defaults` locally and from Render environment variables in production.
+- **Strict Environment Class Isolation (`LOCAL` vs `PRODUCTION`):**
+  - Backend `_matches_current_environment(url)` (`ERP_Main/backend/app/global_auth/landing.py`, `http_adapter.py`) rejects public hosted domains (`*.onrender.com`) when `ENVIRONMENT=local` and rejects loopback/RFC-1918 LAN addresses when `ENVIRONMENT=production`.
+  - Frontend `sanitizeEnvMatchedUrl(raw)` (`ssoBridge.ts`, `EcosystemSwitcher.tsx`, `ecosystemSession.ts`, `AppShell.tsx`) enforces browser-origin parity across `routeForCentralSession()`, `enforceCentralLanding()`, `erpUrlFor()`, `controlPlaneUrl()`, and `planSwitch()`—preventing a `localhost` session (such as a single-ERP user visiting another local port) from ever jumping to a hosted Render URL, while automatically adapting loopback hostnames (`localhost`) to the browser's LAN IP when accessed over Wi-Fi/LAN.
+
 ---
-*Maintained and verified for Inhyma Solutions Enterprise ERP. Last updated: October 28, 2026 (Federation Resilience, Winsock DNS Platform Gating, Inbound Email DB Deduplication, Seed First-Install Protection, SSO Deactivated Account Guards, HRMS Attendance Calendar & Payroll Excel Export Engine, Sale Status Update & Timeline Drawers, Discount Payments Multi-Installment Ledger, and Product Re-Order Branch-Scoped Matrix & FIFO Stock Breakup).*
+*Maintained and verified for Inhyma Solutions Enterprise ERP. Last updated: October 29, 2026 (Environment-Isolated Cross-ERP URL Resolution & Zero-Hardcoded-Port Architecture, Local & Import Purchase Bulk CSV/Excel Import Engine, Standardized Golden-Amber Export & Vector SVG Imp/Exp Controls, Suppliers Sidebar Active Highlight & Goods Expected Report Removal, HRMS Integrity Remediation & Payroll Approval Persistence, Product Stock Transactions Master List & Per-Product Ledger, Product Re-Order Branch-Scoped Matrix & FIFO Stock Breakup, Sale Status Update & Timeline Drawers, and Discount Payments Multi-Installment Ledger).*
 

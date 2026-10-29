@@ -6,7 +6,7 @@
  */
 
 import { useEffect, useRef, useState } from "react";
-import { ECOSYSTEM_ERPS, planSwitch, warmPeerServices } from "@/lib/ssoBridge";
+import { getEcosystemErps, planSwitch, warmPeerServices, type CentralSessionLike, type Landing } from "@/lib/ssoBridge";
 import { getCachedBrandName, subscribeBrandName } from "@/lib/brand";
 import { establishCentralEcosystemSession, getEcosystemCookie } from "@/lib/ecosystemSession";
 import { Auth } from "@/lib/auth";
@@ -21,6 +21,7 @@ export function EcosystemSwitcher({ currentKey = "yinglima", organizationName }:
   const dropdownRef = useRef<HTMLDivElement>(null);
   const [brandName, setBrandName] = useState(() => getCachedBrandName());
   const [cookie, setCookie] = useState(() => getEcosystemCookie());
+  const [landing, setLanding] = useState<Landing | null>(null);
   const [switchError, setSwitchError] = useState<string | null>(null);
   const [switching, setSwitching] = useState(false);
 
@@ -48,6 +49,10 @@ export function EcosystemSwitcher({ currentKey = "yinglima", organizationName }:
       }).then((freshSession) => {
         if (freshSession) {
           setCookie(freshSession);
+          const freshLanding = (freshSession as unknown as CentralSessionLike)?.landing ?? null;
+          if (freshLanding) {
+            setLanding(freshLanding);
+          }
         }
       });
     }
@@ -58,7 +63,8 @@ export function EcosystemSwitcher({ currentKey = "yinglima", organizationName }:
   const hasWildcard = allowedErps.includes("*");
   const distinctErps = allowedErps.filter((k) => k && k !== "*" && k !== "control-plane");
 
-  const currentErp = ECOSYSTEM_ERPS.find((erp) => erp.key === currentKey);
+  const ecosystemErps = getEcosystemErps(landing);
+  const currentErp = ecosystemErps.find((erp) => erp.key === currentKey);
   const displayName =
     organizationName ||
     (currentKey === "control-plane"
@@ -68,7 +74,7 @@ export function EcosystemSwitcher({ currentKey = "yinglima", organizationName }:
   // Dynamic peer ERP company names resolved from ERP Settings
   const [peerNames, setPeerNames] = useState<Record<string, string>>(() => {
     const initial: Record<string, string> = {};
-    for (const erp of ECOSYSTEM_ERPS) {
+    for (const erp of getEcosystemErps()) {
       if (erp.key === currentKey) {
         initial[erp.key] = displayName;
       } else if (erp.key === "control-plane") {
@@ -83,7 +89,7 @@ export function EcosystemSwitcher({ currentKey = "yinglima", organizationName }:
 
   useEffect(() => {
     let cancelled = false;
-    ECOSYSTEM_ERPS.forEach(async (erp) => {
+    getEcosystemErps(landing).forEach(async (erp) => {
       if (erp.key === currentKey || erp.key === "control-plane" || !erp.apiUrl) return;
       try {
         const resp = await fetch(`${erp.apiUrl}/organizations/public`);
@@ -102,7 +108,7 @@ export function EcosystemSwitcher({ currentKey = "yinglima", organizationName }:
     return () => {
       cancelled = true;
     };
-  }, [currentKey]);
+  }, [currentKey, landing]);
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
@@ -118,29 +124,13 @@ export function EcosystemSwitcher({ currentKey = "yinglima", organizationName }:
     };
   }, [open]);
 
-  /**
-   * Switching to another ERP (or back to the Global Control Panel)
-   * from inside a spoke app is deliberately a PLAIN navigation, not a
-   * forged handover: this app only holds its own local session, never
-   * a Global User session on ERP_Main, so it has no way to mint a
-   * genuine, signed authorization for another app -- that would just
-   * be a second, weaker door next to the real one.
-   *
-   * The real, secure ERP-to-ERP switch (OIDC-style authorize -> code
-   * -> server-to-server token exchange -> local session) lives on
-   * ERP_Main's own ERP Switcher page, gated by that user's actual
-   * Global User session and ACTIVE membership. So this control simply
-   * takes the user there (or to the target app's normal login/session
-   * check) and lets that real flow run -- it never claims to log
-   * anyone in on their behalf.
-   */
   // Wake sleeping services while the person is choosing, and forget an old error when the menu is reopened.
   useEffect(() => {
     if (open) {
       setSwitchError(null);
-      warmPeerServices();
+      warmPeerServices(landing);
     }
-  }, [open]);
+  }, [open, landing]);
 
   const handleSwitch = async (hostUrl: string) => {
     if (switching) return;
@@ -166,9 +156,6 @@ export function EcosystemSwitcher({ currentKey = "yinglima", organizationName }:
     }
   };
 
-  // Hooks above must run on EVERY render; only now decide whether to show anything.  (Returning earlier changed the
-  // number of hooks between renders and crashed the page when the session data arrived after the first render.)
-  // Only users with MORE THAN 1 ERP permission (or Super Admin) get the switch option.
   if (!isSuperAdmin && !hasWildcard && distinctErps.length <= 1) {
     return null;
   }
@@ -263,7 +250,7 @@ export function EcosystemSwitcher({ currentKey = "yinglima", organizationName }:
             Connected Fleet Applications
           </div>
 
-          {ECOSYSTEM_ERPS.filter((erp) => {
+          {ecosystemErps.filter((erp) => {
             if (isSuperAdmin || hasWildcard) return true;
             if (erp.key === "control-plane") return true;
             return allowedErps.map((k) => k.toLowerCase()).includes(erp.key.toLowerCase());

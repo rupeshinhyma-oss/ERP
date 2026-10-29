@@ -83,8 +83,62 @@ class Settings(BaseSettings):
     # -------------------------------------------------------------------
     HOST: str = "0.0.0.0"
     PORT: int = 8000
-    BACKEND_URL: str = "http://localhost:8000"
-    FRONTEND_URL: str = "http://localhost:5170"
+    BACKEND_URL: str = ""
+    FRONTEND_URL: str = ""
+    YINGLIMA_FRONTEND_URL: str = ""
+    INHYMA_FRONTEND_URL: str = ""
+    YINGLIMA_API_URL: str = ""
+    INHYMA_API_URL: str = ""
+
+    def get_erp_frontend_url(self, erp_key: str) -> str:
+        """
+        Return the configured frontend dashboard URL for `erp_key` from `.env` / OS environment
+        (`<KEY>_FRONTEND_URL`), normalized with `/dashboard`, or `""` when unset.
+        """
+        import os
+
+        key_norm = (erp_key or "").strip().lower().replace("-", "_")
+        candidates: list[str] = []
+        if key_norm in ("yinglima", "yinglima_erp", "erp_02"):
+            candidates.extend([self.YINGLIMA_FRONTEND_URL, os.environ.get("YINGLIMA_FRONTEND_URL", "")])
+        elif key_norm in ("inhyma", "inhyma_erp", "erp_01"):
+            candidates.extend([self.INHYMA_FRONTEND_URL, os.environ.get("INHYMA_FRONTEND_URL", "")])
+        if key_norm:
+            env_name = f"{key_norm.upper()}_FRONTEND_URL"
+            candidates.extend([getattr(self, env_name, ""), os.environ.get(env_name, "")])
+
+        for raw in candidates:
+            cleaned = (raw or "").strip().rstrip("/")
+            if cleaned:
+                if cleaned.endswith("/dashboard"):
+                    cleaned = cleaned[: -len("/dashboard")].rstrip("/")
+                return f"{cleaned}/dashboard"
+        return ""
+
+    def get_erp_api_url(self, erp_key: str) -> str:
+        """
+        Return the configured internal API base origin for `erp_key` from `.env` / OS environment
+        (`<KEY>_API_URL`), without trailing slash, or `""` when unset.
+        """
+        import os
+
+        key_norm = (erp_key or "").strip().lower().replace("-", "_")
+        candidates: list[str] = []
+        if key_norm in ("yinglima", "yinglima_erp", "erp_02"):
+            candidates.extend([self.YINGLIMA_API_URL, os.environ.get("YINGLIMA_API_URL", "")])
+        elif key_norm in ("inhyma", "inhyma_erp", "erp_01"):
+            candidates.extend([self.INHYMA_API_URL, os.environ.get("INHYMA_API_URL", "")])
+        if key_norm:
+            env_name = f"{key_norm.upper()}_API_URL"
+            candidates.extend([getattr(self, env_name, ""), os.environ.get(env_name, "")])
+
+        for raw in candidates:
+            cleaned = (raw or "").strip().rstrip("/")
+            if cleaned:
+                if cleaned.endswith("/api/v1"):
+                    cleaned = cleaned[: -len("/api/v1")].rstrip("/")
+                return cleaned
+        return ""
 
     # -------------------------------------------------------------------
     # Database
@@ -138,8 +192,8 @@ class Settings(BaseSettings):
     # boot in production with the literal "*" origin configured.
     # -------------------------------------------------------------------
     CORS_ALLOWED_ORIGINS: str = (
-        "http://localhost:5170,http://localhost:5173,http://localhost:5174,http://localhost:5175,"
-        "http://127.0.0.1:5170,http://127.0.0.1:5173,http://127.0.0.1:5174,http://127.0.0.1:5175"
+        ""
+        ""
     )
     CORS_ALLOW_CREDENTIALS: bool = True
     ALLOW_LOCAL_URLS: bool = False
@@ -256,7 +310,7 @@ class Settings(BaseSettings):
     # (via JWKS) -- the private key never leaves ERP_Main (Step 5).
     # -------------------------------------------------------------------
     FEDERATION_ISSUER: str = Field(
-        default="http://127.0.0.1:8000",
+        default="",
         description="This ERP_Main instance's OIDC issuer URL. Must exactly match what ERPs are "
         "configured to expect as `iss` -- see app.federation.",
     )

@@ -5,6 +5,11 @@ import { planSwitch, processIncomingSsoHandover, resetIncomingSsoHandoverForTest
 import * as ecosystemModule from "../lib/ecosystemSession";
 import { clearEcosystemCookie, getEcosystemCookie, setEcosystemCookie } from "../lib/ecosystemSession";
 
+const REAL_LOCATION = window.location;
+const restoreWindowLocation = () => {
+  Object.defineProperty(window, "location", { value: REAL_LOCATION, writable: true, configurable: true });
+};
+
 const ticket = (sid: string, email = "u@x.com") =>
   btoa(JSON.stringify({ sig: "ihm_erp_sso_v1", ts: Date.now(), session_id: sid, email, user: email, role: "global_user", allowed_erps: ["*"] }));
 const exchanged = (sid: string) => ({ data: { principal_type: "global_user", access_token: "A-" + sid, expires_at: "2099-01-01T00:00:00Z", session: { email: "u@x.com", display_name: "U", role: "global_user", user_type: "global_user", allowed_erps: ["*"] } } });
@@ -12,7 +17,7 @@ const arrive = (t: string) => window.history.pushState({}, "", "/login?sso_hando
 const wipeCookies = () => document.cookie.split(";").forEach((c) => { document.cookie = c.split("=")[0].trim() + "=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/"; });
 
 describe("arriving at the dashboard from an ERP: a fresh handover always wins, and failures explain themselves", () => {
-  beforeEach(() => { resetIncomingSsoHandoverForTests(); localStorage.clear(); sessionStorage.clear(); wipeCookies(); window.history.pushState({}, "", "/login"); vi.restoreAllMocks(); vi.spyOn(apiModule, "apiGet").mockResolvedValue({ data: {} } as never); });
+  beforeEach(() => { restoreWindowLocation(); resetIncomingSsoHandoverForTests(); localStorage.clear(); sessionStorage.clear(); wipeCookies(); window.history.pushState({}, "", "/login"); vi.restoreAllMocks(); vi.spyOn(apiModule, "apiGet").mockResolvedValue({ data: {} } as never); });
 
   it("a stale saved dashboard session does NOT block a new handover", async () => {
     Auth.setSession("STALE", { email: "u@x.com" } as never, "global_user", undefined, "OLD-SESSION");
@@ -49,14 +54,14 @@ describe("arriving at the dashboard from an ERP: a fresh handover always wins, a
 });
 
 describe("signing out one login never wipes another login's shared cookie", () => {
-  beforeEach(() => { localStorage.clear(); sessionStorage.clear(); wipeCookies(); });
+  beforeEach(() => { restoreWindowLocation(); localStorage.clear(); sessionStorage.clear(); wipeCookies(); });
   const cookieFor = (sid: string) => ({ session_id: sid, email: "u@x.com", display_name: "U", role: "global_user", user_type: "global_user", allowed_erps: ["*"] }) as never;
   it("keeps the cookie when it belongs to a different session", () => { setEcosystemCookie(cookieFor("LOGIN-B")); clearEcosystemCookie("LOGIN-A"); expect(getEcosystemCookie()?.session_id).toBe("LOGIN-B"); });
   it("removes the cookie when it is this login's own", () => { setEcosystemCookie(cookieFor("LOGIN-A")); clearEcosystemCookie("LOGIN-A"); expect(getEcosystemCookie()).toBeNull(); });
 });
 
 describe("reliability: one shared handover, no blind redirects, honest messages", () => {
-  beforeEach(() => { localStorage.clear(); sessionStorage.clear(); wipeCookies(); window.history.pushState({}, "", "/login"); vi.restoreAllMocks(); resetIncomingSsoHandoverForTests(); });
+  beforeEach(() => { restoreWindowLocation(); localStorage.clear(); sessionStorage.clear(); wipeCookies(); window.history.pushState({}, "", "/login"); vi.restoreAllMocks(); resetIncomingSsoHandoverForTests(); });
 
   it("simultaneous callers (App, AppShell, Login, StrictMode) share ONE exchange", async () => {
     const post = vi.spyOn(apiModule, "apiPost").mockResolvedValue(exchanged("ONCE") as never);
@@ -92,7 +97,7 @@ describe("reliability: one shared handover, no blind redirects, honest messages"
 
   it("a failure never bounces the browser to a made-up dashboard address", async () => {
     const replace = vi.fn();
-    Object.defineProperty(window, "location", { value: { ...window.location, replace, assign: vi.fn(), href: window.location.href, search: window.location.search, pathname: window.location.pathname, hash: "", hostname: "app.example.com", origin: "https://app.example.com" }, writable: true });
+    Object.defineProperty(window, "location", { value: { ...REAL_LOCATION, replace, assign: vi.fn(), href: REAL_LOCATION.href, search: REAL_LOCATION.search, pathname: REAL_LOCATION.pathname, hash: "", hostname: "app.example.com", origin: "https://app.example.com" }, writable: true, configurable: true });
     vi.spyOn(apiModule, "apiGet").mockResolvedValue({ data: {} } as never);
     vi.spyOn(apiModule, "apiPost").mockRejectedValue(Object.assign(new Error("boom"), { status: 500 }));
     vi.useFakeTimers();
@@ -104,17 +109,25 @@ describe("reliability: one shared handover, no blind redirects, honest messages"
       expect(replace).not.toHaveBeenCalled();
     } finally {
       vi.useRealTimers();
+      restoreWindowLocation();
     }
   });
 });
 
 describe("planSwitch: say what is wrong BEFORE leaving the page", () => {
-  beforeEach(() => { localStorage.clear(); sessionStorage.clear(); wipeCookies(); vi.restoreAllMocks(); });
+  beforeEach(() => { restoreWindowLocation(); localStorage.clear(); sessionStorage.clear(); wipeCookies(); vi.restoreAllMocks(); });
   const signIn = (sid: string) => Auth.setSession("T", { email: "u@x.com" } as never, "global_user", undefined, sid);
 
   it("refuses when the target address is not configured", async () => {
     signIn("S1");
     const plan = await planSwitch("");
+    expect(plan.ok).toBe(false);
+    expect(!plan.ok && plan.message).toMatch(/not configured/i);
+  });
+
+  it("refuses cross-environment switching from localhost to a hosted Render URL", async () => {
+    signIn("S-ENV");
+    const plan = await planSwitch("https://inhyma-erp-frontend.onrender.com/dashboard");
     expect(plan.ok).toBe(false);
     expect(!plan.ok && plan.message).toMatch(/not configured/i);
   });

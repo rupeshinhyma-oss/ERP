@@ -197,7 +197,7 @@ export function LoginPage() {
         if (isAbortError(e)) {
           backendUnreachable = true;
           localError = new Error(
-            "Inhyma ERP backend service (port 8002) timed out. Please ensure the backend server is running and try again.",
+            "Inhyma ERP backend service timed out. Please ensure the backend server is running and try again.",
           );
         } else {
           backendUnreachable =
@@ -249,7 +249,7 @@ export function LoginPage() {
           if (backendUnreachable) {
             throw (
               localError ??
-              new Error("Inhyma ERP backend service (port 8002) is currently unavailable. Please try again.")
+              new Error("Inhyma ERP backend service is currently unavailable. Please try again.")
             );
           }
           window.location.href = createSsoHandoverUrlFromSession(`${window.location.origin}/dashboard`, central);

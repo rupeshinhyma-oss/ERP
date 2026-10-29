@@ -62,7 +62,7 @@ async def create_id_token(
     jti = uuid.uuid4().hex
 
     payload: dict[str, Any] = {
-        "iss": settings.FEDERATION_ISSUER,
+        "iss": (settings.FEDERATION_ISSUER or settings.BACKEND_URL).rstrip("/"),
         "sub": str(global_user_id),
         "aud": audience_client_id,
         "exp": expires_at,
@@ -109,7 +109,7 @@ async def decode_id_token(
             token,
             public_pem,
             algorithms=["RS256"],
-            issuer=settings.FEDERATION_ISSUER,
+            issuer=(settings.FEDERATION_ISSUER or settings.BACKEND_URL).rstrip("/"),
             audience=expected_audience,
             options={"require": ["exp", "iat", "iss", "aud", "sub", "jti", "type"]},
         )

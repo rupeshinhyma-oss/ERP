@@ -37,6 +37,10 @@ services:
         sync: false
       - key: INHYMA_API_URL
         sync: false
+      - key: YINGLIMA_FRONTEND_URL
+        sync: false
+      - key: INHYMA_FRONTEND_URL
+        sync: false
 
   - type: web
     name: erp-main-frontend
@@ -57,17 +61,17 @@ services:
         sync: false
       - key: VITE_CENTRAL_AUTH_API
         sync: false
-      - key: VITE_COOKIE_DOMAIN
+      - key: VITE_CONTROL_PLANE_API_URL
         sync: false
       - key: VITE_YINGLIMA_URL
         sync: false
-      - key: VITE_INHYMA_URL
-        sync: false
-      - key: VITE_CONTROL_PLANE_API_URL
-        sync: false
       - key: VITE_YINGLIMA_API_URL
         sync: false
+      - key: VITE_INHYMA_URL
+        sync: false
       - key: VITE_INHYMA_API_URL
+        sync: false
+      - key: VITE_COOKIE_DOMAIN
         sync: false
 
   # =============================================================================
@@ -152,6 +156,16 @@ services:
         sync: false
       - key: VITE_CENTRAL_AUTH_API
         sync: false
+      - key: VITE_CONTROL_PLANE_API_URL
+        sync: false
+      - key: VITE_YINGLIMA_URL
+        sync: false
+      - key: VITE_YINGLIMA_API_URL
+        sync: false
+      - key: VITE_INHYMA_URL
+        sync: false
+      - key: VITE_INHYMA_API_URL
+        sync: false
       - key: VITE_COOKIE_DOMAIN
         sync: false
 
@@ -224,6 +238,16 @@ services:
       - key: VITE_CONTROL_PLANE_URL
         sync: false
       - key: VITE_CENTRAL_AUTH_API
+        sync: false
+      - key: VITE_CONTROL_PLANE_API_URL
+        sync: false
+      - key: VITE_YINGLIMA_URL
+        sync: false
+      - key: VITE_YINGLIMA_API_URL
+        sync: false
+      - key: VITE_INHYMA_URL
+        sync: false
+      - key: VITE_INHYMA_API_URL
         sync: false
       - key: VITE_COOKIE_DOMAIN
         sync: false

@@ -1,51 +1,15 @@
 """
 Seed the ERP Registry (Phase 3 update).
 
-Registers/reconciles both Yinglima and Inhyma as real ERP instances. This
-replaces the Phase 2 version of this script, which correctly registered
-Inhyma only as an INACTIVE placeholder because Inhyma did not exist in
-the repository at all at that time (Phase 2 Step 19). It now does.
-
-Capability reconciliation (Phase 3 Steps 4-5, 29)
---------------------------------------------------
-The business-capability list below for each ERP is derived from actually
-reading each ERP's own `app/api/v1/router.py` `include_router(...)` calls
-at the time this script was last updated -- NOT from migration history,
-which the Phase 3 brief explicitly warns can be stale (Inhyma's own
-migration history contains tasks-related migrations from before and
-after functionality changes; what matters is the CURRENT router). Pure
-platform infrastructure common to every ERP (auth, users, rbac, cache,
-audit, trash, search, queue, events, and the generic `masters.*` lookup
-tables) is deliberately excluded from this "capabilities" list -- it
-describes what makes each ERP's business offering distinct, not its
-internal plumbing, mirroring the Phase 2 script's own original choice.
-
-Confirmed identical for both ERPs: buyers, suppliers, products,
-inquiries, planning, organizations.
-Confirmed Inhyma-only (verified live in Inhyma's router, not just its
-migration history): notifications, tasks.
-
-Inhyma's status decision (Phase 3 Step 29)
---------------------------------------------
-INACTIVE, not ACTIVE. The application itself is real, complete, and
-independently tested (see docs/INHYMA_AUDIT.md) -- but as of this
-writing Inhyma has no live `.env` / deployed configuration in this
-environment (only `.env.example`), unlike Yinglima which does. Per Step
-29's own bar -- "ACTIVE should mean its configured deployment is
-genuinely eligible for platform interaction" -- an application that has
-never been deployed with real configuration is not yet eligible for
-platform interaction, regardless of how complete its code is. This is a
-deliberate, documented judgment call, not a default; revisit once Inhyma
-has a real deployment.
-
-Run with:
-    cd backend && python -m scripts.seed_registry
+Registers/reconciles both Yinglima and Inhyma as real ERP instances.
+All frontend URLs are sourced strictly from environment configuration
+(`YINGLIMA_FRONTEND_URL` and `INHYMA_FRONTEND_URL` in `.env` locally or
+platform environment variables in production) with zero hard-coded URLs/ports.
 """
 
 from __future__ import annotations
 
 import asyncio
-import os
 
 from app.core.config import EnvironmentEnum, settings
 from app.database.base import Base
@@ -55,7 +19,6 @@ from app.erp_registry.repository import ErpInstanceRepository, ErpModuleReposito
 from app.erp_registry.schemas import ErpInstanceCreate, ErpInstanceUpdate, ErpModuleCreate
 from app.erp_registry.service import ErpRegistryService
 
-# Business capabilities confirmed live in BOTH ERPs' current routers.
 _SHARED_MODULES: list[tuple[str, str]] = [
     ("buyers", "Buyer & Client Management"),
     ("suppliers", "Supplier Directory"),
@@ -65,35 +28,22 @@ _SHARED_MODULES: list[tuple[str, str]] = [
     ("organizations", "Organization Profile"),
 ]
 
-# Business capabilities confirmed live ONLY in Inhyma's current router
-# (app.notifications.routes / app.tasks.routes are both registered in
-# Inhyma_ERP/backend/app/api/v1/router.py; neither exists in Yinglima's).
 _INHYMA_ONLY_MODULES: list[tuple[str, str]] = [
     ("notifications", "Notifications"),
     ("tasks", "Task & Project Management"),
 ]
 
 
-def _dashboard_url(env_key: str, local_default: str) -> str:
+def _dashboard_url(erp_key: str, env_key: str) -> str:
     """
-    Resolve an ERP frontend dashboard URL (the registry ``base_url``).
-
-    Reads ``<env_key>`` (the ERP's public FRONTEND origin, e.g.
-    ``https://yinglima-erp-frontend.onrender.com``) and appends ``/dashboard``.
-    Falls back to the localhost default ONLY in local/test environments; in
-    any other environment a missing value is a hard, readable error instead of
-    a silent localhost registration (which the SSRF validator rejects anyway).
+    Resolve an ERP frontend dashboard URL strictly from `<env_key>` in `.env` / OS environment.
+    Never falls back to hard-coded localhost ports.
     """
-    origin = os.environ.get(env_key, "").strip().rstrip("/")
-    if origin:
-        if origin.endswith("/dashboard"):
-            origin = origin[: -len("/dashboard")]
-        return f"{origin}/dashboard"
-    if settings.ENVIRONMENT in (EnvironmentEnum.LOCAL, EnvironmentEnum.TEST):
-        return local_default
+    resolved = settings.get_erp_frontend_url(erp_key)
+    if resolved:
+        return resolved
     raise RuntimeError(
-        f"{env_key} is not set. Set it to the public URL of that ERP's frontend "
-        f"(e.g. https://<name>.onrender.com) in the ERP_Main service environment."
+        f"{env_key} is not set. Set it in `.env` (for local development) or in the ERP_Main service environment."
     )
 
 
@@ -121,8 +71,9 @@ async def seed() -> None:
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
-    yinglima_url = _dashboard_url("YINGLIMA_FRONTEND_URL", "http://localhost:5173/dashboard")
-    inhyma_url = _dashboard_url("INHYMA_FRONTEND_URL", "http://localhost:5174/dashboard")
+    yinglima_url = _dashboard_url("yinglima", "YINGLIMA_FRONTEND_URL")
+    inhyma_url = _dashboard_url("inhyma", "INHYMA_FRONTEND_URL")
+    is_local = settings.ENVIRONMENT in (EnvironmentEnum.LOCAL, EnvironmentEnum.TEST)
 
     session_factory = get_sessionmaker()
     async with session_factory() as db:
@@ -142,9 +93,8 @@ async def seed() -> None:
                 base_url=yinglima_url,
             ),
         )
-        # Config comes from the environment ONLY when it is explicitly set; a local run with no value must
-        # never overwrite the live registry (local and hosted runs share one database).
-        if not yinglima_is_new and os.environ.get("YINGLIMA_FRONTEND_URL", "").strip():
+        # Never overwrite an existing shared DB row from a local run so production's registry stays intact.
+        if not yinglima_is_new and not is_local:
             await service.update_metadata(
                 yinglima.id,
                 ErpInstanceUpdate(base_url=yinglima_url),
@@ -158,16 +108,12 @@ async def seed() -> None:
                 key="inhyma",
                 name="Inhyma ERP",
                 display_name="Inhyma ERP",
-                description=(
-                    "Independent ERP for Inhyma's own operations. A complete, independently-tested "
-                    f"application running at {inhyma_url}."
-                ),
+                description="Independent ERP for Inhyma's own operations.",
                 status=ErpStatus.ACTIVE,
                 base_url=inhyma_url,
             ),
         )
-        # Never re-activate or re-describe an existing ERP: an operator may have suspended or edited it on purpose.
-        if not inhyma_is_new and os.environ.get("INHYMA_FRONTEND_URL", "").strip():
+        if not inhyma_is_new and not is_local:
             await service.update_metadata(inhyma.id, ErpInstanceUpdate(base_url=inhyma_url))
             print("Updated inhyma's base_url from INHYMA_FRONTEND_URL.")
         await _declare_modules(service, inhyma.id, _SHARED_MODULES + _INHYMA_ONLY_MODULES)

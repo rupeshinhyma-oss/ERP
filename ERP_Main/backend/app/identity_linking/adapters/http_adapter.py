@@ -9,12 +9,14 @@ with structured domain exceptions.
 
 from __future__ import annotations
 
+import ipaddress
 import logging
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 
-from app.core.config import settings
+from app.core.config import EnvironmentEnum, settings
 from app.core.exceptions import BadRequestException
 from app.erp_registry.models import ErpInstance
 from app.identity_linking.adapters.base import BaseErpProvisioningAdapter
@@ -34,6 +36,19 @@ from app.identity_linking.exceptions import (
 logger = logging.getLogger(__name__)
 
 
+def _is_local_url(url: str) -> bool:
+    host = (urlparse(url).hostname or "").strip().lower()
+    if not host:
+        return False
+    if host in {"localhost", "localhost.localdomain", "0.0.0.0"} or host.endswith(".local"):
+        return True
+    try:
+        ip = ipaddress.ip_address(host)
+        return bool(ip.is_loopback or ip.is_private or ip.is_unspecified)
+    except ValueError:
+        return False
+
+
 class HttpErpProvisioningAdapter(BaseErpProvisioningAdapter):
     """Standard adapter communicating with ERPs via their internal REST endpoints."""
 
@@ -41,31 +56,35 @@ class HttpErpProvisioningAdapter(BaseErpProvisioningAdapter):
         self.timeout = timeout
 
     def _resolve_erp_api_url(self, erp: ErpInstance) -> str:
-        import os
-        from app.core.config import EnvironmentEnum, settings
+        """
+        Resolve the target ERP's backend API origin strictly from `.env` / environment
+        (`<KEY>_API_URL`), falling back to `erp.base_url` ONLY when environment-compatible.
+        Never falls back to hard-coded localhost ports or cross-environment addresses.
+        """
+        configured = settings.get_erp_api_url(erp.key)
+        env = getattr(settings, "ENVIRONMENT", None)
 
-        # Check environment variable overrides first (e.g. YINGLIMA_API_URL or INHYMA_API_URL)
-        clean_key = (erp.key or "").upper().replace("-", "_")
-        env_override = os.environ.get(f"{clean_key}_API_URL")
-        if env_override:
-            return env_override.strip().rstrip("/")
+        if configured:
+            if env == EnvironmentEnum.LOCAL and not _is_local_url(configured):
+                return ""
+            if env == EnvironmentEnum.PRODUCTION and _is_local_url(configured):
+                return ""
+            return configured
 
         base = (erp.base_url or "").strip().rstrip("/")
         if base.endswith("/dashboard"):
-            base = base[:-len("/dashboard")].rstrip("/")
+            base = base[: -len("/dashboard")].rstrip("/")
+        if not base:
+            return ""
 
-        is_local_env = getattr(settings, "ENVIRONMENT", None) in (EnvironmentEnum.LOCAL, EnvironmentEnum.TEST)
-        key_norm = (erp.key or "").lower().replace("-", "_")
-
-        if is_local_env or not base or "localhost" in base or "127.0.0.1" in base or ":5173" in base or ":5174" in base or "-frontend" in base:
-            if key_norm in ("yinglima", "yinglima_erp", "erp_02", "erp-02"):
-                return os.environ.get("YINGLIMA_API_URL", "http://127.0.0.1:8001").rstrip("/")
-            if key_norm in ("inhyma", "inhyma_erp", "erp_01", "erp-01"):
-                return os.environ.get("INHYMA_API_URL", "http://127.0.0.1:8002").rstrip("/")
+        if env == EnvironmentEnum.LOCAL and not _is_local_url(base):
+            return ""
+        if env == EnvironmentEnum.PRODUCTION and _is_local_url(base):
+            return ""
 
         if "-frontend." in base:
             return base.replace("-frontend.", "-backend.")
-        elif "-frontend" in base:
+        if "-frontend" in base:
             return base.replace("-frontend", "-backend")
 
         return base
@@ -111,10 +130,13 @@ class HttpErpProvisioningAdapter(BaseErpProvisioningAdapter):
         Returns data dictionary if user exists, None if user does not exist,
         or raises structured ErpProvisioningError on communication/remote errors.
         """
-        if not erp.base_url:
+        api_base = self._resolve_erp_api_url(erp)
+        if not api_base:
+            clean_key = (erp.key or "ERP").upper().replace("-", "_")
+            msg = f"No API URL configured for ERP instance '{erp.key}'. Set {clean_key}_API_URL in .env / environment."
             if raise_errors:
-                raise ErpUnreachableError(erp.key, "No base_url configured for ERP instance")
-            logger.warning("ERP instance %s has no base_url configured; skipping live check.", erp.key)
+                raise ErpUnreachableError(erp.key, msg)
+            logger.warning("%s Skipping live check.", msg)
             return None
 
         try:
@@ -124,7 +146,7 @@ class HttpErpProvisioningAdapter(BaseErpProvisioningAdapter):
             logger.warning("Missing or placeholder federation credential; skipping live check for ERP %s.", erp.key)
             return None
 
-        url = f"{self._resolve_erp_api_url(erp)}/api/v1/internal/users/check"
+        url = f"{api_base}/api/v1/internal/users/check"
         payload = {"identifier": email_or_username}
 
         try:
@@ -208,10 +230,15 @@ class HttpErpProvisioningAdapter(BaseErpProvisioningAdapter):
         idempotency_key: str | None = None,
     ) -> dict[str, Any]:
         """Provision a minimal user account in the target ERP."""
-        if not erp.base_url:
-            raise ErpUnreachableError(erp.key, f"ERP instance '{erp.key}' has no base_url configured for provisioning.")
+        api_base = self._resolve_erp_api_url(erp)
+        if not api_base:
+            clean_key = (erp.key or "ERP").upper().replace("-", "_")
+            raise ErpUnreachableError(
+                erp.key,
+                f"ERP instance '{erp.key}' has no API URL configured for this environment. Set {clean_key}_API_URL in .env / environment.",
+            )
 
-        url = f"{self._resolve_erp_api_url(erp)}/api/v1/internal/users/provision"
+        url = f"{api_base}/api/v1/internal/users/provision"
         payload = {
             "email": email,
             "display_name": display_name,
@@ -271,15 +298,16 @@ class HttpErpProvisioningAdapter(BaseErpProvisioningAdapter):
         Deliberately soft-fails (logs a warning, returns None) rather than
         raising when the target ERP can't be reached or configured.
         """
-        if not erp.base_url:
+        api_base = self._resolve_erp_api_url(erp)
+        if not api_base:
             logger.warning(
-                "ERP instance %s has no base_url configured; cannot sync local access for %s.",
+                "ERP instance %s has no API URL configured for this environment; cannot sync local access for %s.",
                 erp.key,
                 local_user_id,
             )
             return None
 
-        url = f"{self._resolve_erp_api_url(erp)}/api/v1/internal/users/{local_user_id}/access"
+        url = f"{api_base}/api/v1/internal/users/{local_user_id}/access"
         payload = {"allow_login": allow_login, "reason": reason}
 
         try:
@@ -309,15 +337,16 @@ class HttpErpProvisioningAdapter(BaseErpProvisioningAdapter):
         Remove/deprovision a local user account in the target spoke ERP.
         Deliberately soft-fails (logs a warning, returns None) rather than raising if unreachable.
         """
-        if not erp.base_url:
+        api_base = self._resolve_erp_api_url(erp)
+        if not api_base:
             logger.warning(
-                "ERP instance %s has no base_url configured; cannot deprovision local user %s.",
+                "ERP instance %s has no API URL configured for this environment; cannot deprovision local user %s.",
                 erp.key,
                 local_user_id,
             )
             return None
 
-        url = f"{self._resolve_erp_api_url(erp)}/api/v1/internal/users/{local_user_id}/deprovision"
+        url = f"{api_base}/api/v1/internal/users/{local_user_id}/deprovision"
         try:
             headers = self._get_headers(erp)
             async with httpx.AsyncClient(timeout=self.timeout) as client:
@@ -345,10 +374,11 @@ class HttpErpProvisioningAdapter(BaseErpProvisioningAdapter):
         Soft-fails (returns False) if the ERP is unreachable -- the ERP also re-checks central sessions itself, so a
         missed message cannot leave the session alive for long.
         """
-        if not erp.base_url:
-            logger.warning("ERP instance %s has no base_url configured; cannot revoke session %s.", erp.key, session_id)
+        api_base = self._resolve_erp_api_url(erp)
+        if not api_base:
+            logger.warning("ERP instance %s has no API URL configured; cannot revoke session %s.", erp.key, session_id)
             return False
-        url = f"{self._resolve_erp_api_url(erp)}/api/v1/internal/sessions/{session_id}/revoke"
+        url = f"{api_base}/api/v1/internal/sessions/{session_id}/revoke"
         try:
             headers = self._get_headers(erp)
             async with httpx.AsyncClient(timeout=self.timeout) as client:
@@ -369,11 +399,16 @@ class HttpErpProvisioningAdapter(BaseErpProvisioningAdapter):
         Terminates live WebSocket connections, revokes local sessions, and invalidates in-flight tokens.
         Deliberately soft-fails (logs a warning, returns None) rather than raising if unreachable.
         """
-        if not erp.base_url:
-            logger.warning("ERP instance %s has no base_url configured; cannot logout local user %s.", erp.key, local_user_id_or_email)
+        api_base = self._resolve_erp_api_url(erp)
+        if not api_base:
+            logger.warning(
+                "ERP instance %s has no API URL configured; cannot logout local user %s.",
+                erp.key,
+                local_user_id_or_email,
+            )
             return None
 
-        url = f"{self._resolve_erp_api_url(erp)}/api/v1/internal/users/{local_user_id_or_email}/logout"
+        url = f"{api_base}/api/v1/internal/users/{local_user_id_or_email}/logout"
         try:
             headers = self._get_headers(erp)
             async with httpx.AsyncClient(timeout=self.timeout) as client:
@@ -393,4 +428,3 @@ class HttpErpProvisioningAdapter(BaseErpProvisioningAdapter):
                 "Failed to reach ERP %s at %s to logout user %s: %s", erp.key, url, local_user_id_or_email, exc
             )
             return None
-

@@ -109,7 +109,8 @@ export function ExpensesPage() {
 
   // RBAC: Check approval and admin permissions
   const canApprove = useMemo(() => {
-    const roleUpper = profile?.role?.toUpperCase();
+    const rawRole = (profile as { role?: string | { name?: string } } | null)?.role;
+    const roleUpper = (typeof rawRole === "string" ? rawRole : rawRole?.name || "").toUpperCase();
     return Boolean(
       isSuperAdmin ||
       roleUpper === "ADMIN" ||
