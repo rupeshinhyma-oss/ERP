@@ -3,7 +3,8 @@
 > **Document Type:** Master Regression Testing Specification & Feature Catalog  
 > **Location:** Root Workspace (`/MODULES_AND_FEATURES_TEST_MANUAL.md`)  
 > **Purpose:** Exhaustive reference catalog detailing every single module, page layout, table column, action button, modal window, drawer, form tab, and form field across the entire ERP. Designed for developers, QA testers, and autonomous AI agents to execute manual and automated regression tests before and after code changes.  
-> **Strict Policy:** When developing or modifying features, no existing module, form, or field listed in this document may be removed, broken, or regressed.
+> **Strict Policy:** When developing or modifying features, no existing module, form, or field listed in this document may be removed, broken, or regressed.  
+> **Last Updated:** October 29, 2026
 
 ---
 
@@ -76,7 +77,12 @@
 65. [SALE: Sales Process Live KPI Metrics & Status Tabs Dynamic Calculation Engine](#65-sale-sales-process-live-kpi-metrics--status-tabs-dynamic-calculation-engine)
 66. [SALE: Sales Process 9-Status Action Menu Matrix, LR Duplicate, Direct Cancellation & SO Files Deletion](#66-sale-sales-process-9-status-action-menu-matrix-lr-duplicate-direct-cancellation--so-files-deletion)
 67. [SALE PROCESS: Collapsible Filter Panel 13-Field Grid & Dropdown Sales Person Selection](#67-sale-process-collapsible-filter-panel-13-field-grid--dropdown-sales-person-selection)
-68. [SALE PROCESS: Sale Status Update Side Drawer, Multi-Stage Workflow, PO File & Tally Bill Upload](#68-sale-process-sale-status-update-side-drawer-multi-stage-workflow-po-file--tally-bill-upload)
+68. [HRMS PHASES 2–6: Granular RBAC, Deny Precedence, Manager-First Real Availability Routing, Two-Stage Approvals & Separation of Duties](#68-hrms-phases-26-granular-rbac-deny-precedence-manager-first-real-availability-routing-two-stage-approvals--separation-of-duties)
+69. [FEED: Open Broadcasting & 1-to-1 Private Employee Messaging](#69-feed-open-broadcasting--1-to-1-private-employee-messaging)
+70. [SALE PROCESS: Sale Status Update Side Drawer, Multi-Stage Workflow, PO File & Tally Bill Upload](#70-sale-process-sale-status-update-side-drawer-multi-stage-workflow-po-file--tally-bill-upload)
+71. [SALE: Discount Payments Ledger, Multi-Installment Adjustment Drawer & Payment List Modal](#71-sale-discount-payments-ledger-multi-installment-adjustment-drawer--payment-list-modal)
+72. [REPORTS: Product Re-Order Matrix, Branch-Scoped Shortfall Engine & FIFO Stock Breakup](#72-reports-product-re-order-matrix-branch-scoped-shortfall-engine--fifo-stock-breakup)
+73. [REPORTS: Product Stock Transactions Master List & Per-Product Stock Transaction Ledger](#73-reports-product-stock-transactions-master-list--per-product-stock-transaction-ledger)
 
 ---
 
@@ -118,6 +124,12 @@
 | **PURCHASE** | Local Purchase | `/purchase/localpurchase` | `local-purchases` | `shoppingBag` | `purchase.view` |
 | **PURCHASE** | Import Purchase | `/purchase/importpurchase` | `import-purchases` | `ship` | `purchase.view` |
 | **PURCHASE** | Purchase Suppliers | `/purchase/suppliers` | `purchase-suppliers` | `factory` | `supplier.view` |
+| **REPORTS** | Re-Order | `/reports/re-order` (`/product-reorder/list`) | `reports-reorder` | `refreshCw` | `product.view` |
+| **REPORTS** | Stock Transactions | `/reports/stock-transactions` (`/transaction-report/list`) | `reports-stock-transactions` | `activity` | `product.view` |
+| **REPORTS** | Stock Transaction Detail | `/stock-transaction/list/:id` | `reports-stock-transactions` | `activity` | `product.view` |
+| **REPORTS** | Goods Expected Report | `/reports/goods-expected` | `reports-goods-expected` | `ship` | `product.view` |
+| **REPORTS** | Deleted Orders | `/reports/deleted-orders` | `reports-deleted-orders` | `fileX` | `saleorder.view` |
+| **REPORTS** | General Reports | `/reports/general` | `reports-general` | `pieChart` | Authenticated |
 | **TASK** | Tasks | `/tasks` | `tasks` | `checkSquare` | `task.view` |
 | **TASK** | Technical Tasks | `/technical-task/list` | `technical-tasks` | `wrench` | `technicaltask.view` |
 | **USER MANAGEMENT** | Users | `/users` | `users` | `user` | `user.view` |
@@ -1644,63 +1656,37 @@ Checklist to execute:
 - **Route:** `/product-stock/list`
 - **Legacy Redirects:** `/product-stock`, `/product_stock/list`, `/product_stock`
 - **Required Permission:** `product.view`
-- **Purpose:** Centralized warehouse inventory ledger providing real-time visibility into physical on-hand stock, reserved order allocations, net available quantities, and monetary inventory valuation across all storage facilities.
+- **Purpose:** Centralized 15-column multi-warehouse inventory matrix (`Mumbai`, `Ahmedabad`, `Indore` physical, transit, and ordered pipelines) outer-joined directly from Product Master (`limit: 2500`, `le=5000`) with live breakup drawers and Product Master detail view.
 
 ### Visual Elements & Layout
 1. **Breadcrumbs:** `Inventory` > `Product Stock`
 2. **Page Title:** `Product Stock`
-3. **Subtitle:** `Real-time physical stock counts, warehouse allocation, and inventory valuation across storage depots.`
-4. **Top Action Controls:**
-   - `Export CSV`: Downloads inventory balance dataset in CSV format.
-   - `Export Excel`: Downloads formatted `.xlsx` workbook with formulas.
-   - `Import Stock`: Launches the universal bulk import wizard for opening balance reconciliation.
-   - `Refresh`: Clears local caches and refetches real-time stock balances from backend.
-5. **Multi-Warehouse Dropdown Selector:**
-   - Prominently positioned in the filter bar.
-   - Options dynamically loaded from Warehouses Master: `All Warehouses` (default) plus each configured warehouse (e.g. *Main Depot - Bhiwandi*, *Ahmedabad Hub*, *Mumbai Transit Depot*).
-   - Selecting a warehouse filters table rows and recalculates the 3,3,3 stat cards instantly.
-6. **Grouped 3,3,3 in 1 Summary Metric Cards (with Crimson Status Badges):**
-   - Distinctive 3-group layout styled with elegant dark cards and deep red/crimson accent badges matching the system design specification:
-     - **Card 1 (Catalog & Line Items):**
-       - Metric A: `Total Registered Products` count.
-       - Metric B: `Active Stock Lines` count (products with positive inventory).
-       - Metric C: `Inactive / Discontinued SKUs` count.
-     - **Card 2 (Physical Quantities):**
-       - Metric A: `Total On Hand Quantity` (cumulative physical units in warehouse).
-       - Metric B: `Total Reserved Quantity` (units committed to pending sales consignments).
-       - Metric C: `Net Available Quantity` (free units ready for immediate sale or dispatch).
-     - **Card 3 (Financial Valuation & Health Alerts):**
-       - Metric A: `Total Inventory Valuation` (calculated as $\sum (\text{On Hand} \times \text{Unit Price})$ with dynamic currency formatting).
-       - Metric B: `Low Stock Alert Lines` count (inventory below reorder threshold).
-       - Metric C: `Out of Stock Alerts` count (inventory exhausted or zero).
-7. **Live Debounced Search Bar:**
-   - Text input with instant debounced filtering across Product Name, Product SKU/Code, Category, and Warehouse Name.
-8. **Master Product Stock Table:**
-   - Columns:
-     - `Sr No.`: 1-indexed sequential counter.
-     - `Product Name & Code`: Displays product name in bold with internal SKU code below in secondary badge.
-     - `Category`: Product categorization name.
-     - `Warehouse`: Warehouse facility name holding the stock.
-     - `On Hand Qty`: Total physical count in warehouse.
-     - `Reserved Qty`: Units reserved for active inquiries or orders.
-     - `Available Qty`: Net available units ($\text{On Hand} - \text{Reserved}$).
-     - `Unit Price`: Unit cost rate formatted in currency.
-     - `Total Valuation`: Product line monetary value ($\text{On Hand} \times \text{Unit Price}$).
-     - `Status`: High-contrast pill badge:
-       - `In Stock` (Emerald green badge `#10b981`).
-       - `Low Stock` (Amber warning badge `#f59e0b`).
-       - `Out of Stock` (Crimson red badge `#ef4444`).
+3. **Top Action Controls:**
+   - Dark slate Funnel filter toggle button (`#556987`, filter panel collapsed by default on `/product-stock/list`).
+   - `Export` button: Downloads `Product_Stock_List.xlsx` workbook for the active filtered dataset.
+4. **Collapsible 4-Column Filter Panel:**
+   - `Category` (`All` + active `ProductCategory` masters).
+   - `Sub Category` (`All` + `ProductSubCategory` masters dynamically narrowed when `Category` is selected).
+   - `Brand` (`All` + active `Brand` masters).
+   - `Is Negative Stock` (`Select`, `Yes`, `No`).
+   - Dark slate `Reset` and golden-amber `Search` buttons.
+5. **Live Search Input:**
+   - Instant client-side search across `Product Name (As Per Tally)`, `Product Code`, `Brand`, and `Sub Category`.
+6. **15-Column Title-Case Product Stock Table (Default `50` Rows/Page):**
+   - `Sr. No.` | `Product Name (As Per Tally)` (blue clickable hyperlink opening the `Product Details` `SideDrawer` with real Packaging Quantity, Minimum Price, CBM Dimensions, HSN, GST %, UOM, and 9-column warehouse breakdown) | `Product Code` | `Brand` | `Sub Category`
+   - **Physical Columns (Soft Pink `#f9e7e9`):** `Mumbai`, `Ahmedabad`, `Indore`
+   - **Transit Columns (Warm Beige-Grey `#efece6`):** `Mumbai Transit`, `Ahmedabad Transit`, `Indore Transit`
+   - **Ordered Columns (Medium Grey `#dedede`):** `Mumbai Ordered`, `Ahmedabad Ordered`, `Indore Ordered`
+   - **Summary Column:** `Total Qty` ($\sum \text{Physical} + \sum \text{Transit} + \sum \text{Ordered}$)
+   - **Transaction-Driven `ⓘ` Breakup Buttons (`breakup_flags`):** Opens right-hand `Sale Order Information` drawer (for physical stock) or `Consignment Breakup` drawer with `Booked Sale Orders (FIFO Deducted)` & clickable `Consignment Details` modal (for transit/ordered stock), without hardcoded fallback rows.
 
 ### Test Cases
-- [ ] Verify navigating to `/product-stock`, `/product_stock`, or `/product_stock/list` redirects automatically to `/product-stock/list`.
-- [ ] Verify the 3,3,3 in 1 summary cards render in 3 balanced columns with deep red/crimson accents.
-- [ ] Verify selecting a specific warehouse in the warehouse dropdown filters both the table and the summary stat card totals.
-- [ ] Verify typing in the search bar dynamically filters matching product names, codes, or categories without full page reload.
-- [ ] Verify table column sorting works as expected on Product Name, On Hand Qty, Available Qty, and Total Valuation.
-- [ ] Verify `Available Qty` mathematically equals `On Hand Qty - Reserved Qty`.
-- [ ] Verify `Total Valuation` mathematically equals `On Hand Qty * Unit Price`.
-- [ ] Verify Status pill renders `In Stock` (green) when available > reorder level, `Low Stock` (amber) when available <= reorder level, and `Out of Stock` (red) when available <= 0.
-- [ ] Verify Export CSV and Export Excel generate valid spreadsheets matching the active filtered dataset.
+- [ ] Verify navigating to `/product-stock`, `/product_stock`, or `/product_stock/list` resolves to `/product-stock/list` with filter panel collapsed by default.
+- [ ] Verify all active Product Master SKUs load (even products with `0` stock and no `product_stocks` row yet) with populated `Brand`, `Category`, and `Sub Category`.
+- [ ] Verify selecting a `Category` dynamically narrows `Sub Category` options and clicking `Search` / `Reset` applies and resets filters accurately.
+- [ ] Verify `Is Negative Stock` (`Yes` / `No` / `Select`) filters products with any negative warehouse or total balance.
+- [ ] Verify clicking `Product Name (As Per Tally)` on `/product-stock/list` opens the `Product Details` `SideDrawer` displaying real Packaging Quantity, Minimum Price, and `L × W × H cm` CBM dimensions.
+- [ ] Verify clicking `ⓘ` opens live `Sale Order Information` or `Consignment Breakup` (with FIFO booked Sale Orders) and `Export` downloads `Product_Stock_List.xlsx`.
 
 ---
 
@@ -3456,4 +3442,47 @@ Positioned directly underneath the collapsible filter panel, these three metric 
 - [ ] **TC-RO-05 (Product Master View Window):** Click any blue `Product Name (As Per Tally)` hyperlink and verify the `Product Master View Window` drawer displays HSN, GST %, UOM, CBM dimensions, 9-column stock matrix, specifications, and `Open in Product Master ↗`.
 
 ---
-*End of Master Features & Testing Specification Manual. Maintained for Inhyma Solutions Enterprise ERP. Last updated: October 28, 2026 (Sections 61-72: Dynamic Organization Company Logo, Product Master Category Rewiring & Floating Duplicate Overlay, Platform Migration Idempotency, Sales Process Workflow & 13-Field Filter Grid, HRMS Phases 2-6 RBAC & Approval Architecture, Feed & Broadcast Open Access & 1-to-1 Employee Messaging, Sale Status Update Side Drawer & Chronological Timeline, Discount Payments Multi-Installment Ledger, and Product Re-Order Branch-Scoped Matrix & FIFO Stock Breakup).*
+
+## 73. REPORTS: Product Stock Transactions Master List & Per-Product Stock Transaction Ledger
+
+- **Module Name:** Stock Transactions (`Completed/Product Stock 26-4-25.docx` L27, `General New points inhyma.docx` L132, `Phase 2/Stock Transactions.docx`)
+- **Routes:**
+  - **Screen 1 (Master List):** `/reports/stock-transactions`, `/transaction-report/list`, `/transaction_report/list`, `/stock-transactions`
+  - **Screen 2 (Per-Product Ledger):** `/stock-transaction/list/:id`, `/stock_transaction/list/:id`, `/reports/stock-transactions/:id`
+- **Files:**
+  - Frontend Pages & Styles: `frontend/src/pages/ProductStockPage.tsx`, `frontend/src/pages/StockTransactionDetailPage.tsx`, `frontend/src/styles/productStock.css`
+  - Frontend API Client & Routing: `frontend/src/lib/api.ts` (`StockTransactionLedgerEntry`, `ProductStockLedgerResponse`, `InventoryApi.getProductStockTransactions`), `frontend/src/App.tsx`
+  - Backend Schemas & Routes: `backend/app/inventory/schemas.py` (`StockTransactionLedgerItemRead`), `backend/app/inventory/routes.py` (`GET /api/v1/inventory/stock-transactions/{product_ref}`, `/api/v1/stock-transaction/list/{product_ref}`)
+  - Test Suites: `frontend/src/pages/__tests__/ProductStockPage.test.tsx`, `frontend/src/pages/__tests__/StockTransactionDetailPage.test.tsx`, `backend/tests/test_inventory_integrity.py`, `backend/tests/test_inventory_and_stock_adjustments.py`
+
+### Feature Overview & UI Specifications
+1. **Screen 1 — `Product Stock Transactions` Master List (`/reports/stock-transactions` / `/transaction-report/list`):**
+   - Sidebar active navigation key: `REPORTS` ➔ `Stock Transactions` (`reports-stock-transactions`).
+   - Top Page Header: `Product Stock Transactions` on left; dark slate Funnel filter toggle `[▼]` + `Export` (`Product_Stock_Transactions.xlsx`) on right.
+   - **4-Column Filter Panel (Open by Default):** `Category` (`All`), cascading `Sub Category` (`All`), `Brand` (`All`), `Is Negative Stock` (`Select` / `Yes` / `No`), with dark slate `Reset` and golden-amber `Search` buttons.
+   - **Right-Aligned Search Card:** Dedicated white card with `[ 🔍 | Search products by name, code, brand, sub-category... ]`.
+   - **15-Column Title-Case Warehouse Matrix:** `Sr. No.` | `Product Name (As Per Tally)` | `Product Code` | `Brand` | `Sub Category` | `Mumbai` (soft pink) | `Mumbai Transit` (warm beige-grey) | `Mumbai Ordered` (medium grey) | `Ahmedabad` (soft pink) | `Ahmedabad Transit` (warm beige-grey) | `Ahmedabad Ordered` (medium grey) | `Indore` (soft pink) | `Indore Transit` (warm beige-grey) | `Indore Ordered` (medium grey) | `Total Qty`.
+   - **Drill-Down Navigation:** Clicking any blue `Product Name (As Per Tally)` hyperlink navigates directly to `/stock-transaction/list/:id` (whereas `/product-stock/list` opens the `Product Details` `SideDrawer`).
+2. **Screen 2 — `<Product Name> Stock` Per-Product Transaction Ledger (`/stock-transaction/list/:id`):**
+   - **Top Header:** `<Product Name> Stock` (e.g., `Air Timer (PFS) Stock`) on left; right side displays dark slate Funnel filter button `[▼]` (collapsible 4-column `Warehouse`, `Type`, `From Date`, `To Date` filter panel with `Reset` & `Search`) and golden-amber `Action ▾` dropdown button (`Export to Excel (.xlsx)`, `Export to CSV (.csv)`, `Add Stock Adjustment`, `Add Stock Transfer`, `← Back to Stock Transactions`).
+   - **KPI Card:** White card displaying `AVAILABLE QTY` label and live numeric balance (defaults to `total_qty` across warehouses; dynamically updates to the selected warehouse balance when filtered by a specific `Warehouse`).
+   - **Ledger Table Card:**
+     - **Toolbar:** Left `[ 10 ▾ ]` `<select>` (`10` default, `25`, `50`, `100`) + `Items/Page` stacked label; right `[ Search... ]` live filter input.
+     - **7 Sortable Title-Case Columns:**
+       1. `ID`: Sequential chronological movement ID (oldest = `1`, rendered newest-first).
+       2. `Title`: Line 1 clickable movement description navigating to the underlying Sale Order / Adjustment PDF / Local Purchase Bill / Import Consignment Bill / Transfer PDF + Line 2 **bold party/company/supplier name** (e.g. **`VRO MACHINES PVT.LTD.`** below `Sale Order #SO-MH/26-27/4987 Confirm`).
+       3. `Type`: Color-coded pill badge (`Sale` soft blue, `Stock IN` soft slate-grey, `Stock OUT` soft red, `Sale Cancel` soft amber, `Local Purchase` / `Import Purchase` soft green, `Transfer IN` / `Transfer OUT` soft indigo).
+       4. `Warehouse`: Target physical, transit, or ordered warehouse (`Mumbai`, `Mumbai Transit`, `Mumbai Ordered`, `Ahmedabad`, `Indore`, etc.).
+       5. `Quantity`: Signed delta with green `+` or red `-` (`- 1`, `+ 1`, `+ 50`, etc.).
+       6. `Created By`: Actor / sales person / creator name (`Bhavin Suthar`, `Akshata Wadekar`, etc.).
+       7. `Transaction Date`: IST timestamp formatted as `DD-MM-YYYY hh:mm AM/PM` (`28-10-2026 12:10 PM`).
+     - **Footer:** `Showing X To Y Of Z Entries` on left | `Previous | 1 | Next` pager on right.
+
+### QA Verification Test Cases
+- [ ] **TC-ST-01 (Master List Layout, Open Filter Panel & Full Catalog Load):** Navigate to `REPORTS` ➔ `Stock Transactions` (`/reports/stock-transactions` or `/transaction-report/list`). Verify heading `Product Stock Transactions`, filter panel open by default, right-aligned search card, 15 Title-Case columns with distinct pink/transit-beige/ordered-grey tints, and all active Product Master SKUs loaded with populated `Brand` and `Sub Category`.
+- [ ] **TC-ST-02 (Product Name Click ➔ Per-Product Ledger Navigation):** Click any product name in `Product Stock Transactions` (e.g. `Air Timer (PFS)` or `Vertical Stand Economy`). Verify browser navigates to `/stock-transaction/list/<id>`, sidebar highlights `REPORTS` ➔ `Stock Transactions`, heading displays `<Product Name> Stock`, and `AVAILABLE QTY` matches the product's net stock.
+- [ ] **TC-ST-03 (All 5 Transactional Sources & Bold Party Name):** Verify movements from Sale Orders (`Sale` `- qty` with bold company name on line 2, plus `Sale Cancel` `+ qty`), Stock Adjustments (`Stock IN` / `Stock OUT` formatted as `Stock In/Out For Purpose <Purpose> (Adjustment Order #<No>)`), Confirmed Local Purchases (`Local Purchase` `+ qty`), Import Purchases (`Import Purchase` `+ qty`), and Stock Transfers (`Transfer OUT` `- qty` & `Transfer IN` `+ qty`) appear newest-first with IST `DD-MM-YYYY hh:mm AM/PM` timestamps.
+- [ ] **TC-ST-04 (Toolbar Pagination, Live Search, Filter Panel & Action Menu):** On `/stock-transaction/list/:id`, verify default `10` `Items/Page`, `Showing X To Y Of Z Entries` footer, live `Search...` filtering by company/SO#/actor, Funnel filter updating `AVAILABLE QTY` when scoped to a warehouse, clickable `Title` links opening underlying documents, and `Action ▾` exporting `.xlsx` / `.csv` or navigating to `Add Stock Adjustment` / `Add Stock Transfer`.
+
+---
+*End of Master Features & Testing Specification Manual. Maintained for Inhyma Solutions Enterprise ERP. Last updated: October 29, 2026 (Sections 61-73: Dynamic Organization Company Logo, Product Master Category Rewiring & Floating Duplicate Overlay, Platform Migration Idempotency, Sales Process Workflow & 13-Field Filter Grid, HRMS Phases 2-6 RBAC & Approval Architecture, Feed & Broadcast Open Access & 1-to-1 Employee Messaging, Sale Status Update Side Drawer & Chronological Timeline, Discount Payments Multi-Installment Ledger, Product Re-Order Branch-Scoped Matrix & FIFO Stock Breakup, and Product Stock Transactions Master List & Per-Product Stock Transaction Ledger).*

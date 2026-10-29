@@ -38,11 +38,32 @@ class ProductStockFilterParams(BaseModel):
     """Query parameters for filtering product stock."""
     warehouse: Optional[str] = None
     category: Optional[str] = None
+    sub_category: Optional[str] = None
     brand: Optional[str] = None
+    negative_stock: Optional[str] = None
     status: Optional[str] = None
     search: Optional[str] = None
     skip: int = Field(0, ge=0)
-    limit: int = Field(50, ge=1, le=500)
+    limit: int = Field(50, ge=1, le=5000)
+
+
+class StockTransactionLedgerItemRead(BaseModel):
+    """Single chronological stock movement row in the per-product Stock Transactions ledger."""
+    id: int = Field(..., description="Sequential ledger entry ID (newest has highest ID)")
+    entry_uid: str = Field(..., description="Deterministic unique entry key")
+    title: str = Field(..., description="Human-readable movement description (e.g. 'Sale Order #SO-... Confirm')")
+    party_name: Optional[str] = Field(None, description="Company or supplier name shown in bold beneath SO/PO line")
+    type: str = Field(..., description="'Sale' | 'Sale Cancel' | 'Stock IN' | 'Stock OUT' | 'Local Purchase' | 'Import Purchase' | 'Transfer IN' | 'Transfer OUT'")
+    warehouse: str = Field(..., description="Affected warehouse (e.g. 'Mumbai', 'Mumbai Transit', 'Mumbai Ordered')")
+    quantity: float = Field(..., description="Signed stock delta (+ve inward, -ve outward)")
+    quantity_display: str = Field(..., description="Formatted signed delta (e.g. '- 1', '+ 1')")
+    created_by: str = Field(..., description="User who performed the transaction")
+    transaction_date: str = Field(..., description="Formatted IST timestamp 'DD-MM-YYYY hh:mm AM/PM'")
+    iso_date: str = Field(..., description="ISO YYYY-MM-DD date in IST for date range filtering")
+    sort_epoch: float = Field(..., description="Unix timestamp for accurate chronological sorting")
+    ref_type: str = Field(..., description="Origin document type ('sale_order', 'stock_adjustment', 'local_purchase', 'import_purchase', 'stock_transfer')")
+    ref_id: str = Field(..., description="Origin document UUID")
+    ref_no: Optional[str] = Field(None, description="Origin document number (e.g. SO number, Adjustment #, Invoice #)")
 
 
 class ProductReorderItemRead(BaseModel):

@@ -1,7 +1,7 @@
 # Enterprise ERP System — Unified Architecture, Feature & Technical Manual
 
 > **System Version:** 1.0.0 (Production)  
-> **Last Updated:** October 28, 2026  
+> **Last Updated:** October 29, 2026  
 > **Architectural Pattern:** Modular Async Monolith (FastAPI) + React 18 SPA (Vite) + Real-Time WebSocket Event Bus  
 > **Target Audience:** Systems Architects, Software Engineers, DevOps, and Autonomous AI Coding Assistants.  
 > **Scope:** Complete end-to-end technical reference containing all system features, data models, API endpoints, background workers, frontend architecture, and developer integration guidelines.
@@ -33,7 +33,9 @@
    - 8.13. [Organization & System Profile](#813-organization--system-profile)
    - 8.14. [Employee Directory & Organization Structure](#814-employee-directory--organization-structure-identity--access-management-upgrade)
    - 8.15. [Standalone Work Management & Task Module](#815-standalone-work-management--task-module)
-   - 8.16. [Inventory: Product Stock Management](#816-inventory-product-stock-management)
+   - 8.16. [Inventory: Product Stock Management & Stock Transactions](#816-inventory-product-stock-management-inhyma-multi-warehouse-matrix)
+     - 8.16.1. [Inventory: Product Re-Order Matrix, Branch-Scoped Shortfall & FIFO Stock Breakup](#8161-inventory-product-re-order-matrix-branch-scoped-shortfall--fifo-stock-breakup)
+     - 8.16.2. [Reports: Product Stock Transactions & Per-Product Stock Transaction Ledger](#8162-reports-product-stock-transactions--per-product-stock-transaction-ledger)
    - 8.17. [Inventory: Stock Adjustment & Order PDF Generation](#817-inventory-stock-adjustment--order-pdf-generation)
    - 8.18. [Contact: Companies & Multi-Contact Directory](#818-contact-companies--multi-contact-directory)
    - 8.19. [Task: Technical Tasks & Field Service Dispatch](#819-task-technical-tasks--field-service-dispatch)
@@ -654,28 +656,27 @@ A user may be assigned any number of Roles simultaneously (`POST /users/{id}/rol
 ### 8.16. Inventory: Product Stock Management (Inhyma Multi-Warehouse Matrix)
 - **Files:**
   - Backend: `backend/app/inventory/models.py`, `backend/app/inventory/stock_service.py`, `backend/app/inventory/routes.py`, `backend/app/inventory/schemas.py`.
-  - Frontend: `frontend/src/pages/inventory/ProductStockPage.tsx`, `frontend/src/styles/productStock.css`, `frontend/src/components/SortHeader.tsx`.
+  - Frontend: `frontend/src/pages/ProductStockPage.tsx`, `frontend/src/pages/StockTransactionDetailPage.tsx`, `frontend/src/styles/productStock.css`, `frontend/src/components/SortHeader.tsx`.
 - **Endpoints:**
-  - `GET /api/v1/inventory/product-stock`: List stock items with 15-column warehouse breakdown, sorting (`sort_by`, `sort_dir`), category/brand filters, and debounced text search (`q`).
-  - `GET /api/v1/inventory/product-stock/{id}`: Detailed product stock ledger breakdown.
-  - `GET /api/v1/sales/orders/by-product`: Used by physical warehouse `(i)` info popup to display reserved Sales Orders.
-  - `GET /api/v1/purchase/imports/by-product`: Used by transit warehouse `(i)` info popup to display arriving PO containers.
-- **Inhyma 15-Column Warehouse Matrix:**
-  1. Item Code
-  2. Product Name
-  3. Category
-  4. Sub Category
-  5. Brand
-  6. HSN Code
-  7. Packaging Unit CBM
-  8. Physical Warehouse 1: Mumbai
-  9. Physical Warehouse 2: Ahmedabad
-  10. Physical Warehouse 3: Indore
-  11. Transit Warehouse: Mumbai Transit
-  12. Ordered Warehouse: Mumbai Ordered
-  13. Total Stock: $\sum \text{Physical Warehouses} + \sum \text{Transit Warehouses} + \sum \text{Ordered Warehouses}$
-  14. Reorder Level (excluded from stock sums via `NON_WAREHOUSE_COLUMNS`)
-  15. Minimum Order Quantity (MOQ)
+  - `GET /api/v1/inventory/product-stock` (and `/product-stock`, `/product-stock/list`): Lists up to `5000` active products from `Product` (`Product.deleted_at.is_(None)`) outer-joined with `ProductStock`, `ProductCategory`, `ProductSubCategory`, `Brand`, `UnitOfMeasurement`, and `Tax`, returning `filter_options` (`categories`, `sub_categories` with parent `category`, `brands`), live `breakup_flags`, and real Product Master packaging/dimensions/pricing fields without synthetic cost or reserved fields.
+  - `GET /api/v1/inventory/product-stock/{id}`: Resolves either `ProductStock.id` or `Product.id` to return detailed warehouse balances and metadata.
+  - `GET /api/v1/inventory/product-stock/breakup`: Used by physical, transit, and ordered warehouse `(i)` info popups to display open Sale Orders and incoming consignments/transfers with FIFO deduction.
+- **Inhyma 15-Column Title-Case Warehouse Matrix:**
+  1. `Sr. No.`
+  2. `Product Name (As Per Tally)` (opens `Product Details` `SideDrawer` on `/product-stock/list`; navigates to `/stock-transaction/list/:id` on `/reports/stock-transactions` / `/transaction-report/list`)
+  3. `Product Code`
+  4. `Brand`
+  5. `Sub Category`
+  6. `Mumbai` (soft pink `#f9e7e9`)
+  7. `Mumbai Transit` (warm beige-grey `#efece6`)
+  8. `Mumbai Ordered` (medium grey `#dedede`)
+  9. `Ahmedabad` (soft pink)
+  10. `Ahmedabad Transit` (warm beige-grey)
+  11. `Ahmedabad Ordered` (medium grey)
+  12. `Indore` (soft pink)
+  13. `Indore Transit` (warm beige-grey)
+  14. `Indore Ordered` (medium grey)
+  15. `Total Qty`: $\sum \text{Physical Warehouses} + \sum \text{Transit Warehouses} + \sum \text{Ordered Warehouses}$
 - **Physical vs. Transit Business Invariants:**
   - **Strict Physical Non-Negative Rule:** Physical warehouses (`is_physical(warehouse) == True`) strictly forbid negative stock. Any sales order or adjustment attempting to drive stock below zero throws `409 Conflict`.
   - **Transit / Ordered Advance Booking Tolerance:** Virtual warehouses (`_transit`, `_ordered`) allow negative balances when goods are pre-allocated against incoming purchase orders.
@@ -698,6 +699,21 @@ A user may be assigned any number of Roles simultaneously (`POST /users/{id}/rol
 - **Core Business Architecture:**
   - **Branch-Scoped Replenishment Math:** Selecting `Mumbai` (default), `Ahmedabad`, or `Indore` in the Warehouse bar evaluates `Short Fall = max(0, Re-Order - (city + city_transit + city_ordered))` and `Order To Be Place = 0 if Short Fall == 0 else max(Short Fall, MOQ)` using branch-specific thresholds, while `All Warehouses` evaluates against global `Total Qty`.
   - **Transaction-Driven `ⓘ` Badges (`breakup_flags`):** Computed from live open `SaleOrder`s, active `ImportPurchase`s, and in-transit `StockTransfer`s so `0` physical stock with an open Sale Order accurately displays `0 ⓘ`, while unbooked physical stock omits `ⓘ`.
+
+#### 8.16.2. Reports: Product Stock Transactions & Per-Product Stock Transaction Ledger
+- **Files:**
+  - Backend: `backend/app/inventory/routes.py` (`get_product_stock_transactions`), `backend/app/inventory/schemas.py` (`StockTransactionLedgerItemRead`).
+  - Frontend: `frontend/src/pages/ProductStockPage.tsx` (Master List mode on `/reports/stock-transactions` & `/transaction-report/list`), `frontend/src/pages/StockTransactionDetailPage.tsx` (`/stock-transaction/list/:id` & `/reports/stock-transactions/:id`), `frontend/src/styles/productStock.css`, `frontend/src/lib/api.ts` (`InventoryApi.getProductStockTransactions`).
+- **Endpoints:**
+  - `GET /api/v1/inventory/stock-transactions/{product_ref}` (and aliases `/api/v1/stock-transaction/list/{product_ref}`, `/api/v1/stock_transaction/list/{product_ref}`, `/api/v1/inventory/product-stock/{product_ref}/transactions`): Resolves `Product.id` UUID, `ProductStock.id` UUID, `ProductStock.sr_no`, or `Product.product_code` and aggregates chronological stock movements across all 5 transactional engines:
+    1. **Sale Orders (`SaleOrder` / `SaleOrderItem`):** Records `Sale` (`- qty`) whenever stock was deducted (`stock_applied == True` or confirmed/cancelled lifecycle) with **bold `party_name`** (`company_name` / `buyer_name`) below the SO title, plus `Sale Cancel` (`+ qty`) when cancelled or soft-deleted.
+    2. **Stock Adjustments (`StockAdjustment` / `StockAdjustmentLineItem`):** Records `Stock IN` (`+ qty`) / `Stock OUT` (`- qty`) formatted as `Stock In/Out For Purpose <Purpose> (Adjustment Order #<No>)`, plus soft-delete reversals.
+    3. **Local Purchases (`LocalPurchase` / `LocalPurchaseItem`):** Records `Local Purchase` (`+ qty`) upon confirmation (`stock_applied == True`), plus cancellation reversals.
+    4. **Import Purchases (`ImportPurchase` / `ImportPurchaseItem`):** Records `Import Purchase` (`+ qty`) into `<City> Ordered` / `<City> Transit` / physical warehouse, plus cancellation reversals.
+    5. **Stock Transfers (`StockTransfer` / `StockTransferLineItem`):** Records dual-leg `Transfer OUT` (`- qty` from origin) and `Transfer IN` (`+ qty` into destination / transit), plus cancellation reversals.
+- **UI Architecture:**
+  - **Screen 1 — Master List (`Product Stock Transactions`):** Filter panel (`Category`, cascading `Sub Category`, `Brand`, `Is Negative Stock`) open by default, right-aligned search card, 15 Title-Case columns with distinct pink/transit-beige/ordered-grey tints, and product name links navigating to `/stock-transaction/list/:id`.
+  - **Screen 2 — Per-Product Ledger (`<Product Name> Stock`):** Top-right Funnel filter toggle (`Warehouse`, `Type`, `From Date`, `To Date`) + golden-amber `Action ▾` menu (`Export to Excel (.xlsx)`, `Export to CSV (.csv)`, `Add Stock Adjustment`, `Add Stock Transfer`, `← Back to Stock Transactions`), `AVAILABLE QTY` KPI card (dynamically scoped when filtered by warehouse), `Items/Page` (`10` default, `25`, `50`, `100`) + instant `Search...`, 7 sortable columns (`ID`, `Title` with clickable document link + bold party/company name, `Type` pill badge, `Warehouse`, signed `Quantity` `- 1` / `+ 1`, `Created By`, `Transaction Date` IST `DD-MM-YYYY hh:mm AM/PM`), and `Showing X To Y Of Z Entries` + `Previous | 1 | Next` pager.
 
 ### 8.17. Inventory: Stock Adjustment & Order PDF Generation
 - **Files:**
@@ -1436,10 +1452,12 @@ A user may be assigned any number of Roles simultaneously (`POST /users/{id}/rol
 | **Notifications** | `GET` | `/api/v1/notifications/unread-count` | Get unread notification badge count | Authenticated |
 | **Notifications** | `POST` | `/api/v1/notifications/{id}/read` | Mark single notification as read | Authenticated |
 | **Notifications** | `POST` | `/api/v1/notifications/read-all` | Mark all notifications as read | Authenticated |
-| **Inventory: Stock** | `GET` | `/api/v1/inventory/product-stock` | List product stock levels with warehouse filter, pagination & search | `product.view` |
-| **Inventory: Stock** | `GET` | `/api/v1/inventory/product-stock/{id}` | Retrieve individual product stock valuation & availability ledger | `product.view` |
+| **Inventory: Stock** | `GET` | `/api/v1/inventory/product-stock` | Full-catalog 15-column Product Stock & Stock Transactions master list (`limit <= 5000`) with master joins, `filter_options` & `breakup_flags` | `product.view` |
+| **Inventory: Stock** | `GET` | `/api/v1/inventory/product-stock/{id}` | Retrieve individual product stock valuation & availability ledger (by `ProductStock.id` or `Product.id`) | `product.view` |
 | **Inventory: Stock** | `GET` | `/api/v1/product-stock` | Legacy alias for `/inventory/product-stock` | `product.view` |
 | **Inventory: Stock** | `GET` | `/api/v1/product-stock/list` | Legacy alias for `/inventory/product-stock` | `product.view` |
+| **Reports: Stock Ledger** | `GET` | `/api/v1/inventory/stock-transactions/{product_ref}` | Chronological per-product stock transaction ledger across Sale Orders, Adjustments, Local/Import Purchases & Transfers | `product.view` |
+| **Reports: Stock Ledger** | `GET` | `/api/v1/stock-transaction/list/{product_ref}` | Legacy alias for `/inventory/stock-transactions/{product_ref}` | `product.view` |
 | **Inventory: Re-Order** | `GET` | `/api/v1/inventory/product-reorder` | Full-catalog 16-column Product Re-Order matrix with master joins, `filter_options`, `breakup_flags` & branch `warehouse` scoping | `product.view` |
 | **Inventory: Re-Order** | `PATCH` | `/api/v1/inventory/product-reorder/{product_id}` | Inline update of global or branch-scoped `reorder_level` and `minimum_order_quantity` (`MOQ`) | `product.edit` |
 | **Inventory: Breakup** | `GET` | `/api/v1/inventory/product-stock/breakup` | Physical open Sale Order breakup (`unit_price` excluded) & Transit/Ordered consignment + StockTransfer FIFO breakup | `product.view` |

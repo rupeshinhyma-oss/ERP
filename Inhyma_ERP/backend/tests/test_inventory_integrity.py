@@ -28,15 +28,23 @@ pytestmark = pytest.mark.asyncio
 NEEDED_TABLES = {
     "warehouses", "products", "brands", "product_categories", "product_sub_categories", "taxes", "units_of_measurement",
     "product_stocks", "stock_adjustments", "stock_adjustment_items", "stock_transfers", "stock_transfer_items",
-    "sale_orders", "sale_order_items", "import_purchases", "import_purchase_items",
+    "sale_orders", "sale_order_items", "import_purchases", "import_purchase_items", "local_purchases", "local_purchase_items",
     "product_dimension_rows", "product_machine_spares", "product_prices", "audit_logs",
 }
 
 
 def _sales_tables() -> set[str]:
+    from app.purchase.models import ImportPurchase, ImportPurchaseItem, LocalPurchase, LocalPurchaseItem
     from app.sales.models import SaleOrder, SaleOrderItem
 
-    return {SaleOrder.__tablename__, SaleOrderItem.__tablename__}
+    return {
+        SaleOrder.__tablename__,
+        SaleOrderItem.__tablename__,
+        ImportPurchase.__tablename__,
+        ImportPurchaseItem.__tablename__,
+        LocalPurchase.__tablename__,
+        LocalPurchaseItem.__tablename__,
+    }
 
 
 def make(model, **over):
@@ -683,3 +691,230 @@ async def test_reorder_breakup_flags_zero_stock_open_so_and_transit_transfer_fif
     assert tr_b["items"][0]["quantity"] == 18.0 and tr_b["items"][0]["booked_quantity"] == 2.0  # FIFO deducted from 1st container
     assert tr_b["items"][1]["quantity"] == 10.0
     assert len(tr_b["booked_orders"]) == 1 and tr_b["booked_orders"][0]["order_no"] == "SO-MH/26-27/0902"
+
+
+async def test_product_stock_master_join_and_filter_options(client, db):
+    """Products without a ProductStock row still appear in /inventory/product-stock with Brand, Category, Sub Category & filter_options."""
+    from app.masters.brands.models import Brand
+    from app.masters.product_categories.models import ProductCategory
+    from app.masters.product_sub_categories.models import ProductSubCategory
+
+    brand = make(Brand, name="Yinglima")
+    cat = make(ProductCategory, name="Spares")
+    db.add_all([brand, cat])
+    await db.flush()
+    sub = make(ProductSubCategory, name="Spares For FFS / Weighing Machines", category_id=cat.id)
+    db.add(sub)
+    await db.flush()
+
+    prod = await add_product(
+        db,
+        "Air Timer (PFS)",
+        product_code="-",
+        brand_id=brand.id,
+        category_id=cat.id,
+        sub_category_id=sub.id,
+        packaging_quantity=2.0,
+        length_cm=15.0,
+        width_cm=10.0,
+        height_cm=8.0,
+    )
+    await db.commit()
+
+    resp = (await client.get("/api/v1/inventory/product-stock", params={"limit": 2500})).json()["data"]
+    assert resp["total"] == 1
+    item = resp["items"][0]
+    assert item["product_id"] == str(prod.id)
+    assert item["product_name_tally"] == "Air Timer (PFS)"
+    assert item["brand"] == "Yinglima"
+    assert item["category"] == "Spares"
+    assert item["sub_category"] == "Spares For FFS / Weighing Machines"
+    assert item["total_qty"] == 0.0
+    assert item["packaging_quantity"] == 2.0
+    assert item["length_cm"] == 15.0
+    assert "unit_cost" not in item and "total_value" not in item and "quantity_reserved" not in item
+    assert resp["filter_options"]["brands"] == ["Yinglima"]
+    assert resp["filter_options"]["categories"] == ["Spares"]
+    assert resp["filter_options"]["sub_categories"] == [
+        {"name": "Spares For FFS / Weighing Machines", "category": "Spares"}
+    ]
+
+
+async def test_product_stock_transactions_ledger_all_sources_and_filters(client, db):
+    """Per-product ledger (/inventory/stock-transactions/:id and /stock-transaction/list/:id) aggregates all 5 movement sources."""
+    from app.inventory.models import StockAdjustmentLineItem, StockTransfer, StockTransferLineItem
+    from app.purchase.models import ImportPurchase, ImportPurchaseItem, LocalPurchase, LocalPurchaseItem
+    from app.sales.models import SaleOrder, SaleOrderItem
+
+    t_base = datetime.datetime(2026, 10, 28, 6, 8, tzinfo=datetime.timezone.utc)  # 11:38 AM IST
+
+    await add_warehouse(db, "Mumbai")
+    await add_warehouse(db, "Mumbai Transit")
+    await add_warehouse(db, "Ahmedabad")
+    prod = await add_product(db, "Air Timer (PFS)", product_code="ATP-01")
+    stock_row = await stock_service._ensure_stock_row(db, prod)
+    stock_row.mumbai = 4.0
+    stock_row.mumbai_transit = 3.0
+    stock_row.ahmedabad = 1.0
+    stock_service.recompute_total(stock_row)
+
+    # 1. Opening Stock Adjustment (+1 Mumbai)
+    adj = make(
+        StockAdjustment,
+        adjustment_no="608",
+        adjustment_date="28-10-2026",
+        warehouse="Mumbai",
+        type="Stock IN",
+        purpose="Opening Stock",
+        created_by="Akshata Wadekar",
+        created_at=t_base,
+    )
+    db.add(adj)
+    await db.flush()
+    db.add(
+        make(
+            StockAdjustmentLineItem,
+            adjustment_id=adj.id,
+            product_id=str(prod.id),
+            product_name="Air Timer (PFS)",
+            quantity=1.0,
+            rate=500.0,
+            amount=500.0,
+        )
+    )
+
+    # 2. Confirmed Sale Order (-1 Mumbai, bold company VRO MACHINES PVT.LTD.)
+    so = make(
+        SaleOrder,
+        order_no="SO-MH/26-27/4987",
+        status="sales_confirmed",
+        warehouse="Mumbai",
+        company_name="VRO MACHINES PVT.LTD.",
+        sales_person="Bhavin Suthar",
+        stock_applied=True,
+        timeline=[
+            {
+                "status_key": "sales_confirmed",
+                "status": "Sales Confirmed",
+                "date": "28-10-2026 12:10 PM",
+                "by": "Bhavin Suthar",
+            }
+        ],
+        created_at=t_base + datetime.timedelta(minutes=32),
+    )
+    db.add(so)
+    await db.flush()
+    db.add(make(SaleOrderItem, order_id=so.id, product_name="Air Timer (PFS)", quantity=1))
+
+    # 3. Cancelled Sale Order (-2 then +2 Sale Cancel)
+    so_canc = make(
+        SaleOrder,
+        order_no="SO-MH/26-27/4990",
+        status="cancelled",
+        warehouse="Mumbai",
+        company_name="ACME PACK",
+        sales_person="Bhavin Suthar",
+        stock_applied=False,
+        timeline=[
+            {"status_key": "sales_confirmed", "date": "28-10-2026 01:00 PM", "by": "Bhavin Suthar"},
+            {"status_key": "cancelled", "date": "28-10-2026 01:15 PM", "by": "Admin"},
+        ],
+        created_at=t_base + datetime.timedelta(minutes=82),
+    )
+    db.add(so_canc)
+    await db.flush()
+    db.add(make(SaleOrderItem, order_id=so_canc.id, product_name="Air Timer (PFS)", quantity=2))
+
+    # 4. Confirmed Local Purchase (+5 Mumbai)
+    lp = make(
+        LocalPurchase,
+        invoice_no="LP/26-27/0201",
+        supplier_name="Mumbai Spares Co",
+        warehouse="Mumbai",
+        status="confirmed",
+        stock_applied=True,
+        confirmed_by="Purchase Team",
+        confirmed_at=t_base + datetime.timedelta(minutes=120),
+        created_at=t_base + datetime.timedelta(minutes=115),
+    )
+    db.add(lp)
+    await db.flush()
+    db.add(make(LocalPurchaseItem, purchase_id=lp.id, product_name="Air Timer (PFS)", quantity=5))
+
+    # 5. Import Purchase (+3 Mumbai Transit)
+    ip = make(
+        ImportPurchase,
+        consignment_no="IMP/26-27/088",
+        supplier_name="Yinglima China",
+        warehouse="Mumbai Transit",
+        status="confirmed",
+        stock_applied=True,
+        created_by="Import Desk",
+        created_at=t_base + datetime.timedelta(minutes=150),
+    )
+    db.add(ip)
+    await db.flush()
+    db.add(make(ImportPurchaseItem, purchase_id=ip.id, product_name="Air Timer (PFS)", quantity=3))
+
+    # 6. Stock Transfer (-1 Mumbai -> +1 Ahmedabad)
+    trf = make(
+        StockTransfer,
+        sr_no=10,
+        transfer_no="TRF-26-010",
+        transfer_date="28-10-2026",
+        from_warehouse="Mumbai",
+        to_warehouse="Ahmedabad",
+        status="Received",
+        added_by="Store Keeper",
+        created_at=t_base + datetime.timedelta(minutes=180),
+    )
+    db.add(trf)
+    await db.flush()
+    db.add(make(StockTransferLineItem, transfer_id=trf.id, product_name="Air Timer (PFS)", quantity=1))
+
+    await db.commit()
+
+    r = await client.get(f"/api/v1/stock-transaction/list/{prod.id}")
+    assert r.status_code == 200
+    data = r.json()["data"]
+    assert data["product"]["product_name_tally"] == "Air Timer (PFS)"
+    assert data["product"]["available_qty"] == 8.0
+
+    # Total movements: 1 (Adj) + 1 (SO) + 2 (SO Cancel pair) + 1 (LP) + 1 (IP) + 2 (Transfer OUT/IN) = 8
+    assert data["total"] == 8
+    ids = [e["id"] for e in data["items"]]
+    assert ids == [8, 7, 6, 5, 4, 3, 2, 1]  # newest first, sequential IDs
+
+    # Check Adjustment (#1 oldest) & Confirmed Sale (#2)
+    by_id = {e["id"]: e for e in data["items"]}
+    assert by_id[1]["title"] == "Stock In For Purpose Opening Stock (Adjustment Order #608)"
+    assert by_id[1]["type"] == "Stock IN"
+    assert by_id[1]["quantity_display"] == "+ 1"
+    assert by_id[1]["created_by"] == "Akshata Wadekar"
+
+    assert by_id[2]["title"] == "Sale Order #SO-MH/26-27/4987 Confirm"
+    assert by_id[2]["party_name"] == "VRO MACHINES PVT.LTD."
+    assert by_id[2]["type"] == "Sale"
+    assert by_id[2]["quantity_display"] == "- 1"
+    assert by_id[2]["created_by"] == "Bhavin Suthar"
+    assert by_id[2]["transaction_date"] == "28-10-2026 12:10 PM"
+
+    assert by_id[4]["type"] == "Sale Cancel" and by_id[4]["quantity_display"] == "+ 2"
+    assert by_id[5]["type"] == "Local Purchase" and by_id[5]["quantity_display"] == "+ 5"
+    assert by_id[6]["type"] == "Import Purchase" and by_id[6]["warehouse"] == "Mumbai Transit"
+
+    # Warehouse filter narrows ledger & updates filtered_available_qty
+    wh_res = (
+        await client.get(f"/api/v1/inventory/stock-transactions/{prod.id}", params={"warehouse": "Mumbai Transit"})
+    ).json()["data"]
+    assert wh_res["total"] == 1
+    assert wh_res["items"][0]["type"] == "Import Purchase"
+    assert wh_res["product"]["filtered_available_qty"] == 3.0
+
+    # Search by company name finds VRO MACHINES PVT.LTD.
+    s_res = (
+        await client.get(f"/api/v1/inventory/stock-transactions/{prod.id}", params={"search": "VRO MACHINES"})
+    ).json()["data"]
+    assert s_res["total"] == 1
+    assert s_res["items"][0]["party_name"] == "VRO MACHINES PVT.LTD."
+

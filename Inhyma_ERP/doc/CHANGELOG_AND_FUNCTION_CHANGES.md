@@ -3,6 +3,44 @@
 **System:** Inhyma_ERP (India Distribution)  
 **Scope:** Functional updates, schema migrations, UI hardening, and bug fixes.
 
+## [Release 2026-10-29] — Product Stock Transactions & Per-Product Ledger, Product Re-Order Branch-Scoped Matrix & FIFO Breakup, and Discount Payments Multi-Installment Ledger
+
+### 1. Product Stock Transactions Master List & Master-Joined 9-Warehouse Stock Matrix (`ProductStockPage.tsx`, `routes.py`, `schemas.py`, `productStock.css`)
+- **Master-Catalog Outer Join (`GET /api/v1/inventory/product-stock`):**
+  - Refactored `list_product_stock` in `backend/app/inventory/routes.py` to query `Product` (`is_active == True`, `is_deleted == False`) left-outer-joined with `ProductStock`, `ProductCategory`, `ProductSubCategory`, `Brand`, `UnitOfMeasurement`, and `Tax`, raising `ProductStockFilterParams.limit` ceiling to `5000`.
+  - Surfaces all active catalog items (`881` products) with `0` default balances when no `product_stocks` row exists yet, and upgraded `GET /api/v1/inventory/product-stock/{stock_id}` to resolve `Product.id` directly via synthetic zero-stock fallback.
+  - Added `filter_options` (`categories`, `sub_categories` with `category_id` cascading metadata, `brands`) and `breakup_flags` (`physical`, `transit`, `ordered` sets per branch so `(i)` info badges render whenever underlying ledger/consignment records exist, even if net stock is `0`).
+- **Stock Transactions Master View (`/reports/stock-transactions`, `/transaction-report/list`):**
+  - Renders `Product Stock Transactions` heading, filter panel open by default (`Category`, cascading `Sub Category`, `Brand`, `Is Negative Stock` + `Reset` / `Search`), right-aligned search card, and Title-Case table headers (`Sr. No.`, `Product Name (As Per Tally)`, `Product Code`, `Brand`, `Sub Category`, 9 warehouse columns tinted `#f5d5da` physical / `#eee9dc` transit / `#dcdcdc` ordered, and `Total Qty`).
+  - Clicking a product name on Stock Transactions navigates to `/stock-transaction/list/{product_id}`, whereas `/product-stock/list` preserves opening the Product Stock `SideDrawer` (upgraded with real `qty_per_box`, `packaging_length_cm`/`width_cm`/`height_cm`, `packaging_unit_cbm`, and `net_weight_kg`/`gross_weight_kg` metrics).
+  - Upgraded the Transit/Ordered Breakup Modal to display both **Expected Consignments (Import PO / Planning)** and **Booked Sale Orders (FIFO Queue)**.
+
+### 2. Per-Product Stock Transaction Ledger (`StockTransactionDetailPage.tsx`, `routes.py`, `schemas.py`, `api.ts`, `App.tsx`)
+- **Unified 5-Source Chronological Ledger Endpoint (`GET /api/v1/inventory/stock-transactions/{product_ref}`):**
+  - Mounted primary endpoint and production route aliases (`/api/v1/stock-transaction/list/{product_ref}`, `/api/v1/stock_transaction/list/{product_ref}`, `/api/v1/inventory/product-stock/{product_ref}/transactions`) resolving either `Product.id` or `ProductStock.id`.
+  - Aggregates real non-deleted inventory movements across 5 transactional tables:
+    1. **Sale Orders (`SaleOrderItem` + `SaleOrder`)** — `type: "Sale"`, `- qty`, clickable `Sale Order #<so_no> Confirm` title + bold buyer company name (`party_name`).
+    2. **Stock Adjustments (`StockAdjustmentItem` + `StockAdjustment`)** — `type: "Stock IN"` / `"Stock OUT"`, signed `+/- qty`, `Stock In/Out For Purpose <purpose> (Adjustment Order #<no>)`.
+    3. **Confirmed Local Purchases (`LocalPurchaseItem` + `LocalPurchaseOrder`)** — `type: "Local Purchase"`, `+ qty`, supplier name.
+    4. **Received/Closed Import Consignments (`ImportPurchaseItem` + `ImportPurchaseOrder`)** — `type: "Import Purchase"`, `+ qty`, supplier / BL reference.
+    5. **Inter-Warehouse Stock Transfers (`StockTransferItem` + `StockTransfer`)** — paired `Transfer OUT` (`- qty` at source) and `Transfer IN` (`+ qty` at destination).
+  - Supports server-side `warehouse`, `tx_type`, `date_from`, `date_to`, `search`, `skip`, and `limit` filtering, returning `available_qty` summed across physical warehouses (`mumbai_qty + ahmedabad_qty + indore_qty`).
+- **Dedicated Per-Product Ledger UI (`StockTransactionDetailPage.tsx`):**
+  - Mounted at `/stock-transaction/list/:id`, `/stock_transaction/list/:id`, and `/reports/stock-transactions/:id`.
+  - Features `<Product Name> Stock` title, Funnel filter toggle (`Warehouse`, `Type`, `From Date`, `To Date`), golden-amber `Action ▾` dropdown (`Export Excel (.xlsx)`, `Export CSV (.csv)`, `Stock Adjustment`, `Stock Transfer`), `AVAILABLE QTY` KPI card, `Items/Page` (`10` default) + `Search...` toolbar, 7 sortable columns (`ID`, `Title`, `Type`, `Warehouse`, `Quantity`, `Created By`, IST `Transaction Date`), deep-link navigation to source vouchers/orders, and `Showing X To Y Of Z Entries` pagination footer.
+
+### 3. Product Re-Order 16-Column Branch-Scoped Matrix & FIFO Consignment Breakup (`ProductReorderPage.tsx`, `routes.py`, `schemas.py`)
+- **Branch-Scoped Shortfall & Order Calculation (`GET /api/v1/inventory/product-reorder`):**
+  - Outer-joins `Product` master with `ProductStock` (`limit` up to `5000`) and evaluates `Re-Order`, `Short Fall`, and `Order To Be Place` against the selected branch (`Mumbai` default, `Ahmedabad`, `Indore`, or `All`) where `branch_total = physical + transit + ordered`, `shortfall = max(0, reorder_level - branch_total)` (when `reorder_level > 0`), and `order_to_be_placed = max(shortfall, moq)` when `shortfall > 0`.
+  - Supports inline `PATCH /api/v1/inventory/product-reorder/{product_id}` updates for `Re-Order` (`reorder_level`) and `MOQ` (`minimum_order_quantity`), conditional `(i)` breakup icons backed by FIFO consignment allocation (`GET /api/v1/inventory/product-stock/breakup`), Title-Case column headers, and full `Pagination` metadata (`total_records`, `page_size`, `has_previous`).
+
+### 4. Discount Payments Multi-Installment Ledger & Sale Process E-Way Bill / Timeline Enhancements (`DiscountPaymentsPage.tsx`, `SaleProcessList.tsx`, `SaleProcessDetailModal.tsx`, `process_routes.py`)
+- **Migration `x9c0d1e2f3a4`:** Added `eway_bill_url` and `eway_bill_name` to `sales_orders`, plus `remarks` and `updated_by_id` to `discount_payments`.
+- **Conditional E-Way Bill Upload & Chronological Sale Order Timeline:** Added `POST /api/v1/sales/upload-eway-bill` when `E-Way Bill = Yes` during `Admin Approved -> Acc. Confirmed`, and added chronological stage-by-stage `Status Timeline` views in `SaleProcessList.tsx` and `SaleProcessDetailModal.tsx`.
+- **Discount Payments Installment Ledger (`/sales/discount-payments`):** Upgraded to full multi-installment tracking with `PATCH /api/v1/sales/discount-payments/{payment_id}` inline editing, installment history modal, receipt uploads, and live `TOTAL DISCOUNT` / `PAID` / `REMAINING` KPI cards.
+
+---
+
 ## [Release 2026-10-28] — Sale Status Update Side Drawer, Multi-Stage Workflow, PO File & Tally Bill Upload
 
 ### 1. Interactive Sale Status Update Side Drawer (`SaleProcessList.tsx`, `SaleProcessDetailModal.tsx`)

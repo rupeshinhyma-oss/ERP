@@ -79,10 +79,11 @@ flowchart TD
 - **Cascading Reset:** Changing State resets District and City; changing District resets City.
 - **Dynamic City Creation:** Adding a custom city on the fly automatically persists with parent `state_id` and `district_id`.
 
-### 2.3 Inventory Management & A4 Order PDF Generation
-- **Stock Ledger:** Real-time visibility into physical on-hand stock, reserved allocations, and net available quantities.
-- **Stock Adjustment Vouchers:** Formal reconciliation vouchers (`Stock IN` / `Stock OUT`) for returns, damage write-offs, and count variances.
-- **A4 PDF Engine:** Client-side generation using `jsPDF` and `jspdf-autotable` conforming to official corporate tax invoice standards.
+### 2.3 Inventory, Multi-Warehouse Stock Matrix, Re-Order Engine & Stock Transaction Ledger
+- **Master-Joined 9-Warehouse Stock Matrix (`/product-stock/list` & `/reports/stock-transactions`):** Left-outer-joins active `Product` master (`is_active == True`, `is_deleted == False`) with `ProductStock` across 3 operational branches (`Mumbai`, `Ahmedabad`, `Indore`) × 3 stock buckets (`Physical` `#f5d5da`, `Transit` `#eee9dc`, `Ordered` `#dcdcdc`), surfacing the full catalog (`881` items) with cascading `Category` -> `Sub Category` filters, `breakup_flags`-driven `(i)` badges, and FIFO booked-order / expected-consignment breakup modals.
+- **Per-Product 5-Source Stock Transaction Ledger (`/stock-transaction/list/:id`):** Chronologically aggregates all non-deleted inventory movements for a product across **Sale Orders**, **Stock Adjustments**, **Confirmed Local Purchases**, **Received/Closed Import Consignments**, and **Inter-Warehouse Stock Transfers** (`StockTransactionDetailPage.tsx`), with `AVAILABLE QTY` KPI, deep-linked document titles + bold party names, IST timestamps, and `.xlsx`/`.csv` export.
+- **Branch-Scoped Product Re-Order Matrix (`/reports/re-order`):** 16-column shortfall planning engine evaluating `branch_total = physical + transit + ordered` against `reorder_level` and `minimum_order_quantity` (`MOQ`) for `Mumbai` (default), `Ahmedabad`, `Indore`, or `All`, with inline `PATCH` editing and FIFO consignment allocation inspection.
+- **Stock Adjustment & Stock Transfer Vouchers:** Formal reconciliation vouchers (`Stock IN` / `Stock OUT`) and atomic inter-warehouse `StockTransfer` movements (`from_warehouse` -> `to_warehouse`), backed by client-side A4 PDF generation (`jsPDF` + `jspdf-autotable`).
 
 ### 2.4 Technical Tasks, Field Service Dispatch & Payments Engine (`/payments`)
 - **Field Service Tickets:** Service call dispatch tracking machine models, serial numbers, warranty status, and problem descriptions.
@@ -211,27 +212,27 @@ Inhyma_ERP/
 │   │   ├── masters/cities/       # City master with cascading state_id & district_id
 │   │   ├── masters/districts/    # District lookup and relations
 │   │   ├── masters/states/       # State lookup and relations
-│   │   ├── inventory/            # Stock adjustments & vouchers
-│   │   ├── products/             # Product models, specs, and sync_adapter (Yinglima)
+│   │   ├── inventory/            # Product Stock matrix, Re-Order engine, 5-source Stock Transactions ledger, Adjustments & Transfers
+│   │   ├── products/             # Product models, specs, machine-spares, and sync_adapter (Yinglima)
 │   │   ├── purchase/             # Local & Import PO models, costing, streaming & routes
-│   │   ├── sales/                # Proforma invoices, commercial terms, and routes
+│   │   ├── sales/                # Proforma invoices, Sales Orders, Gatepass, Discount Payments & routes
 │   │   ├── tasks/                # Workforce tasks, Jira board & recurring_worker.py
 │   │   ├── common/workflow.py    # Database-driven workflow transition validator
 │   │   ├── suppliers/            # Supplier directory with mandatory calling number
 │   │   ├── technical_tasks/      # Field service tickets & technician dispatch
 │   │   ├── api/v1/internal_users.py # Spoke user deprovisioning endpoint
 │   │   └── events/               # WebSocket connection manager & broadcast
-│   ├── alembic/                  # Database migrations (j1 through o1)
-│   └── tests/                    # Backend test suites (38 passing tests)
+│   ├── alembic/                  # Database migrations (single-head invariant)
+│   └── tests/                    # Backend test suites (inventory, sales, migrations, RBAC)
 ├── frontend/
 │   ├── src/
-│   │   ├── components/           # UI design tokens, SideDrawer, ActionMenu, Kanban
+│   │   ├── components/           # UI design tokens, SideDrawer, ActionMenu, Kanban, Pagination
 │   │   ├── lib/                  # autocompleteBlocker.ts, api.ts, purchaseApi.ts, workflowRules.ts
 │   │   ├── pages/                # Companies, Suppliers, LocalPurchase, ImportPurchase,
-│   │   │                         # ImportPurchasePdfPage, crm/LeadListPage, crm/LeadKanbanPage,
-│   │   │                         # tasks/TasksPage (Recurring sub-tab)
-│   │   ├── styles/               # style.css (spin button removal, calc-locked, toasts)
-│   │   ├── App.tsx               # App lifecycle & blocker initialization
+│   │   │                         # ProductStockPage, StockTransactionDetailPage, ProductReorderPage,
+│   │   │                         # SaleProcessList, DiscountPaymentsPage, crm/*, tasks/TasksPage
+│   │   ├── styles/               # style.css, productStock.css (warehouse tints, ledger styles, calc-locked, toasts)
+│   │   ├── App.tsx               # App lifecycle, routes & blocker initialization
 │   │   └── main.tsx              # Wheel scroll lockout listener
 │   └── package.json
 └── doc/                          # System documentation

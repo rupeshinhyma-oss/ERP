@@ -110,6 +110,7 @@ import { initGlobalPasteSanitizer } from "@/lib/pasteSanitizer";
 import { initGlobalAutocompleteBlocker } from "@/lib/autocompleteBlocker";
 import { processIncomingSsoHandover } from "@/lib/ssoBridge";
 import { ProductStockPage } from "@/pages/ProductStockPage";
+import { StockTransactionDetailPage } from "@/pages/StockTransactionDetailPage";
 import { ProductReorderPage } from "@/pages/ProductReorderPage";
 import { DeletedOrdersPage } from "@/pages/DeletedOrdersPage";
 import { StockAdjustmentPage } from "@/pages/StockAdjustmentPage";
@@ -319,8 +320,11 @@ export function App() {
 
           <Route path="/reports/stock-transactions" element={<ProductStockPage />} />
           <Route path="/transaction_report/list" element={<ProductStockPage />} />
-          <Route path="/transaction-report/list" element={<Navigate to="/reports/stock-transactions" replace />} />
+          <Route path="/transaction-report/list" element={<ProductStockPage />} />
           <Route path="/stock-transactions" element={<Navigate to="/reports/stock-transactions" replace />} />
+          <Route path="/stock-transaction/list/:id" element={<StockTransactionDetailPage />} />
+          <Route path="/stock_transaction/list/:id" element={<StockTransactionDetailPage />} />
+          <Route path="/reports/stock-transactions/:id" element={<StockTransactionDetailPage />} />
 
           <Route path="/reports/goods-expected" element={<ProductStockPage defaultTab="goods-expected" />} />
           <Route path="/inventory/goods-expected" element={<ProductStockPage defaultTab="goods-expected" />} />

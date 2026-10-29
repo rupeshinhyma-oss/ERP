@@ -876,6 +876,57 @@ export interface ProductReorderItem {
   warehouse_thresholds?: Record<string, { reorder_level: number; moq: number }>;
 }
 
+export interface StockTransactionLedgerEntry {
+  id: number;
+  entry_uid: string;
+  title: string;
+  party_name?: string | null;
+  type: string;
+  warehouse: string;
+  quantity: number;
+  quantity_display: string;
+  created_by: string;
+  transaction_date: string;
+  iso_date: string;
+  sort_epoch: number;
+  ref_type: string;
+  ref_id: string;
+  ref_no?: string | null;
+}
+
+export interface ProductStockTransactionsFilterParams {
+  warehouse?: string;
+  type?: string;
+  date_from?: string;
+  date_to?: string;
+  search?: string;
+}
+
+export interface ProductStockLedgerResponse {
+  product: {
+    id: string;
+    product_id?: string | null;
+    stock_id?: string | null;
+    sr_no?: number | null;
+    product_name_tally: string;
+    product_code: string;
+    brand: string;
+    category?: string | null;
+    sub_category?: string | null;
+    uom: string;
+    available_qty: number;
+    filtered_available_qty: number;
+    physical_qty: number;
+    warehouses: Record<string, number>;
+  };
+  items: StockTransactionLedgerEntry[];
+  total: number;
+  filter_options?: {
+    warehouses?: string[];
+    types?: string[];
+  };
+}
+
 export interface StockAdjustmentFilterParams {
   date_range?: string;
   type?: string;
@@ -919,7 +970,24 @@ export const InventoryApi = {
    * Fetch details for a specific product stock item.
    */
   async getProductStock(stockId: string) {
-    return apiGet<any>(`/inventory/product-stock/${stockId}`);
+    return apiGet<any>(`/inventory/product-stock/${encodeURIComponent(stockId)}`);
+  },
+
+  async getProductStockTransactions(
+    productId: string,
+    params?: ProductStockTransactionsFilterParams
+  ) {
+    const qs = new URLSearchParams();
+    if (params?.warehouse && params.warehouse !== "All") qs.set("warehouse", params.warehouse);
+    if (params?.type && params.type !== "All") qs.set("type", params.type);
+    if (params?.date_from) qs.set("date_from", params.date_from);
+    if (params?.date_to) qs.set("date_to", params.date_to);
+    if (params?.search) qs.set("search", params.search);
+
+    const suffix = qs.toString() ? `?${qs.toString()}` : "";
+    return apiGet<ProductStockLedgerResponse>(
+      `/inventory/stock-transactions/${encodeURIComponent(productId)}${suffix}`
+    );
   },
 
   /**
