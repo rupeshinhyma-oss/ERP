@@ -366,6 +366,7 @@ export function ProductGalleryPage() {
   const [loading, setLoading] = useState(true);
 
   const [galleryTab, setGalleryTab] = useState<GalleryTab>("all");
+  const [filterOpen, setFilterOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("");
   const [subCategoryFilter, setSubCategoryFilter] = useState("");
@@ -607,9 +608,33 @@ export function ProductGalleryPage() {
   return (
     <AppShell activeKey="product-gallery">
       <main className="page">
-        <div className="page-header" style={{ marginBottom: "20px" }}>
+        <div className="page-header" style={{ marginBottom: "16px", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "12px" }}>
           <div>
             <h1 className="page-title">Product Gallery</h1>
+          </div>
+          <div className="page-header-actions" style={{ display: "flex", alignItems: "center", gap: "10px", marginLeft: "auto" }}>
+            <button
+              type="button"
+              className={`btn btn-header-filter ${filterOpen ? "active" : ""}`}
+              style={{
+                background: filterOpen ? "#0061f2" : "#475569",
+                color: "#ffffff",
+                padding: "8px 12px",
+                borderRadius: "6px",
+                border: "none",
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                cursor: "pointer",
+                boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
+              }}
+              onClick={() => setFilterOpen((v) => !v)}
+              title="Toggle Filter Options"
+            >
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon>
+              </svg>
+            </button>
           </div>
         </div>
 
@@ -682,8 +707,49 @@ export function ProductGalleryPage() {
           >
             📄 Supplier Quotation Sheets / PDFs ({quotationDocs.length})
           </button>
+
+          <div style={{ marginLeft: "auto", position: "relative", minWidth: "240px", flex: "0 1 280px" }}>
+            <input
+              type="text"
+              placeholder="🔍 Search code, name, supplier..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              style={{
+                width: "100%",
+                height: "36px",
+                padding: "6px 28px 6px 12px",
+                borderRadius: "6px",
+                border: "1px solid #cbd5e0",
+                fontSize: "13px",
+                background: "#ffffff",
+                boxSizing: "border-box",
+              }}
+            />
+            {search && (
+              <button
+                type="button"
+                onClick={() => setSearch("")}
+                style={{
+                  position: "absolute",
+                  right: "8px",
+                  top: "50%",
+                  transform: "translateY(-50%)",
+                  background: "none",
+                  border: "none",
+                  color: "#94a3b8",
+                  cursor: "pointer",
+                  fontSize: "13px",
+                  padding: "2px",
+                }}
+                title="Clear search"
+              >
+                ✕
+              </button>
+            )}
+          </div>
         </div>
 
+        {filterOpen && (
         <div
           className="card"
           style={{
@@ -828,6 +894,7 @@ export function ProductGalleryPage() {
             </div>
           </div>
         </div>
+        )}
 
         {loading ? (
           <ProductGallerySkeletonGrid count={12} />

@@ -1065,7 +1065,7 @@ Manage complete vendor team directory:
 
    - 🏭 **Supplier Factory Media Tab:** Visual card grid of vendor factory inspection photos & videos.
 
-2. **Filters & Search:** Category, Sub-Category, Supplier, Country, Status, and Keyword search.
+2. **Top-Right Filter Toggle Button & Collapsible Filter Options (`ProductGallery.tsx`):** Header `.page-header-actions` features the standardized Funnel Filter Toggle button (`.btn-header-filter`, `#475569` when closed, `#0061f2` when active) that expands/collapses the **Filter Options** card (Search, Category, Sub Category, Brand, and `Reset Filters`), alongside an inline quick search bar on the right side of the media tabs bar.
 
 3. **Product Media Card:**
 
@@ -4758,6 +4758,9 @@ A standardized suite of 8 production-grade Excel (`.xlsx`) files is maintained d
 | **TC-RUN-04** | Graceful Multi-Service Shutdown | Send SIGINT (`Ctrl+C`) to the running master runner. | All 6 services and child process trees terminate cleanly without leaving orphaned listening sockets. |
 | **TC-PP-MODAL-01** | Product Prices Add Quote Modal at 100% Zoom | At 100% browser zoom on `/inventory/product-prices`, click `+ Quote` or `+ Assign` on any product. | All fields align cleanly with the top product banner, and both `Cancel` and `+ Add Supplier Quote` / `Save Supplier Quote` buttons are fully visible inside the white modal card without needing to zoom out. |
 | **TC-SALE-LP-01** | Sale Process Auto-Load from Inwarded Local Purchase | Create a Local Purchase for a product (e.g. `DAR-00208`), inward it into stock (`Received / Inwarded`), then auto-load a consignment containing `DAR-00208` in `/sale/process/new`. | Sale Process automatically populates `Supplier` (`✓ Local Purchase`), `Unit Price (RMB) Including VAT`, `Excluding VAT`, `Including Profit %`, `FOB Price (USD)`, and `CFR Price/Unit` from the inwarded Local Purchase. |
+| **TC-PG-FILTER-01** | Product Gallery Top-Right Funnel Filter Toggle | Open `/product-gallery`. Verify Filter Options card is collapsed by default, quick search input is on the tabs row, and clicking the top-right funnel button toggles the Filter Options card. | Filter Options card expands/collapses cleanly and displays active filter badge count on the top-right header button. |
+| **TC-INSTANT-ITEMS-01** | 0ms Product Line Items in Sale Process & Local Purchase Modals | Open `/sale/process` or `/purchase/local` and click any order/invoice row to open its detail modal. | Product line items render immediately in 0ms on first frame without flashing `0 line items` or `"No line items recorded."` for 1–2 seconds. |
+| **TC-SM-USERS-UI-01** | Stock Movement & Users Top-Right Funnel Filter Toggle | Open `/inventory/stock-movements` and `/users`. Verify page header title, top-right funnel filter button, inline quick search, and collapsible `Filter Options` card with `Reset Filters`. | Both pages match the global ERP header and collapsible filter card standard. |
 
 ---
 *End of Master Features & Testing Specification Manual. Maintained for Yinglima Enterprise ERP. Last updated: October 2026 (Sections 42-43: Multi-ERP Ecosystem SSO Bridge, Canonical ERP Keys, Dynamic Registry Routing, Central Session Resilience, Master Runner Process Supervision, and Scoped Reload).*

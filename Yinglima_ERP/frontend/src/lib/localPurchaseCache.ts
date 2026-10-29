@@ -47,22 +47,25 @@ export function setLocalPurchasesListCache(
       existing.detail = {
         ...existing.detail,
         ...item,
-        packing_forwarding: existing.detail.packing_forwarding ?? 0,
-        transport_expense: existing.detail.transport_expense ?? 0,
-        offloading_expense: existing.detail.offloading_expense ?? 0,
-        other_expense: existing.detail.other_expense ?? 0,
-        items: existing.detail.items ?? [],
+        packing_forwarding: item.packing_forwarding ?? existing.detail.packing_forwarding ?? 0,
+        transport_expense: item.transport_expense ?? existing.detail.transport_expense ?? 0,
+        offloading_expense: item.offloading_expense ?? existing.detail.offloading_expense ?? 0,
+        other_expense: item.other_expense ?? existing.detail.other_expense ?? 0,
+        items:
+          item.items && item.items.length > 0
+            ? item.items
+            : existing.detail.items ?? [],
       };
       existing.timestamp = Date.now();
     } else {
       detailCache.set(item.id, {
         detail: {
           ...item,
-          packing_forwarding: 0,
-          transport_expense: 0,
-          offloading_expense: 0,
-          other_expense: 0,
-          items: [],
+          packing_forwarding: item.packing_forwarding ?? 0,
+          transport_expense: item.transport_expense ?? 0,
+          offloading_expense: item.offloading_expense ?? 0,
+          other_expense: item.other_expense ?? 0,
+          items: item.items ?? [],
         },
         timestamp: Date.now(),
       });

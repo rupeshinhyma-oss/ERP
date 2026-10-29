@@ -114,10 +114,10 @@ class LocalPurchaseRepository(BaseRepository[LocalPurchase]):
         count_stmt = select(func.count(LocalPurchase.id)).where(where_clause)
         total_count = (await self.session.execute(count_stmt)).scalar() or 0
 
-        # Data query with items loaded for line-item count (load only id for performance)
+        # Data query with items loaded in the same selectinload query for 0ms detail preview
         data_stmt = (
             select(LocalPurchase)
-            .options(selectinload(LocalPurchase.items).load_only(LocalPurchaseItem.id))
+            .options(selectinload(LocalPurchase.items))
             .where(where_clause)
             .order_by(desc(LocalPurchase.created_at))
             .offset(offset)

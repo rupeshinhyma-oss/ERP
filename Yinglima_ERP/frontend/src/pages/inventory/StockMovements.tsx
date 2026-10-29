@@ -9,6 +9,7 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
 import { Can } from "@/components/ui";
 import { apiDelete, apiGet, apiPost, errorMessage } from "@/lib/api";
@@ -49,6 +50,11 @@ export function StockMovementsPage() {
   const [search, setSearch] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
+  const [filterOpen, setFilterOpen] = useState(false);
+
+  const activeFiltersCount =
+    (dateFrom ? 1 : 0) +
+    (dateTo ? 1 : 0);
 
   // Modals state
   const [selectedMovement, setSelectedMovement] = useState<StockMovement | null>(null);
@@ -193,7 +199,100 @@ export function StockMovementsPage() {
 
   return (
     <AppShell activeKey="stock-movement">
-      <div style={{ display: "flex", flexDirection: "column", gap: "24px", paddingBottom: "40px" }}>
+      <main className="page" style={{ width: "100%", padding: "16px 24px" }}>
+        {/* Page Header Bar */}
+        <div className="page-header" style={{ marginBottom: "16px" }}>
+          <div>
+            <h1 className="page-title">Stock Movement</h1>
+          </div>
+          <div className="page-header-actions" style={{ display: "flex", gap: "10px", alignItems: "center", flexWrap: "wrap" }}>
+            {activeTab === "inward" ? (
+              <Link
+                to="/purchase/local"
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  padding: "7px 14px",
+                  borderRadius: "6px",
+                  fontSize: "12.5px",
+                  fontWeight: 600,
+                  color: "#047857",
+                  background: "#ecfdf5",
+                  border: "1px solid #a7f3d0",
+                  textDecoration: "none",
+                }}
+                title="Inward stock is strictly generated from Local Purchases"
+              >
+                <span>📦</span> Go to Local Purchase &rarr;
+              </Link>
+            ) : activeTab === "outward" ? (
+              <Link
+                to="/sale/process"
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  padding: "7px 14px",
+                  borderRadius: "6px",
+                  fontSize: "12.5px",
+                  fontWeight: 600,
+                  color: "#7e22ce",
+                  background: "#faf5ff",
+                  border: "1px solid #d8b4fe",
+                  textDecoration: "none",
+                }}
+                title="Outward stock is strictly generated from Sales Process upon dispatch"
+              >
+                <span>📤</span> Go to Sales Process &rarr;
+              </Link>
+            ) : null}
+
+            <button
+              type="button"
+              className={`btn btn-header-filter ${filterOpen ? "active" : ""}`}
+              onClick={() => setFilterOpen((v) => !v)}
+              style={{
+                background: filterOpen || activeFiltersCount > 0 ? "#0061f2" : "#475569",
+                color: "#ffffff",
+                padding: "8px 12px",
+                borderRadius: "6px",
+                border: "none",
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                cursor: "pointer",
+                boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
+                position: "relative",
+              }}
+              title="Toggle Filter Options"
+            >
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon>
+              </svg>
+              {activeFiltersCount > 0 && (
+                <span
+                  style={{
+                    position: "absolute",
+                    top: "-5px",
+                    right: "-5px",
+                    background: "#ef4444",
+                    color: "#ffffff",
+                    borderRadius: "10px",
+                    padding: "1px 5px",
+                    fontSize: "10px",
+                    fontWeight: 700,
+                    lineHeight: "1.2",
+                  }}
+                >
+                  {activeFiltersCount}
+                </span>
+              )}
+            </button>
+          </div>
+        </div>
+
+      <div style={{ display: "flex", flexDirection: "column", gap: "18px", paddingBottom: "40px" }}>
         {/* Top KPI Metric Cards */}
         <div
           style={{
@@ -336,7 +435,121 @@ export function StockMovementsPage() {
           </div>
         </div>
 
-        {/* Tab Selection Bar & Primary Action Buttons */}
+        {/* Collapsible Filter Options Card */}
+        {filterOpen && (
+          <div
+            className="card"
+            style={{
+              padding: "16px 20px",
+              background: "#ffffff",
+              border: "1px solid #e2e8f0",
+              borderRadius: "12px",
+              boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                marginBottom: "14px",
+                paddingBottom: "10px",
+                borderBottom: "1px solid #f1f5f9",
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "13.5px", fontWeight: 700, color: "#1e293b" }}>
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#2563eb" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                  <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon>
+                </svg>
+                <span>Filter Options</span>
+                {activeFiltersCount > 0 && (
+                  <span
+                    style={{
+                      background: "#eff6ff",
+                      color: "#2563eb",
+                      border: "1px solid #bfdbfe",
+                      borderRadius: "999px",
+                      padding: "1px 8px",
+                      fontSize: "11px",
+                      fontWeight: 700,
+                    }}
+                  >
+                    {activeFiltersCount} active
+                  </span>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setSearch("");
+                  setDateFrom("");
+                  setDateTo("");
+                }}
+                style={{
+                  background: "#f1f5f9",
+                  border: "1px solid #cbd5e1",
+                  color: "#475569",
+                  borderRadius: "6px",
+                  padding: "5px 12px",
+                  fontSize: "12px",
+                  fontWeight: 600,
+                  cursor: "pointer",
+                }}
+              >
+                Reset Filters
+              </button>
+            </div>
+
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+                gap: "16px",
+                alignItems: "flex-end",
+              }}
+            >
+              <div>
+                <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "6px" }}>
+                  Date From
+                </label>
+                <input
+                  type="date"
+                  value={dateFrom}
+                  onChange={(e) => setDateFrom(e.target.value)}
+                  style={{
+                    width: "100%",
+                    height: "38px",
+                    padding: "7px 10px",
+                    borderRadius: "6px",
+                    border: "1px solid #cbd5e1",
+                    fontSize: "13px",
+                  }}
+                />
+              </div>
+
+              <div>
+                <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "6px" }}>
+                  Date To
+                </label>
+                <input
+                  type="date"
+                  value={dateTo}
+                  onChange={(e) => setDateTo(e.target.value)}
+                  style={{
+                    width: "100%",
+                    height: "38px",
+                    padding: "7px 10px",
+                    borderRadius: "6px",
+                    border: "1px solid #cbd5e1",
+                    fontSize: "13px",
+                  }}
+                />
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Tab Selection Bar & Inline Quick Search */}
         <div
           style={{
             display: "flex",
@@ -351,7 +564,7 @@ export function StockMovementsPage() {
           }}
         >
           {/* Tabs */}
-          <div style={{ display: "flex", gap: "8px" }}>
+          <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
             <button
               type="button"
               onClick={() => setActiveTab("inward")}
@@ -413,213 +626,48 @@ export function StockMovementsPage() {
             </button>
           </div>
 
-          {/* Navigation Shortcuts */}
-          <div style={{ display: "flex", gap: "10px" }}>
-            {activeTab === "inward" ? (
-              <a
-                href="/purchase/local"
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "6px",
-                  padding: "8px 14px",
-                  borderRadius: "8px",
-                  fontSize: "12.5px",
-                  fontWeight: 600,
-                  color: "#047857",
-                  background: "#ecfdf5",
-                  border: "1px solid #a7f3d0",
-                  textDecoration: "none",
-                }}
-                title="Inward stock is strictly generated from Local Purchases"
-              >
-                <span>📦</span> Go to Local Purchase &rarr;
-              </a>
-            ) : activeTab === "outward" ? (
-              <a
-                href="/sale/process"
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "6px",
-                  padding: "8px 14px",
-                  borderRadius: "8px",
-                  fontSize: "12.5px",
-                  fontWeight: 600,
-                  color: "#7e22ce",
-                  background: "#faf5ff",
-                  border: "1px solid #d8b4fe",
-                  textDecoration: "none",
-                }}
-                title="Outward stock is strictly generated from Sales Process upon dispatch"
-              >
-                <span>📤</span> Go to Sales Process &rarr;
-              </a>
-            ) : null}
-          </div>
-        </div>
-
-        {/* Automated Inward Notice */}
-        {activeTab === "inward" && (
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              background: "#f0fdf4",
-              border: "1px solid #bbf7d0",
-              borderRadius: "10px",
-              padding: "10px 16px",
-              marginBottom: "14px",
-              fontSize: "12.5px",
-              color: "#166534",
-            }}
-          >
-            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-              <span style={{ fontSize: "16px" }}>💡</span>
-              <span>
-                <strong>Automated Inward:</strong> Warehouse inward receipts are generated directly from verified <strong>Local Purchases</strong> (/purchase/local).
-              </span>
-            </div>
-            <a
-              href="/purchase/local"
-              style={{
-                fontWeight: 700,
-                color: "#059669",
-                textDecoration: "underline",
-                fontSize: "12px",
-              }}
-            >
-              Open Local Purchases &rarr;
-            </a>
-          </div>
-        )}
-
-        {/* Automated Outward Notice */}
-        {activeTab === "outward" && (
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              background: "#faf5ff",
-              border: "1px solid #e9d5ff",
-              borderRadius: "10px",
-              padding: "10px 16px",
-              marginBottom: "14px",
-              fontSize: "12.5px",
-              color: "#6b21a8",
-            }}
-          >
-            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-              <span style={{ fontSize: "16px" }}>⚡</span>
-              <span>
-                <strong>Automated Outward:</strong> Warehouse outward dispatches are generated directly from <strong>Sales Process</strong> (/sale/process) upon order dispatch.
-              </span>
-            </div>
-            <a
-              href="/sale/process"
-              style={{
-                fontWeight: 700,
-                color: "#7e22ce",
-                textDecoration: "underline",
-                fontSize: "12px",
-              }}
-            >
-              Open Sales Process &rarr;
-            </a>
-          </div>
-        )}
-
-        {/* Filter & Search Bar */}
-        <div
-          style={{
-            display: "flex",
-            flexWrap: "wrap",
-            gap: "12px",
-            alignItems: "center",
-            backgroundColor: "#ffffff",
-            padding: "14px 16px",
-            borderRadius: "12px",
-            border: "1px solid #e2e8f0",
-          }}
-        >
-          <div style={{ flex: "1 1 240px" }}>
+          {/* Inline Quick Search Input */}
+          <div style={{ position: "relative", minWidth: "280px", flex: "0 1 340px" }}>
             <input
               type="text"
               placeholder={
                 activeTab === "balances"
                   ? "Search by Product SKU or Item Name..."
-                  : "Search Movement No, Party, Challan, Vehicle, Container, Bill..."
+                  : "Search Movement No, Party, Challan, Container..."
               }
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               style={{
                 width: "100%",
-                padding: "8px 14px",
+                height: "36px",
+                padding: "6px 30px 6px 12px",
                 borderRadius: "8px",
                 border: "1px solid #cbd5e1",
                 fontSize: "13px",
               }}
             />
+            {search && (
+              <button
+                type="button"
+                onClick={() => setSearch("")}
+                title="Clear search"
+                style={{
+                  position: "absolute",
+                  right: "8px",
+                  top: "50%",
+                  transform: "translateY(-50%)",
+                  border: "none",
+                  background: "transparent",
+                  color: "#94a3b8",
+                  cursor: "pointer",
+                  fontSize: "14px",
+                  padding: "2px",
+                }}
+              >
+                ✕
+              </button>
+            )}
           </div>
-
-          {activeTab !== "balances" && (
-            <>
-              <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-                <span style={{ fontSize: "12px", color: "#64748b", fontWeight: 600 }}>From:</span>
-                <input
-                  type="date"
-                  value={dateFrom}
-                  onChange={(e) => setDateFrom(e.target.value)}
-                  style={{
-                    padding: "7px 10px",
-                    borderRadius: "6px",
-                    border: "1px solid #cbd5e1",
-                    fontSize: "13px",
-                  }}
-                />
-              </div>
-
-              <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-                <span style={{ fontSize: "12px", color: "#64748b", fontWeight: 600 }}>To:</span>
-                <input
-                  type="date"
-                  value={dateTo}
-                  onChange={(e) => setDateTo(e.target.value)}
-                  style={{
-                    padding: "7px 10px",
-                    borderRadius: "6px",
-                    border: "1px solid #cbd5e1",
-                    fontSize: "13px",
-                  }}
-                />
-              </div>
-
-              {(search || dateFrom || dateTo) && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSearch("");
-                    setDateFrom("");
-                    setDateTo("");
-                  }}
-                  style={{
-                    padding: "7px 12px",
-                    borderRadius: "6px",
-                    border: "1px solid #cbd5e1",
-                    background: "#f1f5f9",
-                    color: "#475569",
-                    fontSize: "12px",
-                    fontWeight: 600,
-                    cursor: "pointer",
-                  }}
-                >
-                  Clear Filters
-                </button>
-              )}
-            </>
-          )}
         </div>
 
         {/* Content Table */}
@@ -916,6 +964,7 @@ export function StockMovementsPage() {
           onClose={() => setKardexProduct(null)}
         />
       )}
+      </main>
     </AppShell>
   );
 }

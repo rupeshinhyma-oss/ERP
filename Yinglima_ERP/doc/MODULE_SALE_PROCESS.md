@@ -230,3 +230,17 @@ When auto-loading a consignment column (`extract_consignment_items`) or adding a
 3. **Strict Zero Fallback Rule:**
    - If a product has no finalized Local Purchase record, `unit_price_rmb_with_vat` remains `0.00` and `supplier_name` remains `None` (no fallback to Product Prices catalog quotes).
 
+---
+
+## 12. 0ms Instant Product Line-Item Rendering in Sale Process Detail & Outward Modals (Release 2026-10-29)
+
+### Root Cause & Zero-Latency Fix
+1. **Include Already-Fetched `items` in `/sales/orders` List Payload (`schemas.py` & `routes.py`):**
+   - `SaleRepository.list_with_filters` already executed `selectinload(SaleOrder.items)` on every list call, so PostgreSQL was already returning all product rows in the same query, but `list_sale_orders` previously discarded `r.items` during serialization.
+   - Updated `SaleOrderResponse` and `list_sale_orders` to serialize `items: list[SaleOrderItemResponse]` directly from the existing `selectinload` result (0 extra DB queries, 0ms list overhead).
+2. **Decoupled `/sales/orders/{id}` from `/sales/orders/{id}/trade-details` (`SaleProcessDetailModal.tsx`):**
+   - Previously, `Promise.all([apiGet('/sales/orders/{id}'), apiGet('/sales/orders/{id}/trade-details')])` blocked `setOrder(res.data)` until `/trade-details` (which executes 6 separate DB queries for Commercial Invoice / Packing List) completed, causing a 1–2 second delay showing `Planned Products Breakdown (0 line items)` and `"No line items recorded."`.
+   - Now, `initialOrder.items` and `saleProcessCache` render all product line items in **0ms** the instant the modal opens, and `/sales/orders/{id}` resolves independently without waiting on `/trade-details`.
+3. **0ms Pre-Fill in Outward Dispatch Modal (`SaleProcessOutwardModal.tsx`):**
+   - Reads cached order line items immediately from `getSaleOrderDetailCache(orderId)` so the Outward Dispatch modal opens at 0ms without a blank loading spinner.
+

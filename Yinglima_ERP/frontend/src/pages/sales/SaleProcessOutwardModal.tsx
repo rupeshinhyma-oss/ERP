@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { apiGet, apiPost, errorMessage } from "@/lib/api";
 import { useToast } from "@/lib/toast";
 import type { SaleOrder } from "@/types/saleProcess";
+import { getSaleOrderDetailCache, updateSaleOrderInCache } from "@/lib/saleProcessCache";
 
 interface SaleProcessOutwardModalProps {
   isOpen: boolean;
@@ -51,28 +52,38 @@ export function SaleProcessOutwardModal({
       return;
     }
 
-    setLoading(true);
+    const applyOrder = (o: SaleOrder) => {
+      setOrder(o);
+      setMovementDate(new Date().toISOString().slice(0, 10));
+      setDispatchRemarks(`Outward dispatch for Sale Order ${o.order_no}`);
+      if (o.container_no) setContainerNo(o.container_no);
+      if (o.transporter_name) setTransporterName(o.transporter_name);
+      if (o.vehicle_no) setVehicleNo(o.vehicle_no);
+      const rows: OutwardItemRow[] = (o.items || []).map((it) => ({
+        product_id: it.product_id,
+        product_name: it.product_name,
+        product_code: it.product_code,
+        quantity: Number(it.quantity) || 0,
+        unit_rate: Number(it.unit_rate) || 0,
+        remarks: it.remarks || "",
+      }));
+      setItems(rows);
+    };
+
+    const cached = getSaleOrderDetailCache(orderId)?.order;
+    if (cached && cached.items && cached.items.length > 0) {
+      applyOrder(cached);
+      setLoading(false);
+    } else {
+      setLoading(true);
+    }
+
     apiGet<SaleOrder>(`/sales/orders/${orderId}`)
       .then((res) => {
         const o = res.data;
         if (o) {
-          setOrder(o);
-          setMovementDate(new Date().toISOString().slice(0, 10));
-          setDispatchRemarks(`Outward dispatch for Sale Order ${o.order_no}`);
-          if (o.container_no) setContainerNo(o.container_no);
-          if (o.transporter_name) setTransporterName(o.transporter_name);
-          if (o.vehicle_no) setVehicleNo(o.vehicle_no);
-
-          // Populate line items
-          const rows: OutwardItemRow[] = (o.items || []).map((it) => ({
-            product_id: it.product_id,
-            product_name: it.product_name,
-            product_code: it.product_code,
-            quantity: Number(it.quantity) || 0,
-            unit_rate: Number(it.unit_rate) || 0,
-            remarks: it.remarks || "",
-          }));
-          setItems(rows);
+          applyOrder(o);
+          updateSaleOrderInCache(o);
         }
       })
       .catch((err) => {

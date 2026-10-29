@@ -288,3 +288,7 @@ Inhyma and Yinglima maintain independent relational UUID namespaces. Products ar
   * Category, Sub-Category, and Brand dropdown selections instantly update `extraFilters`, triggering automatic server-side re-querying reactively without requiring an extra click on a search button.
 * **Comprehensive Reset Action (`onResetFilters`):**
   * Clicking `[Reset]` now triggers `onResetFilters`, clearing Category, Sub Category, and Brand back to "All" along with clearing table search input and resetting to page 1.
+
+* **Product Gallery Top-Right Funnel Filter Toggle (`ProductGallery.tsx`):**
+  * Added the standardized `.btn-header-filter` funnel icon toggle button in the top-right `.page-header-actions` of **Product Gallery** (`/product-gallery`), matching **Product Master**, **Product Prices**, **Suppliers**, and **Buyers**.
+  * The **Filter Options** card (Category, Sub Category, Brand, Search, and `Reset Filters`) is now collapsed by default (`filterOpen = false`) and toggles open/closed when clicking the top-right funnel button, while a quick search input (`🔍 Search code, name, supplier...`) remains accessible on the right side of the media tabs bar.

@@ -230,3 +230,6 @@ When touching this module, always verify the following:
    - Organization lookup (`/masters/company-list/lookup`) is fetched independently and cached in memory across form opens for instant 0ms dropdown display.
    - Any newly added organization in Organization Master is immediately fetched fresh and displayed.
    - Consignments lookup (`/purchases/local/consignments-lookup`) runs single-batch SQL with in-memory TTL caching without blocking Organization selection.
+7. **0ms Instant Product Line-Item Rendering in Detail & Inward Modals (Release 2026-10-29):**
+   - `LocalPurchaseRepository.list_with_filters` loads full `LocalPurchase.items` in the same `selectinload(LocalPurchase.items)` batch query (0 extra DB queries) and returns `items` plus expense breakdown fields (`packing_forwarding`, `transport_expense`, `offloading_expense`, `other_expense`) in `LocalPurchaseSummaryResponse`.
+   - `setLocalPurchasesListCache` seeds `detailCache` with full `items`, allowing `LocalPurchaseDetailModal.tsx`, `LocalPurchaseInwardModal.tsx`, and `LocalPurchaseForm.tsx` to display all product line items in **0ms** upon click without showing `0 items` or waiting 1–2 seconds.
