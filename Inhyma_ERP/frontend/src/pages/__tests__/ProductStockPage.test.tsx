@@ -99,7 +99,11 @@ describe("ProductStockPage", () => {
 
     expect(screen.getByRole("heading", { name: /Product Stock/i })).toBeTruthy();
     expect(screen.getByTitle("Filter stock list")).toBeTruthy();
-    expect(screen.getByTitle("Export to Excel")).toBeTruthy();
+    const exportBtn = screen.getByTitle("Export to Excel");
+    expect(exportBtn).toBeTruthy();
+    expect(exportBtn.classList.contains("btn-imp-exp")).toBe(true);
+    expect(exportBtn.classList.contains("stock-btn-export")).toBe(true);
+    expect(exportBtn.querySelector("svg")).toBeTruthy();
   });
 
   it("renders search input with placeholder matching screenshot", () => {
@@ -467,7 +471,7 @@ describe("ProductStockPage", () => {
     });
   });
 
-  it("renders Product Stock Transactions report mode with open filter panel and navigates to /stock-transaction/list/:id on product click", async () => {
+  it("renders Product Stock Transactions report mode with filter panel off by default and navigates to /stock-transaction/list/:id on product click", async () => {
     render(
       <MemoryRouter initialEntries={["/transaction-report/list"]}>
         <Routes>
@@ -484,7 +488,9 @@ describe("ProductStockPage", () => {
       "reports-stock-transactions"
     );
     expect(screen.getByRole("heading", { name: "Product Stock Transactions" })).toBeTruthy();
-    // Filter panel is open by default on Stock Transactions report
+    // Filter panel is off by default on Stock Transactions report and opens on click
+    expect(screen.queryByTestId("stock-filter-panel")).toBeNull();
+    fireEvent.click(screen.getByTitle("Filter stock list"));
     expect(screen.getByTestId("stock-filter-panel")).toBeTruthy();
 
     // Clicking product name navigates to per-product ledger page instead of opening SideDrawer

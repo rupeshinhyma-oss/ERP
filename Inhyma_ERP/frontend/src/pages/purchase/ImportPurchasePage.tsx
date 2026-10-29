@@ -34,6 +34,36 @@ import {
 
 // The record types live in the shared data layer; re-exported so existing imports keep working.
 export type { ImportPurchaseItem, ImportPurchaseRecord } from "@/lib/purchaseApi";
+import { ImpExpDropdown, ImportSummaryPanel, type ImportHeader, type ImportSummary } from "@/components/ImportWizard";
+
+const IMPORT_PURCHASE_IMPORT_HEADERS: ImportHeader[] = [
+  { key: "consignment_no", label: "Invoice / Consignment No.", required: true },
+  { key: "supplier_name", label: "Supplier", required: true },
+  { key: "warehouse", label: "Warehouse", required: true },
+  { key: "ordered_date", label: "Ordered Date (DD-MM-YYYY)", required: true },
+  { key: "etd_origin_date", label: "ETD Origin Date (DD-MM-YYYY)" },
+  { key: "eta_port_date", label: "ETA Port Date (DD-MM-YYYY)" },
+  { key: "expected_arrival_date", label: "Expected Arrival Date (DD-MM-YYYY)" },
+  { key: "invoice_date", label: "Invoice Date (DD-MM-YYYY)" },
+  { key: "conversion_rate", label: "Conversion Rate (USD to INR)", required: true },
+  { key: "customs_conversion_rate", label: "Customs Conversion Rate (USD to INR)", required: true },
+  { key: "product_name", label: "Product Name", required: true },
+  { key: "product_code", label: "Product Code" },
+  { key: "quantity", label: "Quantity", required: true },
+  { key: "unit_rate_usd", label: "Unit Rate (USD)", required: true },
+  { key: "invoice_total_usd", label: "Purchase Invoice Total Value (USD)" },
+  { key: "total_cbm", label: "Total CBM" },
+  { key: "total_import_duty", label: "Total Import Duty (INR)" },
+  { key: "freight", label: "Freight" },
+  { key: "insurance", label: "Insurance" },
+  { key: "stamp_duty", label: "Stamp Duty" },
+  { key: "shipping_line_charges", label: "Shipping Line Charges" },
+  { key: "cfs_charges", label: "CFS Charges" },
+  { key: "clearing_transport", label: "Clearing & Transport" },
+  { key: "offloading", label: "Offloading" },
+  { key: "misc_charges", label: "Miscellaneous" },
+  { key: "remarks", label: "Remarks" },
+];
 
 const IMPORT_OPTION_GROUPS = ["purchase.import.defaults"] as const;
 
@@ -525,6 +555,8 @@ export function ImportPurchasePage({ defaultAdd = false }: { defaultAdd?: boolea
   // Selection & Bulk Actions matching Companies design
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [bulkMenuOpen, setBulkMenuOpen] = useState(false);
+  const [importSummary, setImportSummary] = useState<ImportSummary | null>(null);
+  const [importError, setImportError] = useState<string | null>(null);
 
   const handleBulkConfirm = async () => {
     if (selectedIds.length === 0) return;
@@ -1134,16 +1166,24 @@ export function ImportPurchasePage({ defaultAdd = false }: { defaultAdd?: boolea
       o.updated_date || o.added_on || o.ordered_date,
       o.status,
     ]);
-    const csvContent =
-      "data:text/csv;charset=utf-8," +
-      [headers.join(","), ...rows.map((e) => e.map((val) => `"${val}"`).join(","))].join("\n");
-    const encodedUri = encodeURI(csvContent);
+    const csvCell = (val: unknown) => `"${String(val ?? "").replace(/"/g, '""')}"`;
+    const csvBody =
+      "\uFEFF" +
+      [headers.map(csvCell).join(","), ...rows.map((r) => r.map(csvCell).join(","))].join("\n");
+    const blob = new Blob([csvBody], { type: "text/csv;charset=utf-8;" });
+    const href =
+      typeof URL.createObjectURL === "function"
+        ? URL.createObjectURL(blob)
+        : "data:text/csv;charset=utf-8," + encodeURIComponent(csvBody);
     const link = document.createElement("a");
-    link.setAttribute("href", encodedUri);
+    link.setAttribute("href", href);
     link.setAttribute("download", `import_purchase_list_${new Date().toISOString().slice(0, 10)}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    if (typeof URL.revokeObjectURL === "function" && href.startsWith("blob:")) {
+      URL.revokeObjectURL(href);
+    }
   };
 
   // ==========================================
@@ -1760,26 +1800,20 @@ export function ImportPurchasePage({ defaultAdd = false }: { defaultAdd?: boolea
               ADD NEW
             </button>
 
-            {/* Export button */}
-            <button
-              type="button"
-              className="btn btn-export"
-              data-testid="btn-export"
-              onClick={handleExport}
-              style={{
-                background: "#f59e0b",
-                color: "#ffffff",
-                padding: "8px 16px",
-                borderRadius: "6px",
-                fontWeight: 600,
-                fontSize: "13px",
-                border: "none",
-                cursor: "pointer",
-                boxShadow: "0 2px 4px rgba(245,158,11,0.2)",
+            {/* Imp / Exp Dropdown (Sample File, Import, Export) */}
+            <ImpExpDropdown
+              apiBase={IMPORT_PURCHASE_API}
+              entityName="Import Purchase"
+              importHeaders={IMPORT_PURCHASE_IMPORT_HEADERS}
+              onSummary={setImportSummary}
+              onError={setImportError}
+              onComplete={() => {
+                void loadOrders();
               }}
-            >
-              Export
-            </button>
+              onExportCsv={handleExport}
+              showImport={true}
+              showExport={true}
+            />
 
             {/* Bulk Actions Button */}
             <div style={{ position: "relative" }}>
@@ -1860,6 +1894,8 @@ export function ImportPurchasePage({ defaultAdd = false }: { defaultAdd?: boolea
             </div>
           </div>
         </div>
+
+        <ImportSummaryPanel summary={importSummary} error={importError} />
 
         {/* Collapsible Filter Panel (Placed ABOVE KPI cards) */}
         {isFilterOpen && (

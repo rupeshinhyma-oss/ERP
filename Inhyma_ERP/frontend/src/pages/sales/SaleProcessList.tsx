@@ -1893,16 +1893,20 @@ export function SaleProcessListPage() {
       o.status,
     ]);
 
-    const csvContent =
-      "data:text/csv;charset=utf-8," +
-      [headers.join(","), ...rows.map((e) => e.map((val) => `"${val}"`).join(","))].join("\n");
-    const encodedUri = encodeURI(csvContent);
+    const escapeCsvCell = (val: unknown) => `"${String(val ?? "").replace(/"/g, '""')}"`;
+    const csvLines = [
+      headers.map(escapeCsvCell).join(","),
+      ...rows.map((e) => e.map(escapeCsvCell).join(",")),
+    ].join("\n");
+    const blob = new Blob(["\uFEFF" + csvLines], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
-    link.setAttribute("href", encodedUri);
-    link.setAttribute("download", `sale_process_orders_${new Date().toISOString().slice(0, 10)}.csv`);
+    link.href = url;
+    link.download = `sale_process_orders_${new Date().toISOString().slice(0, 10)}.csv`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    URL.revokeObjectURL(url);
     toast("Orders exported successfully", "success");
   };
 
@@ -2172,27 +2176,37 @@ export function SaleProcessListPage() {
               + ADD NEW
             </Link>
 
-            {/* Export Button */}
+            {/* Export Button (matches Companies, Product Stock, Stock Adjustment & Stock Transfer) */}
             <button
               type="button"
               className="btn btn-imp-exp"
+              title="Export sale process orders"
               onClick={handleExport}
               style={{
-                backgroundColor: "#f59e0b",
-                color: "#ffffff",
                 border: "none",
-                borderRadius: "6px",
-                padding: "8px 16px",
-                fontSize: "12.5px",
-                fontWeight: 600,
                 cursor: "pointer",
                 display: "inline-flex",
                 alignItems: "center",
-                gap: "4px",
-                boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
+                gap: "6px",
+                boxShadow: "0 1px 2px rgba(0, 0, 0, 0.05)",
               }}
             >
-              Export
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                <polyline points="7 10 12 15 17 10" />
+                <line x1="12" y1="15" x2="12" y2="3" />
+              </svg>
+              <span>Export</span>
             </button>
           </div>
         </div>

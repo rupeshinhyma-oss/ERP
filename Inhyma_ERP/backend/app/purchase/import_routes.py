@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import re
 import uuid
 from collections import defaultdict
 from datetime import date, datetime, timezone
-from typing import Optional
+from typing import Any, Optional
 
 from pathlib import Path
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
@@ -17,10 +18,12 @@ from app.auth.dependencies import get_auth_service, get_current_user
 from app.auth.service import AuthService, CurrentUser
 from app.common import workflow as wf
 from app.common.storage import guess_content_type, save_uploaded_file
-from app.core.exceptions import ConflictException, NotFoundException
+from app.core.exceptions import AppException, BadRequestException, ConflictException, NotFoundException
 from app.core.responses import build_success_response
 from app.database.session import get_db_session
 from app.inventory import stock_service
+from app.masters.import_export import ImportSummary, model_to_dict, parse_rows_from_file
+from app.masters.products.models import Product
 from app.purchase import costing
 from app.purchase.common import load_parties, party_fields, by_product, check_future, move_stock, product_defaults, resolve_supplier
 from app.purchase.models import ImportPurchase, ImportPurchaseItem
@@ -244,6 +247,325 @@ async def preview_import_purchase(
         "items": [{f: getattr(i, f) for f in ITEM_FIELDS} for i in r.items],
     }
     return build_success_response(data=data, request_id=_rid(request))
+
+
+class _InFileDuplicateRowError(Exception):
+    """Raised when an identical consignment line item row is repeated in the same import file."""
+
+
+def _norm_col(name: str) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", (name or "").lower()).strip()
+
+
+def _cell(norm_row: dict[str, str], *aliases: str) -> str:
+    for alias in aliases:
+        val = norm_row.get(_norm_col(alias), "")
+        if val != "":
+            return val
+    return ""
+
+
+def _num_field(raw: str, label: str, *, required: bool = False, positive: bool = False) -> float:
+    cleaned = raw.replace(",", "").strip()
+    if cleaned == "":
+        if required:
+            raise BadRequestException(f"{label} is required.")
+        return 0.0
+    try:
+        value = float(cleaned)
+    except ValueError as exc:
+        raise BadRequestException(f"{label} must be a valid number.") from exc
+    if positive and value <= 0:
+        raise BadRequestException(f"{label} must be greater than 0.")
+    if not positive and value < 0:
+        raise BadRequestException(f"{label} cannot be negative.")
+    return value
+
+
+def _opt_num_field(raw: str, label: str) -> Optional[float]:
+    cleaned = raw.replace(",", "").strip()
+    if cleaned == "":
+        return None
+    return _num_field(cleaned, label)
+
+
+def _opt_date_field(raw: str, label: str) -> Optional[date]:
+    cleaned = raw.strip()
+    if cleaned == "":
+        return None
+    try:
+        return parse_date(cleaned)
+    except ValueError as exc:
+        raise BadRequestException(f"{label}: {exc}") from exc
+
+
+async def _resolve_import_product(db: AsyncSession, product_name: str, product_code: str) -> dict:
+    if product_name:
+        try:
+            return await product_defaults(db, product_name)
+        except BadRequestException:
+            if not product_code:
+                prod_by_code = (
+                    await db.execute(select(Product).where(func.lower(Product.product_code) == product_name.lower()))
+                ).scalars().first()
+                if prod_by_code is not None:
+                    return await product_defaults(db, prod_by_code.product_name)
+                raise
+    if product_code:
+        prod = (
+            await db.execute(select(Product).where(func.lower(Product.product_code) == product_code.lower()))
+        ).scalars().first()
+        if prod is not None:
+            return await product_defaults(db, prod.product_name)
+        raise BadRequestException(f"Product code '{product_code}' is not in the Product Master.")
+    raise BadRequestException("Product Name or Product Code is required.")
+
+
+@router.post("/import", summary="Import consignments from CSV/Excel")
+async def import_import_purchases(
+    request: Request,
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db_session),
+    user: CurrentUser = Depends(get_current_user),
+) -> dict:
+    raw_bytes = await file.read()
+    rows = parse_rows_from_file(file.filename or "import.csv", raw_bytes)
+    rules = await wf.load_status_rules(db, GROUP)
+    first = wf.initial_status(rules)
+    apply_stock_on_create = bool(rules.get(first, {}).get("stock_in"))
+    today = date.today()
+
+    summary = ImportSummary(total_rows=len(rows))
+    batch_consignments: dict[str, dict[str, Any]] = {}
+
+    for index, raw_row in enumerate(rows, start=2):
+        norm = {_norm_col(k): str(v).strip() for k, v in raw_row.items() if k is not None and v is not None}
+        try:
+            async with db.begin_nested():
+                consignment_no = _cell(
+                    norm,
+                    "consignment_no",
+                    "invoice consignment no",
+                    "inv con no",
+                    "inv con no date",
+                    "consignment no",
+                    "consignment number",
+                )
+                if not consignment_no:
+                    raise BadRequestException("Invoice / Consignment No. is required.")
+
+                supplier_raw = _cell(norm, "supplier_name", "supplier", "vendor", "vendor name")
+                supplier = await resolve_supplier(db, supplier_raw, None)
+
+                warehouse_raw = _cell(norm, "warehouse", "warehouse name", "location")
+                if not warehouse_raw:
+                    raise BadRequestException("Warehouse is required.")
+                warehouse = await stock_service.get_warehouse(db, warehouse_raw)
+
+                ordered_date_raw = _cell(norm, "ordered_date", "ordered date dd mm yyyy", "ordered date", "order date")
+                if not ordered_date_raw:
+                    raise BadRequestException("Ordered Date is required.")
+                ordered_dt = _opt_date_field(ordered_date_raw, "Ordered Date")
+                if ordered_dt is None:
+                    raise BadRequestException("Ordered Date is required.")
+                if ordered_dt > today:
+                    raise BadRequestException("Ordered date cannot be in the future.")
+
+                etd_dt = _opt_date_field(_cell(norm, "etd_origin_date", "etd origin date dd mm yyyy", "etd origin date", "etd"), "ETD origin date")
+                eta_dt = _opt_date_field(_cell(norm, "eta_port_date", "eta port date dd mm yyyy", "eta port date", "eta"), "ETA port date")
+                arrival_dt = _opt_date_field(
+                    _cell(norm, "expected_arrival_date", "expected arrival date dd mm yyyy", "expected arrival date", "arrival date"),
+                    "Expected arrival date",
+                )
+                invoice_dt = _opt_date_field(_cell(norm, "invoice_date", "invoice date dd mm yyyy", "invoice date"), "Invoice date")
+
+                check_future("ETD origin date", etd_dt, None, today)
+                check_future("ETA port date", eta_dt, None, today)
+                check_future("Expected arrival date", arrival_dt, None, today)
+
+                conv_rate = _num_field(
+                    _cell(norm, "conversion_rate", "conversion rate usd to inr", "conversion rate", "con rate"),
+                    "Conversion Rate (USD to INR)",
+                    required=True,
+                    positive=True,
+                )
+                customs_rate = _num_field(
+                    _cell(norm, "customs_conversion_rate", "customs conversion rate usd to inr", "customs conversion rate", "customs rate"),
+                    "Customs Conversion Rate (USD to INR)",
+                    required=True,
+                    positive=True,
+                )
+
+                product_name_raw = _cell(norm, "product_name", "product name", "product name as per tally", "item name", "product")
+                product_code_raw = _cell(norm, "product_code", "product code", "sku", "item code")
+                prod_info = await _resolve_import_product(db, product_name_raw, product_code_raw)
+
+                qty = _num_field(_cell(norm, "quantity", "qty"), "Quantity", required=True, positive=True)
+                unit_rate_usd = _num_field(
+                    _cell(norm, "unit_rate_usd", "unit rate usd", "rate usd", "usd rate"),
+                    "Unit Rate (USD)",
+                    required=True,
+                )
+
+                pkg_unit_cbm_opt = _opt_num_field(_cell(norm, "pkg_unit_cbm", "pkg unit cbm"), "Pkg Unit CBM")
+                pkg_qty_opt = _opt_num_field(_cell(norm, "pkg_qty", "pkg qty"), "Pkg Qty")
+                duty_pct_opt = _opt_num_field(_cell(norm, "duty_percent", "duty percent", "import duty percent"), "Duty %")
+
+                inv_usd_cell = _cell(norm, "invoice_total_usd", "purchase invoice total value usd", "inv total usd", "invoice total usd")
+                inv_usd_explicit = _num_field(inv_usd_cell, "Purchase Invoice Total Value (USD)") if inv_usd_cell != "" else None
+                total_cbm = _num_field(_cell(norm, "total_cbm", "total cbm"), "Total CBM")
+                total_duty = _num_field(_cell(norm, "total_import_duty", "total import duty inr", "total import duty"), "Total Import Duty (INR)")
+
+                freight = _num_field(_cell(norm, "freight", "freight exp"), "Freight")
+                insurance = _num_field(_cell(norm, "insurance", "insurance exp"), "Insurance")
+                stamp_duty = _num_field(_cell(norm, "stamp_duty", "stamp duty"), "Stamp Duty")
+                shipping_line = _num_field(_cell(norm, "shipping_line_charges", "shipping line charges"), "Shipping Line Charges")
+                cfs = _num_field(_cell(norm, "cfs_charges", "cfs charges"), "CFS Charges")
+                clearing = _num_field(_cell(norm, "clearing_transport", "clearing transport"), "Clearing & Transport")
+                offloading = _num_field(_cell(norm, "offloading", "offloading exp"), "Offloading")
+                misc = _num_field(_cell(norm, "misc_charges", "miscellaneous", "misc charges"), "Miscellaneous")
+                misc_remarks = _cell(norm, "misc_remarks", "misc remarks") or None
+                remarks = _cell(norm, "remarks", "remark", "notes") or None
+
+                con_key = consignment_no.lower()
+                line_sig = (prod_info["name"].lower(), round(qty, 6), round(unit_rate_usd, 6))
+                item_in = costing.ImportItemIn(
+                    product_name=prod_info["name"],
+                    quantity=qty,
+                    unit_rate_usd=unit_rate_usd,
+                    pkg_unit_cbm=prod_info["pkg_unit_cbm"] if pkg_unit_cbm_opt is None else pkg_unit_cbm_opt,
+                    pkg_qty=prod_info["pkg_qty"] if pkg_qty_opt is None else pkg_qty_opt,
+                    duty_percent=prod_info["duty_percent"] if duty_pct_opt is None else duty_pct_opt,
+                    uom=prod_info["uom"],
+                    product_code=product_code_raw or prod_info["code"],
+                )
+
+                if con_key in batch_consignments:
+                    entry = batch_consignments[con_key]
+                    if line_sig in entry["seen_lines"]:
+                        raise _InFileDuplicateRowError(
+                            f"Duplicate of an earlier row in this file (Consignment '{consignment_no}', Product '{prod_info['name']}'); skipped."
+                        )
+                    entry["seen_lines"].add(line_sig)
+                    entry["items_in"].append(item_in)
+                    record: ImportPurchase = entry["record"]
+                    effective_inv_usd = (
+                        entry["explicit_inv_usd"]
+                        if entry["explicit_inv_usd"] is not None
+                        else sum(i.quantity * i.unit_rate_usd for i in entry["items_in"])
+                    )
+                    record.invoice_total_usd = effective_inv_usd
+                    result = costing.compute_import(
+                        conversion_rate=record.conversion_rate,
+                        customs_conversion_rate=record.customs_conversion_rate,
+                        invoice_total_usd=effective_inv_usd,
+                        total_cbm=record.total_cbm,
+                        total_import_duty=record.total_import_duty,
+                        expenses=[getattr(record, f) for f in EXPENSE_FIELDS],
+                        items=entry["items_in"],
+                    )
+                    record.invoice_total_inr = result.invoice_total_inr
+                    record.total_expenses = result.total_expenses
+                    record.gross_total_landing = result.gross_total_landing
+                    record.loading_percent_vb = result.loading_percent_vb
+                    record.loading_amount_per_cbm = result.loading_amount_per_cbm
+                    record.items.clear()
+                    for ln in result.items:
+                        record.items.append(ImportPurchaseItem(**{f: getattr(ln, f) for f in ITEM_FIELDS}))
+                    if record.stock_applied:
+                        await move_stock(db, record.warehouse, [(prod_info["name"], qty)], +1)
+                    await db.flush()
+                else:
+                    existing_po = (
+                        await db.execute(
+                            select(ImportPurchase).where(
+                                ImportPurchase.deleted_at.is_(None),
+                                func.lower(ImportPurchase.consignment_no) == con_key,
+                            )
+                        )
+                    ).scalars().first()
+                    if existing_po is not None:
+                        raise ConflictException(
+                            f"Consignment '{consignment_no}' is already recorded.",
+                            details={"existing": model_to_dict(existing_po)},
+                        )
+
+                    items_in = [item_in]
+                    effective_inv_usd = inv_usd_explicit if inv_usd_explicit is not None else (qty * unit_rate_usd)
+                    expenses_vals = [freight, insurance, stamp_duty, shipping_line, cfs, clearing, offloading, misc]
+                    result = costing.compute_import(
+                        conversion_rate=conv_rate,
+                        customs_conversion_rate=customs_rate,
+                        invoice_total_usd=effective_inv_usd,
+                        total_cbm=total_cbm,
+                        total_import_duty=total_duty,
+                        expenses=expenses_vals,
+                        items=items_in,
+                    )
+                    record = ImportPurchase(status=first, created_by=user.username)
+                    record.supplier_name, record.supplier_id, record.warehouse = supplier.company_name, supplier.id, warehouse.name
+                    record.consignment_no = consignment_no
+                    record.ordered_date = ordered_dt
+                    record.etd_origin_date = etd_dt
+                    record.eta_port_date = eta_dt
+                    record.expected_arrival_date = arrival_dt
+                    record.invoice_date = invoice_dt
+                    record.conversion_rate = conv_rate
+                    record.customs_conversion_rate = customs_rate
+                    record.invoice_total_usd = effective_inv_usd
+                    record.total_cbm = total_cbm
+                    record.total_import_duty = total_duty
+                    record.freight = freight
+                    record.insurance = insurance
+                    record.stamp_duty = stamp_duty
+                    record.shipping_line_charges = shipping_line
+                    record.cfs_charges = cfs
+                    record.clearing_transport = clearing
+                    record.offloading = offloading
+                    record.misc_charges = misc
+                    record.misc_remarks = misc_remarks
+                    record.remarks = remarks
+                    record.invoice_total_inr = result.invoice_total_inr
+                    record.total_expenses = result.total_expenses
+                    record.gross_total_landing = result.gross_total_landing
+                    record.loading_percent_vb = result.loading_percent_vb
+                    record.loading_amount_per_cbm = result.loading_amount_per_cbm
+                    for ln in result.items:
+                        record.items.append(ImportPurchaseItem(**{f: getattr(ln, f) for f in ITEM_FIELDS}))
+                    if apply_stock_on_create:
+                        await move_stock(db, record.warehouse, [(prod_info["name"], qty)], +1)
+                        record.stock_applied = True
+                    db.add(record)
+                    await db.flush()
+                    batch_consignments[con_key] = {
+                        "record": record,
+                        "items_in": items_in,
+                        "explicit_inv_usd": inv_usd_explicit,
+                        "seen_lines": {line_sig},
+                    }
+
+            summary.created += 1
+        except _InFileDuplicateRowError as exc:
+            summary.failed += 1
+            summary.in_file_duplicate_count += 1
+            summary.in_file_duplicates.append({"row": index, "error": str(exc), "row_data": dict(raw_row)})
+        except ConflictException as exc:
+            summary.failed += 1
+            summary.duplicate_count += 1
+            existing = exc.details.get("existing") if isinstance(exc.details, dict) else None
+            summary.duplicates.append({"row": index, "error": str(exc), "row_data": dict(raw_row), "existing": existing})
+        except AppException as exc:
+            summary.failed += 1
+            summary.errors.append({"row": index, "error": str(exc), "row_data": dict(raw_row)})
+        except Exception as exc:  # noqa: BLE001
+            summary.failed += 1
+            summary.errors.append({"row": index, "error": str(exc), "row_data": dict(raw_row)})
+
+    return build_success_response(
+        data=summary.as_dict(),
+        message=f"Imported import purchases: {summary.created} created, {summary.failed} failed.",
+        request_id=_rid(request),
+    )
 
 
 @router.get("/{purchase_id}", summary="Get an import purchase")

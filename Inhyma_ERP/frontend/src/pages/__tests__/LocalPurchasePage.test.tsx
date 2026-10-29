@@ -144,12 +144,20 @@ const dd = (n: number) => String(n).padStart(2, "0");
 const TODAY = `${dd(today.getDate())}-${dd(today.getMonth() + 1)}-${today.getFullYear()}`;
 
 describe("LocalPurchasePage list (data comes from the API)", () => {
-  it("renders the page title and the Add New / Export buttons (no Import)", () => {
+  it("renders the page title, Add New, Bulk Actions, and Imp / Exp dropdown with Import and Export", () => {
     renderPurchasePage();
     expect(screen.getByRole("heading", { name: "Local Purchase" })).toBeTruthy();
     expect(screen.getByTestId("btn-add-new")).toBeTruthy();
-    expect(screen.getByTestId("btn-export")).toBeTruthy();
-    expect(screen.queryByTestId("btn-import")).toBeNull(); // purchases are created from the form so stock can be added
+    expect(screen.getByRole("button", { name: /bulk actions/i })).toBeTruthy();
+
+    const impExpBtn = screen.getByRole("button", { name: /imp \/ exp/i });
+    expect(impExpBtn.className).toContain("btn-imp-exp");
+    fireEvent.click(impExpBtn);
+
+    const menu = screen.getByRole("menu");
+    expect(within(menu).getByText("SAMPLE FILE")).toBeTruthy();
+    expect(within(menu).getByText("IMPORT")).toBeTruthy();
+    expect(within(menu).getByText("EXPORT")).toBeTruthy();
   });
 
   it("renders toolbar with Items/Page dropdown and Search... input", () => {

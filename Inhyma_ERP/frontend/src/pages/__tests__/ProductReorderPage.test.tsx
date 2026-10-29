@@ -76,6 +76,16 @@ describe("ProductReorderPage", () => {
 
     expect(screen.getByText("Product Re-Order")).toBeTruthy();
     expect(screen.getByTestId("app-shell").getAttribute("data-active-key")).toBe("reports-re-order");
+
+    // Verify Filter button appears first and golden-amber Export button appears second (after Filter), with no Import button
+    const headerActions = document.querySelector(".reorder-header-actions");
+    expect(headerActions).toBeTruthy();
+    const actionButtons = Array.from(headerActions!.querySelectorAll("button"));
+    expect(actionButtons).toHaveLength(2);
+    expect(actionButtons[0].className).toContain("reorder-btn-filter");
+    expect(actionButtons[1].className).toContain("btn-imp-exp");
+    expect(actionButtons[1].className).toContain("reorder-btn-export");
+    expect(actionButtons[1].textContent?.trim()).toBe("Export");
   });
 
   it("renders the 16 core table headers including Re-Order, Short Fall, MOQ, and Order To Be Place", async () => {

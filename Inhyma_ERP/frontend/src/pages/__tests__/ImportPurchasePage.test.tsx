@@ -137,12 +137,21 @@ const TODAY = `${dd(today.getDate())}-${dd(today.getMonth() + 1)}-${today.getFul
 const calls = (fn: any, prefix: string) => fn.mock.calls.filter((c: any[]) => String(c[0]).startsWith(prefix));
 
 describe("ImportPurchasePage list (data comes from the API)", () => {
-  it("renders the page title and the action buttons", () => {
+  it("renders the page title, Add New, Bulk Actions, and Imp / Exp dropdown with Import and Export", () => {
     renderImportPage();
     expect(screen.getByRole("heading", { name: "Import Purchase" })).toBeTruthy();
     expect(screen.getByTestId("btn-filter-toggle")).toBeTruthy();
     expect(screen.getByTestId("btn-add-new")).toBeTruthy();
-    expect(screen.getByTestId("btn-export")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /bulk actions/i })).toBeTruthy();
+
+    const impExpBtn = screen.getByRole("button", { name: /imp \/ exp/i });
+    expect(impExpBtn.className).toContain("btn-imp-exp");
+    fireEvent.click(impExpBtn);
+
+    const menu = screen.getByRole("menu");
+    expect(within(menu).getByText("SAMPLE FILE")).toBeTruthy();
+    expect(within(menu).getByText("IMPORT")).toBeTruthy();
+    expect(within(menu).getByText("EXPORT")).toBeTruthy();
   });
 
   it("builds one KPI card and one tab per status in the DB-configured workflow, with counts", async () => {
@@ -226,10 +235,11 @@ describe("ImportPurchasePage list (data comes from the API)", () => {
     }
   });
 
-  it("triggers a file download when clicking Export", async () => {
-    const createElementSpy = vi.spyOn(document, "createElement");
+  it("triggers a file download when clicking Export inside Imp / Exp menu", async () => {
     await loaded();
-    fireEvent.click(screen.getByTestId("btn-export"));
+    fireEvent.click(screen.getByRole("button", { name: /imp \/ exp/i }));
+    const createElementSpy = vi.spyOn(document, "createElement");
+    fireEvent.click(within(screen.getByRole("menu")).getByText("EXPORT"));
     expect(createElementSpy).toHaveBeenCalledWith("a");
     createElementSpy.mockRestore();
   });

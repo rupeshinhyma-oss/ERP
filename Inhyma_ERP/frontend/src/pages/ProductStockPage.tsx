@@ -848,11 +848,11 @@ export function ProductStockPage({
   const [searchTerm, setSearchTerm] = useState("");
   const [perPage, setPerPage] = useState(50);
   const [currentPage, setCurrentPage] = useState(1);
-  // Collapsible inline filter panel - open by default on Stock Transactions report, off by default on Product Stock
-  const [showFilterPanel, setShowFilterPanel] = useState<boolean>(isTransactionReport);
+  // Collapsible inline filter panel - off by default across both Product Stock and Stock Transactions; toggles via Filter button
+  const [showFilterPanel, setShowFilterPanel] = useState<boolean>(false);
 
   useEffect(() => {
-    setShowFilterPanel(isTransactionReport);
+    setShowFilterPanel(false);
   }, [isTransactionReport]);
 
   // Filter draft input states (for the filter panel controls)
@@ -1354,24 +1354,29 @@ export function ProductStockPage({
                   </svg>
                 </button>
 
-                {/* Export Button */}
+                {/* Export Button (matches Companies Imp/Exp golden-amber theme) */}
                 <button
                   type="button"
-                  className="btn stock-btn-export"
-                  style={{
-                    background: "#5c6f84",
-                    color: "#ffffff",
-                    padding: "8px 16px",
-                    borderRadius: "4px",
-                    fontWeight: 600,
-                    fontSize: "13px",
-                    border: "none",
-                    cursor: "pointer",
-                  }}
+                  className="btn btn-imp-exp stock-btn-export"
                   onClick={handleExport}
                   title="Export to Excel"
                 >
-                  Export
+                  <svg
+                    width="14"
+                    height="14"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    aria-hidden="true"
+                  >
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                    <polyline points="7 10 12 15 17 10" />
+                    <line x1="12" y1="15" x2="12" y2="3" />
+                  </svg>
+                  <span>Export</span>
                 </button>
               </>
             ) : (

@@ -127,7 +127,6 @@
 | **REPORTS** | Re-Order | `/reports/re-order` (`/product-reorder/list`) | `reports-reorder` | `refreshCw` | `product.view` |
 | **REPORTS** | Stock Transactions | `/reports/stock-transactions` (`/transaction-report/list`) | `reports-stock-transactions` | `activity` | `product.view` |
 | **REPORTS** | Stock Transaction Detail | `/stock-transaction/list/:id` | `reports-stock-transactions` | `activity` | `product.view` |
-| **REPORTS** | Goods Expected Report | `/reports/goods-expected` | `reports-goods-expected` | `ship` | `product.view` |
 | **REPORTS** | Deleted Orders | `/reports/deleted-orders` | `reports-deleted-orders` | `fileX` | `saleorder.view` |
 | **REPORTS** | General Reports | `/reports/general` | `reports-general` | `pieChart` | Authenticated |
 | **TASK** | Tasks | `/tasks` | `tasks` | `checkSquare` | `task.view` |
@@ -183,7 +182,7 @@
 
 ## 4. CONTACT: Suppliers Module
 
-- **Route:** `/suppliers`
+- **Route:** `/purchase/suppliers` (legacy redirects: `/suppliers`, `/supplier/list`; Sidebar `activeKey`: `purchase-suppliers` under **PURCHASE**)
 - **Purpose:** Comprehensive vendor directory, sourcing management, factory visit logs, and public quote token dispatching.
 
 ### 4.1. Screen Layout & Header Actions
@@ -311,7 +310,7 @@ Manage complete vendor team directory:
 - **Sections:** Identity, Geography, Contact Persons Grid, Sourcing Status, Factory Visit Photos Gallery, Notes.
 
 ### Test Cases
-- [ ] Open `/suppliers` and confirm active list loads.
+- [ ] Open `/purchase/suppliers` and confirm active list loads and `Suppliers` under `PURCHASE` in the left sidebar is highlighted active (`.nav-item.active`).
 - [ ] Click `+ QUICK ADD`, fill Company Name, Country, State, City and save. Verify record appears in table.
 - [ ] Click `+ ADD NEW`, navigate all 3 tabs, upload factory visit photo, add contact person, and save.
 - [ ] Test Country Dial Code Auto-Update: Change Country (e.g. China -> India) and verify Calling Number, WhatsApp Number, and WeChat Number dialing codes automatically update (e.g. `+86` -> `+91`) while resetting Province/City dropdowns.
@@ -1588,7 +1587,7 @@ Checklist to execute:
 3. **Subtitle:** `Manage corporate business accounts, credit terms, multi-contact directories, and client potential ratings.`
 4. **Action Buttons:**
    - `+ ADD NEW` (Primary blue button) — Opens company creation drawer or navigates to `/companies/add`.
-   - `Import` / `Export` — Universal Excel/CSV import wizard and export utilities.
+   - `Imp / Exp` Dropdown — Amber action dropdown (`ImpExpDropdown`) with professional SVG icon badges for `SAMPLE FILE` (slate document template icon), `IMPORT` (blue upload icon), and `EXPORT` (emerald download icon).
    - `Bulk Actions` — Bulk status activation, deactivation, and soft-deletion for selected companies.
 5. **Filter Toolbar:**
    - Real-time search bar querying legal name, trade name, GSTIN, PAN, and contact persons.
@@ -1663,7 +1662,7 @@ Checklist to execute:
 2. **Page Title:** `Product Stock`
 3. **Top Action Controls:**
    - Dark slate Funnel filter toggle button (`#556987`, filter panel collapsed by default on `/product-stock/list`).
-   - `Export` button: Downloads `Product_Stock_List.xlsx` workbook for the active filtered dataset.
+   - Golden-amber `Export` button (`#f59e0b`, hover `#d97706`, `.btn-imp-exp.stock-btn-export` with vector download icon matching Companies `Imp / Exp`): Downloads `Product_Stock_List.xlsx` workbook for the active filtered dataset.
 4. **Collapsible 4-Column Filter Panel:**
    - `Category` (`All` + active `ProductCategory` masters).
    - `Sub Category` (`All` + `ProductSubCategory` masters dynamically narrowed when `Category` is selected).
@@ -1703,8 +1702,9 @@ Checklist to execute:
 2. **Page Title:** `Stock Adjustment`
 3. **Subtitle:** `Record physical inventory count adjustments, reconciliations, split orders, and damage deductions.`
 4. **Header Action Controls:**
-   - `+ New Adjustment` (Primary blue button) — Opens adjustment creation modal.
-   - `Refresh` — Refetches adjustment records and resets filter caches.
+   - Dark slate Funnel filter toggle button (`#556987`, filter panel collapsed by default).
+   - `+ Add New ▾` (Primary blue dropdown button) — Opens `Stock IN Adjustment` or `Stock OUT Adjustment` form.
+   - Golden-amber `Export` button (`#f59e0b` / hover `#d97706`, `.btn-imp-exp` with vector download icon; replaces legacy `Imp / Exp` and omits `Bulk Actions`) — Exports filtered adjustments to `stock_adjustments.csv`.
 5. **Search & Comprehensive Filter Toolbar:**
    - Live text search bar querying Invoice Number, Client Name, Warehouse, or Remarks.
    - Adjustment Type dropdown filter: `All Types`, `Stock IN` (green), `Stock OUT` (red).
@@ -2316,6 +2316,9 @@ Checklist to execute:
    - Unauthorized users cannot trigger state changes outside configured transitions.
 6. **Atomic Warehouse Stock-In:**
    - Executing Stock-In (`POST /api/v1/purchase/local-orders/{id}/stock-in`) atomically increments warehouse inventory ledgers with unit landed cost valuation and locks the purchase order against subsequent modifications.
+7. **Header Action Bar & Import / Export (`Imp / Exp`):**
+   - Top-right header displays Filter Toggle (funnel), `+ ADD NEW`, `Imp / Exp` dropdown (`btn-imp-exp` golden-amber button with `SAMPLE FILE`, `IMPORT` column-mapping wizard posting to `POST /api/v1/purchase/local-orders/import`, and UTF-8 BOM `EXPORT` CSV download), and `Bulk Actions`.
+   - `ImportSummaryPanel` displays created count, duplicate invoice alerts, and per-row validation errors directly below the page header.
 
 ### Test Cases
 - [ ] Verify navigating to `/purchase/localpurchase` renders the Local Purchase orders table with all KPI summary cards.
@@ -2329,7 +2332,9 @@ Checklist to execute:
 - [ ] Verify status transition buttons strictly obey database workflow rules and user permissions.
 - [ ] Verify executing Stock-In updates the warehouse stock ledger and marks the order status as completed.
 - [ ] Verify clicking "Download PDF" streams a valid print-ready Purchase Order document.
-- [ ] Verify all 16 automated tests in `LocalPurchasePage.test.tsx` pass without errors.
+- [ ] Verify clicking `Imp / Exp` opens the dropdown menu with professional SVG icon badges for `SAMPLE FILE`, `IMPORT`, and `EXPORT`.
+- [ ] Verify `SAMPLE FILE` downloads `Sample_Local_Purchase_Template.csv`, `IMPORT` opens the column-mapping wizard and imports valid rows via `POST /api/v1/purchase/local-orders/import` as `Pending` orders, and `EXPORT` downloads the filtered Local Purchase CSV with UTF-8 BOM.
+- [ ] Verify all 32 automated tests in `LocalPurchasePage.test.tsx` and 11 local purchase route tests in `test_purchase_routes.py` pass without errors.
 
 ---
 
@@ -2375,6 +2380,9 @@ Checklist to execute:
    - When an import consignment reaches `Closed` status, the row action menu (`⋮`) strictly displays **ONLY `Download Purchase`**.
    - `Edit`, `Confirm`, and `Delete` actions are suppressed.
    - Client-side navigation to `/addedit/:id` for closed consignments is blocked, and backend endpoint `PUT /purchase/import-orders/{id}` enforces `edit: "none"`.
+8. **Header Action Bar & Import / Export (`Imp / Exp`):**
+   - Top-right header displays Filter Toggle (funnel), `ADD NEW`, `Imp / Exp` dropdown (`btn-imp-exp` golden-amber button with `SAMPLE FILE`, `IMPORT` column-mapping wizard posting to `POST /api/v1/purchase/import-orders/import`, and UTF-8 BOM `EXPORT` CSV download), and `Bulk Actions`.
+   - `ImportSummaryPanel` displays created count, duplicate consignment alerts, and per-row validation errors directly below the page header.
 
 ### Test Cases
 - [ ] Verify navigating to `/purchase/importpurchase` loads import consignments table with foreign currency and INR totals.
@@ -2390,7 +2398,9 @@ Checklist to execute:
 - [ ] Verify clicking the uploaded PDF invoice in the INVOICE column opens `/purchase-order/import-bill-file/:id` and renders the actual uploaded file inside an iframe without generating synthetic PDF.
 - [ ] Verify clicking an uploaded docx invoice displays the document card with file size and download button.
 - [ ] Verify that on a consignment with `Closed` status, clicking the Action menu (`⋮`) displays strictly ONLY `Download Purchase` (Edit is removed).
-- [ ] Verify all 45 automated tests in `ImportPurchasePage.test.tsx` and 6 tests in `ImportPurchasePdfPage.test.tsx` pass without errors.
+- [ ] Verify clicking `Imp / Exp` opens the dropdown menu with professional SVG icon badges for `SAMPLE FILE`, `IMPORT`, and `EXPORT`.
+- [ ] Verify `SAMPLE FILE` downloads `Sample_Import_Purchase_Template.csv` with valid dynamic dates, `IMPORT` opens the column-mapping wizard and imports valid consignments via `POST /api/v1/purchase/import-orders/import`, and `EXPORT` downloads the filtered Import Purchase CSV with UTF-8 BOM.
+- [ ] Verify all 45 automated tests in `ImportPurchasePage.test.tsx`, 6 tests in `ImportPurchasePdfPage.test.tsx`, and 23 purchase route tests in `test_purchase_routes.py` pass without errors.
 
 ---
 
@@ -2594,8 +2604,8 @@ Checklist to execute:
 
 ### Modules Covered by Universal Standard
 - **Contact:** `Companies.tsx`, `Suppliers.tsx`, `AgentsPage.tsx`, `FollowUpsPage.tsx`, `IndustrialZonesPage.tsx`, `LeadsPage.tsx`.
-- **Inventory:** `ProductStockPage.tsx`, `StockAdjustmentPage.tsx`, `StockTransferPage.tsx`, `ProductReorderPage.tsx`, `PriceListPage.tsx`, `masters/Products.tsx`.
-- **Sales & Commercial:** `sales/SaleProcessList.tsx`, `sales/DiscountPaymentsPage.tsx`, `ProformaInvoicesPage.tsx`, `DeletedOrdersPage.tsx`.
+- **Inventory:** `ProductStockPage.tsx`, `StockAdjustmentPage.tsx`, `StockTransferPage.tsx` (header action bar with Funnel filter toggle, `+ ADD NEW`, golden-amber `Export` `.btn-imp-exp` button with download SVG icon, and `Bulk Actions ▾`), `ProductReorderPage.tsx`, `PriceListPage.tsx`, `masters/Products.tsx`.
+- **Sales & Commercial:** `sales/SaleProcessList.tsx` (top header with `Including GST` toggle, Funnel filter toggle, `+ ADD NEW`, and golden-amber `Export` `.btn-imp-exp` button with download SVG icon), `sales/DiscountPaymentsPage.tsx`, `ProformaInvoicesPage.tsx`, `DeletedOrdersPage.tsx`.
 - **Tasks & Engineering:** `technicalTasks/TechnicalTasksPage.tsx`.
 - **Generic Masters:** `components/MasterPage.tsx` (applies to Brands, Categories, UOM, Taxes, Warehouses, Call Types, Buyer Types, etc.).
 
@@ -3410,7 +3420,7 @@ Positioned directly underneath the collapsible filter panel, these three metric 
 
 ### Feature Overview & UI Specifications
 1. **Top Page Header & Collapsible 4-Column Filter Panel:**
-   - Title `Product Re-Order` on left; `Export` CSV button and dark slate `#5c6f88` funnel toggle button on right (open by default).
+   - Title `Product Re-Order` on left; dark slate `#5a6d87` funnel toggle button first, followed by golden-amber `#f59e0b` standalone `Export` CSV button (`btn btn-imp-exp reorder-btn-export`) on the right.
    - **Row 1 (4 Columns):** `Category` (`All` + active `ProductCategory` masters), `Sub Category` (`All` + `ProductSubCategory` masters dynamically narrowed when `Category` is selected), `Brand` (`All` + active `Brand` masters), `Short Fall` (`All`, `0`, `Greater Than 0`).
    - **Row 2 (Column 1):** `Re-Order` (`All`, `0`, `Greater Than 0`).
    - **Bottom-Right Filter Actions:** Dark slate `Reset` button (`#5c6f88`) and golden-amber `Search` button (`#f7b919`).
@@ -3459,7 +3469,7 @@ Positioned directly underneath the collapsible filter panel, these three metric 
 1. **Screen 1 — `Product Stock Transactions` Master List (`/reports/stock-transactions` / `/transaction-report/list`):**
    - Sidebar active navigation key: `REPORTS` ➔ `Stock Transactions` (`reports-stock-transactions`).
    - Top Page Header: `Product Stock Transactions` on left; dark slate Funnel filter toggle `[▼]` + `Export` (`Product_Stock_Transactions.xlsx`) on right.
-   - **4-Column Filter Panel (Open by Default):** `Category` (`All`), cascading `Sub Category` (`All`), `Brand` (`All`), `Is Negative Stock` (`Select` / `Yes` / `No`), with dark slate `Reset` and golden-amber `Search` buttons.
+   - **4-Column Filter Panel (Off / Collapsed by Default; Toggled via Funnel Button):** `Category` (`All`), cascading `Sub Category` (`All`), `Brand` (`All`), `Is Negative Stock` (`Select` / `Yes` / `No`), with dark slate `Reset` and golden-amber `Search` buttons.
    - **Right-Aligned Search Card:** Dedicated white card with `[ 🔍 | Search products by name, code, brand, sub-category... ]`.
    - **15-Column Title-Case Warehouse Matrix:** `Sr. No.` | `Product Name (As Per Tally)` | `Product Code` | `Brand` | `Sub Category` | `Mumbai` (soft pink) | `Mumbai Transit` (warm beige-grey) | `Mumbai Ordered` (medium grey) | `Ahmedabad` (soft pink) | `Ahmedabad Transit` (warm beige-grey) | `Ahmedabad Ordered` (medium grey) | `Indore` (soft pink) | `Indore Transit` (warm beige-grey) | `Indore Ordered` (medium grey) | `Total Qty`.
    - **Drill-Down Navigation:** Clicking any blue `Product Name (As Per Tally)` hyperlink navigates directly to `/stock-transaction/list/:id` (whereas `/product-stock/list` opens the `Product Details` `SideDrawer`).
@@ -3479,7 +3489,7 @@ Positioned directly underneath the collapsible filter panel, these three metric 
      - **Footer:** `Showing X To Y Of Z Entries` on left | `Previous | 1 | Next` pager on right.
 
 ### QA Verification Test Cases
-- [ ] **TC-ST-01 (Master List Layout, Open Filter Panel & Full Catalog Load):** Navigate to `REPORTS` ➔ `Stock Transactions` (`/reports/stock-transactions` or `/transaction-report/list`). Verify heading `Product Stock Transactions`, filter panel open by default, right-aligned search card, 15 Title-Case columns with distinct pink/transit-beige/ordered-grey tints, and all active Product Master SKUs loaded with populated `Brand` and `Sub Category`.
+- [ ] **TC-ST-01 (Master List Layout, Collapsed Filter Toggle & Full Catalog Load):** Navigate to `REPORTS` ➔ `Stock Transactions` (`/reports/stock-transactions` or `/transaction-report/list`). Verify heading `Product Stock Transactions`, filter panel off (collapsed) by default and expandable via the top-right Funnel button, right-aligned search card, 15 Title-Case columns with distinct pink/transit-beige/ordered-grey tints, and all active Product Master SKUs loaded with populated `Brand` and `Sub Category`.
 - [ ] **TC-ST-02 (Product Name Click ➔ Per-Product Ledger Navigation):** Click any product name in `Product Stock Transactions` (e.g. `Air Timer (PFS)` or `Vertical Stand Economy`). Verify browser navigates to `/stock-transaction/list/<id>`, sidebar highlights `REPORTS` ➔ `Stock Transactions`, heading displays `<Product Name> Stock`, and `AVAILABLE QTY` matches the product's net stock.
 - [ ] **TC-ST-03 (All 5 Transactional Sources & Bold Party Name):** Verify movements from Sale Orders (`Sale` `- qty` with bold company name on line 2, plus `Sale Cancel` `+ qty`), Stock Adjustments (`Stock IN` / `Stock OUT` formatted as `Stock In/Out For Purpose <Purpose> (Adjustment Order #<No>)`), Confirmed Local Purchases (`Local Purchase` `+ qty`), Import Purchases (`Import Purchase` `+ qty`), and Stock Transfers (`Transfer OUT` `- qty` & `Transfer IN` `+ qty`) appear newest-first with IST `DD-MM-YYYY hh:mm AM/PM` timestamps.
 - [ ] **TC-ST-04 (Toolbar Pagination, Live Search, Filter Panel & Action Menu):** On `/stock-transaction/list/:id`, verify default `10` `Items/Page`, `Showing X To Y Of Z Entries` footer, live `Search...` filtering by company/SO#/actor, Funnel filter updating `AVAILABLE QTY` when scoped to a warehouse, clickable `Title` links opening underlying documents, and `Action ▾` exporting `.xlsx` / `.csv` or navigating to `Add Stock Adjustment` / `Add Stock Transfer`.

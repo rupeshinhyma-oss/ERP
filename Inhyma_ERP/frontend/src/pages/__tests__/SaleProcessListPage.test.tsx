@@ -45,7 +45,10 @@ describe("SaleProcessListPage", () => {
     expect(screen.getByText("Including GST")).toBeTruthy();
     expect(screen.getByTestId("btn-toggle-filter")).toBeTruthy();
     expect(screen.getByRole("link", { name: /\+ add new/i })).toBeTruthy();
-    expect(screen.getByRole("button", { name: /export/i })).toBeTruthy();
+    const exportBtn = screen.getByRole("button", { name: /^export$/i });
+    expect(exportBtn).toBeTruthy();
+    expect(exportBtn.classList.contains("btn-imp-exp")).toBe(true);
+    expect(exportBtn.querySelector("svg")).toBeTruthy();
   });
 
   it("renders the 6 KPI summary stat cards matching the screenshot", () => {

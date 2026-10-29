@@ -326,9 +326,9 @@ export function App() {
           <Route path="/stock_transaction/list/:id" element={<StockTransactionDetailPage />} />
           <Route path="/reports/stock-transactions/:id" element={<StockTransactionDetailPage />} />
 
-          <Route path="/reports/goods-expected" element={<ProductStockPage defaultTab="goods-expected" />} />
-          <Route path="/inventory/goods-expected" element={<ProductStockPage defaultTab="goods-expected" />} />
-          <Route path="/goods-expected" element={<Navigate to="/reports/goods-expected" replace />} />
+          <Route path="/reports/goods-expected" element={<Navigate to="/reports/stock-transactions" replace />} />
+          <Route path="/inventory/goods-expected" element={<Navigate to="/reports/stock-transactions" replace />} />
+          <Route path="/goods-expected" element={<Navigate to="/reports/stock-transactions" replace />} />
 
           <Route path="/reports/deleted-orders" element={<DeletedOrdersPage />} />
           <Route path="/delete_order_report/list" element={<DeletedOrdersPage />} />

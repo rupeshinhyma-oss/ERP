@@ -915,14 +915,25 @@ export function ProductReorderPage() {
       item.order_to_be_place,
     ]);
 
-    const csvContent = "data:text/csv;charset=utf-8," + [headers.join(","), ...rows.map((e) => e.join(","))].join("\n");
-    const encodedUri = encodeURI(csvContent);
+    const csvBody = [headers.join(","), ...rows.map((e) => e.join(","))].join("\n");
+    const filename = `Product_ReOrder_${warehouseFilter}_${new Date().toISOString().slice(0, 10)}.csv`;
     const link = document.createElement("a");
-    link.setAttribute("href", encodedUri);
-    link.setAttribute("download", `Product_ReOrder_${warehouseFilter}_${new Date().toISOString().slice(0, 10)}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    if (typeof URL !== "undefined" && typeof URL.createObjectURL === "function") {
+      const blob = new Blob(["\uFEFF" + csvBody], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      link.setAttribute("href", url);
+      link.setAttribute("download", filename);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } else {
+      link.setAttribute("href", "data:text/csv;charset=utf-8," + encodeURIComponent(csvBody));
+      link.setAttribute("download", filename);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    }
   }, [sortedItems, warehouseFilter]);
 
   const editPreview = useMemo(() => {
@@ -951,20 +962,6 @@ export function ProductReorderPage() {
           <div className="reorder-header-actions">
             <button
               type="button"
-              className="reorder-btn-export"
-              onClick={handleExportCSV}
-              title="Export Re-Order Table to CSV"
-            >
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                <polyline points="7 10 12 15 17 10" />
-                <line x1="12" y1="15" x2="12" y2="3" />
-              </svg>
-              <span>Export</span>
-            </button>
-
-            <button
-              type="button"
               className={`reorder-btn-filter ${showFilterPanel ? "active" : ""}`}
               onClick={() => setShowFilterPanel(!showFilterPanel)}
               title="Toggle filter panel"
@@ -974,6 +971,30 @@ export function ProductReorderPage() {
                 <path d="M3 4h18l-7 8.5V19l-4 2v-8.5L3 4z" />
               </svg>
               {activeFilterCount > 0 && <span className="reorder-filter-badge">{activeFilterCount}</span>}
+            </button>
+
+            <button
+              type="button"
+              className="btn btn-imp-exp reorder-btn-export"
+              onClick={handleExportCSV}
+              title="Export Re-Order Table to CSV"
+            >
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                <polyline points="7 10 12 15 17 10" />
+                <line x1="12" y1="15" x2="12" y2="3" />
+              </svg>
+              <span>Export</span>
             </button>
           </div>
         </div>
