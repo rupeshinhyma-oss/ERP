@@ -7,24 +7,25 @@ The rules (from the platform owner):
   * access to 2+ ERPs         -> may switch between exactly those ERPs;
   * platform admins           -> every ERP.
 
-Addresses come from the ERP registry (``erp_instances.base_url``) and the control plane's own ``FRONTEND_URL`` -- nothing is
-hard-coded, so the same decision works on localhost and on hosted domains and for ERPs added later.
-
-The registry is read through a short in-process cache (every spoke request verifies the session, so this runs at high
-volume) and, if the database hiccups, the last good copy is used: a routing answer is still produced.
+Addresses come first from environment configuration (`.env` locally, platform environment variables in production,
+e.g. ``YINGLIMA_FRONTEND_URL``, ``INHYMA_FRONTEND_URL``, ``<KEY>_FRONTEND_URL``, and ``FRONTEND_URL``), falling back
+to ``erp_instances.base_url`` ONLY when that database URL belongs to the same environment class (local vs hosted).
+Localhost and hosted domains never cross-contaminate even when sharing one database.
 """
 
 from __future__ import annotations
 
+import ipaddress
 import logging
 import time
 from dataclasses import dataclass
 from typing import Any, Dict, Iterable, List, Optional
+from urllib.parse import urlparse
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.config import settings
+from app.core.config import EnvironmentEnum, settings
 from app.erp_registry.models import ErpInstance, ErpStatus
 
 logger = logging.getLogger(__name__)
@@ -39,47 +40,130 @@ class RegistryErp:
     url: Optional[str]
 
 
-_CACHE: Dict[str, Any] = {"at": 0.0, "erps": None}
+_CACHE: Dict[str, Any] = {"at": 0.0, "rows": None}
 
 
 def invalidate_landing_registry_cache() -> None:
     """Forget the cached registry (call after an ERP is registered, edited or suspended)."""
     _CACHE["at"] = 0.0
-    _CACHE["erps"] = None
+    _CACHE["rows"] = None
+
+
+def _is_local_url(url: str) -> bool:
+    """Return True for loopback, `.local`, and RFC-1918 LAN addresses; False for public hosted domains."""
+    host = (urlparse(url).hostname or "").strip().lower()
+    if not host:
+        return False
+    if host in {"localhost", "localhost.localdomain", "0.0.0.0"} or host.endswith(".local"):
+        return True
+    try:
+        ip = ipaddress.ip_address(host)
+        return bool(ip.is_loopback or ip.is_private or ip.is_unspecified)
+    except ValueError:
+        return False
+
+
+def _matches_current_environment(url: str) -> bool:
+    """Ensure local runs never emit hosted URLs and production runs never emit localhost/LAN URLs."""
+    env = getattr(settings, "ENVIRONMENT", None)
+    if env == EnvironmentEnum.LOCAL:
+        return _is_local_url(url)
+    if env == EnvironmentEnum.PRODUCTION:
+        return not _is_local_url(url)
+    return True
+
+
+def _normalize_dashboard_url(raw: str) -> str:
+    cleaned = (raw or "").strip().rstrip("/")
+    if not cleaned:
+        return ""
+    if cleaned.endswith("/dashboard"):
+        cleaned = cleaned[: -len("/dashboard")].rstrip("/")
+    return f"{cleaned}/dashboard" if cleaned else ""
+
+
+def _resolve_erp_frontend_url(key: str, db_url: Optional[str]) -> Optional[str]:
+    """
+    Resolve an ERP's frontend dashboard URL:
+      1. `<KEY>_FRONTEND_URL` from `.env` / OS environment (authoritative per environment).
+      2. `erp_instances.base_url` from DB ONLY when compatible with the current environment.
+    """
+    configured = settings.get_erp_frontend_url(key)
+    if configured and _matches_current_environment(configured):
+        return configured
+
+    candidate = (db_url or "").strip()
+    if candidate and _matches_current_environment(candidate):
+        return candidate
+    return None
 
 
 def control_plane_url() -> str:
-    """The ERP Dashboard's own address (this app's FRONTEND_URL), as a dashboard URL."""
-    base = (getattr(settings, "FRONTEND_URL", "") or "").strip().rstrip("/")
-    return f"{base}/dashboard" if base else ""
+    """The ERP Dashboard's own address (`FRONTEND_URL` from `.env` / environment), as a dashboard URL."""
+    base = _normalize_dashboard_url(getattr(settings, "FRONTEND_URL", "") or "")
+    if base and _matches_current_environment(base):
+        return base
+
+    raw_cors = getattr(settings, "CORS_ALLOWED_ORIGINS", "") or ""
+    if isinstance(raw_cors, str):
+        cors_origins = [o.strip() for o in raw_cors.split(",") if o.strip()]
+    else:
+        cors_origins = [str(o).strip() for o in raw_cors if str(o).strip()]
+    spoke_origins = {
+        _normalize_dashboard_url(raw)[: -len("/dashboard")]
+        for raw in (
+            getattr(settings, "YINGLIMA_FRONTEND_URL", ""),
+            getattr(settings, "INHYMA_FRONTEND_URL", ""),
+        )
+        if _normalize_dashboard_url(raw)
+    }
+    remaining = [
+        _normalize_dashboard_url(origin)
+        for origin in cors_origins
+        if origin
+        and origin != "*"
+        and _normalize_dashboard_url(origin)[: -len("/dashboard")] not in spoke_origins
+        and _matches_current_environment(origin)
+    ]
+    if len(remaining) == 1:
+        return remaining[0]
+    return ""
 
 
 async def load_registry(db: AsyncSession) -> List[RegistryErp]:
-    """ACTIVE ERPs with their dashboard address; cached briefly, stale copy on a database error."""
+    """ACTIVE ERPs with their environment-resolved dashboard address; cached briefly, stale copy on DB error."""
     ttl = float(getattr(settings, "ECOSYSTEM_LANDING_REGISTRY_TTL_SECONDS", 30.0))
     now = time.monotonic()
-    cached = _CACHE.get("erps")
-    if cached is not None and (now - float(_CACHE.get("at") or 0.0)) < ttl:
-        return list(cached)
-    try:
-        rows = (
-            await db.execute(
-                select(ErpInstance.key, ErpInstance.display_name, ErpInstance.name, ErpInstance.base_url).where(
-                    ErpInstance.status == ErpStatus.ACTIVE
+    cached_rows = _CACHE.get("rows")
+    if cached_rows is None or (now - float(_CACHE.get("at") or 0.0)) >= ttl:
+        try:
+            db_rows = (
+                await db.execute(
+                    select(ErpInstance.key, ErpInstance.display_name, ErpInstance.name, ErpInstance.base_url).where(
+                        ErpInstance.status == ErpStatus.ACTIVE
+                    )
                 )
-            )
-        ).all()
-    except Exception as exc:  # noqa: BLE001 -- fallback by design
-        logger.warning("ERP registry unavailable for the landing decision (%s); using the last good copy", exc)
-        return list(cached) if cached is not None else []
-    erps = [
-        RegistryErp(key=(key or "").strip().lower(), name=(display or name or key or "").strip(), url=((url or "").strip() or None))
-        for key, display, name, url in rows
-        if key
+            ).all()
+            cached_rows = [
+                (
+                    (key or "").strip().lower(),
+                    (display or name or key or "").strip(),
+                    ((url or "").strip() or None),
+                )
+                for key, display, name, url in db_rows
+                if key
+            ]
+            _CACHE["rows"] = cached_rows
+            _CACHE["at"] = now
+        except Exception as exc:  # noqa: BLE001 -- fallback by design
+            logger.warning("ERP registry unavailable for the landing decision (%s); using the last good copy", exc)
+            if cached_rows is None:
+                return []
+
+    return [
+        RegistryErp(key=key, name=name, url=_resolve_erp_frontend_url(key, db_url))
+        for key, name, db_url in cached_rows
     ]
-    _CACHE["erps"] = erps
-    _CACHE["at"] = now
-    return list(erps)
 
 
 def _public_erp(e: RegistryErp) -> Dict[str, Any]:

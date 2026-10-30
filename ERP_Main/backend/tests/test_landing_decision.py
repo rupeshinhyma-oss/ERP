@@ -125,3 +125,92 @@ async def test_a_suspended_erp_stops_counting_immediately(client, admin_client, 
     await admin_client.patch(f"/api/v1/global/erps/{erps['yinglima']}/status", json={"status": "SUSPENDED"})
     after = (await client.get(f"/api/v1/global/ecosystem-session/{s['session_id']}")).json()["data"]
     assert after["landing"]["mode"] == "single" and after["landing"]["target"]["key"] == "inhyma"
+
+
+async def test_local_environment_never_emits_hosted_render_db_urls_and_uses_env_urls(client, admin_client, monkeypatch):
+    from app.core.config import EnvironmentEnum, settings
+
+    invalidate_landing_registry_cache()
+    erps = {}
+    for key, hosted_url in (
+        ("yinglima", "https://yinglima-erp-frontend.onrender.com/dashboard"),
+        ("inhyma", "https://inhyma-erp-frontend.onrender.com/dashboard"),
+    ):
+        r = await admin_client.post(
+            "/api/v1/global/erps",
+            json={"key": key, "name": key, "display_name": key.title() + " ERP", "status": "ACTIVE", "base_url": hosted_url},
+        )
+        erps[key] = r.json()["data"]["id"]
+
+    u = await admin_client.post(
+        "/api/v1/global/users",
+        json={"display_name": "User D", "primary_email": "userd@gmail.com", "external_identity_id": None},
+    )
+    uid = u.json()["data"]["id"]
+    await admin_client.patch(f"/api/v1/global/users/{uid}", json={"metadata": {"default_password": "Str0ng!Passw0rd", "role": ""}})
+    m = await admin_client.post(f"/api/v1/global/users/{uid}/memberships/{erps['inhyma']}", json={"local_user_id": "loc-inhyma"})
+    await admin_client.post(f"/api/v1/global/memberships/{m.json()['data']['id']}/verify")
+
+    monkeypatch.setattr(settings, "ENVIRONMENT", EnvironmentEnum.LOCAL)
+    monkeypatch.setattr(settings, "FRONTEND_URL", "http://localhost:5170")
+    monkeypatch.setattr(settings, "YINGLIMA_FRONTEND_URL", "http://localhost:5173")
+    monkeypatch.setattr(settings, "INHYMA_FRONTEND_URL", "http://localhost:5174")
+    invalidate_landing_registry_cache()
+
+    r = await client.post("/api/v1/global/ecosystem-session/establish", json={"email": "userd@gmail.com", "password": "Str0ng!Passw0rd"})
+    s = r.json()["data"]
+    assert s["landing"]["mode"] == "single"
+    assert s["landing"]["target"]["url"] == "http://localhost:5174/dashboard"
+    assert s["landing"]["control_plane_url"] == "http://localhost:5170/dashboard"
+
+    # Even if INHYMA_FRONTEND_URL were blank locally, the hosted Render DB URL must NEVER leak into a local session.
+    monkeypatch.setattr(settings, "INHYMA_FRONTEND_URL", "")
+    seen = (await client.get(f"/api/v1/global/ecosystem-session/{s['session_id']}")).json()["data"]
+    assert seen["landing"]["target"]["url"] is None
+
+
+async def test_production_environment_uses_render_env_urls_and_rejects_localhost_urls(client, admin_client, monkeypatch):
+    from app.core.config import EnvironmentEnum, settings
+
+    invalidate_landing_registry_cache()
+    erps = {}
+    for key, local_url in (
+        ("yinglima", "http://localhost:5173/dashboard"),
+        ("inhyma", "http://localhost:5174/dashboard"),
+    ):
+        r = await admin_client.post(
+            "/api/v1/global/erps",
+            json={"key": key, "name": key, "display_name": key.title() + " ERP", "status": "ACTIVE", "base_url": local_url},
+        )
+        erps[key] = r.json()["data"]["id"]
+
+    u = await admin_client.post(
+        "/api/v1/global/users",
+        json={"display_name": "Prod User", "primary_email": "produser@gmail.com", "external_identity_id": None},
+    )
+    uid = u.json()["data"]["id"]
+    await admin_client.patch(f"/api/v1/global/users/{uid}", json={"metadata": {"default_password": "Str0ng!Passw0rd", "role": ""}})
+    m = await admin_client.post(f"/api/v1/global/users/{uid}/memberships/{erps['inhyma']}", json={"local_user_id": "loc-inhyma"})
+    await admin_client.post(f"/api/v1/global/memberships/{m.json()['data']['id']}/verify")
+
+    monkeypatch.setattr(settings, "ENVIRONMENT", EnvironmentEnum.PRODUCTION)
+    monkeypatch.setattr(settings, "FRONTEND_URL", "")
+    monkeypatch.setattr(
+        settings,
+        "CORS_ALLOWED_ORIGINS",
+        "https://erp-main-frontend.onrender.com, https://yinglima-erp-frontend.onrender.com, https://inhyma-erp-frontend.onrender.com",
+    )
+    monkeypatch.setattr(settings, "YINGLIMA_FRONTEND_URL", "https://yinglima-erp-frontend.onrender.com")
+    monkeypatch.setattr(settings, "INHYMA_FRONTEND_URL", "https://inhyma-erp-frontend.onrender.com")
+    invalidate_landing_registry_cache()
+
+    r = await client.post("/api/v1/global/ecosystem-session/establish", json={"email": "produser@gmail.com", "password": "Str0ng!Passw0rd"})
+    s = r.json()["data"]
+    assert s["landing"]["mode"] == "single"
+    assert s["landing"]["target"]["url"] == "https://inhyma-erp-frontend.onrender.com/dashboard"
+    assert s["landing"]["control_plane_url"] == "https://erp-main-frontend.onrender.com/dashboard"
+
+    # If INHYMA_FRONTEND_URL is unset in production and DB holds localhost, localhost must be rejected.
+    monkeypatch.setattr(settings, "INHYMA_FRONTEND_URL", "")
+    seen = (await client.get(f"/api/v1/global/ecosystem-session/{s['session_id']}")).json()["data"]
+    assert seen["landing"]["target"]["url"] is None

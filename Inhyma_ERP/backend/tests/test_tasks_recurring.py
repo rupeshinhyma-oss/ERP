@@ -175,7 +175,9 @@ async def test_recurring_schedule_lifecycle_and_generation(
     assert len(instances_res2.json()["data"]) == len(instances)
 
     # 4. Verify generated task appears in standard task list
-    normal_tasks_res = await client.get("/api/v1/tasks?view=all&page_size=200", headers=headers)
+    normal_tasks_res = await client.get(
+        f"/api/v1/tasks?view=all&search=Monthly Branch Inventory Audit&page_size=200", headers=headers
+    )
     assert normal_tasks_res.status_code == 200
     task_items = normal_tasks_res.json()["data"]["items"]
     matched = [t for t in task_items if t["id"] == gen_task["id"]]
@@ -627,7 +629,6 @@ async def test_reminder_deduplication_and_zero_lead_days(
 
 @pytest.mark.asyncio
 async def test_manager_escalation_repeat_interval_and_hold_suppression(
-    client: AsyncClient,
     recurring_test_user: User,
     recurring_manager_user: User,
 ) -> None:
@@ -669,19 +670,19 @@ async def test_manager_escalation_repeat_interval_and_hold_suppression(
     # 1. Day 1 (Oct 1): initial escalation triggers
     async with get_sessionmaker()() as s:
         svc = _make_task_service(s)
-        stats1 = await svc.check_recurring_reminders_and_escalations(as_of_date=base_date)
+        stats1 = await svc.check_recurring_reminders_and_escalations(schedule_id=sch.id, as_of_date=base_date)
         assert stats1["escalations_triggered"] == 1
 
     # 2. Day 3 (Oct 3, 2 days later): repeat interval is 5 days -> no repeat escalation yet
     async with get_sessionmaker()() as s:
         svc = _make_task_service(s)
-        stats2 = await svc.check_recurring_reminders_and_escalations(as_of_date=base_date + timedelta(days=2))
+        stats2 = await svc.check_recurring_reminders_and_escalations(schedule_id=sch.id, as_of_date=base_date + timedelta(days=2))
         assert stats2["escalations_triggered"] == 0
 
     # 3. Day 6 (Oct 6, 5 days later): repeat escalation triggers!
     async with get_sessionmaker()() as s:
         svc = _make_task_service(s)
-        stats3 = await svc.check_recurring_reminders_and_escalations(as_of_date=base_date + timedelta(days=5))
+        stats3 = await svc.check_recurring_reminders_and_escalations(schedule_id=sch.id, as_of_date=base_date + timedelta(days=5))
         assert stats3["escalations_triggered"] == 1
 
     # 4. Hold suppression: put task on hold until Oct 15
@@ -695,7 +696,7 @@ async def test_manager_escalation_repeat_interval_and_hold_suppression(
 
         # Day 11 (Oct 11, 10 days later): would normally repeat, but held -> 0 escalations
         svc = _make_task_service(s)
-        stats4 = await svc.check_recurring_reminders_and_escalations(as_of_date=base_date + timedelta(days=10))
+        stats4 = await svc.check_recurring_reminders_and_escalations(schedule_id=sch.id, as_of_date=base_date + timedelta(days=10))
         assert stats4["escalations_triggered"] == 0
 
 

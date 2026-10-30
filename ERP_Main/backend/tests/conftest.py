@@ -18,7 +18,13 @@ from __future__ import annotations
 import os
 import uuid
 
+os.environ.setdefault("ENVIRONMENT", "test")
 os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
+os.environ.setdefault("FEDERATION_ISSUER", "https://erp-main.test")
+os.environ.setdefault("YINGLIMA_FRONTEND_URL", "")
+os.environ.setdefault("INHYMA_FRONTEND_URL", "")
+os.environ.setdefault("YINGLIMA_API_URL", "")
+os.environ.setdefault("INHYMA_API_URL", "")
 # Many tests create users through the public register route; production keeps it disabled.
 os.environ.setdefault("GLOBAL_SELF_REGISTRATION_ENABLED", "true")
 # Tests need suspensions etc. to be visible immediately (production trusts a validated session for a few seconds).

@@ -117,6 +117,7 @@ Machine-to-machine internal service endpoints invoked by `ERP_Main` over authent
 | :--- | :--- | :--- | :--- |
 | `GET` | `/api/v1/purchase/local-orders` | List local purchases with status counts (`all`, `pending`, `confirmed`), search, warehouse, and date filters | Authenticated |
 | `POST` | `/api/v1/purchase/local-orders` | Create local purchase with multi-product lines; server auto-calculates expense loading & landing rates | Authenticated |
+| `POST` | `/api/v1/purchase/local-orders/import` | Bulk import multi-line local purchase invoices from `.csv` / `.xlsx` (`file` + optional `column_map` JSON), validating Supplier/Warehouse/Product masters, calculating Expense Factor & Unit Landing Rate (INR) (VB), skipping duplicate Invoice Nos, and isolating row errors via nested DB savepoints | Authenticated |
 | `GET` | `/api/v1/purchase/local-orders/{id}` | Inspect detailed local purchase record and items | Authenticated |
 | `PUT` | `/api/v1/purchase/local-orders/{id}` | Update pending local purchase lines or invoice expenses | `localpurchase.update` |
 | `PATCH` | `/api/v1/purchase/local-orders/{id}/status` | Transition purchase status (`pending` -> `confirmed`); auto-applies physical stock-in movement | `localpurchase.confirm` |
@@ -133,6 +134,7 @@ Machine-to-machine internal service endpoints invoked by `ERP_Main` over authent
 | :--- | :--- | :--- | :--- |
 | `GET` | `/api/v1/purchase/import-orders` | List import consignments with status counts (`all`, `pending`, `confirmed`, `received`, `closed`) and 3-way date ranges | Authenticated |
 | `POST` | `/api/v1/purchase/import-orders` | Create import consignment with exchange rates, duty %, shipping, and dual VB/CB landing calculations | Authenticated |
+| `POST` | `/api/v1/purchase/import-orders/import` | Bulk import multi-line import consignments from `.csv` / `.xlsx` (`file` + optional `column_map` JSON), validating Supplier/Warehouse/Product masters, calculating dual VB/CB landing costs, applying workflow `stock_in_on_create` rules, skipping duplicate Consignment Nos, and isolating row errors via nested DB savepoints | Authenticated |
 | `POST` | `/api/v1/purchase/import-orders/preview` | Live preview calculation of CBM, duty, and landing expenses while typing in form | Authenticated |
 | `GET` | `/api/v1/purchase/import-orders/{id}` | Inspect detailed consignment record, line items, and landed costs | Authenticated |
 | `PUT` | `/api/v1/purchase/import-orders/{id}` | Update pending import consignment details or product lines | Authenticated |
@@ -170,6 +172,9 @@ Machine-to-machine internal service endpoints invoked by `ERP_Main` over authent
 | `POST` | `/api/v1/suppliers` | Create supplier profile; **`contact_calling_number` is mandatory** with strict phone validation | `supplier.create` |
 | `GET` | `/api/v1/suppliers/{id}` | Inspect detailed supplier record and linked products | `supplier.view` |
 | `PATCH` | `/api/v1/suppliers/{id}` | Update supplier profile (cannot blank out mandatory calling number) | `supplier.update` |
+| `POST` | `/api/v1/suppliers/{id}/contacts` | Add sub-contact person with country dial code, WhatsApp/WeChat sync, and handling territory | `supplier.update` |
+| `POST` | `/api/v1/suppliers/import` | Bulk CSV/Excel supplier import with column mapping and duplicate validation | `supplier.import` |
+| `GET` | `/api/v1/suppliers/export` | Export active/filtered suppliers directory to CSV/Excel | `supplier.export` |
 | `DELETE`| `/api/v1/suppliers/{id}` | Soft-delete supplier profile | `supplier.delete` |
 
 ---
@@ -348,6 +353,31 @@ Machine-to-machine internal service endpoints invoked by `ERP_Main` over authent
 | `DELETE`| `/api/v1/feed/comments/{comment_id}` | Soft-delete comment | Authenticated |
 | `POST` | `/api/v1/feed/posts/{id}/reactions` | Toggle emoji reaction on post | Authenticated |
 | `POST` | `/api/v1/feed/posts/{id}/mark-read` | Record user read receipt for broadcast compliance | Authenticated |
+
+---
+
+## 20. Human Resource Management System — HRMS (`/hrms`)
+
+| Method | Endpoint URI | Description | Permission / Role Gate |
+| :--- | :--- | :--- | :--- |
+| `POST` | `/api/v1/hrms/attendance/punch-in` | Punch in with validated GPS coordinates & geofence verification | `hrms.attendance` |
+| `POST` | `/api/v1/hrms/attendance/punch-out` | Punch out and compute daily worked duration & attendance status | `hrms.attendance` |
+| `GET` | `/api/v1/hrms/attendance/all-calendar` | Monthly all-employee attendance calendar matrix (`PRESENT`, `LATE`, `HALF_DAY`, `ON_LEAVE`, `HOLIDAY`, `WEEKEND`, `ABSENT`) | `hrms.attendance` (Scoped) |
+| `POST` | `/api/v1/hrms/attendance/regularizations` | Submit attendance regularization; `direct_regularize=True` restricted strictly to Admin with self-approval blocked (`400 Bad Request`) | `hrms.attendance` / Admin |
+| `GET` / `POST` | `/api/v1/hrms/leave/requests` | List or submit employee leave requests with manager-first routing and HR availability fallback | `hrms.leave` |
+| `POST` | `/api/v1/hrms/leave/requests/{id}/approve` | Approve/reject leave request (enforces self-approval prevention & stale action guard) | Manager / HR / Admin |
+| `GET` | `/api/v1/hrms/assets/summary` | Retrieve company-wide asset summary statistics (strictly gated to Admin or HR; `403` for regular employees) | Admin / HR |
+| `PATCH` / `PUT` | `/api/v1/hrms/assets/{id}` | Update asset metadata, condition, or status (`PATCH /assets/{id}/status`); strictly gated to Admin or HR | Admin / HR |
+| `GET` / `POST` | `/api/v1/hrms/expenses` | List or submit employee expense claims | `hrms.expenses` |
+| `POST` | `/api/v1/hrms/expenses/{id}/approve` | Stage 1 manager/HR approval (`PENDING` -> `APPROVED`; self-approval blocked) | Manager / HR / Admin |
+| `POST` | `/api/v1/hrms/expenses/{id}/reimburse` | Stage 2 HR/Finance reimbursement (`APPROVED` -> `REIMBURSED`; self-reimbursement strictly blocked with `403`) | HR / Finance / Admin |
+| `GET` / `POST` | `/api/v1/hrms/site-visits` | Track field site visits with check-in/out geolocation & photographic evidence lifecycle | `hrms.site_visits` |
+| `POST` | `/api/v1/hrms/payroll/calculate` | Generate/recalculate monthly payroll batch (`hrms.payroll.configure` separation-of-duties gate) | `hrms.payroll.configure` |
+| `POST` | `/api/v1/hrms/payroll/{month}/approve` | Approve monthly payroll batch (`hrms.payroll.approve`), returning full deduplicated payroll with child item `APPROVED` propagation | `hrms.payroll.approve` |
+| `PATCH` | `/api/v1/hrms/payroll/items/{item_id}` | Edit monthly payroll line item (`hrms.payroll.configure`; self-editing strictly prohibited with `400 Bad Request`) | `hrms.payroll.configure` |
+| `POST` | `/api/v1/hrms/payroll/adjustments` | Add payroll bonus/deduction adjustment (`hrms.payroll.configure`; self-adjustment strictly prohibited with `400 Bad Request`) | `hrms.payroll.configure` |
+| `GET` | `/api/v1/hrms/payroll/payslips` | Retrieve approved salary slips (employees see own only; managers with `employee_id=ALL` see managed department `APPROVED` slips) | `hrms.payroll` (Scoped) |
+| `GET` | `/api/v1/hrms/payroll/export` | Export non-destructive monthly payroll `.xlsx` workbook (`Payroll_Export_All_Employees_YYYY_MM.xlsx`) | Admin / HR |
 
 
 

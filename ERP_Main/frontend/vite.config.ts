@@ -1,32 +1,40 @@
-import { defineConfig } from "vite";
+import { defineConfig, loadEnv } from "vite";
 import react from "@vitejs/plugin-react";
 import path from "node:path";
 
-export default defineConfig({
-  plugins: [react()],
-  resolve: {
-    alias: { "@": path.resolve(__dirname, "./src") },
-  },
-  server: {
-    host: "0.0.0.0",
-    port: Number(process.env.VITE_PORT) || 5170,
-    // ERP_Main backend runs separately (default http://127.0.0.1:8000). Requests to
-    // /api are proxied so browser calls /api/v1/... seamlessly without CORS friction.
-    proxy: {
-      "/api": {
-        target: process.env.VITE_API_PROXY_TARGET || "http://127.0.0.1:8000",
-        changeOrigin: true,
-        ws: true,
-        configure: (proxy) => {
-          proxy.on("error", (err: any) => {
-            const code = err?.code;
-            if (code === "ECONNRESET" || code === "ECONNREFUSED" || err?.message?.includes("socket hang up")) {
-              return;
-            }
-            console.warn("[vite] api proxy error:", err?.message || err);
-          });
-        },
-      },
+export default defineConfig(({ mode }) => {
+  const env = loadEnv(mode, process.cwd(), "");
+  const proxyTarget = env.VITE_API_PROXY_TARGET?.trim() || "";
+  const port = env.VITE_PORT ? Number(env.VITE_PORT) : undefined;
+
+  return {
+    plugins: [react()],
+    resolve: {
+      alias: { "@": path.resolve(__dirname, "./src") },
     },
-  },
+    server: {
+      host: "0.0.0.0",
+      ...(port ? { port } : {}),
+      ...(proxyTarget
+        ? {
+            proxy: {
+              "/api": {
+                target: proxyTarget,
+                changeOrigin: true,
+                ws: true,
+                configure: (proxy) => {
+                  proxy.on("error", (err: any) => {
+                    const code = err?.code;
+                    if (code === "ECONNRESET" || code === "ECONNREFUSED" || err?.message?.includes("socket hang up")) {
+                      return;
+                    }
+                    console.warn("[vite] api proxy error:", err?.message || err);
+                  });
+                },
+              },
+            },
+          }
+        : {}),
+    },
+  };
 });

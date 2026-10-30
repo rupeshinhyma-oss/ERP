@@ -6,7 +6,7 @@
  */
 
 import { useEffect, useRef, useState } from "react";
-import { ECOSYSTEM_ERPS, planSwitch, warmPeerServices } from "@/lib/ssoBridge";
+import { fetchLanding, getEcosystemErps, planSwitch, warmPeerServices, type Landing } from "@/lib/ssoBridge";
 import { Auth } from "@/lib/auth";
 import { useGlobalSession } from "@/lib/session";
 
@@ -18,11 +18,13 @@ interface EcosystemSwitcherProps {
 export function EcosystemSwitcher({ currentKey = "control-plane", organizationName }: EcosystemSwitcherProps) {
   const { userType, memberships } = useGlobalSession();
   const [open, setOpen] = useState(false);
+  const [landing, setLanding] = useState<Landing | null>(null);
   const [switchError, setSwitchError] = useState<string | null>(null);
   const [switching, setSwitching] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
-  const currentErp = ECOSYSTEM_ERPS.find((erp) => erp.key === currentKey);
+  const ecosystemErps = getEcosystemErps(landing);
+  const currentErp = ecosystemErps.find((erp) => erp.key === currentKey);
   const displayName =
     organizationName ||
     (currentKey === "control-plane"
@@ -32,7 +34,7 @@ export function EcosystemSwitcher({ currentKey = "control-plane", organizationNa
   // Dynamic peer ERP company names resolved from ERP Settings
   const [peerNames, setPeerNames] = useState<Record<string, string>>(() => {
     const initial: Record<string, string> = {};
-    for (const erp of ECOSYSTEM_ERPS) {
+    for (const erp of getEcosystemErps()) {
       if (erp.key === currentKey) {
         initial[erp.key] = displayName;
       } else if (erp.key === "control-plane") {
@@ -47,7 +49,23 @@ export function EcosystemSwitcher({ currentKey = "control-plane", organizationNa
 
   useEffect(() => {
     let cancelled = false;
-    ECOSYSTEM_ERPS.forEach(async (erp) => {
+    fetchLanding()
+      .then((liveLanding) => {
+        if (!cancelled && liveLanding) {
+          setLanding(liveLanding);
+        }
+      })
+      .catch(() => {
+        /* fallback to .env configuration */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [currentKey]);
+
+  useEffect(() => {
+    let cancelled = false;
+    getEcosystemErps(landing).forEach(async (erp) => {
       if (erp.key === currentKey || erp.key === "control-plane" || !erp.apiUrl) return;
       try {
         const resp = await fetch(`${erp.apiUrl}/organizations/public`);
@@ -66,7 +84,7 @@ export function EcosystemSwitcher({ currentKey = "control-plane", organizationNa
     return () => {
       cancelled = true;
     };
-  }, [currentKey]);
+  }, [currentKey, landing]);
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
@@ -92,9 +110,9 @@ export function EcosystemSwitcher({ currentKey = "control-plane", organizationNa
   useEffect(() => {
     if (open) {
       setSwitchError(null);
-      warmPeerServices();
+      warmPeerServices(landing);
     }
-  }, [open]);
+  }, [open, landing]);
 
   const handleSwitch = async (hostUrl: string) => {
     if (switching) return;
@@ -124,7 +142,6 @@ export function EcosystemSwitcher({ currentKey = "control-plane", organizationNa
   if (!isSuperAdmin && activeMemberships.length <= 1) {
     return null;
   }
-
 
   return (
     <div style={{ position: "relative" }} ref={dropdownRef}>
@@ -217,7 +234,7 @@ export function EcosystemSwitcher({ currentKey = "control-plane", organizationNa
             Connected Fleet Applications
           </div>
 
-          {ECOSYSTEM_ERPS.filter((erp) => {
+          {ecosystemErps.filter((erp) => {
             if (isSuperAdmin) return true;
             if (erp.key === "control-plane") return true;
             return allowedKeys.some((k) => k === erp.key.toLowerCase() || (erp.name && k === erp.name.toLowerCase()));

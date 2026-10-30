@@ -18,6 +18,7 @@ import {
   EmptyState,
 } from "@/components/ui";
 import { ICONS } from "@/components/icons";
+import { resolveErpTargetUrl } from "@/lib/ssoBridge";
 import type { ErpInstance } from "@/types";
 
 export function ErpRegistry() {
@@ -228,7 +229,7 @@ export function ErpRegistry() {
                       v{erp.version}
                     </td>
                     <td style={{ fontSize: "12px", fontFamily: "monospace", color: "var(--color-primary)" }}>
-                      {erp.base_url}
+                      {resolveErpTargetUrl(erp.erp_key, erp.base_url) || erp.base_url}
                     </td>
                     <td>
                       <div className="capability-pills">

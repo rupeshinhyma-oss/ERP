@@ -11,12 +11,14 @@ Handles:
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 import mimetypes
 import os
 import re
 import uuid
 from pathlib import Path
-from typing import Tuple
+from typing import Any, Tuple
+from urllib.parse import unquote, urlparse
 
 import httpx
 
@@ -328,3 +330,209 @@ async def save_uploaded_file(
         raise
 
     return f"{url_prefix}/{unique_filename}", unique_filename
+
+
+# In-memory retryable storage cleanup queue for transient failures
+_PENDING_CLEANUP_QUEUE: list[dict[str, Any]] = []
+
+
+def enqueue_storage_cleanup(file_url: str, bucket: str = "task-attachments", reason: str = "") -> None:
+    """Enqueue a failed physical storage cleanup for subsequent retry."""
+    _PENDING_CLEANUP_QUEUE.append({
+        "file_url": file_url,
+        "bucket": bucket,
+        "reason": reason,
+        "enqueued_at": datetime.now(timezone.utc).isoformat(),
+        "attempts": 0,
+    })
+
+
+def get_pending_cleanups() -> list[dict[str, Any]]:
+    """Return a copy of currently pending storage cleanups."""
+    return list(_PENDING_CLEANUP_QUEUE)
+
+
+def clear_pending_cleanups() -> None:
+    """Clear pending storage cleanups (primarily for test teardown)."""
+    global _PENDING_CLEANUP_QUEUE
+    _PENDING_CLEANUP_QUEUE.clear()
+
+
+async def retry_pending_storage_cleanups() -> dict[str, int]:
+    """
+    Process pending physical storage deletions in the retry queue.
+    Retries each item up to 5 times before logging a critical error.
+    """
+    global _PENDING_CLEANUP_QUEUE
+    if not _PENDING_CLEANUP_QUEUE:
+        return {"processed": 0, "succeeded": 0, "failed": 0}
+
+    remaining: list[dict[str, Any]] = []
+    succeeded = 0
+    failed = 0
+
+    for item in _PENDING_CLEANUP_QUEUE:
+        item["attempts"] += 1
+        ok = await delete_stored_file(
+            file_url=item["file_url"],
+            allowed_buckets={item["bucket"]},
+        )
+        if ok:
+            succeeded += 1
+        else:
+            failed += 1
+            if item["attempts"] < 5:
+                remaining.append(item)
+            else:
+                logger.error(
+                    "Permanent storage cleanup failure for %s after %d attempts: %s",
+                    item["file_url"],
+                    item["attempts"],
+                    item["reason"],
+                )
+
+    _PENDING_CLEANUP_QUEUE = remaining
+    return {"processed": succeeded + failed, "succeeded": succeeded, "failed": failed}
+
+
+async def delete_from_supabase(bucket: str, filename: str) -> bool:
+    """
+    Delete an object from Supabase Storage.
+
+    Returns True on success or if the object was already absent (HTTP 404 - idempotent).
+    Returns False on unexpected failure or network issues.
+    """
+    auth_key = settings.supabase_auth_key
+    base_url = settings.supabase_base_url
+    if not auth_key or not base_url:
+        return False
+
+    headers = {
+        "apikey": auth_key,
+        "Authorization": f"Bearer {auth_key}",
+    }
+    delete_url = f"{base_url}/storage/v1/object/{bucket}/{filename}"
+
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.delete(delete_url, headers=headers)
+            if resp.status_code in (200, 204, 404):
+                logger.info("Deleted Supabase object %s/%s (HTTP %d)", bucket, filename, resp.status_code)
+                return True
+
+            # Also attempt prefixes deletion endpoint supported by Supabase Storage
+            batch_url = f"{base_url}/storage/v1/object/{bucket}"
+            resp_batch = await client.request(
+                "DELETE",
+                batch_url,
+                headers={**headers, "Content-Type": "application/json"},
+                json={"prefixes": [filename]},
+            )
+            if resp_batch.status_code in (200, 204, 404):
+                logger.info("Deleted Supabase object %s/%s via batch API (HTTP %d)", bucket, filename, resp_batch.status_code)
+                return True
+
+            logger.warning(
+                "Supabase Storage deletion failed for %s/%s: HTTP %d: %s",
+                bucket,
+                filename,
+                resp.status_code,
+                resp.text[:200],
+            )
+            return False
+    except Exception as exc:
+        logger.warning("Supabase Storage delete exception for %s/%s: %s", bucket, filename, exc)
+        return False
+
+
+async def delete_stored_file(
+    file_url: str,
+    allowed_buckets: set[str] | None = None,
+    allowed_local_subfolders: set[str] | None = None,
+) -> bool:
+    """
+    Safely delete a stored file from local filesystem or Supabase Storage.
+
+    Security & Guardrails:
+    - Rejects path traversal characters ('..', absolute escapes, drive letters).
+    - Whitelists permissible buckets and local subfolders.
+    - Verifies local paths remain strictly confined inside the base 'uploads' directory.
+    - Treats missing files idempotently as True.
+    - Enqueues to retry queue if physical deletion fails.
+    """
+    if not file_url or not isinstance(file_url, str):
+        return True
+
+    effective_buckets = allowed_buckets or {
+        "task-attachments",
+        "product-images",
+        "supplier-media",
+        "public-assets",
+        "expense-receipts",
+    }
+    effective_subfolders = allowed_local_subfolders or {"tasks", "products", "receipts", "media"}
+
+    parsed = urlparse(file_url)
+    clean_path = unquote(parsed.path)
+
+    # 1. Local Filesystem path (/uploads/... or uploads/...)
+    if clean_path.startswith("/uploads/") or clean_path.startswith("uploads/"):
+        rel_str = clean_path.lstrip("/")
+        if rel_str.startswith("uploads/"):
+            rel_str = rel_str[len("uploads/"):]
+
+        # Path traversal & injection guard
+        if ".." in rel_str or rel_str.startswith("/") or rel_str.startswith("\\") or ":" in rel_str:
+            logger.warning("Security violation: path traversal attempt in storage deletion: %s", file_url)
+            return False
+
+        parts = Path(rel_str).parts
+        if not parts:
+            return False
+
+        # Validate subfolder whitelist
+        subfolder = parts[1] if parts[0] == "private" and len(parts) > 1 else parts[0]
+        if subfolder not in effective_subfolders:
+            logger.warning("Disallowed subfolder '%s' in file_url: %s", subfolder, file_url)
+            return False
+
+        base_uploads = Path("uploads").resolve()
+        target_path = (base_uploads / rel_str).resolve()
+
+        if not target_path.is_relative_to(base_uploads):
+            logger.warning("Security violation: resolved path %s escapes base uploads directory", target_path)
+            return False
+
+        try:
+            if target_path.is_file():
+                target_path.unlink()
+                logger.info("Deleted local stored file: %s", str(target_path))
+            return True
+        except Exception as exc:
+            logger.error("Failed to delete local file %s: %s", str(target_path), exc)
+            enqueue_storage_cleanup(file_url, bucket="local", reason=str(exc))
+            return False
+
+    # 2. Supabase Storage URL
+    # Matches /storage/v1/object/(public|authenticated|sign)/<bucket>/<filename>
+    m = re.search(r"/storage/v1/object/(?:public|authenticated|sign)/([^/]+)/(.+)$", clean_path)
+    if m:
+        bucket = m.group(1)
+        filename = m.group(2)
+
+        if bucket not in effective_buckets:
+            logger.warning("Disallowed Supabase bucket '%s' for deletion: %s", bucket, file_url)
+            return False
+        if ".." in filename:
+            logger.warning("Security violation: path traversal in Supabase object name: %s", filename)
+            return False
+
+        ok = await delete_from_supabase(bucket, filename)
+        if not ok:
+            enqueue_storage_cleanup(file_url, bucket=bucket, reason="supabase_api_failure")
+        return ok
+
+    logger.warning("Unrecognized storage URL pattern for deletion: %s", file_url)
+    return False
+
+

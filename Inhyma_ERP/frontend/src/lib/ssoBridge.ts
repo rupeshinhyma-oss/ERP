@@ -25,13 +25,74 @@ export interface SsoHandoverPayload {
 const SSO_SIGNATURE = "ihm_erp_sso_v1";
 const SSO_VALIDITY_WINDOW_MS = 10 * 60 * 1000; // 10 minutes
 
-const getHost = () => (typeof window !== "undefined" && window.location.hostname ? window.location.hostname : "127.0.0.1");
+const getHost = () => (typeof window !== "undefined" && window.location.hostname ? window.location.hostname : "");
 
-const isLocalhost = (hostname: string) =>
-  hostname === "localhost" ||
-  hostname === "127.0.0.1" ||
-  hostname === "0.0.0.0" ||
-  hostname.endsWith(".local");
+const isLoopbackHost = (hostname: string): boolean => {
+  const h = (hostname || "").trim().toLowerCase();
+  return h === "localhost" || h === "127.0.0.1" || h === "0.0.0.0" || h === "::1" || h === "[::1]";
+};
+
+const isPrivateLanIpv4 = (hostname: string): boolean => {
+  const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec((hostname || "").trim());
+  if (!m) return false;
+  const [a, b, c, d] = [Number(m[1]), Number(m[2]), Number(m[3]), Number(m[4])];
+  if ([a, b, c, d].some((n) => n < 0 || n > 255)) return false;
+  if (a === 10 || a === 127) return true;
+  if (a === 192 && b === 168) return true;
+  if (a === 172 && b >= 16 && b <= 31) return true;
+  return false;
+};
+
+export const isLocalNetworkHost = (hostname: string): boolean => {
+  const h = (hostname || "").trim().toLowerCase();
+  if (!h) return false;
+  if (isLoopbackHost(h) || h.endsWith(".local")) return true;
+  return isPrivateLanIpv4(h);
+};
+
+/**
+ * Validates that a candidate URL belongs to the same environment class as the current browser tab
+ * (local/LAN vs hosted domain) and adapts loopback hostnames to the active LAN IP when accessed over LAN.
+ */
+export function sanitizeEnvMatchedUrl(
+  candidateUrl: string | null | undefined,
+  options?: { ensureDashboardPath?: boolean },
+): string {
+  const trimmed = (candidateUrl || "").trim();
+  if (!trimmed || trimmed === "#") return "";
+  try {
+    const base = typeof window !== "undefined" && window.location.origin ? window.location.origin : undefined;
+    const parsed = base ? new URL(trimmed, base) : new URL(trimmed);
+    const browserHost = getHost();
+    if (browserHost) {
+      if (isLocalNetworkHost(browserHost) !== isLocalNetworkHost(parsed.hostname)) {
+        return "";
+      }
+      if (isLocalNetworkHost(browserHost) && isLoopbackHost(parsed.hostname) && !isLoopbackHost(browserHost)) {
+        parsed.hostname = browserHost;
+      }
+    }
+    if (options?.ensureDashboardPath && (parsed.pathname === "" || parsed.pathname === "/")) {
+      parsed.pathname = "/dashboard";
+    }
+    return parsed.toString();
+  } catch {
+    return "";
+  }
+}
+
+/** What ERP_Main decided about where a person belongs (see ERP_Main global_auth/landing.py). */
+export interface LandingErp {
+  key: string;
+  name: string;
+  url?: string | null;
+}
+export interface Landing {
+  mode: "admin" | "dashboard" | "single" | "multi";
+  target: LandingErp | null;
+  erps: LandingErp[];
+  control_plane_url?: string | null;
+}
 
 export interface EcosystemErpEntry {
   key: string;
@@ -42,33 +103,61 @@ export interface EcosystemErpEntry {
   badge: string;
 }
 
-export const getEcosystemErps = (): EcosystemErpEntry[] => {
-  const host = getHost();
-  const isLocal = isLocalhost(host);
+const landingUrlForKey = (key: string, landing?: Landing | null): string => {
+  const k = key.toLowerCase();
+  if (k === "control-plane") {
+    return landing?.control_plane_url || "";
+  }
+  return (
+    landing?.erps?.find((e) => e.key.toLowerCase() === k)?.url ||
+    (landing?.target?.key?.toLowerCase() === k ? landing.target.url || "" : "")
+  );
+};
 
-  const controlPlaneHost = import.meta.env.VITE_CONTROL_PLANE_URL || (isLocal ? `http://${host}:5170/dashboard` : "");
-  const controlPlaneApi = import.meta.env.VITE_CONTROL_PLANE_API_URL || (isLocal ? `http://${host}:8000/api/v1` : undefined);
-  const yinglimaHost = import.meta.env.VITE_YINGLIMA_URL || (isLocal ? `http://${host}:5173/dashboard` : "");
-  const yinglimaApi = import.meta.env.VITE_YINGLIMA_API_URL || (isLocal ? `http://${host}:8001/api/v1` : undefined);
+export const getEcosystemErps = (landing?: Landing | null): EcosystemErpEntry[] => {
+  const controlPlaneHost =
+    sanitizeEnvMatchedUrl(import.meta.env.VITE_CONTROL_PLANE_URL, { ensureDashboardPath: true }) ||
+    sanitizeEnvMatchedUrl(landing?.control_plane_url, { ensureDashboardPath: true });
+  const controlPlaneApi =
+    sanitizeEnvMatchedUrl(import.meta.env.VITE_CONTROL_PLANE_API_URL).replace(/\/+$/, "") || undefined;
+
+  const yinglimaHost =
+    sanitizeEnvMatchedUrl(import.meta.env.VITE_YINGLIMA_URL, { ensureDashboardPath: true }) ||
+    sanitizeEnvMatchedUrl(landingUrlForKey("yinglima", landing), { ensureDashboardPath: true });
+  const yinglimaApi =
+    sanitizeEnvMatchedUrl(import.meta.env.VITE_YINGLIMA_API_URL).replace(/\/+$/, "") || undefined;
+
   const inhymaHost =
-    import.meta.env.VITE_INHYMA_URL ||
-    (typeof window !== "undefined" && window.location.origin
-      ? `${window.location.origin}/dashboard`
-      : isLocal
-        ? `http://${host}:5174/dashboard`
-        : "#");
-  const inhymaApi =
-    import.meta.env.VITE_API_ORIGIN
-      ? `${import.meta.env.VITE_API_ORIGIN.replace(/\/+$/, "")}/api/v1`
-      : isLocal
-        ? `http://${host}:8002/api/v1`
-        : undefined;
+    sanitizeEnvMatchedUrl(import.meta.env.VITE_INHYMA_URL, { ensureDashboardPath: true }) ||
+    sanitizeEnvMatchedUrl(landingUrlForKey("inhyma", landing), { ensureDashboardPath: true }) ||
+    (typeof window !== "undefined" && window.location.origin ? `${window.location.origin}/dashboard` : "");
+  const rawInhymaApi =
+    import.meta.env.VITE_INHYMA_API_URL ||
+    (import.meta.env.VITE_API_ORIGIN ? `${import.meta.env.VITE_API_ORIGIN.replace(/\/+$/, "")}/api/v1` : "");
+  const inhymaApi = sanitizeEnvMatchedUrl(rawInhymaApi).replace(/\/+$/, "") || undefined;
 
-  return [
+  const entries: EcosystemErpEntry[] = [
     { key: "control-plane", id: "control-plane", name: "ERP Dashboard", hostUrl: controlPlaneHost, apiUrl: controlPlaneApi, badge: "Control Plane" },
     { key: "yinglima", id: "erp-02", name: "ERP 2", hostUrl: yinglimaHost, apiUrl: yinglimaApi, badge: "ERP 2" },
     { key: "inhyma", id: "erp-01", name: "ERP 1", hostUrl: inhymaHost, apiUrl: inhymaApi, badge: "Inhyma ERP" },
   ];
+
+  if (landing?.erps) {
+    for (const extra of landing.erps) {
+      const k = (extra.key || "").trim().toLowerCase();
+      if (!k || entries.some((e) => e.key === k)) continue;
+      const hostUrl = sanitizeEnvMatchedUrl(extra.url, { ensureDashboardPath: true });
+      entries.push({
+        key: k,
+        id: k,
+        name: extra.name || k,
+        hostUrl,
+        badge: extra.name || k,
+      });
+    }
+  }
+
+  return entries;
 };
 
 export const ECOSYSTEM_ERPS = getEcosystemErps();
@@ -78,7 +167,8 @@ export const ECOSYSTEM_ERPS = getEcosystemErps();
  * Carries the unified session_id across origins.
  */
 export function createSsoHandoverUrl(targetBaseUrl: string, targetPath?: string): string {
-  if (!targetBaseUrl) return "#";
+  const safeBaseUrl = sanitizeEnvMatchedUrl(targetBaseUrl);
+  if (!safeBaseUrl) return "#";
 
   const currentSessionId = Auth.getSessionId() || getEcosystemCookie()?.session_id;
   const currentCookie = getEcosystemCookie();
@@ -98,33 +188,16 @@ export function createSsoHandoverUrl(targetBaseUrl: string, targetPath?: string)
   };
 
   try {
-    const url = new URL(targetBaseUrl, window.location.origin);
-    const host = getHost();
-    if (url.hostname === "localhost" && host !== "localhost" && isLocalhost(host)) {
-      url.hostname = host;
-    }
+    const url = new URL(safeBaseUrl, window.location.origin);
     if (targetPath) {
       url.pathname = targetPath;
     }
     url.searchParams.set("sso_handover", btoa(JSON.stringify(payload)));
     return url.toString();
   } catch {
-    const separator = targetBaseUrl.includes("?") ? "&" : "?";
-    return `${targetBaseUrl}${separator}sso_handover=${encodeURIComponent(btoa(JSON.stringify(payload)))}`;
+    const separator = safeBaseUrl.includes("?") ? "&" : "?";
+    return `${safeBaseUrl}${separator}sso_handover=${encodeURIComponent(btoa(JSON.stringify(payload)))}`;
   }
-}
-
-/** What ERP_Main decided about where a person belongs (see ERP_Main global_auth/landing.py). */
-export interface LandingErp {
-  key: string;
-  name: string;
-  url?: string | null;
-}
-export interface Landing {
-  mode: "admin" | "dashboard" | "single" | "multi";
-  target: LandingErp | null;
-  erps: LandingErp[];
-  control_plane_url?: string | null;
 }
 
 /** The parts of a central (ERP_Main) session that routing needs. */
@@ -137,26 +210,29 @@ export interface CentralSessionLike {
   landing?: Landing | null;
 }
 
-/** The ERP Dashboard's address: from ERP_Main's decision, else this app's configuration. Never a guessed port. */
+/** The ERP Dashboard's address: from `.env` configuration first, else an environment-compatible landing URL. */
 export function controlPlaneUrl(s?: CentralSessionLike | null): string {
-  return s?.landing?.control_plane_url || getEcosystemErps().find((e) => e.key === "control-plane")?.hostUrl || "";
+  const fromConfig = getEcosystemErps(s?.landing).find((e) => e.key === "control-plane")?.hostUrl || "";
+  if (fromConfig) return fromConfig;
+  return sanitizeEnvMatchedUrl(s?.landing?.control_plane_url, { ensureDashboardPath: true });
 }
 
-/** An ERP's dashboard address: from ERP_Main's registry (via the decision), else this app's configuration. */
+/** An ERP's dashboard address: from `.env` configuration first, else an environment-compatible landing URL. */
 export function erpUrlFor(key: string, s?: CentralSessionLike | null): string {
   const k = key.toLowerCase();
-  const fromLanding = s?.landing?.erps?.find((e) => e.key.toLowerCase() === k)?.url || (s?.landing?.target?.key?.toLowerCase() === k ? s.landing.target.url : "");
-  const fromConfig = getEcosystemErps().find((e) => e.key.toLowerCase() === k)?.hostUrl;
-  const url = fromLanding || fromConfig || "";
-  return url === "#" ? "" : url;
+  const fromConfig = getEcosystemErps(s?.landing).find((e) => e.key.toLowerCase() === k)?.hostUrl || "";
+  if (fromConfig && fromConfig !== "#") return fromConfig;
+  const rawLanding = landingUrlForKey(k, s?.landing);
+  return sanitizeEnvMatchedUrl(rawLanding, { ensureDashboardPath: true });
 }
 
 /**
  * Builds an SSO handover link from an explicit central session (used at sign-in time, before this
- * app has its own local session).  The receiving app verifies the session with ERP_Main itself.
+ * app has its own local session). The receiving app verifies the session with ERP_Main itself.
  */
 export function createSsoHandoverUrlFromSession(targetBaseUrl: string, s: CentralSessionLike): string {
-  if (!targetBaseUrl || !s.session_id) return "#";
+  const safeBaseUrl = sanitizeEnvMatchedUrl(targetBaseUrl);
+  if (!safeBaseUrl || !s.session_id) return "#";
   const payload = {
     role: s.role || "global_user",
     user: s.display_name || s.email || "",
@@ -166,11 +242,7 @@ export function createSsoHandoverUrlFromSession(targetBaseUrl: string, s: Centra
     ts: Date.now(),
     sig: SSO_SIGNATURE,
   };
-  const url = new URL(targetBaseUrl, window.location.origin);
-  const host = getHost();
-  if (url.hostname === "localhost" && host !== "localhost" && isLocalhost(host)) {
-    url.hostname = host;
-  }
+  const url = new URL(safeBaseUrl, window.location.origin);
   url.searchParams.set("sso_handover", btoa(JSON.stringify(payload)));
   return url.toString();
 }
@@ -183,7 +255,7 @@ export type CentralRoute =
 /**
  * Where should someone who has just proven their identity centrally go from THIS ERP's login page?
  *  - Super admin (`*`) or this ERP granted        -> stay here.
- *  - Exactly one other ERP granted                -> straight to that ERP.
+ *  - Exactly one other ERP granted                -> straight to that ERP (within the same environment).
  *  - Two or more ERPs granted (not this one)      -> the ERP Dashboard, where the switcher lets them choose.
  *  - Nothing granted                              -> no access.
  */
@@ -193,23 +265,25 @@ export function routeForCentralSession(
   dashboardQuery?: Record<string, string>,
 ): CentralRoute {
   const here = thisErpKey.toLowerCase();
-  /** Hand over to `url`; the extra query (an error to show) is only added when the destination is the dashboard. */
   const go = (url: string, toDashboard: boolean): CentralRoute => {
-    if (!url) return { kind: "none" };
-    let target = url;
+    const safeUrl = sanitizeEnvMatchedUrl(url);
+    if (!safeUrl) return { kind: "none" };
+    let target = safeUrl;
     if (toDashboard && dashboardQuery) {
       try {
-        const u = new URL(url, window.location.origin);
+        const u = new URL(safeUrl, window.location.origin);
         Object.entries(dashboardQuery).forEach(([k, v]) => u.searchParams.set(k, v));
         target = u.toString();
       } catch {
         /* keep the plain address */
       }
     }
-    return { kind: "redirect", url: createSsoHandoverUrlFromSession(target, s) };
+    const handover = createSsoHandoverUrlFromSession(target, s);
+    if (!handover || handover === "#") return { kind: "none" };
+    return { kind: "redirect", url: handover };
   };
 
-  // 1. ERP_Main's own decision wins (it knows the live grants and the registry addresses).
+  // 1. ERP_Main's own decision wins for authorization; URLs are resolved strictly within the current environment.
   const L = s.landing;
   if (L && typeof L.mode === "string") {
     if (L.mode === "admin") return { kind: "stay" };
@@ -217,7 +291,7 @@ export function routeForCentralSession(
     if (L.mode === "multi") return mine ? { kind: "stay" } : go(controlPlaneUrl(s), true);
     if (L.mode === "single") {
       if (mine) return { kind: "stay" };
-      return go(L.target?.url || (L.target ? erpUrlFor(L.target.key, s) : ""), false);
+      return go(L.target ? erpUrlFor(L.target.key, s) : "", false);
     }
     return go(controlPlaneUrl(s), true); // "dashboard": no ERP access
   }
@@ -232,8 +306,7 @@ export function routeForCentralSession(
 
 /**
  * Re-checks, with ERP_Main, that this person may be in THIS ERP right now, and moves them to where they belong if not
- * (grants and revokes made after sign-in take effect). Throttled to once per 30 s per session and fail-open: if ERP_Main
- * cannot be reached nothing changes -- the ERP's own backend still refuses anyone not allowed.
+ * (grants and revokes made after sign-in take effect). Throttled to once per 30 s per session and fail-open.
  */
 export async function enforceCentralLanding(thisErpKey: string): Promise<"ok" | "redirected" | "unverified"> {
   const cookie = getEcosystemCookie();
@@ -249,7 +322,6 @@ export async function enforceCentralLanding(thisErpKey: string): Promise<"ok" | 
   const live = await verifyCentralEcosystemSession(sid);
   if (!live.session) return "unverified";
   const session = live.session as unknown as CentralSessionLike;
-  // the shared cookie's list feeds the ERP switcher: keep it equal to ERP_Main's live answer (grants / revokes since sign-in)
   if (Array.isArray(session.allowed_erps) && JSON.stringify(session.allowed_erps) !== JSON.stringify(cookie?.allowed_erps)) {
     setEcosystemCookie({ ...cookie, allowed_erps: session.allowed_erps } as EcosystemSessionData);
   }
@@ -268,32 +340,11 @@ export async function enforceCentralLanding(thisErpKey: string): Promise<"ok" | 
   return "ok";
 }
 
-/**
- * Consumes an incoming SSO handover ticket or shared ecosystem session cookie.
- * Automatically logs in as local Admin/User with the matching session_id.
- *
- * Returns "already-logged-in" (rather than a plain boolean) when Auth was
- * already logged in on entry -- no new session was actually established,
- * so nothing changed and there is nothing for a caller to react to.
- * Distinguishing this from a genuine fresh auto-login matters: a caller
- * that reloads the page whenever this resolves truthy would otherwise
- * reload on every call once logged in, including calls made right after
- * a reload it just triggered -- an infinite reload loop that repeats the
- * whole login -> establish -> fetch sequence forever. Only "logged-in"
- * (a real state change) should ever trigger a reload/navigation.
- */
 type HandoverResult = "logged-in" | "already-logged-in" | "not-logged-in";
 let handoverInFlight: Promise<HandoverResult> | null = null;
 
-/**
- * Several components (App, AppShell, Login, AuthCallback) ask for the handover on the same page load, and React's
- * development mode runs effects twice.  The exchange runs ONCE per arrival and every caller shares its result, so a
- * redirect started by one caller can never abort another caller's request (that used to surface as "network
- * connection lost" and a flash of the login page).
- */
 export function processIncomingSsoHandover(): Promise<HandoverResult> {
   if (!handoverInFlight) {
-    // Let the login page show "Signing you in..." while a ticket is being exchanged (a sleeping service can take a while).
     try {
       if (typeof window !== "undefined" && new URLSearchParams(window.location.search).has("sso_handover")) {
         sessionStorage.setItem("ihm_handover_pending", "1");
@@ -375,8 +426,6 @@ async function runIncomingSsoHandover(): Promise<HandoverResult> {
   const hasValidCookie = Boolean(cookieSession?.session_id);
 
   if (!hasValidToken && !hasValidCookie) {
-    // Neither an incoming handover ticket nor an active ecosystem session cookie exists:
-    // DO NOT auto-login. Remain on the login page.
     return "not-logged-in";
   }
 
@@ -387,9 +436,7 @@ async function runIncomingSsoHandover(): Promise<HandoverResult> {
     allowedErps = cookieSession.allowed_erps || ["*"];
   }
 
-  // 1b. The cookie / ticket only CARRY the session id. What the person may use right now is asked of ERP_Main (it may have
-  //     changed since the cookie was written: a grant, a revoke, a suspended ERP). If ERP_Main cannot be reached the
-  //     cookie's list is used instead, so a short outage never locks anyone out.
+  // 1b. Ask ERP_Main what this session may currently access.
   let landing: Landing | null = null;
   if (targetSessionId && !targetSessionId.startsWith("ihm-sess-") && !targetSessionId.startsWith("loc-")) {
     const live = await verifyCentralEcosystemSession(targetSessionId);
@@ -433,31 +480,26 @@ async function runIncomingSsoHandover(): Promise<HandoverResult> {
     return "not-logged-in";
   }
 
-  // 3. A fresh handover ticket ALWAYS wins over whatever is stored here (it is a new login, or a different person).
-  //    Only the very same login (same session id) is left alone.  Stale or foreign state is cleared first, so an old,
-  //    ended session can never block -- or silently replace -- the sign-in the person just made.
+  // 3. A fresh handover ticket ALWAYS wins over stale local state.
   if (Auth.isLoggedIn()) {
     const currentLocalEmail = Auth.getProfile()?.email?.toLowerCase();
     const currentSessionId = Auth.getSessionId();
     const sameEmail = !targetEmail || !currentLocalEmail || currentLocalEmail === targetEmail.toLowerCase();
     if (!hasValidToken) {
-      // Only the shared cookie is present (no new ticket).
       if (sameEmail) {
         if (targetSessionId && !currentSessionId) {
           Auth.setSessionId(targetSessionId);
         }
         return "already-logged-in";
       }
-      Auth.clear(); // User isolation: the cookie belongs to a different person
+      Auth.clear();
     } else if (sameEmail && targetSessionId && currentSessionId === targetSessionId) {
-      return "already-logged-in"; // this very login is already open here
+      return "already-logged-in";
     } else {
-      Auth.clear(); // a NEW login (or a different person) arrives: it replaces whatever is stored here
+      Auth.clear();
     }
   }
 
-  // The ticket to exchange: the one in the URL or -- for cookie-only auto sign-in -- one built from the shared
-  // cookie.  Either way THIS ERP asks ERP_Main to verify the central session; no password is ever stored or replayed.
   let ticket: string | null = token;
   if (
     !ticket &&
@@ -487,8 +529,6 @@ async function runIncomingSsoHandover(): Promise<HandoverResult> {
         sso_token: ticket as string,
         target_erp: "inhyma",
       });
-    // Retry only TEMPORARY failures (network, 5xx/503) with growing waits, so a sleeping service has time to wake up.
-    // A clear answer (401 ended, 403 no access) is final.
     const retryDelaysMs = [700, 2500, 6000];
     for (let attempt = 0; ; attempt++) {
       try {
@@ -506,7 +546,6 @@ async function runIncomingSsoHandover(): Promise<HandoverResult> {
       const finalSessionId = tokens.session_id || targetSessionId || `ihm-sess-${Date.now()}`;
       Auth.setSession(tokens, tokens.user, finalSessionId);
 
-      // Sync cookie
       const sessionData: EcosystemSessionData = {
         session_id: finalSessionId,
         email: tokens.user?.email || targetEmail,
@@ -520,7 +559,6 @@ async function runIncomingSsoHandover(): Promise<HandoverResult> {
     }
   } catch (err: any) {
     const status = (err as { status?: number })?.status;
-    // Another caller may have completed this very sign-in in the meantime: nothing to report then.
     if (Auth.isLoggedIn() && (!targetSessionId || Auth.getSessionId() === targetSessionId)) {
       return "already-logged-in";
     }
@@ -528,9 +566,6 @@ async function runIncomingSsoHandover(): Promise<HandoverResult> {
     const transient = status === undefined || status >= 500;
     if (!transient) Auth.clear();
     const failureReason = String((err as { message?: string })?.message || "").trim();
-    // A 401 about THIS ERP's own account ("No account exists for you", "deleted or disabled") does not mean the CENTRAL session is
-    // gone: the person is still signed in centrally, so their shared cookie must NOT be thrown away (that would sign them out of
-    // every ERP). Any other 401 still ends that central session, as before.
     const accountProblem = /no account exists|deleted or disabled in this erp|account is not active|must explicitly grant access/i.test(failureReason);
     const centralSessionEnded = status === 401 && !accountProblem;
 
@@ -547,10 +582,8 @@ async function runIncomingSsoHandover(): Promise<HandoverResult> {
     } catch {
       /* storage unavailable: the login page simply shows no notice */
     }
-    if (status === 401 && centralSessionEnded) clearEcosystemCookie(targetSessionId); // that central session is gone: do not try it again
+    if (status === 401 && centralSessionEnded) clearEcosystemCookie(targetSessionId);
 
-    // Only a clear "no access to THIS ERP" re-routes the person; every other failure stays here, on the login page, with
-    // the reason shown. Where they belong is ERP_Main's decision (their one ERP, or the dashboard) -- never a guess.
     if (status === 403 && typeof window !== "undefined") {
       const centralCookie = getEcosystemCookie();
       let centralSession: CentralSessionLike = {
@@ -584,12 +617,12 @@ async function runIncomingSsoHandover(): Promise<HandoverResult> {
 export type SwitchPlan = { ok: true; url: string } | { ok: false; message: string; sessionEnded?: boolean };
 
 /**
- * Check BEFORE leaving the page that a switch can work, so the person gets a clear message here instead of landing on
- * the other ERP's login page: the address must be configured, the sign-in must be a central session (not an
- * ERP-only one), and that session must not have ended.
+ * Check BEFORE leaving the page that a switch can work: the address must be configured for this environment,
+ * the sign-in must be a central session, and that session must not have ended.
  */
 export async function planSwitch(targetBaseUrl: string, targetPath?: string): Promise<SwitchPlan> {
-  if (!targetBaseUrl) {
+  const safeBaseUrl = sanitizeEnvMatchedUrl(targetBaseUrl);
+  if (!safeBaseUrl) {
     return { ok: false, message: "This ERP's address is not configured for this site. Please contact your administrator." };
   }
   const sid = Auth.getSessionId() || getEcosystemCookie()?.session_id;
@@ -605,7 +638,7 @@ export async function planSwitch(targetBaseUrl: string, targetPath?: string): Pr
   }
   let url = "";
   try {
-    url = createSsoHandoverUrl(targetBaseUrl, targetPath);
+    url = createSsoHandoverUrl(safeBaseUrl, targetPath);
   } catch {
     url = "";
   }
@@ -614,9 +647,9 @@ export async function planSwitch(targetBaseUrl: string, targetPath?: string): Pr
 }
 
 /** Best-effort wake-up of the other services (hosted free tiers sleep) while the switcher is open. */
-export function warmPeerServices(): void {
+export function warmPeerServices(landing?: Landing | null): void {
   try {
-    for (const erp of getEcosystemErps()) {
+    for (const erp of getEcosystemErps(landing)) {
       if (erp.apiUrl) void fetch(`${erp.apiUrl}/health/live`, { mode: "no-cors", cache: "no-store" }).catch(() => undefined);
     }
   } catch {

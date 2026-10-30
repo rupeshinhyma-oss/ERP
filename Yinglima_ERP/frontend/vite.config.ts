@@ -4,7 +4,8 @@ import path from "node:path";
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), "");
-  const target = env.VITE_API_PROXY_TARGET || "http://127.0.0.1:8001";
+  const proxyTarget = env.VITE_API_PROXY_TARGET?.trim() || "";
+  const port = env.VITE_PORT ? Number(env.VITE_PORT) : undefined;
 
   return {
     plugins: [react()],
@@ -13,31 +14,35 @@ export default defineConfig(({ mode }) => {
     },
     server: {
       host: "0.0.0.0",
-      port: 5173,
-      proxy: {
-        "/api": {
-          target: target,
-          changeOrigin: true,
-          ws: true,
-          configure: (proxy) => {
-            proxy.on("error", (err: any) => {
-              const code = err?.code;
-              if (code === "ECONNRESET" || code === "ECONNREFUSED" || err?.message?.includes("socket hang up")) {
-                return;
-              }
-              console.warn("[vite] api proxy error:", err?.message || err);
-            });
-          },
-        },
-        "/static": {
-          target: target,
-          changeOrigin: true,
-        },
-        "/uploads": {
-          target: target,
-          changeOrigin: true,
-        },
-      },
+      ...(port ? { port } : {}),
+      ...(proxyTarget
+        ? {
+            proxy: {
+              "/api": {
+                target: proxyTarget,
+                changeOrigin: true,
+                ws: true,
+                configure: (proxy) => {
+                  proxy.on("error", (err: any) => {
+                    const code = err?.code;
+                    if (code === "ECONNRESET" || code === "ECONNREFUSED" || err?.message?.includes("socket hang up")) {
+                      return;
+                    }
+                    console.warn("[vite] api proxy error:", err?.message || err);
+                  });
+                },
+              },
+              "/static": {
+                target: proxyTarget,
+                changeOrigin: true,
+              },
+              "/uploads": {
+                target: proxyTarget,
+                changeOrigin: true,
+              },
+            },
+          }
+        : {}),
     },
   };
 });

@@ -24,18 +24,56 @@ const LOCAL_STORAGE_KEY = "ihm_ecosystem_session";
 const LOGOUT_COOKIE_NAME = "ihm_ecosystem_logged_out";
 const BROADCAST_CHANNEL_NAME = "ihm_ecosystem_auth";
 
-const isLocalhost = (hostname: string) =>
-  hostname === "localhost" ||
-  hostname === "127.0.0.1" ||
-  hostname === "0.0.0.0" ||
-  hostname.endsWith(".local");
+const isLoopbackHost = (hostname: string): boolean => {
+  const h = (hostname || "").trim().toLowerCase();
+  return h === "localhost" || h === "127.0.0.1" || h === "0.0.0.0" || h === "::1" || h === "[::1]";
+};
+
+const isPrivateLanIpv4 = (hostname: string): boolean => {
+  const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec((hostname || "").trim());
+  if (!m) return false;
+  const [a, b, c, d] = [Number(m[1]), Number(m[2]), Number(m[3]), Number(m[4])];
+  if ([a, b, c, d].some((n) => n < 0 || n > 255)) return false;
+  if (a === 10 || a === 127) return true;
+  if (a === 192 && b === 168) return true;
+  if (a === 172 && b >= 16 && b <= 31) return true;
+  return false;
+};
+
+const isLocalNetworkHost = (hostname: string): boolean => {
+  const h = (hostname || "").trim().toLowerCase();
+  if (!h) return false;
+  if (isLoopbackHost(h) || h.endsWith(".local")) return true;
+  return isPrivateLanIpv4(h);
+};
+
+const sanitizeEndpointUrl = (rawUrl: string | undefined): string => {
+  const trimmed = (rawUrl || "").trim();
+  if (!trimmed) return "";
+  try {
+    const base = typeof window !== "undefined" && window.location.origin ? window.location.origin : undefined;
+    const parsed = base ? new URL(trimmed, base) : new URL(trimmed);
+    const browserHost = typeof window !== "undefined" && window.location.hostname ? window.location.hostname : "";
+    if (browserHost) {
+      if (isLocalNetworkHost(browserHost) !== isLocalNetworkHost(parsed.hostname)) {
+        return "";
+      }
+      if (isLocalNetworkHost(browserHost) && isLoopbackHost(parsed.hostname) && !isLoopbackHost(browserHost)) {
+        parsed.hostname = browserHost;
+      }
+    }
+    return parsed.toString().replace(/\/+$/, "");
+  } catch {
+    return "";
+  }
+};
 
 function clearCookieEverywhere(name: string): void {
   if (typeof document === "undefined") return;
   const domainAttr = import.meta.env.VITE_COOKIE_DOMAIN ? `; domain=${import.meta.env.VITE_COOKIE_DOMAIN}` : "";
   const host = typeof window !== "undefined" && window.location.hostname ? window.location.hostname : "";
-  const domains = ["", "; domain=localhost", "; domain=127.0.0.1"];
-  if (host && host !== "localhost" && host !== "127.0.0.1") {
+  const domains = [""];
+  if (host) {
     domains.push(`; domain=${host}`);
   }
   if (domainAttr && !domains.includes(domainAttr)) {
@@ -50,8 +88,8 @@ function setCookieEverywhere(name: string, value: string, maxAgeSeconds: number)
   if (typeof document === "undefined") return;
   const domainAttr = import.meta.env.VITE_COOKIE_DOMAIN ? `; domain=${import.meta.env.VITE_COOKIE_DOMAIN}` : "";
   const host = typeof window !== "undefined" && window.location.hostname ? window.location.hostname : "";
-  const domains = ["", "; domain=localhost"];
-  if (host && host !== "localhost") {
+  const domains = [""];
+  if (host) {
     domains.push(`; domain=${host}`);
   }
   if (domainAttr && !domains.includes(domainAttr)) {
@@ -138,23 +176,25 @@ export function isExplicitlyLoggedOut(currentSessionId?: string): boolean {
   return false;
 }
 
-const getCentralAuthApi = (): string => {
-  if (import.meta.env.VITE_CENTRAL_AUTH_API) {
-    return import.meta.env.VITE_CENTRAL_AUTH_API;
+export const getCentralAuthApi = (): string => {
+  const fromCentral = sanitizeEndpointUrl(import.meta.env.VITE_CENTRAL_AUTH_API);
+  if (fromCentral) {
+    return fromCentral;
   }
   if (import.meta.env.VITE_CONTROL_PLANE_API_URL) {
-    return `${import.meta.env.VITE_CONTROL_PLANE_API_URL.replace(/\/+$/, "")}/global/ecosystem-session`;
-  }
-  const host = typeof window !== "undefined" && window.location.hostname ? window.location.hostname : "127.0.0.1";
-  if (isLocalhost(host)) {
-    return `http://${host}:8000/api/v1/global/ecosystem-session`;
+    const fromCpApi = sanitizeEndpointUrl(
+      `${import.meta.env.VITE_CONTROL_PLANE_API_URL.replace(/\/+$/, "")}/global/ecosystem-session`,
+    );
+    if (fromCpApi) {
+      return fromCpApi;
+    }
   }
   return "";
 };
 export const CENTRAL_AUTH_API = getCentralAuthApi();
 
 /* ------------------------------------------------------------------ */
-/* Cookie & Storage Helpers (Shared across localhost ports)            */
+/* Cookie & Storage Helpers                                           */
 /* ------------------------------------------------------------------ */
 
 export function setEcosystemCookie(session: EcosystemSessionData): void {
@@ -250,9 +290,10 @@ export async function establishCentralEcosystemSession(params: {
   source_erp: string;
   existing_session_id?: string;
 }): Promise<EcosystemSessionData | null> {
-  if (!CENTRAL_AUTH_API) return null;
+  const apiUrl = getCentralAuthApi();
+  if (!apiUrl) return null;
   try {
-    const res = await fetch(`${CENTRAL_AUTH_API}/establish`, {
+    const res = await fetch(`${apiUrl}/establish`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(params),
@@ -277,9 +318,10 @@ export async function establishCentralEcosystemSession(params: {
  * Validates whether an ecosystem session is currently active or revoked.
  */
 export async function verifyCentralEcosystemSession(sessionId: string): Promise<{ active: boolean; revoked?: boolean; session?: EcosystemSessionData }> {
+  const apiUrl = getCentralAuthApi();
   // Local standalone sessions (ihm-sess-*) are strictly internal to this ERP
   // and must NEVER be queried against ERP_Main or considered revoked.
-  if (!sessionId || sessionId.startsWith("ihm-sess-") || !CENTRAL_AUTH_API) {
+  if (!sessionId || sessionId.startsWith("ihm-sess-") || !apiUrl) {
     return { active: true, revoked: false };
   }
 
@@ -287,7 +329,7 @@ export async function verifyCentralEcosystemSession(sessionId: string): Promise<
   const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
   const timer = controller ? setTimeout(() => controller.abort(), 6000) : null;
   try {
-    const res = await fetch(`${CENTRAL_AUTH_API}/${sessionId}`, {
+    const res = await fetch(`${apiUrl}/${sessionId}`, {
       method: "GET",
       headers: { "Content-Type": "application/json" },
       signal: controller?.signal,
@@ -332,12 +374,13 @@ export async function globalEcosystemLogout(sessionId?: string): Promise<void> {
 
   clearEcosystemCookie(idToRevoke);
 
-  // Notify all open tabs across all ports immediately (0ms perceived latency)
+  // Notify all open tabs across same-host origins immediately (0ms perceived latency)
   broadcastEcosystemEvent({ type: "LOGOUT", session_id: idToRevoke });
 
-  if (idToRevoke && !idToRevoke.startsWith("ihm-sess-") && CENTRAL_AUTH_API) {
+  const apiUrl = getCentralAuthApi();
+  if (idToRevoke && !idToRevoke.startsWith("ihm-sess-") && apiUrl) {
     try {
-      await fetch(`${CENTRAL_AUTH_API}/${idToRevoke}/revoke`, {
+      await fetch(`${apiUrl}/${idToRevoke}/revoke`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         keepalive: true,
@@ -395,7 +438,7 @@ export function initEcosystemSessionWatcher(
   }
 
   const checkRevocation = async () => {
-    // 1. If explicit logout was triggered across any tab/port for THIS session:
+    // 1. If explicit logout was triggered for THIS session:
     if (isExplicitlyLoggedOut(currentSessionId || undefined)) {
       onSessionRevoked();
       return;
@@ -421,7 +464,6 @@ export function initEcosystemSessionWatcher(
   window.addEventListener("focus", handleFocus);
   document.addEventListener("visibilitychange", checkRevocation);
 
-  // Poll every 2.5s for fast synchronization across localhost origins
   // Poll gently: every 30 s while the tab is visible, every 2 min while hidden.  Returning to the tab or regaining
   // focus checks immediately (listeners above), and an ERP's own 401 also signs the person out, so a longer interval
   // costs the person nothing -- but it is ~12x lighter on the server for every open tab.

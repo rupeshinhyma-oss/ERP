@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useCallback, useRef } from "react";
+import { useSearchParams } from "react-router-dom";
 import type { TaskSummary, TaskStatus, TaskPriority, TaskDetail } from "@/types/tasks";
 import { isTaskOverdue } from "@/types/tasks";
 import { tasksApi } from "@/lib/tasksApi";
@@ -7,6 +8,7 @@ import { liveClient } from "@/lib/live/liveClient";
 import { CreateTaskModal } from "./CreateTaskModal";
 import { EscalateTaskModal } from "./EscalateTaskModal";
 import { TaskDrawer } from "./TaskDrawer";
+import { getTaskIdFromSearchParams } from "@/lib/tasksDeepLink";
 import {
   IconCheckSquare,
   IconClock,
@@ -60,6 +62,16 @@ export const MyTasksPage: React.FC = () => {
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [escalatingTask, setEscalatingTask] = useState<TaskDetail | null>(null);
+
+  const [searchParams] = useSearchParams();
+
+  // Deep linking: open TaskDrawer from URL ?taskId=... or ?id=... or ?task_id=...
+  useEffect(() => {
+    const urlTaskId = getTaskIdFromSearchParams(searchParams);
+    if (urlTaskId) {
+      setSelectedTaskId((prev) => (prev === urlTaskId ? prev : urlTaskId));
+    }
+  }, [searchParams]);
 
   const fetchTasks = useCallback(async () => {
     try {

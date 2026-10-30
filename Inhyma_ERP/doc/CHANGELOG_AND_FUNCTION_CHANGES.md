@@ -3,7 +3,7 @@
 **System:** Inhyma_ERP (India Distribution)  
 **Scope:** Functional updates, schema migrations, UI hardening, and bug fixes.
 
-## [Release 2026-10-29] — Product Stock Transactions & Per-Product Ledger, Product Re-Order Branch-Scoped Matrix & FIFO Breakup, and Discount Payments Multi-Installment Ledger
+## [Release 2026-10-29] — `.env`-Driven Cross-ERP Switching & Local/Render Environment Isolation, Purchase Bulk Import/Export, Standardized Golden-Amber Export Controls, Sidebar Navigation Polish, HRMS Integrity & Payroll Persistence, Product Stock Transactions Ledger, Re-Order Matrix & Discount Payments
 
 ### 1. Product Stock Transactions Master List & Master-Joined 9-Warehouse Stock Matrix (`ProductStockPage.tsx`, `routes.py`, `schemas.py`, `productStock.css`)
 - **Master-Catalog Outer Join (`GET /api/v1/inventory/product-stock`):**
@@ -38,6 +38,45 @@
 - **Migration `x9c0d1e2f3a4`:** Added `eway_bill_url` and `eway_bill_name` to `sales_orders`, plus `remarks` and `updated_by_id` to `discount_payments`.
 - **Conditional E-Way Bill Upload & Chronological Sale Order Timeline:** Added `POST /api/v1/sales/upload-eway-bill` when `E-Way Bill = Yes` during `Admin Approved -> Acc. Confirmed`, and added chronological stage-by-stage `Status Timeline` views in `SaleProcessList.tsx` and `SaleProcessDetailModal.tsx`.
 - **Discount Payments Installment Ledger (`/sales/discount-payments`):** Upgraded to full multi-installment tracking with `PATCH /api/v1/sales/discount-payments/{payment_id}` inline editing, installment history modal, receipt uploads, and live `TOTAL DISCOUNT` / `PAID` / `REMAINING` KPI cards.
+
+### 5. Local Purchase & Import Purchase Bulk CSV/Excel Import Engine & `ImpExpDropdown` Vector SVG Badges (`local_routes.py`, `import_routes.py`, `ImportWizard.tsx`, `LocalPurchasePage.tsx`, `ImportPurchasePage.tsx`, `Companies.tsx`, `style.css`)
+- **Professional Vector SVG Icon Badges in `ImpExpDropdown`:**
+  - Replaced plain emoji glyphs in `ImpExpDropdown` (`ImportWizard.tsx`) and `Companies.tsx` with 26×26 rounded vector SVG icon badges (`.imp-exp-icon-badge--sample` slate document template, `.imp-exp-icon-badge--import` blue upload badge, `.imp-exp-icon-badge--export` emerald download badge) and an animated chevron on the `Imp / Exp` button.
+- **Local Purchase Full Import & Export (`POST /api/v1/purchase/local-orders/import` & `LocalPurchasePage.tsx`):**
+  - Added multi-line `.csv` / `.xlsx` import in `backend/app/purchase/local_routes.py` (`import_local_purchases`), grouping rows by `Invoice No.`, validating Supplier, physical Warehouse, and Product masters, auto-computing Expense Factor and `Unit Landing Rate (INR) (VB)`, skipping duplicate Invoice Nos, and isolating invalid invoices via nested savepoints (`db.begin_nested()`).
+  - Replaced standalone `Export` on `/purchase/localpurchase` with `<ImpExpDropdown />` (`SAMPLE FILE` via `LOCAL_PURCHASE_SAMPLES`, `IMPORT` column-mapping wizard, `EXPORT` UTF-8 BOM CSV) + `<ImportSummaryPanel />`.
+- **Import Purchase Full Import & Export (`POST /api/v1/purchase/import-orders/import` & `ImportPurchasePage.tsx`):**
+  - Added multi-line `.csv` / `.xlsx` import in `backend/app/purchase/import_routes.py` (`import_import_purchases`), grouping rows by `Inv. / Con. No.`, validating Supplier, Ordered/Transit/Physical Warehouse, and Product masters, computing dual VB/CB landing costs, applying workflow `stock_in_on_create` rules immediately, skipping duplicate Consignment Nos, and isolating invalid consignments via nested savepoints.
+  - Replaced standalone `Export` on `/purchase/importpurchase` with `<ImpExpDropdown />` (`SAMPLE FILE` via dynamic `getImportPurchaseSamples()` `DD-MM-YYYY` dates, `IMPORT` column-mapping wizard, `EXPORT` UTF-8 BOM CSV) + `<ImportSummaryPanel />`.
+
+### 6. Standardized Golden-Amber (`#f59e0b`) `Export` Buttons & Header Action Alignment (`ProductStockPage.tsx`, `StockAdjustmentPage.tsx`, `StockTransferPage.tsx`, `SaleProcessList.tsx`, `ProductReorderPage.tsx`)
+- **Unified Standalone `Export` Styling:** Standardized standalone `Export` buttons across **Product Stock** (`/product-stock/list`), **Stock Transactions** (`/reports/stock-transactions`), **Stock Adjustment** (`/stock-adjustment`), **Stock Transfer** (`/stock-transfer`), **Sales Process** (`/sales/process`), and **Product Re-Order** (`/reports/re-order`) to the Companies golden-amber `#f59e0b` (`#d97706` hover) `.btn.btn-imp-exp` theme with a 14×14 vector download SVG icon and UTF-8 BOM CSV/Excel downloads.
+- **Module-Specific Header Cleanup & Ordering:**
+  - **Stock Adjustment (`/stock-adjustment`):** Replaced `Imp / Exp` with standalone `Export` and removed unused `Bulk Actions`.
+  - **Stock Transfer (`/stock-transfer`):** Replaced `Imp / Exp` with standalone `Export` while retaining `Bulk Actions`.
+  - **Product Re-Order (`/reports/re-order`):** Shifted standalone golden-amber `Export` (`reorder-btn-export`) behind (to the right of) the Filter funnel button (`reorder-btn-filter`) to match all other ERP list headers.
+  - **Stock Transactions (`/reports/stock-transactions`):** Set collapsible filter panel off (collapsed) by default on initial load.
+
+### 7. Sidebar Navigation Polish — Suppliers Active Highlight & Removal of Goods Expected Report (`Suppliers.tsx`, `AppShell.tsx`, `nav.ts`, `App.tsx`)
+- **Suppliers Sidebar Active Highlight (`/purchase/suppliers`):** Updated `SuppliersPage` (`Suppliers.tsx`) to pass `activeKey="purchase-suppliers"` matching `NAV_SECTIONS` under **PURCHASE**, and added canonical alias key resolution (`navItem?.key || activeKey`) in `AppShell.tsx` so `Suppliers` highlights active (`.nav-item.active`) just like `Import Purchase` and `Local Purchase`.
+- **Goods Expected Report Removal (`REPORTS` Sidebar):** Removed `reports-goods-expected` (`Goods Expected Report`) from `NAV_SECTIONS` in `frontend/src/lib/nav.ts` and redirected `/reports/goods-expected`, `/inventory/goods-expected`, and `/goods-expected` in `App.tsx` cleanly to `/reports/stock-transactions`.
+
+### 8. HRMS Security, Separation-of-Duties, Geolocation Integrity & Payroll Approval Persistence (`backend/app/hrms/*`, `frontend/src/pages/hrms/*`)
+- **Strict Separation-of-Duties & Self-Action Blocks:**
+  - Restricted company-wide asset summary (`GET /hrms/assets/summary`) and asset metadata/status mutations (`PATCH`/`PUT /hrms/assets/{id}`, `PATCH /hrms/assets/{id}/status`) strictly to Admin or HR (`403 Forbidden` for regular employees).
+  - Blocked self-approval on direct attendance regularization (`POST /hrms/attendance/regularizations` with `direct_regularize=True`, restricted to Admin only and rejecting `target_id == ctx.user_id` with `400 Bad Request`).
+  - Blocked self-reimbursement on expenses (`POST /hrms/expenses/{id}/reimburse`, `403 Forbidden` when `exp.employee_id == ctx.user_id`).
+  - Blocked self-editing of monthly payroll items (`PATCH /hrms/payroll/items/{id}`) and self-adjustment of bonuses/deductions (`POST /hrms/payroll/adjustments`) with `400 Bad Request`.
+- **Payroll Approval Persistence, Deduplication & Manager Payslip Scoping:**
+  - Updated `POST /hrms/payroll/{month}/approve` to return the full serialized `_serialize_payroll` payload with employee-level deduplication and automatic `APPROVED` status propagation across all child items when the parent payroll is `APPROVED`.
+  - Enabled department managers querying `GET /hrms/payroll/payslips?employee_id=ALL` to view `APPROVED` payslips strictly for their `managed_employee_ids`.
+- **Attendance Geolocation, Leave, Site Visit & Regression Suite:** Hardened attendance GPS/geofence validation, leave balance & UI state handling, and site-visit lifecycle tracking, backed by comprehensive backend (`test_hrms_batch1_security.py`, `test_hrms_batch2_security.py`, `test_hrms_batch3_integrity.py`, `test_hrms_site_visit_lifecycle.py`) and frontend (`HrmsAttendanceGeolocationSecurity.test.tsx`, `HrmsPayroll.test.tsx`, `HrmsSiteVisitAndEvidence.test.tsx`) test suites.
+
+### 9. `.env`-Driven Cross-ERP Switching, Zero Hardcoded Ports & Strict Local/Render Isolation (`ssoBridge.ts`, `ecosystemSession.ts`, `EcosystemSwitcher.tsx`, `vite.config.ts`, `config.py`, `inquiries/routes.py`, `render.yaml`)
+- **Zero Hardcoded Localhost/Port Links:** Removed all hardcoded `localhost`, `127.0.0.1`, and port (`5170`, `5173`, `5174`, `8000`, `8001`, `8002`) fallbacks across `frontend/vite.config.ts` (`loadEnv`), `frontend/src/lib/ssoBridge.ts`, `frontend/src/lib/ecosystemSession.ts`, `frontend/src/components/EcosystemSwitcher.tsx`, `frontend/src/pages/Login.tsx`, `backend/app/core/config.py`, and `backend/app/inquiries/routes.py`.
+- **`.env` Locally vs Render Environment in Cloud:** Peer frontend/backend URLs (`VITE_CONTROL_PLANE_URL`, `VITE_CONTROL_PLANE_API_URL`, `VITE_CENTRAL_AUTH_API`, `VITE_YINGLIMA_URL`, `VITE_YINGLIMA_API_URL`, `VITE_INHYMA_URL`, `VITE_INHYMA_API_URL`, `VITE_PORT`, `VITE_API_PROXY_TARGET`) are loaded strictly from `.env` / `.env.defaults` in local development and from Render environment variables when deployed on Render.
+- **Strict Cross-Environment Leak Guard (`sanitizeEnvMatchedUrl`):** Updated `routeForCentralSession()`, `enforceCentralLanding()`, `erpUrlFor()`, `controlPlaneUrl()`, and `planSwitch()` so a `localhost`/LAN browser tab never redirects or switches to a hosted `*.onrender.com` URL (even if the shared `ERP_Main` database `erp_instances.base_url` stores Render URLs), and hosted tabs never redirect to `localhost`/LAN.
+- **Render Static Build (`tsc -b`) Cleanliness:** Resolved strict `TS6133` / `TS2339` checks in `AttendancePage.tsx` and `ExpensesPage.tsx` so `npm run build` (`tsc -b && vite build`) compiles with zero errors on Render.
 
 ---
 

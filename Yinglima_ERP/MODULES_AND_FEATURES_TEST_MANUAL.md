@@ -4719,6 +4719,9 @@ A standardized suite of 8 production-grade Excel (`.xlsx`) files is maintained d
 - **Dynamic Control Plane Routing:**
   - All redirection and dashboard fallbacks dynamically query `controlPlaneUrl(central)` from the ERP registry (`getEcosystemErps()`). Hardcoded port numbers (e.g. `http://localhost:5170`) are eliminated.
   - Users with no access or redirected after denial land on the control plane with explicit `sso_error=no_access` and `sso_reason` parameters.
+- **`.env`-First Peer URL Resolution & Strict Local/Render Origin Guard (`sanitizeEnvMatchedUrl`):**
+  - Peer frontend/API addresses (`VITE_CONTROL_PLANE_URL`, `VITE_CONTROL_PLANE_API_URL`, `VITE_CENTRAL_AUTH_API`, `VITE_YINGLIMA_URL`, `VITE_YINGLIMA_API_URL`, `VITE_INHYMA_URL`, `VITE_INHYMA_API_URL`) resolve strictly from `.env` / `.env.defaults` locally and from Render environment variables in production.
+  - `routeForCentralSession()`, `enforceCentralLanding()`, `erpUrlFor()`, `controlPlaneUrl()`, and `planSwitch()` block cross-environment (`localhost` <-> `*.onrender.com`) redirects so local tabs never jump to Render URLs even when sharing a central database.
 
 ### 42.2. Test Cases & Verification Matrix
 
@@ -4728,6 +4731,7 @@ A standardized suite of 8 production-grade Excel (`.xlsx`) files is maintained d
 | **TC-SSO-02** | Local Account Problem Does Not Kill Central Session | In Yinglima, deactivate the local user account while keeping central user active. Attempt SSO into Yinglima. | Yinglima refuses access with 401/403 and displays informative denial banner. Central session cookie is retained; switching to Inhyma or Control Plane remains authenticated. |
 | **TC-SSO-03** | Dynamic Control Plane Re-Routing | Attempt to open Yinglima with an account that only has access to Inhyma. | System redirects to the central control plane / dashboard with `sso_error=no_access` and `sso_reason` explaining the denial; zero hardcoded localhost:5170 redirects. |
 | **TC-SSO-04** | Central Users Link Resolution | Navigate to `/users` in Yinglima. Inspect Central Users button link. | Target URL dynamically matches configured control-plane host from registry without fallback port assumptions. |
+| **TC-SSO-05** | Localhost Single-ERP Cross-Port Redirect Stays Local | Sign in locally as an Inhyma-only user (`User D`), then paste `http://localhost:5173` in a browser tab. | Browser redirects to `http://localhost:5174/dashboard` from `.env` and **never** jumps to `https://inhyma-erp-frontend.onrender.com/dashboard`. |
 
 ---
 

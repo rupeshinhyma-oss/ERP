@@ -68,5 +68,15 @@ services:
         sync: false
       - key: VITE_CENTRAL_AUTH_API
         sync: false
+      - key: VITE_CONTROL_PLANE_API_URL
+        sync: false
+      - key: VITE_INHYMA_URL
+        sync: false
+      - key: VITE_INHYMA_API_URL
+        sync: false
+      - key: VITE_YINGLIMA_URL
+        sync: false
+      - key: VITE_YINGLIMA_API_URL
+        sync: false
       - key: VITE_COOKIE_DOMAIN
         sync: false

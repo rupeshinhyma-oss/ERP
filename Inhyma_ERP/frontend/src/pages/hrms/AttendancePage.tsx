@@ -516,7 +516,7 @@ export function AttendancePage() {
   // GPS & Location Simulator State
   const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [gpsStatus, setGpsStatus] = useState<"searching" | "connected" | "denied" | "simulated">("searching");
-  const [simulatorMode, setSimulatorMode] = useState<"real" | "inside" | "edge" | "outside">("real");
+  const [_simulatorMode, setSimulatorMode] = useState<"real" | "inside" | "edge" | "outside">("real");
 
   // UI States
   const [actionLoading, setActionLoading] = useState<boolean>(false);
@@ -780,7 +780,7 @@ export function AttendancePage() {
   }, []);
 
   // Simulator Presets
-  const applySimulator = (mode: "inside" | "edge" | "outside") => {
+  const applySimulator = (mode: "inside" | "edge" | "outside") => { void applySimulator;
     if (!office) return;
     setSimulatorMode(mode);
     setGpsStatus("simulated");

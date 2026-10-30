@@ -22,7 +22,7 @@ import {
   NAV_SECTIONS,
   PAGE_TITLES,
 } from "@/lib/nav";
-import { createSsoHandoverUrl, fetchLanding, processIncomingSsoHandover, resolveSingleErpDirectUrl } from "@/lib/ssoBridge";
+import { createSsoHandoverUrl, fetchLanding, processIncomingSsoHandover, resolveErpTargetUrl, resolveSingleErpDirectUrl } from "@/lib/ssoBridge";
 import { getEcosystemCookie, isExplicitlyLoggedOut, setEcosystemCookie } from "@/lib/ecosystemSession";
 
 
@@ -109,8 +109,8 @@ export function AppShell({
       const landing = await fetchLanding();
       if (cancelled) return;
       if (landing) {
-        if (landing.mode === "single" && landing.target?.url) {
-          launch(landing.target.key, landing.target.url);
+        if (landing.mode === "single" && landing.target && resolveErpTargetUrl(landing.target.key, landing.target.url, landing)) {
+          launch(landing.target.key, resolveErpTargetUrl(landing.target.key, landing.target.url, landing));
           return;
         }
         if (landing.mode !== "single") {

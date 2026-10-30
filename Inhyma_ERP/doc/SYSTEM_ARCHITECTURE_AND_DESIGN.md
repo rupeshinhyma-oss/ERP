@@ -113,6 +113,9 @@ flowchart TD
 ### 2.6 Purchase Management & Costing Engine (`/purchase/localpurchase` & `/purchase/importpurchase`)
 - **Local Purchase Orders:** Full domestic PO workflow with overhead expense absorption (Freight, Handling, Insurance). Calculates dynamic itemized landing costs via the Expense Factor formula and supports atomic inventory stock-in into destination warehouses.
 - **Import Consignments:** Multi-currency international purchase tracking with live exchange rates, shipping logistics (BL, vessel, container references), Indian Customs statutory tariff computation (Assessable Value, BCD, SWS 10%, IGST), and dual landing cost matrices (with vs. without statutory duty/tax).
+- **Multi-Line Bulk CSV/Excel Import Engine (`POST /api/v1/purchase/local-orders/import` & `POST /api/v1/purchase/import-orders/import`):**
+  - Both Local Purchase (`LocalPurchasePage.tsx`) and Import Purchase (`ImportPurchasePage.tsx`) integrate the shared `ImpExpDropdown` (`SAMPLE FILE`, `IMPORT` column-mapping `WizardModal`, `EXPORT` UTF-8 BOM CSV) and `ImportSummaryPanel`.
+  - Multi-line invoices/consignments in `.csv` or `.xlsx` uploads are grouped by `Invoice No.` / `Inv. / Con. No.`, validated against live Supplier, Warehouse, and Product masters, costed through the server landing-rate engine, isolated per invoice/consignment via nested SQLAlchemy savepoints (`db.begin_nested()`), and checked against duplicate invoice/consignment numbers.
 - **Uploaded Invoice File Streaming & Zero-Synthetic-PDF Policy:**
   - Dedicated endpoint `GET /api/v1/purchase/import-orders/{purchase_id}/bill-file` streams the **actual uploaded file** attached by the operator in the Add/Edit form.
   - Zero-synthetic PDF policy strictly prohibits generating mock or fabricated invoice PDFs.
@@ -426,7 +429,7 @@ All primary and secondary actions in top-level page headers adhere to a strict u
    - Exact `border-radius: 6px !important;`.
    - Typography: `font-size: 13px !important; font-weight: 600 !important; line-height: 1 !important;`.
    - Layout: `display: inline-flex !important; align-items: center !important; justify-content: center !important; gap: 10px !important;`.
-2. **Targeted Controls:** Applied uniformly across `.btn-filter-toggle`, `.btn-add-new`, `.btn-quick-add`, `.btn-imp-exp`, `.btn-bulk-actions`, `.stock-btn-export`, etc.
+2. **Targeted Controls & Export/Import Theme:** Applied uniformly across `.btn-filter-toggle` (`#556987`, always positioned before Export), `.btn-add-new`, `.btn-quick-add`, `.btn-imp-exp` / `.stock-btn-export` / `.reorder-btn-export` (golden-amber `#f59e0b`, hover `#d97706`, 14×14 vector download SVG on standalone `Export` buttons, and 26×26 `.imp-exp-icon-badge` vector SVG badges inside `Imp / Exp` dropdowns), and `.btn-bulk-actions`.
 3. **Dropdown Popover Isolation:** Dropdown menu buttons inside absolute popovers (`.page-header-actions div[style*="absolute"] button`) are explicitly isolated with `height: auto !important; min-height: unset; justify-content: flex-start !important;` so menu item layout remains unconstrained.
 
 ### 13.3 Filter-Above-KPI Architectural Hierarchy
@@ -465,3 +468,14 @@ During Render/Docker container boot, `python server.py` executes a four-phase in
    - Provisions roles, permissions, geography, and default super-admin credentials if not already present.
 4. **ASGI Process Launch (`uvicorn app.main:app`):**
    - Starts API server with DNS resilience and graceful shutdown signal handlers.
+
+---
+
+## 15. Environment-Isolated Cross-ERP URL Resolution & Zero-Hardcoded-Port Architecture
+
+1. **Zero Hardcoded Host or Port Fallbacks:**
+   - Neither backend (`app/core/config.py`, `app/inquiries/routes.py`) nor frontend (`vite.config.ts`, `src/lib/ssoBridge.ts`, `src/lib/ecosystemSession.ts`, `src/components/EcosystemSwitcher.tsx`) embeds hardcoded `localhost`, `127.0.0.1`, or port (`5170`, `5173`, `5174`, `8000`, `8001`, `8002`) URLs.
+   - Local development reads peer addresses from `.env` / `.env.defaults` (`VITE_CONTROL_PLANE_URL`, `VITE_CONTROL_PLANE_API_URL`, `VITE_CENTRAL_AUTH_API`, `VITE_YINGLIMA_URL`, `VITE_YINGLIMA_API_URL`, `VITE_INHYMA_URL`, `VITE_INHYMA_API_URL`, `VITE_PORT`, `VITE_API_PROXY_TARGET`); Render deployments read from Render's injected environment variables.
+2. **Strict Local vs Cloud Origin Parity (`sanitizeEnvMatchedUrl`):**
+   - Even when local developers and Render cloud instances share a single `ERP_Main` database whose `erp_instances.base_url` rows hold `https://*.onrender.com/dashboard`, `ERP_Main` (`landing.py`) prioritizes `<KEY>_FRONTEND_URL` from its active environment and rejects cross-environment DB URLs (`LOCAL` vs `PRODUCTION`).
+   - On the client, `sanitizeEnvMatchedUrl()` verifies that every SSO landing redirect (`routeForCentralSession`, `enforceCentralLanding`) and switcher target (`planSwitch`, `erpUrlFor`, `controlPlaneUrl`) belongs to the same network class as `window.location.hostname`—blocking `localhost` <-> `*.onrender.com` jumps while adapting `localhost` hostnames to the active LAN IP when accessed over Wi-Fi/LAN.

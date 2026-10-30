@@ -19,6 +19,8 @@ from datetime import date, datetime, timezone
 import logging
 from typing import Any
 
+from sqlalchemy import text
+
 from app.audit.repository import AuditRepository
 from app.audit.service import AuditService
 from app.database.engine import get_sessionmaker
@@ -30,6 +32,7 @@ from app.tasks.service import TaskService
 logger = logging.getLogger(__name__)
 
 DEFAULT_INTERVAL_SECONDS = 3600  # 1 hour
+RECURRING_WORKER_ADVISORY_LOCK_ID = 8849201948201
 
 
 class RecurringTaskWorker:
@@ -98,24 +101,72 @@ class RecurringTaskWorker:
         escalations_triggered = 0
 
         async with sessionmaker() as session:
-            repo = TaskRepository(session)
-            audit = AuditService(AuditRepository(session))
-            notif = NotificationService(NotificationRepository(session))
-            service = TaskService(repository=repo, audit_service=audit, notification_service=notif)
-
+            is_pg = False
             try:
-                # 1. Generate due task instances
-                tasks = await service.generate_recurring_tasks(as_of_date=ref_date)
-                generated_count = len(tasks)
+                bind = session.bind or getattr(session, "get_bind", lambda: None)()
+                if bind and getattr(bind.dialect, "name", "") == "postgresql":
+                    is_pg = True
+            except Exception:
+                is_pg = False
 
-                # 2. Check and process reminders and escalations
-                check_stats = await service.check_recurring_reminders_and_escalations(as_of_date=ref_date)
-                reminders_sent = check_stats.get("reminders_sent", 0)
-                escalations_triggered = check_stats.get("escalations_triggered", 0)
+            if is_pg:
+                # Distributed single-run coordination: PostgreSQL Transaction-Scoped Advisory Lock
+                # Safe with direct connections, session pooling, and transaction-mode PgBouncer (port 6543)
+                async with session.begin():
+                    lock_res = await session.execute(
+                        text("SELECT pg_try_advisory_xact_lock(:lock_id)"),
+                        {"lock_id": RECURRING_WORKER_ADVISORY_LOCK_ID},
+                    )
+                    lock_acquired = bool(lock_res.scalar())
+                    if not lock_acquired:
+                        logger.info(
+                            "Recurring task worker pass skipped: advisory xact lock held by another worker instance."
+                        )
+                        return {
+                            "skipped": True,
+                            "reason": "lock_held_by_another_worker",
+                            "as_of_date": ref_date.isoformat(),
+                        }
 
-            except Exception as e:
-                logger.error("Failed executing recurring task cycle: %s", str(e), exc_info=True)
-                raise
+                    try:
+                        repo = TaskRepository(session)
+                        audit = AuditService(AuditRepository(session))
+                        notif = NotificationService(NotificationRepository(session))
+                        service = TaskService(repository=repo, audit_service=audit, notification_service=notif)
+
+                        # 1. Generate due task instances (auto_commit=False keeps transaction and xact lock held)
+                        tasks = await service.generate_recurring_tasks(as_of_date=ref_date, auto_commit=False)
+                        generated_count = len(tasks)
+
+                        # 2. Check and process reminders and escalations (auto_commit=False)
+                        check_stats = await service.check_recurring_reminders_and_escalations(
+                            as_of_date=ref_date, auto_commit=False
+                        )
+                        reminders_sent = check_stats.get("reminders_sent", 0)
+                        escalations_triggered = check_stats.get("escalations_triggered", 0)
+                    except Exception as e:
+                        logger.error("Failed executing recurring task cycle: %s", str(e), exc_info=True)
+                        raise
+                # Exiting async with session.begin() commits the transaction and releases the advisory xact lock
+            else:
+                # Non-PostgreSQL fallback (e.g. SQLite in unit tests)
+                try:
+                    repo = TaskRepository(session)
+                    audit = AuditService(AuditRepository(session))
+                    notif = NotificationService(NotificationRepository(session))
+                    service = TaskService(repository=repo, audit_service=audit, notification_service=notif)
+
+                    tasks = await service.generate_recurring_tasks(as_of_date=ref_date, auto_commit=True)
+                    generated_count = len(tasks)
+
+                    check_stats = await service.check_recurring_reminders_and_escalations(
+                        as_of_date=ref_date, auto_commit=True
+                    )
+                    reminders_sent = check_stats.get("reminders_sent", 0)
+                    escalations_triggered = check_stats.get("escalations_triggered", 0)
+                except Exception as e:
+                    logger.error("Failed executing recurring task cycle: %s", str(e), exc_info=True)
+                    raise
 
         self.last_run_at = datetime.now(timezone.utc)
         self.last_stats = {

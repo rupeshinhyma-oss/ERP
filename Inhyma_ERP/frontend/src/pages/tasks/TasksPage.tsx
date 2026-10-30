@@ -25,6 +25,7 @@ import { CreateTaskModal } from "./CreateTaskModal";
 import { EscalateTaskModal } from "./EscalateTaskModal";
 import { TaskDrawer } from "./TaskDrawer";
 import { RecurringTasksTab } from "./RecurringTasksTab";
+import { getTaskIdFromSearchParams } from "@/lib/tasksDeepLink";
 
 export type TabKey =
   | "my"
@@ -214,10 +215,7 @@ export const TasksPage: React.FC = () => {
 
   // Deep linking: open TaskDrawer from URL ?taskId=... or ?id=... or ?task_id=...
   useEffect(() => {
-    const urlTaskId =
-      searchParams.get("taskId") ||
-      searchParams.get("id") ||
-      searchParams.get("task_id");
+    const urlTaskId = getTaskIdFromSearchParams(searchParams);
     const drawerTabParam = searchParams.get("drawerTab");
     if (urlTaskId) {
       setSelectedTaskId((prev) => (prev === urlTaskId ? prev : urlTaskId));

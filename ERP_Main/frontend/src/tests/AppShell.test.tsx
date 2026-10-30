@@ -231,3 +231,84 @@ describe("AppShell: where a signed-in Global User belongs is ERP_Main's live dec
     }
   });
 });
+
+
+describe("AppShell: localhost never jumps to hosted Render URLs", () => {
+  const REAL_LOCATION = window.location;
+
+  beforeEach(() => {
+    localStorage.clear();
+    sessionStorage.clear();
+    Object.defineProperty(window, "location", { value: REAL_LOCATION, writable: true, configurable: true });
+  });
+
+  it("redirects a single-ERP user on localhost to the local .env URL even if landing carries a Render URL", async () => {
+    const { vi: v } = await import("vitest");
+    v.resetModules();
+    const assign = v.fn();
+    Object.defineProperty(window, "location", {
+      value: {
+        ...REAL_LOCATION,
+        assign,
+        replace: v.fn(),
+        href: "http://localhost:5170/dashboard",
+        search: "",
+        pathname: "/dashboard",
+        hash: "",
+        hostname: "localhost",
+        origin: "http://localhost:5170",
+      },
+      writable: true,
+      configurable: true,
+    });
+    const renderInhyma = {
+      key: "inhyma",
+      name: "Inhyma ERP",
+      url: "https://inhyma-erp-frontend.onrender.com/dashboard",
+    };
+    v.doMock("../lib/session", () => ({
+      useGlobalSession: () => ({
+        userType: "global_user",
+        memberships: [{ status: "ACTIVE", erp_key: "inhyma", erp_name: "Inhyma ERP" }],
+        loading: false,
+        logout: v.fn(),
+      }),
+    }));
+    v.doMock("../lib/ssoBridge", async (orig) => ({
+      ...(await orig<typeof import("../lib/ssoBridge")>()),
+      fetchLanding: async () => ({
+        mode: "single",
+        target: renderInhyma,
+        erps: [renderInhyma],
+        control_plane_url: "https://erp-main-frontend.onrender.com/dashboard",
+      }),
+    }));
+    const { AppShell: Shell } = await import("../components/AppShell");
+    const { Auth: A } = await import("../lib/auth");
+    A.setSession(
+      "t",
+      {
+        id: "u-d",
+        primary_email: "userd@gmail.com",
+        display_name: "User D",
+        role: "NONE",
+        status: "ACTIVE",
+        permissions: [],
+        created_at: new Date().toISOString(),
+      },
+      "global_user",
+    );
+    render(
+      <MemoryRouter initialEntries={["/dashboard"]}>
+        <Shell activeKey="dashboard">
+          <div>Dashboard Content</div>
+        </Shell>
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => expect(assign).toHaveBeenCalledTimes(1));
+    const url = new URL(String(assign.mock.calls[0][0]));
+    expect(url.origin + url.pathname).toBe("http://localhost:5174/dashboard");
+    expect(String(assign.mock.calls[0][0])).not.toContain("onrender.com");
+  });
+});

@@ -88,8 +88,8 @@ class Settings(BaseSettings):
     # -------------------------------------------------------------------
     HOST: str = "0.0.0.0"
     PORT: int = 8000
-    BACKEND_URL: str = "http://localhost:8002"
-    FRONTEND_URL: str = "http://localhost:5174"
+    BACKEND_URL: str = ""
+    FRONTEND_URL: str = ""
 
     # -------------------------------------------------------------------
     # CORS
@@ -100,7 +100,7 @@ class Settings(BaseSettings):
     # to JSON-decode `list[str]` fields sourced from the environment,
     # which rejects plain comma-separated values -- so we keep the raw
     # field a `str` and do the splitting ourselves.
-    CORS_ALLOWED_ORIGINS: str = "http://localhost:5173,http://localhost:3000,http://127.0.0.1:5173,http://127.0.0.1:3000"
+    CORS_ALLOWED_ORIGINS: str = "*"
     CORS_ALLOW_CREDENTIALS: bool = True
     CORS_ALLOWED_METHODS: str = "*"
     CORS_ALLOWED_HEADERS: str = "*"
@@ -311,15 +311,15 @@ class Settings(BaseSettings):
     # -------------------------------------------------------------------
     INHYMA_SSO_ENABLED: bool = True
     ERP_MAIN_ISSUER: str = Field(
-        default="http://127.0.0.1:8000",
+        default="",
         description="ERP_Main's OIDC issuer URL. Federation ID tokens with any other `iss` are rejected.",
     )
     ERP_MAIN_JWKS_URL: str = Field(
-        default="http://127.0.0.1:8000/api/v1/.well-known/jwks.json",
+        default="",
         description="Where this ERP fetches ERP_Main's public signing keys to verify federation ID tokens.",
     )
     ERP_MAIN_API_BASE_URL: str = Field(
-        default="http://127.0.0.1:8000/api/v1",
+        default="",
         description="Base URL for calling ERP_Main's own API (e.g. the internal membership lookup).",
     )
     SSO_HANDOVER_REQUIRE_CENTRAL_VERIFICATION: bool = Field(
@@ -401,14 +401,14 @@ class Settings(BaseSettings):
             return problems
         local = ("localhost", "127.0.0.1", "0.0.0.0")
         base = (self.ERP_MAIN_API_BASE_URL or "")
-        if not (getattr(self, "ERP_MAIN_URL", "") or "").strip() and any(h in base for h in local):
+        if not (getattr(self, "ERP_MAIN_URL", "") or "").strip() and (not base.strip() or any(h in base for h in local)):
             problems.append(
                 "ERP_MAIN_API_BASE_URL still points to localhost. Set ERP_MAIN_API_BASE_URL (or ERP_MAIN_URL) to the "
                 "public ERP_Main address, e.g. https://<erp-main-backend>.onrender.com/api/v1"
             )
         if not self.get_expected_erp_main_credentials():
             problems.append("No ERP_Main service credential is configured (ERP_MAIN_SERVICE_CREDENTIAL).")
-        if any(h in (self.ERP_MAIN_ISSUER or "") for h in local) and not (getattr(self, "ERP_MAIN_URL", "") or "").strip():
+        if (not (self.ERP_MAIN_ISSUER or "").strip() or any(h in (self.ERP_MAIN_ISSUER or "") for h in local)) and not (getattr(self, "ERP_MAIN_URL", "") or "").strip():
             problems.append("ERP_MAIN_ISSUER still points to localhost.")
         return problems
 
@@ -420,7 +420,7 @@ class Settings(BaseSettings):
 
     # Peer ERP Direct Integration Endpoints (Phase 8E - Direct runtime ERP-to-ERP delivery)
     PEER_ERP_ENDPOINTS: str = Field(
-        default="inhyma=http://127.0.0.1:8002/api/v1,yinglima=http://127.0.0.1:8001/api/v1",
+        default="",
         description="Comma-separated key=url mapping of peer ERP base URLs for direct runtime sync.",
     )
 

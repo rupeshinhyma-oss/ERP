@@ -1067,7 +1067,7 @@ async def create_item_rfq(
         })
 
     # Automatically dispatch emails in the background for suppliers with email addresses
-    base_host = (request.headers.get("origin") or getattr(settings, "FRONTEND_URL", "http://localhost:5173")).rstrip("/")
+    base_host = (request.headers.get("origin") or getattr(settings, "FRONTEND_URL", "") or "").rstrip("/")
     for link in supplier_links:
         if link.get("emails"):
             full_quote_url = f"{base_host}{link['quote_path']}"

@@ -10,6 +10,7 @@ import { apiGet } from "@/lib/api";
 import { AppShell } from "@/components/AppShell";
 import { StatusBadge, LoadingSpinner, Banner } from "@/components/ui";
 import { ICONS } from "@/components/icons";
+import { resolveErpTargetUrl } from "@/lib/ssoBridge";
 import type { ErpInstance, ErpMembership } from "@/types";
 
 export function ErpDetail() {
@@ -63,7 +64,7 @@ export function ErpDetail() {
               ← Back to Registry
             </Link>
             <a
-              href={erp.base_url}
+              href={resolveErpTargetUrl(erp.erp_key, erp.base_url) || erp.base_url}
               target="_blank"
               rel="noopener noreferrer"
               className="btn btn-primary btn-sm"
@@ -141,8 +142,8 @@ export function ErpDetail() {
                 <div style={{ display: "flex", flexDirection: "column", gap: "12px", fontSize: "13px" }}>
                   <div>
                     <span style={{ color: "var(--color-muted)", display: "block", fontSize: "11px" }}>BASE URL</span>
-                    <a href={erp.base_url} target="_blank" rel="noopener noreferrer" style={{ fontFamily: "monospace" }}>
-                      {erp.base_url}
+                    <a href={resolveErpTargetUrl(erp.erp_key, erp.base_url) || erp.base_url} target="_blank" rel="noopener noreferrer" style={{ fontFamily: "monospace" }}>
+                      {resolveErpTargetUrl(erp.erp_key, erp.base_url) || erp.base_url}
                     </a>
                   </div>
                   <div>

@@ -65,9 +65,10 @@ async def discovery(request: Request) -> OidcDiscoveryDocument:
     """
     from app.core.config import settings
 
-    base = settings.FEDERATION_ISSUER.rstrip("/")
+    issuer = (settings.FEDERATION_ISSUER or settings.BACKEND_URL or str(request.base_url)).rstrip("/")
+    base = issuer
     return OidcDiscoveryDocument(
-        issuer=settings.FEDERATION_ISSUER,
+        issuer=issuer,
         authorization_endpoint=f"{base}{settings.API_V1_PREFIX}/federation/authorize",
         token_endpoint=f"{base}{settings.API_V1_PREFIX}/federation/token",
         jwks_uri=f"{base}{settings.API_V1_PREFIX}/.well-known/jwks.json",

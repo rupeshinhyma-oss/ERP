@@ -1,10 +1,16 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import * as apiModule from "../lib/api";
 import { Auth } from "../lib/auth";
-import { planSwitch, processIncomingSsoHandover, resetIncomingSsoHandoverForTests } from "../lib/ssoBridge";
+import {
+  planSwitch,
+  processIncomingSsoHandover,
+  resetIncomingSsoHandoverForTests,
+  routeForCentralSession,
+} from "../lib/ssoBridge";
 import * as ecosystemModule from "../lib/ecosystemSession";
 import { clearEcosystemCookie, getEcosystemCookie, setEcosystemCookie } from "../lib/ecosystemSession";
 
+const REAL_LOCATION = window.location;
 const ticket = (sid: string, email = "u@x.com") =>
   btoa(JSON.stringify({ sig: "ihm_erp_sso_v1", ts: Date.now(), session_id: sid, email, user: email, role: "global_user", allowed_erps: ["*"] }));
 const tokens = (sid: string) => ({ data: { access_token: "A-" + sid, refresh_token: "R-" + sid, session_id: sid, session_mode: "central", user: { email: "u@x.com" } } });
@@ -12,7 +18,15 @@ const arrive = (t: string) => window.history.pushState({}, "", "/login?sso_hando
 const wipeCookies = () => document.cookie.split(";").forEach((c) => { document.cookie = c.split("=")[0].trim() + "=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/"; });
 
 describe("switching ERPs: a fresh handover always wins, and every failure explains itself", () => {
-  beforeEach(() => { resetIncomingSsoHandoverForTests(); localStorage.clear(); sessionStorage.clear(); wipeCookies(); window.history.pushState({}, "", "/login"); vi.restoreAllMocks(); });
+  beforeEach(() => {
+    Object.defineProperty(window, "location", { value: REAL_LOCATION, writable: true, configurable: true });
+    resetIncomingSsoHandoverForTests();
+    localStorage.clear();
+    sessionStorage.clear();
+    wipeCookies();
+    window.history.pushState({}, "", "/login");
+    vi.restoreAllMocks();
+  });
 
   it("a stale saved session does NOT block a new handover (the 'login page instead of direct login' bug)", async () => {
     Auth.setSession({ access_token: "STALE", refresh_token: "STALE" } as never, { email: "u@x.com" } as never, "OLD-SESSION");
@@ -64,7 +78,12 @@ describe("switching ERPs: a fresh handover always wins, and every failure explai
 });
 
 describe("signing out one login never wipes another login's shared cookie", () => {
-  beforeEach(() => { localStorage.clear(); sessionStorage.clear(); wipeCookies(); });
+  beforeEach(() => {
+    Object.defineProperty(window, "location", { value: REAL_LOCATION, writable: true, configurable: true });
+    localStorage.clear();
+    sessionStorage.clear();
+    wipeCookies();
+  });
   const cookieFor = (sid: string) => ({ session_id: sid, email: "u@x.com", display_name: "U", role: "global_user", user_type: "global_user", allowed_erps: ["*"] }) as never;
 
   it("keeps the cookie when it belongs to a different session", () => {
@@ -81,7 +100,15 @@ describe("signing out one login never wipes another login's shared cookie", () =
 });
 
 describe("reliability: one shared handover, no blind redirects, honest messages", () => {
-  beforeEach(() => { localStorage.clear(); sessionStorage.clear(); wipeCookies(); window.history.pushState({}, "", "/login"); vi.restoreAllMocks(); resetIncomingSsoHandoverForTests(); });
+  beforeEach(() => {
+    Object.defineProperty(window, "location", { value: REAL_LOCATION, writable: true, configurable: true });
+    localStorage.clear();
+    sessionStorage.clear();
+    wipeCookies();
+    window.history.pushState({}, "", "/login");
+    vi.restoreAllMocks();
+    resetIncomingSsoHandoverForTests();
+  });
 
   it("simultaneous callers (App, AppShell, Login, StrictMode) share ONE exchange", async () => {
     const post = vi.spyOn(apiModule, "apiPost").mockResolvedValue(tokens("ONCE") as never);
@@ -99,9 +126,9 @@ describe("reliability: one shared handover, no blind redirects, honest messages"
       const pending = processIncomingSsoHandover();
       await vi.advanceTimersByTimeAsync(12000);
       expect(await pending).toBe("not-logged-in");
-      expect(post).toHaveBeenCalledTimes(4); // first try + 3 retries
+      expect(post).toHaveBeenCalledTimes(4);
       expect(sessionStorage.getItem("ihm_login_notice")).toMatch(/temporarily unavailable/i);
-      expect(getEcosystemCookie()?.session_id).toBe("KEEP"); // the session is fine; only the service is down
+      expect(getEcosystemCookie()?.session_id).toBe("KEEP");
     } finally {
       vi.useRealTimers();
     }
@@ -117,7 +144,11 @@ describe("reliability: one shared handover, no blind redirects, honest messages"
 
   it("a failure never bounces the browser to a made-up dashboard address", async () => {
     const replace = vi.fn();
-    Object.defineProperty(window, "location", { value: { ...window.location, replace, assign: vi.fn(), href: window.location.href, search: window.location.search, pathname: window.location.pathname, hash: "", hostname: "app.example.com", origin: "https://app.example.com" }, writable: true });
+    Object.defineProperty(window, "location", {
+      value: { ...REAL_LOCATION, replace, assign: vi.fn(), href: REAL_LOCATION.href, search: REAL_LOCATION.search, pathname: REAL_LOCATION.pathname, hash: "", hostname: "app.example.com", origin: "https://app.example.com" },
+      writable: true,
+      configurable: true,
+    });
     vi.spyOn(apiModule, "apiPost").mockRejectedValue(Object.assign(new Error("boom"), { status: 500 }));
     vi.useFakeTimers();
     try {
@@ -128,17 +159,31 @@ describe("reliability: one shared handover, no blind redirects, honest messages"
       expect(replace).not.toHaveBeenCalled();
     } finally {
       vi.useRealTimers();
+      Object.defineProperty(window, "location", { value: REAL_LOCATION, writable: true, configurable: true });
     }
   });
 });
 
 describe("planSwitch: say what is wrong BEFORE leaving the page", () => {
-  beforeEach(() => { localStorage.clear(); sessionStorage.clear(); wipeCookies(); vi.restoreAllMocks(); });
+  beforeEach(() => {
+    Object.defineProperty(window, "location", { value: REAL_LOCATION, writable: true, configurable: true });
+    localStorage.clear();
+    sessionStorage.clear();
+    wipeCookies();
+    vi.restoreAllMocks();
+  });
   const signIn = (sid: string) => Auth.setSession({ access_token: "T", refresh_token: "R" } as never, { email: "u@x.com" } as never, sid);
 
   it("refuses when the target address is not configured", async () => {
     signIn("S1");
     const plan = await planSwitch("");
+    expect(plan.ok).toBe(false);
+    expect(!plan.ok && plan.message).toMatch(/not configured/i);
+  });
+
+  it("refuses cross-environment navigation from localhost to hosted Render", async () => {
+    signIn("S1-ENV");
+    const plan = await planSwitch("https://inhyma-erp-frontend.onrender.com/dashboard");
     expect(plan.ok).toBe(false);
     expect(!plan.ok && plan.message).toMatch(/not configured/i);
   });
@@ -164,5 +209,96 @@ describe("planSwitch: say what is wrong BEFORE leaving the page", () => {
     const plan = await planSwitch("http://localhost:5173/dashboard");
     expect(plan.ok).toBe(true);
     expect(plan.ok && plan.url).toContain("sso_handover=");
+  });
+});
+
+describe("environment isolation: localhost never jumps to hosted Render URLs (and vice versa)", () => {
+  beforeEach(() => {
+    Object.defineProperty(window, "location", { value: REAL_LOCATION, writable: true, configurable: true });
+    localStorage.clear();
+    sessionStorage.clear();
+    wipeCookies();
+    vi.restoreAllMocks();
+  });
+
+  it("on localhost, single-ERP landing carrying a hosted Render URL redirects to the local .env URL instead", () => {
+    Object.defineProperty(window, "location", {
+      value: { ...REAL_LOCATION, hostname: "localhost", origin: "http://localhost:5174", href: "http://localhost:5174/login" },
+      writable: true,
+      configurable: true,
+    });
+    const route = routeForCentralSession("inhyma", {
+      session_id: "S-LOCAL",
+      email: "usera@gmail.com",
+      role: "global_user",
+      allowed_erps: ["yinglima"],
+      landing: {
+        mode: "single",
+        target: { key: "yinglima", name: "Yinglima ERP", url: "https://yinglima-erp-frontend.onrender.com/dashboard" },
+        erps: [{ key: "yinglima", name: "Yinglima ERP", url: "https://yinglima-erp-frontend.onrender.com/dashboard" }],
+        control_plane_url: "https://erp-main-frontend.onrender.com/dashboard",
+      },
+    });
+    expect(route.kind).toBe("redirect");
+    if (route.kind === "redirect") {
+      const target = new URL(route.url);
+      expect(target.origin + target.pathname).toBe("http://localhost:5173/dashboard");
+      expect(route.url).not.toContain("onrender.com");
+    }
+  });
+
+  it("on LAN IP, adapts the local .env URL to the LAN hostname and never jumps to hosted Render", () => {
+    Object.defineProperty(window, "location", {
+      value: { ...REAL_LOCATION, hostname: "192.168.1.50", origin: "http://192.168.1.50:5174", href: "http://192.168.1.50:5174/login" },
+      writable: true,
+      configurable: true,
+    });
+    const route = routeForCentralSession("inhyma", {
+      session_id: "S-LAN",
+      email: "usera@gmail.com",
+      role: "global_user",
+      allowed_erps: ["yinglima"],
+      landing: {
+        mode: "single",
+        target: { key: "yinglima", name: "Yinglima ERP", url: "https://yinglima-erp-frontend.onrender.com/dashboard" },
+        erps: [{ key: "yinglima", name: "Yinglima ERP", url: "https://yinglima-erp-frontend.onrender.com/dashboard" }],
+      },
+    });
+    expect(route.kind).toBe("redirect");
+    if (route.kind === "redirect") {
+      const target = new URL(route.url);
+      expect(target.origin + target.pathname).toBe("http://192.168.1.50:5173/dashboard");
+    }
+  });
+
+  it("on hosted Render, ignores any localhost .env URL and uses the hosted landing URL", () => {
+    Object.defineProperty(window, "location", {
+      value: {
+        ...REAL_LOCATION,
+        hostname: "inhyma-erp-frontend.onrender.com",
+        origin: "https://inhyma-erp-frontend.onrender.com",
+        href: "https://inhyma-erp-frontend.onrender.com/login",
+      },
+      writable: true,
+      configurable: true,
+    });
+    const route = routeForCentralSession("inhyma", {
+      session_id: "S-PROD",
+      email: "usera@gmail.com",
+      role: "global_user",
+      allowed_erps: ["yinglima"],
+      landing: {
+        mode: "single",
+        target: { key: "yinglima", name: "Yinglima ERP", url: "https://yinglima-erp-frontend.onrender.com/dashboard" },
+        erps: [{ key: "yinglima", name: "Yinglima ERP", url: "https://yinglima-erp-frontend.onrender.com/dashboard" }],
+        control_plane_url: "https://erp-main-frontend.onrender.com/dashboard",
+      },
+    });
+    expect(route.kind).toBe("redirect");
+    if (route.kind === "redirect") {
+      const target = new URL(route.url);
+      expect(target.origin + target.pathname).toBe("https://yinglima-erp-frontend.onrender.com/dashboard");
+      expect(route.url).not.toContain("localhost");
+    }
   });
 });

@@ -3,40 +3,27 @@
 **System:** Yinglima_ERP (China Procurement)  
 **Scope:** Functional updates, schema changes, UI hardening, and bug fixes.
 
-## [Release 2026-10-29] — 0ms Instant Product Line-Item Rendering, Stock Movement / Users Filter UI & Standardized Imp/Exp SVG Icon Badges
+## [Release 2026-10-29] — 0ms Instant Product Line-Item Rendering, Stock Movement / Users Filter UI, Standardized Imp/Exp SVG Badges & Cross-ERP Isolation
 
-### 0A. Standardized `Imp / Exp` (`SAMPLE FILE`, `IMPORT`, `EXPORT`) SVG Icon Badges (`ImportWizard.tsx`, `style.css`, `ProductPrices.tsx`, `LocalPurchases.tsx`)
-- Replaced legacy `📄`, `📥`, `📤`, and `📊` emojis inside all `Imp / Exp` and `Export` dropdown menus across `Yinglima_ERP` with the clean SVG icon badges matching `Inhyma_ERP`:
-  - **SAMPLE FILE** (`.imp-exp-icon-badge--sample`): Slate file document SVG badge (`#f1f5f9` / `#475569`).
-  - **IMPORT** (`.imp-exp-icon-badge--import`): Blue upload arrow-in-tray SVG badge (`#eff6ff` / `#2563eb`).
-  - **EXPORT** (`.imp-exp-icon-badge--export`): Green download arrow-in-tray SVG badge (`#ecfdf5` / `#059669`).
-  - Added rotating chevron SVG (`.imp-exp-chevron`) on the `.btn-imp-exp` trigger button when `aria-expanded="true"`.
+### 0A. Standardized Imp / Exp (SAMPLE FILE, IMPORT, EXPORT) SVG Icon Badges (ImportWizard.tsx, style.css, ProductPrices.tsx, LocalPurchases.tsx)
+- Replaced legacy emojis inside all Imp / Exp and Export dropdown menus across Yinglima_ERP with clean SVG icon badges matching Inhyma_ERP.
 
-### 0. Stock Movement & Users Page Header + Filter Options Standardization (`StockMovements.tsx` & `Users.tsx`)
-- **Stock Movement (`frontend/src/pages/inventory/StockMovements.tsx`):**
-  - Added the missing top `<div className="page-header">` with `<h1 className="page-title">Stock Movement</h1>` and `.page-header-actions`.
-  - Added the standardized top-right Funnel Filter toggle button (`.btn-header-filter`) with active filter badge and collapsible **Filter Options** card (`Search`, `Date From`, `Date To`, and `Reset Filters`).
-  - Placed the inline quick search bar on the right side of the `Inward Register` / `Outward Register` / `Current Stock Ledger` tabs bar and removed the duplicate stacked link banners.
-- **Users (`frontend/src/pages/Users.tsx`):**
-  - Added the top-right Funnel Filter toggle button (`.btn-header-filter`) and collapsible **Filter Options** card (`Search`, `Account Status`, and `Reset Filters`), replacing the raw inline status `<select>` in the table toolbar with a clean quick search bar and removable active status pill.
+### 0. Stock Movement & Users Page Header + Filter Options Standardization (StockMovements.tsx & Users.tsx)
+- Added standardized page-header title, top-right Funnel Filter toggle button with active count badge, and collapsible Filter Options card.
 
-### 1. Root Cause of 1–2 Second Empty Product Table Delay
-- When opening a **Sale Process** entry (`SaleProcessDetailModal.tsx`) or **Local Purchase** entry (`LocalPurchaseDetailModal.tsx`), the modal header opened immediately from the list row (`initialOrder` / `initialSummary`), but the list response omitted `items`. As a result, the modal rendered `0 line items` / `"No line items recorded."` for 1–2 seconds while waiting for background network calls.
-- In `SaleProcessDetailModal.tsx`, `Promise.all` also coupled `GET /sales/orders/{id}` with `GET /sales/orders/{id}/trade-details` (6 DB queries for CI/PL tabs), delaying product rows on the Order Overview tab until `/trade-details` finished.
+### 1. Zero Hardcoded Localhost/Port Links & Cross-ERP Isolation (ssoBridge.ts, ecosystemSession.ts, EcosystemSwitcher.tsx, ite.config.ts, config.py, inquiries/routes.py)
+- Peer frontend and API addresses are loaded strictly from .env / .env.defaults locally and from Render environment variables when deployed.
+- Strict Local vs Hosted Origin Guard prevents localhost tabs from jumping to hosted domains.
 
-### 2. Zero-Query-Overhead Backend & Frontend Fix
-- **Sale Process (`backend/app/sales/schemas.py`, `routes.py`, `SaleProcessDetailModal.tsx`, `SaleProcessOutwardModal.tsx`):**
-  - Included `items: list[SaleOrderItemResponse]` in `SaleOrderResponse` and `list_sale_orders` using the already-executed `selectinload(SaleOrder.items)` query (0 extra DB queries).
-  - Decoupled `/sales/orders/{id}` from `/sales/orders/{id}/trade-details` in `SaleProcessDetailModal.tsx` so Order Overview never waits on CI/PL trade details, and seeded `SaleProcessOutwardModal.tsx` from `saleProcessCache`.
-- **Local Purchase (`backend/app/purchases/local/repository.py`, `schemas.py`, `routes.py`, `localPurchaseCache.ts`, `LocalPurchaseDetailModal.tsx`, `LocalPurchaseInwardModal.tsx`):**
-  - Loaded full `LocalPurchase.items` in the existing `selectinload(LocalPurchase.items)` query in `list_with_filters` (0 extra DB round-trips) and included `items` and expense fields in `LocalPurchaseSummaryResponse`.
-  - Seeded `localPurchaseCache.ts` with full items from the list response so `LocalPurchaseDetailModal.tsx` and `LocalPurchaseInwardModal.tsx` display all product rows in **0ms**.
+### 2. 0ms Instant Product Line-Item Rendering in Sale Process & Local Purchase
+- Sale Process and Local Purchase summary endpoints include line items upfront, rendering table items in 0ms without waiting for background queries.
 
-## [Release 2026-10-28] — Sale Process Local Purchase Costing Resolution, Product Prices Quote Modal & Product Gallery Filter Toggle
+---
 
-### 0A. Product Gallery Top-Right Funnel Filter Toggle Button (`ProductGallery.tsx`)
-- Added the standardized top-right funnel filter toggle button (`.btn-header-filter`) in `.page-header-actions` on **Product Gallery** (`/product-gallery`), matching **Product Master**, **Product Prices**, **Suppliers**, and **Buyers**.
-- Collapses the **Filter Options** card (`filterOpen = false` by default) until toggled by the user, and provides a quick search bar (`🔍 Search code, name, supplier...`) aligned to the right of the media tabs bar.
+## [Release 2026-10-28] — Sale Process Local Purchase Costing Resolution, Product Prices Quote Modal 100% Zoom Fix & Product Gallery Filter Toggle
+
+### 0A. Product Gallery Top-Right Funnel Filter Toggle Button (ProductGallery.tsx)
+- Added the standardized top-right funnel filter toggle button on Product Gallery matching Product Master, Product Prices, Suppliers, and Buyers.
 
 ### 0. Product Prices "+ Add New Supplier Quotation" Modal 100% Zoom Footer Visibility Fix (`ProductPrices.tsx` & `style.css`)
 - **Root Cause:** `.modal-card form > :not(.form-actions):not(.modal-footer)` in `style.css` applied `padding: 20px 24px` to every direct child `<div>` inside `<form>`, adding 160px of vertical height and pushing the `Cancel` and `+ Add Supplier Quote` footer buttons outside the `max-height: 90vh` `.modal-dialog-card` box at 100% zoom.
