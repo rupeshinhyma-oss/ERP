@@ -1,3 +1,4 @@
+import os
 import uuid
 from collections.abc import AsyncGenerator
 import pytest
@@ -10,6 +11,12 @@ from app.rbac.models import Role, RoleAssignmentStatus, RoleAssignmentType, User
 from app.tasks.models import Task, TaskAssignee, TaskPriority, TaskStatus
 from app.tasks.repository import TaskRepository
 from app.users.models import User, UserStatus
+
+
+# resolve_tasks_departments uses PostgreSQL-only SQL (DISTINCT ON) and this test inserts synthetic
+# users/roles, so it never runs on the isolated in-memory SQLite used by local pytest (see conftest.py).
+_ON_SQLITE = os.environ.get("DATABASE_URL", "").lower().startswith("sqlite")
+pytestmark = pytest.mark.skipif(_ON_SQLITE, reason="PostgreSQL-only; set ALLOW_LIVE_DB_TESTS=1 to run.")
 
 
 @pytest_asyncio.fixture
