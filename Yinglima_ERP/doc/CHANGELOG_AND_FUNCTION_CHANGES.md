@@ -3,7 +3,14 @@
 **System:** Yinglima_ERP (China Procurement)  
 **Scope:** Functional updates, schema changes, UI hardening, and bug fixes.
 
-## [Release 2026-10-29] — 0ms Instant Product Line-Item Rendering & Stock Movement / Users Filter UI Standardization
+## [Release 2026-10-29] — 0ms Instant Product Line-Item Rendering, Stock Movement / Users Filter UI & Standardized Imp/Exp SVG Icon Badges
+
+### 0A. Standardized `Imp / Exp` (`SAMPLE FILE`, `IMPORT`, `EXPORT`) SVG Icon Badges (`ImportWizard.tsx`, `style.css`, `ProductPrices.tsx`, `LocalPurchases.tsx`)
+- Replaced legacy `📄`, `📥`, `📤`, and `📊` emojis inside all `Imp / Exp` and `Export` dropdown menus across `Yinglima_ERP` with the clean SVG icon badges matching `Inhyma_ERP`:
+  - **SAMPLE FILE** (`.imp-exp-icon-badge--sample`): Slate file document SVG badge (`#f1f5f9` / `#475569`).
+  - **IMPORT** (`.imp-exp-icon-badge--import`): Blue upload arrow-in-tray SVG badge (`#eff6ff` / `#2563eb`).
+  - **EXPORT** (`.imp-exp-icon-badge--export`): Green download arrow-in-tray SVG badge (`#ecfdf5` / `#059669`).
+  - Added rotating chevron SVG (`.imp-exp-chevron`) on the `.btn-imp-exp` trigger button when `aria-expanded="true"`.
 
 ### 0. Stock Movement & Users Page Header + Filter Options Standardization (`StockMovements.tsx` & `Users.tsx`)
 - **Stock Movement (`frontend/src/pages/inventory/StockMovements.tsx`):**
