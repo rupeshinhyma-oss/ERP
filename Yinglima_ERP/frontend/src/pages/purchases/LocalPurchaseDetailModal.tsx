@@ -46,28 +46,36 @@ export function LocalPurchaseDetailModal({
 
     // 1. Instant 0ms Paint: Check in-memory detail cache first
     const cached = getLocalPurchaseDetailCache(purchaseId);
+    const resolvedItems =
+      (initialSummary && initialSummary.id === purchaseId && initialSummary.items && initialSummary.items.length > 0)
+        ? initialSummary.items
+        : (cached?.items && cached.items.length > 0 ? cached.items : []);
+
     if (cached) {
       if (initialSummary && initialSummary.id === purchaseId) {
         setDetail({
           ...cached,
           ...initialSummary,
-          items: cached.items && cached.items.length > 0 ? cached.items : [],
+          packing_forwarding: initialSummary.packing_forwarding ?? cached.packing_forwarding ?? 0,
+          transport_expense: initialSummary.transport_expense ?? cached.transport_expense ?? 0,
+          offloading_expense: initialSummary.offloading_expense ?? cached.offloading_expense ?? 0,
+          other_expense: initialSummary.other_expense ?? cached.other_expense ?? 0,
+          items: resolvedItems,
         });
       } else {
         setDetail(cached);
       }
-      setLoading(false);
+      setLoading(resolvedItems.length === 0 && ((initialSummary?.items_count ?? cached.items_count ?? 0) > 0));
     } else if (initialSummary && initialSummary.id === purchaseId) {
-      // Synthesize lightweight detail from table row summary
       setDetail({
         ...initialSummary,
-        packing_forwarding: 0,
-        transport_expense: 0,
-        offloading_expense: 0,
-        other_expense: 0,
-        items: [],
+        packing_forwarding: initialSummary.packing_forwarding ?? 0,
+        transport_expense: initialSummary.transport_expense ?? 0,
+        offloading_expense: initialSummary.offloading_expense ?? 0,
+        other_expense: initialSummary.other_expense ?? 0,
+        items: resolvedItems,
       });
-      setLoading(true); // background fetch for full items
+      setLoading(resolvedItems.length === 0 && (initialSummary.items_count ?? 0) > 0);
     } else {
       setLoading(true);
     }

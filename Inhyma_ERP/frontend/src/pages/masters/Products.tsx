@@ -34,6 +34,11 @@ import { SearchableSelectField } from "@/components/fields";
 import {
   ImpExpDropdown,
   BulkActionsDropdown,
+  ImportSummaryPanel,
+  WizardModal,
+  parseFile,
+  downloadSampleCsv,
+  type SheetRow,
 } from "@/components/ImportWizard";
 import { apiGet, apiPatch, apiPost, downloadExport } from "@/lib/api";
 import { useLookup } from "@/lib/lookups";
@@ -41,6 +46,7 @@ import { useLiveModule } from "@/lib/live/useLive";
 import type {
   Brand,
   ImportHeader,
+  ImportSummary,
   PaginationMeta,
   Product,
   ProductCategory,
@@ -932,6 +938,37 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
   const [formSubmitting, setFormSubmitting] = useState(false);
   const [errorMessageBanner, setErrorMessageBanner] = useState<string | null>(null);
+
+  // Full-Page Import State
+  const [isImportOpen, setIsImportOpen] = useState(false);
+  const [importMode, setImportMode] = useState<"create" | "update">("create");
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [importSummary, setImportSummary] = useState<ImportSummary | null>(null);
+  const [importError, setImportError] = useState<string | null>(null);
+  const [importLoading, setImportLoading] = useState(false);
+  const [wizardPending, setWizardPending] = useState<{
+    file: File;
+    rows: SheetRow[];
+    sheetColumns: string[];
+  } | null>(null);
+  const importFileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleImportSubmit = async () => {
+    if (!importFile) return;
+    setImportLoading(true);
+    setImportError(null);
+    try {
+      const rows = await parseFile(importFile);
+      if (!rows.length) {
+        throw new Error("The file appears to be empty or has no data rows.");
+      }
+      setWizardPending({ file: importFile, rows, sheetColumns: Object.keys(rows[0]) });
+    } catch (err: any) {
+      setImportError(err?.message || "Could not read that file.");
+    } finally {
+      setImportLoading(false);
+    }
+  };
   const [dimensionRows, setDimensionRows] = useState<
     Array<{
       id: string;
@@ -3092,6 +3129,380 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
     );
   }
 
+  if (isImportOpen) {
+    return (
+      <AppShell activeKey="masters-products" pageClassName="page-product-master">
+        <main className="page" style={{ width: "100%", padding: "16px 24px", boxSizing: "border-box" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px" }}>
+            <div>
+              <h1 className="page-title" style={{ margin: 0, fontSize: "20px", fontWeight: 700, color: "#1e293b" }}>
+                Import products
+              </h1>
+              <div style={{ fontSize: "13px", color: "#64748b", marginTop: "4px" }}>
+                Upload bulk products records from Excel (.xlsx, .xls) or CSV.
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setIsImportOpen(false);
+                setImportFile(null);
+                setImportError(null);
+              }}
+              style={{
+                padding: "8px 16px",
+                borderRadius: "6px",
+                border: "1px solid #cbd5e1",
+                background: "#ffffff",
+                color: "#1e293b",
+                fontWeight: 600,
+                fontSize: "13px",
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                gap: "6px",
+              }}
+            >
+              ← BACK
+            </button>
+          </div>
+
+          {importError && (
+            <div
+              style={{
+                padding: "12px 16px",
+                backgroundColor: "#fee2e2",
+                border: "1px solid #fca5a5",
+                borderRadius: "6px",
+                color: "#b91c1c",
+                fontSize: "13px",
+                marginBottom: "16px",
+              }}
+            >
+              ⚠️ {importError}
+            </div>
+          )}
+
+          {importSummary && (
+            <div style={{ marginBottom: "20px" }}>
+              <ImportSummaryPanel summary={importSummary} error={importError} />
+            </div>
+          )}
+
+          <div
+            style={{
+              background: "#ffffff",
+              borderRadius: "8px",
+              border: "1px solid #e2e8f0",
+              boxShadow: "0 1px 3px rgba(0,0,0,0.05)",
+              padding: "28px 36px",
+            }}
+          >
+            {/* Import Mode Selection */}
+            <div style={{ marginBottom: "26px" }}>
+              <label style={{ display: "block", fontSize: "14px", fontWeight: 700, color: "#0f172a", marginBottom: "10px" }}>
+                Select Import Mode
+              </label>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: "14px", maxWidth: "800px" }}>
+                {/* Mode 1: Add New */}
+                <div
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => setImportMode("create")}
+                  onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") setImportMode("create"); }}
+                  style={{
+                    padding: "16px 18px",
+                    borderRadius: "8px",
+                    border: importMode === "create" ? "2px solid #2563eb" : "1px solid #cbd5e1",
+                    background: importMode === "create" ? "#eff6ff" : "#ffffff",
+                    cursor: "pointer",
+                    boxShadow: importMode === "create" ? "0 2px 8px rgba(37,99,235,0.12)" : "none",
+                    transition: "all 0.15s ease-in-out",
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "6px" }}>
+                    <span style={{ fontSize: "17px" }}>➕</span>
+                    <strong style={{ fontSize: "14px", color: importMode === "create" ? "#1d4ed8" : "#1e293b" }}>
+                      Add New Records Only
+                    </strong>
+                    {importMode === "create" && (
+                      <span style={{ marginLeft: "auto", fontSize: "10px", fontWeight: 700, background: "#2563eb", color: "#ffffff", padding: "2px 8px", borderRadius: "10px", letterSpacing: "0.5px" }}>
+                        ACTIVE
+                      </span>
+                    )}
+                  </div>
+                  <div style={{ fontSize: "12px", color: "#64748b", lineHeight: 1.45 }}>
+                    Upload only brand new product records. Any duplicate rows that already exist in the system will be safely flagged and skipped.
+                  </div>
+                </div>
+
+                {/* Mode 2: Update / Modify */}
+                <div
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => setImportMode("update")}
+                  onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") setImportMode("update"); }}
+                  style={{
+                    padding: "16px 18px",
+                    borderRadius: "8px",
+                    border: importMode === "update" ? "2px solid #2563eb" : "1px solid #cbd5e1",
+                    background: importMode === "update" ? "#eff6ff" : "#ffffff",
+                    cursor: "pointer",
+                    boxShadow: importMode === "update" ? "0 2px 8px rgba(37,99,235,0.12)" : "none",
+                    transition: "all 0.15s ease-in-out",
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "6px" }}>
+                    <span style={{ fontSize: "17px" }}>✏️</span>
+                    <strong style={{ fontSize: "14px", color: importMode === "update" ? "#1d4ed8" : "#1e293b" }}>
+                      Update / Modify Existing Records
+                    </strong>
+                    {importMode === "update" && (
+                      <span style={{ marginLeft: "auto", fontSize: "10px", fontWeight: 700, background: "#2563eb", color: "#ffffff", padding: "2px 8px", borderRadius: "10px", letterSpacing: "0.5px" }}>
+                        ACTIVE
+                      </span>
+                    )}
+                  </div>
+                  <div style={{ fontSize: "12px", color: "#64748b", lineHeight: 1.45 }}>
+                    Update existing product records matching names or codes. <strong>Zero Data Loss:</strong> Blank cells in your file are ignored and will never erase existing fields.
+                  </div>
+                </div>
+              </div>
+
+              {/* Mode Info Callout */}
+              <div
+                style={{
+                  marginTop: "12px",
+                  padding: "10px 14px",
+                  borderRadius: "6px",
+                  fontSize: "12.5px",
+                  maxWidth: "800px",
+                  background: importMode === "create" ? "#f8fafc" : "#fffbeb",
+                  color: importMode === "create" ? "#475569" : "#92400e",
+                  borderLeft: importMode === "create" ? "3px solid #64748b" : "3px solid #d97706",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
+                }}
+              >
+                <span>{importMode === "create" ? "ℹ️" : "🛡️"}</span>
+                <span>
+                  {importMode === "create"
+                    ? "Strict creation mode: Existing product records remain untouched. Any duplicate rows will be reported."
+                    : "Safe non-destructive update: Only columns with values in your uploaded file will update matching product records. Empty columns are kept intact."}
+                </span>
+              </div>
+            </div>
+
+            {/* Import File Section */}
+            <div style={{ marginBottom: "24px" }}>
+              <label style={{ display: "block", fontSize: "14px", fontWeight: 600, color: "#1e293b", marginBottom: "8px" }}>
+                Import File
+              </label>
+              <div style={{ display: "flex", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    border: "1px solid #cbd5e1",
+                    borderRadius: "6px",
+                    background: "#f8fafc",
+                    padding: "4px 8px",
+                    minWidth: "320px",
+                    maxWidth: "500px",
+                    flex: 1,
+                  }}
+                >
+                  <button
+                    type="button"
+                    onClick={() => importFileInputRef.current?.click()}
+                    style={{
+                      background: "#ffffff",
+                      border: "1px solid #cbd5e1",
+                      borderRadius: "4px",
+                      padding: "6px 14px",
+                      fontSize: "13px",
+                      fontWeight: 600,
+                      color: "#334155",
+                      cursor: "pointer",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    Choose File
+                  </button>
+                  <span
+                    style={{
+                      paddingLeft: "12px",
+                      fontSize: "13px",
+                      color: importFile ? "#0f172a" : "#64748b",
+                      fontWeight: importFile ? 600 : 400,
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                      flex: 1,
+                    }}
+                  >
+                    {importFile ? importFile.name : "No file chosen"}
+                  </span>
+                  {importFile && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setImportFile(null);
+                        if (importFileInputRef.current) importFileInputRef.current.value = "";
+                      }}
+                      style={{
+                        background: "none",
+                        border: "none",
+                        color: "#ef4444",
+                        cursor: "pointer",
+                        fontSize: "14px",
+                        padding: "4px 8px",
+                      }}
+                      title="Clear selected file"
+                    >
+                      ✕
+                    </button>
+                  )}
+                  <input
+                    ref={importFileInputRef}
+                    type="file"
+                    accept=".csv,.xlsx,.xls"
+                    style={{ display: "none" }}
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      if (f) {
+                        setImportFile(f);
+                        setImportError(null);
+                      }
+                    }}
+                  />
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => downloadSampleCsv("product", IMPORT_HEADERS)}
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "6px",
+                    background: "#f8fafc",
+                    border: "1px dashed #94a3b8",
+                    borderRadius: "6px",
+                    padding: "8px 14px",
+                    color: "#475569",
+                    fontSize: "13px",
+                    fontWeight: 600,
+                    cursor: "pointer",
+                  }}
+                >
+                  📥 Download Sample CSV Template
+                </button>
+              </div>
+              <div style={{ fontSize: "12px", color: "#64748b", marginTop: "6px" }}>
+                Only CSV, XLS, And XLSX Files Are Allowed. Maximum File Size: 8MB.
+              </div>
+            </div>
+
+            {/* Notes Section */}
+            <div style={{ borderTop: "1px solid #f1f5f9", paddingTop: "20px" }}>
+              <div style={{ fontSize: "14px", fontWeight: 700, color: "#1e293b", marginBottom: "12px" }}>
+                Notes:
+              </div>
+              <ul
+                style={{
+                  margin: 0,
+                  paddingLeft: "20px",
+                  fontSize: "13px",
+                  lineHeight: "1.9",
+                  color: "#334155",
+                }}
+              >
+                <li>Upload Up To <strong>5,000 Rows</strong> Per File.</li>
+                <li>Avoid Special Characters (Like @ # $ % ^ & * ( ) ) In Text Fields.</li>
+                <li>Maximum Allowed File Size: <strong>8 MB</strong>.</li>
+                <li>Only <strong>.Csv</strong>, <strong>.Xls</strong>, And <strong>.Xlsx</strong> Files Are Accepted.</li>
+                <li>Mandatory Columns: <strong>Product Name (As Per Tally)</strong>, <strong>Category</strong>, <strong>UOM</strong>, <strong>Packaging Quantity</strong>, <strong>Packaging Gross Weight (kg)</strong>, and <strong>Packaging Unit CBM</strong>.</li>
+                <li><strong>Product Name (As Per Tally)</strong> and <strong>Product Code</strong> (if provided) Must Be Unique.</li>
+                <li><strong>Category, Sub Category, Brand, HSN Code, and UOM</strong> Must Already Exist In The System.</li>
+                <li><strong>Sub Category</strong> Must Belong To The Selected <strong>Category</strong>.</li>
+                <li><strong>Packaging Unit CBM</strong> can be entered directly or automatically calculated from Length, Width, Height in cm: <code>(L × W × H) / 1,000,000</code>.</li>
+                <li><strong>Packaging Gross Weight (kg)</strong> Must Be Greater Than 0.</li>
+                <li><strong>Refund VAT %</strong> Must Be A Number Between 0 and 100.</li>
+                <li>No Blank Rows, Merged Cells, Or Excel Formulas Allowed.</li>
+                <li>Import May Take <strong>Several Seconds</strong> Depending On File Size. Please Do Not Refresh The Page During Import.</li>
+              </ul>
+            </div>
+
+            {/* Action Buttons */}
+            <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "32px", borderTop: "1px solid #f1f5f9", paddingTop: "20px", gap: "12px" }}>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsImportOpen(false);
+                  setImportFile(null);
+                  setImportError(null);
+                }}
+                style={{
+                  padding: "9px 20px",
+                  borderRadius: "6px",
+                  border: "1px solid #cbd5e1",
+                  background: "#ffffff",
+                  color: "#475569",
+                  fontWeight: 600,
+                  fontSize: "13.5px",
+                  cursor: "pointer",
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={!importFile || importLoading}
+                onClick={handleImportSubmit}
+                style={{
+                  padding: "9px 24px",
+                  borderRadius: "6px",
+                  border: "none",
+                  background: !importFile || importLoading ? "#94a3b8" : "#2563eb",
+                  color: "#ffffff",
+                  fontWeight: 700,
+                  fontSize: "13.5px",
+                  cursor: !importFile || importLoading ? "not-allowed" : "pointer",
+                }}
+              >
+                {importLoading ? "Reading File..." : "Submit"}
+              </button>
+            </div>
+          </div>
+
+          {wizardPending && (
+            <WizardModal
+              file={wizardPending.file}
+              rows={wizardPending.rows}
+              sheetColumns={wizardPending.sheetColumns}
+              apiBase="/masters/products"
+              entityName="product"
+              importHeaders={IMPORT_HEADERS}
+              initialMode={importMode}
+              onClose={() => setWizardPending(null)}
+              onComplete={(summary) => {
+                setWizardPending(null);
+                setImportFile(null);
+                setImportSummary(summary);
+                loadProducts();
+              }}
+              onError={(msg) => {
+                setWizardPending(null);
+                setImportError(msg);
+              }}
+            />
+          )}
+        </main>
+      </AppShell>
+    );
+  }
+
   return (
     <AppShell activeKey="masters-products" pageClassName="page-product-master">
       <main className="page">
@@ -3146,7 +3557,13 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
                   apiBase="/masters/products"
                   entityName="product"
                   importHeaders={IMPORT_HEADERS}
-                  onSummary={() => { }}
+                  onOpenImportPage={() => {
+                    setImportFile(null);
+                    setImportError(null);
+                    setImportSummary(null);
+                    setIsImportOpen(true);
+                  }}
+                  onSummary={(summary) => setImportSummary(summary)}
                   onError={(msg) => setErrorMessageBanner(msg)}
                   onComplete={() => loadProducts()}
                   onExportCsv={() => {

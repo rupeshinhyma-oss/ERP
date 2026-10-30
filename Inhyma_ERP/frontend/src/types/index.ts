@@ -920,6 +920,8 @@ export interface InFileDuplicate {
 export interface ImportSummary {
   total_rows: number;
   created: number;
+  updated?: number;
+  unchanged?: number;
   failed: number;
   duplicate_count: number;
   errors: ImportRowError[];
@@ -1058,4 +1060,4 @@ export interface PriceListUpdatePayload {
   minimum_price?: number | null;
   standard_cost?: number | null;
   is_inclusive?: boolean;
-}
+}

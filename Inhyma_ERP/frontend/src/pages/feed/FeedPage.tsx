@@ -108,9 +108,11 @@ export function FeedPage() {
         resolvedTargetRef.current = targetPostId;
         setHighlightedPostId(targetPostId);
         setTimeout(() => {
-          const el = document.getElementById(`feed-post-${targetPostId}`);
-          if (el && typeof el.scrollIntoView === "function") {
-            el.scrollIntoView({ behavior: "smooth", block: "center" });
+          if (typeof document !== "undefined") {
+            const el = document.getElementById(`feed-post-${targetPostId}`);
+            if (el && typeof el.scrollIntoView === "function") {
+              el.scrollIntoView({ behavior: "smooth", block: "center" });
+            }
           }
         }, 150);
         return;
@@ -131,9 +133,11 @@ export function FeedPage() {
           });
           setHighlightedPostId(singlePost.id);
           setTimeout(() => {
-            const el = document.getElementById(`feed-post-${singlePost.id}`);
-            if (el && typeof el.scrollIntoView === "function") {
-              el.scrollIntoView({ behavior: "smooth", block: "center" });
+            if (typeof document !== "undefined") {
+              const el = document.getElementById(`feed-post-${singlePost.id}`);
+              if (el && typeof el.scrollIntoView === "function") {
+                el.scrollIntoView({ behavior: "smooth", block: "center" });
+              }
             }
           }, 150);
         }

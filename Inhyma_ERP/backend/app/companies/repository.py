@@ -294,6 +294,20 @@ class CompanyRepository(BaseRepository[Company]):
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 
+    async def get_company_by_tax_id(self, tax_id: str, *, exclude_id: uuid.UUID | None = None) -> Company | None:
+        """Fetch the non-deleted company already using this GST / tax id (case-insensitive), if any."""
+        clean = (tax_id or "").strip().upper()
+        if not clean:
+            return None
+        stmt = (
+            self._base_select()
+            .where(func.upper(func.trim(Company.tax_id_number)) == clean)
+        )
+        if exclude_id is not None:
+            stmt = stmt.where(Company.id != exclude_id)
+        result = await self.session.execute(stmt.limit(1))
+        return result.scalar_one_or_none()
+
     async def tax_id_exists(self, tax_id: str, *, exclude_id: uuid.UUID | None = None) -> bool:
         """Return True if a non-deleted company already uses this GST / tax id (case-insensitive)."""
         clean = (tax_id or "").strip().upper()
@@ -302,7 +316,7 @@ class CompanyRepository(BaseRepository[Company]):
         stmt = (
             self._base_select()
             .with_only_columns(Company.id)
-            .where(func.upper(Company.tax_id_number) == clean)
+            .where(func.upper(func.trim(Company.tax_id_number)) == clean)
         )
         if exclude_id is not None:
             stmt = stmt.where(Company.id != exclude_id)

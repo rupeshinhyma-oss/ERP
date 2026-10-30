@@ -46,6 +46,11 @@ export interface LocalPurchaseSummary {
   items_total_landing: number;
   total_quantity: number;
   items_count: number;
+  packing_forwarding?: number;
+  transport_expense?: number;
+  offloading_expense?: number;
+  other_expense?: number;
+  items?: LocalPurchaseItem[];
   remarks?: string | null;
   status: "Pending" | "Confirmed" | "Inwarded" | "Cancelled" | string;
   stock_movement_id?: string | null;

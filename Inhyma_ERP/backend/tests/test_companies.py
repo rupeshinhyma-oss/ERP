@@ -571,4 +571,135 @@ async def test_automatic_status_transition_by_company_name():
     assert updated is not None
     assert updated.current_status == CompanyCurrentStatus.EXISTING
     session.flush.assert_called_once()
-
+
+
+
+@pytest.mark.asyncio
+async def test_company_import_blocks_duplicate_gst_and_supports_update_mode():
+    """
+    Verify:
+    1. Add New Records Only mode (update_existing=False) blocks duplicate GST numbers
+       both against existing DB companies and within the same CSV batch, populating
+       summary.duplicates with existing company comparison details.
+    2. Update / Modify Existing Records mode (update_existing=True) safely updates
+       non-blank fields while keeping blank cells intact (Zero Data Loss), tracks
+       updated vs unchanged counts, and still blocks GST collisions across different companies.
+    """
+    from unittest.mock import AsyncMock, MagicMock
+    from app.companies.service import CompanyService
+    from app.companies.models import Company, CompanyCurrentStatus, CompanyGrade
+
+    country_id = uuid.uuid4()
+    state_id = uuid.uuid4()
+    city_id = uuid.uuid4()
+
+    mock_country = MagicMock(id=country_id, code="IN")
+    mock_country.name = "India"
+    mock_state = MagicMock(id=state_id, code="GJ", country_id=country_id)
+    mock_state.name = "Gujarat"
+    mock_city = MagicMock(id=city_id, state_id=state_id)
+    mock_city.name = "Ahmedabad" 
+
+    existing_comp = Company(
+        id=uuid.uuid4(),
+        company_name="Inhyma Precision Eng 37AF7B",
+        tax_id_number="27ABCDE1234F1Z5",
+        country_id=country_id,
+        state_id=state_id,
+        city_id=city_id,
+        contact_calling_number="+919825011111",
+        company_grade=CompanyGrade.B,
+        current_status=CompanyCurrentStatus.NEW,
+        is_active=True,
+    )
+    existing_comp.emails = []
+    existing_comp.contacts = []
+    existing_comp.category_links = []
+    existing_comp.sub_category_links = []
+    existing_comp.product_links = []
+
+    repo = MagicMock()
+    repo.list_all = AsyncMock(return_value=[existing_comp])
+    repo.update = AsyncMock(side_effect=lambda obj, **kw: [setattr(obj, k, v) for k, v in kw.items()])
+
+    contact_repo = MagicMock()
+    contact_repo.get_primary_contact = AsyncMock(return_value=None)
+    contact_repo.create = AsyncMock()
+    contact_repo.update = AsyncMock()
+
+    country_repo = MagicMock(list_all=AsyncMock(return_value=[mock_country]))
+    state_repo = MagicMock(list_all=AsyncMock(return_value=[mock_state]))
+    city_repo = MagicMock(list_all=AsyncMock(return_value=[mock_city]))
+    cat_repo = MagicMock(list_all=AsyncMock(return_value=[]))
+    sub_cat_repo = MagicMock(list_all=AsyncMock(return_value=[]))
+
+    service = CompanyService(
+        repository=repo,
+        contact_repository=contact_repo,
+        country_repository=country_repo,
+        state_repository=state_repo,
+        city_repository=city_repo,
+        category_repository=cat_repo,
+        sub_category_repository=sub_cat_repo,
+        cache_manager=MagicMock(),
+    )
+
+    async def _fake_create(**kwargs):
+        c = Company(
+            id=uuid.uuid4(),
+            company_name=kwargs["company_name"],
+            tax_id_number=kwargs.get("tax_id_number"),
+            country_id=kwargs.get("country_id"),
+            state_id=kwargs.get("state_id"),
+            city_id=kwargs.get("city_id"),
+            contact_calling_number=kwargs.get("contact_calling_number"),
+            is_active=kwargs.get("is_active", True),
+        )
+        c.emails = []
+        c.contacts = []
+        c.category_links = []
+        c.sub_category_links = []
+        c.product_links = []
+        return c
+
+    service.create = AsyncMock(side_effect=_fake_create)
+
+    # 1. Add New Records Only mode:
+    # - Row 2: New company with unique GST -> Created
+    # - Row 3: Different Company Name but SAME GST as existing_comp ("27ABCDE1234F1Z5") -> Blocked as duplicate!
+    # - Row 4: Different Company Name but SAME GST as Row 2 ("24NEWGST0001Z5") -> Blocked as in-batch duplicate!
+    csv_create = (
+        "Company Name,Country,State / Province,City,Tax ID / GST Number,Calling Number\n"
+        "Brand New Co Pvt Ltd,India,Gujarat,Ahmedabad,24NEWGST0001Z5,+919825022222\n"
+        "Inhyma Precision Eng 301686,India,Gujarat,Ahmedabad,27ABCDE1234F1Z5,+919825033333\n"
+        "Another Co With Same Batch GST,India,Gujarat,Ahmedabad,24NEWGST0001Z5,+919825044444\n"
+    ).encode("utf-8")
+
+    summary_create = await service.import_file("companies.csv", csv_create, update_existing=False)
+    assert summary_create.total_rows == 3
+    assert summary_create.created == 1
+    assert summary_create.duplicate_count == 2
+    assert len(summary_create.duplicates) == 2
+    assert summary_create.duplicates[0]["existing"]["Company Name"] == "Inhyma Precision Eng 37AF7B"
+    assert summary_create.duplicates[0]["existing"]["Tax ID / GST Number"] == "27ABCDE1234F1Z5"
+
+    # 2. Update / Modify Existing Records mode (update_existing=True):
+    # Update existing_comp's Grade to A and Town to 'Vatva' while leaving Calling Number blank (Zero Data Loss)
+    csv_update = (
+        "Company Name,Tax ID / GST Number,Company Grade,Town,Calling Number\n"
+        "Inhyma Precision Eng 37AF7B,27ABCDE1234F1Z5,Grade A,Vatva,\n"
+    ).encode("utf-8")
+
+    summary_update = await service.import_file("update.csv", csv_update, update_existing=True)
+    assert summary_update.total_rows == 1
+    assert summary_update.updated == 1
+    assert summary_update.unchanged == 0
+    assert existing_comp.company_grade == CompanyGrade.A
+    assert existing_comp.town == "Vatva"
+    # Blank calling number in CSV must NOT erase existing calling number
+    assert existing_comp.contact_calling_number == "+919825011111"
+
+    # Re-running the same update file with no changes -> unchanged == 1
+    summary_unchanged = await service.import_file("update.csv", csv_update, update_existing=True)
+    assert summary_unchanged.updated == 0
+    assert summary_unchanged.unchanged == 1

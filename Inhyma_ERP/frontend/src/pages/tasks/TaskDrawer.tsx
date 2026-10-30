@@ -306,6 +306,7 @@ export const TaskDrawer: React.FC<TaskDrawerProps> = ({
   const [isAddingDependency, setIsAddingDependency] = useState(false);
   const [depTaskId, setDepTaskId] = useState("");
   const [depType, setDepType] = useState<DependencyType>("BLOCKED_BY");
+  const [dependencyError, setDependencyError] = useState<string | null>(null);
 
   // Inline editing state
   const [isEditingTitle, setIsEditingTitle] = useState(false);
@@ -538,6 +539,7 @@ export const TaskDrawer: React.FC<TaskDrawerProps> = ({
 
   const handleAddDependency = async () => {
     if (!task || !depTaskId) return;
+    setDependencyError(null);
     try {
       await tasksApi.addTaskDependency(task.id, {
         depends_on_task_id: depTaskId,
@@ -549,20 +551,25 @@ export const TaskDrawer: React.FC<TaskDrawerProps> = ({
       loadTimeline(task.id);
       onTaskUpdated();
     } catch (err: any) {
-      alert(err?.response?.data?.detail || "Failed to add dependency link");
+      const errMsg = err?.response?.data?.detail || err?.message || "Failed to add dependency link";
+      setDependencyError(errMsg);
+      await loadTask(task.id);
     }
   };
 
   const handleDeleteDependency = async (depId: string) => {
     if (!task) return;
     if (!confirm("Are you sure you want to remove this dependency?")) return;
+    setDependencyError(null);
     try {
       await tasksApi.deleteTaskDependency(depId);
       await loadTask(task.id);
       loadTimeline(task.id);
       onTaskUpdated();
     } catch (err: any) {
-      alert(err?.response?.data?.detail || "Failed to remove dependency");
+      const errMsg = err?.response?.data?.detail || err?.message || "Failed to remove dependency";
+      setDependencyError(errMsg);
+      await loadTask(task.id);
     }
   };
 
@@ -2063,6 +2070,11 @@ export const TaskDrawer: React.FC<TaskDrawerProps> = ({
                   >
                     Add Dependency Link
                   </button>
+                  {dependencyError && (
+                    <div style={{ color: "#ef4444", fontSize: "12px", marginTop: "4px", fontWeight: 500 }}>
+                      {dependencyError}
+                    </div>
+                  )}
                 </div>
               )}
 

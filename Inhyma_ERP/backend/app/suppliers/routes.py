@@ -318,6 +318,7 @@ async def export_suppliers(
 async def import_suppliers(
     request: Request,
     file: UploadFile = File(...),
+    update_existing: bool = False,
     service: SupplierService = Depends(get_supplier_service),
     current_user: CurrentUser = Depends(require_permission("supplier.create")),
     audit_service: AuditService = Depends(get_audit_service),
@@ -325,19 +326,24 @@ async def import_suppliers(
     """
     Import suppliers from an uploaded CSV/XLSX file, validating every row.
 
-    Applies the document's duplicate-detection rule (Company Name + City)
-    per row; duplicates are skipped and reported in the import summary
-    rather than aborting the whole batch.
+    Applies GST duplicate detection per row in Add New mode, or updates
+    matching suppliers in Update / Modify Existing Records mode.
     """
     raw_bytes = await file.read()
-    summary = await service.import_file(file.filename or "import.csv", raw_bytes)
+    summary = await service.import_file(
+        file.filename or "import.csv", raw_bytes, update_existing=update_existing
+    )
     await _record_action(
         audit_service=audit_service,
         request=request,
         action=AuditAction.IMPORT,
         actor=current_user,
         entity_id="bulk",
-        description=f"Imported suppliers: {summary.created} created, {summary.failed} failed.",
+        description=(
+            f"Imported suppliers: {summary.created} created, "
+            f"{summary.updated} updated, {summary.unchanged} unchanged, "
+            f"{summary.failed} failed."
+        ),
         new_values=summary.as_dict(),
     )
     data = ImportSummaryRead(**summary.as_dict()).model_dump(mode="json")

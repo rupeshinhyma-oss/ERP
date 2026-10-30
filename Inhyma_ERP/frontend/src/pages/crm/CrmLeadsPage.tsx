@@ -9,7 +9,7 @@
  * - RBAC & Departmental scoping enforced on backend.
  */
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
 import { Breadcrumb } from "@/components/Breadcrumb";
@@ -454,6 +454,9 @@ export function CrmLeadsPage() {
   const showToast = useToast();
 
   const [activeTab, setActiveTab] = useState<"leads" | "kanban" | "unassigned" | "team_oversight" | "history">("leads");
+
+  // Deep link tracking to avoid repeated fetches / reopening loops
+  const processedDeepLinkIdRef = useRef<string | null>(null);
 
   // Embedded CSV Import Modal State
   const [importModalOpen, setImportModalOpen] = useState(false);
@@ -1884,6 +1887,50 @@ export function CrmLeadsPage() {
       setLoadingLeadHistory(false);
     }
   };
+
+  // Deep-linking: Support /crm/leads?leadId=<uuid> and /crm/leads?id=<uuid>
+  useEffect(() => {
+    const searchParams = new URLSearchParams(location.search);
+    const targetLeadId = (searchParams.get("leadId") || searchParams.get("id"))?.trim();
+
+    if (!targetLeadId) {
+      processedDeepLinkIdRef.current = null;
+      return;
+    }
+
+    if (processedDeepLinkIdRef.current === targetLeadId) {
+      return;
+    }
+
+    processedDeepLinkIdRef.current = targetLeadId;
+
+    // Check if the lead is already present in loaded leads or kanbanLeads
+    const existingLead =
+      leads.find((l) => l.id === targetLeadId) ||
+      kanbanLeads.find((l) => l.id === targetLeadId);
+
+    if (existingLead) {
+      handleOpenLeadDrawer(existingLead);
+      return;
+    }
+
+    // Otherwise fetch the lead directly by ID
+    async function fetchDeepLinkedLead() {
+      try {
+        const res = await apiGet<CrmLeadListItem>(`/api/v1/crm/leads/${targetLeadId}`);
+        const data = res?.data || res;
+        if (data && data.id) {
+          handleOpenLeadDrawer(data);
+        } else {
+          showToast("Lead not found or you do not have permission to view it.", "error");
+        }
+      } catch (err: any) {
+        showToast(errorMessage(err) || "Lead not found or you do not have permission to view it.", "error");
+      }
+    }
+
+    fetchDeepLinkedLead();
+  }, [location.search, leads, kanbanLeads, handleOpenLeadDrawer, showToast]);
 
   const handleLogActivity = async (e: React.FormEvent) => {
     e.preventDefault();

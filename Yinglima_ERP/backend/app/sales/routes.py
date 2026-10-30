@@ -159,42 +159,9 @@ async def list_sale_orders(
 
     items = []
     for r in records:
-        items.append(
-            SaleOrderResponse(
-                id=r.id,
-                order_no=r.order_no,
-                organization_id=r.organization_id,
-                organization_name=r.organization_name,
-                buyer_id=r.buyer_id,
-                buyer_name=r.buyer_name,
-                buyer_branch_id=r.buyer_branch_id,
-                buyer_branch_name=r.buyer_branch_name,
-                consignment_code=r.consignment_code,
-                planning_sheet_id=r.planning_sheet_id,
-                planning_column_id=r.planning_column_id,
-                order_date=r.order_date,
-                delivery_date=r.delivery_date,
-                currency=r.currency,
-                status=r.status,
-                total_basic=float(r.total_basic),
-                total_tax=float(r.total_tax),
-                total_amount=float(r.total_amount),
-                total_quantity=float(r.total_quantity),
-                item_count=len(r.items),
-                container_no=r.container_no,
-                bl_no=r.bl_no,
-                lr_no=r.lr_no,
-                transporter_name=r.transporter_name,
-                port_of_loading=r.port_of_loading,
-                port_of_discharge=r.port_of_discharge,
-                remarks=r.remarks,
-                stock_movement_id=r.stock_movement_id,
-                stock_movement_number=r.stock_movement_number,
-                created_by_name=r.created_by_name,
-                created_at=r.created_at,
-                updated_at=r.updated_at,
-            ).model_dump()
-        )
+        dto = SaleOrderDetailResponse.model_validate(r)
+        dto.item_count = len(r.items)
+        items.append(dto.model_dump())
 
     return build_success_response(
         data={

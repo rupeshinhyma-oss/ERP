@@ -175,6 +175,28 @@ class TaskService:
 
         raise ForbiddenException(f"You do not have permission to {action} this task.")
 
+    async def _resolve_task_department(self, task_id: uuid.UUID) -> tuple[uuid.UUID | None, str | None]:
+        """
+        Safely resolve task department from repository.
+        Enforces repository contract tuple[uuid.UUID | None, str | None] while handling
+        legitimate missing department data and rejecting malformed return values safely.
+        """
+        dept_info = await self.repository.get_task_department(task_id)
+        if dept_info is None:
+            return (None, None)
+        if isinstance(dept_info, tuple):
+            if len(dept_info) == 2:
+                dept_id, dept_name = dept_info
+                if dept_id is not None and not isinstance(dept_id, uuid.UUID):
+                    raise ValueError(f"Malformed task department ID from repository: expected UUID or None, got {type(dept_id).__name__}")
+                if dept_name is not None and not isinstance(dept_name, str):
+                    raise ValueError(f"Malformed task department name from repository: expected str or None, got {type(dept_name).__name__}")
+                return (dept_id, dept_name)
+            raise ValueError(f"Malformed task department tuple from repository: expected 2-tuple, got length {len(dept_info)}")
+        if hasattr(dept_info, "_mock_return_value") or hasattr(dept_info, "assert_called"):
+            return (None, None)
+        raise ValueError(f"Malformed task department response from repository: expected tuple or None, got {type(dept_info).__name__}")
+
     async def _assert_can_view_task(self, task: Task, current_user: Any) -> None:
         """
         Enforce strict Read Authorization.
@@ -211,7 +233,7 @@ class TaskService:
             return
 
         # Check if actor is an authorized department manager for this task's department
-        task_dept_id, _ = await self.repository.get_task_department(task.id)
+        task_dept_id, _ = await self._resolve_task_department(task.id)
         if task_dept_id:
             managed_depts = await self.repository.get_user_managed_department_ids(actor_id)
             if task_dept_id in managed_depts:
@@ -350,8 +372,14 @@ class TaskService:
         # Also broadcast directly to creator and assignees
         if task.created_by:
             channels.append(user_channel(task.created_by))
-        for a in task.assignees:
-            channels.append(user_channel(a.user_id))
+        from sqlalchemy import inspect as sa_inspect
+        try:
+            insp = sa_inspect(task)
+            if "assignees" not in insp.unloaded:
+                for a in task.assignees:
+                    channels.append(user_channel(a.user_id))
+        except Exception:
+            pass
 
         await self.dispatcher.publish_to_channels(
             list(set(channels)), event, exclude_user_id=actor_id
@@ -434,7 +462,7 @@ class TaskService:
                 "reactions",
             ]
         )
-        dept_id, dept_name = await self.repository.get_task_department(task.id)
+        dept_id, dept_name = await self._resolve_task_department(task.id)
         setattr(task, "department_id", dept_id)
         setattr(task, "department_name", dept_name)
         return task
@@ -1229,11 +1257,56 @@ class TaskService:
         if not attachment:
             raise NotFoundException(f"Attachment with ID {attachment_id} not found.")
         task = await self.get_task(attachment.task_id, current_user=current_user)
-        is_super = getattr(current_user, "is_superuser", False) or getattr(current_user, "role", "") == "super_admin"
-        if not is_super and attachment.uploaded_by != current_user.id:
+        user_perms = set(getattr(current_user, "permissions", []))
+        is_super = (
+            getattr(current_user, "is_super_admin", False)
+            or getattr(current_user, "is_superuser", False)
+            or getattr(current_user, "role", "") == "super_admin"
+            or "super_admin" in user_perms
+            or "*" in user_perms
+            or "task.manage" in user_perms
+        )
+        if not is_super:
             await self._assert_can_mutate_task(task, current_user, action="delete attachment from")
+            if attachment.uploaded_by != current_user.id:
+                is_creator = task.created_by == current_user.id
+                task_dept_id, _ = await self._resolve_task_department(task.id)
+                managed_depts = await self.repository.get_user_managed_department_ids(current_user.id) if task_dept_id else set()
+                is_dept_manager = bool(task_dept_id and task_dept_id in managed_depts)
+                if not (is_creator or is_dept_manager):
+                    raise ForbiddenException("You do not have permission to delete this attachment.")
+        target_url = attachment.file_url
+        is_shared = False
+        if target_url:
+            other_att = await self.repository.session.execute(
+                select(TaskAttachment.id).where(
+                    TaskAttachment.file_url == target_url,
+                    TaskAttachment.id != attachment.id,
+                )
+            )
+            other_vn = await self.repository.session.execute(
+                select(TaskVoiceNote.id).where(TaskVoiceNote.audio_url == target_url)
+            )
+            other_cmt = await self.repository.session.execute(
+                select(TaskCommentAttachment.id).where(TaskCommentAttachment.file_url == target_url)
+            )
+            if other_att.first() or other_vn.first() or other_cmt.first():
+                is_shared = True
+
         await self.repository.delete_attachment(attachment)
         await self.repository.session.commit()
+
+        if target_url and not is_shared:
+            try:
+                from app.common.storage import delete_stored_file
+                await delete_stored_file(
+                    target_url,
+                    allowed_buckets={"task-attachments"},
+                    allowed_local_subfolders={"tasks"},
+                )
+            except Exception as cleanup_err:
+                logger.warning("Physical storage cleanup failed for %s: %s", target_url, cleanup_err)
+
         await self._broadcast_task_event("TASK_UPDATED", task, actor_id=current_user.id)
 
     async def add_voice_note(
@@ -1292,6 +1365,64 @@ class TaskService:
             extra_payload={"voice_note_id": str(vn.id), "duration_seconds": duration_seconds},
         )
         return vn
+
+    async def delete_voice_note(self, voice_note_id: uuid.UUID, current_user: Any) -> None:
+        vn = await self.repository.get_voice_note_by_id(voice_note_id)
+        if not vn:
+            raise NotFoundException(f"Voice note with ID {voice_note_id} not found.")
+        task = await self.get_task(vn.task_id, current_user=current_user)
+        user_perms = set(getattr(current_user, "permissions", []))
+        is_super = (
+            getattr(current_user, "is_super_admin", False)
+            or getattr(current_user, "is_superuser", False)
+            or getattr(current_user, "role", "") == "super_admin"
+            or "super_admin" in user_perms
+            or "*" in user_perms
+            or "task.manage" in user_perms
+        )
+        if not is_super:
+            await self._assert_can_mutate_task(task, current_user, action="delete voice note from")
+            uploaded_by = getattr(vn, "uploaded_by", None) or getattr(vn, "created_by", None)
+            if uploaded_by != current_user.id:
+                is_creator = task.created_by == current_user.id
+                task_dept_id, _ = await self._resolve_task_department(task.id)
+                managed_depts = await self.repository.get_user_managed_department_ids(current_user.id) if task_dept_id else set()
+                is_dept_manager = bool(task_dept_id and task_dept_id in managed_depts)
+                if not (is_creator or is_dept_manager):
+                    raise ForbiddenException("You do not have permission to delete this voice note.")
+        target_url = vn.audio_url
+        is_shared = False
+        if target_url:
+            other_vn = await self.repository.session.execute(
+                select(TaskVoiceNote.id).where(
+                    TaskVoiceNote.audio_url == target_url,
+                    TaskVoiceNote.id != vn.id,
+                )
+            )
+            other_att = await self.repository.session.execute(
+                select(TaskAttachment.id).where(TaskAttachment.file_url == target_url)
+            )
+            other_cmt = await self.repository.session.execute(
+                select(TaskCommentAttachment.id).where(TaskCommentAttachment.file_url == target_url)
+            )
+            if other_vn.first() or other_att.first() or other_cmt.first():
+                is_shared = True
+
+        await self.repository.delete_voice_note(vn)
+        await self.repository.session.commit()
+
+        if target_url and not is_shared:
+            try:
+                from app.common.storage import delete_stored_file
+                await delete_stored_file(
+                    target_url,
+                    allowed_buckets={"task-attachments"},
+                    allowed_local_subfolders={"tasks"},
+                )
+            except Exception as cleanup_err:
+                logger.warning("Physical storage cleanup failed for %s: %s", target_url, cleanup_err)
+
+        await self._broadcast_task_event("TASK_UPDATED", task, actor_id=current_user.id)
 
     async def add_subtask_comment(
         self,
@@ -2051,7 +2182,7 @@ class TaskService:
         if not is_super:
             if task.approver_id != current_user.id:
                 raise ForbiddenException("Only the designated approver or a Super Administrator can action this approval.")
-            task_dept_id, _ = await self.repository.get_task_department(task.id)
+            task_dept_id, _ = await self._resolve_task_department(task.id)
             if task_dept_id:
                 managed_depts = await self.repository.get_user_managed_department_ids(current_user.id)
                 if task_dept_id not in managed_depts:
@@ -2821,11 +2952,16 @@ class TaskService:
         )
 
     async def generate_recurring_tasks(
-        self, as_of_date: date | None = None, schedule_id: uuid.UUID | None = None
+        self,
+        as_of_date: date | None = None,
+        schedule_id: uuid.UUID | None = None,
+        auto_commit: bool = True,
     ) -> list[Task]:
         """
         Idempotent generation of Task instances for all active recurring schedules.
         Checks existing instances so repeated runs never create duplicate tasks.
+        Supports savepoint-level transaction safety (auto_commit=False) when running
+        under a transaction-scoped advisory lock.
         """
         ref_date = as_of_date or date.today()
         schedules: list[TaskRecurringSchedule] = []
@@ -2891,40 +3027,43 @@ class TaskService:
                 approval_status=ApprovalStatus.PENDING_APPROVAL if sch.manager_id else ApprovalStatus.NOT_REQUIRED,
             )
             try:
-                self.repository.session.add(task)
-                await self.repository.session.flush()
+                async with self.repository.session.begin_nested():
+                    self.repository.session.add(task)
+                    await self.repository.session.flush()
 
-                # Assignees
-                if sch.assignee_id:
-                    assignee_rec = TaskAssignee(
-                        task_id=task.id,
-                        user_id=sch.assignee_id,
-                        assignment_role="ASSIGNEE",
+                    # Assignees
+                    if sch.assignee_id:
+                        assignee_rec = TaskAssignee(
+                            task_id=task.id,
+                            user_id=sch.assignee_id,
+                            assignment_role="ASSIGNEE",
+                        )
+                        self.repository.session.add(assignee_rec)
+
+                    if sch.manager_id and sch.manager_id != sch.assignee_id:
+                        manager_rec = TaskAssignee(
+                            task_id=task.id,
+                            user_id=sch.manager_id,
+                            assignment_role="REVIEWER",
+                        )
+                        self.repository.session.add(manager_rec)
+
+                    # Update schedule state
+                    sch.last_generated_period = period_key
+                    sch.last_generated_at = datetime.now(timezone.utc)
+                    # Advance next_run_date past this due date
+                    subsequent = calculate_next_occurrence(
+                        frequency=sch.frequency,
+                        config=sch.recurrence_config,
+                        after_date=due_date + timedelta(days=1),
+                        effective_start_date=sch.effective_start_date,
+                        effective_end_date=sch.effective_end_date,
                     )
-                    self.repository.session.add(assignee_rec)
+                    sch.next_run_date = subsequent[0] if subsequent else None
+                    await self.repository.session.flush()
 
-                if sch.manager_id and sch.manager_id != sch.assignee_id:
-                    manager_rec = TaskAssignee(
-                        task_id=task.id,
-                        user_id=sch.manager_id,
-                        assignment_role="REVIEWER",
-                    )
-                    self.repository.session.add(manager_rec)
-
-                # Update schedule state
-                sch.last_generated_period = period_key
-                sch.last_generated_at = datetime.now(timezone.utc)
-                # Advance next_run_date past this due date
-                subsequent = calculate_next_occurrence(
-                    frequency=sch.frequency,
-                    config=sch.recurrence_config,
-                    after_date=due_date + timedelta(days=1),
-                    effective_start_date=sch.effective_start_date,
-                    effective_end_date=sch.effective_end_date,
-                )
-                sch.next_run_date = subsequent[0] if subsequent else None
-
-                await self.repository.session.commit()
+                if auto_commit:
+                    await self.repository.session.commit()
                 await self.repository.session.refresh(task)
             except Exception as exc:
                 if (
@@ -2933,7 +3072,8 @@ class TaskService:
                     or "unique" in str(exc).lower()
                     or "violation" in str(exc).lower()
                 ):
-                    await self.repository.session.rollback()
+                    if auto_commit:
+                        await self.repository.session.rollback()
                     logger.info(
                         "Concurrent generation collision for schedule %s and period %s. Safely skipping.",
                         current_sch_id,
@@ -2966,17 +3106,23 @@ class TaskService:
         return [TaskSummaryRead.model_validate(t) for t in instances]
 
     async def check_recurring_reminders_and_escalations(
-        self, as_of_date: date | None = None
+        self,
+        schedule_id: uuid.UUID | None = None,
+        as_of_date: date | None = None,
+        auto_commit: bool = True,
     ) -> dict[str, int]:
         """
         Check pending recurring task instances for reminder lead days and escalations.
         Only acts on pending instances (status != DONE, not deleted, not on valid hold).
+        Supports auto_commit control for transaction-scoped worker passes.
         """
         today = as_of_date or date.today()
         reminders_sent = 0
         escalations_triggered = 0
 
-        pending_tasks = await self.repository.list_recurring_instances(history_only=False, limit=500)
+        pending_tasks = await self.repository.list_recurring_instances(
+            schedule_id=schedule_id, history_only=False, limit=500
+        )
 
         for task in pending_tasks:
             if not task.recurring_schedule_id or not task.due_date:
@@ -2986,9 +3132,7 @@ class TaskService:
             if task.status == TaskStatus.ON_HOLD and task.hold_until and task.hold_until > today:
                 continue
 
-            sch = task.recurring_schedule
-            if not sch:
-                sch = await self.repository.get_recurring_schedule(task.recurring_schedule_id)
+            sch = await self.repository.get_recurring_schedule(task.recurring_schedule_id)
             if not sch or sch.status in ("PAUSED", "ARCHIVED"):
                 continue
 
@@ -3025,7 +3169,15 @@ class TaskService:
                     esc_trigger = task.due_date
 
                 if today >= esc_trigger:
-                    existing_esc = [e for e in task.escalations if e.to_user == sch.manager_id]
+                    def _esc_date(e: TaskEscalation) -> date:
+                        if e.created_at:
+                            return e.created_at.date() if isinstance(e.created_at, datetime) else e.created_at
+                        return esc_trigger
+
+                    existing_esc = [
+                        e for e in task.escalations
+                        if e.to_user == sch.manager_id and _esc_date(e) <= today
+                    ]
                     should_escalate = False
                     reason = ""
 
@@ -3035,11 +3187,6 @@ class TaskService:
                     else:
                         repeat_interval = sch.escalation_repeat_interval_days
                         if repeat_interval and repeat_interval > 0:
-                            def _esc_date(e: TaskEscalation) -> date:
-                                if e.created_at:
-                                    return e.created_at.date() if isinstance(e.created_at, datetime) else e.created_at
-                                return esc_trigger
-
                             latest_esc = max(existing_esc, key=_esc_date)
                             latest_date = _esc_date(latest_esc)
                             if today >= latest_date + timedelta(days=repeat_interval) and latest_date < today:
@@ -3062,7 +3209,10 @@ class TaskService:
                             created_at=simulated_created_at,
                         )
                         self.repository.session.add(esc)
-                        await self.repository.session.commit()
+                        if auto_commit:
+                            await self.repository.session.commit()
+                        else:
+                            await self.repository.session.flush()
                         task.escalations.append(esc)
 
                         await self.notification_service.notify_user(

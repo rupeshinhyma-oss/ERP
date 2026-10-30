@@ -17,6 +17,7 @@ from app.leads.models import Lead
 from app.leads.repository import LeadRepository
 from app.leads.schemas import LeadAllotRequest, LeadBulkDeleteRequest, LeadCreate, LeadRead, LeadUpdate
 from app.leads.service import LeadService
+from app.rbac.dependencies import require_any_permission
 
 router = APIRouter(prefix="", tags=["Leads"])
 
@@ -55,6 +56,9 @@ async def list_leads(
     page: int | None = Query(default=None, ge=1),
     page_size: int | None = Query(default=None, ge=1, le=500),
     service: LeadService = Depends(get_service),
+    current_user: CurrentUser = Depends(
+        require_any_permission("crm.leads.view", "crm.leads.manage", "leads.view", "leads.manage")
+    ),
 ) -> dict:
     effective_limit = page_size if page_size is not None else (limit if limit is not None else 50)
     effective_offset = (
@@ -65,6 +69,7 @@ async def list_leads(
     effective_status = lead_status or status
 
     items, total = await service.list_leads(
+        actor=current_user,
         search=search,
         source=source,
         priority=priority,
@@ -111,8 +116,11 @@ async def create_lead(
     payload: LeadCreate,
     request: Request,
     service: LeadService = Depends(get_service),
+    current_user: CurrentUser = Depends(
+        require_any_permission("crm.leads.manage", "leads.manage")
+    ),
 ) -> dict:
-    lead = await service.create(payload)
+    lead = await service.create(payload, actor=current_user)
     return build_success_response(data=_to_dict(lead), message="Lead created successfully.")
 
 
@@ -120,8 +128,11 @@ async def create_lead(
 async def get_lead(
     lead_id: uuid.UUID,
     service: LeadService = Depends(get_service),
+    current_user: CurrentUser = Depends(
+        require_any_permission("crm.leads.view", "crm.leads.manage", "leads.view", "leads.manage")
+    ),
 ) -> dict:
-    lead = await service.get_by_id(lead_id)
+    lead = await service.get_by_id(lead_id, actor=current_user)
     return build_success_response(data=_to_dict(lead))
 
 
@@ -130,8 +141,11 @@ async def update_lead(
     lead_id: uuid.UUID,
     payload: LeadUpdate,
     service: LeadService = Depends(get_service),
+    current_user: CurrentUser = Depends(
+        require_any_permission("crm.leads.manage", "leads.manage")
+    ),
 ) -> dict:
-    lead = await service.update(lead_id, payload)
+    lead = await service.update(lead_id, payload, actor=current_user)
     return build_success_response(data=_to_dict(lead), message="Lead updated successfully.")
 
 
@@ -140,8 +154,11 @@ async def allot_lead(
     lead_id: uuid.UUID,
     payload: LeadAllotRequest,
     service: LeadService = Depends(get_service),
+    current_user: CurrentUser = Depends(
+        require_any_permission("crm.leads.manage", "leads.manage")
+    ),
 ) -> dict:
-    lead = await service.allot_lead(lead_id, payload.allotted_to)
+    lead = await service.allot_lead(lead_id, payload.allotted_to, actor=current_user)
     return build_success_response(data=_to_dict(lead), message="Lead allotted successfully.")
 
 
@@ -149,8 +166,11 @@ async def allot_lead(
 async def delete_lead(
     lead_id: uuid.UUID,
     service: LeadService = Depends(get_service),
+    current_user: CurrentUser = Depends(
+        require_any_permission("crm.leads.manage", "leads.manage")
+    ),
 ) -> dict:
-    await service.delete(lead_id)
+    await service.delete(lead_id, actor=current_user)
     return build_success_response(data={"id": str(lead_id)}, message="Lead deleted successfully.")
 
 
@@ -158,8 +178,11 @@ async def delete_lead(
 async def bulk_delete_leads(
     payload: LeadBulkDeleteRequest,
     service: LeadService = Depends(get_service),
+    current_user: CurrentUser = Depends(
+        require_any_permission("crm.leads.manage", "leads.manage")
+    ),
 ) -> dict:
-    deleted_count = await service.bulk_delete(payload.ids)
+    deleted_count = await service.bulk_delete(payload.ids, actor=current_user)
     return build_success_response(
         data={"deleted_count": deleted_count},
         message=f"{deleted_count} lead(s) deleted successfully.",

@@ -1206,13 +1206,15 @@ export function ProductPricesPage() {
               <button
                 type="button"
                 className="btn btn-imp-exp"
+                aria-haspopup="menu"
+                aria-expanded={exportMenuOpen}
                 onClick={() => setExportMenuOpen((v) => !v)}
                 disabled={exporting}
                 style={{
                   background: "#f59e0b",
                   color: "#ffffff",
                   border: "none",
-                  padding: "8px 16px",
+                  padding: "8px 14px",
                   borderRadius: "6px",
                   fontWeight: 700,
                   fontSize: "13px",
@@ -1224,30 +1226,28 @@ export function ProductPricesPage() {
                 }}
                 title="Export complete pricing directory"
               >
-                <span>{exporting ? "Exporting..." : "Export ▾"}</span>
+                <span>{exporting ? "Exporting..." : "Export"}</span>
+                {!exporting && (
+                  <svg
+                    className="imp-exp-chevron"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    aria-hidden="true"
+                  >
+                    <polyline points="6 9 12 15 18 9" />
+                  </svg>
+                )}
               </button>
 
               {exportMenuOpen && (
-                <div
-                  style={{
-                    position: "absolute",
-                    top: "100%",
-                    right: 0,
-                    marginTop: "6px",
-                    background: "#ffffff",
-                    borderRadius: "8px",
-                    boxShadow: "0 10px 25px rgba(0,0,0,0.12), 0 2px 6px rgba(0,0,0,0.06)",
-                    border: "1px solid #e2e8f0",
-                    zIndex: 1000,
-                    minWidth: "220px",
-                    overflow: "hidden",
-                  }}
-                >
+                <div className="imp-exp-menu" role="menu" style={{ minWidth: "220px" }}>
                   <div
                     style={{
-                      padding: "8px 14px",
-                      background: "#f8fafc",
-                      borderBottom: "1px solid #e2e8f0",
+                      padding: "6px 10px",
                       fontSize: "11px",
                       fontWeight: 700,
                       color: "#64748b",
@@ -1259,28 +1259,20 @@ export function ProductPricesPage() {
                   </div>
                   <button
                     type="button"
+                    role="menuitem"
+                    className="imp-exp-menu-item"
                     onClick={() => {
                       setExportMenuOpen(false);
                       handleExport("xlsx");
                     }}
-                    style={{
-                      width: "100%",
-                      textAlign: "left",
-                      padding: "10px 14px",
-                      fontSize: "13px",
-                      color: "#1e293b",
-                      fontWeight: 600,
-                      background: "none",
-                      border: "none",
-                      cursor: "pointer",
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "10px",
-                    }}
-                    onMouseEnter={(e) => (e.currentTarget.style.background = "#f1f5f9")}
-                    onMouseLeave={(e) => (e.currentTarget.style.background = "none")}
                   >
-                    <span style={{ fontSize: "18px" }}>📊</span>
+                    <span className="imp-exp-icon-badge imp-exp-icon-badge--export" aria-hidden="true">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                        <polyline points="7 10 12 15 17 10" />
+                        <line x1="12" y1="15" x2="12" y2="3" />
+                      </svg>
+                    </span>
                     <div>
                       <div style={{ fontWeight: 600 }}>Export to Excel (.xlsx)</div>
                       <div style={{ fontSize: "11px", color: "#64748b", fontWeight: 400 }}>
@@ -1290,29 +1282,21 @@ export function ProductPricesPage() {
                   </button>
                   <button
                     type="button"
+                    role="menuitem"
+                    className="imp-exp-menu-item"
                     onClick={() => {
                       setExportMenuOpen(false);
                       handleExport("csv");
                     }}
-                    style={{
-                      width: "100%",
-                      textAlign: "left",
-                      padding: "10px 14px",
-                      fontSize: "13px",
-                      color: "#1e293b",
-                      fontWeight: 600,
-                      background: "none",
-                      border: "none",
-                      borderTop: "1px solid #f1f5f9",
-                      cursor: "pointer",
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "10px",
-                    }}
-                    onMouseEnter={(e) => (e.currentTarget.style.background = "#f1f5f9")}
-                    onMouseLeave={(e) => (e.currentTarget.style.background = "none")}
                   >
-                    <span style={{ fontSize: "18px" }}>📄</span>
+                    <span className="imp-exp-icon-badge imp-exp-icon-badge--sample" aria-hidden="true">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                        <polyline points="14 2 14 8 20 8" />
+                        <line x1="16" y1="13" x2="8" y2="13" />
+                        <line x1="16" y1="17" x2="8" y2="17" />
+                      </svg>
+                    </span>
                     <div>
                       <div style={{ fontWeight: 600 }}>Export to CSV (.csv)</div>
                       <div style={{ fontSize: "11px", color: "#64748b", fontWeight: 400 }}>

@@ -29,12 +29,31 @@ export function SaleProcessDetailModal({
   const toast = useToast();
   const cached = useMemo(() => getSaleOrderDetailCache(orderId), [orderId]);
   const [order, setOrder] = useState<SaleOrder | null>(() => {
-    if (cached?.order) return cached.order;
-    if (initialOrder && initialOrder.id === orderId) return initialOrder;
-    return null;
+    const cOrder = cached?.order;
+    const initOrder = initialOrder && initialOrder.id === orderId ? initialOrder : null;
+    if (cOrder && initOrder) {
+      return {
+        ...cOrder,
+        ...initOrder,
+        items:
+          initOrder.items && initOrder.items.length > 0
+            ? initOrder.items
+            : cOrder.items ?? [],
+      };
+    }
+    return cOrder || initOrder || null;
   });
   const [tradeDetails, setTradeDetails] = useState<any>(() => cached?.tradeDetails ?? null);
   const [loading, setLoading] = useState(() => !cached?.order && !(initialOrder && initialOrder.id === orderId));
+  const [loadingItems, setLoadingItems] = useState<boolean>(() => {
+    const initialItems =
+      (initialOrder && initialOrder.id === orderId && initialOrder.items?.length) ||
+      cached?.order?.items?.length ||
+      0;
+    const expectedCount =
+      (initialOrder && initialOrder.id === orderId ? initialOrder.item_count : cached?.order?.item_count) ?? 0;
+    return initialItems === 0 && expectedCount > 0;
+  });
   const [updatingStatus, setUpdatingStatus] = useState(false);
   const [statusRemark, setStatusRemark] = useState("");
   const [showStatusModal, setShowStatusModal] = useState<SaleOrderStatus | null>(null);
@@ -45,32 +64,48 @@ export function SaleProcessDetailModal({
 
   useEffect(() => {
     let mounted = true;
-    async function fetchDetails() {
-      const cachedEntry = getSaleOrderDetailCache(orderId);
-      if (!cachedEntry?.order && !(initialOrder && initialOrder.id === orderId)) {
-        setLoading(true);
-      }
-      try {
-        const [res, tradeRes] = await Promise.all([
-          apiGet<SaleOrder>(`/sales/orders/${orderId}`),
-          apiGet<any>(`/sales/orders/${orderId}/trade-details`).catch(() => ({ data: null })),
-        ]);
+    const cachedEntry = getSaleOrderDetailCache(orderId);
+    if (!cachedEntry?.order && !(initialOrder && initialOrder.id === orderId)) {
+      setLoading(true);
+    }
+
+    // 1. Fetch order & items immediately without blocking on trade-details
+    apiGet<SaleOrder>(`/sales/orders/${orderId}`)
+      .then((res) => {
         if (mounted && res.data) {
           setOrder(res.data);
-          const td = tradeRes?.data ?? null;
-          if (td) setTradeDetails(td);
-          updateSaleOrderInCache(res.data, td);
+          updateSaleOrderInCache(res.data);
         }
-      } catch (err) {
+      })
+      .catch((err) => {
         if (mounted && !cachedEntry?.order && !initialOrder) {
           toast(errorMessage(err), "error");
           onClose();
         }
-      } finally {
-        if (mounted) setLoading(false);
-      }
-    }
-    fetchDetails();
+      })
+      .finally(() => {
+        if (mounted) {
+          setLoading(false);
+          setLoadingItems(false);
+        }
+      });
+
+    // 2. Fetch trade-details (for CI / PL tabs) in parallel without delaying Order Overview items
+    apiGet<any>(`/sales/orders/${orderId}/trade-details`)
+      .then((tradeRes) => {
+        const td = tradeRes?.data ?? null;
+        if (mounted && td) {
+          setTradeDetails(td);
+          const latestCached = getSaleOrderDetailCache(orderId)?.order;
+          if (latestCached) {
+            updateSaleOrderInCache(latestCached, td);
+          }
+        }
+      })
+      .catch(() => {
+        // Non-critical fallback
+      });
+
     return () => {
       mounted = false;
     };
@@ -1418,8 +1453,14 @@ export function SaleProcessDetailModal({
                         })
                       ) : (
                         <tr>
-                          <td colSpan={10} style={{ textAlign: "center", padding: "20px", color: "#94a3b8" }}>
-                            No line items recorded.
+                          <td colSpan={10} style={{ textAlign: "center", padding: "20px", color: "#64748b" }}>
+                            {loadingItems || loading ? (
+                              <span style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>
+                                <span>⏳</span> Loading line items...
+                              </span>
+                            ) : (
+                              <span style={{ color: "#94a3b8" }}>No line items recorded.</span>
+                            )}
                           </td>
                         </tr>
                       )}
