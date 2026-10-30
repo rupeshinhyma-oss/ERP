@@ -16,6 +16,16 @@ export interface LookupResult<T> {
   loaded: boolean;
 }
 
+export function isRecordActive(item: unknown): boolean {
+  if (!item || typeof item !== "object") return true;
+  const rec = item as Record<string, unknown>;
+  if (rec.is_active === false) return false;
+  if (typeof rec.status === "string" && rec.status.trim().toLowerCase() === "inactive") {
+    return false;
+  }
+  return true;
+}
+
 /**
  * Debounced, server-side search-as-you-type lookup for tables too large to
  * ever prefetch in full (e.g. Products, once it's grown past a few
@@ -65,7 +75,7 @@ export function useSearchableLookup<T>(
             search: trimmed,
           })
         );
-        if (!cancelled) setItems(data || []);
+        if (!cancelled) setItems((data || []).filter((item) => isRecordActive(item)));
       } catch {
         /* filters and dropdowns degrade gracefully without lookups */
       } finally {
@@ -127,7 +137,8 @@ export function useLookup<T>(apiBase: string, pageSize = 250, includeInactive = 
       promise = apiGet<T[]>(
         apiBase + toQueryString(queryParams)
       ).then(({ data }) => {
-        const result = data || [];
+        const raw = data || [];
+        const result = includeInactive ? raw : raw.filter((item) => isRecordActive(item));
         lookupCache.set(cacheKey, { items: result, timestamp: Date.now() });
         inFlightRequests.delete(cacheKey);
         return result;

@@ -394,6 +394,7 @@ export function ProductGalleryPage() {
         page_size: "1000",
         sort_by: "created_at",
         sort_order: "desc",
+        status: "active",
       };
       if (categoryFilter) prodParams.category_id = categoryFilter;
       if (subCategoryFilter) prodParams.sub_category_id = subCategoryFilter;
@@ -401,11 +402,15 @@ export function ProductGalleryPage() {
 
       const prodQuery = new URLSearchParams(prodParams).toString();
       const prodRes = await apiGet<Product[] | { items: Product[] }>(`/masters/products?${prodQuery}`);
-      const prodItems = Array.isArray(prodRes.data) ? prodRes.data : (prodRes.data?.items || []);
+      const prodItems = (Array.isArray(prodRes.data) ? prodRes.data : (prodRes.data?.items || [])).filter(
+        (p: any) => p?.is_active !== false && String(p?.status ?? "active").toLowerCase() !== "inactive"
+      );
       setProducts(prodItems);
 
-      const suppRes = await apiGet<Supplier[] | { items: Supplier[] }>("/suppliers?page_size=1000");
-      const suppItems = Array.isArray(suppRes.data) ? suppRes.data : (suppRes.data?.items || []);
+      const suppRes = await apiGet<Supplier[] | { items: Supplier[] }>("/suppliers?page_size=1000&status=active");
+      const suppItems = (Array.isArray(suppRes.data) ? suppRes.data : (suppRes.data?.items || [])).filter(
+        (s: any) => s?.is_active !== false
+      );
       setSuppliers(suppItems);
 
       try {

@@ -14,7 +14,7 @@ Alembic, testing, and for keeping import order irrelevant).
 from __future__ import annotations
 
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
-from sqlalchemy.pool import AsyncAdaptedQueuePool
+from sqlalchemy.pool import AsyncAdaptedQueuePool, StaticPool
 
 from app.core.config import settings
 from app.core.logging import get_logger
@@ -52,6 +52,17 @@ def get_engine() -> AsyncEngine:
     """
     global _engine
     if _engine is None:
+        db_url = str(settings.DATABASE_URL)
+        if db_url.lower().startswith("sqlite"):
+            _engine = create_async_engine(
+                db_url,
+                echo=settings.DATABASE_ECHO,
+                poolclass=StaticPool,
+                connect_args={"check_same_thread": False},
+                future=True,
+            )
+            logger.info("SQLite test database engine created.")
+            return _engine
         connect_args = {}
         if _statement_cache_must_be_disabled():
             # Required when connecting through a transaction-mode PgBouncer

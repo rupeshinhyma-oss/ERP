@@ -5452,11 +5452,13 @@ function LinkRecordModal({
     async (term: string, signal: AbortSignal): Promise<DropdownOption[]> => {
       if (!apiBase) return [];
       const { data } = await apiGet<Record<string, unknown>[]>(
-        apiBase + toQueryString({ search: term, page: 1, page_size: 20 }),
+        apiBase + toQueryString({ search: term, page: 1, page_size: 20, status: "active" }),
         { signal }
       );
       const labelField = SOURCE_MODULE_LABEL_FIELD[column.source_module || ""] || "name";
-      return data.map((d) => ({ value: String(d.id), label: String(d[labelField] ?? d.id) }));
+      return data
+        .filter((d) => d.is_active !== false && String(d.status ?? "active").toLowerCase() !== "inactive")
+        .map((d) => ({ value: String(d.id), label: String(d[labelField] ?? d.id) }));
     },
     [apiBase, column.source_module] // eslint-disable-line react-hooks/exhaustive-deps
   );

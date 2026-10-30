@@ -72,7 +72,7 @@ class HrmsLeaveService:
         """
         # 1. Leave Types (all 8 standard corporate types + Privilege Leave)
         existing_types_res = await self.db.execute(
-            select(HrmsLeaveType.name).where(HrmsLeaveType.deleted_at.is_(None))
+            select(HrmsLeaveType.name)
         )
         existing_names = {row[0].strip().lower() for row in existing_types_res.all()}
 
@@ -187,14 +187,14 @@ class HrmsLeaveService:
             ),
         ]
 
-        to_add_types = [t for t in default_types if t.name.strip().lower() not in existing_names]
+        to_add_types = default_types if not existing_names else []
         if to_add_types:
             self.db.add_all(to_add_types)
             await self.db.flush()
 
         # 2. Default Holidays
         holiday_count_res = await self.db.execute(
-            select(func.count(HrmsHoliday.id)).where(HrmsHoliday.deleted_at.is_(None))
+            select(func.count(HrmsHoliday.id))
         )
         if (holiday_count_res.scalar() or 0) == 0:
             sample_holidays = [
@@ -231,7 +231,7 @@ class HrmsLeaveService:
 
         # 3. Default Leave Plan
         plan_count_res = await self.db.execute(
-            select(func.count(HrmsLeavePlan.id)).where(HrmsLeavePlan.deleted_at.is_(None))
+            select(func.count(HrmsLeavePlan.id))
         )
         if (plan_count_res.scalar() or 0) == 0:
             default_plan = HrmsLeavePlan(
@@ -366,13 +366,12 @@ class HrmsLeaveService:
     # -----------------------------------------------------------------------
     # Leave Types CRUD
     # -----------------------------------------------------------------------
-    async def list_leave_types(self) -> List[HrmsLeaveType]:
+    async def list_leave_types(self, *, active_only: bool = False) -> List[HrmsLeaveType]:
         await self.ensure_seeds()
-        query = (
-            select(HrmsLeaveType)
-            .where(HrmsLeaveType.deleted_at.is_(None))
-            .order_by(HrmsLeaveType.name.asc())
-        )
+        query = select(HrmsLeaveType).where(HrmsLeaveType.deleted_at.is_(None))
+        if active_only:
+            query = query.where(HrmsLeaveType.is_active.is_(True))
+        query = query.order_by(HrmsLeaveType.name.asc())
         result = await self.db.execute(query)
         return list(result.scalars().all())
 

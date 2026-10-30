@@ -325,8 +325,11 @@ export function RbacPage() {
   }, [allUsers, viewingRole]);
 
   const unassignedUsers = useMemo(() => {
-    if (!viewingRole || !viewingRole.name) return allUsers;
-    return allUsers.filter((u) => !(u.roles || []).includes(viewingRole.name));
+    const activePool = allUsers.filter(
+      (u) => u.is_active !== false && String(u.status || "ACTIVE").toUpperCase() === "ACTIVE"
+    );
+    if (!viewingRole || !viewingRole.name) return activePool;
+    return activePool.filter((u) => !(u.roles || []).includes(viewingRole.name));
   }, [allUsers, viewingRole]);
 
   /* Managers for viewingRole */
@@ -355,7 +358,12 @@ export function RbacPage() {
   const unassignedManagers = useMemo(() => {
     if (!viewingRole || !viewingRole.name) return [];
     const assignedManagerIds = new Set(assignedManagers.map((m) => m.id));
-    return assignedUsers.filter((u) => !assignedManagerIds.has(u.id));
+    return assignedUsers.filter(
+      (u) =>
+        !assignedManagerIds.has(u.id) &&
+        u.is_active !== false &&
+        String(u.status || "ACTIVE").toUpperCase() === "ACTIVE"
+    );
   }, [assignedUsers, viewingRole, assignedManagers]);
 
   async function handleAddUserToRole() {

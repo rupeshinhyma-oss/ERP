@@ -229,15 +229,29 @@ async def _resolve_import_product(db: AsyncSession, product_name: str, product_c
             return await product_defaults(db, product_name)
         except BadRequestException:
             if not product_code:
+                from app.core.constants import RecordStatus
                 prod_by_code = (
-                    await db.execute(select(Product).where(func.lower(Product.product_code) == product_name.lower()))
+                    await db.execute(
+                        select(Product).where(
+                            Product.deleted_at.is_(None),
+                            Product.status == RecordStatus.ACTIVE,
+                            func.lower(Product.product_code) == product_name.lower(),
+                        )
+                    )
                 ).scalars().first()
                 if prod_by_code is not None:
                     return await product_defaults(db, prod_by_code.product_name)
                 raise
     if product_code:
+        from app.core.constants import RecordStatus
         prod = (
-            await db.execute(select(Product).where(func.lower(Product.product_code) == product_code.lower()))
+            await db.execute(
+                select(Product).where(
+                    Product.deleted_at.is_(None),
+                    Product.status == RecordStatus.ACTIVE,
+                    func.lower(Product.product_code) == product_code.lower(),
+                )
+            )
         ).scalars().first()
         if prod is not None:
             return await product_defaults(db, prod.product_name)

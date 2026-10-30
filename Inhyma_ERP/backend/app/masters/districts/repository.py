@@ -7,6 +7,7 @@ import uuid
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common.base_repository import BaseRepository
+from app.core.constants import RecordStatus
 from app.masters.districts.models import District
 
 
@@ -53,7 +54,7 @@ class DistrictRepository(BaseRepository[District]):
 
     async def list_by_state(self, state_id: uuid.UUID) -> list[District]:
         """Return every active non-deleted district in the given state, ordered by name."""
-        stmt = self._base_select().where(District.state_id == state_id).order_by(District.name)
+        stmt = self._base_select().where(District.state_id == state_id, District.status == RecordStatus.ACTIVE).order_by(District.name)
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 

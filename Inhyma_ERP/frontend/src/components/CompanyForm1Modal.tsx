@@ -119,7 +119,7 @@ export function CompanyForm1Modal({ isOpen, onClose, onSuccess }: CompanyForm1Mo
     if (!isOpen) return;
     (async () => {
       try {
-        const res = await apiGet<any[]>("/masters/states?page_size=100");
+        const res = await apiGet<any[]>("/masters/states?page_size=100&status=active");
         if (res?.data && Array.isArray(res.data) && res.data.length > 0) {
           setStatesList(res.data.map((s: any) => ({ id: String(s.id), name: s.name })));
         } else {

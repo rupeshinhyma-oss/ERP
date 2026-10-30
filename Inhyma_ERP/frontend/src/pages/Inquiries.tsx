@@ -3436,7 +3436,7 @@ function AddQuotationDrawer({
   const fetchSuppliers = useCallback(
     async (term: string) => {
       try {
-        let url = `/suppliers?search=${encodeURIComponent(term)}&limit=100&sort_by=company_name&sort_order=asc`;
+        let url = `/suppliers?search=${encodeURIComponent(term)}&limit=100&status=active&sort_by=company_name&sort_order=asc`;
         if (supplierFilterScope === "sub_category" && productMeta?.subCategoryId) {
           url += `&sub_category_id=${productMeta.subCategoryId}`;
         } else if (supplierFilterScope === "category" && productMeta?.categoryId) {
@@ -3444,7 +3444,9 @@ function AddQuotationDrawer({
         }
         const res = await apiGet<any>(url);
         const list = Array.isArray(res.data) ? res.data : res.data?.data || [];
-        return list.map((s: any) => ({ value: s.id, label: s.company_name || s.name || "Supplier" }));
+        return list
+          .filter((s: any) => s?.is_active !== false)
+          .map((s: any) => ({ value: s.id, label: s.company_name || s.name || "Supplier" }));
       } catch {
         return [];
       }
@@ -3781,13 +3783,15 @@ function RequestQuotationDrawer({
 
   const fetchSupplierOptions = useCallback(async (term: string) => {
     try {
-      let url = `/suppliers?page_size=100&sort_by=company_name&sort_order=asc`;
+      let url = `/suppliers?page_size=100&status=active&sort_by=company_name&sort_order=asc`;
       if (term && term.trim()) {
         url += `&search=${encodeURIComponent(term.trim())}`;
       }
       const res = await apiGet<any>(url);
       const list = Array.isArray(res.data) ? res.data : res.data?.items || res.data?.data || [];
-      return list.map((s: any) => ({ value: s.id, label: s.company_name || s.name || "Supplier" }));
+      return list
+        .filter((s: any) => s?.is_active !== false)
+        .map((s: any) => ({ value: s.id, label: s.company_name || s.name || "Supplier" }));
     } catch {
       return [];
     }
@@ -3870,7 +3874,7 @@ function RequestQuotationDrawer({
           }
         } else {
           // "all" matching suppliers
-          const { data: sups } = await apiGet<any>("/suppliers?limit=200");
+          const { data: sups } = await apiGet<any>("/suppliers?limit=200&status=active");
           const supList = Array.isArray(sups) ? sups : sups?.data || [];
 
           const matchingSupStubs = supList.filter((s: any) => {
@@ -4644,13 +4648,15 @@ function BulkRequestQuotationDrawer({
 
   const fetchSupplierOptions = useCallback(async (term: string) => {
     try {
-      let url = `/suppliers?page_size=100&sort_by=company_name&sort_order=asc`;
+      let url = `/suppliers?page_size=100&status=active&sort_by=company_name&sort_order=asc`;
       if (term && term.trim()) {
         url += `&search=${encodeURIComponent(term.trim())}`;
       }
       const res = await apiGet<any>(url);
       const list = Array.isArray(res.data) ? res.data : res.data?.items || res.data?.data || [];
-      return list.map((s: any) => ({ value: s.id, label: s.company_name || s.name || "Supplier" }));
+      return list
+        .filter((s: any) => s?.is_active !== false)
+        .map((s: any) => ({ value: s.id, label: s.company_name || s.name || "Supplier" }));
     } catch {
       return [];
     }
@@ -4720,7 +4726,7 @@ function BulkRequestQuotationDrawer({
             })
           );
 
-          const { data: sups } = await apiGet<any>("/suppliers?limit=200");
+          const { data: sups } = await apiGet<any>("/suppliers?limit=200&status=active");
           const supList = Array.isArray(sups) ? sups : sups?.data || [];
           
           // Filter suppliers whose category or subcategory links overlap with the products
@@ -6272,11 +6278,13 @@ function QuickInquiryDrawer({
     (async () => {
       try {
         const [compRes, uomRes] = await Promise.all([
-          apiGet<any>("/buyers?limit=1000"),
-          apiGet<any[]>("/masters/uom"),
+          apiGet<any>("/buyers?limit=1000&status=active"),
+          apiGet<any[]>("/masters/uom?status=active"),
         ]);
         const buyersList = Array.isArray(compRes.data) ? compRes.data : compRes.data?.data || [];
-        const formattedBuyers = buyersList.map((b: any) => ({
+        const formattedBuyers = buyersList
+          .filter((b: any) => b?.is_active !== false)
+          .map((b: any) => ({
           ...b,
           name: b.company_name || b.name || "Unnamed Buyer",
         }));
@@ -6519,9 +6527,11 @@ function QuickInquiryDrawer({
 
   const buyerFetcher: FetchOptions = useCallback(
     async (term, signal) => {
-      const { data } = await apiGet<any>("/buyers" + toQueryString({ search: term, limit: 20 }), { signal });
+      const { data } = await apiGet<any>("/buyers" + toQueryString({ search: term, limit: 20, status: "active" }), { signal });
       const list = Array.isArray(data) ? data : (data?.data || []);
-      return list.map((b: any) => ({
+      return list
+        .filter((b: any) => b?.is_active !== false)
+        .map((b: any) => ({
         value: b.id,
         label: b.company_name || b.name || "Unnamed Buyer",
       }));

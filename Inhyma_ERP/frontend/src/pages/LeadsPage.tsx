@@ -334,7 +334,7 @@ export function LeadsPage() {
   // Load Lead Sources from master if available
   useEffect(() => {
     let active = true;
-    apiGet<any[]>("/masters/lead-sources")
+    apiGet<any[]>("/masters/lead-sources?status=active")
       .then((res) => {
         if (active && Array.isArray(res.data)) {
           setSourceOptions(Array.from(new Set(res.data.map((item) => item.name).filter(Boolean))));
@@ -386,7 +386,7 @@ export function LeadsPage() {
         if (Array.isArray(res.data) && res.data.length > 0) {
           setDistrictList([...res.data].sort((a, b) => a.name.localeCompare(b.name)));
         } else {
-          apiGet<Array<{ id: string; name: string }>>(`/masters/districts?state_id=${stateIdOrName}&page_size=200`)
+          apiGet<Array<{ id: string; name: string }>>(`/masters/districts?state_id=${stateIdOrName}&page_size=200&status=active`)
             .then((res2) => {
               if (Array.isArray(res2.data)) {
                 setDistrictList([...res2.data].sort((a, b) => a.name.localeCompare(b.name)));

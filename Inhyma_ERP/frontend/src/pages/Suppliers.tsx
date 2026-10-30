@@ -834,7 +834,7 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
   const companyNameFetcher = useCallback(
     async (term: string, signal: AbortSignal): Promise<DropdownOption[]> => {
       const { data } = await apiGet<Supplier[]>(
-        "/suppliers" + toQueryString({ search: term, page: 1, page_size: 20 }),
+        "/suppliers" + toQueryString({ search: term, page: 1, page_size: 20, status: "active" }),
         { signal }
       );
       return data.map((d) => ({ value: d.company_name, label: d.company_name }));
@@ -1338,7 +1338,7 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
     if (!stateId && formStateCustomText.trim() && countryId) {
       try {
         const { data: searchStates } = await apiGet<{ id: string; name: string }[]>(
-          `/masters/states${toQueryString({ search: formStateCustomText.trim(), country_id: countryId, page: 1, page_size: 5 })}`
+          `/masters/states${toQueryString({ search: formStateCustomText.trim(), country_id: countryId, page: 1, page_size: 5, status: "active" })}`
         );
         const match = searchStates.find((s) => s.name.toLowerCase() === formStateCustomText.trim().toLowerCase());
         if (match) {
@@ -1360,7 +1360,7 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
     if (!cityId && formCityCustomText.trim() && stateId) {
       try {
         const { data: searchCities } = await apiGet<{ id: string; name: string }[]>(
-          `/masters/cities${toQueryString({ search: formCityCustomText.trim(), state_id: stateId, page: 1, page_size: 5 })}`
+          `/masters/cities${toQueryString({ search: formCityCustomText.trim(), state_id: stateId, page: 1, page_size: 5, status: "active" })}`
         );
         const match = searchCities.find((c) => c.name.toLowerCase() === formCityCustomText.trim().toLowerCase());
         if (match) {
@@ -1393,7 +1393,7 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
       } else {
         try {
           const { data: searchCats } = await apiGet<{ id: string; name: string }[]>(
-            `/masters/product-categories${toQueryString({ search: cat.trim(), page: 1, page_size: 5 })}`
+            `/masters/product-categories${toQueryString({ search: cat.trim(), page: 1, page_size: 5, status: "active" })}`
           );
           const match = searchCats.find((c) => c.name.toLowerCase() === cat.trim().toLowerCase());
           if (match) {

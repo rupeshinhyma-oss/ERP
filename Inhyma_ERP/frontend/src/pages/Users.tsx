@@ -1399,7 +1399,9 @@ export function UsersPage() {
               style={{ gridColumn: "span 2" }}
             >
               <option value="">-- None (No Manager) --</option>
-              {(allUsers.length > 0 ? allUsers : rows).map((u) => (
+              {(allUsers.length > 0 ? allUsers : rows)
+                .filter((u) => u.is_active !== false && String(u.status || "ACTIVE").toUpperCase() === "ACTIVE")
+                .map((u) => (
                 <option key={u.id} value={u.id}>
                   {u.full_name || u.display_name || u.employee_name || u.username} ({u.username || u.email || "No Login"})
                 </option>
@@ -1532,7 +1534,12 @@ export function UsersPage() {
                 >
                   <option value="">-- None (No Manager) --</option>
                   {(allUsers.length > 0 ? allUsers : rows)
-                    .filter((u) => u.id !== editForm.id)
+                    .filter(
+                      (u) =>
+                        u.id !== editForm.id &&
+                        ((u.is_active !== false && String(u.status || "ACTIVE").toUpperCase() === "ACTIVE") ||
+                          u.id === editForm.manager_id)
+                    )
                     .map((u) => (
                       <option key={u.id} value={u.id}>
                         {u.full_name || u.display_name || u.employee_name || u.username} ({u.username})

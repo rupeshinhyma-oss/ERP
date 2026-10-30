@@ -30,7 +30,9 @@ async def resolve_supplier(db: AsyncSession, name: str, supplier_id):
     """
     clean_name = (name or "").strip()
     if supplier_id:
-        stmt = select(Supplier.id, Supplier.company_name).where(Supplier.deleted_at.is_(None), Supplier.id == supplier_id)
+        stmt = select(Supplier.id, Supplier.company_name).where(
+            Supplier.deleted_at.is_(None), Supplier.is_active.is_(True), Supplier.id == supplier_id
+        )
         supplier = (await db.execute(stmt)).first()
         if supplier:
             return supplier
@@ -41,6 +43,7 @@ async def resolve_supplier(db: AsyncSession, name: str, supplier_id):
     # 1. Exact match (case-insensitive)
     stmt = select(Supplier.id, Supplier.company_name).where(
         Supplier.deleted_at.is_(None),
+        Supplier.is_active.is_(True),
         func.lower(Supplier.company_name) == clean_name.lower(),
     )
     supplier = (await db.execute(stmt)).first()
@@ -50,6 +53,7 @@ async def resolve_supplier(db: AsyncSession, name: str, supplier_id):
     # 2. Prefix match (e.g. 'Yinglima' -> 'Yinglima Packaging Machinery Co., Ltd.')
     stmt = select(Supplier.id, Supplier.company_name).where(
         Supplier.deleted_at.is_(None),
+        Supplier.is_active.is_(True),
         Supplier.company_name.ilike(f"{clean_name}%"),
     )
     supplier = (await db.execute(stmt)).first()
@@ -59,6 +63,7 @@ async def resolve_supplier(db: AsyncSession, name: str, supplier_id):
     # 3. Substring match
     stmt = select(Supplier.id, Supplier.company_name).where(
         Supplier.deleted_at.is_(None),
+        Supplier.is_active.is_(True),
         Supplier.company_name.ilike(f"%{clean_name}%"),
     )
     supplier = (await db.execute(stmt)).first()
@@ -69,16 +74,16 @@ async def resolve_supplier(db: AsyncSession, name: str, supplier_id):
 
 
 
-async def require_physical_warehouse(db: AsyncSession, name: str):
-    warehouse = await stock_service.get_warehouse(db, name)
+async def require_physical_warehouse(db: AsyncSession, name: str, *, require_active: bool = True):
+    warehouse = await stock_service.get_warehouse(db, name, require_active=require_active)
     if not stock_service.is_physical(warehouse):
         raise BadRequestException("Local purchases can only be received into a physical warehouse.")
     return warehouse
 
 
-async def product_defaults(db: AsyncSession, product_name: str) -> dict:
-    """Facts about a product from the Product Master (also proves the product exists)."""
-    product = await stock_service.find_product(db, product_name)
+async def product_defaults(db: AsyncSession, product_name: str, *, require_active: bool = True) -> dict:
+    """Facts about an active product from the Product Master (also proves the product exists and is active)."""
+    product = await stock_service.find_product(db, product_name, require_active=require_active)
     duty = None
     if product.hsn_id:
         duty = (await db.execute(select(Tax.import_duty_percent).where(Tax.id == product.hsn_id))).scalar()

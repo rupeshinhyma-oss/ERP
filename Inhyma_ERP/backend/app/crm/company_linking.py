@@ -93,10 +93,12 @@ async def resolve_or_create_company(
 
     # 1. Explicitly selected company ID from UI
     if company_id is not None:
-        stmt = select(Company).where(Company.id == company_id, Company.deleted_at.is_(None))
+        stmt = select(Company).where(
+            Company.id == company_id, Company.deleted_at.is_(None), Company.is_active.is_(True)
+        )
         company = (await session.execute(stmt)).scalar_one_or_none()
         if not company:
-            raise BadRequestException(f"Selected company (ID: {company_id}) was not found or has been deleted.")
+            raise BadRequestException(f"Selected company (ID: {company_id}) was not found, is inactive, or has been deleted.")
         return company.id, company.company_name, False
 
     # 2. Match by Tax ID / GSTIN if supplied
@@ -104,6 +106,7 @@ async def resolve_or_create_company(
     if clean_tax:
         tax_stmt = select(Company).where(
             Company.deleted_at.is_(None),
+            Company.is_active.is_(True),
             func.upper(Company.tax_id_number) == clean_tax,
         )
         tax_matches = (await session.execute(tax_stmt)).scalars().all()
@@ -135,6 +138,7 @@ async def resolve_or_create_company(
     # 3a. Exact normalized name match (case-insensitive, trimmed)
     exact_stmt = select(Company).where(
         Company.deleted_at.is_(None),
+        Company.is_active.is_(True),
         func.lower(func.trim(Company.company_name)) == clean_name.lower(),
     )
     exact_matches = (await session.execute(exact_stmt)).scalars().all()
@@ -160,6 +164,7 @@ async def resolve_or_create_company(
     if len(clean_name) >= 3:
         plausible_stmt = select(Company).where(
             Company.deleted_at.is_(None),
+            Company.is_active.is_(True),
             Company.company_name.ilike(f"%{clean_name}%"),
         )
         plausible_matches = (await session.execute(plausible_stmt)).scalars().all()

@@ -71,6 +71,38 @@ type CatalogProduct = { product_name: string };
 
 const todayDDMMYYYY = () => new Date().toLocaleDateString("en-GB").split("/").join("-");
 
+export function addDaysToDDMMYYYY(val: string, days: number): string | null {
+  if (!val || typeof val !== "string") return null;
+  const trimmed = val.trim();
+  const dmyMatch = trimmed.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/);
+  const ymdMatch = trimmed.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  let d: number;
+  let m: number;
+  let y: number;
+  if (dmyMatch) {
+    d = parseInt(dmyMatch[1], 10);
+    m = parseInt(dmyMatch[2], 10);
+    y = parseInt(dmyMatch[3], 10);
+  } else if (ymdMatch) {
+    y = parseInt(ymdMatch[1], 10);
+    m = parseInt(ymdMatch[2], 10);
+    d = parseInt(ymdMatch[3], 10);
+  } else {
+    return null;
+  }
+  const dt = new Date(y, m - 1, d);
+  if (
+    isNaN(dt.getTime()) ||
+    dt.getFullYear() !== y ||
+    dt.getMonth() !== m - 1 ||
+    dt.getDate() !== d
+  ) {
+    return null;
+  }
+  const shifted = new Date(y, m - 1, d + days);
+  return formatDDMMYYYY(shifted);
+}
+
 // Row colours by position in the DB-configured workflow (purely visual)
 const STATUS_PALETTE = [
   { bg: "#fef9c3", fg: "#a16207", border: "#fde047" },
@@ -762,6 +794,7 @@ export function ImportPurchasePage({ defaultAdd = false }: { defaultAdd?: boolea
   const billInputRef = useRef<HTMLInputElement>(null);
   const previewSeq = useRef(0);
   const productSearchSeq = useRef(0);
+  const expectedArrivalCustomizedRef = useRef(false);
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -846,6 +879,7 @@ export function ImportPurchasePage({ defaultAdd = false }: { defaultAdd?: boolea
   const warehouseLocked = Boolean(editingOrderId) && (isEditingInwarded || physicalWarehouses.has(originalWarehouse));
 
   const resetForm = () => {
+    expectedArrivalCustomizedRef.current = false;
     setForm(blankForm());
     setFormItems([]);
     setOriginalWarehouse("");
@@ -863,9 +897,23 @@ export function ImportPurchasePage({ defaultAdd = false }: { defaultAdd?: boolea
 
   const populateForm = (order: ImportPurchaseRecord) => {
     const s = (n: number | undefined) => (n ? String(n) : "");
+    const rawEta = order.eta_port_date || "";
+    const createdAnchor = order.added_on || order.created_at_time || "";
+    const createdDt = createdAnchor ? parseDDMMYYYY(createdAnchor) : null;
+    if (createdDt) createdDt.setHours(0, 0, 0, 0);
+    const computedFromEta = rawEta ? addDaysToDDMMYYYY(rawEta, 5) : null;
+    const computedDt = computedFromEta ? parseDDMMYYYY(computedFromEta) : null;
+    const validDefaultArrival =
+      computedFromEta && (!createdDt || (computedDt && computedDt >= createdDt))
+        ? computedFromEta
+        : "";
+    const resolvedExpArrival = order.exp_arri_date || validDefaultArrival;
+    expectedArrivalCustomizedRef.current = Boolean(
+      order.exp_arri_date && order.exp_arri_date !== (computedFromEta || "")
+    );
     setEditingOrderId(order.id);
     setOriginalWarehouse(order.warehouse);
-    setEditingCreatedDate(order.added_on || order.created_at_time || "");
+    setEditingCreatedDate(createdAnchor);
     setForm({
       consignment_no: order.consignment_no,
       supplier_name: order.supplier_name,
@@ -873,8 +921,8 @@ export function ImportPurchasePage({ defaultAdd = false }: { defaultAdd?: boolea
       ordered_date: order.ordered_date || todayDDMMYYYY(),
       invoice_date: order.invoice_date || "",
       etd_origin_date: order.etd_origin_date || "",
-      eta_port_date: order.eta_port_date || "",
-      expected_arrival_date: order.exp_arri_date || "",
+      eta_port_date: rawEta,
+      expected_arrival_date: resolvedExpArrival,
       conversion_rate: s(order.con_rate_usd_to_inr),
       customs_conversion_rate: s(order.custom_con_rate_usd_to_inr),
       invoice_total_usd: s(order.invoice_total_usd),
@@ -1224,9 +1272,79 @@ export function ImportPurchasePage({ defaultAdd = false }: { defaultAdd?: boolea
         <DatePicker
           value={form[key] as string}
           onChange={(val) => {
-            setField(key, val);
-            if (maxDate && val.trim()) {
-              const p = parseDDMMYYYY(val.trim());
+            const trimmedVal = val.trim();
+            const parsedVal = trimmedVal ? parseDDMMYYYY(trimmedVal) : null;
+            let minLimit: Date | null = null;
+            if (minDate) {
+              const rawMin =
+                minDate === "today"
+                  ? new Date()
+                  : minDate instanceof Date
+                  ? new Date(minDate)
+                  : parseDDMMYYYY(minDate);
+              if (rawMin && !isNaN(rawMin.getTime())) {
+                rawMin.setHours(0, 0, 0, 0);
+                minLimit = rawMin;
+              }
+            }
+
+            if (key === "eta_port_date") {
+              if (!trimmedVal) {
+                const clearArrival = !expectedArrivalCustomizedRef.current;
+                setForm((prev) => ({
+                  ...prev,
+                  eta_port_date: "",
+                  expected_arrival_date: clearArrival ? "" : prev.expected_arrival_date,
+                }));
+                setFormErrors((prev) => ({
+                  ...prev,
+                  eta_port_date: "",
+                  ...(clearArrival ? { expected_arrival_date: "" } : {}),
+                }));
+                return;
+              }
+              const defaultArrival = addDaysToDDMMYYYY(trimmedVal, 5);
+              const isValidMin = !minLimit || Boolean(parsedVal && parsedVal >= minLimit);
+              if (defaultArrival && isValidMin) {
+                const currentExp = form.expected_arrival_date?.trim() || "";
+                const parsedCurrentExp = currentExp ? parseDDMMYYYY(currentExp) : null;
+                const shouldAutoFill =
+                  !expectedArrivalCustomizedRef.current ||
+                  !currentExp ||
+                  Boolean(parsedCurrentExp && parsedVal && parsedCurrentExp < parsedVal);
+                if (shouldAutoFill) {
+                  expectedArrivalCustomizedRef.current = false;
+                }
+                setForm((prev) => ({
+                  ...prev,
+                  eta_port_date: val,
+                  expected_arrival_date: shouldAutoFill ? defaultArrival : prev.expected_arrival_date,
+                }));
+                setFormErrors((prev) => ({
+                  ...prev,
+                  eta_port_date: "",
+                  ...(shouldAutoFill ? { expected_arrival_date: "" } : {}),
+                }));
+                return;
+              }
+              setField(key, val);
+            } else if (key === "expected_arrival_date") {
+              setField(key, val);
+              if (!trimmedVal) {
+                expectedArrivalCustomizedRef.current = false;
+              } else {
+                const completeArrival = addDaysToDDMMYYYY(trimmedVal, 0);
+                const defaultFromEta = form.eta_port_date ? addDaysToDDMMYYYY(form.eta_port_date, 5) : null;
+                if (completeArrival && (!minLimit || Boolean(parsedVal && parsedVal >= minLimit))) {
+                  expectedArrivalCustomizedRef.current = completeArrival !== defaultFromEta;
+                }
+              }
+            } else {
+              setField(key, val);
+            }
+
+            if (maxDate && trimmedVal) {
+              const p = parsedVal;
               if (p) {
                 const limit =
                   maxDate === "today"
@@ -1246,27 +1364,13 @@ export function ImportPurchasePage({ defaultAdd = false }: { defaultAdd?: boolea
                 }
               }
             }
-            if (minDate && val.trim()) {
-              const p = parseDDMMYYYY(val.trim());
-              if (p) {
-                const limit =
-                  minDate === "today"
-                    ? new Date()
-                    : minDate instanceof Date
-                    ? new Date(minDate)
-                    : parseDDMMYYYY(minDate);
-                if (limit) {
-                  limit.setHours(0, 0, 0, 0);
-                  if (p < limit) {
-                    const limitStr = typeof minDate === "string" && minDate !== "today" ? minDate : formatDDMMYYYY(limit);
-                    setFormErrors((prev) => ({
-                      ...prev,
-                      [key]: `${label} cannot be earlier than Created Date (${limitStr}).`,
-                    }));
-                    return;
-                  }
-                }
-              }
+            if (minLimit && trimmedVal && parsedVal && parsedVal < minLimit) {
+              const limitStr = typeof minDate === "string" && minDate !== "today" ? minDate : formatDDMMYYYY(minLimit);
+              setFormErrors((prev) => ({
+                ...prev,
+                [key]: `${label} cannot be earlier than Created Date (${limitStr}).`,
+              }));
+              return;
             }
             if (formErrors[key]) {
               setFormErrors((prev) => ({ ...prev, [key]: "" }));

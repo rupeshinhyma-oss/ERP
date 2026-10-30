@@ -340,7 +340,7 @@ class CrmFollowUp(Base, UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, Ve
         CheckConstraint("status IN ('pending', 'completed', 'cancelled')", name="ck_crm_follow_up_status"),
         Index("ix_crm_follow_ups_due_at", "due_at"),
         Index("ix_crm_follow_ups_status", "status"),
-        Index("ix_crm_follow_ups_task_id", "task_id"),
+
     )
 
     lead_id: Mapped[uuid.UUID] = mapped_column(

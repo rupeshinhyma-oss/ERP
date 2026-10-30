@@ -245,11 +245,17 @@ async def list_users(
 @router.get("/all", summary="List all users (unpaginated for manager pickers and lookups)")
 async def list_all_users(
     request: Request,
+    active_only: bool = Query(default=False),
     user_service: UserService = Depends(get_user_service),
     _current_user: CurrentUser = Depends(require_permission("user.view")),
 ) -> dict:
-    """Return every non-deleted user, for manager dropdowns and lookups."""
+    """Return every non-deleted user, optionally restricted to active users for cross-module dropdowns."""
     users = await user_service.user_repository.list_all()
+    if active_only:
+        users = [
+            u for u in users
+            if u.is_active and getattr(u.status, "value", str(u.status)).upper() == "ACTIVE"
+        ]
     data = [UserRead.model_validate(u).model_dump(mode="json") for u in users]
     return build_success_response(data=data, request_id=request.state.request_id)
 
@@ -288,7 +294,7 @@ async def get_department_manager(
     lead = lead_res.scalar_one_or_none()
     if lead and lead.employee_id:
         user = await db.get(User, lead.employee_id)
-        if user and not user.deleted_at:
+        if user and not user.deleted_at and user.is_active and getattr(user.status, "value", str(user.status)).upper() == "ACTIVE":
             return build_success_response(
                 data={
                     "manager_id": str(user.id),
@@ -302,9 +308,12 @@ async def get_department_manager(
     role_users_stmt = (
         select(User)
         .join(UserRole, UserRole.user_id == User.id)
-        .where(UserRole.role_id == role_id, User.deleted_at.is_(None))
+        .where(UserRole.role_id == role_id, User.deleted_at.is_(None), User.is_active.is_(True))
     )
-    role_users = list((await db.execute(role_users_stmt)).scalars().all())
+    role_users = [
+        u for u in (await db.execute(role_users_stmt)).scalars().all()
+        if getattr(u.status, "value", str(u.status)).upper() == "ACTIVE"
+    ]
 
     if role_users:
         role_user_ids = {u.id for u in role_users}
@@ -332,7 +341,7 @@ async def get_department_manager(
         if managers:
             common_mgr_id = Counter(managers).most_common(1)[0][0]
             mgr_user = await db.get(User, common_mgr_id)
-            if mgr_user and not mgr_user.deleted_at:
+            if mgr_user and not mgr_user.deleted_at and mgr_user.is_active and getattr(mgr_user.status, "value", str(mgr_user.status)).upper() == "ACTIVE":
                 return build_success_response(
                     data={
                         "manager_id": str(mgr_user.id),

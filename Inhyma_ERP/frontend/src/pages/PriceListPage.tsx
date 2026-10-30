@@ -282,9 +282,9 @@ export function PriceListPage() {
   const loadSuppliersForQuotes = useCallback(async () => {
     if (quoteSuppliers.length > 0) return;
     try {
-      const res = await apiGet<Array<{ id: string; company_name: string }>>("/suppliers?page_size=200");
+      const res = await apiGet<Array<{ id: string; company_name: string; is_active?: boolean }>>("/suppliers?page_size=200&status=active");
       if (Array.isArray(res.data)) {
-        setQuoteSuppliers(res.data);
+        setQuoteSuppliers(res.data.filter((s) => s.is_active !== false));
       }
     } catch {
       // Non-blocking

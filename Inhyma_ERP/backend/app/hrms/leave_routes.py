@@ -77,11 +77,12 @@ async def get_current_user_context(
 
 @router.get("/types")
 async def list_leave_types(
+    active_only: bool = Query(default=False),
     service: HrmsLeaveService = Depends(get_leave_service),
     ctx: HrmsUserContext = Depends(get_hrms_user_context),
 ):
     ctx.require_module_access("leave")
-    leaves = await service.list_leave_types()
+    leaves = await service.list_leave_types(active_only=active_only)
     return build_success_response(
         data=[LeaveTypeRead.model_validate(l).model_dump(mode="json") for l in leaves],
         message="Leave types retrieved successfully.",

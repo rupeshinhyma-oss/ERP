@@ -582,16 +582,17 @@ class HrmsAssetService:
             if sn_check.scalar_one_or_none():
                 raise ConflictException(f"Asset with serial number '{clean_serial}' already exists.")
 
-        # 3. Check Location ID if provided
+        # 3. Check Location ID if provided (must exist and be active)
         if payload.location_id:
             loc_check = await self.db.execute(
                 select(HrmsLocation.id).where(
                     HrmsLocation.id == payload.location_id,
                     HrmsLocation.deleted_at.is_(None),
+                    HrmsLocation.is_active.is_(True),
                 )
             )
             if not loc_check.scalar_one_or_none():
-                raise BadRequestException("Office branch / location not found.")
+                raise BadRequestException("Office branch / location not found or inactive.")
 
         # 4. Status validation
         status = (payload.status or "AVAILABLE").upper()
@@ -668,17 +669,18 @@ class HrmsAssetService:
                     raise ConflictException(f"Serial number '{clean_sn}' is already registered to another asset.")
             asset.serial_number = clean_sn
 
-        # Check location
+        # Check location (enforce active if changing location)
         if payload.location_id is not None:
-            if payload.location_id:
+            if payload.location_id and payload.location_id != asset.location_id:
                 loc_check = await self.db.execute(
                     select(HrmsLocation.id).where(
                         HrmsLocation.id == payload.location_id,
                         HrmsLocation.deleted_at.is_(None),
+                        HrmsLocation.is_active.is_(True),
                     )
                 )
                 if not loc_check.scalar_one_or_none():
-                    raise BadRequestException("Office branch / location not found.")
+                    raise BadRequestException("Office branch / location not found or inactive.")
             asset.location_id = payload.location_id
 
         # Status validation if updated directly
@@ -848,10 +850,11 @@ class HrmsAssetService:
                 select(HrmsLocation.id).where(
                     HrmsLocation.id == target_location_id,
                     HrmsLocation.deleted_at.is_(None),
+                    HrmsLocation.is_active.is_(True),
                 )
             )
             if not loc_check.scalar_one_or_none():
-                raise BadRequestException("Assigned office location not found.")
+                raise BadRequestException("Assigned office location not found or inactive.")
             asset.location_id = target_location_id
 
         assigned_condition = payload.condition_at_assignment or payload.condition or asset.condition or "GOOD"
@@ -940,10 +943,11 @@ class HrmsAssetService:
                 select(HrmsLocation.id).where(
                     HrmsLocation.id == ret_loc,
                     HrmsLocation.deleted_at.is_(None),
+                    HrmsLocation.is_active.is_(True),
                 )
             )
             if not loc_check.scalar_one_or_none():
-                raise BadRequestException("Return office location not found.")
+                raise BadRequestException("Return office location not found or inactive.")
             asset.location_id = ret_loc
 
         # Close active assignment in HrmsAssetAssignment table
@@ -1095,11 +1099,15 @@ class HrmsAssetService:
 
         # Check target location
         loc_res = await self.db.execute(
-            select(HrmsLocation).where(HrmsLocation.id == payload.location_id, HrmsLocation.deleted_at.is_(None))
+            select(HrmsLocation).where(
+                HrmsLocation.id == payload.location_id,
+                HrmsLocation.deleted_at.is_(None),
+                HrmsLocation.is_active.is_(True),
+            )
         )
         new_loc = loc_res.scalar_one_or_none()
         if not new_loc:
-            raise BadRequestException("Target office branch / location not found.")
+            raise BadRequestException("Target office branch / location not found or inactive.")
 
         old_loc_name = asset.location.name if asset.location else "None"
         new_loc_name = new_loc.name

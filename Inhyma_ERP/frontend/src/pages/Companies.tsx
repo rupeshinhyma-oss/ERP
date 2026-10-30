@@ -1656,7 +1656,7 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
         })
         .catch(() => { });
 
-      void apiGet<Array<{ id: string; name: string }>>("/masters/countries?search=India&page_size=5")
+      void apiGet<Array<{ id: string; name: string }>>("/masters/countries?search=India&page_size=5&status=active")
         .then((res) => {
           const match = res?.data?.find((c) => c.name.toLowerCase().includes("india"));
           if (match) setDefaultIndiaId(match.id);
@@ -1675,7 +1675,7 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
           }
         })
         .catch(() => {
-          void apiGet<any[]>("/users/all")
+          void apiGet<any[]>("/users/all?active_only=true")
             .then((res) => {
               if (res?.data) {
                 const mapped = res.data.map((u) => ({
@@ -1786,7 +1786,7 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
     } catch (err: any) {
       try {
         const fetchRes = await apiGet<Array<{ id: string; name: string }>>(
-          `/masters/cities?state_id=${quickForm.state_id}&search=${encodeURIComponent(cityLabel)}&page_size=10`
+          `/masters/cities?state_id=${quickForm.state_id}&search=${encodeURIComponent(cityLabel)}&page_size=10&status=active`
         );
         const match = fetchRes.data?.find((c) => c.name.toLowerCase() === cityLabel.toLowerCase());
         if (match) {
@@ -1829,7 +1829,7 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
           if (quickErrors.state_id) setQuickErrors((prev) => ({ ...prev, state_id: "" }));
         } else {
           try {
-            const indiaRes = await apiGet<any[]>("/masters/countries?search=India&page_size=1");
+            const indiaRes = await apiGet<any[]>("/masters/countries?search=India&page_size=1&status=active");
             const indiaId = indiaRes.data?.[0]?.id;
             const { data: newState } = await apiPost<{ id: string; name: string }>("/masters/states", {
               name: stateName,

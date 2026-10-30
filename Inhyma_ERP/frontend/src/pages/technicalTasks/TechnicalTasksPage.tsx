@@ -836,7 +836,7 @@ function TechnicalTasksPageContent() {
       }
 
       try {
-        const prodRes = await apiGet<any[]>("/masters/products?limit=200");
+        const prodRes = await apiGet<any[]>("/masters/products?limit=200&status=active");
         const prods = Array.isArray(prodRes?.data)
           ? prodRes.data
           : (prodRes?.data as any)?.items || [];
@@ -1130,7 +1130,7 @@ function TechnicalTasksPageContent() {
     if (!val || !val.trim()) return;
     try {
       const res = await apiGet<any[] | { items: any[] }>(
-        `/masters/products?is_active=true&search=${encodeURIComponent(val.trim())}&limit=50`
+        `/masters/products?status=active&is_active=true&search=${encodeURIComponent(val.trim())}&limit=50`
       );
       const prods = Array.isArray(res?.data) ? res.data : (res?.data as any)?.items || [];
       const names = prods

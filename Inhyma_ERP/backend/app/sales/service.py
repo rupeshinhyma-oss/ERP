@@ -330,11 +330,16 @@ class SaleService:
             return {}
         if not (RESTRICTED_VIEW_PERMISSIONS & set(user.permissions)):
             return {}
+        from app.core.constants import RecordStatus
         from app.masters.warehouses.models import Warehouse
 
         names = (
             await self.session.execute(
-                select(Warehouse.name).where(Warehouse.main_warehouse_id.is_(None), Warehouse.deleted_at.is_(None))
+                select(Warehouse.name).where(
+                    Warehouse.main_warehouse_id.is_(None),
+                    Warehouse.deleted_at.is_(None),
+                    Warehouse.status == RecordStatus.ACTIVE,
+                )
             )
         ).scalars().all()
         rules = await self.load_status_rules()
@@ -451,11 +456,22 @@ class SaleService:
                         has_remarks = True
                         break
 
-                # Inspect cell counts for this column
+                # Inspect cell counts for this column (excluding rows linked to inactive/deleted products)
+                from app.core.constants import RecordStatus
+                inactive_prod_ids = select(Product.id).where(
+                    or_(Product.deleted_at.is_not(None), Product.status != RecordStatus.ACTIVE)
+                )
                 q_cells = await self.session.execute(
-                    select(PlanningCell.value).where(
+                    select(PlanningCell.value)
+                    .join(PlanningRow, PlanningCell.row_id == PlanningRow.id)
+                    .where(
                         PlanningCell.column_id == col.id,
                         PlanningCell.value.isnot(None),
+                        PlanningRow.deleted_at.is_(None),
+                        or_(
+                            PlanningRow.linked_record_id.is_(None),
+                            PlanningRow.linked_record_id.notin_(inactive_prod_ids),
+                        ),
                     )
                 )
                 cell_vals = q_cells.scalars().all()
@@ -569,7 +585,8 @@ class SaleService:
         )
         rows = list(q_rows.scalars().all())
 
-        # 5. Fetch linked Product details
+        # 5. Fetch linked Product details (strictly active products only)
+        from app.core.constants import RecordStatus
         prod_ids = [r.linked_record_id for r in rows if r.linked_record_id]
         prod_map: dict[uuid.UUID, Product] = {}
         if prod_ids:
@@ -577,6 +594,7 @@ class SaleService:
                 select(Product).where(
                     Product.id.in_(prod_ids),
                     Product.deleted_at.is_(None),
+                    Product.status == RecordStatus.ACTIVE,
                 )
             )
             for p in q_prods.scalars().all():
@@ -597,6 +615,8 @@ class SaleService:
         total_quantity = 0.0
 
         for r in rows:
+            if r.linked_record_id and r.linked_record_id not in prod_map:
+                continue
             qty = valid_row_map.get(r.id, 1.0)
             total_quantity += qty
 
@@ -643,6 +663,43 @@ class SaleService:
         payload: SaleOrderCreate,
         current_user: Any = None,
     ) -> SaleOrder:
+        from app.core.constants import RecordStatus
+        from app.masters.warehouses.models import Warehouse
+
+        if payload.warehouse and payload.warehouse.strip():
+            wh_row = (
+                await self.session.execute(
+                    select(Warehouse).where(
+                        func.lower(Warehouse.name) == payload.warehouse.strip().lower(),
+                        Warehouse.deleted_at.is_(None),
+                    )
+                )
+            ).scalars().first()
+            if wh_row is not None and wh_row.status != RecordStatus.ACTIVE:
+                raise BadRequestException(f"Warehouse '{payload.warehouse}' is inactive in the Warehouse Master.")
+
+        if payload.buyer_id is not None:
+            from app.buyers.models import Buyer
+            buyer_row = await self.session.get(Buyer, payload.buyer_id)
+            if buyer_row is not None and (buyer_row.deleted_at is not None or not buyer_row.is_active):
+                raise BadRequestException("Selected buyer is inactive or deleted.")
+
+        for it in payload.items or []:
+            if not getattr(it, "is_additional_charge", False) and getattr(it, "product_name", None):
+                prod_check = (
+                    await self.session.execute(
+                        select(Product).where(
+                            Product.deleted_at.is_(None),
+                            or_(
+                                func.lower(Product.product_name) == it.product_name.strip().lower(),
+                                func.lower(Product.product_name_tally) == it.product_name.strip().lower(),
+                            ),
+                        )
+                    )
+                ).scalars().first()
+                if prod_check is not None and prod_check.status != RecordStatus.ACTIVE:
+                    raise BadRequestException(f"Product '{it.product_name}' is inactive in the Product Master.")
+
         rules = await self.load_status_rules()
         order_no = await self.repo.generate_order_no(payload.order_date)
 

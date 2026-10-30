@@ -2194,7 +2194,9 @@ class PlanningService:
         else:
             repository = module.repository_factory(self.row_repository.session)
             order_by = getattr(repository.model, "created_at", None)
-            records = await repository.list(offset=0, limit=limit, order_by=order_by)
+            table_cols = repository.model.__table__.columns
+            active_filters = {"is_active": True} if "is_active" in table_cols else ({"status": "active"} if "status" in table_cols else {})
+            records = await repository.list(offset=0, limit=limit, order_by=order_by, filters=active_filters)
 
         existing_rows = await self.row_repository.list_for_sheet(sheet_id)
         already_linked_ids = {r.linked_record_id for r in existing_rows if r.linked_record_id is not None}
@@ -2413,6 +2415,11 @@ class PlanningService:
                 record = await repository.get_by_id(effective_record_id)
             if record is None:
                 return None
+            if getattr(record, "is_active", True) is False:
+                return None
+            rec_status = getattr(record, "status", None)
+            if rec_status is not None and str(getattr(rec_status, "value", rec_status)).lower() == "inactive":
+                return None
             value = module.value_getter(record, column.source_field or "")
             return str(value) if value is not None else None
 
@@ -2421,7 +2428,12 @@ class PlanningService:
             if module is None:
                 return None
             repository = module.repository_factory(self.cell_repository.session)
-            filters = column.source_aggregate_filters or {}
+            filters = dict(column.source_aggregate_filters or {})
+            table_cols = repository.model.__table__.columns
+            if "is_active" in table_cols and "is_active" not in filters:
+                filters["is_active"] = True
+            elif "status" in table_cols and "status" not in filters:
+                filters["status"] = "active"
             if column.source_aggregate_fn == "count":
                 total = await repository.count(filters=filters)
                 return str(total)

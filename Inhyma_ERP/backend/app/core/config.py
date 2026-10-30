@@ -108,7 +108,7 @@ class Settings(BaseSettings):
     # -------------------------------------------------------------------
     # Database
     # -------------------------------------------------------------------
-    DATABASE_URL: PostgresDsn = Field(
+    DATABASE_URL: PostgresDsn | str = Field(
         default="postgresql+asyncpg://erp_user:erp_password@localhost:5432/erp_db",
         description="Async SQLAlchemy connection string, e.g. "
         "postgresql+asyncpg://user:pass@host:5432/dbname",

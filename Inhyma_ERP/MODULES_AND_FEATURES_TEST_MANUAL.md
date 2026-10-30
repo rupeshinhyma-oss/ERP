@@ -4,7 +4,7 @@
 > **Location:** Root Workspace (`/MODULES_AND_FEATURES_TEST_MANUAL.md`)  
 > **Purpose:** Exhaustive reference catalog detailing every single module, page layout, table column, action button, modal window, drawer, form tab, and form field across the entire ERP. Designed for developers, QA testers, and autonomous AI agents to execute manual and automated regression tests before and after code changes.  
 > **Strict Policy:** When developing or modifying features, no existing module, form, or field listed in this document may be removed, broken, or regressed.  
-> **Last Updated:** October 29, 2026
+> **Last Updated:** October 30, 2026
 
 ---
 
@@ -83,6 +83,9 @@
 71. [SALE: Discount Payments Ledger, Multi-Installment Adjustment Drawer & Payment List Modal](#71-sale-discount-payments-ledger-multi-installment-adjustment-drawer--payment-list-modal)
 72. [REPORTS: Product Re-Order Matrix, Branch-Scoped Shortfall Engine & FIFO Stock Breakup](#72-reports-product-re-order-matrix-branch-scoped-shortfall-engine--fifo-stock-breakup)
 73. [REPORTS: Product Stock Transactions Master List & Per-Product Stock Transaction Ledger](#73-reports-product-stock-transactions-master-list--per-product-stock-transaction-ledger)
+74. [PLATFORM ECOSYSTEM: `.env`-Driven Cross-ERP Switching & Strict Local/Hosted Environment Isolation](#74-platform-ecosystem-env-driven-cross-erp-switching--strict-localhosted-environment-isolation)
+75. [PLATFORM GOVERNANCE: Pytest Live-Database Isolation & Synthetic User Prevention](#75-platform-governance-pytest-live-database-isolation--synthetic-user-prevention)
+76. [PLATFORM GOVERNANCE: System-Wide Active-Only Cross-Module Extraction & Inactive Isolation](#76-platform-governance-system-wide-active-only-cross-module-extraction--inactive-isolation)
 
 ---
 
@@ -925,7 +928,10 @@ Manage complete vendor team directory:
 
 ### 16.1. Departments Table
 - **Columns:** Checkbox, Sr. No., Department Name, Created Date, Actions.
-- **Header Actions:** `+ ADD NEW DEPARTMENT`, `Bulk Delete`.
+- **Header Actions:** `+ ADD NEW`, `DELETE` (bulk delete selected custom departments), `Clone Department Permissions`.
+- **Canonical System Roles vs. Custom Organizational Departments:**
+  - Strictly **two** bootstrap roles carry the `SYSTEM` badge (`is_system=True`): **`Admin`** (`super_admin`, full `297/297` permission access, reserved for the bootstrap admin) and **`User`** (`user`, default fallback role). Their row checkboxes are disabled and they cannot be renamed or deleted.
+  - Zero business departments (`Sales`, `HR`, `Operations`, `Engineering`, `Sales Manager`, etc.) are hardcoded or auto-seeded; every organizational department is created dynamically by administrators (`is_system=False`) and can be edited, nested, or deleted without ever re-creating automatically.
 
 ### 16.2. Department View / Edit Modal
 - **Department Name** (*Required*): Title (reserved system roles like `super_admin` are protected).
@@ -2230,7 +2236,7 @@ Checklist to execute:
 - [ ] Verify manager rejection transitions status to `REJECTED` and does not alter employee balance.
 - [ ] Verify cancelling an approved leave request restores consumed balance back to available.
 - [ ] Verify manual Leave Adjustment (+ or -) creates an immutable audit record and updates available balance via `available = allocated + adjusted - consumed`.
-- [ ] Verify all automated tests in `test_hrms_leave_phase1.py`, `HrmsPhase1Foundation.test.tsx`, and `HrmsLeavePhase1.test.tsx` pass 100%.
+- [ ] Verify all automated tests in `test_hrms_batch1_security.py`, `test_hrms_batch2_security.py`, `test_hrms_batch3_integrity.py`, `HrmsPhase1Foundation.test.tsx`, and `HrmsLeavePhase1.test.tsx` pass 100%.
 
 ---
 
@@ -2350,13 +2356,12 @@ Checklist to execute:
    - Total Foreign Value ($ / ¥ / €).
    - Total Landed INR Valuation (₹).
    - In-Transit vs. Custom-Cleared Consignment breakdown.
-2. **Consignment Logistics & Shipping Header:**
-   - Overseas Supplier / Manufacturer picker.
-   - Foreign Currency selector (USD, CNY, EUR, etc.) with live Exchange Rate to INR.
-   - Port of Loading (Foreign origin) & Port of Discharge (Indian port).
-   - Bill of Lading (BL) / Air Waybill (AWB) number and BL Date.
-   - Commercial Invoice Number and Invoice Date.
-   - Vessel / Flight Name, Container Numbers, Shipping Date, and Expected Arrival Date.
+2. **Consignment Logistics, Shipping Header & `General Details` Form Fields (`ImportPurchasePage.tsx`):**
+   - **Row 1:** `Supplier *` (active-only searchable floating Combobox), `Warehouse *` (active Ordered/Transit warehouse dropdown), `Invoice / Consignment No. *`, `Ordered Date *` (defaults to `todayDDMMYYYY()`, strictly `maxDate="today"`).
+   - **Row 2 (Shipping & Arrival Dates):** `Invoice Date` (`DD-MM-YYYY`), `ETD Origin Date` (`DD-MM-YYYY`, `minDate=effectiveCreatedDate`), `ETA Port Date` (`DD-MM-YYYY`, `minDate=effectiveCreatedDate`), and `Expected Arrival Date` (`DD-MM-YYYY`, `minDate=effectiveCreatedDate`).
+     - **`ETA Port Date + 5 Days` Editable Auto-Default:** Selecting or typing a valid `ETA Port Date` (or opening Edit when `ETA Port Date` is populated and `Expected Arrival Date` was blank) automatically populates `Expected Arrival Date` with **`ETA Port Date + 5 days`** (`addDaysToDDMMYYYY(val, 5)`). Unlike `.calc-locked` grey fields, `Expected Arrival Date` stays an **unlocked, white (`#ffffff`), freely editable `<DatePicker />`** so operators can change or override it via calendar selection or direct `DD-MM-YYYY` keyboard entry (`expectedArrivalCustomizedRef` preserves manual overrides `>= ETA Port Date`). Backend `POST /api/v1/purchase/import-orders` and `POST /api/v1/purchase/import-orders/import` likewise default omitted `expected_arrival_date` to `eta_port_date + 5 days` while saving any custom operator-entered arrival date.
+   - **Row 3 (Currency & Valuation):** `Conversion Rate (USD to INR) *`, `Customs Conversion Rate (USD to INR) *`, `Purchase Invoice Total Value (USD)`, and `.calc-locked` read-only `Purchase Invoice Total Value (INR)` (`₹ 0.00` with lock icon).
+   - **Row 4 (Volume, Duty & Attachment):** `Total CBM`, `Total Import Duty (INR)`, and `Attach Invoice` (file picker), alongside Port of Loading/Discharge, BL/AWB, Vessel/Flight, and Container references.
 3. **Customs Duty & Statutory Assessment Engine:**
    - **Assessable Value (CIF INR):**
      $$\text{Assessable Value} = (\text{FOB Value Foreign} \times \text{Exchange Rate}) + \text{Ocean/Air Freight} + \text{Insurance}$$
@@ -2399,7 +2404,10 @@ Checklist to execute:
 - [ ] Verify that on a consignment with `Closed` status, clicking the Action menu (`⋮`) displays strictly ONLY `Download Purchase` (Edit is removed).
 - [ ] Verify clicking `Imp / Exp` opens the dropdown menu with professional SVG icon badges for `SAMPLE FILE`, `IMPORT`, and `EXPORT`.
 - [ ] Verify `SAMPLE FILE` downloads `Sample_Import_Purchase_Template.csv` with valid dynamic dates, `IMPORT` opens the column-mapping wizard and imports valid consignments via `POST /api/v1/purchase/import-orders/import`, and `EXPORT` downloads the filtered Import Purchase CSV with UTF-8 BOM.
-- [ ] Verify all 45 automated tests in `ImportPurchasePage.test.tsx`, 6 tests in `ImportPurchasePdfPage.test.tsx`, and 23 purchase route tests in `test_purchase_routes.py` pass without errors.
+- [ ] **TC-IMP-ETA-01 (UI Auto-Default & Month/Year Rollover):** On `/purchase-order/import-purchase/addedit`, select or type `ETA Port Date = 05-11-2026` and verify `Expected Arrival Date` automatically fills `10-11-2026` (and `28-11-2026` rolls cleanly to `03-12-2026`).
+- [ ] **TC-IMP-ETA-02 (Unlocked Manual Override & Preservation):** Verify `Expected Arrival Date` is rendered as an unlocked white `<DatePicker />` (not `.calc-locked`), manually change it to `14-11-2026`, then update `ETA Port Date` to `07-11-2026` and verify the manual `14-11-2026` override is preserved and submitted intact.
+- [ ] **TC-IMP-ETA-03 (Backend Create & CSV/Excel Bulk Import Fallback):** Submit `POST /api/v1/purchase/import-orders` or upload an Import Purchase `.csv`/`.xlsx` via `POST /api/v1/purchase/import-orders/import` with `ETA Port Date` set and `Expected Arrival Date` blank — verify the saved consignment defaults `expected_arrival_date` to `ETA Port Date + 5 days`, whereas an explicit custom `Expected Arrival Date` in the payload/CSV is preserved verbatim.
+- [ ] Verify all 46 automated tests in `ImportPurchasePage.test.tsx`, 6 tests in `ImportPurchasePdfPage.test.tsx`, and 30 purchase backend tests (`24` in `test_purchase_routes.py` + `6` in `test_purchase_costing.py`) pass without errors.
 
 ---
 
@@ -3528,4 +3536,61 @@ Positioned directly underneath the collapsible filter panel, these three metric 
 - [ ] **TC-ENV-04 (LAN Hostname Adaptation):** When opening any local ERP frontend over LAN IP (`http://192.168.x.x:5174`), verify cross-ERP links configured as `http://localhost:5173` or `http://localhost:5170` in `.env` automatically adapt their hostname to `192.168.x.x` so LAN devices stay on the LAN network.
 
 ---
-*End of Master Features & Testing Specification Manual. Maintained for Inhyma Solutions Enterprise ERP. Last updated: October 29, 2026 (Sections 61-74 & Global Updates: `.env`-Driven Cross-ERP Switching & Strict Local/Hosted Environment Isolation, Local & Import Purchase Multi-Line CSV/Excel Bulk Import, Standardized Golden-Amber Export & Vector SVG Imp/Exp Controls, Suppliers Sidebar Active Highlight & Goods Expected Report Removal, HRMS Integrity Remediation & Payroll Approval Persistence, Dynamic Organization Company Logo, Product Master Category Rewiring & Floating Duplicate Overlay, Platform Migration Idempotency, Sales Process Workflow & 13-Field Filter Grid, Feed & Broadcast Open Access & 1-to-1 Employee Messaging, Sale Status Update Side Drawer & Chronological Timeline, Discount Payments Multi-Installment Ledger, Product Re-Order Branch-Scoped Matrix & FIFO Stock Breakup, and Product Stock Transactions Master List & Per-Product Stock Transaction Ledger).*
+
+## 75. PLATFORM GOVERNANCE: Pytest Live-Database Isolation & Synthetic User Prevention
+
+- **Module Name:** Test Suite Database Isolation & User Directory Data Hygiene
+- **Routes Affected:** `/users`, `/rbac`, `/tasks`, `/feed`, `/hrms/setup`, `/crm/pipelines`
+- **Files:** `backend/tests/conftest.py`, `backend/app/core/config.py`, `backend/app/database/engine.py`, `backend/app/main.py`, `backend/app/crm/models.py`, `backend/app/hrms/service.py`, `backend/app/hrms/leave_service.py`, `backend/scripts/seed.py`
+
+### Feature Overview & Specifications
+1. **In-Memory SQLite Default for Local Pytest (`backend/tests/conftest.py`):**
+   - `conftest.py` never calls `load_dotenv(..., override=True)`.
+   - Whenever `DATABASE_URL` is unset or points to `supabase.com` / `supabase.co` (and `ALLOW_LIVE_DB_TESTS != "1"`), `conftest.py` forces `DATABASE_URL="sqlite+aiosqlite:///:memory:"` and `ENVIRONMENT="test"` before application settings load.
+   - Running `pytest` locally cannot connect to or insert test users into the live Supabase database.
+2. **Permanent Removal of Synthetic User / QA Generators:**
+   - All standalone QA persona scripts (`provision_tasks_qa_personas.py`, `provision_hrms_qa_matrix.py`, `provision_feed_test_accounts.py`, `prepare_minimal_crm_qa_data.py`, `seed_crm_qa_demo_data.py`, `cleanup_local_crm_qa_data.py`) and live-DB `User(...)`-inserting test suites (`test_tasks_recurring.py`, etc.) have been removed.
+3. **Canonical 2-System-Role & 297-Permission Bootstrap (`backend/scripts/seed.py`):**
+   - `scripts/seed.py` seeds strictly `super_admin` (`Admin SYSTEM`, `297/297` permissions including granular `hrms.*`, `bank.*`, `billingcompany.*`, and `technician.*` permissions) and `user` (`User SYSTEM`), without creating hardcoded business roles.
+4. **HRMS Default Seed Soft-Delete Non-Recreation (`app/hrms/service.py`, `app/hrms/leave_service.py`):**
+   - `ensure_seeds()` checks total row existence (including soft-deleted rows) for `HrmsLocation`, `HrmsLeaveType`, `HrmsExpenseCategory`, `HrmsHoliday`, and `HrmsLeavePlan`, ensuring soft-deleted defaults never re-create on subsequent page loads.
+
+### QA Verification Test Cases
+- [ ] **TC-ISO-01 (Clean Users & Departments Directories):** Navigate to `USER MANAGEMENT` ➔ `Users` (`/users`) and `USER MANAGEMENT` ➔ `Departments & Permissions` (`/rbac`). Verify only authentic provisioned accounts and real departments/roles appear, only the two bootstrap roles (`Admin` / `super_admin` and `User` / `user`) carry the `SYSTEM` lock badge, and zero synthetic hex-suffixed test roles (`Admin_04ae`, `Engineering_xxxx`, `HR Dept_xxxxxx`, duplicate `admin`/`Admin`) or `@example.com` test personas exist.
+- [ ] **TC-ISO-02 (Zero Live-DB Mutation During Pytest):** Record `SELECT COUNT(*) FROM users` in `Inhyma_ERP`'s live database, execute `pytest` inside `Inhyma_ERP/backend`, and re-query `SELECT COUNT(*) FROM users`. Verify the live user count remains 100% unchanged.
+- [ ] **TC-ISO-03 (Deleted Departments & HRMS Defaults Never Re-Seed):** Delete a custom department on `/rbac` or a default master entry on `/hrms/setup` (Location, Leave Type, Expense Category, Holiday, Leave Plan), reload the page and restart the backend (`python -m scripts.seed`), and verify the deleted record is never automatically re-created.
+
+---
+
+## 76. PLATFORM GOVERNANCE: System-Wide Active-Only Cross-Module Extraction & Inactive Isolation
+
+- **Module Name:** Universal Cross-Module Active-Only Data Extraction & Historical Reference Safety
+- **Routes Affected:** All Master `/lookup` & `/dropdown` endpoints, `/product-stock/list`, `/reports/stock-transactions`, `/reports/re-order`, `/masters/price-list`, `/product/gallery`, `/planning`, `/purchase/localpurchase`, `/purchase/importpurchase`, `/proforma-invoice`, `/sales/process`, `/inquiries`, `/crm/leads`, `/crm/import`, `/technical-tasks`, `/companies`, `/purchase/suppliers`, `/buyers`, `/leads`, `/follow-ups`, `/agents`, `/industrial-zones`, `/users`, `/rbac`, `/hrms/leave`, `/hrms/assets`, `/hrms/expenses`, `/hrms/site-visit`, Topbar Universal Search (`/search`)
+- **Files:**
+  - Backend Core & Masters: `backend/app/common/base_repository.py`, `backend/app/masters/*/service.py` (all 28 master modules), `backend/app/masters/products/{repository,service}.py`, `backend/app/masters/{cities,districts}/repository.py`, `backend/app/masters/price_list/repository.py`
+  - Backend Operational & Directory Modules: `backend/app/inventory/{routes,stock_service}.py`, `backend/app/planning/{repository,service}.py`, `backend/app/purchase/{common,local_routes,import_routes}.py`, `backend/app/sales/{service,proforma_service}.py`, `backend/app/inquiries/{repository,service,routes}.py`, `backend/app/companies/routes.py`, `backend/app/users/routes.py`, `backend/app/org_structure/position_routes.py`, `backend/app/crm/{company_linking,quotation_service}.py`, `backend/app/search/service.py`, `backend/app/hrms/{routes,service,leave_routes,leave_service,asset_service,expense_service}.py`
+  - Frontend Shared Helpers & Pages: `frontend/src/lib/{lookups,productSearchCache}.ts`, `frontend/src/components/CompanyForm1Modal.tsx`, `frontend/src/pages/masters/Products.tsx`, `frontend/src/pages/{AgentsPage,IndustrialZonesPage,FollowUpsPage,LeadsPage,Companies,Suppliers,Inquiries,Planning,PriceListPage,ProductGallery,ProformaInvoicePdfPage,SalesOrderPdfPage,ProformaInvoicesPage,Users,Rbac}.tsx`, `frontend/src/pages/sales/{SaleProcessForm,SaleProcessList}.tsx`, `frontend/src/pages/crm/{CrmLeadsPage,LeadImportPage}.tsx`, `frontend/src/pages/technicalTasks/TechnicalTasksPage.tsx`, `frontend/src/pages/hrms/{AssetPage,LeavePage,SiteVisitPage}.tsx`
+  - Automated Test Suites: `backend/tests/test_active_only_extraction.py`, `frontend/src/lib/__tests__/activeOnlyExtraction.test.ts`
+
+### Feature Overview & Specifications
+1. **Strict Cross-Module Active-Only Extraction:**
+   - Whenever any operational, reporting, directory, CRM, HRMS, or governance module extracts records from another Master or Directory module (`Product`, `Brand`, `Category`, `Sub Category`, `UOM`, `Tax/HSN`, `Bank`, `Warehouse`, `Transport`, `Country`, `State`, `District`, `City`, `Company`, `Supplier`, `Buyer`, `Consignment Code`, `User`, `Position`, `CRM Pipeline/Stage/Salesperson`, `HRMS Location/Leave Type/Expense Category/Holiday/Leave Plan`), **only `Active` records are returned and selectable**.
+   - Bidirectional query translation in `BaseRepository._apply_dynamic_filters` ensures both `?status=active|inactive` and `?is_active=true|false` filter accurately regardless of whether the target table uses a `RecordStatus` string column or a boolean `is_active` column.
+2. **Complete Preservation of Own Management `Active` / `Inactive` Tabs:**
+   - Every module's own management view (`Product Master`, all 28 `MasterPage` screens, `Companies`, `Suppliers`, `Buyers`, `Users`, `Positions`, HRMS `Setup`, CRM `Pipeline Setup` & `Salesperson Configuration`) continues loading both `Active` and `Inactive` records so `Active (N)` and `Inactive (M)` tabs and re-activation toggles work without regression.
+3. **Non-Destructive Shipment Planning & Historical Safety:**
+   - Deactivating a `Product` hides its linked row on `Shipment Planning` grids without deleting the row or its saved cell quantities/remarks; re-activating the `Product` immediately restores the row and all cell values.
+   - Existing historical orders, invoices, purchases, inquiries, and edit forms (`item.id === currentSelectedId`) continue resolving previously saved inactive records via single-record `GET /.../{id}` without `404` errors, and cancelling a historical order whose SKU or warehouse was deactivated later cleanly reverses stock (`require_active=False`).
+
+### QA Verification Test Cases
+- [ ] **TC-ACT-01 (Product Master `Active` vs `Inactive` Isolation Across Inventory, Gallery & Price List):** Mark a SKU (e.g. `LDM-99` / `PRD-INACT-001`) `Inactive` in `Product Master` (`/product/list`). Verify it remains visible under Product Master's `Inactive` tab (and can be re-activated), while disappearing completely from `Product Stock` (`/product-stock/list`), `Stock Transactions` (`/reports/stock-transactions`), `Product Re-Order` (`/reports/re-order`), `Product Gallery` (`/product/gallery`), `Price List` (`/masters/price-list`), and Machine-Spares `"All"` picker tab.
+- [ ] **TC-ACT-02 (Commercial Forms, Purchase CSV/Excel Imports & PDF Bank Footers):** Attempt to search or select an `Inactive` Product, `Inactive` Supplier, `Inactive` Company/Buyer, `Inactive` Warehouse, or `Inactive` Bank in `Local Purchase`, `Import Purchase` (form + CSV/Excel import), `Proforma Invoice` (form + PDF bank footer), `Sales Process` (form + filter + PDF bank footer), `Stock Adjustment`, `Stock Transfer`, `Inquiries`, `CRM Quotations`, and `Technical Tasks`. Verify inactive records never appear in dropdowns/autocompletes and direct API/import submissions with inactive masters return `400 Bad Request`.
+- [ ] **TC-ACT-03 (Master-to-Master Cascading Dropdowns & Edit-Form Preservation):** Mark a `Brand`, `Category`, `Sub Category`, `HSN/Tax`, `UOM`, `Country`, `State`, `District`, or `City` as `Inactive`. Verify New Product / Company / Supplier / Lead / Agent / Follow-Up forms exclude the inactive option, while opening Edit on an existing record that already references that inactive option still displays its saved value until changed.
+- [ ] **TC-ACT-04 (Shipment Planning Non-Destructive Hide & Restore):** Link a product row in `Shipment Planning` (`/planning`) and enter cell values/remarks. Set that product to `Inactive` in `Product Master` and reload `/planning` — verify the row is hidden. Re-activate the product in `Product Master` and reload `/planning` — verify the row and all previously entered cell values reappear intact.
+- [ ] **TC-ACT-05 (CRM Pipeline Stages & Salesperson Eligibility):** Deactivate a stage in `Pipeline Setup` or toggle a salesperson inactive/ineligible in `Salesperson Configuration` (or mark their User `Inactive`). Verify `Lead Database` (`/crm/leads`) creation/reassignment modals and `Lead Import` (`/crm/import`) exclude inactive stages and inactive salespeople.
+- [ ] **TC-ACT-06 (HRMS Setup vs Leave, Asset, Expense & Site Visit Extraction):** Deactivate an Office Location, Leave Type, or Expense Category in `HRMS` ➔ `Setup` (`/hrms/setup`). Verify it stays visible on `/hrms/setup` for re-activation, but is excluded from `Leave` (`/hrms/leave`), `Asset Management` (`/hrms/assets`), and `Expense Management` (`/hrms/expenses`), and `Site Visit` (`/hrms/site-visit`) employee filters exclude inactive users.
+- [ ] **TC-ACT-07 (Users, Positions, RBAC Department Pickers & Topbar Universal Search):** Mark a User or Position `Inactive`. Verify `Users` (`/users`) Create/Edit `Reporting Manager` and `Position` dropdowns and `Departments & Permissions` (`/rbac`) `Add User` / `Add Manager` pickers exclude inactive records, and Topbar Universal Search never surfaces inactive Products, Companies, Suppliers, Buyers, Masters, or Users.
+- [ ] **TC-ACT-08 (Historical Order View, Print & Cancellation Stock Reversal):** Create and confirm a Sale Order or Purchase Order for an `Active` product, then mark that product `Inactive` in `Product Master`. Verify viewing/printing the saved historical order succeeds with full product/party names (`200 OK`) and cancelling the historical order reverses stock cleanly without throwing an inactive-product error.
+
+---
+*End of Master Features & Testing Specification Manual. Maintained for Inhyma Solutions Enterprise ERP. Last updated: October 30, 2026 (Sections 48 & 61-76 & Global Updates: Import Purchase Expected Arrival Date Editable Default [ETA Port Date + 5 Days], System-Wide Active-Only Cross-Module Extraction & Inactive Isolation, Pytest Live-Database Isolation & Synthetic User Prevention, `.env`-Driven Cross-ERP Switching & Strict Local/Hosted Environment Isolation, Local & Import Purchase Multi-Line CSV/Excel Bulk Import, Standardized Golden-Amber Export & Vector SVG Imp/Exp Controls, Suppliers Sidebar Active Highlight & Goods Expected Report Removal, HRMS Integrity Remediation & Payroll Approval Persistence, Dynamic Organization Company Logo, Product Master Category Rewiring & Floating Duplicate Overlay, Platform Migration Idempotency, Sales Process Workflow & 13-Field Filter Grid, Feed & Broadcast Open Access & 1-to-1 Employee Messaging, Sale Status Update Side Drawer & Chronological Timeline, Discount Payments Multi-Installment Ledger, Product Re-Order Branch-Scoped Matrix & FIFO Stock Breakup, and Product Stock Transactions Master List & Per-Product Stock Transaction Ledger).*

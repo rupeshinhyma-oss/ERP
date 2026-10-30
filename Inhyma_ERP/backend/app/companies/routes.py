@@ -349,11 +349,11 @@ async def list_sales_persons(
     _current_user: CurrentUser = Depends(require_any_permission("company.view", "company.create", "supplier.view", "supplier.create")),
 ) -> dict:
     """Return active users for sales person selection."""
-    from app.users.models import User
+    from app.users.models import User, UserStatus
     from sqlalchemy import select
     stmt = (
         select(User.id, User.username, User.first_name, User.last_name, User.display_name)
-        .where(User.is_active == True, User.deleted_at.is_(None))
+        .where(User.is_active == True, User.status == UserStatus.ACTIVE, User.deleted_at.is_(None))
         .order_by(User.username.asc())
     )
     result = await db.execute(stmt)
@@ -416,7 +416,7 @@ async def lookup_companies(
         )
         .outerjoin(City, City.id == Company.city_id)
         .outerjoin(State, State.id == Company.state_id)
-        .where(Company.deleted_at.is_(None))
+        .where(Company.deleted_at.is_(None), Company.is_active.is_(True))
     )
     if q.strip():
         term = f"%{q.strip()}%"

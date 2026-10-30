@@ -949,8 +949,12 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
 
   const filteredSubCategories = useMemo(() => {
     if (!formState.category_id) return [];
-    return allSubCategories.filter((sc) => sc.category_id === formState.category_id);
-  }, [allSubCategories, formState.category_id]);
+    return allSubCategories.filter(
+      (sc) =>
+        sc.category_id === formState.category_id &&
+        ((sc.status || "active").toLowerCase() !== "inactive" || sc.id === formState.sub_category_id)
+    );
+  }, [allSubCategories, formState.category_id, formState.sub_category_id]);
 
 
 
@@ -1285,7 +1289,10 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
   }, [allSpareProducts, machineSparesLinkedIds]);
 
   const currentSparesList = useMemo(() => {
-    const base = activeSparesTab === "selected" ? selectedSpareProducts : allSpareProducts;
+    const base =
+      activeSparesTab === "selected"
+        ? selectedSpareProducts
+        : allSpareProducts.filter((p) => (p.status || "active").toLowerCase() === "active");
     if (!sparesSearchTerm.trim()) return base;
     const term = sparesSearchTerm.trim().toLowerCase();
     return base.filter((p) => {
@@ -1391,9 +1398,14 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
   // Open Create Form
   const handleOpenCreate = () => {
     setEditingProduct(null);
-    const defaultTax = findTaxByHsnNumber("8422.30.00") || allTaxes[0];
-    const initialCatId = allCategories[0]?.id || "";
-    const matchingSubs = allSubCategories.filter((sc) => sc.category_id === initialCatId);
+    const activeTaxes = allTaxes.filter((t) => (t.status || "active").toLowerCase() !== "inactive");
+    const activeCategories = allCategories.filter((c) => (c.status || "active").toLowerCase() !== "inactive");
+    const activeUoms = allUoms.filter((u) => (u.status || "active").toLowerCase() !== "inactive");
+    const defaultTax = activeTaxes.find((t) => t.hsn_number === "8422.30.00") || activeTaxes[0];
+    const initialCatId = activeCategories[0]?.id || "";
+    const matchingSubs = allSubCategories.filter(
+      (sc) => sc.category_id === initialCatId && (sc.status || "active").toLowerCase() !== "inactive"
+    );
     const initialCat = findCategoryById(initialCatId);
     const initialCatName = (initialCat?.name || "").toLowerCase();
     const initialProductType = initialCatName.includes("spare") ? "Spare Part" : "Machine";
@@ -1409,7 +1421,7 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
       hsn_id: defaultTax?.id || "",
       gst_percent: defaultTax ? String(defaultTax.gst_percent) : "18",
       import_duty: defaultTax ? String(defaultTax.import_duty_percent) : "7.5",
-      uom_id: allUoms[0]?.id || "",
+      uom_id: activeUoms[0]?.id || "",
       packaging_quantity: "1",
       packaging_net_weight: "1",
       packaging_gross_weight: "1",
@@ -1821,9 +1833,11 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
                   onChange={(v) => setFormState({ ...formState, brand_id: v })}
                 >
                   <option value="">Select</option>
-                  {allBrands.map((b) => (
-                    <option key={b.id} value={b.id}>{b.name}</option>
-                  ))}
+                  {allBrands
+                    .filter((b) => (b.status || "active").toLowerCase() !== "inactive" || b.id === formState.brand_id)
+                    .map((b) => (
+                      <option key={b.id} value={b.id}>{b.name}</option>
+                    ))}
                 </SearchableSelectField>
 
                 <SearchableSelectField
@@ -1833,7 +1847,9 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
                   value={formState.category_id || ""}
                   onChange={(v) => {
                     setFormState((prev) => {
-                      const validSubs = allSubCategories.filter((sc) => sc.category_id === v);
+                      const validSubs = allSubCategories.filter(
+                        (sc) => sc.category_id === v && (sc.status || "active").toLowerCase() !== "inactive"
+                      );
                       const keepSub = validSubs.some((sc) => sc.id === prev.sub_category_id);
                       const selCategory = findCategoryById(v);
                       const categoryName = (selCategory?.name || "").toLowerCase();
@@ -1849,9 +1865,11 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
                   errorMessage={formErrors.category_id}
                 >
                   <option value="">Select</option>
-                  {allCategories.map((c) => (
-                    <option key={c.id} value={c.id}>{c.name}</option>
-                  ))}
+                  {allCategories
+                    .filter((c) => (c.status || "active").toLowerCase() !== "inactive" || c.id === formState.category_id)
+                    .map((c) => (
+                      <option key={c.id} value={c.id}>{c.name}</option>
+                    ))}
                 </SearchableSelectField>
 
                 <SearchableSelectField
@@ -1894,9 +1912,11 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
                   errorMessage={formErrors.hsn_id}
                 >
                   <option value="">Select</option>
-                  {allTaxes.map((h) => (
-                    <option key={h.id} value={h.id}>{h.hsn_number}</option>
-                  ))}
+                  {allTaxes
+                    .filter((h) => (h.status || "active").toLowerCase() !== "inactive" || h.id === formState.hsn_id)
+                    .map((h) => (
+                      <option key={h.id} value={h.id}>{h.hsn_number}</option>
+                    ))}
                 </SearchableSelectField>
 
                 <div className="pm-form-group">
@@ -1940,11 +1960,13 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
                   errorMessage={formErrors.uom_id}
                 >
                   <option value="">Select</option>
-                  {allUoms.map((u) => (
-                    <option key={u.id} value={u.id}>
-                      {u.code ? `${u.code} (${u.name})` : u.name}
-                    </option>
-                  ))}
+                  {allUoms
+                    .filter((u) => (u.status || "active").toLowerCase() !== "inactive" || u.id === formState.uom_id)
+                    .map((u) => (
+                      <option key={u.id} value={u.id}>
+                        {u.code ? `${u.code} (${u.name})` : u.name}
+                      </option>
+                    ))}
                 </SearchableSelectField>
 
                 <div className="pm-form-group">

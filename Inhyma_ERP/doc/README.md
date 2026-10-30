@@ -10,20 +10,24 @@ Welcome to the dedicated documentation directory for **Inhyma_ERP** (India Distr
   - System topology, architectural patterns, and directory layout.
   - Extended B2B Company intelligence data model and social media matrix.
   - Cascading geographic address resolution hierarchy (State ➔ District ➔ City).
-  - Purchase Orders (Local & Import) costing engine, dual landed valuation, and multi-line `.csv`/`.xlsx` bulk import engine.
+  - Purchase Orders (Local & Import) costing engine, dual landed valuation, `Expected Arrival Date = ETA Port Date + 5 days` editable auto-default, and multi-line `.csv`/`.xlsx` bulk import engine.
   - Proforma Invoices commercial terms and dynamic tax routing.
   - Database-driven workflow status transition engine.
   - Multi-warehouse Product Stock matrix (9 warehouse columns across Mumbai, Ahmedabad, Indore), Branch-Scoped Product Re-Order engine with FIFO consignment breakup, Per-Product 5-source Stock Transaction Ledger, Stock Adjustments/Transfers, A4 PDF engine, and technical tasks dispatch.
   - Global autocomplete blocker and mouse wheel scroll value protection.
   - Universal page header geometry (`.page { padding: 12px 20px }`), 35px action button standard (`.page-header-actions`), golden-amber `#f59e0b` `Export` / `Imp / Exp` vector SVG badge standard, and filter-above-KPI layout hierarchy.
   - `.env`-driven cross-ERP URL resolution, zero hardcoded localhost/ports, and strict local-vs-Render environment isolation.
+  - Pytest in-memory SQLite live-DB isolation guard (`conftest.py`), canonical 2-system-role (`super_admin` / `user`) & 297-permission bootstrap (`seed.py`), and HRMS soft-delete non-recreation guards (`ensure_seeds()`).
+  - System-wide Active-Only Cross-Module Extraction & Historical Reference Preservation (`BaseRepository._apply_dynamic_filters` bidirectional `?status=`/`?is_active=` translation, 28 master `/lookup` & `/dropdown` services, non-destructive Shipment Planning row hiding/restoration, and `require_active=False` stock cancellation safety).
 
 - 🔌 **[API Design & Endpoints](API_DESIGN_AND_ENDPOINTS.md)**:
   - Complete endpoint reference for Local Purchase (including `/local-orders/import`), Import Purchase (including `/import-orders/import`), Proforma Invoices, Sales Orders & Discount Payments, Suppliers, Companies, Masters, Geography, Inventory (Product Stock, Re-Order, Stock Transactions Ledger, Adjustments & Transfers), HRMS (Attendance, Leave, Assets, Expenses, Site Visits, Payroll), Payments, and Tasks.
+  - Cross-module Active-Only extraction contracts (`?status=active`, `?is_active=true`, `?active_only=true`, active-only `/lookup` & `/dropdown` endpoints) and Import Purchase `expected_arrival_date = eta_port_date + 5 days` server default.
   - Workflow transition rules and internal spoke deprovisioning endpoint specifications.
 
 - 📜 **[Changelog & Function Changes](CHANGELOG_AND_FUNCTION_CHANGES.md)**:
   - Chronological history of all functional updates, migrations, and bug fixes.
+  - Release October 30, 2026: Import Purchase `Expected Arrival Date` editable auto-default (`ETA Port Date + 5 days` on `ImportPurchasePage.tsx` and backend `POST /purchase/import-orders` & `POST /purchase/import-orders/import` fallback); System-Wide Active-Only Cross-Module Extraction & Historical Reference Safety (`58` backend + `27` frontend files, non-destructive Shipment Planning row hiding/restoration, and `require_active=False` stock cancellation safety); removal of all 42 synthetic-user/QA provisioning scripts & non-isolated live-DB test files; Pytest in-memory SQLite isolation guard (`backend/tests/conftest.py`, `config.py`, `engine.py`, `main.py`); HRMS `ensure_seeds()` soft-delete non-recreation fix (`app/hrms/service.py`, `app/hrms/leave_service.py`); canonical 297-permission + 2-system-role (`Admin` / `User`) bootstrap sync (`backend/scripts/seed.py`).
   - Release October 29, 2026: `.env`-driven cross-ERP switching, zero hardcoded localhost/port fallbacks & strict local-vs-Render routing isolation (`ssoBridge.ts`, `ecosystemSession.ts`, `EcosystemSwitcher.tsx`, `vite.config.ts`, `config.py`); Local & Import Purchase multi-line `.csv`/`.xlsx` bulk import (`POST /purchase/local-orders/import`, `POST /purchase/import-orders/import`) & `ImpExpDropdown` vector SVG badges; standardized golden-amber `#f59e0b` `Export` buttons & header alignment across Product Stock, Stock Adjustment, Stock Transfer, Sales Process & Product Re-Order; Suppliers active sidebar highlight (`purchase-suppliers`) & removal of Goods Expected Report from `REPORTS`; HRMS separation-of-duties security remediation, geolocation hardening & payroll approval persistence; Product Stock Transactions Master List & Per-Product 5-Source Ledger (`/stock-transaction/list/:id`); Product Re-Order 16-Column Branch-Scoped Matrix; Discount Payments Multi-Installment Ledger & Sale Order E-Way Bill / Status Timeline.
   - Release October 28, 2026: Interactive Sale Status Update Side Drawer across all Sale Process stages (`Pending` -> `Sales Confirmed` -> `Admin Approved` -> `Acc. Confirmed` -> `Gatepass Created` -> `Dispatched` -> `LR`), PO / Tally Bill / LR / Dispatch Media uploads, and Alembic migrations `v7a8b9c0d1e2` & `w8b9c0d1e2f3`.
   - Release October 27, 2026: Sales Process Add New Parity with Proforma Invoice, 100% Dynamic Masters, Warehouse Stock Exceeded Alerts, Upward Comboboxes, Live KPI Metrics, and Dynamic Organization Logo in Proforma PDF.
@@ -43,7 +47,7 @@ Welcome to the dedicated documentation directory for **Inhyma_ERP** (India Distr
 
 
 - 📘 **[Complete Living Technical Manual](SYSTEM_DOCUMENTATION.md)**:
-  - Exhaustive 15-section technical manual covering all modules, database schemas, frontend tokens, and developer guidelines.
+  - Exhaustive 16-section technical manual covering all modules, database schemas, frontend tokens, and developer guidelines.
 
 - 🛡️ **[Disaster Recovery & Operational Runbooks](DISASTER_RECOVERY_AND_RUNBOOKS.md)**:
   - Database pooler failover, Supabase storage synchronization procedures, Alembic version desynchronization recovery (RB-03), and resolving divergent migration heads (RB-04).

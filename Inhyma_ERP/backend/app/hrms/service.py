@@ -64,7 +64,7 @@ class HrmsSetupService:
         """Seed default Office, Leave Types, Expense Categories, and Settings if empty."""
         # 1. Default Office Location
         loc_res = await self.db.execute(
-            select(func.count(HrmsLocation.id)).where(HrmsLocation.deleted_at.is_(None))
+            select(func.count(HrmsLocation.id))
         )
         if loc_res.scalar() == 0:
             default_office = HrmsLocation(
@@ -80,7 +80,7 @@ class HrmsSetupService:
 
         # 2. Default Leave Types
         existing_types_res = await self.db.execute(
-            select(HrmsLeaveType.name).where(HrmsLeaveType.deleted_at.is_(None))
+            select(HrmsLeaveType.name)
         )
         existing_names = {row[0].strip().lower() for row in existing_types_res.all()}
 
@@ -194,13 +194,13 @@ class HrmsSetupService:
                 is_active=True,
             ),
         ]
-        to_add = [l for l in seed_leaves if l.name.strip().lower() not in existing_names]
+        to_add = seed_leaves if not existing_names else []
         if to_add:
             self.db.add_all(to_add)
 
         # 3. Default Expense Categories
         cat_res = await self.db.execute(
-            select(func.count(HrmsExpenseCategory.id)).where(HrmsExpenseCategory.deleted_at.is_(None))
+            select(func.count(HrmsExpenseCategory.id))
         )
         if cat_res.scalar() == 0:
             seed_cats = [
@@ -232,15 +232,14 @@ class HrmsSetupService:
     # -----------------------------------------------------------------------
     # Office Locations (Geo Fencing)
     # -----------------------------------------------------------------------
-    async def list_locations(self) -> List[LocationRead]:
+    async def list_locations(self, *, active_only: bool = False) -> List[LocationRead]:
         await self.ensure_seeds()
 
         # Query locations
-        query = (
-            select(HrmsLocation)
-            .where(HrmsLocation.deleted_at.is_(None))
-            .order_by(HrmsLocation.created_at.asc())
-        )
+        query = select(HrmsLocation).where(HrmsLocation.deleted_at.is_(None))
+        if active_only:
+            query = query.where(HrmsLocation.is_active.is_(True))
+        query = query.order_by(HrmsLocation.created_at.asc())
         result = await self.db.execute(query)
         locations = result.scalars().all()
 
@@ -419,13 +418,12 @@ class HrmsSetupService:
     # -----------------------------------------------------------------------
     # Leave Types
     # -----------------------------------------------------------------------
-    async def list_leave_types(self) -> List[HrmsLeaveType]:
+    async def list_leave_types(self, *, active_only: bool = False) -> List[HrmsLeaveType]:
         await self.ensure_seeds()
-        query = (
-            select(HrmsLeaveType)
-            .where(HrmsLeaveType.deleted_at.is_(None))
-            .order_by(HrmsLeaveType.created_at.asc())
-        )
+        query = select(HrmsLeaveType).where(HrmsLeaveType.deleted_at.is_(None))
+        if active_only:
+            query = query.where(HrmsLeaveType.is_active.is_(True))
+        query = query.order_by(HrmsLeaveType.created_at.asc())
         result = await self.db.execute(query)
         return list(result.scalars().all())
 
@@ -546,13 +544,12 @@ class HrmsSetupService:
     # -----------------------------------------------------------------------
     # Expense Categories
     # -----------------------------------------------------------------------
-    async def list_expense_categories(self) -> List[HrmsExpenseCategory]:
+    async def list_expense_categories(self, *, active_only: bool = False) -> List[HrmsExpenseCategory]:
         await self.ensure_seeds()
-        query = (
-            select(HrmsExpenseCategory)
-            .where(HrmsExpenseCategory.deleted_at.is_(None))
-            .order_by(HrmsExpenseCategory.created_at.asc())
-        )
+        query = select(HrmsExpenseCategory).where(HrmsExpenseCategory.deleted_at.is_(None))
+        if active_only:
+            query = query.where(HrmsExpenseCategory.is_active.is_(True))
+        query = query.order_by(HrmsExpenseCategory.created_at.asc())
         result = await self.db.execute(query)
         return list(result.scalars().all())
 
@@ -865,8 +862,9 @@ class HrmsSetupService:
         search: Optional[str] = None,
         allowed_employee_ids: Optional[set[uuid.UUID]] = None,
     ) -> list[DetailedTrackingEmployeeItem]:
-        """List employees with their individual Detailed Tracking ON/OFF status and interval."""
-        query = select(User).where(User.deleted_at.is_(None))
+        """List active employees with their individual Detailed Tracking ON/OFF status and interval."""
+        from app.users.models import UserStatus
+        query = select(User).where(User.deleted_at.is_(None), User.is_active.is_(True), User.status == UserStatus.ACTIVE)
         if allowed_employee_ids is not None:
             query = query.where(User.id.in_(allowed_employee_ids))
         if search and search.strip():
@@ -992,7 +990,8 @@ class HrmsSetupService:
         org = await self.get_or_create_org_tracking_settings()
         org_secs = org.return_timer_seconds if not org.is_unlimited_return else None
 
-        query = select(User).where(User.deleted_at.is_(None))
+        from app.users.models import UserStatus
+        query = select(User).where(User.deleted_at.is_(None), User.is_active.is_(True), User.status == UserStatus.ACTIVE)
         if allowed_employee_ids is not None:
             query = query.where(User.id.in_(allowed_employee_ids))
         if search and search.strip():

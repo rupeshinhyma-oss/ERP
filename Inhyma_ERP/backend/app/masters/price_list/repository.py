@@ -8,6 +8,7 @@ from typing import Any
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.constants import RecordStatus
 from app.core.exceptions import NotFoundException
 from app.masters.brands.models import Brand
 from app.masters.price_list.schemas import (
@@ -69,7 +70,7 @@ class PriceListRepository:
             .outerjoin(Brand, Brand.id == Product.brand_id)
             .outerjoin(UnitOfMeasurement, UnitOfMeasurement.id == Product.uom_id)
             .outerjoin(Tax, Tax.id == Product.hsn_id)
-            .where(Product.deleted_at.is_(None))
+            .where(Product.deleted_at.is_(None), Product.status == RecordStatus.ACTIVE)
         )
 
         if category_id:
@@ -147,6 +148,7 @@ class PriceListRepository:
             .where(
                 SupplierProductLink.product_id.in_(product_ids),
                 Supplier.deleted_at.is_(None),
+                Supplier.is_active.is_(True),
             )
             .order_by(SupplierProductLink.created_at.asc())
         )
@@ -264,7 +266,7 @@ class PriceListRepository:
                 func.avg(Tax.gst_percent).label("avg_gst"),
             )
             .outerjoin(Tax, Tax.id == Product.hsn_id)
-            .where(Product.deleted_at.is_(None))
+            .where(Product.deleted_at.is_(None), Product.status == RecordStatus.ACTIVE)
         )
         res = await self.session.execute(stmt)
         row = res.one()
@@ -298,7 +300,11 @@ class PriceListRepository:
     async def get_product_by_code(self, code: str) -> Product | None:
         """Fetch product by code (case-insensitive) for bulk import."""
         clean_code = code.strip()
-        stmt = select(Product).where(func.lower(Product.product_code) == clean_code.lower(), Product.deleted_at.is_(None))
+        stmt = select(Product).where(
+            func.lower(Product.product_code) == clean_code.lower(),
+            Product.deleted_at.is_(None),
+            Product.status == RecordStatus.ACTIVE,
+        )
         res = await self.session.execute(stmt)
         return res.scalar_one_or_none()
 
@@ -365,6 +371,7 @@ class PriceListRepository:
             .where(
                 SupplierProductLink.product_id == product_id,
                 Supplier.deleted_at.is_(None),
+                Supplier.is_active.is_(True),
             )
             .order_by(SupplierProductLink.unit_price.asc().nulls_last())
         )

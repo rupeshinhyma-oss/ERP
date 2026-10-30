@@ -507,7 +507,7 @@ export function LeavePage() {
     try {
       const [rolesRes, locsRes] = await Promise.allSettled([
         apiGet<any>("/rbac/roles"),
-        apiGet<any>("/hrms/setup/locations"),
+        apiGet<any>("/hrms/setup/locations?active_only=true"),
       ]);
       if (rolesRes.status === "fulfilled") {
         const roles = Array.isArray(rolesRes.value.data) ? rolesRes.value.data : rolesRes.value.data?.data || [];
@@ -522,7 +522,7 @@ export function LeavePage() {
       if (locsRes.status === "fulfilled") {
         const locs = Array.isArray(locsRes.value.data) ? locsRes.value.data : locsRes.value.data?.data || [];
         if (Array.isArray(locs)) {
-          const branches = locs.map((l: any) => l.name).filter(Boolean);
+          const branches = locs.filter((l: any) => l?.is_active !== false).map((l: any) => l.name).filter(Boolean);
           setDbBranches(Array.from(new Set(branches)));
         }
       }

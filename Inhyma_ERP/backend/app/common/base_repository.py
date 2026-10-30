@@ -303,7 +303,31 @@ class BaseRepository(Generic[ModelT]):
 
     def _apply_dynamic_filters(self, stmt: Select, filters: Any) -> Select:
         """Apply exact-match and date-range dynamic filters, restricted to ``filterable_fields``."""
+        table_cols = self.model.__table__.columns
         for column_name, value in filters.exact.items():
+            if column_name == "status" and "status" not in table_cols and "is_active" in table_cols:
+                is_active_col = getattr(self.model, "is_active")
+                if isinstance(value, bool):
+                    stmt = stmt.where(is_active_col.is_(value))
+                else:
+                    val_low = str(value).strip().lower()
+                    if val_low in ("active", "true", "1", "t", "yes"):
+                        stmt = stmt.where(is_active_col.is_(True))
+                    elif val_low in ("inactive", "false", "0", "f", "no"):
+                        stmt = stmt.where(is_active_col.is_(False))
+                continue
+            if column_name == "is_active" and "is_active" not in table_cols and "status" in table_cols:
+                status_col = getattr(self.model, "status")
+                if isinstance(value, bool):
+                    target_status = "active" if value else "inactive"
+                    stmt = stmt.where(func.lower(status_col) == target_status)
+                else:
+                    val_low = str(value).strip().lower()
+                    if val_low in ("true", "1", "t", "yes", "active"):
+                        stmt = stmt.where(func.lower(status_col) == "active")
+                    elif val_low in ("false", "0", "f", "no", "inactive"):
+                        stmt = stmt.where(func.lower(status_col) == "inactive")
+                continue
             if column_name not in self.filterable_fields or not hasattr(self.model, column_name):
                 continue
             column = getattr(self.model, column_name)

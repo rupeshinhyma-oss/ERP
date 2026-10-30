@@ -637,7 +637,7 @@ export function CrmLeadsPage() {
   });
 
   useEffect(() => {
-    apiGet<any[]>("/masters/uom?limit=250")
+    apiGet<any[]>("/masters/uom?limit=250&status=active")
       .then((res) => {
         const items = Array.isArray(res?.data) ? res.data : [];
         if (items.length > 0) {
@@ -796,7 +796,7 @@ export function CrmLeadsPage() {
     try {
       const pipeRes = await apiGet<any>(`/api/v1/crm/pipelines/${pipelineId}`);
       const pipeData = pipeRes?.data || pipeRes;
-      const stages: CrmStageOption[] = pipeData?.stages || [];
+      const stages: CrmStageOption[] = (pipeData?.stages || []).filter((s: CrmStageOption) => s.is_active !== false);
       stages.sort((a, b) => a.stage_order - b.stage_order);
       setKanbanStages(stages);
 
@@ -984,7 +984,7 @@ export function CrmLeadsPage() {
       try {
         const res = await apiGet<any>(`/api/v1/crm/pipelines/${createPipelineId}`);
         const data = res?.data || res;
-        const stages: CrmStageOption[] = data?.stages || [];
+        const stages: CrmStageOption[] = (data?.stages || []).filter((s: CrmStageOption) => s.is_active !== false);
         stages.sort((a, b) => a.stage_order - b.stage_order);
         setCreatePipelineStages(stages);
         if (stages.length > 0) {
@@ -1305,8 +1305,8 @@ export function CrmLeadsPage() {
     }
     setSearchingQuoteProducts(true);
     try {
-      // Reusing the working ERP Product Master API: /masters/products
-      const res = await apiGet<any>(`/masters/products?search=${encodeURIComponent(query.trim())}&limit=50`);
+      // Reusing the working ERP Product Master API: /masters/products (active only)
+      const res = await apiGet<any>(`/masters/products?search=${encodeURIComponent(query.trim())}&limit=50&status=active`);
       let items: any[] = [];
       if (Array.isArray(res?.data)) {
         items = res.data;
@@ -1315,6 +1315,7 @@ export function CrmLeadsPage() {
       } else if (Array.isArray((res as any)?.items)) {
         items = (res as any).items;
       }
+      items = items.filter((p: any) => p?.is_active !== false && String(p?.status ?? "active").toLowerCase() !== "inactive");
       setQuoteLineSearchResults(items);
       if (items.length === 0) {
         setProductSearchError(`No products found matching "${query.trim()}".`);
@@ -1333,7 +1334,7 @@ export function CrmLeadsPage() {
       setSearchingQuoteProducts(true);
       setProductSearchError(null);
       try {
-        const res = await apiGet<any>("/masters/products?limit=25");
+        const res = await apiGet<any>("/masters/products?limit=25&status=active");
         let items: any[] = [];
         if (Array.isArray(res?.data)) {
           items = res.data;
@@ -1342,6 +1343,7 @@ export function CrmLeadsPage() {
         } else if (Array.isArray((res as any)?.items)) {
           items = (res as any).items;
         }
+        items = items.filter((p: any) => p?.is_active !== false && String(p?.status ?? "active").toLowerCase() !== "inactive");
         setQuoteLineSearchResults(items);
       } catch {
         // Keep calm on background prefetch
@@ -6159,7 +6161,9 @@ export function CrmLeadsPage() {
                       }}
                     >
                       <option value="">-- Choose Stage --</option>
-                      {pipelineStages.map((st) => (
+                      {pipelineStages
+                        .filter((st) => st.is_active !== false || st.id === selectedLead.stage_id)
+                        .map((st) => (
                         <option key={st.id} value={st.id}>
                           {st.name} ({st.stage_type.toUpperCase()}) {st.id === selectedLead.stage_id ? "— (Current)" : ""}
                         </option>
@@ -6415,7 +6419,13 @@ export function CrmLeadsPage() {
                     }}
                   >
                     <option value="">-- Select Sales Representative --</option>
-                    {salespeople.map((sp) => {
+                    {salespeople
+                      .filter(
+                        (sp) =>
+                          ((sp as any).is_active !== false && (sp as any).is_active_user !== false) ||
+                          sp.user_id === leadToReassign.assigned_to
+                      )
+                      .map((sp) => {
                       const isCurrentOwner = sp.user_id === leadToReassign.assigned_to;
                       const capText = sp.max_lead_capacity !== null && sp.max_lead_capacity !== undefined
                         ? `Cap: ${sp.max_lead_capacity} (${sp.remaining_capacity ?? (sp.max_lead_capacity - sp.active_lead_count)} rem)`
@@ -7048,7 +7058,9 @@ export function CrmLeadsPage() {
                         }}
                       >
                         <option value="">Leave Unassigned</option>
-                        {salespeople.map((sp) => (
+                        {salespeople
+                          .filter((sp) => (sp as any).is_active !== false && (sp as any).is_active_user !== false)
+                          .map((sp) => (
                           <option key={sp.user_id} value={sp.user_id}>
                             {sp.display_name || sp.username} ({sp.active_lead_count} active leads)
                           </option>

@@ -47,8 +47,8 @@ class CompanyService:
         """Return all companies for dropdown selection."""
         cached = await self.cache_manager.get_dropdown(DROPDOWN_CACHE_NAME)
         if cached is not None:
-            return cached
-        companies = await self.repository.list_all()
+            return [i for i in cached if getattr(i.status, 'value', str(i.status)).lower() == 'active']
+        companies = [i for i in await self.repository.list_all() if getattr(i.status, 'value', str(i.status)).lower() == 'active']
         await self.cache_manager.set_dropdown(DROPDOWN_CACHE_NAME, companies)
         return companies
 
