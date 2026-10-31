@@ -597,14 +597,115 @@ export function AttendancePage() {
   const [selectedYear, setSelectedYear] = useState<number>(() => new Date().getFullYear());
   const [selectedMonth, setSelectedMonth] = useState<number>(() => new Date().getMonth() + 1);
 
+  // Live timer tick (updates every 1 second)
+  const [now, setNow] = useState<Date>(() => new Date());
+
   // Weekday offset for the 1st of the month (Monday-aligned grid)
   const firstDayWeekdayOffset = useMemo(() => {
     const d = new Date(selectedYear, selectedMonth - 1, 1).getDay();
     return (d + 6) % 7;
   }, [selectedYear, selectedMonth]);
 
-  // Live timer tick (updates every 1 second)
-  const [now, setNow] = useState<Date>(() => new Date());
+  // Memoized weekly off set (e.g. {"sunday", "saturday"})
+  const weeklyOffDays = useMemo(() => {
+    const raw = policy?.weekly_off || "Sunday";
+    return new Set(
+      raw
+        .split(",")
+        .map((s) => s.trim().toLowerCase())
+        .filter(Boolean)
+    );
+  }, [policy?.weekly_off]);
+
+  // Monthly calendar dates generator with API attendance record merging
+  const monthlyGridDays = useMemo<CalendarDay[]>(() => {
+    const daysInMonth = new Date(selectedYear, selectedMonth, 0).getDate();
+    const todayYear = now.getFullYear();
+    const todayMonth = now.getMonth() + 1;
+    const todayDay = now.getDate();
+
+    // Map existing records from API by date string and day_number
+    const recordByDate = new Map<string, CalendarDay>();
+    const recordByDayNum = new Map<number, CalendarDay>();
+    for (const d of calendarDays) {
+      if (d.date) recordByDate.set(d.date, d);
+      if (typeof d.day_number === "number") recordByDayNum.set(d.day_number, d);
+    }
+
+    const dayNames = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+    const dayFullNames = [
+      "monday",
+      "tuesday",
+      "wednesday",
+      "thursday",
+      "friday",
+      "saturday",
+      "sunday",
+    ];
+
+    const result: CalendarDay[] = [];
+
+    for (let dayNum = 1; dayNum <= daysInMonth; dayNum++) {
+      const dateStr = `${selectedYear}-${String(selectedMonth).padStart(2, "0")}-${String(dayNum).padStart(2, "0")}`;
+      const existing = recordByDate.get(dateStr) || recordByDayNum.get(dayNum);
+
+      const dObj = new Date(selectedYear, selectedMonth - 1, dayNum);
+      const weekdayIdx = (dObj.getDay() + 6) % 7;
+      const dayName = dayNames[weekdayIdx];
+      const dayFullName = dayFullNames[weekdayIdx];
+      const isWeekend = weeklyOffDays.size > 0 ? weeklyOffDays.has(dayFullName) : weekdayIdx === 6;
+
+      const isFuture =
+        selectedYear > todayYear ||
+        (selectedYear === todayYear && selectedMonth > todayMonth) ||
+        (selectedYear === todayYear && selectedMonth === todayMonth && dayNum > todayDay);
+
+      const isPast =
+        selectedYear < todayYear ||
+        (selectedYear === todayYear && selectedMonth < todayMonth) ||
+        (selectedYear === todayYear && selectedMonth === todayMonth && dayNum < todayDay);
+
+      if (existing) {
+        result.push({
+          ...existing,
+          date: existing.date || dateStr,
+          day_number: existing.day_number || dayNum,
+          day_name: existing.day_name || dayName,
+        });
+      } else {
+        // Fallback when no attendance record is returned by the API
+        let status = "NOT_PUNCHED";
+        let canRegularize = false;
+
+        if (isWeekend) {
+          status = "WEEKEND";
+        } else if (isFuture) {
+          status = "FUTURE";
+        } else if (isPast) {
+          status = "ABSENT";
+          canRegularize = true;
+        }
+
+        result.push({
+          date: dateStr,
+          day_number: dayNum,
+          day_name: dayName,
+          status,
+          punch_in: null,
+          punch_out: null,
+          working_minutes: null,
+          late_minutes: 0,
+          early_exit_minutes: 0,
+          is_irregular: false,
+          regularization_status: "NONE",
+          can_regularize: canRegularize,
+          attendance_id: null,
+        });
+      }
+    }
+
+    return result;
+  }, [selectedYear, selectedMonth, calendarDays, weeklyOffDays, now]);
 
   // GPS & Location Simulator State
   const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
@@ -2152,13 +2253,14 @@ export function AttendancePage() {
                     <div key={`pad-${idx}`} className="hrms-cal-day padding" />
                   ))}
 
-                  {calendarDays.map((day) => {
+                  {monthlyGridDays.map((day) => {
                     const isToday =
                       day.day_number === now.getDate() &&
                       selectedMonth === now.getMonth() + 1 &&
                       selectedYear === now.getFullYear();
 
-                    const isWeekend = day.status === "WEEKEND";
+                    const rawStatus = (day.status || "").trim().toUpperCase().replace(/\s+/g, "_");
+                    const isWeekend = rawStatus === "WEEKEND";
 
                     // ==============================================================
                     // Day 3.6 — Regularize Button Rules:
@@ -2169,36 +2271,38 @@ export function AttendancePage() {
                     // Present, Holiday, Weekend, Future, Approved Leave, In Progress.
                     // ==============================================================
                     const isNeverEditable =
-                      day.status === "WEEKEND" ||
-                      day.status === "HOLIDAY" ||
-                      day.status === "FUTURE" ||
-                      day.status === "IN_PROGRESS" ||
-                      day.status === "NOT_PUNCHED" ||
-                      day.status === "APPROVED_LEAVE" ||
-                      day.status === "LEAVE" ||
+                      rawStatus === "WEEKEND" ||
+                      rawStatus === "HOLIDAY" ||
+                      rawStatus === "FUTURE" ||
+                      rawStatus === "IN_PROGRESS" ||
+                      rawStatus === "NOT_PUNCHED" ||
+                      rawStatus === "APPROVED_LEAVE" ||
+                      rawStatus === "LEAVE" ||
+                      rawStatus === "ON_LEAVE" ||
                       day.regularization_status === "APPROVED" ||
-                      (day.status === "PRESENT" && !day.is_irregular && day.regularization_status !== "PENDING");
+                      (rawStatus === "PRESENT" && !day.is_irregular && day.regularization_status !== "PENDING");
 
                     const canEdit =
                       !isNeverEditable &&
-                      (day.status === "LATE" ||
-                        day.status === "HALF_DAY" ||
-                        day.status === "MISSING_PUNCH" ||
-                        day.status === "ABSENT" ||
+                      (rawStatus === "LATE" ||
+                        rawStatus === "HALF_DAY" ||
+                        rawStatus === "MISSING_PUNCH" ||
+                        rawStatus === "ABSENT" ||
+                        rawStatus.includes("MISSING") ||
                         day.is_irregular ||
                         day.regularization_status === "PENDING" ||
                         day.can_regularize);
 
                     let badgeClass = "status-scheduled";
-                    if (day.status === "PRESENT") badgeClass = "status-present";
-                    else if (day.status === "LATE") badgeClass = "status-late";
-                    else if (day.status === "HALF_DAY") badgeClass = "status-half-day";
-                    else if (day.status === "MISSING_PUNCH") badgeClass = "status-missing-punch";
-                    else if (day.status === "IN_PROGRESS") badgeClass = "status-in-progress";
-                    else if (day.status === "WEEKEND") badgeClass = "status-weekend";
-                    else if (day.status === "ABSENT") badgeClass = "status-absent";
-                    else if (day.status === "HOLIDAY") badgeClass = "status-holiday";
-                    else if (day.status === "LEAVE" || day.status === "APPROVED_LEAVE") badgeClass = "status-leave";
+                    if (rawStatus === "PRESENT") badgeClass = "status-present";
+                    else if (rawStatus === "LATE") badgeClass = "status-late";
+                    else if (rawStatus === "HALF_DAY") badgeClass = "status-half-day";
+                    else if (rawStatus === "MISSING_PUNCH" || rawStatus.includes("MISSING")) badgeClass = "status-missing-punch";
+                    else if (rawStatus === "IN_PROGRESS") badgeClass = "status-in-progress";
+                    else if (rawStatus === "WEEKEND") badgeClass = "status-weekend";
+                    else if (rawStatus === "ABSENT") badgeClass = "status-absent";
+                    else if (rawStatus === "HOLIDAY") badgeClass = "status-holiday";
+                    else if (rawStatus === "LEAVE" || rawStatus === "APPROVED_LEAVE" || rawStatus === "ON_LEAVE") badgeClass = "status-leave";
 
                     if (day.regularization_status === "PENDING") {
                       badgeClass = "status-pending";
@@ -2207,7 +2311,7 @@ export function AttendancePage() {
                     return (
                       <div
                         key={day.date}
-                        className={`hrms-cal-day ${isToday ? "today" : ""} ${isWeekend ? "weekend" : ""} ${day.status === "FUTURE" ? "future" : ""}`}
+                        className={`hrms-cal-day ${isToday ? "today" : ""} ${isWeekend ? "weekend" : ""} ${rawStatus === "FUTURE" ? "future" : ""}`}
                         data-testid={`calendar-day-${day.date}`}
                       >
                         {/* Top: Day number, Today pill, Pencil top-right (Phase I) */}
@@ -2235,26 +2339,30 @@ export function AttendancePage() {
 
                         {/* Middle: Status badge */}
                         <div className="hrms-cal-day-middle">
-                          {day.status !== "FUTURE" && day.status !== "NOT_PUNCHED" ? (
-                            <span className={`hrms-cal-status-badge ${badgeClass}`} title={day.status === "HOLIDAY" && day.holiday_name ? day.holiday_name : (day.leave_type_name || "")}>
+                          {rawStatus !== "FUTURE" && rawStatus !== "NOT_PUNCHED" ? (
+                            <span className={`hrms-cal-status-badge ${badgeClass}`} title={rawStatus === "HOLIDAY" && day.holiday_name ? day.holiday_name : (day.leave_type_name || "")}>
                               {day.regularization_status === "PENDING"
                                 ? "Pending Regularization"
                                 : day.regularization_status === "APPROVED"
                                 ? "APPROVED"
-                                : day.status === "HOLIDAY"
+                                : rawStatus === "HOLIDAY"
                                 ? (day.holiday_name ? `HOLIDAY: ${day.holiday_name}` : "HOLIDAY")
-                                : (day.status === "LEAVE" || day.status === "APPROVED_LEAVE")
+                                : (rawStatus === "LEAVE" || rawStatus === "APPROVED_LEAVE" || rawStatus === "ON_LEAVE")
                                 ? (day.leave_type_name || "LEAVE")
-                                : day.status === "HALF_DAY"
+                                : rawStatus === "HALF_DAY"
                                 ? "Half Day"
-                                : day.status === "MISSING_PUNCH"
+                                : rawStatus === "MISSING_PUNCH" || rawStatus.includes("MISSING")
                                 ? "Missing Punch"
-                                : day.status === "IN_PROGRESS"
+                                : rawStatus === "IN_PROGRESS"
                                 ? "In Progress"
-                                : day.status === "WEEKEND"
+                                : rawStatus === "WEEKEND"
                                 ? "Weekend"
-                                : day.status === "ABSENT"
+                                : rawStatus === "ABSENT"
                                 ? "Absent"
+                                : rawStatus === "PRESENT"
+                                ? "Present"
+                                : rawStatus === "LATE"
+                                ? "Late"
                                 : day.status}
                             </span>
                           ) : null}
@@ -2274,14 +2382,19 @@ export function AttendancePage() {
                               <span className="hrms-cal-timing-val">{day.punch_out}</span>
                             </div>
                           )}
-                          {day.working_minutes !== null && day.working_minutes !== undefined && day.working_minutes > 0 && (
+                          {(day.working_minutes !== null && day.working_minutes !== undefined && day.working_minutes > 0) ? (
                             <div className="hrms-cal-timing-row">
                               <span className="hrms-cal-timing-label">Hours:</span>
                               <span className="hrms-cal-timing-val">
                                 {Math.floor(day.working_minutes / 60)}h {day.working_minutes % 60}m
                               </span>
                             </div>
-                          )}
+                          ) : (day as any).total_hours ? (
+                            <div className="hrms-cal-timing-row">
+                              <span className="hrms-cal-timing-label">Hours:</span>
+                              <span className="hrms-cal-timing-val">{(day as any).total_hours}</span>
+                            </div>
+                          ) : null}
                           {day.late_minutes > 0 && (
                             <div className="hrms-cal-timing-row late">
                               <span className="hrms-cal-timing-label">Late:</span>

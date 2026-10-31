@@ -398,7 +398,23 @@ async function performRequestOnce<T>(path: string, options: RequestInit): Promis
   }
 
   if (!response.ok || body.success === false) {
-    let message = body.message || defaultMessageForStatus(response.status);
+    const anyBody = body as any;
+    let message =
+      body.message ||
+      (typeof anyBody.detail === "string" ? anyBody.detail : null) ||
+      defaultMessageForStatus(response.status);
+    if (Array.isArray(anyBody.detail) && anyBody.detail.length > 0) {
+      const pydanticDetails = anyBody.detail
+        .map((d: any) => {
+          const loc = Array.isArray(d.loc) ? d.loc.filter((x: any) => x !== "body").join(".") : "";
+          return loc ? `${loc}: ${d.msg || d.message}` : (d.msg || d.message || JSON.stringify(d));
+        })
+        .filter(Boolean)
+        .join("; ");
+      if (pydanticDetails) {
+        message = `${message}: ${pydanticDetails}`;
+      }
+    }
     if (body.errors && body.errors.length > 0) {
       const details = body.errors
         .map((e) => (e.field ? `${e.field}: ${e.message}` : e.message))
@@ -693,8 +709,10 @@ export function errorMessage(err: unknown): string {
   if (err && typeof err === "object") {
     const anyErr = err as any;
     if (typeof anyErr.message === "string" && anyErr.message) return anyErr.message;
-    if (anyErr.data && typeof anyErr.data.message === "string" && anyErr.data.message) {
-      return anyErr.data.message;
+    if (typeof anyErr.detail === "string" && anyErr.detail) return anyErr.detail;
+    if (anyErr.data) {
+      if (typeof anyErr.data.message === "string" && anyErr.data.message) return anyErr.data.message;
+      if (typeof anyErr.data.detail === "string" && anyErr.data.detail) return anyErr.data.detail;
     }
   }
   return String(err);

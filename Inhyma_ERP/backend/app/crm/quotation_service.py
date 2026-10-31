@@ -545,6 +545,60 @@ class CrmQuotationService:
 
         return f"{prefix}-{next_seq:04d}"
 
+    @staticmethod
+    def _normalize_image_reference(selected_img: str | None, product: Product) -> str | None:
+        """
+        Normalize image reference to ensure compatibility with crm_quotation_items.selected_image_url (VARCHAR 1000).
+        - If selected_img is a storage path/URL (<= 1000 chars and not data:), keep as is.
+        - If selected_img is a photo index/tag (e.g. 'photo:0'), keep as is.
+        - If selected_img is a raw Base64 data URI (> 1000 chars), map it to 'photo:<index>' within product.images.
+        - If selected_img is None or empty and product.images exists, default to 'photo:0' or first storage URL.
+        """
+        if not selected_img or not str(selected_img).strip():
+            if product.images and len(product.images) > 0:
+                first = product.images[0]
+                if isinstance(first, str) and len(first) <= 1000 and not first.startswith("data:"):
+                    return first
+                return "photo:0"
+            return None
+
+        clean = str(selected_img).strip()
+        if clean.startswith("photo:") or clean.startswith("gallery:"):
+            return clean
+
+        if len(clean) <= 1000 and not clean.startswith("data:"):
+            return clean
+
+        # Large Base64 string: find index in product.images
+        if product.images:
+            for idx, img in enumerate(product.images):
+                if img == clean:
+                    return f"photo:{idx}"
+            # If not exact match, default to photo:0
+            if len(product.images) > 0:
+                return "photo:0"
+
+        # Fallback to prevent PostgreSQL StringDataRightTruncationError
+        return clean[:1000]
+
+    @staticmethod
+    def _resolve_image_reference(img_ref: str | None, product: Product | None) -> str | None:
+        """
+        Resolve a stored image reference (such as 'photo:0' or storage URL) to the full image URI.
+        """
+        if not img_ref or not str(img_ref).strip():
+            return None
+        clean = str(img_ref).strip()
+        if clean.startswith("photo:"):
+            try:
+                idx = int(clean.split(":", 1)[1])
+                if product and product.images and 0 <= idx < len(product.images):
+                    return product.images[idx]
+            except Exception:
+                pass
+            return None
+        return clean
+
     def _calculate_commercials(
         self,
         items_in: list[CrmQuotationItemIn],
@@ -602,13 +656,10 @@ class CrmQuotationService:
             tax_total += line_tax
             total_amount += line_total
 
-            # Product snapshot
+            # Product snapshot - normalize reference for storage compatibility (<1000 chars)
             img_to_include = None
             if item.include_images:
-                if item.selected_image_url:
-                    img_to_include = item.selected_image_url
-                elif product.images and len(product.images) > 0:
-                    img_to_include = product.images[0]
+                img_to_include = self._normalize_image_reference(item.selected_image_url, product)
 
             calculated_lines.append(
                 {
@@ -639,6 +690,7 @@ class CrmQuotationService:
         """Create an immutable historical snapshot dictionary of a quotation revision."""
         items_data = []
         for it in q.items:
+            resolved_img = self._resolve_image_reference(it.selected_image_url, getattr(it, "product", None))
             items_data.append(
                 {
                     "position": it.position,
@@ -649,7 +701,7 @@ class CrmQuotationService:
                     "specification": it.specification,
                     "uom": it.uom,
                     "include_images": it.include_images,
-                    "selected_image_url": it.selected_image_url,
+                    "selected_image_url": resolved_img,
                     "include_specifications": it.include_specifications,
                     "demo_link": it.demo_link,
                     "quantity": float(it.quantity),
@@ -842,7 +894,7 @@ class CrmQuotationService:
             .options(
                 selectinload(CrmSalesQuotation.lead).selectinload(CrmLead.company).selectinload(Company.contacts),
                 selectinload(CrmSalesQuotation.company).selectinload(Company.contacts),
-                selectinload(CrmSalesQuotation.items),
+                selectinload(CrmSalesQuotation.items).selectinload(CrmQuotationItem.product),
                 selectinload(CrmSalesQuotation.revisions),
             )
             .where(
@@ -868,7 +920,7 @@ class CrmQuotationService:
             .options(
                 selectinload(CrmSalesQuotation.lead).selectinload(CrmLead.company).selectinload(Company.contacts),
                 selectinload(CrmSalesQuotation.company).selectinload(Company.contacts),
-                selectinload(CrmSalesQuotation.items),
+                selectinload(CrmSalesQuotation.items).selectinload(CrmQuotationItem.product),
                 selectinload(CrmSalesQuotation.revisions),
             )
             .where(
@@ -904,7 +956,7 @@ class CrmQuotationService:
             .options(
                 selectinload(CrmSalesQuotation.lead).selectinload(CrmLead.company).selectinload(Company.contacts),
                 selectinload(CrmSalesQuotation.company).selectinload(Company.contacts),
-                selectinload(CrmSalesQuotation.items),
+                selectinload(CrmSalesQuotation.items).selectinload(CrmQuotationItem.product),
                 selectinload(CrmSalesQuotation.revisions),
             )
             .where(
@@ -1069,7 +1121,7 @@ class CrmQuotationService:
                 specification=it.specification,
                 uom=it.uom,
                 include_images=it.include_images,
-                selected_image_url=it.selected_image_url,
+                selected_image_url=self._resolve_image_reference(it.selected_image_url, getattr(it, "product", None)),
                 include_specifications=it.include_specifications,
                 demo_link=it.demo_link,
                 quantity=float(it.quantity),
@@ -1210,7 +1262,7 @@ class CrmQuotationService:
             .options(
                 selectinload(CrmSalesQuotation.lead).selectinload(CrmLead.company).selectinload(Company.contacts),
                 selectinload(CrmSalesQuotation.company).selectinload(Company.contacts),
-                selectinload(CrmSalesQuotation.items),
+                selectinload(CrmSalesQuotation.items).selectinload(CrmQuotationItem.product),
                 selectinload(CrmSalesQuotation.revisions),
             )
             .where(
