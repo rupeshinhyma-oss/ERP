@@ -79,3 +79,4 @@ def purge_retired_qa_files(inhyma_root: Path | None = None) -> list[str]:
             except OSError:
                 pass
     return removed
+

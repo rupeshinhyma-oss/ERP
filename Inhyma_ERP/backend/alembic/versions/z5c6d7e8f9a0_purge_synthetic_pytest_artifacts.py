@@ -111,3 +111,4 @@ def upgrade() -> None:
 def downgrade() -> None:
     # Irreversible data hygiene migration (synthetic test artifacts only).
     pass
+

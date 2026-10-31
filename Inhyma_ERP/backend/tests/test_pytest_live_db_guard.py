@@ -51,3 +51,4 @@ async def test_engine_blocks_supabase_url_during_pytest_even_if_settings_mutated
     finally:
         object.__setattr__(settings, "DATABASE_URL", prev_url)
         await engine_module.dispose_engine()
+
