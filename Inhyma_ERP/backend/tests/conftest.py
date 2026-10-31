@@ -35,7 +35,19 @@ from httpx import ASGITransport, AsyncClient
 
 import app.database.engine as engine_module
 from app.core.config import settings
+from app.core.legacy_qa_guard import purge_retired_qa_files
 from app.main import create_application
+
+# Automatically remove any retired live-DB QA test/script files that might
+# still exist as untracked copies on a developer/colleague machine.
+purge_retired_qa_files()
+
+# Also enforce isolation if Settings was imported before conftest ran.
+if os.environ.get("ALLOW_LIVE_DB_TESTS") != "1" and (
+    "supabase.com" in str(settings.DATABASE_URL).lower()
+    or "supabase.co" in str(settings.DATABASE_URL).lower()
+):
+    object.__setattr__(settings, "DATABASE_URL", "sqlite+aiosqlite:///:memory:")
 
 
 @pytest_asyncio.fixture(autouse=True)

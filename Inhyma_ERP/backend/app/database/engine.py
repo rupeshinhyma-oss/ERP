@@ -13,6 +13,9 @@ Alembic, testing, and for keeping import order irrelevant).
 
 from __future__ import annotations
 
+import os
+import sys
+
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import AsyncAdaptedQueuePool, StaticPool
 
@@ -42,6 +45,15 @@ def _statement_cache_must_be_disabled() -> bool:
     return ":6543/" in url or ":6543?" in url or "pgbouncer" in url
 
 
+def _is_supabase_url(url: str) -> bool:
+    lower = url.lower()
+    return "supabase.com" in lower or "supabase.co" in lower
+
+
+def _is_pytest_runtime() -> bool:
+    return "pytest" in sys.modules or bool(os.environ.get("PYTEST_CURRENT_TEST"))
+
+
 def get_engine() -> AsyncEngine:
     """
     Return the process-wide async SQLAlchemy engine, creating it on first use.
@@ -53,6 +65,11 @@ def get_engine() -> AsyncEngine:
     global _engine
     if _engine is None:
         db_url = str(settings.DATABASE_URL)
+        # Hard safety guard: never allow pytest runs on any developer machine
+        # to connect to a live Supabase database unless ALLOW_LIVE_DB_TESTS=1
+        # is explicitly provided, even if Settings loaded .env before conftest.
+        if _is_pytest_runtime() and os.environ.get("ALLOW_LIVE_DB_TESTS") != "1" and _is_supabase_url(db_url):
+            db_url = "sqlite+aiosqlite:///:memory:"
         if db_url.lower().startswith("sqlite"):
             _engine = create_async_engine(
                 db_url,

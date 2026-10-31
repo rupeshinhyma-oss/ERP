@@ -83,3 +83,4 @@ def downgrade() -> None:
 
     if insp.has_table("product_specification_documents"):
         op.drop_table("product_specification_documents")
+

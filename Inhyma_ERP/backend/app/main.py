@@ -113,6 +113,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # well-known default signing key.
     settings.validate_production_secrets()
 
+    if settings.ENVIRONMENT.value in {"local", "development", "test"}:
+        from app.core.legacy_qa_guard import purge_retired_qa_files
+
+        removed_qa_files = purge_retired_qa_files()
+        if removed_qa_files:
+            logger.info("Purged retired synthetic QA files.", extra={"count": len(removed_qa_files)})
+
     # Eagerly initialize the engine to fail fast on misconfiguration.
     engine = get_engine()
     async def _run_startup_schema() -> None:
