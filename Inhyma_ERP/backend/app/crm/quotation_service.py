@@ -19,7 +19,7 @@ from datetime import datetime, timezone
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Any
 
-from sqlalchemy import desc, func, or_, select
+from sqlalchemy import desc, func, inspect as sa_inspect, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -34,6 +34,41 @@ from app.core.exceptions import (
 from app.database.base import _utcnow
 from app.core.logging import get_logger
 from app.masters.products.models import Product
+
+
+def _sanitize_crm_image_url(url: str | None) -> str | None:
+    """Return None for empty or reserved non-resolvable synthetic domains (*.test, *.invalid, *.example)."""
+    if not url or not isinstance(url, str):
+        return None
+    u = url.strip()
+    if not u:
+        return None
+    if u.lower().startswith(("http://", "https://")):
+        from urllib.parse import urlparse
+        host = (urlparse(u).hostname or "").lower()
+        if host.endswith((".test", ".invalid", ".example")) or host in {"test", "invalid", "example"}:
+            return None
+    return u
+
+
+def _resolve_product_spec_pdf_link(product: Product | None) -> str | None:
+    """Return the DB-stored Specification document link for a product when an uploaded document exists."""
+    if product is None:
+        return None
+    doc_url = getattr(product, "specification_doc_url", None)
+    if doc_url and str(doc_url).strip():
+        return str(doc_url).strip()
+    doc_id = getattr(product, "specification_doc_id", None)
+    if doc_id:
+        from app.common.storage import sanitize_filename
+        doc_name = sanitize_filename(getattr(product, "specification_doc_name", None) or "specification.pdf")
+        return f"/api/v1/masters/products/specification-documents/{doc_id}/{doc_name}"
+    spec = getattr(product, "specification", None)
+    if spec and isinstance(spec, str):
+        s = spec.strip()
+        if s.startswith(("http://", "https://", "/api/")):
+            return s
+    return None
 from app.companies.models import Company, CompanyContact
 from app.organizations.models import Organization
 from app.users.models import User
@@ -348,7 +383,9 @@ class CrmQuotationService:
                     id=p.id,
                     product_code=p.product_code,
                     product_name=p.product_name,
-                    specification=p.specification,
+                    specification=_resolve_product_spec_pdf_link(p) or p.specification,
+                    specification_doc_name=getattr(p, "specification_doc_name", None),
+                    specification_doc_url=getattr(p, "specification_doc_url", None),
                     description=p.description,
                     uom="Nos",
                     standard_price=float(p.standard_price) if p.standard_price is not None else None,
@@ -610,6 +647,14 @@ class CrmQuotationService:
                 elif product.images and len(product.images) > 0:
                     img_to_include = product.images[0]
 
+            prod_pdf_link = _resolve_product_spec_pdf_link(product)
+            effective_include_specs = True if prod_pdf_link else item.include_specifications
+            default_spec = prod_pdf_link or product.specification
+            effective_spec = (
+                (item.specification if (item.specification and item.specification.strip()) else default_spec)
+                if effective_include_specs
+                else None
+            )
             calculated_lines.append(
                 {
                     "product_id": product.id,
@@ -617,11 +662,11 @@ class CrmQuotationService:
                     "product_name": product.product_name,
                     "product_code": product.product_code,
                     "description": item.description if item.description is not None else product.description,
-                    "specification": (item.specification if item.specification is not None else product.specification) if item.include_specifications else None,
+                    "specification": effective_spec,
                     "uom": item.uom or "Nos",
                     "include_images": item.include_images,
                     "selected_image_url": img_to_include,
-                    "include_specifications": item.include_specifications,
+                    "include_specifications": effective_include_specs,
                     "demo_link": item.demo_link,
                     "quantity": qty,
                     "unit_price": price,
@@ -638,7 +683,16 @@ class CrmQuotationService:
     def _serialize_quotation(self, q: CrmSalesQuotation) -> dict[str, Any]:
         """Create an immutable historical snapshot dictionary of a quotation revision."""
         items_data = []
+        is_draft_quote = (getattr(q, "status", "") or "").lower() == "draft"
         for it in q.items:
+            loaded_prod = it.product if "product" not in sa_inspect(it).unloaded else None
+            prod_pdf = _resolve_product_spec_pdf_link(loaded_prod)
+            spec_val = it.specification
+            inc_specs = it.include_specifications
+            if prod_pdf and (not spec_val or is_draft_quote):
+                spec_val = prod_pdf
+                inc_specs = True
+            spec_doc_name = getattr(loaded_prod, "specification_doc_name", None) if loaded_prod else None
             items_data.append(
                 {
                     "position": it.position,
@@ -646,11 +700,12 @@ class CrmQuotationService:
                     "product_name": it.product_name,
                     "product_code": it.product_code,
                     "description": it.description,
-                    "specification": it.specification,
+                    "specification": spec_val,
+                    "specification_doc_name": spec_doc_name,
                     "uom": it.uom,
                     "include_images": it.include_images,
                     "selected_image_url": it.selected_image_url,
-                    "include_specifications": it.include_specifications,
+                    "include_specifications": inc_specs,
                     "demo_link": it.demo_link,
                     "quantity": float(it.quantity),
                     "unit_price": float(it.unit_price),
@@ -842,7 +897,7 @@ class CrmQuotationService:
             .options(
                 selectinload(CrmSalesQuotation.lead).selectinload(CrmLead.company).selectinload(Company.contacts),
                 selectinload(CrmSalesQuotation.company).selectinload(Company.contacts),
-                selectinload(CrmSalesQuotation.items),
+                selectinload(CrmSalesQuotation.items).selectinload(CrmQuotationItem.product),
                 selectinload(CrmSalesQuotation.revisions),
             )
             .where(
@@ -868,7 +923,7 @@ class CrmQuotationService:
             .options(
                 selectinload(CrmSalesQuotation.lead).selectinload(CrmLead.company).selectinload(Company.contacts),
                 selectinload(CrmSalesQuotation.company).selectinload(Company.contacts),
-                selectinload(CrmSalesQuotation.items),
+                selectinload(CrmSalesQuotation.items).selectinload(CrmQuotationItem.product),
                 selectinload(CrmSalesQuotation.revisions),
             )
             .where(
@@ -904,7 +959,7 @@ class CrmQuotationService:
             .options(
                 selectinload(CrmSalesQuotation.lead).selectinload(CrmLead.company).selectinload(Company.contacts),
                 selectinload(CrmSalesQuotation.company).selectinload(Company.contacts),
-                selectinload(CrmSalesQuotation.items),
+                selectinload(CrmSalesQuotation.items).selectinload(CrmQuotationItem.product),
                 selectinload(CrmSalesQuotation.revisions),
             )
             .where(
@@ -1057,32 +1112,42 @@ class CrmQuotationService:
 
     def _build_read_model(self, q: CrmSalesQuotation) -> CrmSalesQuotationRead:
         """Map ORM CrmSalesQuotation to CrmSalesQuotationRead."""
-        items = [
-            CrmQuotationItemRead(
-                id=it.id,
-                quotation_id=it.quotation_id,
-                product_id=it.product_id,
-                position=it.position,
-                product_name=it.product_name,
-                product_code=it.product_code,
-                description=it.description,
-                specification=it.specification,
-                uom=it.uom,
-                include_images=it.include_images,
-                selected_image_url=it.selected_image_url,
-                include_specifications=it.include_specifications,
-                demo_link=it.demo_link,
-                quantity=float(it.quantity),
-                unit_price=float(it.unit_price),
-                unit_discount=float(it.unit_discount),
-                tax_rate=float(it.tax_rate),
-                taxable_amount=float(it.taxable_amount),
-                tax_amount=float(it.tax_amount),
-                total_amount=float(it.total_amount),
+        is_draft_quote = (getattr(q, "status", "") or "").lower() == "draft"
+        items: list[CrmQuotationItemRead] = []
+        for it in (q.items or []):
+            loaded_prod = it.product if "product" not in sa_inspect(it).unloaded else None
+            prod_pdf = _resolve_product_spec_pdf_link(loaded_prod)
+            spec_val = it.specification
+            inc_specs = it.include_specifications
+            if prod_pdf and (not spec_val or is_draft_quote):
+                spec_val = prod_pdf
+                inc_specs = True
+            items.append(
+                CrmQuotationItemRead(
+                    id=it.id,
+                    quotation_id=it.quotation_id,
+                    product_id=it.product_id,
+                    position=it.position,
+                    product_name=it.product_name,
+                    product_code=it.product_code,
+                    description=it.description,
+                    specification=spec_val,
+                    specification_doc_name=getattr(loaded_prod, "specification_doc_name", None) if loaded_prod else None,
+                    specification_doc_url=getattr(loaded_prod, "specification_doc_url", None) if loaded_prod else None,
+                    uom=it.uom,
+                    include_images=bool(it.include_images and _sanitize_crm_image_url(it.selected_image_url)),
+                    selected_image_url=_sanitize_crm_image_url(it.selected_image_url),
+                    include_specifications=inc_specs,
+                    demo_link=it.demo_link,
+                    quantity=float(it.quantity),
+                    unit_price=float(it.unit_price),
+                    unit_discount=float(it.unit_discount),
+                    tax_rate=float(it.tax_rate),
+                    taxable_amount=float(it.taxable_amount),
+                    tax_amount=float(it.tax_amount),
+                    total_amount=float(it.total_amount),
+                )
             )
-            for it in (q.items or [])
-        ]
-
         revisions = [
             CrmQuotationVersionRead(
                 id=rv.id,
@@ -1196,6 +1261,7 @@ class CrmQuotationService:
         quotation_id: uuid.UUID,
         *,
         version: int | None = None,
+        public_origin: str | None = None,
         actor: CurrentUser,
     ) -> tuple[bytes, str]:
         """
@@ -1210,7 +1276,7 @@ class CrmQuotationService:
             .options(
                 selectinload(CrmSalesQuotation.lead).selectinload(CrmLead.company).selectinload(Company.contacts),
                 selectinload(CrmSalesQuotation.company).selectinload(Company.contacts),
-                selectinload(CrmSalesQuotation.items),
+                selectinload(CrmSalesQuotation.items).selectinload(CrmQuotationItem.product),
                 selectinload(CrmSalesQuotation.revisions),
             )
             .where(
@@ -1234,7 +1300,8 @@ class CrmQuotationService:
             rev_match = next((r for r in q.revisions if r.version == target_version), None)
             if not rev_match:
                 raise NotFoundException(f"Revision version {target_version} not found for quotation {q.quotation_number}.")
-            snapshot_data = rev_match.snapshot_data
+            import copy
+            snapshot_data = copy.deepcopy(rev_match.snapshot_data)
         else:
             raise NotFoundException(f"Revision version {target_version} does not exist (current version is v{q.version}).")
 
@@ -1300,6 +1367,13 @@ class CrmQuotationService:
         except Exception as log_err:
             logger.warning("Could not log quotation PDF generation activity: %s", log_err)
             await self.session.rollback()
+
+        if public_origin:
+            clean_origin = public_origin.rstrip("/")
+            for snap_item in snapshot_data.get("items") or []:
+                raw_spec = snap_item.get("specification")
+                if isinstance(raw_spec, str) and raw_spec.strip().startswith("/"):
+                    snap_item["specification"] = f"{clean_origin}{raw_spec.strip()}"
 
         pdf_bytes = generate_crm_quotation_pdf_bytes(snapshot_data, company_branding=company_branding)
         filename = f"{q.quotation_number}_v{target_version}.pdf"

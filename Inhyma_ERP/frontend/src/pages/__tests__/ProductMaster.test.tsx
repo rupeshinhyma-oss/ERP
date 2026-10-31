@@ -80,18 +80,36 @@ vi.mock("@/lib/api", () => ({
     return Promise.resolve({ data: [], success: true });
   }),
   apiPost: vi.fn().mockResolvedValue({ success: true, data: { id: "new-prod" } }),
+  apiPostMultipart: vi.fn().mockImplementation((_url: string, fd: FormData) => {
+    const uploadedFile = fd.get("file") as File | null;
+    const fname = uploadedFile?.name || "spec.pdf";
+    const isPdf = fname.toLowerCase().endsWith(".pdf") || uploadedFile?.type === "application/pdf";
+    const docId = "11111111-1111-4111-8111-111111111111";
+    const url = `http://localhost:8002/api/v1/masters/products/specification-documents/${docId}/${encodeURIComponent(fname)}`;
+    return Promise.resolve({
+      success: true,
+      data: {
+        doc_id: docId,
+        filename: fname,
+        clean_filename: fname,
+        content_type: isPdf ? "application/pdf" : "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        file_size: uploadedFile?.size || 1024,
+        is_pdf: isPdf,
+        url,
+        pdf_link: isPdf ? url : null,
+      },
+    });
+  }),
   apiPatch: vi.fn().mockResolvedValue({ success: true }),
   apiDelete: vi.fn().mockResolvedValue({ success: true }),
   downloadExport: vi.fn(),
+  errorMessage: vi.fn((err: any) => err?.message || "Request failed"),
   API_ORIGIN: "http://localhost:8000",
 }));
 
 // Mock Lookups
 vi.mock("@/lib/lookups", () => ({
   useLookup: (url: string) => {
-    if (url.includes("categories")) {
-      return { items: [{ id: "cat-machines", name: "Machines" }, { id: "cat-spares", name: "Spares" }], loaded: true };
-    }
     if (url.includes("sub-categories")) {
       return {
         items: [
@@ -101,6 +119,9 @@ vi.mock("@/lib/lookups", () => ({
         ],
         loaded: true,
       };
+    }
+    if (url.includes("categories")) {
+      return { items: [{ id: "cat-machines", name: "Machines" }, { id: "cat-spares", name: "Spares" }], loaded: true };
     }
     if (url.includes("brands")) {
       return { items: [{ id: "brand-yinglima", name: "Yinglima" }], loaded: true };
@@ -369,11 +390,10 @@ describe("Product Master (/product/list)", () => {
     expect(screen.getByText(/Image Of Product/i)).toBeTruthy();
     expect(screen.getByRole("button", { name: "Select Image" })).toBeTruthy();
 
-    // Specification
+    // Specification Document Upload
     expect(screen.getByText(/^Specification$/i)).toBeTruthy();
-    expect(screen.getByTitle("Bold")).toBeTruthy();
-    expect(screen.getByTitle("Italic")).toBeTruthy();
-    expect(screen.getByTitle("Underline")).toBeTruthy();
+    expect(screen.getByTestId("specification-doc-input")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Select Document" })).toBeTruthy();
 
     // Dimensions Dynamic Table
     expect(screen.getByRole("heading", { name: /^Dimensions$/i })).toBeTruthy();
@@ -491,6 +511,151 @@ describe("Product Master (/product/list)", () => {
     fireEvent.click(item);
     expect(nameInput.value).toBe("ISL150 Rotary PFS 4 Stations");
     expect(screen.queryByTestId("product-name-suggestions")).toBeNull();
+  });
+
+  it("uploads a non-PDF document (.docx) to DB and displays its saved document link without copying to clipboard", async () => {
+    const apiMod = await import("@/lib/api");
+    const writeTextMock = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, {
+      clipboard: { writeText: writeTextMock },
+    });
+
+    render(
+      <BrowserRouter>
+        <ProductsPage defaultAdd={true} />
+      </BrowserRouter>
+    );
+
+    const fileInput = screen.getByTestId("specification-doc-input") as HTMLInputElement;
+    const docxFile = new File(["dummy docx bytes"], "machine_manual.docx", {
+      type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    });
+
+    fireEvent.change(fileInput, { target: { files: [docxFile] } });
+
+    await waitFor(() => {
+      expect(apiMod.apiPostMultipart).toHaveBeenCalledWith(
+        "/masters/products/specification-document",
+        expect.any(FormData)
+      );
+      expect(screen.getByText("machine_manual.docx")).toBeTruthy();
+      expect(screen.getByText("Stored in Database")).toBeTruthy();
+      expect(screen.getByTestId("specification-pdf-link-box")).toBeTruthy();
+    });
+
+    expect(writeTextMock).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: /Copy Link|Copied!/i })).toBeNull();
+  });
+
+  it("uploads a PDF specification to DB, displays Saved PDF Link without clipboard copy, and shows saved link in Product View", async () => {
+    const writeTextMock = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, {
+      clipboard: { writeText: writeTextMock },
+    });
+
+    render(
+      <BrowserRouter>
+        <ProductsPage />
+      </BrowserRouter>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("ISL150 Rotary PFS 4 Stations")).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByLabelText("Edit ISL150 Rotary PFS 4 Stations"));
+
+    const fileInput = screen.getByTestId("specification-doc-input") as HTMLInputElement;
+    const pdfFile = new File(["%PDF-1.4 sample spec"], "AFM500_Spec.pdf", {
+      type: "application/pdf",
+    });
+
+    fireEvent.change(fileInput, { target: { files: [pdfFile] } });
+
+    const expectedUrl =
+      "http://localhost:8002/api/v1/masters/products/specification-documents/11111111-1111-4111-8111-111111111111/AFM500_Spec.pdf";
+
+    await waitFor(() => {
+      expect(screen.getByText("AFM500_Spec.pdf")).toBeTruthy();
+      expect(screen.getByText("Stored in Database")).toBeTruthy();
+      expect(screen.getByTestId("specification-pdf-link-box")).toBeTruthy();
+      expect(screen.getByText(expectedUrl)).toBeTruthy();
+    });
+
+    // Never copies to user's clipboard and renders no Copy Link button
+    expect(writeTextMock).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: /Copy Link|Copied!/i })).toBeNull();
+
+    // Return to list and open Product Details View drawer — saved link is displayed in View
+    fireEvent.click(screen.getByRole("button", { name: "← BACK" }));
+    fireEvent.click(screen.getByText("ISL150 Rotary PFS 4 Stations"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("drawer-product-specification")).toBeTruthy();
+      expect(screen.getByTestId("drawer-specification-link")).toBeTruthy();
+      expect(within(screen.getByTestId("drawer-specification-link")).getByText(expectedUrl)).toBeTruthy();
+    });
+    expect(screen.queryByRole("button", { name: /Copy Link|Copied!/i })).toBeNull();
+  });
+
+  it("shows visible validation error near Submit when editing a legacy product with 0 weight, then submits cleanly once filled", async () => {
+    const apiMod = await import("@/lib/api");
+    render(
+      <BrowserRouter>
+        <ProductsPage />
+      </BrowserRouter>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("ISL150 Rotary PFS 4 Stations")).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByLabelText("Edit ISL150 Rotary PFS 4 Stations"));
+    expect(screen.getByRole("heading", { name: "Edit Product" })).toBeTruthy();
+
+    // Legacy 0 weight is initialized empty rather than misleadingly pre-filling "0"
+    const grossWtInput = screen.getByPlaceholderText("Enter weight in kg (> 0)") as HTMLInputElement;
+    expect(grossWtInput.value).toBe("");
+
+    // Clicking Submit without filling gross weight or dimensions shows visible error near Submit
+    fireEvent.click(screen.getByRole("button", { name: "Save Product" }));
+    await waitFor(() => {
+      expect(screen.getByTestId("product-submit-error")).toBeTruthy();
+      expect(screen.getAllByText(/Packaging Gross Weight must be greater than 0 kg\./i).length).toBeGreaterThanOrEqual(1);
+    });
+    expect(apiMod.apiPatch).not.toHaveBeenCalled();
+
+    // Fill gross weight + dimensions + upload Specification PDF, then click Submit
+    fireEvent.change(grossWtInput, { target: { value: "25" } });
+    const numberInputs = document.querySelectorAll('input[type="number"]');
+    // Length, Width, Height inputs are right after Packaging Gross Weight
+    const grossIdx = Array.from(numberInputs).indexOf(grossWtInput);
+    fireEvent.change(numberInputs[grossIdx + 1], { target: { value: "45" } });
+    fireEvent.change(numberInputs[grossIdx + 2], { target: { value: "85" } });
+    fireEvent.change(numberInputs[grossIdx + 3], { target: { value: "65" } });
+
+    const fileInput = screen.getByTestId("specification-doc-input") as HTMLInputElement;
+    const pdfFile = new File(["%PDF-1.4 spec"], "Sales_Order_SO.pdf", { type: "application/pdf" });
+    fireEvent.change(fileInput, { target: { files: [pdfFile] } });
+
+    await waitFor(() => {
+      expect(screen.getByText("Sales_Order_SO.pdf")).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Save Product" }));
+
+    await waitFor(() => {
+      expect(apiMod.apiPatch).toHaveBeenCalledWith(
+        "/masters/products/prd-001",
+        expect.objectContaining({
+          packaging_gross_weight: 25,
+          packaging_unit_cbm: 0.25,
+          specification_doc_id: "11111111-1111-4111-8111-111111111111",
+          specification_doc_name: "Sales_Order_SO.pdf",
+        })
+      );
+      expect(screen.getByRole("heading", { name: "Product Master" })).toBeTruthy();
+    });
   });
 });
 

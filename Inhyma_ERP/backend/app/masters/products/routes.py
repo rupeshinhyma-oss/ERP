@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends, File, Request, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, status
 from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -22,7 +22,9 @@ from app.auth.dependencies import get_current_user
 from app.auth.service import CurrentUser
 from app.common.list_query import ListQueryParams, get_list_query_params
 from app.common.pagination import PageMeta
-from app.common.storage import save_uploaded_file
+from app.common.storage import MAX_FILE_SIZE, guess_content_type, sanitize_filename, save_uploaded_file
+from app.core.config import settings
+from app.core.exceptions import BadRequestException
 from app.core.logging import get_logger
 from app.core.responses import build_success_response
 from app.database.session import get_db_session
@@ -42,7 +44,8 @@ from app.masters.products.schemas import (
     ProductUpdate,
 )
 from app.masters.products.service import ProductService
-from app.rbac.dependencies import require_permission
+from app.masters.products.models import ProductSpecificationDocument
+from app.rbac.dependencies import require_any_permission, require_permission
 from app.integration.jobs import enqueue_dispatch
 from app.integration.repository import IntegrationOutboxRepository
 from app.integration.service import IntegrationService
@@ -275,6 +278,147 @@ async def upload_product_image(
         content_type=file.content_type,
     )
     return {"success": True, "data": {"url": image_url}}
+
+
+ALLOWED_SPEC_DOC_EXTENSIONS: set[str] = {
+    "pdf", "doc", "docx", "xls", "xlsx", "csv", "txt", "rtf", "odt", "ods", "ppt", "pptx",
+}
+
+
+def _resolve_public_api_origin(request: Request) -> str:
+    """Resolve externally reachable base origin for DB-served specification document links."""
+    if settings.BACKEND_URL and settings.BACKEND_URL.strip():
+        return settings.BACKEND_URL.strip().rstrip("/")
+    proto = (request.headers.get("x-forwarded-proto") or request.url.scheme or "http").split(",")[0].strip()
+    host = (
+        request.headers.get("x-forwarded-host")
+        or request.headers.get("host")
+        or request.url.netloc
+        or ""
+    ).split(",")[0].strip()
+    if host.startswith("127.0.0.1:"):
+        origin_hdr = f"{request.headers.get('origin', '')} {request.headers.get('referer', '')}"
+        if "localhost" in origin_hdr:
+            host = "localhost:" + host.split(":", 1)[1]
+    if host:
+        return f"{proto}://{host}"
+    return str(request.base_url).rstrip("/")
+
+
+@router.post("/specification-document", summary="Upload product specification document to DB")
+async def upload_product_specification_document(
+    request: Request,
+    file: UploadFile = File(...),
+    product_id: str | None = Form(None),
+    db: AsyncSession = Depends(get_db_session),
+    current_user: CurrentUser = Depends(require_any_permission("product.create", "product.update")),
+) -> dict:
+    """
+    Store any uploaded Product Specification document directly in the database.
+    When a PDF is uploaded, automatically generates a direct link to that DB-stored PDF.
+    """
+    content = await file.read()
+    if not content:
+        raise BadRequestException("Uploaded document file cannot be empty.")
+    if len(content) > MAX_FILE_SIZE:
+        raise BadRequestException(f"File size exceeds maximum allowed limit ({MAX_FILE_SIZE // (1024 * 1024)} MB).")
+
+    original_filename = (file.filename or "specification.pdf").strip()
+    ext = original_filename.rsplit(".", 1)[-1].lower() if "." in original_filename else ""
+    if not ext or ext not in ALLOWED_SPEC_DOC_EXTENSIONS:
+        raise BadRequestException(
+            f"Unsupported document format '.{ext}'. Allowed formats: {', '.join(sorted(ALLOWED_SPEC_DOC_EXTENSIONS))}."
+        )
+
+    is_pdf = ext == "pdf" or (file.content_type or "").lower() == "application/pdf"
+    mime = "application/pdf" if is_pdf else (file.content_type or guess_content_type(original_filename))
+    clean_name = sanitize_filename(original_filename)
+
+    parsed_product_id: uuid.UUID | None = None
+    if product_id and product_id.strip():
+        try:
+            parsed_product_id = uuid.UUID(product_id.strip())
+        except ValueError:
+            parsed_product_id = None
+
+    doc = ProductSpecificationDocument(
+        product_id=parsed_product_id,
+        filename=original_filename[:255],
+        content_type=mime[:120],
+        file_size=len(content),
+        file_data=content,
+        uploaded_by=current_user.id,
+    )
+    db.add(doc)
+    await db.flush()
+
+    origin = _resolve_public_api_origin(request)
+    doc_url = f"{origin}{settings.API_V1_PREFIX}/masters/products/specification-documents/{doc.id}/{clean_name}"
+
+    if parsed_product_id is not None:
+        from app.masters.products.models import Product as ProductModel
+        existing_prod = await db.get(ProductModel, parsed_product_id)
+        if existing_prod is not None and getattr(existing_prod, "deleted_at", None) is None:
+            existing_prod.specification_doc_id = doc.id
+            existing_prod.specification_doc_name = doc.filename
+            existing_prod.specification_doc_mime = doc.content_type
+            existing_prod.specification_doc_url = doc_url
+            existing_prod.specification = doc_url
+
+    await db.commit()
+    await db.refresh(doc)
+
+    return build_success_response(
+        data={
+            "doc_id": str(doc.id),
+            "filename": doc.filename,
+            "clean_filename": clean_name,
+            "content_type": doc.content_type,
+            "file_size": doc.file_size,
+            "is_pdf": is_pdf,
+            "url": doc_url,
+            "pdf_link": doc_url if is_pdf else None,
+        },
+        request_id=request.state.request_id,
+        message="Specification document stored in database.",
+    )
+
+
+async def _serve_specification_document(doc_id: uuid.UUID, db: AsyncSession) -> Response:
+    doc = await db.get(ProductSpecificationDocument, doc_id)
+    if doc is None or not doc.file_data:
+        raise HTTPException(status_code=404, detail="Specification document not found.")
+    is_pdf = (doc.content_type or "").lower() == "application/pdf" or doc.filename.lower().endswith(".pdf")
+    media_type = "application/pdf" if is_pdf else (doc.content_type or "application/octet-stream")
+    disposition = "inline" if is_pdf else "attachment"
+    safe_name = sanitize_filename(doc.filename or ("specification.pdf" if is_pdf else "specification.bin"))
+    return Response(
+        content=doc.file_data,
+        media_type=media_type,
+        headers={
+            "Content-Disposition": f'{disposition}; filename="{safe_name}"',
+            "Cache-Control": "public, max-age=86400",
+        },
+    )
+
+
+@router.get("/specification-documents/{doc_id}", summary="Stream specification document from DB")
+async def get_product_specification_document(
+    doc_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db_session),
+) -> Response:
+    """Serve a DB-stored product specification document by ID."""
+    return await _serve_specification_document(doc_id, db)
+
+
+@router.get("/specification-documents/{doc_id}/{filename}", summary="Stream named specification document from DB")
+async def get_product_specification_document_named(
+    doc_id: uuid.UUID,
+    filename: str,
+    db: AsyncSession = Depends(get_db_session),
+) -> Response:
+    """Serve a DB-stored product specification document with clean filename in URL."""
+    return await _serve_specification_document(doc_id, db)
 
 
 @router.post("/bulk-delete", summary="Bulk delete products with zero-stock enforcement (admin level)")

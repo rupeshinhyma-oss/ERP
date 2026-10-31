@@ -314,6 +314,10 @@ export interface Product extends MasterRecord {
   license_certificate_required?: string | null;
   conversion_factor?: number | null;
   specification?: string | null;
+  specification_doc_id?: string | null;
+  specification_doc_name?: string | null;
+  specification_doc_mime?: string | null;
+  specification_doc_url?: string | null;
   description?: string | null;
   image_url?: string | null;
   images?: string[] | null;

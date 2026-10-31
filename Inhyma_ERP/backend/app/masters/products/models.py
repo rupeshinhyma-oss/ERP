@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import JSON, Boolean, ForeignKey, Numeric, String, Text
+from sqlalchemy import JSON, Boolean, ForeignKey, Integer, LargeBinary, Numeric, String, Text
 from sqlalchemy import Enum as SAEnum
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -81,6 +81,10 @@ class Product(Base, UUIDPrimaryKeyMixin, TimestampMixin, VersionMixin, SoftDelet
 
     # --- Descriptive ----------------------------------------------------------------
     specification: Mapped[str | None] = mapped_column(Text, nullable=True)
+    specification_doc_id: Mapped[uuid.UUID | None] = mapped_column(GUID(), nullable=True, index=True)
+    specification_doc_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    specification_doc_mime: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    specification_doc_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     images: Mapped[list | None] = mapped_column(JSON, nullable=True)  # list[str] of image URLs/paths
 
@@ -192,3 +196,21 @@ class ProductMachineSpare(Base, UUIDPrimaryKeyMixin, TimestampMixin):
 
     def __repr__(self) -> str:
         return f"<ProductMachineSpare machine_id={self.machine_id!r} spare_part_id={self.spare_part_id!r}>"
+
+
+class ProductSpecificationDocument(Base, UUIDPrimaryKeyMixin, TimestampMixin):
+    """Stores uploaded Product Specification documents (PDF, DOC, DOCX, etc.) directly in the database."""
+
+    __tablename__ = "product_specification_documents"
+
+    product_id: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(), ForeignKey("products.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    filename: Mapped[str] = mapped_column(String(255), nullable=False)
+    content_type: Mapped[str] = mapped_column(String(120), nullable=False, default="application/octet-stream")
+    file_size: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    file_data: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    uploaded_by: Mapped[uuid.UUID | None] = mapped_column(GUID(), nullable=True)
+
+    def __repr__(self) -> str:
+        return f"<ProductSpecificationDocument id={self.id!r} filename={self.filename!r}>"

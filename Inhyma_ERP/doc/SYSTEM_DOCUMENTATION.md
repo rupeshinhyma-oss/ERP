@@ -1,7 +1,7 @@
 # Enterprise ERP System — Unified Architecture, Feature & Technical Manual
 
 > **System Version:** 1.0.0 (Production)  
-> **Last Updated:** October 30, 2026  
+> **Last Updated:** October 31, 2026  
 > **Architectural Pattern:** Modular Async Monolith (FastAPI) + React 18 SPA (Vite) + Real-Time WebSocket Event Bus  
 > **Target Audience:** Systems Architects, Software Engineers, DevOps, and Autonomous AI Coding Assistants.  
 > **Scope:** Complete end-to-end technical reference containing all system features, data models, API endpoints, background workers, frontend architecture, and developer integration guidelines.
@@ -411,7 +411,11 @@ A user may be assigned any number of Roles simultaneously (`POST /users/{id}/rol
   - **Agent Types:** Multi-tier agent classifications and commission brackets.
 
 ### 8.5. Product Catalog & Dynamic Specification Builder
-- **Endpoints:** `GET /products`, `POST /products`, `PATCH /products/{id}`, `POST /products/{id}/specs`, `GET /products/{id}/datasheet-pdf`, `GET /masters/products/machine-spares/universal-view`, `POST /masters/products/machine-spares/map`, `POST /masters/products/machine-spares/unmap`, `GET /masters/products/package-dimensions`.
+- **Endpoints:** `GET /products`, `POST /products`, `PATCH /products/{id}`, `POST /masters/products/specification-document`, `GET /masters/products/specification-documents/{doc_id}`, `GET /masters/products/specification-documents/{doc_id}/{filename}`, `POST /products/{id}/specs`, `GET /products/{id}/datasheet-pdf`, `GET /masters/products/machine-spares/universal-view`, `POST /masters/products/machine-spares/map`, `POST /masters/products/machine-spares/unmap`, `GET /masters/products/package-dimensions`.
+- **Database-Backed Specification Document Storage (`ProductSpecificationDocument`):**
+  - Replaces the legacy rich-text specification box in `Products.tsx` with a document file upload input (`Select Document` / drag-and-drop).
+  - Stores uploaded documents (`.pdf`, `.doc`, `.docx`, `.xls`, `.xlsx`, `.csv`, `.txt`, `.rtf`, `.odt`, `.ods`, `.ppt`, `.pptx`) directly in PostgreSQL (`product_specification_documents.file_data` `BYTEA`), while keeping lightweight metadata (`specification_doc_id`, `specification_doc_name`, `specification_doc_mime`, `specification_doc_url`) on `products` so catalog queries never load binary blobs.
+  - Whenever a document is uploaded, the system automatically generates and saves its direct DB streaming URL (`/api/v1/masters/products/specification-documents/{doc_id}/{filename}`) on the product (no manual clipboard copy required), displays that clickable link inside the **Product Details** View (`Specification` section) for every product with an uploaded document, and automatically attaches the link to the Quotation line item and embeds it as a clickable hyperlink inside generated CRM Quotation PDFs whenever that product is selected while creating a Quotation.
 - **Features:** Dynamic JSON specification builder allowing arbitrary technical specifications (e.g. Dimensions, Voltage, Speed, Material). Includes multi-image upload, supplier association, and ReportLab PDF datasheet generation.
 - **Master Multi-View Navigation Strip (`master-view-nav`):**
   - **`📦 Product Master` (`catalog`):** Main product catalog grid featuring column pinning, inline stock inspection, and bulk activation/deactivation.
@@ -1197,7 +1201,7 @@ A user may be assigned any number of Roles simultaneously (`POST /users/{id}/rol
   - **360° Lead Activity Timeline:** Chronological timeline consolidating notes, stage progression logs, call summaries, quotation dispatches, and linked tasks.
   - **Company Master Conversion:** 1-click seamless conversion of qualified leads into official `Company` records within the B2B directory, linking existing contacts and past activity.
   - **Workforce Task Synchronization:** Scheduling follow-up reminders automatically spawns assigned tickets in the enterprise Workforce Task module with bidirectional linkbacks.
-  - **Branded ReportLab Quotation PDF:** Server-side PDF engine producing formatted A4 quotations with company branding, tax breakdown, terms & conditions, and authorized signature blocks.
+  - **Branded ReportLab Quotation PDF (`backend/app/crm/quotation_pdf.py`):** Server-side ReportLab PDF engine (`reportlab>=4.2.0`) producing formatted A4 quotations (`GET /api/v1/crm/quotations/{quotation_id}/pdf`) with company branding, tax breakdown, terms & conditions, authorized signature blocks, and automatic clickable PDF URI hyperlinks (`Specification PDF: <filename>`) pointing directly to DB-stored Product Master specification PDFs.
 
 ### 8.27. Workforce: Recurring Tasks Scheduling Engine & Automated Spawning Worker
 - **Backend Architecture & Files:** `backend/app/tasks/recurring_models.py`, `backend/app/tasks/recurring_schemas.py`, `backend/app/tasks/recurring_routes.py`, `backend/app/tasks/recurring_service.py`, `backend/app/tasks/recurring_worker.py`.

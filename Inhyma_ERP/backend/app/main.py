@@ -141,10 +141,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         from app.suppliers.models import Supplier, SupplierContact
         from app.purchase.models import LocalPurchase, LocalPurchaseItem, ImportPurchase, ImportPurchaseItem
         from app.feed.models import FeedConversation, FeedConversationParticipant, FeedDirectMessage
+        from app.masters.products.models import ProductSpecificationDocument
 
         required_column_ddls = [
             ("organizations", "logo_data", "ALTER TABLE organizations ADD COLUMN IF NOT EXISTS logo_data TEXT;"),
             ("products", "organization_ids", "ALTER TABLE products ADD COLUMN IF NOT EXISTS organization_ids JSON;"),
+            ("products", "specification_doc_id", "ALTER TABLE products ADD COLUMN IF NOT EXISTS specification_doc_id UUID;"),
+            ("products", "specification_doc_name", "ALTER TABLE products ADD COLUMN IF NOT EXISTS specification_doc_name VARCHAR(255);"),
+            ("products", "specification_doc_mime", "ALTER TABLE products ADD COLUMN IF NOT EXISTS specification_doc_mime VARCHAR(120);"),
+            ("products", "specification_doc_url", "ALTER TABLE products ADD COLUMN IF NOT EXISTS specification_doc_url VARCHAR(1000);"),
             ("hrms_leave_types", "carry_forward_allowed", "ALTER TABLE hrms_leave_types ADD COLUMN IF NOT EXISTS carry_forward_allowed BOOLEAN DEFAULT false;"),
             ("hrms_leave_types", "description", "ALTER TABLE hrms_leave_types ADD COLUMN IF NOT EXISTS description TEXT;"),
             ("hrms_leave_types", "accrual_amount", "ALTER TABLE hrms_leave_types ADD COLUMN IF NOT EXISTS accrual_amount FLOAT DEFAULT 1.0;"),
@@ -194,6 +199,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             FeedConversation.__table__,
             FeedConversationParticipant.__table__,
             FeedDirectMessage.__table__,
+            ProductSpecificationDocument.__table__,
         ]
 
         # Read-only metadata check first so we NEVER acquire ACCESS EXCLUSIVE locks on `users` / `organizations`

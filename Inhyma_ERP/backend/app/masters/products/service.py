@@ -33,7 +33,12 @@ from app.masters.import_export import (
 from app.masters.product_categories.repository import ProductCategoryRepository
 from app.masters.product_sub_categories.repository import ProductSubCategoryRepository
 from app.masters.products.constants import DROPDOWN_CACHE_NAME, EXPORT_HEADERS
-from app.masters.products.models import Product, ProductDimensionRow, ProductMachineSpare
+from app.masters.products.models import (
+    Product,
+    ProductDimensionRow,
+    ProductMachineSpare,
+    ProductSpecificationDocument,
+)
 from app.masters.products.repository import ProductRepository
 from app.masters.products.schemas import compute_client_cbm
 from app.masters.products.validators import validate_product_row
@@ -245,10 +250,24 @@ class ProductService:
         if applicable_machines is not None:
             field_values["applicable_machine_ids"] = [str(x) for x in applicable_machines]
 
+        if field_values.get("specification_doc_id") is not None:
+            if not field_values.get("specification_doc_url"):
+                from app.common.storage import sanitize_filename
+                clean_doc = sanitize_filename(field_values.get("specification_doc_name") or "specification.pdf")
+                field_values["specification_doc_url"] = f"/api/v1/masters/products/specification-documents/{field_values['specification_doc_id']}/{clean_doc}"
+            if not field_values.get("specification"):
+                field_values["specification"] = field_values["specification_doc_url"]
+
         product = await self.repository.create(**field_values)
         if dimension_rows_payload is not None:
             await self._replace_dimension_rows(product, dimension_rows_payload)
             await self.repository.session.flush()
+
+        if getattr(product, "specification_doc_id", None) is not None:
+            doc = await self.repository.session.get(ProductSpecificationDocument, product.specification_doc_id)
+            if doc is not None:
+                doc.product_id = product.id
+                await self.repository.session.flush()
 
         if getattr(product, "product_type", None) == "Spare Part" and product.applicable_machine_ids:
             await self._sync_spare_machines(product.id, product.applicable_machine_ids)
@@ -298,6 +317,15 @@ class ProductService:
         if "applicable_machine_ids" in field_values and field_values["applicable_machine_ids"] is not None:
             field_values["applicable_machine_ids"] = [str(x) for x in field_values["applicable_machine_ids"]]
 
+        if "specification_doc_id" in field_values and field_values["specification_doc_id"] is not None:
+            if not field_values.get("specification_doc_url") and not getattr(product, "specification_doc_url", None):
+                from app.common.storage import sanitize_filename
+                clean_doc = sanitize_filename(field_values.get("specification_doc_name") or getattr(product, "specification_doc_name", None) or "specification.pdf")
+                field_values["specification_doc_url"] = f"/api/v1/masters/products/specification-documents/{field_values['specification_doc_id']}/{clean_doc}"
+            resolved_doc_url = field_values.get("specification_doc_url") or getattr(product, "specification_doc_url", None)
+            if resolved_doc_url and not field_values.get("specification"):
+                field_values["specification"] = resolved_doc_url
+
         if field_values:
             await self.repository.update(product, **field_values)
             if "hsn_id" in field_values:
@@ -314,6 +342,12 @@ class ProductService:
         if dimension_rows_payload is not None:
             await self._replace_dimension_rows(product, dimension_rows_payload)
             await self.repository.session.flush()
+
+        if "specification_doc_id" in field_values and field_values["specification_doc_id"] is not None:
+            doc = await self.repository.session.get(ProductSpecificationDocument, field_values["specification_doc_id"])
+            if doc is not None:
+                doc.product_id = product.id
+                await self.repository.session.flush()
 
         if "applicable_machine_ids" in field_values:
             await self._sync_spare_machines(product.id, field_values["applicable_machine_ids"])

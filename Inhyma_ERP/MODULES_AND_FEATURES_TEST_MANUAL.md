@@ -4,7 +4,7 @@
 > **Location:** Root Workspace (`/MODULES_AND_FEATURES_TEST_MANUAL.md`)  
 > **Purpose:** Exhaustive reference catalog detailing every single module, page layout, table column, action button, modal window, drawer, form tab, and form field across the entire ERP. Designed for developers, QA testers, and autonomous AI agents to execute manual and automated regression tests before and after code changes.  
 > **Strict Policy:** When developing or modifying features, no existing module, form, or field listed in this document may be removed, broken, or regressed.  
-> **Last Updated:** October 30, 2026
+> **Last Updated:** October 31, 2026
 
 ---
 
@@ -450,9 +450,10 @@ Manage complete vendor team directory:
   - **Conversion Factor**: e.g., $1 \text{ BOX} = 24 \text{ PCS}$.
 - **Packaging & Dimensions (CBM Engine):**
   - **Packaging Quantity**: Items per master carton.
-  - **Net Weight (kg)** & **Gross Weight (kg)**.
+  - **Net Weight (kg)** & **Gross Weight (kg)** (`Packaging Gross Weight *` > 0 kg required; legacy `0`/`null` rows initialize empty with placeholder `"Enter weight in kg (> 0)"` and inline red error message if omitted).
   - **Length (cm)**, **Width (cm)**, **Height (cm)**.
-  - **Packaging Unit CBM**: Auto-computed live read-only display ($L \times W \times H / 1,000,000$).
+  - **Packaging Unit CBM**: Auto-computed live read-only display ($L \times W \times H / 1,000,000$), with inline validation message if dimensions/CBM are missing.
+  - **Submit Validation Banner (`data-testid="product-submit-error"`):** Displays validation and API errors both at the top of the form and directly above the `Submit` / `Cancel` footer buttons, automatically resolving soft-deleted/orphan lookup references on Edit.
 - **Commercial & Regulatory:**
   - **Color** & **Material**.
   - **Standard Purchase Cost** & **Standard Selling Price**.
@@ -460,6 +461,11 @@ Manage complete vendor team directory:
   - **Refund VAT %**: Auto-filled from HSN or custom override.
   - **License / Certificate Required**: Checkbox & description for regulatory certifications (e.g. CE, ISO, BIS).
   - **Is Purchasable** (`true`/`false`) & **Is Sellable** (`true`/`false`).
+- **Specification Document Upload (`Specification`):**
+  - Document upload dropzone & `Select Document` button (`data-testid="specification-doc-input"`) replacing the legacy rich-text editor.
+  - Uploads any document (`.pdf`, `.doc`, `.docx`, `.xls`, `.xlsx`, `.csv`, `.txt`) via `POST /api/v1/masters/products/specification-document` and stores its binary payload in PostgreSQL (`product_specification_documents`).
+  - Displays `DOC` / `PDF` badge, `"Stored in Database"` status, `Open / Download`, `Replace Document`, and `Remove` controls.
+  - Automatically generates and saves the public document/PDF link (`data-testid="specification-pdf-link-box"`) on the product without requiring manual clipboard copying, displays the saved clickable link inside the Product Details View drawer (`data-testid="drawer-specification-link"`), and automatically attaches that link into CRM Sales Quotations and Quotation PDFs (`View PDF` / `Download PDF`) whenever the product is selected.
 - **Dynamic Technical Specifications Builder:**
   - Key-Value attribute table (e.g. `Voltage: 380V`, `Power: 4.5kW`, `Speed: 120 pcs/min`).
 - **Cloud Media & Photo Upload:**
@@ -504,6 +510,8 @@ Manage complete vendor team directory:
   - `Selected` tab shows only mapped spares with a `Remove` action.
   - `All Spare Parts` tab shows the full spare catalog with 11 columns, real-time search, and `+ Add` / `✓ Added` buttons.
   - Add a spare part in `All Spare Parts` tab and confirm it immediately appears in `Selected` tab with an incremented tab badge count.
+- [ ] In Product Master Add/Edit form, upload a `.docx` file in **Specification**: verify `"Stored in Database"` appears and `Open / Download` downloads the document from DB.
+- [ ] Upload a `.pdf` file in **Specification**: verify `"Stored in Database"` appears, the **Saved PDF Link** is saved on the product and shown in the Product Details View drawer (`drawer-specification-link`) with no manual clipboard copying needed, and selecting that product in **Create Quotation** automatically attaches the link to the Quotation and embeds the clickable `Specification PDF: <filename>` link inside the Quotation PDF.
 
 ---
 

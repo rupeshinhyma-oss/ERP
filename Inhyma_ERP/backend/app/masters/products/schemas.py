@@ -5,7 +5,9 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, Field, computed_field, model_validator
+from urllib.parse import urlparse
+
+from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator, model_validator
 
 from app.core.constants import RecordStatus
 
@@ -19,6 +21,25 @@ class TaxRefRead(BaseModel):
     hsn_number: str
     gst_percent: float
     import_duty_percent: float
+
+
+def _sanitize_product_image_urls(urls: list[str] | None) -> list[str] | None:
+    """Filter out blank strings and RFC 2606 synthetic test domains (*.test, *.invalid, *.example)."""
+    if urls is None:
+        return None
+    cleaned: list[str] = []
+    for raw_url in urls:
+        if not isinstance(raw_url, str):
+            continue
+        u = raw_url.strip()
+        if not u:
+            continue
+        if u.lower().startswith(("http://", "https://")):
+            host = (urlparse(u).hostname or "").lower()
+            if host.endswith((".test", ".invalid", ".example")) or host in {"test", "invalid", "example"}:
+                continue
+        cleaned.append(u)
+    return cleaned
 
 
 def compute_client_cbm(length: float | None, width: float | None, height: float | None) -> float:
@@ -102,8 +123,17 @@ class ProductCreate(BaseModel):
     license_certificate_required: str | None = None
 
     specification: str | None = None
+    specification_doc_id: uuid.UUID | None = None
+    specification_doc_name: str | None = Field(default=None, max_length=255)
+    specification_doc_mime: str | None = Field(default=None, max_length=120)
+    specification_doc_url: str | None = Field(default=None, max_length=1000)
     description: str | None = None
     images: list[str] | None = None
+
+    @field_validator("images", mode="after")
+    @classmethod
+    def _clean_images(cls, v: list[str] | None) -> list[str] | None:
+        return _sanitize_product_image_urls(v)
 
     packaging_quantity: float = Field(..., ge=0, description="Packaging Quantity (unit) is mandatory")
     packaging_net_weight: float | None = Field(default=None, ge=0)
@@ -177,8 +207,17 @@ class ProductUpdate(BaseModel):
     license_certificate_required: str | None = None
 
     specification: str | None = None
+    specification_doc_id: uuid.UUID | None = None
+    specification_doc_name: str | None = Field(default=None, max_length=255)
+    specification_doc_mime: str | None = Field(default=None, max_length=120)
+    specification_doc_url: str | None = Field(default=None, max_length=1000)
     description: str | None = None
     images: list[str] | None = None
+
+    @field_validator("images", mode="after")
+    @classmethod
+    def _clean_images(cls, v: list[str] | None) -> list[str] | None:
+        return _sanitize_product_image_urls(v)
 
     packaging_quantity: float | None = Field(default=None, ge=0)
     packaging_net_weight: float | None = Field(default=None, ge=0)
@@ -259,11 +298,20 @@ class ProductRead(BaseModel):
     hsn: "TaxRefRead | None" = Field(default=None, exclude=True)
 
     refund_vat_percent: float = 0.0
+    specification_doc_id: uuid.UUID | None = None
+    specification_doc_name: str | None = None
+    specification_doc_mime: str | None = None
+    specification_doc_url: str | None = None
     license_certificate_required: str | None = None
 
     specification: str | None
     description: str | None
     images: list[str] | None = None
+
+    @field_validator("images", mode="after")
+    @classmethod
+    def _clean_images(cls, v: list[str] | None) -> list[str] | None:
+        return _sanitize_product_image_urls(v)
 
     @computed_field
     @property

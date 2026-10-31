@@ -17,6 +17,8 @@ import os
 from datetime import datetime
 from decimal import Decimal
 from typing import Any
+from urllib.parse import unquote
+from xml.sax.saxutils import escape as xml_escape
 
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
@@ -375,6 +377,14 @@ def generate_crm_quotation_pdf_bytes(
         leading=9,
         textColor=colors.HexColor("#475569"),
     )
+    style_td_link = ParagraphStyle(
+        "TableSpecLink",
+        fontName="Helvetica",
+        fontSize=7,
+        leading=9.5,
+        textColor=colors.HexColor("#0061f2"),
+        wordWrap="CJK",
+    )
     style_notes = ParagraphStyle(
         "NotesBody",
         fontName="Helvetica",
@@ -631,23 +641,59 @@ def generate_crm_quotation_pdf_bytes(
         item_paragraphs: list[Any] = []
         p_name = it.get("product_name") or "Product"
         p_code = it.get("product_code")
-        header_text = f"<b>{p_name}</b>" + (f" <font color='#475569'>({p_code})</font>" if p_code else "")
+        header_text = f"<b>{xml_escape(str(p_name))}</b>" + (f" <font color='#475569'>({xml_escape(str(p_code))})</font>" if p_code else "")
         item_paragraphs.append(Paragraph(header_text, style_td_bold))
 
         desc = it.get("description")
         if desc and desc.strip() and desc.strip() != p_name.strip():
-            item_paragraphs.append(Paragraph(desc.strip(), style_td))
+            item_paragraphs.append(Paragraph(xml_escape(desc.strip()), style_td))
 
         include_specs = it.get("include_specifications", True)
         spec = it.get("specification")
         if include_specs and spec and spec.strip():
             item_paragraphs.append(Spacer(1, 1.5))
-            item_paragraphs.append(Paragraph(f"<b>Specs:</b> {spec.strip()}", style_td_spec))
+            clean_spec = spec.strip()
+            is_spec_link = (
+                clean_spec.startswith("http://")
+                or clean_spec.startswith("https://")
+                or clean_spec.startswith("/api/")
+            )
+            if is_spec_link:
+                doc_label = (it.get("specification_doc_name") or "").strip()
+                if not doc_label:
+                    tail = unquote(clean_spec.split("?", 1)[0].rsplit("/", 1)[-1]).strip()
+                    doc_label = tail if tail else "Specification.pdf"
+                safe_href = xml_escape(clean_spec, {'"': "&quot;"})
+                safe_label = xml_escape(doc_label)
+                safe_url_text = xml_escape(clean_spec)
+                is_pdf_doc = doc_label.lower().endswith(".pdf") or clean_spec.lower().split("?", 1)[0].endswith(".pdf")
+                spec_heading = "Specification PDF:" if is_pdf_doc else "Specification Document:"
+                item_paragraphs.append(
+                    Paragraph(
+                        f'<b>{spec_heading}</b> <a href="{safe_href}" color="#0061f2"><u>{safe_label}</u></a>',
+                        style_td_spec,
+                    )
+                )
+                item_paragraphs.append(
+                    Paragraph(
+                        f'<a href="{safe_href}" color="#0061f2"><u>{safe_url_text}</u></a>',
+                        style_td_link,
+                    )
+                )
+            else:
+                item_paragraphs.append(Paragraph(f"<b>Specs:</b> {xml_escape(clean_spec)}", style_td_spec))
 
         demo_link = it.get("demo_link")
         if demo_link and demo_link.strip():
             item_paragraphs.append(Spacer(1, 1))
-            item_paragraphs.append(Paragraph(f"<b>Ref / Demo:</b> {demo_link.strip()}", style_td_spec))
+            clean_demo = demo_link.strip()
+            safe_demo = xml_escape(clean_demo, {'"': "&quot;"})
+            if clean_demo.startswith("http://") or clean_demo.startswith("https://"):
+                item_paragraphs.append(
+                    Paragraph(f'<b>Ref / Demo:</b> <a href="{safe_demo}" color="#0061f2"><u>{xml_escape(clean_demo)}</u></a>', style_td_link)
+                )
+            else:
+                item_paragraphs.append(Paragraph(f"<b>Ref / Demo:</b> {xml_escape(clean_demo)}", style_td_spec))
 
         qty_val = it.get("quantity", 1)
         uom_val = it.get("uom", "Nos")

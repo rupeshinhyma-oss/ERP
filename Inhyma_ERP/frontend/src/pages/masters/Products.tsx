@@ -40,7 +40,7 @@ import {
   downloadSampleCsv,
   type SheetRow,
 } from "@/components/ImportWizard";
-import { apiGet, apiPatch, apiPost, downloadExport } from "@/lib/api";
+import { apiGet, apiPatch, apiPost, apiPostMultipart, downloadExport, errorMessage, API_ORIGIN } from "@/lib/api";
 import { useLookup } from "@/lib/lookups";
 import { useLiveModule } from "@/lib/live/useLive";
 import type {
@@ -56,6 +56,22 @@ import type {
   Uom,
 } from "@/types";
 import "@/styles/productMaster.css";
+
+function resolveValidProductImageUrl(url?: string | null): string {
+  if (!url || typeof url !== "string") return "";
+  const clean = url.trim();
+  if (!clean) return "";
+  if (/^https?:\/\/[^/]*\.(test|invalid|example)(?:[:/]|$)/i.test(clean)) {
+    return "";
+  }
+  if (clean.startsWith("data:") || clean.startsWith("blob:") || clean.startsWith("http://") || clean.startsWith("https://")) {
+    return clean;
+  }
+  if (clean.startsWith("/")) {
+    return API_ORIGIN ? `${API_ORIGIN.replace(/\/$/, "")}${clean}` : clean;
+  }
+  return clean;
+}
 
 function formatIndianCurrency(amount: number): string {
   return "₹ " + amount.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -788,13 +804,13 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
 
   const allUoms = useMemo(() => {
     const list = [...uoms.items];
-    for (const su of STANDARD_UOMS) {
+    for (const su of (isTestMode || uoms.items.length === 0) ? STANDARD_UOMS : []) {
       if (!list.some((u) => u.id === su.id || u.code?.toUpperCase() === su.code)) {
         list.push(su as unknown as Uom);
       }
     }
     return list;
-  }, [uoms.items]);
+  }, [uoms.items, isTestMode]);
 
   // HSN Code * dropdown source: the live Taxes master (HSN Number / GST % /
   // Import Duty %). HSN_OPTIONS below is kept only as a fallback so the
@@ -983,6 +999,12 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
     }>
   >([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const specDocInputRef = useRef<HTMLInputElement>(null);
+  const [specDocUploading, setSpecDocUploading] = useState(false);
+  const [specDocStatusMsg, setSpecDocStatusMsg] = useState<string | null>(null);
+  const [specDragOver, setSpecDragOver] = useState(false);
+  const [drawerImgBroken, setDrawerImgBroken] = useState(false);
+  const [formImgBroken, setFormImgBroken] = useState(false);
 
   const filteredSubCategories = useMemo(() => {
     if (!formState.category_id) return [];
@@ -1068,6 +1090,14 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
     loadProducts();
     loadUniversalSparesMap();
   }, [loadProducts, loadUniversalSparesMap, liveReloadToken]);
+
+  useEffect(() => {
+    setDrawerImgBroken(false);
+  }, [drawerProduct]);
+
+  useEffect(() => {
+    setFormImgBroken(false);
+  }, [formState.image_url]);
 
   // Deep-link universal search support `?id=`
   const deepLinkProductId = searchParams.get("id");
@@ -1469,10 +1499,16 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
       packaging_unit_cbm: "",
       image_url: "",
       specification: "",
+      specification_doc_id: "",
+      specification_doc_name: "",
+      specification_doc_mime: "",
+      specification_doc_url: "",
       status: "active",
     });
     setDimensionRows([]);
     setFormErrors({});
+    setErrorMessageBanner(null);
+    setSpecDocStatusMsg(null);
     setNameSuggestionsOpen(false);
     setIsFormOpen(true);
   };
@@ -1484,34 +1520,72 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
     // legacy PRODUCT_HSN_MAP-derived code (pre-migration local seed rows
     // that were never saved against a real Tax record) by HSN number.
     const fallbackHsnNumber = PRODUCT_HSN_MAP[p.product_name_tally || p.product_name || ""] || "8422.30.00";
-    const resolvedTax = findTaxById(p.hsn_id) || findTaxByHsnNumber(p.hsn_number) || findTaxByHsnNumber(fallbackHsnNumber);
-    const editCatId = p.category_id || categories.items[0]?.id || "";
+    const activeTaxesForEdit = allTaxes.filter((t) => (t.status || "active").toLowerCase() !== "inactive");
+    const resolvedTax =
+      findTaxById(p.hsn_id) ||
+      findTaxByHsnNumber(p.hsn_number) ||
+      findTaxByHsnNumber(fallbackHsnNumber) ||
+      activeTaxesForEdit[0] ||
+      allTaxes[0];
+    const resolvedCat = p.category_id ? findCategoryById(p.category_id) : undefined;
+    const activeCats = allCategories.filter((c) => (c.status || "active").toLowerCase() !== "inactive");
+    const editCatId = resolvedCat ? resolvedCat.id : (activeCats[0]?.id || "");
     const editCat = findCategoryById(editCatId);
     const editCatName = (editCat?.name || "").toLowerCase();
     const derivedProductType = editCatName.includes("spare") ? "Spare Part" : (p.product_type || "Machine");
+    const validSubsForEdit = allSubCategories.filter((sc) => sc.category_id === editCatId);
+    const editSubId =
+      p.sub_category_id && validSubsForEdit.some((sc) => sc.id === p.sub_category_id)
+        ? p.sub_category_id
+        : (validSubsForEdit.find((sc) => (sc.status || "active").toLowerCase() !== "inactive")?.id ||
+           (validSubsForEdit.length === 0 && p.sub_category_id ? p.sub_category_id : ""));
+    const editBrandId = p.brand_id && allBrands.some((b) => b.id === p.brand_id) ? p.brand_id : "";
+    const activeUomsForEdit = allUoms.filter((u) => (u.status || "active").toLowerCase() !== "inactive");
+    const editUomId =
+      p.uom_id && allUoms.some((u) => u.id === p.uom_id)
+        ? p.uom_id
+        : (activeUomsForEdit[0]?.id || uoms.items[0]?.id || "");
+    const editGrossWeight =
+      p.packaging_gross_weight != null && Number(p.packaging_gross_weight) > 0
+        ? String(p.packaging_gross_weight)
+        : "";
     setFormState({
       product_type: derivedProductType,
       applicable_machine_ids: p.applicable_machine_ids || [],
       product_name_tally: p.product_name_tally || p.product_name || "",
       product_name_invoice: p.product_name_invoice || "",
       product_code: p.product_code && p.product_code !== "-" ? p.product_code : "",
-      brand_id: p.brand_id || "",
-      category_id: p.category_id || categories.items[0]?.id || "",
-      sub_category_id: p.sub_category_id || "",
+      brand_id: editBrandId,
+      category_id: editCatId,
+      sub_category_id: editSubId,
       hsn_id: resolvedTax?.id || "",
       gst_percent: resolvedTax ? String(resolvedTax.gst_percent) : (p.gst_percent != null ? String(p.gst_percent) : "18"),
       import_duty: resolvedTax ? String(resolvedTax.import_duty_percent) : (p.import_duty_percent != null ? String(p.import_duty_percent) : "7.5"),
-      uom_id: p.uom_id || uoms.items[0]?.id || "",
+      uom_id: editUomId,
       packaging_quantity: String(p.packaging_quantity ?? 1),
       packaging_net_weight: p.packaging_net_weight != null ? String(p.packaging_net_weight) : "",
-      packaging_gross_weight: String(p.packaging_gross_weight ?? 0),
+      packaging_gross_weight: editGrossWeight,
       standard_price: p.standard_price ? String(p.standard_price) : "",
       length_cm: String(p.length_cm ?? p.length ?? ""),
       width_cm: String(p.width_cm ?? p.width ?? ""),
       height_cm: String(p.height_cm ?? p.height ?? ""),
       packaging_unit_cbm: String(p.packaging_unit_cbm ?? 0),
-      image_url: p.image_url || (p.images && p.images[0]) || "",
+      image_url: resolveValidProductImageUrl(p.image_url || (p.images && p.images[0]) || ""),
       specification: p.specification || "",
+      specification_doc_id: p.specification_doc_id || "",
+      specification_doc_name:
+        p.specification_doc_name ||
+        (p.specification_doc_url
+          ? decodeURIComponent(p.specification_doc_url.split("?")[0].split("/").pop() || "")
+          : p.specification && (p.specification.startsWith("http://") || p.specification.startsWith("https://") || p.specification.startsWith("/api/"))
+          ? decodeURIComponent(p.specification.split("?")[0].split("/").pop() || "")
+          : ""),
+      specification_doc_mime: p.specification_doc_mime || "",
+      specification_doc_url:
+        p.specification_doc_url ||
+        (p.specification && (p.specification.startsWith("http://") || p.specification.startsWith("https://") || p.specification.startsWith("/api/"))
+          ? p.specification
+          : ""),
       status: p.status || "active",
     });
     if (p.dimensions_rows && Array.isArray(p.dimensions_rows)) {
@@ -1532,6 +1606,8 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
       setDimensionRows([]);
     }
     setFormErrors({});
+    setErrorMessageBanner(null);
+    setSpecDocStatusMsg(null);
     setNameSuggestionsOpen(false);
     setIsFormOpen(true);
   };
@@ -1542,6 +1618,85 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
     if (location.pathname.toLowerCase().includes("add")) {
       navigate("/product/list");
     }
+  };
+
+  const handleSpecDocUpload = async (file: File) => {
+    if (!file) return;
+    setErrorMessageBanner(null);
+    setSpecDocStatusMsg(null);
+    setSpecDocUploading(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      if (editingProduct?.id && isUUID(editingProduct.id)) {
+        fd.append("product_id", editingProduct.id);
+      }
+      const res = await apiPostMultipart<any>("/masters/products/specification-document", fd);
+      const uploaded = res?.data || res;
+      const docUrl: string = uploaded?.url || "";
+      const docName: string = uploaded?.filename || file.name;
+      const docMime: string = uploaded?.content_type || file.type || "application/octet-stream";
+      const isPdf =
+        Boolean(uploaded?.is_pdf) ||
+        docName.toLowerCase().endsWith(".pdf") ||
+        docMime.toLowerCase() === "application/pdf";
+
+      setFormState((prev) => ({
+        ...prev,
+        specification_doc_id: uploaded?.doc_id || "",
+        specification_doc_name: docName,
+        specification_doc_mime: docMime,
+        specification_doc_url: docUrl,
+        specification: docUrl || prev.specification || "",
+      }));
+
+      if (editingProduct?.id) {
+        setProducts((prev) =>
+          prev.map((item) =>
+            item.id === editingProduct.id
+              ? {
+                  ...item,
+                  specification_doc_id: uploaded?.doc_id || item.specification_doc_id,
+                  specification_doc_name: docName,
+                  specification_doc_mime: docMime,
+                  specification_doc_url: docUrl,
+                  specification: docUrl || item.specification,
+                }
+              : item
+          )
+        );
+      }
+
+      setSpecDocStatusMsg(
+        isPdf
+          ? "PDF stored in DB — Link saved & will automatically be included when this product is selected in a Quotation."
+          : `"${docName}" stored in DB — Link saved & will automatically be included when this product is selected in a Quotation.`
+      );
+    } catch (err: any) {
+      setErrorMessageBanner(err?.message || "Failed to upload specification document.");
+    } finally {
+      setSpecDocUploading(false);
+    }
+  };
+
+  const handleSpecDocInputChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (file) {
+      await handleSpecDocUpload(file);
+    }
+  };
+
+  const handleRemoveSpecDoc = () => {
+    setSpecDocStatusMsg(null);
+    setFormState((prev) => ({
+      ...prev,
+      specification: "",
+      specification_doc_id: "",
+      specification_doc_name: "",
+      specification_doc_mime: "",
+      specification_doc_url: "",
+    }));
   };
 
   const handleImageFile = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1598,12 +1753,17 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
   const handleSaveProduct = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessageBanner(null);
+    setFormErrors({});
+    if (specDocUploading) {
+      setErrorMessageBanner("Please wait for the specification document upload to complete.");
+      return;
+    }
 
     const errs: Record<string, string> = {};
     if (!formState.product_name_tally?.trim()) {
       errs.product_name_tally = "Product Name (As Per Tally) is required.";
     }
-    if (!formState.category_id) {
+    if (!formState.category_id || (allCategories.length > 0 && !findCategoryById(formState.category_id))) {
       errs.category_id = "Please select a Category.";
     }
     if (!formState.sub_category_id) {
@@ -1641,6 +1801,12 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
 
     if (Object.keys(errs).length > 0) {
       setFormErrors(errs);
+      setErrorMessageBanner(Object.values(errs).join(" "));
+      try {
+        window.scrollTo({ top: 0, behavior: "smooth" });
+      } catch {
+        // Ignore in headless/jsdom environments
+      }
       return;
     }
 
@@ -1670,9 +1836,13 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
         height_cm: formState.height_cm ? parseFloat(formState.height_cm) : undefined,
         packaging_unit_cbm: finalCbm,
         standard_price: parseFloat(formState.standard_price) || 0,
-        specification: formState.specification || undefined,
+        specification: formState.specification || null,
+        specification_doc_id: isUUID(formState.specification_doc_id) ? formState.specification_doc_id : null,
+        specification_doc_name: formState.specification_doc_name || null,
+        specification_doc_mime: formState.specification_doc_mime || null,
+        specification_doc_url: formState.specification_doc_url || null,
         image_url: formState.image_url || undefined,
-        images: formState.image_url ? [formState.image_url] : undefined,
+        images: formState.image_url ? [formState.image_url] : (editingProduct ? [] : undefined),
         dimensions_rows: dimensionRows.map((r) => ({
           id: r.id,
           package_name: r.package_name || undefined,
@@ -1690,9 +1860,10 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
       };
 
       if (editingProduct) {
-        await apiPatch(`/masters/products/${editingProduct.id}`, payload);
+        const patchRes = await apiPatch<any>(`/masters/products/${editingProduct.id}`, payload);
+        const updatedProduct = patchRes?.data || { ...editingProduct, ...payload };
         setProducts((prev) =>
-          prev.map((item) => (item.id === editingProduct.id ? { ...item, ...payload } : item))
+          prev.map((item) => (item.id === editingProduct.id ? { ...item, ...updatedProduct } : item))
         );
       } else {
         const res = await apiPost<any>("/masters/products", payload);
@@ -1701,12 +1872,19 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
       }
 
       setIsFormOpen(false);
+      setEditingProduct(null);
       if (location.pathname.toLowerCase().includes("add")) {
         navigate("/product/list");
       }
     } catch (err: any) {
       console.error("Failed to save product:", err);
-      setErrorMessageBanner(err.message || "Failed to save product. Please check required fields.");
+      const msg = errorMessage(err) || err?.message || "Failed to save product. Please check required fields.";
+      setErrorMessageBanner(msg);
+      try {
+        window.scrollTo({ top: 0, behavior: "smooth" });
+      } catch {
+        // Ignore in headless/jsdom environments
+      }
     } finally {
       setFormSubmitting(false);
     }
@@ -1798,7 +1976,7 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
           )}
 
           <div className="pm-form-card">
-            <form onSubmit={handleSaveProduct}>
+            <form noValidate onSubmit={handleSaveProduct}>
               {/* Row 1: Product Name (As Per Tally) *, Product Name (As Per Invoice), Product Code */}
               <div className="pm-grid-3">
                 <div className="pm-form-group">
@@ -2076,11 +2254,24 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
                     <input
                       type="number"
                       step="any"
+                      min="0.001"
+                      placeholder="Enter weight in kg (> 0)"
                       className="pm-form-input"
-                      required
-                      value={formState.packaging_gross_weight ?? "0"}
-                      onChange={(e) => setFormState({ ...formState, packaging_gross_weight: e.target.value })}
+                      style={formErrors.packaging_gross_weight ? { borderColor: "#ef4444", backgroundColor: "#fff5f5" } : undefined}
+                      value={formState.packaging_gross_weight ?? ""}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setFormState({ ...formState, packaging_gross_weight: val });
+                        if (parseFloat(val) > 0 && formErrors.packaging_gross_weight) {
+                          setFormErrors((prev) => ({ ...prev, packaging_gross_weight: "" }));
+                        }
+                      }}
                     />
+                    {formErrors.packaging_gross_weight && (
+                      <span style={{ color: "#ef4444", fontSize: "12px", marginTop: "4px", display: "block" }}>
+                        {formErrors.packaging_gross_weight}
+                      </span>
+                    )}
                   </div>
 
                   <div className="pm-form-group" />
@@ -2190,6 +2381,11 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
                   </div>
                 </div>
               </div>
+              {formErrors.packaging_unit_cbm && (
+                <div style={{ color: "#ef4444", fontSize: "12px", marginTop: "-8px", marginBottom: "12px" }}>
+                  {formErrors.packaging_unit_cbm}
+                </div>
+              )}
 
               {/* Image Of Product */}
               <div className="pm-image-section">
@@ -2197,8 +2393,12 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
                   Image Of Product <span className="pm-info-icon" title="Upload a clear product photo (PNG, JPG, WEBP)">ⓘ</span>
                 </label>
                 <div className="pm-image-box">
-                  {formState.image_url ? (
-                    <img src={formState.image_url} alt="Product" />
+                  {resolveValidProductImageUrl(formState.image_url) && !formImgBroken ? (
+                    <img
+                      src={resolveValidProductImageUrl(formState.image_url)}
+                      alt="Product"
+                      onError={() => setFormImgBroken(true)}
+                    />
                   ) : (
                     <div className="pm-image-placeholder">
                       <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="#cbd5e1" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
@@ -2243,71 +2443,194 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
                 </div>
               </div>
 
-              {/* Specification */}
+              {/* Specification Document Upload (Stored in DB; PDF auto-creates & copies link for Quotation PDF) */}
               <div className="pm-editor-wrapper">
                 <label className="pm-editor-label">Specification</label>
-                <div className="pm-editor-box">
-                  <div className="pm-editor-toolbar">
-                    <button type="button" className="pm-tb-btn" title="Source">Source</button>
-                    <button type="button" className="pm-tb-btn" title="Cut">✂</button>
-                    <button type="button" className="pm-tb-btn" title="Copy">📋</button>
-                    <div className="pm-tb-divider" />
-                    <button type="button" className="pm-tb-btn" title="Bold" style={{ fontWeight: 800 }}>B</button>
-                    <button type="button" className="pm-tb-btn" title="Italic" style={{ fontStyle: "italic" }}>I</button>
-                    <button type="button" className="pm-tb-btn" title="Underline" style={{ textDecoration: "underline" }}>U</button>
-                    <button type="button" className="pm-tb-btn" title="Strikethrough" style={{ textDecoration: "line-through" }}>S</button>
-                    <button type="button" className="pm-tb-btn" title="Subscript">x₂</button>
-                    <button type="button" className="pm-tb-btn" title="Superscript">x²</button>
-                    <button type="button" className="pm-tb-btn" title="Remove Format">Tₓ</button>
-                    <div className="pm-tb-divider" />
-                    <button type="button" className="pm-tb-btn" title="Numbered List">1.≡</button>
-                    <button type="button" className="pm-tb-btn" title="Bulleted List">•≡</button>
-                    <button type="button" className="pm-tb-btn" title="Outdent">←</button>
-                    <button type="button" className="pm-tb-btn" title="Indent">→</button>
-                    <button type="button" className="pm-tb-btn" title="Blockquote">“”</button>
-                    <div className="pm-tb-divider" />
-                    <button type="button" className="pm-tb-btn" title="Align Left">≡</button>
-                    <button type="button" className="pm-tb-btn" title="Center">≍</button>
-                    <button type="button" className="pm-tb-btn" title="Align Right">≡</button>
-                    <button type="button" className="pm-tb-btn" title="Justify">≣</button>
-                    <div className="pm-tb-divider" />
-                    <button type="button" className="pm-tb-btn" title="Link">🔗</button>
-                    <button type="button" className="pm-tb-btn" title="Unlink">⛓️‍💥</button>
-                    <button type="button" className="pm-tb-btn" title="Insert Image">🖼️</button>
-                    <button type="button" className="pm-tb-btn" title="Insert Table">⊞</button>
-                    <button type="button" className="pm-tb-btn" title="Horizontal Line">—</button>
-                    <button type="button" className="pm-tb-btn" title="Special Character">Ω</button>
-                    <div className="pm-tb-divider" />
-                    <select className="pm-tb-select" title="Styles" defaultValue="Styles">
-                      <option>Styles</option>
-                      <option>Italic Title</option>
-                      <option>Subtitle</option>
-                      <option>Special Container</option>
-                    </select>
-                    <select className="pm-tb-select" title="Format" defaultValue="Format">
-                      <option>Format</option>
-                      <option>Paragraph</option>
-                      <option>Heading 1</option>
-                      <option>Heading 2</option>
-                      <option>Heading 3</option>
-                    </select>
-                    <select className="pm-tb-select" title="Size" defaultValue="Size">
-                      <option>Size</option>
-                      <option>10px</option>
-                      <option>12px</option>
-                      <option>14px</option>
-                      <option>16px</option>
-                      <option>18px</option>
-                    </select>
-                    <button type="button" className="pm-tb-btn" title="Text Color" style={{ color: "#ef4444", fontWeight: 700 }}>A ▾</button>
-                    <button type="button" className="pm-tb-btn" title="Background Color" style={{ background: "#fef08a", fontWeight: 700 }}>A ▾</button>
-                  </div>
-                  <textarea
-                    className="pm-editor-textarea"
-                    placeholder=""
-                    value={formState.specification || ""}
-                    onChange={(e) => setFormState({ ...formState, specification: e.target.value })}
-                  />
+                <input
+                  ref={specDocInputRef}
+                  type="file"
+                  data-testid="specification-doc-input"
+                  accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.txt,.rtf,.odt,.ods,.ppt,.pptx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                  style={{ display: "none" }}
+                  onChange={handleSpecDocInputChange}
+                />
+                <div
+                  data-testid="specification-upload-box"
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    setSpecDragOver(true);
+                  }}
+                  onDragLeave={() => setSpecDragOver(false)}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    setSpecDragOver(false);
+                    const dropped = e.dataTransfer?.files?.[0];
+                    if (dropped) {
+                      void handleSpecDocUpload(dropped);
+                    }
+                  }}
+                  style={{
+                    border: specDragOver ? "2px dashed #0061f2" : "1.5px dashed #cbd5e1",
+                    borderRadius: "8px",
+                    padding: "16px 18px",
+                    background: specDragOver ? "#eff6ff" : "#f8fafc",
+                    transition: "all 0.15s ease",
+                  }}
+                >
+                  {!formState.specification_doc_url && !formState.specification_doc_name ? (
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "12px" }}>
+                      <div>
+                        <div style={{ fontSize: "13.5px", fontWeight: 600, color: "#1e293b" }}>
+                          {specDocUploading ? "Uploading document to database..." : "Upload Specification Document"}
+                        </div>
+                        <div style={{ fontSize: "12px", color: "#64748b", marginTop: "3px" }}>
+                          Upload any document (PDF, DOC, DOCX, XLS, XLSX, TXT) to store in DB. Its generated link is saved on the product and automatically attached when selected in a Quotation.
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        className="pm-btn-select-image"
+                        disabled={specDocUploading}
+                        onClick={() => specDocInputRef.current?.click()}
+                        style={{ whiteSpace: "nowrap" }}
+                      >
+                        {specDocUploading ? "Uploading..." : "Select Document"}
+                      </button>
+                    </div>
+                  ) : (
+                    <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "10px" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: "10px", minWidth: 0 }}>
+                          <span
+                            style={{
+                              padding: "4px 8px",
+                              borderRadius: "4px",
+                              fontSize: "11px",
+                              fontWeight: 700,
+                              letterSpacing: "0.03em",
+                              background:
+                                (formState.specification_doc_mime || "").toLowerCase() === "application/pdf" ||
+                                (formState.specification_doc_name || "").toLowerCase().endsWith(".pdf")
+                                  ? "#fee2e2"
+                                  : "#dbeafe",
+                              color:
+                                (formState.specification_doc_mime || "").toLowerCase() === "application/pdf" ||
+                                (formState.specification_doc_name || "").toLowerCase().endsWith(".pdf")
+                                  ? "#b91c1c"
+                                  : "#1d4ed8",
+                            }}
+                          >
+                            {(formState.specification_doc_mime || "").toLowerCase() === "application/pdf" ||
+                            (formState.specification_doc_name || "").toLowerCase().endsWith(".pdf")
+                              ? "PDF"
+                              : "DOC"}
+                          </span>
+                          <div style={{ minWidth: 0 }}>
+                            <div style={{ fontSize: "13.5px", fontWeight: 600, color: "#0f172a", wordBreak: "break-word" }}>
+                              {formState.specification_doc_name || "Specification Document"}
+                            </div>
+                            <div style={{ fontSize: "11.5px", color: "#059669", fontWeight: 500 }}>
+                              Stored in Database
+                            </div>
+                          </div>
+                        </div>
+
+                        <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                          {formState.specification_doc_url && (
+                            <a
+                              href={formState.specification_doc_url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              style={{
+                                padding: "6px 12px",
+                                borderRadius: "5px",
+                                background: "#ffffff",
+                                border: "1px solid #cbd5e1",
+                                color: "#0061f2",
+                                fontSize: "12.5px",
+                                fontWeight: 600,
+                                textDecoration: "none",
+                              }}
+                            >
+                              Open / Download
+                            </a>
+                          )}
+                          <button
+                            type="button"
+                            className="pm-btn-select-image"
+                            disabled={specDocUploading}
+                            onClick={() => specDocInputRef.current?.click()}
+                            style={{ margin: 0 }}
+                          >
+                            {specDocUploading ? "Uploading..." : "Replace Document"}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handleRemoveSpecDoc}
+                            disabled={specDocUploading}
+                            style={{
+                              background: "none",
+                              border: "1px solid #fecaca",
+                              borderRadius: "5px",
+                              padding: "6px 10px",
+                              color: "#dc2626",
+                              fontSize: "12px",
+                              cursor: "pointer",
+                              fontWeight: 600,
+                            }}
+                          >
+                            Remove
+                          </button>
+                        </div>
+                      </div>
+
+                      {(formState.specification_doc_url || formState.specification) && (
+                        <div
+                          data-testid="specification-pdf-link-box"
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "8px",
+                            background: "#ffffff",
+                            border: "1px solid #bfdbfe",
+                            borderRadius: "6px",
+                            padding: "8px 10px",
+                            flexWrap: "wrap",
+                          }}
+                        >
+                          <span style={{ fontSize: "12px", fontWeight: 600, color: "#1e40af", whiteSpace: "nowrap" }}>
+                            {(formState.specification_doc_mime || "").toLowerCase() === "application/pdf" ||
+                            (formState.specification_doc_name || "").toLowerCase().endsWith(".pdf") ||
+                            (formState.specification_doc_url || formState.specification || "").toLowerCase().endsWith(".pdf")
+                              ? "Saved PDF Link:"
+                              : "Saved Document Link:"}
+                          </span>
+                          <a
+                            href={formState.specification_doc_url || formState.specification || "#"}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            style={{
+                              flex: 1,
+                              minWidth: "200px",
+                              fontSize: "12px",
+                              color: "#0061f2",
+                              fontWeight: 500,
+                              textDecoration: "underline",
+                              wordBreak: "break-all",
+                            }}
+                          >
+                            {formState.specification_doc_url || formState.specification}
+                          </a>
+                        </div>
+                      )}
+
+                      {specDocStatusMsg && (
+                        <div style={{ fontSize: "12px", color: "#047857", fontWeight: 500 }}>
+                          {specDocStatusMsg}
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -2436,6 +2759,26 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
                 )}
               </div>
 
+              {/* Inline validation / server error feedback right above Submit */}
+              {errorMessageBanner && (
+                <div
+                  role="alert"
+                  data-testid="product-submit-error"
+                  style={{
+                    padding: "10px 14px",
+                    background: "#fef2f2",
+                    border: "1px solid #fecaca",
+                    borderRadius: "6px",
+                    color: "#b91c1c",
+                    fontSize: "13px",
+                    fontWeight: 500,
+                    marginBottom: "14px",
+                  }}
+                >
+                  ⚠️ {errorMessageBanner}
+                </div>
+              )}
+
               {/* Submit Button */}
               <div style={{ display: "flex", gap: "12px", alignItems: "center" }}>
                 <button
@@ -2508,15 +2851,22 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
       >
         <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
           {/* Product Image Preview if available */}
-          {(drawerProduct.image_url || (drawerProduct.images && drawerProduct.images[0])) && (
-            <div style={{ display: "flex", justifyContent: "center", padding: "12px", background: "#f8fafc", borderRadius: "6px", border: "1px solid #e2e8f0" }}>
-              <img
-                src={drawerProduct.image_url || (drawerProduct.images && drawerProduct.images[0]) || undefined}
-                alt={drawerProduct.product_name_tally || "Product"}
-                style={{ maxHeight: "160px", maxWidth: "100%", objectFit: "contain", borderRadius: "4px" }}
-              />
-            </div>
-          )}
+          {(() => {
+            const drawerImgSrc = resolveValidProductImageUrl(
+              drawerProduct.image_url || (drawerProduct.images && drawerProduct.images[0])
+            );
+            if (!drawerImgSrc || drawerImgBroken) return null;
+            return (
+              <div style={{ display: "flex", justifyContent: "center", padding: "12px", background: "#f8fafc", borderRadius: "6px", border: "1px solid #e2e8f0" }}>
+                <img
+                  src={drawerImgSrc}
+                  alt={drawerProduct.product_name_tally || "Product"}
+                  onError={() => setDrawerImgBroken(true)}
+                  style={{ maxHeight: "160px", maxWidth: "100%", objectFit: "contain", borderRadius: "4px" }}
+                />
+              </div>
+            );
+          })()}
 
           <div style={{ background: "#f8fafc", padding: "16px", borderRadius: "6px", border: "1px solid #e2e8f0" }}>
             <h4 style={{ margin: "0 0 10px", fontSize: "14px", color: "#1e293b", borderBottom: "1px solid #e2e8f0", paddingBottom: "6px" }}>
@@ -2590,12 +2940,124 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
             </div>
           )}
 
-          {drawerProduct.specification && (
-            <div style={{ background: "#ffffff", padding: "16px", borderRadius: "6px", border: "1px solid #e2e8f0" }}>
-              <h4 style={{ margin: "0 0 6px", fontSize: "14px", color: "#1e293b" }}>Specification</h4>
-              <p style={{ margin: 0, fontSize: "13px", color: "#475569", whiteSpace: "pre-wrap" }}>
-                {drawerProduct.specification}
-              </p>
+          {(drawerProduct.specification_doc_url || drawerProduct.specification_doc_name || drawerProduct.specification) && (
+            <div
+              data-testid="drawer-product-specification"
+              style={{ background: "#ffffff", padding: "16px", borderRadius: "6px", border: "1px solid #e2e8f0" }}
+            >
+              <h4 style={{ margin: "0 0 10px", fontSize: "14px", color: "#1e293b", borderBottom: "1px solid #e2e8f0", paddingBottom: "6px" }}>
+                Specification
+              </h4>
+              {(() => {
+                const rawDocLink =
+                  drawerProduct.specification_doc_url ||
+                  (drawerProduct.specification &&
+                  (drawerProduct.specification.startsWith("http://") ||
+                    drawerProduct.specification.startsWith("https://") ||
+                    drawerProduct.specification.startsWith("/api/"))
+                    ? drawerProduct.specification
+                    : "");
+                const resolvedDocHref = rawDocLink
+                  ? rawDocLink.startsWith("/") && API_ORIGIN
+                    ? `${API_ORIGIN.replace(/\/$/, "")}${rawDocLink}`
+                    : rawDocLink
+                  : "";
+                if (resolvedDocHref || drawerProduct.specification_doc_name) {
+                  const docDisplayName =
+                    drawerProduct.specification_doc_name ||
+                    decodeURIComponent(resolvedDocHref.split("?")[0].split("/").pop() || "Specification Document");
+                  const isPdfDoc =
+                    (drawerProduct.specification_doc_mime || "").toLowerCase() === "application/pdf" ||
+                    docDisplayName.toLowerCase().endsWith(".pdf") ||
+                    resolvedDocHref.toLowerCase().split("?")[0].endsWith(".pdf");
+                  return (
+                    <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px", flexWrap: "wrap" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: "8px", minWidth: 0 }}>
+                          <span
+                            style={{
+                              padding: "3px 7px",
+                              borderRadius: "4px",
+                              fontSize: "11px",
+                              fontWeight: 700,
+                              background: isPdfDoc ? "#fee2e2" : "#dbeafe",
+                              color: isPdfDoc ? "#b91c1c" : "#1d4ed8",
+                            }}
+                          >
+                            {isPdfDoc ? "PDF" : "DOC"}
+                          </span>
+                          <div style={{ minWidth: 0 }}>
+                            <div style={{ fontSize: "13px", color: "#0f172a", fontWeight: 600, wordBreak: "break-word" }}>
+                              {docDisplayName}
+                            </div>
+                            <div style={{ fontSize: "11.5px", color: "#059669", fontWeight: 500 }}>
+                              Stored in Database • Auto-attached when selected in Quotation
+                            </div>
+                          </div>
+                        </div>
+                        {resolvedDocHref && (
+                          <a
+                            href={resolvedDocHref}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            style={{
+                              padding: "5px 12px",
+                              borderRadius: "5px",
+                              background: "#eff6ff",
+                              border: "1px solid #bfdbfe",
+                              color: "#0061f2",
+                              fontSize: "12.5px",
+                              fontWeight: 600,
+                              textDecoration: "none",
+                              whiteSpace: "nowrap",
+                            }}
+                          >
+                            Open / Download
+                          </a>
+                        )}
+                      </div>
+                      {resolvedDocHref && (
+                        <div
+                          data-testid="drawer-specification-link"
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "8px",
+                            background: "#f8fafc",
+                            border: "1px solid #cbd5e1",
+                            borderRadius: "6px",
+                            padding: "8px 10px",
+                            flexWrap: "wrap",
+                          }}
+                        >
+                          <span style={{ fontSize: "12px", fontWeight: 600, color: "#1e40af", whiteSpace: "nowrap" }}>
+                            {isPdfDoc ? "Saved PDF Link:" : "Saved Document Link:"}
+                          </span>
+                          <a
+                            href={resolvedDocHref}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            style={{
+                              fontSize: "12px",
+                              color: "#0061f2",
+                              fontWeight: 500,
+                              textDecoration: "underline",
+                              wordBreak: "break-all",
+                            }}
+                          >
+                            {resolvedDocHref}
+                          </a>
+                        </div>
+                      )}
+                    </div>
+                  );
+                }
+                return (
+                  <p style={{ margin: 0, fontSize: "13px", color: "#475569", whiteSpace: "pre-wrap" }}>
+                    {drawerProduct.specification}
+                  </p>
+                );
+              })()}
             </div>
           )}
 

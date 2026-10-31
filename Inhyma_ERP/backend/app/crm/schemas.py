@@ -884,6 +884,8 @@ class CrmProductLookupItem(BaseModel):
     product_code: str | None = None
     product_name: str
     specification: str | None = None
+    specification_doc_name: str | None = None
+    specification_doc_url: str | None = None
     description: str | None = None
     uom: str = "Nos"
     standard_price: float | None = None
@@ -918,6 +920,8 @@ class CrmLeadProductRead(BaseModel):
     product_name: str
     product_code: str | None = None
     specification: str | None = None
+    specification_doc_name: str | None = None
+    specification_doc_url: str | None = None
     uom: str = "Nos"
     selected_image_url: str | None = None
     notes: str | None = None
@@ -944,6 +948,8 @@ class CrmQuotationItemIn(BaseModel):
     tax_rate: Decimal = Field(default=Decimal("0.00"), ge=0, le=100)
     description: str | None = None
     specification: str | None = None
+    specification_doc_name: str | None = None
+    specification_doc_url: str | None = None
     include_images: bool = False
     selected_image_url: str | None = None
     include_specifications: bool = True
@@ -980,6 +986,8 @@ class CrmQuotationItemRead(BaseModel):
     product_code: str | None = None
     description: str | None = None
     specification: str | None = None
+    specification_doc_name: str | None = None
+    specification_doc_url: str | None = None
     uom: str
     include_images: bool
     selected_image_url: str | None = None

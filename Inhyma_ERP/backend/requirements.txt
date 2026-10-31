@@ -22,6 +22,7 @@ aiosqlite==0.20.0        # async SQLite driver (tests)
 # --- Utilities ---
 python-dotenv==1.0.1
 pypdf==6.16.2
+reportlab>=4.2.0         # CRM Sales Quotation PDF generation
 orjson==3.10.14          # fast JSON serialization
 tenacity==9.0.0          # retry logic (DB startup, future external calls)
 

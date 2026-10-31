@@ -13,7 +13,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
 import { Breadcrumb } from "@/components/Breadcrumb";
-import { apiGet, apiPost, apiPut, apiPatch, apiDownloadBlob, errorMessage } from "@/lib/api";
+import { apiGet, apiPost, apiPut, apiPatch, apiDownloadBlob, errorMessage, API_ORIGIN } from "@/lib/api";
 import { Auth } from "@/lib/auth";
 import { useToast } from "@/lib/toast";
 import { LeadImportPage } from "./LeadImportPage";
@@ -25,11 +25,59 @@ import {
   IconUserCheck,
 } from "@/components/icons";
 
+function resolveValidCrmImageUrl(url?: string | null): string | null {
+  if (!url || typeof url !== "string") return null;
+  const clean = url.trim();
+  if (!clean) return null;
+  if (/^https?:\/\/[^/]*\.(test|invalid|example)(?:[:/]|$)/i.test(clean)) {
+    return null;
+  }
+  if (clean.startsWith("/")) {
+    return API_ORIGIN ? `${API_ORIGIN.replace(/\/$/, "")}${clean}` : clean;
+  }
+  return clean;
+}
+
+function resolveSpecificationPdfHref(spec?: string | null, docUrl?: string | null): string | null {
+  const cleanDocUrl = typeof docUrl === "string" ? docUrl.trim() : "";
+  const cleanSpec = typeof spec === "string" ? spec.trim() : "";
+  const candidate =
+    cleanDocUrl &&
+    (cleanDocUrl.startsWith("http://") ||
+      cleanDocUrl.startsWith("https://") ||
+      cleanDocUrl.startsWith("/"))
+      ? cleanDocUrl
+      : cleanSpec &&
+        (cleanSpec.startsWith("http://") ||
+          cleanSpec.startsWith("https://") ||
+          cleanSpec.startsWith("/api/"))
+      ? cleanSpec
+      : null;
+  if (!candidate) return null;
+  if (candidate.startsWith("/")) {
+    return API_ORIGIN ? `${API_ORIGIN.replace(/\/$/, "")}${candidate}` : candidate;
+  }
+  return candidate;
+}
+
+function extractSpecFilename(urlOrName?: string | null, fallbackName?: string | null): string {
+  if (fallbackName && fallbackName.trim()) return fallbackName.trim();
+  if (!urlOrName) return "Specification.pdf";
+  try {
+    const last = decodeURIComponent(urlOrName.split("?")[0].split("/").pop() || "");
+    return last || "Specification.pdf";
+  } catch {
+    return "Specification.pdf";
+  }
+}
+
 export interface CrmProductLookupItem {
   id: string;
   product_code: string;
   product_name: string;
   specification?: string | null;
+  specification_doc_name?: string | null;
+  specification_doc_url?: string | null;
   description?: string | null;
   category?: string | null;
   retail_price?: number | null;
@@ -62,6 +110,8 @@ export interface CrmQuotationItemDraft {
   product_code: string;
   description: string;
   specification: string;
+  specification_doc_name?: string | null;
+  specification_doc_url?: string | null;
   uom: string;
   available_images: string[];
   include_images: boolean;
@@ -87,6 +137,8 @@ export interface CrmQuotationItemRead {
   product_code: string;
   description?: string | null;
   specification?: string | null;
+  specification_doc_name?: string | null;
+  specification_doc_url?: string | null;
   uom: string;
   include_images: boolean;
   selected_image_url?: string | null;
@@ -1363,17 +1415,22 @@ export function CrmLeadsPage() {
       showToast(`"${prodName}" is already in this quotation draft.`, "warning");
       return;
     }
-    const availableImgs = prod.images || (prod.image_url ? [prod.image_url] : []);
+    const availableImgs = ((prod.images || (prod.image_url ? [prod.image_url] : [])) as string[])
+      .map((u) => resolveValidCrmImageUrl(u))
+      .filter((u): u is string => Boolean(u));
     const suggestedPrice = prod.standard_price || prod.retail_price || prod.wholesale_price || 0;
     const catTax = prod.gst_percent ?? prod.tax_rate ?? null;
     const uom = (prod.uom_id && uomLookup[prod.uom_id]) || prod.uom || "Unit";
-    const specs = prod.specification || "";
+    const resolvedDocLink = resolveSpecificationPdfHref(prod.specification, prod.specification_doc_url) || "";
+    const specs = resolvedDocLink || prod.specification || "";
     const newLine: CrmQuotationItemDraft = {
       product_id: prod.id,
       product_name: prodName,
       product_code: prod.product_code || "-",
       description: prod.description || "",
       specification: specs,
+      specification_doc_name: prod.specification_doc_name || null,
+      specification_doc_url: resolvedDocLink || null,
       uom: uom,
       available_images: availableImgs,
       include_images: availableImgs.length > 0,
@@ -1429,6 +1486,8 @@ export function CrmLeadsPage() {
       product_code: it.product_code,
       description: it.description || "",
       specification: it.specification || "",
+      specification_doc_name: it.specification_doc_name || null,
+      specification_doc_url: it.specification_doc_url || null,
       uom: it.uom || "Unit",
       available_images: it.selected_image_url ? [it.selected_image_url] : [],
       include_images: it.include_images,
@@ -7630,11 +7689,38 @@ export function CrmLeadsPage() {
                                     </span>
                                   )}
                                 </div>
-                                {prod.specification && (
-                                  <div style={{ fontSize: "0.75rem", color: "#475569" }}>
-                                    {prod.specification}
-                                  </div>
-                                )}
+                                {(() => {
+                                  const specPdfHref = resolveSpecificationPdfHref(prod.specification, prod.specification_doc_url);
+                                  if (specPdfHref) {
+                                    const fname = extractSpecFilename(specPdfHref, prod.specification_doc_name);
+                                    const isPdf = fname.toLowerCase().endsWith(".pdf") || specPdfHref.toLowerCase().split("?")[0].endsWith(".pdf");
+                                    return (
+                                      <div style={{ fontSize: "0.75rem", marginTop: "0.1rem" }}>
+                                        <a
+                                          href={specPdfHref}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          onClick={(e) => e.stopPropagation()}
+                                          style={{ color: "#2563eb", fontWeight: 600, textDecoration: "underline" }}
+                                        >
+                                          📄 {isPdf ? "Specification PDF" : "Specification Doc"}: {fname}
+                                        </a>
+                                      </div>
+                                    );
+                                  }
+                                  if (prod.specification_doc_name) {
+                                    return (
+                                      <div style={{ fontSize: "0.75rem", color: "#475569" }}>
+                                        📄 Spec Doc: {prod.specification_doc_name}
+                                      </div>
+                                    );
+                                  }
+                                  return prod.specification ? (
+                                    <div style={{ fontSize: "0.75rem", color: "#475569" }}>
+                                      {prod.specification}
+                                    </div>
+                                  ) : null;
+                                })()}
                               </div>
                               <div style={{ display: "flex", alignItems: "center", gap: "0.85rem", flexShrink: 0 }}>
                                 {prod.retail_price && (
@@ -7728,11 +7814,43 @@ export function CrmLeadsPage() {
                                         {item.product_name}
                                       </strong>
                                     </div>
-                                    {item.specification && (
-                                      <div style={{ fontSize: "0.75rem", color: "#64748b", fontStyle: "italic", marginTop: "0.2rem" }}>
-                                        {item.specification}
-                                      </div>
-                                    )}
+                                    {(item.specification || item.specification_doc_url) && (() => {
+                                      const specPdfHref = resolveSpecificationPdfHref(item.specification, item.specification_doc_url);
+                                      if (specPdfHref) {
+                                        const fname = extractSpecFilename(specPdfHref, item.specification_doc_name);
+                                        const isPdf = fname.toLowerCase().endsWith(".pdf") || specPdfHref.toLowerCase().split("?")[0].endsWith(".pdf");
+                                        return (
+                                          <div style={{ fontSize: "0.75rem", marginTop: "0.25rem", display: "flex", flexDirection: "column", gap: "2px" }}>
+                                            <div>
+                                              <a
+                                                href={specPdfHref}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                style={{ color: "#2563eb", fontWeight: 600, textDecoration: "underline" }}
+                                              >
+                                                📄 {isPdf ? "Specification PDF" : "Specification Document"}: {fname}
+                                              </a>
+                                              <span style={{ color: "#059669", fontWeight: 500, marginLeft: "6px" }}>
+                                                — Auto-attached to Quotation &amp; PDF
+                                              </span>
+                                            </div>
+                                            <a
+                                              href={specPdfHref}
+                                              target="_blank"
+                                              rel="noopener noreferrer"
+                                              style={{ color: "#475569", fontSize: "0.7rem", textDecoration: "underline", wordBreak: "break-all" }}
+                                            >
+                                              {specPdfHref}
+                                            </a>
+                                          </div>
+                                        );
+                                      }
+                                      return (
+                                        <div style={{ fontSize: "0.75rem", color: "#64748b", fontStyle: "italic", marginTop: "0.2rem" }}>
+                                          {item.specification}
+                                        </div>
+                                      );
+                                    })()}
                                     <input
                                       type="text"
                                       placeholder="Optional quotation-specific description / notes..."
@@ -8384,13 +8502,19 @@ export function CrmLeadsPage() {
                               <td style={{ padding: "0.5rem 0.75rem", color: "#64748b" }}>{it.position}</td>
                               <td style={{ padding: "0.5rem 0.75rem" }}>
                                 <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
-                                  {it.include_images && it.selected_image_url && (
-                                    <img
-                                      src={it.selected_image_url}
-                                      alt={it.product_name}
-                                      style={{ width: "36px", height: "36px", objectFit: "cover", borderRadius: "0.25rem", border: "1px solid #e2e8f0" }}
-                                    />
-                                  )}
+                                  {(() => {
+                                    const validItemImg = it.include_images ? resolveValidCrmImageUrl(it.selected_image_url) : null;
+                                    return validItemImg ? (
+                                      <img
+                                        src={validItemImg}
+                                        alt={it.product_name}
+                                        onError={(e) => {
+                                          e.currentTarget.style.display = "none";
+                                        }}
+                                        style={{ width: "36px", height: "36px", objectFit: "cover", borderRadius: "0.25rem", border: "1px solid #e2e8f0" }}
+                                      />
+                                    ) : null;
+                                  })()}
                                   <div>
                                     <div style={{ fontWeight: 600, color: "#0f172a" }}>
                                       {it.product_name}
@@ -8398,11 +8522,30 @@ export function CrmLeadsPage() {
                                     <div style={{ fontSize: "0.7rem", color: "#64748b" }}>
                                       {it.product_code}
                                     </div>
-                                    {it.include_specifications && it.specification && (
-                                      <div style={{ fontSize: "0.7rem", color: "#059669", marginTop: "0.15rem" }}>
-                                        Specs: {it.specification}
-                                      </div>
-                                    )}
+                                    {it.include_specifications && (it.specification || it.specification_doc_url) && (() => {
+                                      const specPdfHref = resolveSpecificationPdfHref(it.specification, it.specification_doc_url);
+                                      if (specPdfHref) {
+                                        const fname = extractSpecFilename(specPdfHref, it.specification_doc_name);
+                                        const isPdf = fname.toLowerCase().endsWith(".pdf") || specPdfHref.toLowerCase().split("?")[0].endsWith(".pdf");
+                                        return (
+                                          <div style={{ fontSize: "0.7rem", marginTop: "0.15rem" }}>
+                                            <a
+                                              href={specPdfHref}
+                                              target="_blank"
+                                              rel="noopener noreferrer"
+                                              style={{ color: "#2563eb", fontWeight: 600, textDecoration: "underline" }}
+                                            >
+                                              📄 {isPdf ? "Specification PDF" : "Specification Document"}: {fname}
+                                            </a>
+                                          </div>
+                                        );
+                                      }
+                                      return (
+                                        <div style={{ fontSize: "0.7rem", color: "#059669", marginTop: "0.15rem" }}>
+                                          Specs: {it.specification}
+                                        </div>
+                                      );
+                                    })()}
                                     {it.demo_link && (
                                       <div style={{ fontSize: "0.7rem", marginTop: "0.15rem" }}>
                                         <a href={it.demo_link} target="_blank" rel="noreferrer" style={{ color: "#2563eb" }}>

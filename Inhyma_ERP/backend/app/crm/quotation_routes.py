@@ -11,7 +11,8 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends, Query, Response, status
+from fastapi import APIRouter, Depends, Query, Request, Response, status
+from app.core.config import settings
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import get_current_user
@@ -217,6 +218,7 @@ async def list_quotation_versions(
     response_class=Response,
 )
 async def get_quotation_pdf(
+    request: Request,
     quotation_id: uuid.UUID,
     version: int | None = Query(None, description="Optional revision version number (defaults to current version)"),
     service: CrmQuotationService = Depends(get_quotation_service),
@@ -227,7 +229,24 @@ async def get_quotation_pdf(
     Enforces RBAC lead authorization and logs CRM activity (deduplicated).
     Does NOT change quotation status or create revisions.
     """
+    if settings.BACKEND_URL and settings.BACKEND_URL.strip():
+        public_origin = settings.BACKEND_URL.strip().rstrip("/")
+    else:
+        proto = (request.headers.get("x-forwarded-proto") or request.url.scheme or "http").split(",")[0].strip()
+        host = (
+            request.headers.get("x-forwarded-host")
+            or request.headers.get("host")
+            or request.url.netloc
+            or ""
+        ).split(",")[0].strip()
+        if host.startswith("127.0.0.1:"):
+            origin_hdr = f"{request.headers.get('origin', '')} {request.headers.get('referer', '')}"
+            if "localhost" in origin_hdr:
+                host = "localhost:" + host.split(":", 1)[1]
+        public_origin = f"{proto}://{host}" if host else str(request.base_url).rstrip("/")
+
     pdf_bytes, filename = await service.generate_quotation_pdf(
+        public_origin=public_origin,
         quotation_id=quotation_id,
         version=version,
         actor=current_user,
