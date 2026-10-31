@@ -188,7 +188,8 @@ async def check_in_site_visit(
         payload=payload,
     )
     dto = service.to_site_visit_read(visit)
-    return build_success_response(data=dto.model_dump(mode="json"), message="Checked in successfully at customer site.")
+    dist_str = f" ({round(dto.check_in_distance_meters, 1)}m away)" if dto.check_in_distance_meters is not None else ""
+    return build_success_response(data=dto.model_dump(mode="json"), message=f"Checked in successfully at customer site{dist_str}.")
 
 
 @router.post("/hrms/site-visits/{visit_id}/check-out", summary="Employee Check-Out from Site Visit")
@@ -206,7 +207,8 @@ async def check_out_site_visit(
         payload=payload,
     )
     dto = service.to_site_visit_read(visit)
-    return build_success_response(data=dto.model_dump(mode="json"), message="Checked out successfully from customer site.")
+    dist_str = f" ({round(dto.check_out_distance_meters, 1)}m away)" if dto.check_out_distance_meters is not None else ""
+    return build_success_response(data=dto.model_dump(mode="json"), message=f"Checked out successfully from customer site{dist_str}.")
 
 
 # ===========================================================================

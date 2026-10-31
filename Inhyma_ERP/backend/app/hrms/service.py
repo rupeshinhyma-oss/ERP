@@ -22,6 +22,7 @@ from app.core.exceptions import BadRequestException, NotFoundException
 from app.hrms.models import (
     HrmsAsset,
     HrmsEmployeeLocation,
+    HrmsLocationAssignmentHistory,
     HrmsExpenseCategory,
     HrmsExpenseSettings,
     HrmsLeaveType,
@@ -30,6 +31,10 @@ from app.hrms.models import (
 )
 from app.hrms.schemas import (
     DetailedTrackingEmployeeItem,
+    EmployeeLocationAssignPayload,
+    EmployeeLocationHistoryItem,
+    EmployeeLocationItem,
+    EmployeeLocationOverview,
     DetailedTrackingEmployeeUpdate,
     EmployeeTrackingSettingsResponse,
     ExpenseCategoryCreate,
@@ -62,21 +67,62 @@ class HrmsSetupService:
     # -----------------------------------------------------------------------
     async def ensure_seeds(self) -> None:
         """Seed default Office, Leave Types, Expense Categories, and Settings if empty."""
-        # 1. Default Office Location
-        loc_res = await self.db.execute(
-            select(func.count(HrmsLocation.id))
+        # 1. Canonical / Seed Office Locations
+        existing_locs_res = await self.db.execute(
+            select(HrmsLocation.name).where(HrmsLocation.deleted_at.is_(None))
         )
-        if loc_res.scalar() == 0:
-            default_office = HrmsLocation(
+        existing_loc_names = {row[0].strip().lower() for row in existing_locs_res.all()}
+
+        seed_locations = [
+            HrmsLocation(
                 name="Inhyma Thane Office",
-                location_type="OFFICE",
+                location_type="HEAD_OFFICE",
                 address="Office No 421, 4th Floor, Lodha Supremus, Road Number 22, Wagle Industrial Estate, Thane West, Maharashtra 400604",
                 latitude=19.199824,
                 longitude=72.956795,
                 radius_meters=150.0,
                 is_active=True,
-            )
-            self.db.add(default_office)
+            ),
+            HrmsLocation(
+                name="Mumbai Office",
+                location_type="BRANCH",
+                address="Bandra Kurla Complex, Bandra East, Mumbai, Maharashtra 400051",
+                latitude=19.066000,
+                longitude=72.868000,
+                radius_meters=150.0,
+                is_active=True,
+            ),
+            HrmsLocation(
+                name="Gujarat Office",
+                location_type="BRANCH",
+                address="SG Highway, Bodakdev, Ahmedabad, Gujarat 380054",
+                latitude=23.033000,
+                longitude=72.508000,
+                radius_meters=150.0,
+                is_active=True,
+            ),
+            HrmsLocation(
+                name="MP Office",
+                location_type="BRANCH",
+                address="AB Road, Vijay Nagar, Indore, Madhya Pradesh 452010",
+                latitude=22.753000,
+                longitude=75.893000,
+                radius_meters=150.0,
+                is_active=True,
+            ),
+            HrmsLocation(
+                name="China Central Office",
+                location_type="INTERNATIONAL",
+                address="Century Avenue, Pudong New Area, Shanghai, China 200120",
+                latitude=31.230400,
+                longitude=121.473700,
+                radius_meters=200.0,
+                is_active=True,
+            ),
+        ]
+        for sl in seed_locations:
+            if sl.name.strip().lower() not in existing_loc_names:
+                self.db.add(sl)
 
         # 2. Default Leave Types
         existing_types_res = await self.db.execute(
@@ -1135,3 +1181,414 @@ class HrmsSetupService:
             updated_at=st.updated_at if st else None,
         )
 
+
+    # =======================================================================
+    # Employee Location Assignment Sub-Module
+    # =======================================================================
+
+    async def list_employee_locations(
+        self,
+        search: Optional[str] = None,
+        department: Optional[str] = None,
+        location_id: Optional[uuid.UUID] = None,
+        allowed_employee_ids: Optional[set[uuid.UUID]] = None,
+    ) -> List[EmployeeLocationOverview]:
+        """
+        List active employees with their assigned primary and additional permitted locations.
+        Filtered by search, department, location_id, and requester's allowed employee scope.
+        """
+        stmt = (
+            select(User)
+            .where(User.deleted_at.is_(None), User.is_active == True)
+            .order_by(User.first_name.asc(), User.username.asc())
+        )
+        if allowed_employee_ids is not None:
+            stmt = stmt.where(User.id.in_(allowed_employee_ids))
+
+        users = list((await self.db.execute(stmt)).scalars().all())
+        if not users:
+            return []
+
+        user_ids = [u.id for u in users]
+
+        # Resolve departments and designations
+        dept_map: dict[uuid.UUID, str] = {}
+        try:
+            from app.rbac.models import Role, UserRole
+            r_stmt = (
+                select(UserRole.user_id, Role.name)
+                .join(Role, Role.id == UserRole.role_id)
+                .where(UserRole.user_id.in_(user_ids))
+                .order_by(UserRole.is_primary.desc())
+            )
+            for uid, rname in (await self.db.execute(r_stmt)).all():
+                if rname.lower() not in ("user", "employee", "department_manager", "super_admin", "admin") and uid not in dept_map:
+                    dept_map[uid] = rname
+        except Exception:
+            pass
+
+        pos_map: dict[uuid.UUID, str] = {}
+        try:
+            from app.org_structure.models import EmployeePositionAssignment, Position
+            p_stmt = (
+                select(EmployeePositionAssignment.employee_id, Position.name)
+                .join(Position, Position.id == EmployeePositionAssignment.position_id)
+                .where(EmployeePositionAssignment.employee_id.in_(user_ids))
+            )
+            for uid, pname in (await self.db.execute(p_stmt)).all():
+                if uid not in pos_map:
+                    pos_map[uid] = pname
+        except Exception:
+            pass
+
+        # Query all assigned locations for these employees
+        el_stmt = (
+            select(HrmsEmployeeLocation, HrmsLocation)
+            .join(HrmsLocation, HrmsLocation.id == HrmsEmployeeLocation.location_id)
+            .where(
+                HrmsEmployeeLocation.user_id.in_(user_ids),
+                HrmsLocation.deleted_at.is_(None),
+            )
+            .order_by(HrmsEmployeeLocation.is_primary.desc(), HrmsLocation.name.asc())
+        )
+        el_rows = (await self.db.execute(el_stmt)).all()
+
+        emp_locations_map: dict[uuid.UUID, list[EmployeeLocationItem]] = {u.id: [] for u in users}
+        assigner_ids = {el.assigned_by for el, _ in el_rows if el.assigned_by}
+        assigner_name_map: dict[uuid.UUID, str] = {}
+        if assigner_ids:
+            asgn_res = await self.db.execute(select(User.id, User.first_name, User.last_name, User.username).where(User.id.in_(assigner_ids)))
+            for au_id, afirst, alast, aun in asgn_res.all():
+                name = f"{afirst or ''} {alast or ''}".strip() or aun
+                assigner_name_map[au_id] = name
+
+        for el, loc in el_rows:
+            asgn_by_name = assigner_name_map.get(el.assigned_by) if el.assigned_by else None
+            emp_locations_map[el.user_id].append(
+                EmployeeLocationItem(
+                    id=el.id,
+                    location_id=loc.id,
+                    location_name=loc.name,
+                    location_type=loc.location_type,
+                    address=loc.address,
+                    latitude=loc.latitude,
+                    longitude=loc.longitude,
+                    radius_meters=loc.radius_meters,
+                    is_primary=el.is_primary,
+                    is_active=loc.is_active,
+                    assigned_at=el.created_at,
+                    assigned_by=el.assigned_by,
+                    assigned_by_name=asgn_by_name,
+                )
+            )
+
+        items: List[EmployeeLocationOverview] = []
+        for u in users:
+            resolved_dept = dept_map.get(u.id) or getattr(u, "department", None) or "General"
+            resolved_desig = pos_map.get(u.id) or getattr(u, "designation", None) or "Staff"
+
+            # Apply department filter
+            if department and department.strip() and department.strip().upper() != "ALL":
+                if resolved_dept.lower() != department.strip().lower():
+                    continue
+
+            # Apply search filter (name, employee_code, username, email, department)
+            if search and search.strip():
+                st = search.strip().lower()
+                first = u.first_name or ""
+                last = u.last_name or ""
+                emp_code = getattr(u, "employee_code", "") or ""
+                match_txt = f"{first} {last} {u.username} {u.email or ''} {emp_code} {resolved_dept}".lower()
+                if st not in match_txt:
+                    continue
+
+            loc_items = emp_locations_map.get(u.id, [])
+            primary_item = next((item for item in loc_items if item.is_primary), None)
+            # If no item is explicitly primary but locations exist, pick the first
+            if not primary_item and loc_items:
+                primary_item = loc_items[0]
+
+            additional_items = [item for item in loc_items if item != primary_item]
+
+            # Apply location filter
+            if location_id:
+                has_loc = any(item.location_id == location_id for item in loc_items)
+                if not has_loc:
+                    continue
+
+            first_n = u.first_name or ""
+            last_n = u.last_name or ""
+            full_name = f"{first_n} {last_n}".strip() or u.username
+
+            items.append(
+                EmployeeLocationOverview(
+                    employee_id=u.id,
+                    employee_code=getattr(u, "employee_code", None),
+                    employee_name=full_name,
+                    username=u.username,
+                    email=u.email,
+                    department=resolved_dept,
+                    designation=resolved_desig,
+                    primary_location=primary_item,
+                    additional_locations=additional_items,
+                    total_locations_count=len(loc_items),
+                )
+            )
+
+        return items
+
+    async def get_employee_location_overview(self, employee_id: uuid.UUID) -> EmployeeLocationOverview:
+        """Fetch location assignment overview for an individual employee."""
+        emp = await self.db.get(User, employee_id)
+        if not emp or emp.deleted_at:
+            raise NotFoundException("Employee not found.")
+
+        el_stmt = (
+            select(HrmsEmployeeLocation, HrmsLocation)
+            .join(HrmsLocation, HrmsLocation.id == HrmsEmployeeLocation.location_id)
+            .where(
+                HrmsEmployeeLocation.user_id == employee_id,
+                HrmsLocation.deleted_at.is_(None),
+            )
+            .order_by(HrmsEmployeeLocation.is_primary.desc(), HrmsLocation.name.asc())
+        )
+        el_rows = (await self.db.execute(el_stmt)).all()
+
+        assigner_ids = {el.assigned_by for el, _ in el_rows if el.assigned_by}
+        assigner_name_map: dict[uuid.UUID, str] = {}
+        if assigner_ids:
+            asgn_res = await self.db.execute(select(User.id, User.first_name, User.last_name, User.username).where(User.id.in_(assigner_ids)))
+            for au_id, afirst, alast, aun in asgn_res.all():
+                name = f"{afirst or ''} {alast or ''}".strip() or aun
+                assigner_name_map[au_id] = name
+
+        loc_items: list[EmployeeLocationItem] = []
+        for el, loc in el_rows:
+            asgn_by_name = assigner_name_map.get(el.assigned_by) if el.assigned_by else None
+            loc_items.append(
+                EmployeeLocationItem(
+                    id=el.id,
+                    location_id=loc.id,
+                    location_name=loc.name,
+                    location_type=loc.location_type,
+                    address=loc.address,
+                    latitude=loc.latitude,
+                    longitude=loc.longitude,
+                    radius_meters=loc.radius_meters,
+                    is_primary=el.is_primary,
+                    is_active=loc.is_active,
+                    assigned_at=el.created_at,
+                    assigned_by=el.assigned_by,
+                    assigned_by_name=asgn_by_name,
+                )
+            )
+
+        primary_item = next((item for item in loc_items if item.is_primary), None)
+        if not primary_item and loc_items:
+            primary_item = loc_items[0]
+        additional_items = [item for item in loc_items if item != primary_item]
+
+        first_n = emp.first_name or ""
+        last_n = emp.last_name or ""
+        full_name = f"{first_n} {last_n}".strip() or emp.username
+
+        return EmployeeLocationOverview(
+            employee_id=emp.id,
+            employee_code=getattr(emp, "employee_code", None),
+            employee_name=full_name,
+            username=emp.username,
+            email=emp.email,
+            department=getattr(emp, "department", None) or "General",
+            designation=getattr(emp, "designation", None) or "Staff",
+            primary_location=primary_item,
+            additional_locations=additional_items,
+            total_locations_count=len(loc_items),
+        )
+
+    async def update_employee_locations(
+        self,
+        employee_id: uuid.UUID,
+        payload: EmployeeLocationAssignPayload,
+        actor_id: uuid.UUID,
+    ) -> EmployeeLocationOverview:
+        """
+        Assign primary and additional permitted locations to an employee.
+        Enforces:
+        - Exactly one primary location when assigning locations.
+        - Primary location must be an active, non-deleted HrmsLocation.
+        - Additional locations must be active, non-deleted HrmsLocations.
+        - Duplicate location assignments are prevented.
+        - Audit history is recorded in hrms_location_assignment_history.
+        """
+        emp = await self.db.get(User, employee_id)
+        if not emp or emp.deleted_at:
+            raise NotFoundException("Employee not found.")
+
+        # 1. Validate primary location
+        primary_loc = await self.db.get(HrmsLocation, payload.primary_location_id)
+        if not primary_loc or primary_loc.deleted_at is not None:
+            raise BadRequestException("Primary location not found.")
+        if not primary_loc.is_active:
+            raise BadRequestException(f"Cannot assign inactive location '{primary_loc.name}' as primary.")
+
+        # 2. Validate and deduplicate additional locations
+        clean_additional_ids: list[uuid.UUID] = []
+        seen = {payload.primary_location_id}
+        for loc_id in payload.additional_location_ids:
+            if loc_id in seen:
+                continue
+            seen.add(loc_id)
+            clean_additional_ids.append(loc_id)
+
+        for loc_id in clean_additional_ids:
+            add_loc = await self.db.get(HrmsLocation, loc_id)
+            if not add_loc or add_loc.deleted_at is not None:
+                raise BadRequestException(f"Additional location {loc_id} not found.")
+            if not add_loc.is_active:
+                raise BadRequestException(f"Cannot assign inactive location '{add_loc.name}'.")
+
+        target_permitted_ids = {payload.primary_location_id} | set(clean_additional_ids)
+
+        # 3. Fetch existing mappings
+        curr_stmt = select(HrmsEmployeeLocation).where(HrmsEmployeeLocation.user_id == employee_id)
+        curr_records = list((await self.db.execute(curr_stmt)).scalars().all())
+        curr_by_loc = {r.location_id: r for r in curr_records}
+
+        now = _utcnow()
+
+        # 4. Remove unassigned locations
+        for loc_id, r in list(curr_by_loc.items()):
+            if loc_id not in target_permitted_ids:
+                hist = HrmsLocationAssignmentHistory(
+                    user_id=employee_id,
+                    location_id=loc_id,
+                    action="REMOVED",
+                    is_primary=r.is_primary,
+                    performed_by=actor_id,
+                    notes=payload.notes or "Location unassigned",
+                )
+                self.db.add(hist)
+                await self.db.delete(r)
+                del curr_by_loc[loc_id]
+
+        # 5. Handle Primary Location
+        if payload.primary_location_id in curr_by_loc:
+            prim_rec = curr_by_loc[payload.primary_location_id]
+            if not prim_rec.is_primary:
+                prim_rec.is_primary = True
+                prim_rec.assigned_by = actor_id
+                prim_rec.updated_at = now
+                hist = HrmsLocationAssignmentHistory(
+                    user_id=employee_id,
+                    location_id=payload.primary_location_id,
+                    action="SET_PRIMARY",
+                    is_primary=True,
+                    performed_by=actor_id,
+                    notes=payload.notes or "Designated as primary office location",
+                )
+                self.db.add(hist)
+        else:
+            new_prim = HrmsEmployeeLocation(
+                user_id=employee_id,
+                location_id=payload.primary_location_id,
+                is_primary=True,
+                assigned_by=actor_id,
+            )
+            self.db.add(new_prim)
+            hist1 = HrmsLocationAssignmentHistory(
+                user_id=employee_id,
+                location_id=payload.primary_location_id,
+                action="ASSIGNED",
+                is_primary=True,
+                performed_by=actor_id,
+                notes=payload.notes or "Assigned as primary office location",
+            )
+            hist2 = HrmsLocationAssignmentHistory(
+                user_id=employee_id,
+                location_id=payload.primary_location_id,
+                action="SET_PRIMARY",
+                is_primary=True,
+                performed_by=actor_id,
+                notes=payload.notes or "Designated as primary office location",
+            )
+            self.db.add(hist1)
+            self.db.add(hist2)
+
+        # 6. Handle Additional Locations
+        for loc_id in clean_additional_ids:
+            if loc_id in curr_by_loc:
+                add_rec = curr_by_loc[loc_id]
+                if add_rec.is_primary:
+                    add_rec.is_primary = False
+                    add_rec.assigned_by = actor_id
+                    add_rec.updated_at = now
+                    hist = HrmsLocationAssignmentHistory(
+                        user_id=employee_id,
+                        location_id=loc_id,
+                        action="UNSET_PRIMARY",
+                        is_primary=False,
+                        performed_by=actor_id,
+                        notes=payload.notes or "Changed from primary to additional location",
+                    )
+                    self.db.add(hist)
+            else:
+                new_add = HrmsEmployeeLocation(
+                    user_id=employee_id,
+                    location_id=loc_id,
+                    is_primary=False,
+                    assigned_by=actor_id,
+                )
+                self.db.add(new_add)
+                hist = HrmsLocationAssignmentHistory(
+                    user_id=employee_id,
+                    location_id=loc_id,
+                    action="ASSIGNED",
+                    is_primary=False,
+                    performed_by=actor_id,
+                    notes=payload.notes or "Assigned as permitted additional location",
+                )
+                self.db.add(hist)
+
+        await self.db.commit()
+        return await self.get_employee_location_overview(employee_id)
+
+    async def get_employee_location_history(
+        self,
+        employee_id: uuid.UUID,
+    ) -> List[EmployeeLocationHistoryItem]:
+        """Fetch audit log history of location assignments for an employee."""
+        emp = await self.db.get(User, employee_id)
+        if not emp or emp.deleted_at:
+            raise NotFoundException("Employee not found.")
+
+        stmt = (
+            select(HrmsLocationAssignmentHistory, HrmsLocation.name, User.first_name, User.last_name, User.username)
+            .join(HrmsLocation, HrmsLocation.id == HrmsLocationAssignmentHistory.location_id)
+            .outerjoin(User, User.id == HrmsLocationAssignmentHistory.performed_by)
+            .where(HrmsLocationAssignmentHistory.user_id == employee_id)
+            .order_by(HrmsLocationAssignmentHistory.created_at.desc())
+        )
+        rows = (await self.db.execute(stmt)).all()
+
+        items: List[EmployeeLocationHistoryItem] = []
+        for hist, loc_name, pfirst, plast, pun in rows:
+            pname = None
+            if hist.performed_by:
+                pname = f"{pfirst or ''} {plast or ''}".strip() or pun
+
+            items.append(
+                EmployeeLocationHistoryItem(
+                    id=hist.id,
+                    employee_id=hist.user_id,
+                    location_id=hist.location_id,
+                    location_name=loc_name,
+                    action=hist.action,
+                    is_primary=hist.is_primary,
+                    performed_by=hist.performed_by,
+                    performed_by_name=pname,
+                    notes=hist.notes,
+                    created_at=hist.created_at,
+                )
+            )
+
+        return items

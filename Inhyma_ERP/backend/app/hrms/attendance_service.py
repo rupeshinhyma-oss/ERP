@@ -136,7 +136,78 @@ def parse_time_on_date(target_date: date, time_str: str | None) -> datetime | No
     return None
 
 
+MAX_ACCEPTABLE_GPS_ACCURACY_METERS: float = 100.0
+MAX_GPS_AGE_SECONDS: float = 60.0
+MAX_GPS_FUTURE_TOLERANCE_SECONDS: float = 10.0
+
+
+def validate_gps_freshness(
+    gps_timestamp: datetime | None,
+    server_now_utc: datetime | None = None,
+    max_age_seconds: float = MAX_GPS_AGE_SECONDS,
+    max_future_seconds: float = MAX_GPS_FUTURE_TOLERANCE_SECONDS,
+) -> datetime:
+    """
+    Centralized validation for GPS timestamp freshness.
+
+    Rules:
+    - gps_timestamp must be provided (reject missing).
+    - gps_timestamp must be a valid datetime (reject invalid).
+    - Converted to timezone-aware UTC.
+    - Reading age (server_now - gps_time) cannot exceed max_age_seconds (60s).
+    - Reading timestamp cannot be more than max_future_seconds (10s) ahead of server clock.
+
+    Returns normalized timezone-aware UTC datetime.
+    """
+    if gps_timestamp is None:
+        raise BadRequestException(
+            "Missing GPS timestamp: A valid GPS timestamp is required to record attendance. "
+            "Please enable location services and retry."
+        )
+
+    if not isinstance(gps_timestamp, datetime):
+        raise BadRequestException(
+            "Invalid GPS timestamp: Timestamp must be a valid date and time."
+        )
+
+    # Normalize to timezone-aware UTC
+    if gps_timestamp.tzinfo is None:
+        gps_dt_utc = gps_timestamp.replace(tzinfo=timezone.utc)
+    else:
+        gps_dt_utc = gps_timestamp.astimezone(timezone.utc)
+
+    now = server_now_utc if server_now_utc is not None else datetime.now(timezone.utc)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+    else:
+        now = now.astimezone(timezone.utc)
+
+    age_seconds = (now - gps_dt_utc).total_seconds()
+
+    if age_seconds < -max_future_seconds:
+        future_seconds = abs(age_seconds)
+        raise BadRequestException(
+            f"Invalid GPS timestamp: GPS timestamp is {round(future_seconds, 1)}s in the future "
+            f"(exceeds maximum allowed tolerance of {int(max_future_seconds)} seconds). "
+            "Please verify your device clock."
+        )
+
+    if age_seconds > max_age_seconds:
+        raise BadRequestException(
+            f"Stale GPS reading: GPS coordinates were acquired {round(age_seconds, 1)}s ago "
+            f"(exceeds maximum allowed age of {int(max_age_seconds)} seconds). "
+            "Please acquire a fresh location reading and retry."
+        )
+
+    return gps_dt_utc
+
+
 class HrmsAttendanceService:
+    MAX_ACCEPTABLE_GPS_ACCURACY_METERS: float = MAX_ACCEPTABLE_GPS_ACCURACY_METERS
+    MAX_GPS_AGE_SECONDS: float = MAX_GPS_AGE_SECONDS
+    MAX_GPS_FUTURE_TOLERANCE_SECONDS: float = MAX_GPS_FUTURE_TOLERANCE_SECONDS
+    validate_gps_freshness = staticmethod(validate_gps_freshness)
+
     def __init__(self, db: AsyncSession):
         self.db = db
 
@@ -348,6 +419,58 @@ class HrmsAttendanceService:
         await self.db.refresh(default_office)
         return default_office
 
+    async def get_permitted_locations(self, user_id: uuid.UUID) -> tuple[HrmsLocation, list[HrmsLocation]]:
+        """
+        Resolve employee's assigned primary and additional permitted locations.
+        Returns:
+            (primary_office, all_permitted_offices)
+        Rules:
+        - Only active and non-soft-deleted HrmsLocation records are included.
+        - Primary office is the one with is_primary=True (or first assigned if none marked primary).
+        - If employee has no assigned locations in DB, falls back to default assigned office (e.g. Thane Office)
+          as the primary and only permitted location.
+        - all_permitted_offices includes the primary office and all additional assigned active offices.
+        """
+        rows = None
+        try:
+            mapping_query = (
+                select(HrmsLocation, HrmsEmployeeLocation.is_primary)
+                .join(HrmsEmployeeLocation, HrmsEmployeeLocation.location_id == HrmsLocation.id)
+                .where(
+                    HrmsEmployeeLocation.user_id == user_id,
+                    HrmsLocation.deleted_at.is_(None),
+                    HrmsLocation.is_active.is_(True),
+                )
+                .order_by(HrmsEmployeeLocation.is_primary.desc(), HrmsLocation.name.asc())
+            )
+            res = await self.db.execute(mapping_query)
+            if hasattr(res, "all"):
+                rows = res.all()
+        except Exception:
+            rows = None
+
+        if rows and isinstance(rows, (list, tuple)) and len(rows) > 0:
+            primary_office = None
+            permitted_offices = []
+            for item in rows:
+                if isinstance(item, (list, tuple)) and len(item) >= 2:
+                    loc, is_prim = item[0], item[1]
+                else:
+                    loc, is_prim = item, False
+                if loc is not None and getattr(loc, "latitude", None) is not None and getattr(loc, "longitude", None) is not None:
+                    permitted_offices.append(loc)
+                    if is_prim and primary_office is None:
+                        primary_office = loc
+
+            if permitted_offices:
+                if primary_office is None:
+                    primary_office = permitted_offices[0]
+                return primary_office, permitted_offices
+
+        # Fallback to get_assigned_office
+        default_loc = await self.get_assigned_office(user_id)
+        return default_loc, [default_loc]
+
     # -----------------------------------------------------------------------
     # Today's Attendance Query
     # -----------------------------------------------------------------------
@@ -403,6 +526,8 @@ class HrmsAttendanceService:
             longitude=rec.longitude,
             punch_in_distance=rec.punch_in_distance,
             punch_out_distance=rec.punch_out_distance,
+            punch_in_accuracy_meters=rec.punch_in_accuracy_meters,
+            punch_out_accuracy_meters=rec.punch_out_accuracy_meters,
             is_irregular=rec.is_irregular,
             regularization_status=rec.regularization_status,
             regularization_reason=rec.regularization_reason,
@@ -418,7 +543,8 @@ class HrmsAttendanceService:
 
     async def get_today_session_state(self, user_id: uuid.UUID) -> TodayAttendanceRead:
         today = datetime.now(IST).date()
-        office = await self.get_assigned_office(user_id)
+        primary_office, permitted_locations = await self.get_permitted_locations(user_id)
+        office = primary_office
         office_read = AssignedOfficeRead(
             id=office.id,
             name=office.name,
@@ -427,6 +553,17 @@ class HrmsAttendanceService:
             longitude=office.longitude,
             radius_meters=office.radius_meters,
         )
+        permitted_reads = [
+            AssignedOfficeRead(
+                id=loc.id,
+                name=loc.name,
+                address=loc.address,
+                latitude=loc.latitude,
+                longitude=loc.longitude,
+                radius_meters=loc.radius_meters,
+            )
+            for loc in permitted_locations
+        ]
 
         rec = await self.get_today_attendance(user_id, today)
         if rec:
@@ -447,6 +584,7 @@ class HrmsAttendanceService:
                 office_location_id=rec.office_location_id,
                 office_name=rec.office_name or office.name,
                 assigned_office=office_read,
+                permitted_offices=permitted_reads,
                 is_irregular=rec.is_irregular,
                 regularization_status=rec.regularization_status,
                 can_regularize=rec.can_regularize,
@@ -468,6 +606,7 @@ class HrmsAttendanceService:
             office_location_id=office.id,
             office_name=office.name,
             assigned_office=office_read,
+            permitted_offices=permitted_reads,
             is_irregular=False,
             regularization_status="NONE",
             can_regularize=False,
@@ -477,25 +616,62 @@ class HrmsAttendanceService:
     # -----------------------------------------------------------------------
     # Punch In Flow
     # -----------------------------------------------------------------------
-    async def punch_in(self, user_id: uuid.UUID, payload: PunchInRequest) -> AttendanceRecordRead:
+    async def punch_in(
+        self,
+        user_id: uuid.UUID,
+        payload: PunchInRequest,
+        server_now: datetime | None = None,
+    ) -> AttendanceRecordRead:
         policy = await self.get_policy()
-        office = await self.get_assigned_office(user_id)
+        primary_office, permitted_offices = await self.get_permitted_locations(user_id)
 
         # 1. Authoritative server timestamp & local date (ignore untrusted client timestamp)
-        now_utc = datetime.now(timezone.utc)
+        now_utc = server_now if server_now is not None else datetime.now(timezone.utc)
+        if now_utc.tzinfo is None:
+            now_utc = now_utc.replace(tzinfo=timezone.utc)
+        else:
+            now_utc = now_utc.astimezone(timezone.utc)
         local_dt = now_utc.astimezone(IST)
         today = local_dt.date()
 
-        # 2. Geofence Distance Validation
-        distance = haversine_distance(
-            payload.latitude, payload.longitude, office.latitude, office.longitude
-        )
-        allowed_radius = office.radius_meters or policy.geofence_radius_meters
-
-        if distance > allowed_radius:
+        # Validate GPS accuracy
+        if payload.accuracy is None:
             raise BadRequestException(
-                f"Outside geofence: You are {round(distance)}m from {office.name} (allowed: {int(allowed_radius)}m)."
+                "Missing GPS accuracy: An accuracy measurement within 100 metres is required to record attendance. "
+                "Please enable location services and retry."
             )
+        if not math.isfinite(payload.accuracy) or payload.accuracy < 0.0:
+            raise BadRequestException("Invalid GPS accuracy value: must be a finite, non-negative number.")
+        if payload.accuracy > MAX_ACCEPTABLE_GPS_ACCURACY_METERS:
+            raise BadRequestException(
+                f"GPS signal is insufficient (accuracy ±{round(payload.accuracy, 1)}m exceeds maximum allowed {MAX_ACCEPTABLE_GPS_ACCURACY_METERS}m). "
+                "Please retry from a location with better reception."
+            )
+
+        # Validate GPS freshness
+        validate_gps_freshness(payload.gps_timestamp, server_now_utc=now_utc)
+
+        # 2. Multi-Location Geofence Validation
+        validating_office = None
+        validating_distance = None
+
+        for off in permitted_offices:
+            dist = haversine_distance(
+                payload.latitude, payload.longitude, off.latitude, off.longitude
+            )
+            allowed_radius = off.radius_meters or policy.geofence_radius_meters
+            if dist <= allowed_radius:
+                validating_office = off
+                validating_distance = dist
+                break
+
+        if not validating_office:
+            raise BadRequestException(
+                "Outside geofence: You are outside your assigned office locations. Please punch in from an authorized location."
+            )
+
+        office = validating_office
+        distance = validating_distance
 
         # 3. Duplicate punch check
         existing = await self.get_today_attendance(user_id, today)
@@ -565,6 +741,7 @@ class HrmsAttendanceService:
         res = await self.db.execute(query)
         record = res.scalar_one_or_none()
 
+        acc_val = round(payload.accuracy, 2) if payload.accuracy is not None else None
         if record:
             record.punch_in = local_dt
             record.status = status
@@ -575,6 +752,7 @@ class HrmsAttendanceService:
             record.latitude = payload.latitude
             record.longitude = payload.longitude
             record.punch_in_distance = round(distance, 1)
+            record.punch_in_accuracy_meters = acc_val
             record.is_irregular = is_irregular
         else:
             record = HrmsAttendance(
@@ -589,6 +767,7 @@ class HrmsAttendanceService:
                 latitude=payload.latitude,
                 longitude=payload.longitude,
                 punch_in_distance=round(distance, 1),
+                punch_in_accuracy_meters=acc_val,
                 is_irregular=is_irregular,
                 regularization_status="NONE",
             )
@@ -622,6 +801,8 @@ class HrmsAttendanceService:
             longitude=record.longitude,
             punch_in_distance=record.punch_in_distance,
             punch_out_distance=None,
+            punch_in_accuracy_meters=record.punch_in_accuracy_meters,
+            punch_out_accuracy_meters=None,
             is_irregular=record.is_irregular,
             regularization_status="NONE",
             can_regularize=self._can_regularize_record(record),
@@ -636,14 +817,40 @@ class HrmsAttendanceService:
     # -----------------------------------------------------------------------
     # Punch Out Flow
     # -----------------------------------------------------------------------
-    async def punch_out(self, user_id: uuid.UUID, payload: PunchOutRequest) -> AttendanceRecordRead:
+    async def punch_out(
+        self,
+        user_id: uuid.UUID,
+        payload: PunchOutRequest,
+        server_now: datetime | None = None,
+    ) -> AttendanceRecordRead:
         policy = await self.get_policy()
-        office = await self.get_assigned_office(user_id)
+        primary_office, permitted_offices = await self.get_permitted_locations(user_id)
 
         # 1. Authoritative server timestamp & local date (ignore untrusted client timestamp)
-        now_utc = datetime.now(timezone.utc)
+        now_utc = server_now if server_now is not None else datetime.now(timezone.utc)
+        if now_utc.tzinfo is None:
+            now_utc = now_utc.replace(tzinfo=timezone.utc)
+        else:
+            now_utc = now_utc.astimezone(timezone.utc)
         local_dt = now_utc.astimezone(IST)
         today = local_dt.date()
+
+        # Validate GPS accuracy
+        if payload.accuracy is None:
+            raise BadRequestException(
+                "Missing GPS accuracy: An accuracy measurement within 100 metres is required to record attendance. "
+                "Please enable location services and retry."
+            )
+        if not math.isfinite(payload.accuracy) or payload.accuracy < 0.0:
+            raise BadRequestException("Invalid GPS accuracy value: must be a finite, non-negative number.")
+        if payload.accuracy > MAX_ACCEPTABLE_GPS_ACCURACY_METERS:
+            raise BadRequestException(
+                f"GPS signal is insufficient (accuracy ±{round(payload.accuracy, 1)}m exceeds maximum allowed {MAX_ACCEPTABLE_GPS_ACCURACY_METERS}m). "
+                "Please retry from a location with better reception."
+            )
+
+        # Validate GPS freshness
+        validate_gps_freshness(payload.gps_timestamp, server_now_utc=now_utc)
 
         # 1. Fetch active punch in
         res = await self.db.execute(
@@ -659,10 +866,27 @@ class HrmsAttendanceService:
         if record.punch_out is not None:
             raise BadRequestException("Attendance locked: already punched out for today.")
 
-        # 2. Calculate distance
-        distance = haversine_distance(
-            payload.latitude, payload.longitude, office.latitude, office.longitude
-        )
+        # 2. Multi-Location Geofence Validation
+        validating_office = None
+        validating_distance = None
+
+        for off in permitted_offices:
+            dist = haversine_distance(
+                payload.latitude, payload.longitude, off.latitude, off.longitude
+            )
+            allowed_radius = off.radius_meters or policy.geofence_radius_meters
+            if dist <= allowed_radius:
+                validating_office = off
+                validating_distance = dist
+                break
+
+        if not validating_office:
+            raise BadRequestException(
+                "Outside geofence: You are outside your assigned office locations. Please punch out from an authorized location."
+            )
+
+        office = validating_office
+        distance = validating_distance
 
         # 3. Calculate working minutes
         working_seconds = (local_dt - to_ist(record.punch_in)).total_seconds()
@@ -680,8 +904,10 @@ class HrmsAttendanceService:
             record.early_exit_minutes = early_exit_mins
             record.is_irregular = True
 
+        out_acc_val = round(payload.accuracy, 2) if payload.accuracy is not None else None
         record.punch_out = local_dt
         record.punch_out_distance = round(distance, 1)
+        record.punch_out_accuracy_meters = out_acc_val
 
         await self.db.commit()
         await self.db.refresh(record)
@@ -712,6 +938,8 @@ class HrmsAttendanceService:
             longitude=record.longitude,
             punch_in_distance=record.punch_in_distance,
             punch_out_distance=record.punch_out_distance,
+            punch_in_accuracy_meters=record.punch_in_accuracy_meters,
+            punch_out_accuracy_meters=record.punch_out_accuracy_meters,
             is_irregular=record.is_irregular,
             regularization_status=record.regularization_status,
             regularization_reason=record.regularization_reason,
@@ -1605,11 +1833,28 @@ class HrmsAttendanceService:
         setup_svc = HrmsSetupService(self.db)
         settings = await setup_svc.get_effective_tracking_settings(employee_id)
 
-        office = await self.get_assigned_office(employee_id)
-        allowed_radius = float(office.radius_meters or 150.0)
+        primary_office, permitted_offices = await self.get_permitted_locations(employee_id)
 
-        # Haversine distance
-        distance = haversine_distance(latitude, longitude, office.latitude, office.longitude)
+        validating_office = None
+        validating_distance = None
+        closest_office = primary_office
+        closest_distance = float("inf")
+
+        for off in permitted_offices:
+            dist = haversine_distance(latitude, longitude, off.latitude, off.longitude)
+            allowed_r = float(off.radius_meters or 150.0)
+            if dist <= allowed_r:
+                validating_office = off
+                validating_distance = dist
+                break
+            if dist < closest_distance:
+                closest_distance = dist
+                closest_office = off
+
+        is_inside_geofence = (validating_office is not None)
+        office = validating_office if is_inside_geofence else closest_office
+        distance = validating_distance if is_inside_geofence else closest_distance
+        allowed_radius = float(office.radius_meters or 150.0)
 
         max_acc = float(settings.max_gps_accuracy_meters or 50.0)
         # If accuracy is unreliable, do not trigger new exit or return

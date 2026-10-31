@@ -54,6 +54,64 @@ class LocationRead(LocationBase):
 
 
 # ---------------------------------------------------------------------------
+# Employee Location Assignment Schemas
+# ---------------------------------------------------------------------------
+
+class EmployeeLocationItem(BaseModel):
+    id: uuid.UUID | None = None
+    location_id: uuid.UUID
+    location_name: str
+    location_type: str = 'OFFICE'
+    address: str
+    latitude: float
+    longitude: float
+    radius_meters: float
+    is_primary: bool
+    is_active: bool = True
+    assigned_at: datetime | None = None
+    assigned_by: uuid.UUID | None = None
+    assigned_by_name: str | None = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class EmployeeLocationOverview(BaseModel):
+    employee_id: uuid.UUID
+    employee_code: str | None = None
+    employee_name: str
+    username: str
+    email: str | None = None
+    department: str = 'General'
+    designation: str = 'Staff'
+    primary_location: EmployeeLocationItem | None = None
+    additional_locations: list[EmployeeLocationItem] = Field(default_factory=list)
+    total_locations_count: int = 0
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class EmployeeLocationAssignPayload(BaseModel):
+    primary_location_id: uuid.UUID
+    additional_location_ids: list[uuid.UUID] = Field(default_factory=list)
+    notes: str | None = Field(default=None, max_length=500)
+
+
+class EmployeeLocationHistoryItem(BaseModel):
+    id: uuid.UUID
+    employee_id: uuid.UUID
+    location_id: uuid.UUID
+    location_name: str
+    action: str
+    is_primary: bool
+    performed_by: uuid.UUID | None = None
+    performed_by_name: str | None = None
+    notes: str | None = None
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+# ---------------------------------------------------------------------------
 # Leave Type Schemas
 # ---------------------------------------------------------------------------
 
@@ -390,6 +448,8 @@ class AttendancePolicyUpdate(BaseModel):
 class PunchInRequest(BaseModel):
     latitude: float = Field(..., ge=-90.0, le=90.0)
     longitude: float = Field(..., ge=-180.0, le=180.0)
+    accuracy: float = Field(..., ge=0.0, le=100.0, description="GPS accuracy in meters (maximum 100m)")
+    gps_timestamp: datetime | None = None
     location_id: uuid.UUID | None = None
     timestamp: datetime | None = None  # optional override for policy testing
 
@@ -397,6 +457,8 @@ class PunchInRequest(BaseModel):
 class PunchOutRequest(BaseModel):
     latitude: float = Field(..., ge=-90.0, le=90.0)
     longitude: float = Field(..., ge=-180.0, le=180.0)
+    accuracy: float = Field(..., ge=0.0, le=100.0, description="GPS accuracy in meters (maximum 100m)")
+    gps_timestamp: datetime | None = None
     timestamp: datetime | None = None
 
 
@@ -425,6 +487,8 @@ class AttendanceRecordRead(BaseModel):
     longitude: float | None = None
     punch_in_distance: float | None = None
     punch_out_distance: float | None = None
+    punch_in_accuracy_meters: float | None = None
+    punch_out_accuracy_meters: float | None = None
     is_irregular: bool = False
     regularization_status: str = "NONE"
     regularization_reason: str | None = None
@@ -456,6 +520,7 @@ class TodayAttendanceRead(BaseModel):
     office_location_id: uuid.UUID | None = None
     office_name: str | None = None
     assigned_office: AssignedOfficeRead | None = None
+    permitted_offices: list[AssignedOfficeRead] = Field(default_factory=list)
     is_irregular: bool = False
     regularization_status: str = "NONE"
     can_regularize: bool = False
@@ -1054,16 +1119,18 @@ class SiteVisitCreate(BaseModel):
 
 
 class SiteVisitCheckIn(BaseModel):
-    latitude: float
-    longitude: float
-    accuracy: float | None = None
+    latitude: float = Field(..., ge=-90.0, le=90.0, description="GPS latitude (-90 to +90)")
+    longitude: float = Field(..., ge=-180.0, le=180.0, description="GPS longitude (-180 to +180)")
+    accuracy: float = Field(..., ge=0.0, le=100.0, description="GPS accuracy in meters (maximum 100m)")
+    gps_timestamp: datetime | None = None
     address: str | None = None
 
 
 class SiteVisitCheckOut(BaseModel):
-    latitude: float
-    longitude: float
-    accuracy: float | None = None
+    latitude: float = Field(..., ge=-90.0, le=90.0, description="GPS latitude (-90 to +90)")
+    longitude: float = Field(..., ge=-180.0, le=180.0, description="GPS longitude (-180 to +180)")
+    accuracy: float = Field(..., ge=0.0, le=100.0, description="GPS accuracy in meters (maximum 100m)")
+    gps_timestamp: datetime | None = None
     address: str | None = None
 
 
@@ -1087,11 +1154,13 @@ class SiteVisitRead(BaseModel):
     check_in_longitude: float | None = None
     check_in_accuracy: float | None = None
     check_in_address: str | None = None
+    check_in_distance_meters: float | None = None
     check_out_time: datetime | None = None
     check_out_latitude: float | None = None
     check_out_longitude: float | None = None
     check_out_accuracy: float | None = None
     check_out_address: str | None = None
+    check_out_distance_meters: float | None = None
     tracking_status: str | None = None
     tracking_session: Any | None = None
     is_simulated: bool | None = False

@@ -81,6 +81,7 @@ const FULL_CODE_LABELS: Record<string, string> = {
   "task.escalate": "Escalate Tasks",
   "task.manage": "Manage All Tasks",
   "task.delete": "Delete Tasks",
+  "hrms.location_assignments.manage": "Manage Location Assignments",
 };
 
 /** "product.create" -> "Create"; unknown actions fall back to the raw code. */

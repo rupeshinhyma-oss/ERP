@@ -403,6 +403,8 @@ async def test_punch_in_uses_authoritative_server_clock_and_ignores_client_times
     payload = PunchInRequest(
         latitude=19.199824,
         longitude=72.956795,
+        accuracy=10.0,
+        gps_timestamp=datetime.now(timezone.utc),
         timestamp=spoofed_time,
     )
 
@@ -550,6 +552,8 @@ async def test_punch_in_rejects_outside_geofence():
     payload = PunchInRequest(
         latitude=19.250000,
         longitude=72.990000,
+        accuracy=10.0,
+        gps_timestamp=datetime.now(timezone.utc),
     )
 
     with pytest.raises(Exception) as exc_info:
@@ -610,6 +614,8 @@ async def test_punch_out_uses_authoritative_server_clock_and_ignores_client_time
     payload = PunchOutRequest(
         latitude=19.199824,
         longitude=72.956795,
+        accuracy=10.0,
+        gps_timestamp=datetime.now(timezone.utc),
         timestamp=spoofed_time,
     )
 
@@ -666,6 +672,8 @@ async def test_punch_in_client_timestamp_cannot_spoof_late_status_or_late_minute
     payload = PunchInRequest(
         latitude=19.199824,
         longitude=72.956795,
+        accuracy=10.0,
+        gps_timestamp=datetime.now(timezone.utc),
         timestamp=spoofed_early_time,
     )
 
@@ -736,6 +744,8 @@ async def test_punch_out_client_timestamp_cannot_inflate_working_minutes():
     payload = PunchOutRequest(
         latitude=19.199824,
         longitude=72.956795,
+        accuracy=10.0,
+        gps_timestamp=datetime.now(timezone.utc),
         timestamp=spoofed_future_time,
     )
 

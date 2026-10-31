@@ -67,6 +67,7 @@ BOOTSTRAP_PERMISSIONS: list[tuple[str, str, str, str, str, str]] = [
     ("hrms.update", "hrms", "hrms", "update", "ALL", "Edit HRMS records, leave types, holidays, and policies."),
     ("hrms.approve", "hrms", "hrms", "approve", "ALL", "Approve or reject leave requests and attendance regularizations."),
     ("hrms.manage", "hrms", "hrms", "manage", "ALL", "Full administrative control over HRMS setup, leave types, adjustments, and approvals."),
+    ("hrms.location_assignments.manage", "hrms", "hrms-setup", "manage", "ALL", "Assign primary and additional office locations to employees for multi-location attendance."),
     ("hrms.attendance", "hrms", "attendance", "view", "ALL", "Access HRMS Attendance module."),
     ("hrms.leave", "hrms", "leave", "view", "ALL", "Access HRMS Leave module."),
     ("hrms.assets", "hrms", "assets", "view", "ALL", "Access HRMS Asset Management module."),

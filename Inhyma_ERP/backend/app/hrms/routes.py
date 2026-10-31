@@ -18,9 +18,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.responses import build_success_response
 from app.database.session import get_db_session
-from app.hrms.rbac import HrmsUserContext, get_hrms_user_context
+from app.hrms.rbac import HrmsUserContext, get_hrms_user_context, require_location_assignments_manage
 from app.hrms.schemas import (
     DetailedTrackingEmployeeItem,
+    EmployeeLocationAssignPayload,
+    EmployeeLocationHistoryItem,
+    EmployeeLocationItem,
+    EmployeeLocationOverview,
     DetailedTrackingEmployeeUpdate,
     EmployeeTrackingSettingsResponse,
     ExpenseCategoryCreate,
@@ -515,3 +519,95 @@ async def update_employee_return_timer(
     )
 
 
+
+
+# ===========================================================================
+# Employee Location Assignment Endpoints
+# ===========================================================================
+
+@router.get("/employee-locations")
+async def list_employee_locations(
+    search: str | None = Query(None, description="Search employee name, ID, username, or department"),
+    department: str | None = Query(None, description="Filter by department"),
+    location_id: uuid.UUID | None = Query(None, description="Filter by assigned location ID"),
+    ctx: HrmsUserContext = Depends(require_setup_read),
+    service: HrmsSetupService = Depends(get_hrms_setup_service),
+):
+    """
+    List active employees with their assigned primary and additional permitted locations.
+    Restricted by caller's authorized employee scope:
+    - Admin / HR: Company-wide view
+    - Department Manager: Scoped to department employees
+    - Employee: View restricted
+    """
+    allowed_ids = None if (ctx.is_admin or ctx.is_hr) else ctx.managed_employee_ids
+    items = await service.list_employee_locations(
+        search=search,
+        department=department,
+        location_id=location_id,
+        allowed_employee_ids=allowed_ids,
+    )
+    return build_success_response(
+        data=[it.model_dump(mode="json") for it in items],
+        message="Employee location assignments retrieved successfully.",
+    )
+
+
+@router.get("/employee-locations/{employee_id}")
+async def get_employee_locations(
+    employee_id: uuid.UUID,
+    ctx: HrmsUserContext = Depends(get_hrms_user_context),
+    service: HrmsSetupService = Depends(get_hrms_setup_service),
+):
+    """
+    Get location assignments for an employee.
+    Accessible to Admin, HR, Manager (for direct reports), or the employee himself.
+    """
+    ctx.require_employee_access(employee_id)
+    overview = await service.get_employee_location_overview(employee_id)
+    return build_success_response(
+        data=overview.model_dump(mode="json"),
+        message="Employee location assignments retrieved successfully.",
+    )
+
+
+@router.put("/employee-locations/{employee_id}")
+async def update_employee_locations(
+    employee_id: uuid.UUID,
+    payload: EmployeeLocationAssignPayload,
+    ctx: HrmsUserContext = Depends(require_location_assignments_manage),
+    service: HrmsSetupService = Depends(get_hrms_setup_service),
+):
+    """
+    Assign primary and additional permitted locations to an employee.
+    Strictly restricted to Admin / Super Admin, or users explicitly granted
+    hrms.location_assignments.manage permission.
+    """
+    ctx.require_employee_access(employee_id)
+    overview = await service.update_employee_locations(
+        employee_id=employee_id,
+        payload=payload,
+        actor_id=ctx.user_id,
+    )
+    return build_success_response(
+        data=overview.model_dump(mode="json"),
+        message=f"Location assignments updated for {overview.employee_name}.",
+    )
+
+
+@router.get("/employee-locations/{employee_id}/history")
+async def get_employee_location_history(
+    employee_id: uuid.UUID,
+    ctx: HrmsUserContext = Depends(require_location_assignments_manage),
+    service: HrmsSetupService = Depends(get_hrms_setup_service),
+):
+    """
+    Get audit history of location assignments and changes for an employee.
+    Restricted to authorized assignment managers.
+    """
+    ctx.require_employee_access(employee_id)
+    history = await service.get_employee_location_history(employee_id)
+    return build_success_response(
+        data=[h.model_dump(mode="json") for h in history],
+        message="Employee location assignment history retrieved successfully.",
+    )

@@ -132,6 +132,42 @@ async def get_assigned_office(
     )
 
 
+@router.get("/permitted-offices")
+async def get_permitted_offices(
+    employee_id: Optional[str] = Query(default=None),
+    ctx: HrmsUserContext = Depends(get_hrms_user_context),
+    service: HrmsAttendanceService = Depends(get_attendance_service),
+):
+    """
+    Fetch all active authorized office locations (primary and additional) for the employee.
+    Used by frontend attendance engine to validate geofence across all permitted locations.
+    """
+    ctx.require_module_access("attendance")
+    target_id = ctx.user_id
+    if employee_id:
+        if ctx.is_admin or ctx.is_hr:
+            try:
+                target_id = uuid.UUID(employee_id)
+            except ValueError:
+                pass
+
+    _, permitted = await service.get_permitted_locations(target_id)
+    return build_success_response(
+        data=[
+            AssignedOfficeRead(
+                id=loc.id,
+                name=loc.name,
+                address=loc.address,
+                latitude=loc.latitude,
+                longitude=loc.longitude,
+                radius_meters=loc.radius_meters,
+            ).model_dump(mode="json")
+            for loc in permitted
+        ],
+        message="Permitted offices retrieved successfully.",
+    )
+
+
 # ===========================================================================
 # Today's Punch Session
 # ===========================================================================
