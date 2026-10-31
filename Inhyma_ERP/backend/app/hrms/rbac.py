@@ -144,6 +144,17 @@ class HrmsUserContext:
             return True
         return False
 
+    def can_manage_location_assignments(self) -> bool:
+        """
+        Only Admin / Super Admin, or users explicitly granted hrms.location_assignments.manage.
+        HR and Managers do NOT have this permission by default unless explicitly granted.
+        """
+        if self.is_admin:
+            return True
+        if "deny:hrms.location_assignments.manage" in self.permissions:
+            return False
+        return "hrms.location_assignments.manage" in self.permissions
+
 
 async def check_manager_availability(
     db: AsyncSession, manager_id: uuid.UUID | None, on_date: Optional[date] = None
@@ -420,3 +431,20 @@ async def resolve_hrms_employee_or_404(
             detail=f"No linked HRMS employee record found for {error_label.lower()} '{identifier}'.",
         )
     return user
+
+
+def require_location_assignments_manage(
+    ctx: HrmsUserContext = Depends(get_hrms_user_context),
+) -> HrmsUserContext:
+    """
+    Enforce hrms.location_assignments.manage permission:
+    - Admin / Super Admin: Full access
+    - HR / Manager / Other authorized person: Only if explicitly granted
+    - Employee: No assignment-management access
+    """
+    if not ctx.can_manage_location_assignments():
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Permission denied. Administrative or explicitly granted location assignment permissions required.",
+        )
+    return ctx

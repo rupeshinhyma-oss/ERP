@@ -49,6 +49,8 @@ class HrmsLocation(Base, UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, V
 class HrmsEmployeeLocation(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     """
     Mapping between employees and authorized office locations.
+    Enforces that each employee has a single primary location and zero or more
+    additional permitted locations.
     """
 
     __tablename__ = "hrms_employee_locations"
@@ -59,7 +61,43 @@ class HrmsEmployeeLocation(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     location_id: Mapped[uuid.UUID] = mapped_column(
         GUID(), ForeignKey("hrms_locations.id", ondelete="CASCADE"), nullable=False, index=True
     )
+    is_primary: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, index=True)
+    assigned_by: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "location_id", name="uq_hrms_employee_locations_user_location"),
+    )
+
+    user: Mapped["User"] = relationship("User", foreign_keys=[user_id], lazy="selectin")
+    location: Mapped["HrmsLocation"] = relationship("HrmsLocation", foreign_keys=[location_id], lazy="selectin")
+    assigner: Mapped["User | None"] = relationship("User", foreign_keys=[assigned_by], lazy="selectin")
+
+
+class HrmsLocationAssignmentHistory(Base, UUIDPrimaryKeyMixin, TimestampMixin):
+    """
+    Audit log of employee office location assignments, changes, and removals.
+    """
+
+    __tablename__ = "hrms_location_assignment_history"
+
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        GUID(), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    location_id: Mapped[uuid.UUID] = mapped_column(
+        GUID(), ForeignKey("hrms_locations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    action: Mapped[str] = mapped_column(String(50), nullable=False, index=True)  # ASSIGNED, REMOVED, SET_PRIMARY, UNSET_PRIMARY
     is_primary: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    performed_by: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    user: Mapped["User"] = relationship("User", foreign_keys=[user_id], lazy="selectin")
+    location: Mapped["HrmsLocation"] = relationship("HrmsLocation", foreign_keys=[location_id], lazy="selectin")
+    performer: Mapped["User | None"] = relationship("User", foreign_keys=[performed_by], lazy="selectin")
 
 
 class HrmsLeaveType(Base, UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, VersionMixin):
@@ -222,6 +260,8 @@ class HrmsAttendance(Base, UUIDPrimaryKeyMixin, TimestampMixin, VersionMixin):
     longitude: Mapped[float | None] = mapped_column(Float, nullable=True)
     punch_in_distance: Mapped[float | None] = mapped_column(Float, nullable=True)
     punch_out_distance: Mapped[float | None] = mapped_column(Float, nullable=True)
+    punch_in_accuracy_meters: Mapped[float | None] = mapped_column(Float, nullable=True)
+    punch_out_accuracy_meters: Mapped[float | None] = mapped_column(Float, nullable=True)
     is_irregular: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, index=True)
     regularization_status: Mapped[str] = mapped_column(String(50), default="NONE", nullable=False, index=True)
     regularization_reason: Mapped[str | None] = mapped_column(Text, nullable=True)

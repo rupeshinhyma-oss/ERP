@@ -148,6 +148,11 @@ export const Auth = {
       if (perms.includes(viewAlias)) return true;
     }
 
+    // Dedicated HRMS permission: hrms.location_assignments.manage requires explicit grant
+    if (code === "hrms.location_assignments.manage") {
+      return perms.includes("hrms.location_assignments.manage");
+    }
+
     // HRMS module defaults
     const isHr = Array.isArray(profile.roles) && (profile.roles.includes("HR") || profile.roles.some((r: any) => String(r).toLowerCase() === "hr"));
     if (isHr) {

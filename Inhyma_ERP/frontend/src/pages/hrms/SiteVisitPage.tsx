@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AppShell } from "@/components/AppShell";
 import { Breadcrumb } from "@/components/Breadcrumb";
 import { IconClock } from "@/components/icons";
@@ -57,6 +57,8 @@ export interface SiteVisitItem {
   check_out_longitude?: number;
   check_out_accuracy?: number;
   check_out_address?: string;
+  check_in_distance_meters?: number | null;
+  check_out_distance_meters?: number | null;
   tracking_status?: string;
   tracking_session?: TrackingSessionItem | null;
   is_simulated?: boolean;
@@ -423,6 +425,10 @@ export function SiteVisitPage() {
     isSimulated?: boolean;
   } | null>(null);
 
+  const activeAttemptIdRef = useRef<number>(0);
+  const activeWatchIdRef = useRef<number | null>(null);
+  const activeTimerRef = useRef<NodeJS.Timeout | null>(null);
+
   // -------------------------------------------------------------------------
   // Fetch Data from PostgreSQL
   // -------------------------------------------------------------------------
@@ -596,6 +602,21 @@ export function SiteVisitPage() {
   // High-Accuracy Geolocation Capture Utility (Section 3 & 4)
   // -------------------------------------------------------------------------
   const startHighAccuracyGpsCapture = useCallback(() => {
+    // 1. Clean up any ongoing acquisition attempt and timers
+    if (activeWatchIdRef.current !== null) {
+      try {
+        navigator.geolocation.clearWatch(activeWatchIdRef.current);
+      } catch {}
+      activeWatchIdRef.current = null;
+    }
+    if (activeTimerRef.current !== null) {
+      clearTimeout(activeTimerRef.current);
+      activeTimerRef.current = null;
+    }
+
+    // 2. Increment attempt identifier to invalidate any late-arriving callbacks
+    const attemptId = ++activeAttemptIdRef.current;
+
     setGpsCaptureStatus("ACQUIRING");
     setGpsStatusText("Getting your location...");
     setGpsReading(null);
@@ -616,25 +637,33 @@ export function SiteVisitPage() {
     }
 
     if (typeof window === "undefined" || !("geolocation" in navigator)) {
-      setGpsReading({
-        latitude: 18.5204,
-        longitude: 73.8567,
-        accuracy: 18,
-        timestamp: new Date().toLocaleTimeString(),
-        address: "Pune, Maharashtra, India",
-        isSimulated: false,
-      });
-      setGpsCaptureStatus("SUCCESS");
-      setGpsStatusText("✓ Location captured");
+      setGpsCaptureStatus("ERROR");
+      setGpsStatusText("Geolocation is not supported by your browser.");
+      setGpsReading(null);
       return () => {};
     }
 
     let bestFix: GeolocationPosition | null = null;
     let hasResolved = false;
 
+    const cleanupAttempt = () => {
+      if (activeWatchIdRef.current !== null) {
+        try {
+          navigator.geolocation.clearWatch(activeWatchIdRef.current);
+        } catch {}
+        activeWatchIdRef.current = null;
+      }
+      if (activeTimerRef.current !== null) {
+        clearTimeout(activeTimerRef.current);
+        activeTimerRef.current = null;
+      }
+    };
+
     const finalizeReading = async (pos: GeolocationPosition) => {
-      if (hasResolved) return;
+      if (attemptId !== activeAttemptIdRef.current || hasResolved) return;
       hasResolved = true;
+      cleanupAttempt();
+
       const lat = pos.coords.latitude;
       const lng = pos.coords.longitude;
       const acc = Math.round(pos.coords.accuracy || 15);
@@ -646,6 +675,8 @@ export function SiteVisitPage() {
         addr = geo?.formatted_address || "";
       } catch {}
 
+      if (attemptId !== activeAttemptIdRef.current) return;
+
       setGpsReading({
         latitude: lat,
         longitude: lng,
@@ -655,13 +686,19 @@ export function SiteVisitPage() {
         isSimulated: false,
       });
       setGpsCaptureStatus("SUCCESS");
-      setGpsStatusText("✓ Location captured");
+      if (acc > 500) {
+        setGpsStatusText(`⚠️ GPS accuracy is coarse (±${acc}m). Please enable Precise Location in your device browser settings.`);
+      } else if (acc > 100) {
+        setGpsStatusText(`⚠️ GPS accuracy is weak (±${acc}m exceeds 100m limit). Please move to an open area.`);
+      } else {
+        setGpsStatusText("✓ Location captured");
+      }
     };
 
-    let watchId: number;
     try {
-      watchId = navigator.geolocation.watchPosition(
+      const watchId = navigator.geolocation.watchPosition(
         (pos) => {
+          if (attemptId !== activeAttemptIdRef.current || hasResolved) return;
           const acc = pos.coords.accuracy;
           if (!bestFix || acc < bestFix.coords.accuracy) {
             bestFix = pos;
@@ -669,75 +706,77 @@ export function SiteVisitPage() {
 
           // If acceptable accuracy (<= 25m), accept immediately
           if (acc <= 25) {
-            try {
-              navigator.geolocation.clearWatch(watchId);
-            } catch {}
             finalizeReading(pos);
           } else {
-            // Coarse reading - show "Getting a more accurate location..."
+            // Coarse reading - show appropriate guidance
             setGpsCaptureStatus("REFINING");
-            setGpsStatusText("Getting a more accurate location...");
+            if (acc > 500) {
+              setGpsStatusText(`GPS accuracy is coarse (±${Math.round(acc)}m). Please enable Precise Location in your device browser settings.`);
+            } else if (acc > 100) {
+              setGpsStatusText(`GPS accuracy is weak (±${Math.round(acc)}m exceeds 100m limit). Please move outdoors or wait for a better GPS lock.`);
+            } else {
+              setGpsStatusText("Getting a more accurate location...");
+            }
             setGpsReading({
               latitude: pos.coords.latitude,
               longitude: pos.coords.longitude,
               accuracy: Math.round(acc),
-              timestamp: new Date(pos.timestamp).toLocaleTimeString(),
+              timestamp: new Date(pos.timestamp || Date.now()).toLocaleTimeString(),
               address: "",
               isSimulated: false,
             });
           }
         },
         (err) => {
-          if (!hasResolved) {
-            hasResolved = true;
-            try {
-              navigator.geolocation.clearWatch(watchId);
-            } catch {}
-            setGpsCaptureStatus("ERROR");
-            let msg = "Failed to acquire location. Please enable GPS permissions.";
-            if (err?.code === 1) {
-              msg = "Location permission denied. Please allow GPS access in your browser to check in/out.";
-            } else if (err?.code === 2) {
-              msg = "Location position is currently unavailable. Please check your device GPS signal.";
-            } else if (err?.code === 3) {
-              msg = "Location request timed out. Please click Retry Location.";
-            }
-            setGpsStatusText(msg);
-            setGpsReading(null);
+          if (attemptId !== activeAttemptIdRef.current || hasResolved) return;
+          hasResolved = true;
+          cleanupAttempt();
+
+          setGpsCaptureStatus("ERROR");
+          let msg = "Failed to acquire location. Please enable GPS permissions.";
+          if (err?.code === 1) {
+            msg = "Location permission denied. Please allow GPS access in your browser to check in/out.";
+          } else if (err?.code === 2) {
+            msg = "Location position is currently unavailable. Please check your device GPS signal.";
+          } else if (err?.code === 3) {
+            msg = "Location request timed out (20s). Please click Retry Location.";
           }
+          setGpsStatusText(msg);
+          setGpsReading(null);
         },
-        { enableHighAccuracy: true, timeout: 8000, maximumAge: 0 }
+        { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 }
       );
+      activeWatchIdRef.current = watchId;
     } catch {
       hasResolved = true;
+      cleanupAttempt();
       setGpsCaptureStatus("ERROR");
       setGpsStatusText("Geolocation is not supported by your browser or failed to initialize.");
       setGpsReading(null);
       return () => {};
     }
 
-    // Safety timeout of 5 seconds to accept best reading without making user wait indefinitely
+    // Safety timeout of 20 seconds aligned with native geolocation window
     const timer = setTimeout(() => {
-      try {
-        navigator.geolocation.clearWatch(watchId);
-      } catch {}
-      if (!hasResolved) {
-        hasResolved = true;
-        if (bestFix) {
-          finalizeReading(bestFix);
-        } else {
-          setGpsCaptureStatus("ERROR");
-          setGpsStatusText("Location request timed out. No GPS fix acquired. Please click Retry Location.");
-          setGpsReading(null);
-        }
+      if (attemptId !== activeAttemptIdRef.current || hasResolved) return;
+      hasResolved = true;
+      cleanupAttempt();
+
+      if (bestFix) {
+        finalizeReading(bestFix);
+      } else {
+        setGpsCaptureStatus("ERROR");
+        setGpsStatusText("Location request timed out (20s). No GPS fix acquired. Please click Retry Location.");
+        setGpsReading(null);
       }
-    }, 5000);
+    }, 20000);
+    activeTimerRef.current = timer;
 
     return () => {
-      try {
-        navigator.geolocation.clearWatch(watchId);
-      } catch {}
-      clearTimeout(timer);
+      if (activeAttemptIdRef.current === attemptId) {
+        hasResolved = true;
+        cleanupAttempt();
+      }
     };
   }, [simulationMode, simulatedCustomLocation]);
 
@@ -747,15 +786,28 @@ export function SiteVisitPage() {
       return () => {
         cleanup?.();
       };
+    } else {
+      // Modal closed: clean up active watch and timeout
+      if (activeWatchIdRef.current !== null) {
+        try {
+          navigator.geolocation.clearWatch(activeWatchIdRef.current);
+        } catch {}
+        activeWatchIdRef.current = null;
+      }
+      if (activeTimerRef.current !== null) {
+        clearTimeout(activeTimerRef.current);
+        activeTimerRef.current = null;
+      }
     }
   }, [checkInOutModal, startHighAccuracyGpsCapture]);
 
-  const captureCurrentGps = useCallback((): Promise<{ latitude: number; longitude: number; accuracy: number }> => {
+  const captureCurrentGps = useCallback((): Promise<{ latitude: number; longitude: number; accuracy: number; timestamp: Date }> => {
     if (simulationMode === "SIMULATED") {
       return Promise.resolve({
         latitude: simulatedCustomLocation.latitude,
         longitude: simulatedCustomLocation.longitude,
         accuracy: simulatedCustomLocation.accuracy,
+        timestamp: new Date(),
       });
     }
 
@@ -770,20 +822,21 @@ export function SiteVisitPage() {
             latitude: pos.coords.latitude,
             longitude: pos.coords.longitude,
             accuracy: pos.coords.accuracy || 15,
+            timestamp: new Date(pos.timestamp || Date.now()),
           });
         },
         (err) => {
           let msg = "Failed to acquire GPS location.";
           if (err?.code === 1) {
-            msg = "Location permission denied. Please enable GPS permissions.";
+            msg = "Location permission denied. Please enable GPS permissions in your browser.";
           } else if (err?.code === 2) {
             msg = "Location unavailable. Please check device GPS.";
           } else if (err?.code === 3) {
-            msg = "Location request timed out. Please retry.";
+            msg = "Location request timed out (20s). Please retry in an open area.";
           }
           reject(new Error(msg));
         },
-        { enableHighAccuracy: true, timeout: 8000, maximumAge: 0 }
+        { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 }
       );
     });
   }, [simulationMode, simulatedCustomLocation]);
@@ -843,33 +896,49 @@ export function SiteVisitPage() {
 
   const handleConfirmCheckInOut = async () => {
     if (!checkInOutModal) return;
-    if (!gpsReading || gpsCaptureStatus !== "SUCCESS" || !gpsReading.latitude || !gpsReading.longitude) {
-      toast.error("Valid GPS coordinates are required. Please acquire a GPS fix before proceeding.");
-      return;
-    }
     const { visit, type } = checkInOutModal;
     setActionLoading(true);
+    setGpsStatusText("Acquiring fresh GPS for proximity verification...");
     try {
-      const isSim = gpsReading.isSimulated || simulationMode === "SIMULATED";
+      // 1. Acquire fresh GPS coordinates immediately before check-in/check-out (no stale React state)
+      let freshFix: { latitude: number; longitude: number; accuracy: number; timestamp: Date };
+      try {
+        freshFix = await captureCurrentGps();
+      } catch (gpsErr: any) {
+        toast.error(gpsErr?.message || "Failed to acquire fresh GPS. Please ensure location services are enabled.");
+        return;
+      }
+
+      // 2. Validate client-side accuracy threshold
+      if (freshFix.accuracy > 100) {
+        if (freshFix.accuracy > 500) {
+          toast.error(`GPS accuracy is coarse (±${Math.round(freshFix.accuracy)}m). Please enable Precise Location in your device browser settings.`);
+        } else {
+          toast.error(`GPS accuracy is too weak (±${Math.round(freshFix.accuracy)}m exceeds 100m maximum). Please move to an open area with clear sky view.`);
+        }
+        return;
+      }
+
+      const isSim = (simulationMode === "SIMULATED");
       const addrSuffix = isSim ? " [TEST / SIMULATED LOCATION]" : "";
-      const finalAddress = (gpsReading.address || visit.site_address || "Customer Site") + addrSuffix;
+      const finalAddress = (visit.site_address || "Customer Site") + addrSuffix;
+
+      const payload = {
+        latitude: freshFix.latitude,
+        longitude: freshFix.longitude,
+        accuracy: freshFix.accuracy,
+        gps_timestamp: freshFix.timestamp.toISOString(),
+        address: finalAddress,
+      };
 
       if (type === "CHECK_IN") {
-        await apiPost(`/hrms/site-visits/${visit.id}/check-in`, {
-          latitude: gpsReading.latitude,
-          longitude: gpsReading.longitude,
-          accuracy: gpsReading.accuracy,
-          address: finalAddress,
-        });
-        toast.success("Checked in successfully! Location captured.");
+        const res = await apiPost<any>(`/hrms/site-visits/${visit.id}/check-in`, payload);
+        const successMsg = (res as any)?.message || (res as any)?.data?.message || "Checked in successfully! Location verified.";
+        toast.success(successMsg);
       } else {
-        await apiPost(`/hrms/site-visits/${visit.id}/check-out`, {
-          latitude: gpsReading.latitude,
-          longitude: gpsReading.longitude,
-          accuracy: gpsReading.accuracy,
-          address: finalAddress,
-        });
-        toast.success("Checked out successfully! Visit marked completed.");
+        const res = await apiPost<any>(`/hrms/site-visits/${visit.id}/check-out`, payload);
+        const successMsg = (res as any)?.message || (res as any)?.data?.message || "Checked out successfully! Visit marked completed.";
+        toast.success(successMsg);
       }
 
       setCheckInOutModal(null);

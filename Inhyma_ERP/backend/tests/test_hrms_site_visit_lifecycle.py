@@ -42,6 +42,8 @@ def create_mock_site_visit(
     visit.employee_id = employee_id
     visit.customer_name = "ABC Corp"
     visit.site_address = "Turbhe MIDC, Navi Mumbai"
+    visit.site_latitude = 19.1998
+    visit.site_longitude = 72.9568
     visit.status = status
     visit.check_in_time = check_in_time
     visit.check_in_latitude = 19.0760 if check_in_time else None
@@ -87,6 +89,7 @@ async def test_first_valid_check_in():
         latitude=19.1998,
         longitude=72.9568,
         accuracy=12.0,
+        gps_timestamp=datetime.now(timezone.utc),
         address="Lodha Supremus, Thane",
     )
 
@@ -119,6 +122,7 @@ async def test_duplicate_check_in_rejected():
         latitude=19.2000,
         longitude=72.9570,
         accuracy=10.0,
+        gps_timestamp=datetime.now(timezone.utc),
         address="New Location Attempt",
     )
 
@@ -146,7 +150,7 @@ async def test_check_in_after_completion_rejected():
     )
     service.get_site_visit = AsyncMock(return_value=mock_visit)
 
-    payload = SiteVisitCheckIn(latitude=19.1998, longitude=72.9568, accuracy=10.0)
+    payload = SiteVisitCheckIn(latitude=19.1998, longitude=72.9568, accuracy=10.0, gps_timestamp=datetime.now(timezone.utc))
 
     with pytest.raises(HTTPException) as exc_info:
         await service.check_in(visit_id, emp_id, is_admin=False, payload=payload)
@@ -170,7 +174,7 @@ async def test_check_in_after_cancellation_rejected():
     )
     service.get_site_visit = AsyncMock(return_value=mock_visit)
 
-    payload = SiteVisitCheckIn(latitude=19.1998, longitude=72.9568, accuracy=10.0)
+    payload = SiteVisitCheckIn(latitude=19.1998, longitude=72.9568, accuracy=10.0, gps_timestamp=datetime.now(timezone.utc))
 
     with pytest.raises(HTTPException) as exc_info:
         await service.check_in(visit_id, emp_id, is_admin=False, payload=payload)
@@ -198,6 +202,7 @@ async def test_check_out_before_check_in_rejected():
         latitude=19.1998,
         longitude=72.9568,
         accuracy=10.0,
+        gps_timestamp=datetime.now(timezone.utc),
         address="Premature Check Out",
     )
 
@@ -227,6 +232,7 @@ async def test_valid_check_out():
         latitude=19.1999,
         longitude=72.9569,
         accuracy=14.0,
+        gps_timestamp=datetime.now(timezone.utc),
         address="Customer Meeting Completed",
     )
 
@@ -256,7 +262,7 @@ async def test_repeated_check_out_rejected():
     )
     service.get_site_visit = AsyncMock(return_value=mock_visit)
 
-    payload = SiteVisitCheckOut(latitude=19.1999, longitude=72.9569, accuracy=10.0)
+    payload = SiteVisitCheckOut(latitude=19.1999, longitude=72.9569, accuracy=10.0, gps_timestamp=datetime.now(timezone.utc))
 
     with pytest.raises(HTTPException) as exc_info:
         await service.check_out(visit_id, emp_id, is_admin=False, payload=payload)
@@ -281,7 +287,7 @@ async def test_unauthorized_employee_check_in_blocked():
     )
     service.get_site_visit = AsyncMock(return_value=mock_visit)
 
-    payload = SiteVisitCheckIn(latitude=19.1998, longitude=72.9568, accuracy=10.0)
+    payload = SiteVisitCheckIn(latitude=19.1998, longitude=72.9568, accuracy=10.0, gps_timestamp=datetime.now(timezone.utc))
 
     with pytest.raises(HTTPException) as exc_info:
         await service.check_in(visit_id, emp_b, is_admin=False, payload=payload)

@@ -56,7 +56,138 @@ def haversine_distance_km(lat1: float, lon1: float, lat2: float, lon2: float) ->
     return R * c
 
 
+def haversine_distance_meters(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Calculate great-circle distance between two points in meters using Haversine formula."""
+    R = 6371000.0  # Earth radius in meters
+    phi1 = math.radians(lat1)
+    phi2 = math.radians(lat2)
+    delta_phi = math.radians(lat2 - lat1)
+    delta_lambda = math.radians(lon2 - lon1)
+    a = (
+        math.sin(delta_phi / 2.0) ** 2
+        + math.cos(phi1) * math.cos(phi2) * math.sin(delta_lambda / 2.0) ** 2
+    )
+    c = 2.0 * math.atan2(math.sqrt(a), math.sqrt(1.0 - a))
+    return R * c
+
+
+# ===========================================================================
+# Centralized Site Visit GPS Policy
+# ===========================================================================
+DEFAULT_SITE_VISIT_RADIUS_METERS: float = 300.0
+MAX_ACCEPTABLE_GPS_ACCURACY_METERS: float = 100.0
+MAX_GPS_AGE_SECONDS: float = 60.0
+MAX_GPS_FUTURE_TOLERANCE_SECONDS: float = 10.0
+
+
+def validate_site_visit_gps(
+    latitude: float,
+    longitude: float,
+    accuracy: float | None,
+    gps_timestamp: datetime | None,
+    site_latitude: float | None,
+    site_longitude: float | None,
+    server_now_utc: datetime | None = None,
+    max_radius_meters: float = DEFAULT_SITE_VISIT_RADIUS_METERS,
+    max_accuracy_meters: float = MAX_ACCEPTABLE_GPS_ACCURACY_METERS,
+    max_age_seconds: float = MAX_GPS_AGE_SECONDS,
+    max_future_seconds: float = MAX_GPS_FUTURE_TOLERANCE_SECONDS,
+) -> float:
+    """
+    Centralized validation for Site Visit GPS coordinate integrity, accuracy,
+    freshness, and proximity to the scheduled customer site.
+
+    Returns calculated distance in meters if validation succeeds.
+    Raises HTTPException(400) if validation fails.
+    """
+    # 1. Coordinate ranges and finite check
+    if not (isinstance(latitude, (int, float)) and isinstance(longitude, (int, float))):
+        raise HTTPException(status_code=400, detail="Invalid GPS coordinates: latitude and longitude must be numbers.")
+    if not (math.isfinite(latitude) and math.isfinite(longitude)):
+        raise HTTPException(status_code=400, detail="Invalid GPS coordinates: latitude and longitude must be finite numbers.")
+    if not (-90.0 <= latitude <= 90.0 and -180.0 <= longitude <= 180.0):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid GPS coordinates: latitude ({latitude}) must be between -90 and 90, longitude ({longitude}) between -180 and 180."
+        )
+
+    # 2. Accuracy check
+    if accuracy is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Missing GPS accuracy: An accuracy measurement within 100 metres is required. Please enable device location services and retry."
+        )
+    if not (isinstance(accuracy, (int, float)) and math.isfinite(accuracy) and accuracy >= 0.0):
+        raise HTTPException(status_code=400, detail="Invalid GPS accuracy value: must be a finite, non-negative number.")
+    if accuracy > max_accuracy_meters:
+        raise HTTPException(
+            status_code=400,
+            detail=f"GPS signal is insufficient (accuracy ±{round(accuracy, 1)}m exceeds maximum allowed {max_accuracy_meters}m). Please retry from a location with better reception."
+        )
+
+    # 3. GPS Freshness check
+    if gps_timestamp is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Missing GPS timestamp: A valid GPS timestamp is required to record site visit. Please enable location services and retry."
+        )
+    if not isinstance(gps_timestamp, datetime):
+        raise HTTPException(status_code=400, detail="Invalid GPS timestamp: Timestamp must be a valid date and time.")
+
+    if gps_timestamp.tzinfo is None:
+        gps_dt_utc = gps_timestamp.replace(tzinfo=timezone.utc)
+    else:
+        gps_dt_utc = gps_timestamp.astimezone(timezone.utc)
+
+    now = server_now_utc if server_now_utc is not None else datetime.now(timezone.utc)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+    else:
+        now = now.astimezone(timezone.utc)
+
+    age_seconds = (now - gps_dt_utc).total_seconds()
+    if age_seconds < -max_future_seconds:
+        future_seconds = abs(age_seconds)
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid GPS timestamp: GPS timestamp is {round(future_seconds, 1)}s in the future (exceeds maximum allowed tolerance of {int(max_future_seconds)} seconds). Please verify your device clock."
+        )
+    if age_seconds > max_age_seconds:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Stale GPS reading: GPS coordinates were acquired {round(age_seconds, 1)}s ago (exceeds maximum allowed age of {int(max_age_seconds)} seconds). Please acquire a fresh location reading and retry."
+        )
+
+    # 4. Scheduled Site Coordinate Existence
+    if site_latitude is None or site_longitude is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Scheduled customer site coordinates are unavailable for this visit. Proximity validation requires valid scheduled site coordinates configured by an administrator."
+        )
+    if not (isinstance(site_latitude, (int, float)) and isinstance(site_longitude, (int, float)) and math.isfinite(site_latitude) and math.isfinite(site_longitude)):
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid scheduled site coordinates configured on this visit."
+        )
+
+    # 5. Proximity Validation (Haversine)
+    dist_m = haversine_distance_meters(latitude, longitude, site_latitude, site_longitude)
+    if dist_m > max_radius_meters:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Outside permitted site radius: You are {round(dist_m, 1)}m away from the scheduled customer site, which exceeds the maximum permitted radius of {int(max_radius_meters)}m. Please reach the scheduled customer location before checking in or out."
+        )
+
+    return dist_m
+
+
 class HrmsSiteVisitService:
+    DEFAULT_SITE_VISIT_RADIUS_METERS: float = DEFAULT_SITE_VISIT_RADIUS_METERS
+    MAX_ACCEPTABLE_GPS_ACCURACY_METERS: float = MAX_ACCEPTABLE_GPS_ACCURACY_METERS
+    MAX_GPS_AGE_SECONDS: float = MAX_GPS_AGE_SECONDS
+    MAX_GPS_FUTURE_TOLERANCE_SECONDS: float = MAX_GPS_FUTURE_TOLERANCE_SECONDS
+    validate_site_visit_gps = staticmethod(validate_site_visit_gps)
+
     def __init__(self, db: AsyncSession):
         self.db = db
 
@@ -98,6 +229,14 @@ class HrmsSiteVisitService:
             else:
                 tr_status = latest_ts.status
 
+        check_in_dist = getattr(v, "_check_in_distance_meters", None)
+        if check_in_dist is None and v.site_latitude is not None and v.site_longitude is not None and v.check_in_latitude is not None and v.check_in_longitude is not None:
+            check_in_dist = round(haversine_distance_meters(v.check_in_latitude, v.check_in_longitude, v.site_latitude, v.site_longitude), 1)
+
+        check_out_dist = getattr(v, "_check_out_distance_meters", None)
+        if check_out_dist is None and v.site_latitude is not None and v.site_longitude is not None and v.check_out_latitude is not None and v.check_out_longitude is not None:
+            check_out_dist = round(haversine_distance_meters(v.check_out_latitude, v.check_out_longitude, v.site_latitude, v.site_longitude), 1)
+
         return SiteVisitRead(
             id=v.id,
             employee_id=v.employee_id,
@@ -118,11 +257,13 @@ class HrmsSiteVisitService:
             check_in_longitude=v.check_in_longitude,
             check_in_accuracy=v.check_in_accuracy,
             check_in_address=v.check_in_address,
+            check_in_distance_meters=check_in_dist,
             check_out_time=v.check_out_time,
             check_out_latitude=v.check_out_latitude,
             check_out_longitude=v.check_out_longitude,
             check_out_accuracy=v.check_out_accuracy,
             check_out_address=v.check_out_address,
+            check_out_distance_meters=check_out_dist,
             tracking_status=tr_status,
             tracking_session=ts_dto,
             is_simulated=bool(v.notes and ("SIMULATED" in v.notes.upper() or "TEST" in v.notes.upper())),
@@ -429,8 +570,10 @@ class HrmsSiteVisitService:
         employee_id: uuid.UUID,
         is_admin: bool,
         payload: SiteVisitCheckIn,
+        server_now: datetime | None = None,
+        max_radius_meters: float | None = None,
     ) -> HrmsSiteVisit:
-        """Record employee check-in with GPS location proof."""
+        """Record employee check-in with GPS location proof and proximity verification."""
         visit = await self.get_site_visit(visit_id, employee_id, is_admin)
 
         if not is_admin and visit.employee_id != employee_id:
@@ -456,7 +599,30 @@ class HrmsSiteVisitService:
                 detail="Site visit is already checked in. Duplicate check-in is not permitted.",
             )
 
-        now = datetime.now(timezone.utc)
+        now = server_now if server_now is not None else datetime.now(timezone.utc)
+        if now.tzinfo is None:
+            now = now.replace(tzinfo=timezone.utc)
+        else:
+            now = now.astimezone(timezone.utc)
+
+        allowed_radius = max_radius_meters if max_radius_meters is not None else self.DEFAULT_SITE_VISIT_RADIUS_METERS
+
+        # Validate GPS coordinate ranges, accuracy, timestamp freshness, and proximity to scheduled customer site
+        dist_m = validate_site_visit_gps(
+            latitude=payload.latitude,
+            longitude=payload.longitude,
+            accuracy=payload.accuracy,
+            gps_timestamp=payload.gps_timestamp,
+            site_latitude=visit.site_latitude,
+            site_longitude=visit.site_longitude,
+            server_now_utc=now,
+            max_radius_meters=allowed_radius,
+            max_accuracy_meters=self.MAX_ACCEPTABLE_GPS_ACCURACY_METERS,
+            max_age_seconds=self.MAX_GPS_AGE_SECONDS,
+            max_future_seconds=self.MAX_GPS_FUTURE_TOLERANCE_SECONDS,
+        )
+
+        visit._check_in_distance_meters = dist_m
         visit.check_in_time = now
         visit.check_in_latitude = payload.latitude
         visit.check_in_longitude = payload.longitude
@@ -487,8 +653,10 @@ class HrmsSiteVisitService:
         employee_id: uuid.UUID,
         is_admin: bool,
         payload: SiteVisitCheckOut,
+        server_now: datetime | None = None,
+        max_radius_meters: float | None = None,
     ) -> HrmsSiteVisit:
-        """Record employee check-out with GPS location proof."""
+        """Record employee check-out with GPS location proof and proximity verification."""
         visit = await self.get_site_visit(visit_id, employee_id, is_admin)
 
         if not is_admin and visit.employee_id != employee_id:
@@ -514,7 +682,30 @@ class HrmsSiteVisitService:
                 detail="Cannot check out of a site visit that has not been checked into yet.",
             )
 
-        now = datetime.now(timezone.utc)
+        now = server_now if server_now is not None else datetime.now(timezone.utc)
+        if now.tzinfo is None:
+            now = now.replace(tzinfo=timezone.utc)
+        else:
+            now = now.astimezone(timezone.utc)
+
+        allowed_radius = max_radius_meters if max_radius_meters is not None else self.DEFAULT_SITE_VISIT_RADIUS_METERS
+
+        # Validate GPS coordinate ranges, accuracy, timestamp freshness, and proximity to scheduled customer site
+        dist_m = validate_site_visit_gps(
+            latitude=payload.latitude,
+            longitude=payload.longitude,
+            accuracy=payload.accuracy,
+            gps_timestamp=payload.gps_timestamp,
+            site_latitude=visit.site_latitude,
+            site_longitude=visit.site_longitude,
+            server_now_utc=now,
+            max_radius_meters=allowed_radius,
+            max_accuracy_meters=self.MAX_ACCEPTABLE_GPS_ACCURACY_METERS,
+            max_age_seconds=self.MAX_GPS_AGE_SECONDS,
+            max_future_seconds=self.MAX_GPS_FUTURE_TOLERANCE_SECONDS,
+        )
+
+        visit._check_out_distance_meters = dist_m
         visit.check_out_time = now
         visit.check_out_latitude = payload.latitude
         visit.check_out_longitude = payload.longitude

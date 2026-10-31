@@ -77,6 +77,8 @@ interface AttendanceRecord {
   longitude: number | null;
   punch_in_distance: number | null;
   punch_out_distance: number | null;
+  punch_in_accuracy_meters?: number | null;
+  punch_out_accuracy_meters?: number | null;
   is_irregular: boolean;
   regularization_status: string;
   regularization_reason?: string | null;
@@ -100,10 +102,97 @@ interface TodayAttendanceResponse {
   office_location_id?: string | null;
   office_name?: string | null;
   assigned_office?: AssignedOffice | null;
+  permitted_offices?: AssignedOffice[];
   is_irregular: boolean;
   regularization_status: string;
   can_regularize: boolean;
   attendance_record?: AttendanceRecord | null;
+}
+
+// Centralized GPS Accuracy Policy
+export interface GpsAccuracyPolicy {
+  HIGH_CONFIDENCE_THRESHOLD: number;
+  GOOD_THRESHOLD: number;
+  WARNING_THRESHOLD: number;
+  PROMINENT_WARNING_THRESHOLD: number;
+  MAX_ACCEPTABLE_THRESHOLD: number;
+}
+
+export const GPS_ACCURACY_POLICY: GpsAccuracyPolicy = {
+  HIGH_CONFIDENCE_THRESHOLD: 10,
+  GOOD_THRESHOLD: 25,
+  WARNING_THRESHOLD: 50,
+  PROMINENT_WARNING_THRESHOLD: 100,
+  MAX_ACCEPTABLE_THRESHOLD: 100,
+};
+
+export type AccuracyLevel = "high" | "good" | "warning" | "prominent_warning" | "unacceptable";
+
+export function evaluateGpsAccuracy(accuracyMeters: number | null | undefined): {
+  level: AccuracyLevel;
+  label: string;
+  isAcceptable: boolean;
+  message?: string;
+  badgeStyle: { background: string; color: string; border?: string };
+} {
+  if (accuracyMeters === null || accuracyMeters === undefined || isNaN(accuracyMeters)) {
+    return {
+      level: "good",
+      label: "GPS Acquired",
+      isAcceptable: true,
+      badgeStyle: { background: "#e0f2fe", color: "#0369a1" },
+    };
+  }
+  if (accuracyMeters <= GPS_ACCURACY_POLICY.HIGH_CONFIDENCE_THRESHOLD) {
+    return {
+      level: "high",
+      label: `High Confidence (±${Math.round(accuracyMeters)}m)`,
+      isAcceptable: true,
+      badgeStyle: { background: "#dcfce7", color: "#15803d", border: "1px solid #86efac" },
+    };
+  }
+  if (accuracyMeters <= GPS_ACCURACY_POLICY.GOOD_THRESHOLD) {
+    return {
+      level: "good",
+      label: `Good Accuracy (±${Math.round(accuracyMeters)}m)`,
+      isAcceptable: true,
+      badgeStyle: { background: "#e0f2fe", color: "#0369a1", border: "1px solid #7dd3fc" },
+    };
+  }
+  if (accuracyMeters <= GPS_ACCURACY_POLICY.WARNING_THRESHOLD) {
+    return {
+      level: "warning",
+      label: `Moderate Accuracy (±${Math.round(accuracyMeters)}m)`,
+      isAcceptable: true,
+      message: `GPS accuracy is moderate (±${Math.round(accuracyMeters)}m). Stand near a window or open area for better precision.`,
+      badgeStyle: { background: "#fef3c7", color: "#92400e", border: "1px solid #fcd34d" },
+    };
+  }
+  if (accuracyMeters <= GPS_ACCURACY_POLICY.PROMINENT_WARNING_THRESHOLD) {
+    return {
+      level: "prominent_warning",
+      label: `Weak Signal (±${Math.round(accuracyMeters)}m)`,
+      isAcceptable: true,
+      message: `Warning: Weak GPS signal (±${Math.round(accuracyMeters)}m). Reading is imprecise. Consider clicking Refresh GPS.`,
+      badgeStyle: { background: "#ffedd5", color: "#9a3412", border: "1px solid #fdba74" },
+    };
+  }
+  if (accuracyMeters > 500) {
+    return {
+      level: "unacceptable",
+      label: `Coarse Accuracy (±${Math.round(accuracyMeters)}m)`,
+      isAcceptable: false,
+      message: `GPS accuracy is coarse (±${Math.round(accuracyMeters)}m). Please enable Precise Location in your device browser settings.`,
+      badgeStyle: { background: "#fee2e2", color: "#991b1b", border: "1px solid #fca5a5" },
+    };
+  }
+  return {
+    level: "unacceptable",
+    label: `Poor Accuracy (±${Math.round(accuracyMeters)}m)`,
+    isAcceptable: false,
+    message: `GPS accuracy is too poor (±${Math.round(accuracyMeters)}m). Geofence validation requires accuracy within ${GPS_ACCURACY_POLICY.MAX_ACCEPTABLE_THRESHOLD}m. Please move to an open area and click Refresh GPS.`,
+    badgeStyle: { background: "#fee2e2", color: "#991b1b", border: "1px solid #fca5a5" },
+  };
 }
 
 interface CalendarDay {
@@ -414,6 +503,10 @@ export function AttendancePage() {
   // Master data
   const [policy, setPolicy] = useState<AttendancePolicy | null>(null);
   const [office, setOffice] = useState<AssignedOffice | null>(null);
+  const [permittedOffices, setPermittedOffices] = useState<AssignedOffice[]>([]);
+  const [gpsAccuracy, setGpsAccuracy] = useState<number | null>(null);
+  const [, setGpsTimestamp] = useState<Date | null>(null);
+  const [isAcquiringGps, setIsAcquiringGps] = useState<boolean>(false);
   const [todayRecord, setTodayRecord] = useState<AttendanceRecord | null>(null);
   const [calendarDays, setCalendarDays] = useState<CalendarDay[]>([]);
   const [regularizations, setRegularizations] = useState<RegularizationItem[]>([]);
@@ -609,6 +702,9 @@ export function AttendancePage() {
         if (raw.assigned_office) {
           setOffice(raw.assigned_office);
         }
+        if (raw.permitted_offices && Array.isArray(raw.permitted_offices) && raw.permitted_offices.length > 0) {
+          setPermittedOffices(raw.permitted_offices);
+        }
         if (raw.punch_in || raw.punched_in) {
           setTodayRecord({
             id: raw.id || raw.attendance_record?.id || "today",
@@ -650,9 +746,10 @@ export function AttendancePage() {
   // Fetch Initial Setup Data (Policy, Assigned Office, Regularizations)
   const loadInitialData = useCallback(async () => {
     try {
-      const [policyRes, officeRes] = await Promise.all([
+      const [policyRes, officeRes, permittedRes] = await Promise.all([
         apiGet<AttendancePolicy>("/hrms/attendance/policy"),
         apiGet<AssignedOffice>("/hrms/attendance/assigned-office"),
+        apiGet<AssignedOffice[]>("/hrms/attendance/permitted-offices").catch(() => null),
       ]);
 
       if (policyRes?.data) {
@@ -666,6 +763,9 @@ export function AttendancePage() {
       }
       if (officeRes?.data) {
         setOffice(officeRes.data);
+      }
+      if (permittedRes?.data && Array.isArray(permittedRes.data) && permittedRes.data.length > 0) {
+        setPermittedOffices(permittedRes.data);
       }
       await Promise.all([
         loadTodayRecord(selectedEmployeeId || undefined),
@@ -748,36 +848,62 @@ export function AttendancePage() {
     }
   }, [calendarViewMode, isPrivileged, selectedYear, selectedMonth, selectedDeptFilter, selectedBranchFilter, loadAllCalendar]);
 
-  // 4. Geolocation Acquisition
-  const requestRealGps = useCallback(() => {
+  // 4. Reusable Fresh GPS Acquisition Utility (Options: enableHighAccuracy: true, maximumAge: 0, timeout: 20000)
+  const acquireFreshGps = useCallback(async (): Promise<{ lat: number; lng: number; accuracy: number; timestamp: Date }> => {
     if (!navigator.geolocation) {
       setGpsStatus("denied");
-      setAlert({
-        type: "warning",
-        message: "Geolocation is not supported by your browser.",
-      });
-      return;
+      throw new Error("Geolocation is not supported by your browser.");
     }
 
     setGpsStatus("searching");
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        setCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude });
-        setGpsStatus("connected");
-        setSimulatorMode("real");
-        setAlert(null);
-      },
-      (err) => {
-        console.warn("GPS error", err);
-        setGpsStatus("denied");
-        setAlert({
-          type: "warning",
-          message: "Location permission denied. Please allow GPS access in your browser to record attendance.",
-        });
-      },
-      { enableHighAccuracy: true, timeout: 8000 }
-    );
+    return new Promise((resolve, reject) => {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          const fresh = {
+            lat: pos.coords.latitude,
+            lng: pos.coords.longitude,
+            accuracy: pos.coords.accuracy,
+            timestamp: new Date(pos.timestamp || Date.now()),
+          };
+          setCoords({ lat: fresh.lat, lng: fresh.lng });
+          setGpsAccuracy(fresh.accuracy);
+          setGpsTimestamp(fresh.timestamp);
+          setGpsStatus("connected");
+          setSimulatorMode("real");
+          resolve(fresh);
+        },
+        (err) => {
+          setGpsStatus("denied");
+          let msg = "Failed to acquire fresh GPS location. Please retry.";
+          if (err.code === 1) {
+            msg = "Location permission denied. Please allow GPS access in your browser settings to record attendance.";
+          } else if (err.code === 2) {
+            msg = "GPS location is currently unavailable. Please verify device location services are enabled.";
+          } else if (err.code === 3) {
+            msg = "GPS location request timed out (20s). Please check your signal and click Retry Location.";
+          }
+          reject(new Error(msg));
+        },
+        {
+          enableHighAccuracy: true,
+          maximumAge: 0,
+          timeout: 20000,
+        }
+      );
+    });
   }, []);
+
+  const requestRealGps = useCallback(async () => {
+    try {
+      await acquireFreshGps();
+      setAlert(null);
+    } catch (err: any) {
+      setAlert({
+        type: "warning",
+        message: err.message || "Failed to acquire GPS location.",
+      });
+    }
+  }, [acquireFreshGps]);
 
   // Simulator Presets
   const applySimulator = (mode: "inside" | "edge" | "outside") => { void applySimulator;
@@ -787,24 +913,78 @@ export function AttendancePage() {
 
     if (mode === "inside") {
       setCoords({ lat: office.latitude, lng: office.longitude });
+      setGpsAccuracy(5.0);
+      setGpsTimestamp(new Date());
       setAlert({ type: "success", message: "Simulator set: Inside radius (0–10m from office)." });
     } else if (mode === "edge") {
       setCoords({ lat: office.latitude + 0.0012, lng: office.longitude });
+      setGpsAccuracy(15.0);
+      setGpsTimestamp(new Date());
       setAlert({ type: "warning", message: "Simulator set: Edge of radius (~135m from office)." });
     } else if (mode === "outside") {
       setCoords({ lat: office.latitude + 0.0045, lng: office.longitude });
+      setGpsAccuracy(35.0);
+      setGpsTimestamp(new Date());
       setAlert({ type: "error", message: "Simulator set: Outside radius (~500m from office)." });
     }
   };
 
-  // 5. Distance and Geofence Status
-  const currentDistance = useMemo(() => {
-    if (!coords || !office) return null;
-    return Math.round(calculateHaversineDistance(coords.lat, coords.lng, office.latitude, office.longitude));
-  }, [coords, office]);
+  // 5. Multi-Location Distance and Geofence Evaluation
+  const geofenceEvaluation = useMemo<{
+    isInside: boolean;
+    distance: number | null;
+    matchingOffice: AssignedOffice | null;
+    closestOffice: AssignedOffice | null;
+  }>(() => {
+    if (!coords) {
+      return { isInside: false, distance: null, matchingOffice: null, closestOffice: office };
+    }
+    const allOffices = permittedOffices.length > 0 ? permittedOffices : (office ? [office] : []);
+    if (allOffices.length === 0) {
+      return { isInside: false, distance: null, matchingOffice: null, closestOffice: null };
+    }
 
-  const allowedRadius = office?.radius_meters || policy?.geofence_radius_meters || 150;
-  const isInsideGeofence = currentDistance !== null && currentDistance <= allowedRadius;
+    let matched: AssignedOffice | null = null;
+    let matchedDist: number | null = null;
+    let closest: AssignedOffice = allOffices[0];
+    let minDistance = Infinity;
+
+    for (const off of allOffices) {
+      const d = calculateHaversineDistance(coords.lat, coords.lng, off.latitude, off.longitude);
+      const r = off.radius_meters || policy?.geofence_radius_meters || 150;
+      if (d <= r) {
+        if (!matched || d < (matchedDist || Infinity)) {
+          matched = off;
+          matchedDist = Math.round(d);
+        }
+      }
+      if (d < minDistance) {
+        minDistance = d;
+        closest = off;
+      }
+    }
+
+    if (matched) {
+      return {
+        isInside: true,
+        distance: matchedDist,
+        matchingOffice: matched,
+        closestOffice: matched,
+      };
+    }
+
+    return {
+      isInside: false,
+      distance: Math.round(minDistance),
+      matchingOffice: null,
+      closestOffice: closest,
+    };
+  }, [coords, permittedOffices, office, policy]);
+
+  const currentDistance = geofenceEvaluation.distance;
+  const isInsideGeofence = geofenceEvaluation.isInside;
+  const activeOffice = geofenceEvaluation.matchingOffice || geofenceEvaluation.closestOffice || office;
+  const allowedRadius = activeOffice?.radius_meters || policy?.geofence_radius_meters || 150;
 
   // 6. Live Working Timer Computation (Persists after refresh from DB timestamp)
   const liveWorkingSeconds = useMemo(() => {
@@ -878,32 +1058,71 @@ export function AttendancePage() {
     return () => clearInterval(interval);
   }, [timerRemainingSeconds, coords, office]);
 
-  // 7. Punch In Handler
+  // 7. Punch In Handler (Acquires fresh GPS immediately before punch, validates accuracy & multi-location)
   const handlePunchIn = async () => {
-    if (!coords) {
-      setAlert({ type: "error", message: "Please enable browser GPS before punching in. Location is required for attendance." });
-      return;
-    }
-    if (!isInsideGeofence) {
+    if (actionLoading || isAcquiringGps) return;
+    if (!navigator.geolocation) {
+      setGpsStatus("denied");
       setAlert({
         type: "error",
-        message: `Outside Geofence: You are ${currentDistance}m from ${office?.name || "office"} (Allowed radius: ${allowedRadius}m). Punching is blocked.`,
+        message: "Please enable browser GPS before punching in. Location is required for attendance.",
       });
       return;
     }
-
+    setIsAcquiringGps(true);
     setActionLoading(true);
     setAlert(null);
+
     try {
+      // 1. Acquire fresh GPS fix immediately before sending punch request
+      const freshFix = await acquireFreshGps();
+
+      // 2. Validate accuracy policy
+      const accEval = evaluateGpsAccuracy(freshFix.accuracy);
+      if (!accEval.isAcceptable) {
+        throw new Error(accEval.message || "GPS accuracy is too poor. Please retry in an open area.");
+      }
+
+      // 3. Multi-location geofence evaluation on fresh coordinates
+      const allOffices = permittedOffices.length > 0 ? permittedOffices : (office ? [office] : []);
+      let matchedOffice: AssignedOffice | null = null;
+      let minDistance = Infinity;
+      let closestOffice: AssignedOffice | null = null;
+
+      for (const off of allOffices) {
+        const d = calculateHaversineDistance(freshFix.lat, freshFix.lng, off.latitude, off.longitude);
+        const r = off.radius_meters || policy?.geofence_radius_meters || 150;
+        if (d <= r) {
+          matchedOffice = off;
+          break;
+        }
+        if (d < minDistance) {
+          minDistance = d;
+          closestOffice = off;
+        }
+      }
+
+      if (!matchedOffice && allOffices.length > 0) {
+        const distRounded = Math.round(minDistance);
+        const offName = closestOffice?.name || "assigned office";
+        const maxR = closestOffice?.radius_meters || policy?.geofence_radius_meters || 150;
+        throw new Error(`Outside Geofence: You are ${distRounded}m from ${offName} (Allowed radius: ${maxR}m). Punching is blocked.`);
+      }
+
+      // 4. Submit punch to authoritative backend
       const res = await apiPost<AttendanceRecord>("/hrms/attendance/punch-in", {
-        latitude: coords.lat,
-        longitude: coords.lng,
+        latitude: freshFix.lat,
+        longitude: freshFix.lng,
+        accuracy: freshFix.accuracy,
+        gps_timestamp: freshFix.timestamp.toISOString(),
       });
+
       if (res?.data) {
         setTodayRecord(res.data);
+        const officeLabel = res.data.office_name ? ` at ${res.data.office_name}` : "";
         setAlert({
           type: "success",
-          message: `Punched in successfully! Status: ${res.data.status}. Working timer started.`,
+          message: `Punched in successfully${officeLabel}! Status: ${res.data.status}. Working timer started.`,
         });
         loadCalendar(selectedYear, selectedMonth, selectedEmployeeId);
       }
@@ -911,26 +1130,70 @@ export function AttendancePage() {
       const msg = err?.message || "Failed to punch in. Please try again.";
       setAlert({ type: "error", message: msg });
     } finally {
+      setIsAcquiringGps(false);
       setActionLoading(false);
     }
   };
 
-  // 8. Punch Out Handler
+  // 8. Punch Out Handler (Acquires fresh GPS immediately before punch, validates accuracy & multi-location)
   const handlePunchOut = async () => {
-    if (!coords) {
-      setAlert({ type: "error", message: "Please enable browser GPS before punching out. Location is required for attendance." });
+    if (actionLoading || isAcquiringGps) return;
+    if (!navigator.geolocation) {
+      setGpsStatus("denied");
+      setAlert({
+        type: "error",
+        message: "Please enable browser GPS before punching out. Location is required for attendance.",
+      });
       return;
     }
-    const lat = coords.lat;
-    const lng = coords.lng;
-
+    setIsAcquiringGps(true);
     setActionLoading(true);
     setAlert(null);
+
     try {
+      // 1. Acquire fresh GPS fix immediately before sending punch request
+      const freshFix = await acquireFreshGps();
+
+      // 2. Validate accuracy policy
+      const accEval = evaluateGpsAccuracy(freshFix.accuracy);
+      if (!accEval.isAcceptable) {
+        throw new Error(accEval.message || "GPS accuracy is too poor. Please retry in an open area.");
+      }
+
+      // 3. Multi-location geofence evaluation on fresh coordinates
+      const allOffices = permittedOffices.length > 0 ? permittedOffices : (office ? [office] : []);
+      let matchedOffice: AssignedOffice | null = null;
+      let minDistance = Infinity;
+      let closestOffice: AssignedOffice | null = null;
+
+      for (const off of allOffices) {
+        const d = calculateHaversineDistance(freshFix.lat, freshFix.lng, off.latitude, off.longitude);
+        const r = off.radius_meters || policy?.geofence_radius_meters || 150;
+        if (d <= r) {
+          matchedOffice = off;
+          break;
+        }
+        if (d < minDistance) {
+          minDistance = d;
+          closestOffice = off;
+        }
+      }
+
+      if (!matchedOffice && allOffices.length > 0) {
+        const distRounded = Math.round(minDistance);
+        const offName = closestOffice?.name || "assigned office";
+        const maxR = closestOffice?.radius_meters || policy?.geofence_radius_meters || 150;
+        throw new Error(`Outside Geofence: You are ${distRounded}m from ${offName} (Allowed radius: ${maxR}m). Punching is blocked.`);
+      }
+
+      // 4. Submit punch to authoritative backend
       const res = await apiPost<AttendanceRecord>("/hrms/attendance/punch-out", {
-        latitude: lat,
-        longitude: lng,
+        latitude: freshFix.lat,
+        longitude: freshFix.lng,
+        accuracy: freshFix.accuracy,
+        gps_timestamp: freshFix.timestamp.toISOString(),
       });
+
       if (res?.data) {
         setTodayRecord(res.data);
         setAlert({
@@ -943,6 +1206,7 @@ export function AttendancePage() {
       const msg = err?.message || "Failed to punch out.";
       setAlert({ type: "error", message: msg });
     } finally {
+      setIsAcquiringGps(false);
       setActionLoading(false);
     }
   };
@@ -1358,15 +1622,32 @@ export function AttendancePage() {
                 </div>
 
                 <div className="hrms-office-gps-group">
-                  {/* Order 3: Assigned Office */}
-                  <div className="hrms-office-pill" title="Assigned Office Location">
+                  {/* Order 3: Assigned Office & Multi-Location Indicator */}
+                  <div className="hrms-office-pill" title="Assigned Office Locations">
                     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                       <path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z" />
                       <circle cx="12" cy="10" r="3" />
                     </svg>
-                    <span>{office ? office.name : "Inhyma Thane Office"}</span>
-                    <span style={{ opacity: 0.7, fontSize: "11px" }}>({allowedRadius}m radius)</span>
+                    <span>{(activeOffice as any)?.name || (office as any)?.name || "Inhyma Thane Office"}</span>
+                    {permittedOffices.length > 1 ? (
+                      <span style={{ background: "#e0f2fe", color: "#0369a1", fontSize: "11px", fontWeight: 700, padding: "1px 6px", borderRadius: "4px" }}>
+                        {permittedOffices.length} offices permitted
+                      </span>
+                    ) : (
+                      <span style={{ opacity: 0.7, fontSize: "11px" }}>({allowedRadius}m radius)</span>
+                    )}
                   </div>
+
+                  {/* Order 3.5: Accuracy Badge */}
+                  {gpsAccuracy !== null && (
+                    <div
+                      className="hrms-office-pill"
+                      style={evaluateGpsAccuracy(gpsAccuracy).badgeStyle}
+                      title={`Reported GPS Accuracy: ±${Math.round(gpsAccuracy)}m`}
+                    >
+                      <span>{evaluateGpsAccuracy(gpsAccuracy).label}</span>
+                    </div>
+                  )}
 
                   {/* Order 4: GPS Status */}
                   <div
@@ -1469,31 +1750,37 @@ export function AttendancePage() {
                           type="button"
                           className="hrms-punch-btn in"
                           onClick={handlePunchIn}
-                          disabled={actionLoading || !isInsideGeofence}
+                          disabled={actionLoading || isAcquiringGps || !isInsideGeofence}
                           title={
                             !isInsideGeofence
-                              ? `Punch In blocked: You are outside the ${allowedRadius}m office geofence.`
-                              : "Punch In for Today"
+                              ? `Punch In blocked: You are outside the ${allowedRadius}m geofence.`
+                              : "Punch In for Today (Acquires fresh GPS)"
                           }
                           data-testid="punch-in-button"
                         >
                           <span className="hrms-punch-btn-icon">⏱️</span>
                           <span className="hrms-punch-btn-label">
-                            {actionLoading ? "VERIFYING..." : "PUNCH IN"}
+                            {isAcquiringGps ? "ACQUIRING GPS..." : actionLoading ? "VERIFYING..." : "PUNCH IN"}
                           </span>
                         </button>
 
                         <div className="hrms-punch-distance-chip">
                           {isInsideGeofence ? (
                             <span style={{ color: "#059669" }}>
-                              ✓ Inside Geofence ({currentDistance} m from office)
+                              ✓ Inside Geofence: {activeOffice?.name || "Office"} ({currentDistance} m — {allowedRadius}m allowed)
                             </span>
                           ) : (
                             <span style={{ color: "#dc2626" }}>
-                              ✕ Outside Geofence ({currentDistance ?? "—"} m from office — {allowedRadius}m allowed)
+                              ✕ Outside Geofence ({currentDistance ?? "—"} m from {activeOffice?.name || "office"} — {allowedRadius}m allowed)
                             </span>
                           )}
                         </div>
+
+                        {gpsAccuracy !== null && evaluateGpsAccuracy(gpsAccuracy).message && (
+                          <div style={{ fontSize: "12px", color: evaluateGpsAccuracy(gpsAccuracy).isAcceptable ? "#b45309" : "#b91c1c", marginTop: "6px", textAlign: "center" }}>
+                            {evaluateGpsAccuracy(gpsAccuracy).message}
+                          </div>
+                        )}
                       </>
                     ) : !todayRecord?.punch_out ? (
                       // After Punch In (Active session -> Punch Out button)

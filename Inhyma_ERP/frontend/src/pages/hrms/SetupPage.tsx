@@ -69,6 +69,41 @@ export interface EmployeeSettingsResponse {
   effective: HrmsTrackingSettingsData;
 }
 
+export interface EmployeeLocationItem {
+  location_id: string;
+  location_name: string;
+  location_type?: string | null;
+  address?: string | null;
+  is_primary: boolean;
+  is_active: boolean;
+  radius_meters: number;
+}
+
+export interface EmployeeLocationOverview {
+  employee_id: string;
+  employee_name: string;
+  employee_code?: string | null;
+  department?: string | null;
+  email?: string | null;
+  primary_location?: EmployeeLocationItem | null;
+  additional_locations: EmployeeLocationItem[];
+  total_permitted_locations: number;
+  updated_at?: string | null;
+}
+
+export interface EmployeeLocationHistoryItem {
+  id: string;
+  user_id: string;
+  location_id: string;
+  location_name: string;
+  action: string;
+  is_primary: boolean;
+  performed_by?: string | null;
+  performed_by_name?: string | null;
+  notes?: string | null;
+  created_at: string;
+}
+
 
 interface HrmsLocation {
   id: string;
@@ -203,6 +238,23 @@ function SetupLocationsSkeletonRows({ rowCount = 4 }: { rowCount?: number }) {
   );
 }
 
+function SetupEmployeeLocationsSkeletonRows({ rowCount = 5 }: { rowCount?: number }) {
+  return (
+    <>
+      {Array.from({ length: rowCount }).map((_, index) => (
+        <tr key={`emp-loc-skel-${index}`} className="skeleton-row" aria-hidden="true">
+          <td><span className="skeleton-line" style={{ width: 140, height: 16 }} /></td>
+          <td><span className="skeleton-badge" style={{ width: 80, height: 20 }} /></td>
+          <td><span className="skeleton-badge" style={{ width: 120, height: 24 }} /></td>
+          <td><span className="skeleton-line" style={{ width: 100, height: 16 }} /></td>
+          <td><span className="skeleton-badge" style={{ width: 60, height: 20 }} /></td>
+          <td><span className="skeleton-line" style={{ width: 90, height: 28 }} /></td>
+        </tr>
+      ))}
+    </>
+  );
+}
+
 function SetupDetailedEmployeesSkeletonRows({ rowCount = 5 }: { rowCount?: number }) {
   return (
     <>
@@ -248,7 +300,7 @@ function SetupReturnTimerSkeletonRows({ rowCount = 5 }: { rowCount?: number }) {
 
 export function SetupPage() {
   const [activeTab, setActiveTab] = useState<
-    "leaveTypes" | "expenseSettings" | "geoFencing" | "detailedTracking" | "returnTimer" | "attendanceDownload"
+    "leaveTypes" | "expenseSettings" | "geoFencing" | "detailedTracking" | "returnTimer" | "attendanceDownload" | "employeeLocations"
   >("leaveTypes");
 
   // Notifications -> Floating Toasts
@@ -274,6 +326,13 @@ export function SetupPage() {
     profile?.username === "admin" ||
     hasPermission("hrms:admin")
   );
+  const canManageLocationAssignments = Boolean(
+    isSuperAdmin ||
+    profile?.role === "ADMIN" ||
+    profile?.username === "admin" ||
+    hasPermission("hrms.location_assignments.manage")
+  );
+
   const isExportPrivileged = Boolean(
     isAdmin ||
     String((profile as any)?.role || "").toLowerCase() === "hr" ||
@@ -299,6 +358,118 @@ export function SetupPage() {
       }
     } catch (err: any) {
       console.error("Failed to load employees for Setup selector", err);
+    }
+  };
+
+  // -------------------------------------------------------------------------
+  // SUB-TAB: EMPLOYEE LOCATION ASSIGNMENTS STATE & HANDLERS
+  // -------------------------------------------------------------------------
+  const [employeeLocations, setEmployeeLocations] = useState<EmployeeLocationOverview[]>([]);
+  const [loadingEmployeeLocations, setLoadingEmployeeLocations] = useState(false);
+  const [empLocSearch, setEmpLocSearch] = useState("");
+  const [empLocDeptFilter, setEmpLocDeptFilter] = useState("");
+  const [empLocOfficeFilter, setEmpLocOfficeFilter] = useState("");
+
+  // Modal: Assign / Edit
+  const [assignModalOpen, setAssignModalOpen] = useState(false);
+  const [selectedEmpLocation, setSelectedEmpLocation] = useState<EmployeeLocationOverview | null>(null);
+  const [assignPrimaryId, setAssignPrimaryId] = useState("");
+  const [assignAdditionalIds, setAssignAdditionalIds] = useState<string[]>([]);
+  const [locationToAddId, setLocationToAddId] = useState("");
+  const [assignNotes, setAssignNotes] = useState("");
+  const [isSavingAssignments, setIsSavingAssignments] = useState(false);
+  const [assignModalError, setAssignModalError] = useState<string | null>(null);
+
+  // Modal: History
+  const [historyModalOpen, setHistoryModalOpen] = useState(false);
+  const [historyEmp, setHistoryEmp] = useState<EmployeeLocationOverview | null>(null);
+  const [historyItems, setHistoryItems] = useState<EmployeeLocationHistoryItem[]>([]);
+  const [loadingHistory, setLoadingHistory] = useState(false);
+
+  const fetchEmployeeLocations = async (search = empLocSearch, dept = empLocDeptFilter, locId = empLocOfficeFilter) => {
+    setLoadingEmployeeLocations(true);
+    try {
+      const params = new URLSearchParams();
+      if (search.trim()) params.append("search", search.trim());
+      if (dept.trim()) params.append("department", dept.trim());
+      if (locId.trim() && locId !== "unassigned") params.append("location_id", locId.trim());
+      const res = await apiGet<EmployeeLocationOverview[]>(
+        `/hrms/setup/employee-locations${params.toString() ? `?${params.toString()}` : ""}`
+      );
+      if (res?.data) {
+        let data = res.data;
+        if (locId === "unassigned") {
+          data = data.filter((item) => !item.primary_location);
+        }
+        setEmployeeLocations(data);
+      }
+    } catch (err: any) {
+      console.error("Failed to load employee locations", err);
+      showError(err.message || "Failed to load employee location assignments.");
+    } finally {
+      setLoadingEmployeeLocations(false);
+    }
+  };
+
+  const handleOpenAssignModal = (emp: EmployeeLocationOverview) => {
+    if (locations.length === 0) {
+      fetchLocations();
+    }
+    setSelectedEmpLocation(emp);
+    setAssignPrimaryId(emp.primary_location?.location_id || "");
+    setAssignAdditionalIds(emp.additional_locations?.map((l) => l.location_id) || []);
+    setLocationToAddId("");
+    setAssignNotes("");
+    setAssignModalError(null);
+    setAssignModalOpen(true);
+  };
+
+  const handleSaveAssignments = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedEmpLocation) return;
+    if (!assignPrimaryId) {
+      setAssignModalError("Please select a primary office location. Every assigned employee must have a primary location.");
+      return;
+    }
+    setIsSavingAssignments(true);
+    setAssignModalError(null);
+    try {
+      const payload = {
+        primary_location_id: assignPrimaryId,
+        additional_location_ids: assignAdditionalIds.filter((id) => id !== assignPrimaryId),
+        notes: assignNotes.trim() || undefined,
+      };
+      const res = await apiPut<EmployeeLocationOverview>(
+        `/hrms/setup/employee-locations/${selectedEmpLocation.employee_id}`,
+        payload
+      );
+      if (res?.data) {
+        showSuccess(`Office locations updated for ${selectedEmpLocation.employee_name}.`);
+        setAssignModalOpen(false);
+        fetchEmployeeLocations();
+      }
+    } catch (err: any) {
+      setAssignModalError(err.message || "Failed to update employee location assignment.");
+    } finally {
+      setIsSavingAssignments(false);
+    }
+  };
+
+  const handleOpenHistoryModal = async (emp: EmployeeLocationOverview) => {
+    setHistoryEmp(emp);
+    setHistoryModalOpen(true);
+    setLoadingHistory(true);
+    try {
+      const res = await apiGet<EmployeeLocationHistoryItem[]>(
+        `/hrms/setup/employee-locations/${emp.employee_id}/history`
+      );
+      setHistoryItems(res.data || []);
+    } catch (err: any) {
+      console.error("Failed to load history", err);
+      showError(err.message || "Failed to load location assignment history.");
+      setHistoryItems([]);
+    } finally {
+      setLoadingHistory(false);
     }
   };
 
@@ -1287,6 +1458,9 @@ export function SetupPage() {
       fetchReturnTimerData();
     } else if (activeTab === "attendanceDownload") {
       fetchEmployeesList();
+    } else if (activeTab === "employeeLocations") {
+      fetchEmployeeLocations();
+      fetchLocations();
     }
   }, [activeTab]);
 
@@ -1328,6 +1502,14 @@ export function SetupPage() {
           >
             <IconPin />
             <span>Geo Fencing</span>
+          </button>
+          <button
+            type="button"
+            className={`hrms-tab-btn ${activeTab === "employeeLocations" ? "active" : ""}`}
+            onClick={() => setActiveTab("employeeLocations")}
+          >
+            <IconMap />
+            <span>Employee Location Assignment</span>
           </button>
           <button
             type="button"
@@ -2783,6 +2965,339 @@ export function SetupPage() {
         )}
 
         {/* ================================================================= */}
+        {/* SUB-TAB 7: EMPLOYEE LOCATION ASSIGNMENT                           */}
+        {/* ================================================================= */}
+        {activeTab === "employeeLocations" && (
+          <div className="hrms-tab-content">
+            <div className="card">
+              <div className="card-header">
+                <div>
+                  <h2 className="hrms-section-title">Employee Location Assignment</h2>
+                  <div className="hrms-section-desc">
+                    Assign primary and additional authorized office locations for employee multi-location attendance and geofence verification.
+                  </div>
+                </div>
+              </div>
+
+              <div style={{ padding: "20px" }}>
+                {!canManageLocationAssignments && (
+                  <div
+                    style={{
+                      background: "#fffbeb",
+                      border: "1px solid #fef3c7",
+                      borderRadius: "8px",
+                      padding: "12px 16px",
+                      marginBottom: "16px",
+                      color: "#92400e",
+                      fontSize: "13px",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "8px",
+                    }}
+                  >
+                    <span>🔒</span>
+                    <span>
+                      <strong>View-Only Access:</strong> You are viewing location assignments. Only Administrators or personnel explicitly granted the <code>hrms.location_assignments.manage</code> permission can modify assignments.
+                    </span>
+                  </div>
+                )}
+
+                {/* Filter / Search Bar */}
+                <div style={{ display: "flex", gap: "12px", alignItems: "center", marginBottom: "20px", flexWrap: "wrap" }}>
+                  {/* Search Box */}
+                  <div style={{ position: "relative", flex: 2, minWidth: "260px" }}>
+                    <input
+                      type="text"
+                      className="form-control"
+                      placeholder="Search by name, employee code, or department..."
+                      value={empLocSearch}
+                      onChange={(e) => {
+                        setEmpLocSearch(e.target.value);
+                        fetchEmployeeLocations(e.target.value, empLocDeptFilter, empLocOfficeFilter);
+                      }}
+                      style={{ paddingLeft: "36px" }}
+                    />
+                    <span style={{ position: "absolute", left: "12px", top: "50%", transform: "translateY(-50%)", color: "#94a3b8" }}>
+                      🔍
+                    </span>
+                    {empLocSearch && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEmpLocSearch("");
+                          fetchEmployeeLocations("", empLocDeptFilter, empLocOfficeFilter);
+                        }}
+                        style={{ position: "absolute", right: "12px", top: "50%", transform: "translateY(-50%)", background: "none", border: "none", cursor: "pointer", color: "#94a3b8", fontSize: "14px" }}
+                      >
+                        ✕
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Department Filter */}
+                  <div style={{ minWidth: "160px" }}>
+                    <select
+                      className="form-control"
+                      value={empLocDeptFilter}
+                      onChange={(e) => {
+                        setEmpLocDeptFilter(e.target.value);
+                        fetchEmployeeLocations(empLocSearch, e.target.value, empLocOfficeFilter);
+                      }}
+                    >
+                      <option value="">All Departments</option>
+                      {Array.from(new Set(employeeLocations.map((e) => e.department).filter(Boolean))).sort().map((d) => (
+                        <option key={d} value={d!}>{d}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Office Location Filter */}
+                  <div style={{ minWidth: "180px" }}>
+                    <select
+                      className="form-control"
+                      value={empLocOfficeFilter}
+                      onChange={(e) => {
+                        setEmpLocOfficeFilter(e.target.value);
+                        fetchEmployeeLocations(empLocSearch, empLocDeptFilter, e.target.value);
+                      }}
+                    >
+                      <option value="">All Office Locations</option>
+                      <option value="unassigned">⚠️ Unassigned Only</option>
+                      {locations.filter((l) => l.is_active).map((l) => (
+                        <option key={l.id} value={l.id}>{l.name}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <button
+                    type="button"
+                    className="btn btn-outline"
+                    onClick={() => fetchEmployeeLocations(empLocSearch, empLocDeptFilter, empLocOfficeFilter)}
+                    disabled={loadingEmployeeLocations}
+                    style={{ minWidth: "90px" }}
+                  >
+                    {loadingEmployeeLocations ? "Loading..." : "Refresh"}
+                  </button>
+                </div>
+
+                {/* Table */}
+                {loadingEmployeeLocations ? (
+                  <div className="hrms-table-container">
+                    <table className="hrms-table">
+                      <thead>
+                        <tr>
+                          <th>Employee</th>
+                          <th>Department</th>
+                          <th>Primary Location</th>
+                          <th>Additional Locations</th>
+                          <th>Permitted Offices</th>
+                          <th>Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <SetupEmployeeLocationsSkeletonRows />
+                      </tbody>
+                    </table>
+                  </div>
+                ) : employeeLocations.length === 0 ? (
+                  <div className="hrms-placeholder-box" style={{ padding: "40px 20px" }}>
+                    <div className="hrms-placeholder-icon">
+                      <IconPin />
+                    </div>
+                    <h4 className="hrms-placeholder-title">No Employees Found</h4>
+                    <p className="hrms-placeholder-text">
+                      {empLocSearch || empLocDeptFilter || empLocOfficeFilter
+                        ? "No employee records match the selected filters. Try clearing filters."
+                        : "No employees found in the authorized scope."}
+                    </p>
+                  </div>
+                ) : (
+                  <div className="hrms-table-container">
+                    <table className="hrms-table">
+                      <thead>
+                        <tr>
+                          <th>Employee</th>
+                          <th>Department</th>
+                          <th>Primary Location</th>
+                          <th>Additional Locations</th>
+                          <th>Permitted Offices</th>
+                          <th>Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {employeeLocations.map((emp) => {
+                          const hasPrimary = Boolean(emp.primary_location);
+                          const addCount = emp.additional_locations?.length || 0;
+                          return (
+                            <tr key={emp.employee_id}>
+                              <td>
+                                <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                                  <div
+                                    style={{
+                                      width: "36px",
+                                      height: "36px",
+                                      borderRadius: "50%",
+                                      background: hasPrimary ? "#eff6ff" : "#fef3c7",
+                                      color: hasPrimary ? "#1d4ed8" : "#b45309",
+                                      display: "flex",
+                                      alignItems: "center",
+                                      justifyContent: "center",
+                                      fontWeight: 700,
+                                      fontSize: "13px",
+                                      border: `1px solid ${hasPrimary ? "#bfdbfe" : "#fde68a"}`,
+                                    }}
+                                  >
+                                    {(emp.employee_name || "E").charAt(0).toUpperCase()}
+                                  </div>
+                                  <div>
+                                    <div style={{ fontWeight: 600, color: "var(--color-text, #0f172a)", fontSize: "13.5px" }}>
+                                      {emp.employee_name}
+                                    </div>
+                                    <div style={{ fontSize: "11.5px", color: "var(--color-muted, #64748b)" }}>
+                                      {emp.employee_code || `EMP-${emp.employee_id.slice(0, 6).toUpperCase()}`}
+                                      {emp.email ? ` • ${emp.email}` : ""}
+                                    </div>
+                                  </div>
+                                </div>
+                              </td>
+                              <td>
+                                <span className="hrms-badge hrms-badge-info" style={{ fontWeight: 600 }}>
+                                  {emp.department || "General"}
+                                </span>
+                              </td>
+                              <td>
+                                {emp.primary_location ? (
+                                  <div style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>
+                                    <span
+                                      style={{
+                                        display: "inline-flex",
+                                        alignItems: "center",
+                                        gap: "4px",
+                                        background: "#f0fdf4",
+                                        border: "1px solid #bbf7d0",
+                                        color: "#15803d",
+                                        borderRadius: "6px",
+                                        padding: "3px 8px",
+                                        fontSize: "12px",
+                                        fontWeight: 700,
+                                      }}
+                                    >
+                                      <span>★</span>
+                                      <span>{emp.primary_location.location_name}</span>
+                                      <span style={{ fontSize: "11px", color: "#16a34a", fontWeight: 500 }}>
+                                        ({emp.primary_location.radius_meters}m)
+                                      </span>
+                                    </span>
+                                  </div>
+                                ) : (
+                                  <span
+                                    style={{
+                                      display: "inline-flex",
+                                      alignItems: "center",
+                                      gap: "4px",
+                                      background: "#fff1f2",
+                                      border: "1px solid #fecdd3",
+                                      color: "#be123c",
+                                      borderRadius: "6px",
+                                      padding: "3px 8px",
+                                      fontSize: "12px",
+                                      fontWeight: 600,
+                                    }}
+                                  >
+                                    <span>⚠️</span> Unassigned
+                                  </span>
+                                )}
+                              </td>
+                              <td>
+                                {addCount > 0 ? (
+                                  <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                                    <div style={{ display: "flex", flexWrap: "wrap", gap: "4px" }}>
+                                      {emp.additional_locations.map((loc) => (
+                                        <span
+                                          key={loc.location_id}
+                                          style={{
+                                            background: "#f1f5f9",
+                                            border: "1px solid #cbd5e1",
+                                            color: "#334155",
+                                            borderRadius: "4px",
+                                            padding: "2px 6px",
+                                            fontSize: "11.5px",
+                                            fontWeight: 500,
+                                          }}
+                                        >
+                                          {loc.location_name} ({loc.radius_meters}m)
+                                        </span>
+                                      ))}
+                                    </div>
+                                    <span style={{ fontSize: "11px", color: "var(--color-muted, #64748b)" }}>
+                                      {addCount} additional {addCount === 1 ? "office" : "offices"}
+                                    </span>
+                                  </div>
+                                ) : (
+                                  <span style={{ fontSize: "12px", color: "#94a3b8" }}>— None</span>
+                                )}
+                              </td>
+                              <td>
+                                <span
+                                  style={{
+                                    display: "inline-block",
+                                    padding: "2px 8px",
+                                    borderRadius: "12px",
+                                    fontSize: "12px",
+                                    fontWeight: 700,
+                                    background: emp.total_permitted_locations > 0 ? "#e0f2fe" : "#f1f5f9",
+                                    color: emp.total_permitted_locations > 0 ? "#0369a1" : "#64748b",
+                                  }}
+                                >
+                                  {emp.total_permitted_locations} {emp.total_permitted_locations === 1 ? "location" : "locations"}
+                                </span>
+                              </td>
+                              <td>
+                                <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
+                                  {canManageLocationAssignments ? (
+                                    <button
+                                      type="button"
+                                      className="btn btn-outline"
+                                      style={{ fontSize: "12px", padding: "4px 10px" }}
+                                      onClick={() => handleOpenAssignModal(emp)}
+                                    >
+                                      Assign / Edit
+                                    </button>
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      className="btn btn-outline"
+                                      style={{ fontSize: "12px", padding: "4px 10px", opacity: 0.7 }}
+                                      onClick={() => handleOpenAssignModal(emp)}
+                                      title="View details"
+                                    >
+                                      View
+                                    </button>
+                                  )}
+                                  <button
+                                    type="button"
+                                    className="btn btn-outline"
+                                    style={{ fontSize: "12px", padding: "4px 8px" }}
+                                    onClick={() => handleOpenHistoryModal(emp)}
+                                    title="View audit history"
+                                  >
+                                    History
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ================================================================= */}
 
         {/* MODAL 1: ADD / EDIT LEAVE TYPE                                    */}
         {/* ================================================================= */}
@@ -3409,6 +3924,399 @@ export function SetupPage() {
                   </button>
                 </div>
               </form>
+            </div>
+          </div>
+        )}
+        {/* ================================================================= */}
+        {/* MODAL: ASSIGN / EDIT EMPLOYEE LOCATIONS                           */}
+        {/* ================================================================= */}
+        {assignModalOpen && selectedEmpLocation && (
+          <div className="hrms-modal-backdrop" onClick={() => setAssignModalOpen(false)}>
+            <div className="hrms-modal-card" style={{ maxWidth: "600px" }} onClick={(e) => e.stopPropagation()}>
+              <div className="hrms-modal-header">
+                <div>
+                  <h3 style={{ margin: 0, fontSize: "16px" }}>
+                    {canManageLocationAssignments ? "Manage Office Locations" : "View Office Locations"}
+                  </h3>
+                  <div style={{ fontSize: "12px", color: "var(--color-muted, #64748b)", marginTop: "2px" }}>
+                    {selectedEmpLocation.employee_name} ({selectedEmpLocation.employee_code || selectedEmpLocation.employee_id}) • {selectedEmpLocation.department || "General"}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  className="hrms-modal-close-btn"
+                  onClick={() => setAssignModalOpen(false)}
+                >
+                  ✕
+                </button>
+              </div>
+
+              <form onSubmit={handleSaveAssignments} className="hrms-modal-form">
+                <div className="hrms-modal-body" style={{ maxHeight: "72vh", overflowY: "auto", padding: "20px" }}>
+                  {assignModalError && (
+                    <div style={{ background: "#fee2e2", border: "1px solid #fca5a5", color: "#b91c1c", padding: "10px 14px", borderRadius: "6px", fontSize: "13px", marginBottom: "16px" }}>
+                      {assignModalError}
+                    </div>
+                  )}
+
+                  {/* Section 1: Primary Location */}
+                  <div style={{ marginBottom: "20px" }}>
+                    <label style={{ display: "block", fontWeight: 700, fontSize: "13px", color: "#1e293b", marginBottom: "6px" }}>
+                      Primary Office Location *
+                    </label>
+                    <div style={{ fontSize: "12px", color: "#64748b", marginBottom: "8px" }}>
+                      Every employee must have exactly one primary office location. This serves as their main work site and default geofence reference.
+                    </div>
+                    <select
+                      className="form-control"
+                      id="primary-office-select"
+                      aria-label="Primary Office Location"
+                      value={assignPrimaryId}
+                      onChange={(e) => {
+                        const newPrimary = e.target.value;
+                        const oldPrimary = assignPrimaryId;
+                        setAssignPrimaryId(newPrimary);
+                        // Changing the primary location preserves other additional assignments wherever valid
+                        setAssignAdditionalIds((prev) => {
+                          let updated = prev.filter((id) => id !== newPrimary);
+                          if (oldPrimary && oldPrimary !== newPrimary && !updated.includes(oldPrimary)) {
+                            updated = [...updated, oldPrimary];
+                          }
+                          return updated;
+                        });
+                      }}
+                      disabled={!canManageLocationAssignments || isSavingAssignments}
+                      required
+                      style={{ fontWeight: 600 }}
+                    >
+                      <option value="">-- Select Primary Office --</option>
+                      {locations
+                        .filter((l) => l.is_active)
+                        .map((loc) => (
+                          <option key={loc.id} value={loc.id}>
+                            {loc.name} ({loc.location_type || "Office"}){loc.address ? ` — ${loc.address.slice(0, 45)}...` : ""} [Radius: {loc.radius_meters}m]
+                          </option>
+                        ))}
+                    </select>
+                  </div>
+
+                  {/* Section 2: Additional Permitted Locations */}
+                  <div style={{ marginBottom: "20px" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: "6px" }}>
+                      <label style={{ fontWeight: 700, fontSize: "13px", color: "#1e293b" }}>
+                        Additional Permitted Locations
+                      </label>
+                      {assignAdditionalIds.length > 0 && canManageLocationAssignments && (
+                        <button
+                          type="button"
+                          style={{ background: "none", border: "none", color: "#0284c7", fontSize: "12px", cursor: "pointer", fontWeight: 600 }}
+                          onClick={() => setAssignAdditionalIds([])}
+                          disabled={isSavingAssignments}
+                        >
+                          Clear all additional
+                        </button>
+                      )}
+                    </div>
+                    <div style={{ fontSize: "12px", color: "#64748b", marginBottom: "10px" }}>
+                      Select zero or more branch offices where this employee is authorized to punch in and punch out.
+                    </div>
+
+                    {/* Part 3: Explicit Add Location interaction */}
+                    {canManageLocationAssignments && (
+                      <div style={{ display: "flex", gap: "8px", alignItems: "center", marginBottom: "12px" }}>
+                        <select
+                          className="form-control"
+                          id="add-permitted-location-select"
+                          aria-label="Add another permitted location"
+                          value={locationToAddId}
+                          onChange={(e) => setLocationToAddId(e.target.value)}
+                          disabled={isSavingAssignments}
+                          style={{ flex: 1, fontSize: "13px" }}
+                        >
+                          <option value="">-- Select an office location to add --</option>
+                          {locations
+                            .filter((l) => l.is_active && l.id !== assignPrimaryId && !assignAdditionalIds.includes(l.id))
+                            .map((loc) => (
+                              <option key={loc.id} value={loc.id}>
+                                + {loc.name} ({loc.location_type || "Office"}) — Radius: {loc.radius_meters}m
+                              </option>
+                            ))}
+                        </select>
+                        <button
+                          type="button"
+                          className="btn btn-outline"
+                          style={{ whiteSpace: "nowrap", padding: "6px 14px", fontWeight: 600, fontSize: "12.5px" }}
+                          disabled={!locationToAddId || isSavingAssignments}
+                          onClick={() => {
+                            if (locationToAddId && !assignAdditionalIds.includes(locationToAddId)) {
+                              setAssignAdditionalIds((prev) => [...prev, locationToAddId]);
+                              setLocationToAddId("");
+                            }
+                          }}
+                        >
+                          + Add Location
+                        </button>
+                      </div>
+                    )}
+
+                    {locations.filter((l) => l.is_active && l.id !== assignPrimaryId).length === 0 ? (
+                      <div style={{ background: "#f8fafc", border: "1px dashed #cbd5e1", padding: "16px", borderRadius: "6px", fontSize: "12.5px", color: "#64748b", textAlign: "center" }}>
+                        {assignPrimaryId
+                          ? "No other active office locations available in your authorized company scope."
+                          : "Please select a primary office first to see available additional locations."}
+                      </div>
+                    ) : (
+                      <div style={{ display: "flex", flexDirection: "column", gap: "8px", maxHeight: "200px", overflowY: "auto", border: "1px solid #e2e8f0", borderRadius: "6px", padding: "10px", background: "#ffffff" }}>
+                        {locations
+                          .filter((l) => l.is_active && l.id !== assignPrimaryId)
+                          .map((loc) => {
+                            const isChecked = assignAdditionalIds.includes(loc.id);
+                            return (
+                              <label
+                                key={loc.id}
+                                style={{
+                                  display: "flex",
+                                  alignItems: "flex-start",
+                                  gap: "10px",
+                                  padding: "8px 10px",
+                                  borderRadius: "6px",
+                                  background: isChecked ? "#f0fdf4" : "#f8fafc",
+                                  border: `1px solid ${isChecked ? "#bbf7d0" : "#e2e8f0"}`,
+                                  cursor: canManageLocationAssignments ? "pointer" : "default",
+                                  transition: "all 0.15s ease",
+                                }}
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={isChecked}
+                                  disabled={!canManageLocationAssignments || isSavingAssignments}
+                                  onChange={(e) => {
+                                    if (e.target.checked) {
+                                      setAssignAdditionalIds((prev) => [...prev, loc.id]);
+                                    } else {
+                                      setAssignAdditionalIds((prev) => prev.filter((id) => id !== loc.id));
+                                    }
+                                  }}
+                                  style={{ width: "16px", height: "16px", marginTop: "2px" }}
+                                />
+                                <div style={{ flex: 1 }}>
+                                  <div style={{ display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap" }}>
+                                    <span style={{ fontWeight: 700, fontSize: "13px", color: "#0f172a" }}>
+                                      {loc.name}
+                                    </span>
+                                    <span style={{ background: "#e2e8f0", color: "#334155", fontSize: "11px", fontWeight: 600, padding: "1px 6px", borderRadius: "4px" }}>
+                                      {loc.location_type || "BRANCH"}
+                                    </span>
+                                    <span style={{ background: "#e0f2fe", color: "#0369a1", fontSize: "11px", fontWeight: 600, padding: "1px 6px", borderRadius: "4px" }}>
+                                      Radius: {loc.radius_meters}m
+                                    </span>
+                                    {isChecked && (
+                                      <span style={{ color: "#16a34a", fontSize: "11.5px", fontWeight: 700, marginLeft: "auto" }}>
+                                        ✓ Permitted
+                                      </span>
+                                    )}
+                                  </div>
+                                  {loc.address && (
+                                    <div style={{ fontSize: "11.5px", color: "#64748b", marginTop: "2px", lineHeight: "1.4" }}>
+                                      {loc.address}
+                                    </div>
+                                  )}
+                                </div>
+                              </label>
+                            );
+                          })}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Section 4: Improved Authorized Locations Summary */}
+                  {assignPrimaryId && (
+                    <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "8px", padding: "14px", marginBottom: "16px" }}>
+                      <div style={{ fontWeight: 700, fontSize: "12px", textTransform: "uppercase", color: "#475569", marginBottom: "8px", letterSpacing: "0.5px" }}>
+                        Authorized Locations Summary
+                      </div>
+                      <ul style={{ margin: "0 0 10px 0", paddingLeft: "18px", listStyleType: "disc", fontSize: "13px", color: "#1e293b", lineHeight: "1.6" }}>
+                        <li>
+                          <strong style={{ color: "#15803d" }}>★ Primary:</strong> {locations.find((l) => l.id === assignPrimaryId)?.name || "Primary Location"}
+                          {locations.find((l) => l.id === assignPrimaryId) && (
+                            <span style={{ fontSize: "11.5px", color: "#64748b", marginLeft: "6px" }}>
+                              ({locations.find((l) => l.id === assignPrimaryId)?.location_type || "Office"}, Radius: {locations.find((l) => l.id === assignPrimaryId)?.radius_meters}m)
+                            </span>
+                          )}
+                        </li>
+                        {assignAdditionalIds.map((id) => {
+                          const loc = locations.find((l) => l.id === id);
+                          return loc ? (
+                            <li key={id}>
+                              <strong>Additional:</strong> {loc.name}
+                              <span style={{ fontSize: "11.5px", color: "#64748b", marginLeft: "6px" }}>
+                                ({loc.location_type || "Office"}, Radius: {loc.radius_meters}m)
+                              </span>
+                            </li>
+                          ) : null;
+                        })}
+                      </ul>
+                      <div style={{ fontSize: "12.5px", fontWeight: 700, color: "#0369a1", borderTop: "1px solid #e2e8f0", paddingTop: "8px" }}>
+                        Total permitted locations: {1 + assignAdditionalIds.length}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Section 4: Audit Notes */}
+                  {canManageLocationAssignments && (
+                    <div>
+                      <label style={{ display: "block", fontWeight: 700, fontSize: "13px", color: "#1e293b", marginBottom: "4px" }}>
+                        Assignment Note (Optional)
+                      </label>
+                      <input
+                        type="text"
+                        className="form-control"
+                        placeholder="e.g. Authorized for multi-site field visit / transfer / client site deployment"
+                        value={assignNotes}
+                        onChange={(e) => setAssignNotes(e.target.value)}
+                        disabled={isSavingAssignments}
+                      />
+                    </div>
+                  )}
+                </div>
+
+                <div className="hrms-modal-footer">
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={() => setAssignModalOpen(false)}
+                    disabled={isSavingAssignments}
+                  >
+                    {canManageLocationAssignments ? "Cancel" : "Close"}
+                  </button>
+                  {canManageLocationAssignments && (
+                    <button
+                      type="submit"
+                      className="btn btn-primary"
+                      disabled={isSavingAssignments || !assignPrimaryId}
+                    >
+                      {isSavingAssignments ? "Saving..." : "Save Locations"}
+                    </button>
+                  )}
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* ================================================================= */}
+        {/* MODAL: LOCATION ASSIGNMENT AUDIT TRAIL                            */}
+        {/* ================================================================= */}
+        {historyModalOpen && historyEmp && (
+          <div className="hrms-modal-backdrop" onClick={() => setHistoryModalOpen(false)}>
+            <div className="hrms-modal-card" style={{ maxWidth: "680px" }} onClick={(e) => e.stopPropagation()}>
+              <div className="hrms-modal-header">
+                <div>
+                  <h3 style={{ margin: 0, fontSize: "16px" }}>Location Assignment History</h3>
+                  <div style={{ fontSize: "12px", color: "var(--color-muted, #64748b)", marginTop: "2px" }}>
+                    Audit log for {historyEmp.employee_name} ({historyEmp.employee_code || historyEmp.employee_id})
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  className="hrms-modal-close-btn"
+                  onClick={() => setHistoryModalOpen(false)}
+                >
+                  ✕
+                </button>
+              </div>
+
+              <div className="hrms-modal-body" style={{ maxHeight: "68vh", overflowY: "auto", padding: "20px" }}>
+                {loadingHistory ? (
+                  <div style={{ textAlign: "center", padding: "30px", color: "#64748b" }}>
+                    Loading audit history...
+                  </div>
+                ) : historyItems.length === 0 ? (
+                  <div style={{ textAlign: "center", padding: "30px", color: "#64748b" }}>
+                    No location assignment events recorded for this employee yet.
+                  </div>
+                ) : (
+                  <div className="hrms-table-container">
+                    <table className="hrms-table">
+                      <thead>
+                        <tr>
+                          <th>Timestamp</th>
+                          <th>Action</th>
+                          <th>Office Location</th>
+                          <th>Performed By</th>
+                          <th>Notes</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {historyItems.map((item) => {
+                          let badgeBg = "#eff6ff";
+                          let badgeColor = "#1d4ed8";
+                          let actionLabel = item.action;
+                          if (item.action === "ASSIGN_PRIMARY") {
+                            badgeBg = "#f0fdf4";
+                            badgeColor = "#15803d";
+                            actionLabel = "★ Assigned Primary";
+                          } else if (item.action === "ASSIGN_ADDITIONAL") {
+                            badgeBg = "#e0f2fe";
+                            badgeColor = "#0369a1";
+                            actionLabel = "+ Assigned Additional";
+                          } else if (item.action === "CHANGE_PRIMARY") {
+                            badgeBg = "#fef3c7";
+                            badgeColor = "#b45309";
+                            actionLabel = "↻ Changed Primary";
+                          } else if (item.action === "REMOVE") {
+                            badgeBg = "#fff1f2";
+                            badgeColor = "#be123c";
+                            actionLabel = "✕ Removed";
+                          }
+
+                          return (
+                            <tr key={item.id}>
+                              <td style={{ fontSize: "12px", whiteSpace: "nowrap" }}>
+                                {new Date(item.created_at).toLocaleString()}
+                              </td>
+                              <td>
+                                <span
+                                  style={{
+                                    display: "inline-block",
+                                    background: badgeBg,
+                                    color: badgeColor,
+                                    padding: "2px 8px",
+                                    borderRadius: "4px",
+                                    fontWeight: 600,
+                                    fontSize: "11.5px",
+                                  }}
+                                >
+                                  {actionLabel}
+                                </span>
+                              </td>
+                              <td style={{ fontWeight: 600, fontSize: "12.5px" }}>
+                                {item.location_name}
+                              </td>
+                              <td style={{ fontSize: "12px", color: "#475569" }}>
+                                {item.performed_by_name || item.performed_by || "System"}
+                              </td>
+                              <td style={{ fontSize: "11.5px", color: "#64748b", maxWidth: "160px" }}>
+                                {item.notes || "—"}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+
+              <div className="hrms-modal-footer">
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => setHistoryModalOpen(false)}
+                >
+                  Close
+                </button>
+              </div>
             </div>
           </div>
         )}

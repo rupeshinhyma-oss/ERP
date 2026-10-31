@@ -28,6 +28,7 @@ NEW_PERMISSIONS = [
     ("hrms.update", "hrms", "hrms", "update", "ALL", "Edit HRMS records, leave types, holidays, and policies."),
     ("hrms.approve", "hrms", "hrms", "approve", "ALL", "Approve or reject leave requests and attendance regularizations."),
     ("hrms.manage", "hrms", "hrms", "manage", "ALL", "Full administrative control over HRMS setup, leave types, adjustments, and approvals."),
+    ("hrms.location_assignments.manage", "hrms", "hrms-setup", "manage", "ALL", "Assign primary and additional office locations to employees for multi-location attendance."),
 ]
 
 
