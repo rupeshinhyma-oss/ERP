@@ -14,6 +14,27 @@ import { useNavigate, useLocation } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
 import { Breadcrumb } from "@/components/Breadcrumb";
 import { apiGet, apiPost, apiPut, apiPatch, apiDownloadBlob, errorMessage, API_ORIGIN } from "@/lib/api";
+function resolveImageUrl(url: string | null | undefined): string {
+  if (!url) return "";
+  let clean = url.trim();
+  if (
+    (clean.startsWith('"') && clean.endsWith('"')) ||
+    (clean.startsWith("'") && clean.endsWith("'"))
+  ) {
+    clean = clean.slice(1, -1).trim();
+  }
+  if (!clean) return "";
+  if (/^https?:\/\/[^/]*\.(test|invalid|example)(?:[:/]|$)/i.test(clean)) {
+    return "";
+  }
+  if (clean.startsWith("data:")) {
+    return clean;
+  }
+  if (clean.startsWith("http://") || clean.startsWith("https://")) {
+    return encodeURI(clean);
+  }
+  return encodeURI(`${API_ORIGIN}${clean.startsWith("/") ? "" : "/"}${clean}`);
+}
 import { Auth } from "@/lib/auth";
 import { useToast } from "@/lib/toast";
 import { LeadImportPage } from "./LeadImportPage";
@@ -7851,6 +7872,60 @@ export function CrmLeadsPage() {
                                         </div>
                                       );
                                     })()}
+                                    {/* Gallery Photo Preview & Selection */}
+                                    <div style={{ display: "flex", gap: "0.5rem", alignItems: "center", marginTop: "0.35rem" }}>
+                                      {item.include_images && resolveImageUrl(item.selected_image_url) ? (
+                                        <img
+                                          src={resolveImageUrl(item.selected_image_url)}
+                                          alt={item.product_name}
+                                          style={{ width: "32px", height: "32px", objectFit: "cover", borderRadius: "0.25rem", border: "1px solid #cbd5e1", backgroundColor: "#f8fafc", flexShrink: 0 }}
+                                          onError={(e) => { (e.currentTarget as HTMLElement).style.display = "none"; }}
+                                        />
+                                      ) : (
+                                        <div style={{ width: "32px", height: "32px", borderRadius: "0.25rem", border: "1px dashed #cbd5e1", backgroundColor: "#f8fafc", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "0.55rem", color: "#94a3b8", flexShrink: 0 }}>
+                                          No Img
+                                        </div>
+                                      )}
+                                      <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" }}>
+                                        {item.available_images && item.available_images.length > 0 ? (
+                                          <>
+                                            <label style={{ display: "inline-flex", alignItems: "center", gap: "0.25rem", fontSize: "0.75rem", color: "#334155", cursor: "pointer" }}>
+                                              <input
+                                                type="checkbox"
+                                                checked={item.include_images}
+                                                onChange={(e) => {
+                                                  const checked = e.target.checked;
+                                                  setQuoteLineItems((prev) =>
+                                                    prev.map((it, i) => (i === idx ? { ...it, include_images: checked, selected_image_url: checked ? (it.selected_image_url || it.available_images[0]) : "" } : it))
+                                                  );
+                                                }}
+                                              />
+                                              Include Photo
+                                            </label>
+                                            {item.available_images.length > 1 && item.include_images && (
+                                              <select
+                                                value={item.selected_image_url}
+                                                onChange={(e) => {
+                                                  const u = e.target.value;
+                                                  setQuoteLineItems((prev) =>
+                                                    prev.map((it, i) => (i === idx ? { ...it, selected_image_url: u } : it))
+                                                  );
+                                                }}
+                                                style={{ fontSize: "0.7rem", padding: "0.15rem 0.35rem", borderRadius: "0.25rem", border: "1px solid #cbd5e1", backgroundColor: "#fff" }}
+                                              >
+                                                {item.available_images.map((imgUrl, imgIdx) => (
+                                                  <option key={imgIdx} value={imgUrl}>
+                                                    Photo {imgIdx + 1}
+                                                  </option>
+                                                ))}
+                                              </select>
+                                            )}
+                                          </>
+                                        ) : (
+                                          <span style={{ fontSize: "0.6875rem", color: "#94a3b8", fontStyle: "italic" }}>No photo in catalog</span>
+                                        )}
+                                      </div>
+                                    </div>
                                     <input
                                       type="text"
                                       placeholder="Optional quotation-specific description / notes..."
@@ -8502,19 +8577,35 @@ export function CrmLeadsPage() {
                               <td style={{ padding: "0.5rem 0.75rem", color: "#64748b" }}>{it.position}</td>
                               <td style={{ padding: "0.5rem 0.75rem" }}>
                                 <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
-                                  {(() => {
-                                    const validItemImg = it.include_images ? resolveValidCrmImageUrl(it.selected_image_url) : null;
-                                    return validItemImg ? (
-                                      <img
-                                        src={validItemImg}
-                                        alt={it.product_name}
-                                        onError={(e) => {
-                                          e.currentTarget.style.display = "none";
-                                        }}
-                                        style={{ width: "36px", height: "36px", objectFit: "cover", borderRadius: "0.25rem", border: "1px solid #e2e8f0" }}
-                                      />
-                                    ) : null;
-                                  })()}
+                                  {it.include_images && resolveImageUrl(it.selected_image_url) ? (
+                                    <img
+                                      src={resolveImageUrl(it.selected_image_url)}
+                                      alt={it.product_name}
+                                      style={{ width: "38px", height: "38px", objectFit: "cover", borderRadius: "0.25rem", border: "1px solid #cbd5e1", backgroundColor: "#f8fafc", flexShrink: 0 }}
+                                      onError={(e) => { (e.currentTarget as HTMLElement).style.display = "none"; }}
+                                    />
+                                  ) : (
+                                    <div
+                                      style={{
+                                        width: "38px",
+                                        height: "38px",
+                                        borderRadius: "0.25rem",
+                                        border: "1px dashed #cbd5e1",
+                                        backgroundColor: "#f8fafc",
+                                        display: "flex",
+                                        alignItems: "center",
+                                        justifyContent: "center",
+                                        fontSize: "0.6rem",
+                                        color: "#94a3b8",
+                                        flexShrink: 0,
+                                        textAlign: "center",
+                                        lineHeight: "1",
+                                      }}
+                                      title="No photograph attached"
+                                    >
+                                      No Img
+                                    </div>
+                                  )}
                                   <div>
                                     <div style={{ fontWeight: 600, color: "#0f172a" }}>
                                       {it.product_name}

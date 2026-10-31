@@ -1,12 +1,14 @@
 """
 CRM Sales Quotation PDF Generation Engine.
 
-Produces clean, professional, multi-page ERP Quotation documents using ReportLab.
+Produces clean, professional, multi-page B2B ERP Quotation documents using ReportLab.
 - Exact snapshot preservation (never recalculates from live Product Master).
+- 8-column itemized table with actual Product Gallery photograph thumbnails and clickable hyperlinks.
 - Multi-page layout with repeating table headers and 'Page X of Y' pagination.
 - Clean typography and auto-wrapping to prevent clipping or overlapping.
 - Official Inhyma ERP company details, logo asset, GSTIN, and saved commercial terms.
 - Authoritative Customer/Company resolution (no internal labels or invented warranties).
+- Authorized signatory block and robust broken-image fallbacks.
 """
 
 from __future__ import annotations
@@ -14,6 +16,7 @@ from __future__ import annotations
 import base64
 import io
 import os
+import urllib.request
 from datetime import datetime
 from decimal import Decimal
 from typing import Any
@@ -26,6 +29,7 @@ from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.pdfgen import canvas
 from reportlab.platypus import (
+    Flowable,
     HRFlowable,
     Image,
     KeepTogether,
@@ -35,6 +39,13 @@ from reportlab.platypus import (
     Table,
     TableStyle,
 )
+
+from app.core.logging import get_logger
+
+logger = get_logger(__name__)
+
+# In-memory image cache for remote URLs to avoid redundant network round-trips
+_REMOTE_IMAGE_CACHE: dict[str, bytes] = {}
 
 
 class NumberedCanvas(canvas.Canvas):
@@ -77,7 +88,7 @@ class NumberedCanvas(canvas.Canvas):
         self.drawString(
             36,
             18,
-            f"{comp_title.upper()} — Official Sales Quotation",
+            f"{comp_title.upper()} - Official Sales Quotation",
         )
 
         # Center quotation reference
@@ -92,6 +103,175 @@ class NumberedCanvas(canvas.Canvas):
         self.restoreState()
 
 
+class ClickableThumbnail(Flowable):
+    """
+    Renders an aspect-ratio-preserved thumbnail centered inside a fixed-size
+    subtle container, with optional clickable hyperlink annotation to the original image.
+    """
+
+    def __init__(
+        self,
+        img_source: Any,
+        width: float,
+        height: float,
+        box_width: float = 154.0,
+        box_height: float = 114.0,
+        link_url: str | None = None,
+    ):
+        super().__init__()
+        self.width = box_width
+        self.height = box_height
+        self.img_w = width
+        self.img_h = height
+        self.img = Image(img_source, width=width, height=height)
+        self.link_url = link_url
+
+    def wrap(self, availWidth: float, availHeight: float) -> tuple[float, float]:
+        return self.width, self.height
+
+    def draw(self) -> None:
+        self.canv.saveState()
+        # Light grey background with crisp rounded border
+        self.canv.setStrokeColor(colors.HexColor("#e2e8f0"))
+        self.canv.setLineWidth(0.5)
+        self.canv.setFillColor(colors.HexColor("#f8fafc"))
+        self.canv.roundRect(0, 0, self.width, self.height, 2, fill=1, stroke=1)
+
+        # Center the scaled image within the thumbnail box
+        off_x = max(0.0, (self.width - self.img_w) / 2.0)
+        off_y = max(0.0, (self.height - self.img_h) / 2.0)
+        self.img.drawOn(self.canv, off_x, off_y)
+
+        # Add clickable hyperlink annotation if valid public HTTP/HTTPS URL
+        if self.link_url and (self.link_url.startswith("http://") or self.link_url.startswith("https://")):
+            self.canv.linkURL(self.link_url, (0, 0, self.width, self.height), relative=1)
+
+        self.canv.restoreState()
+
+
+class PlaceholderThumbnail(Flowable):
+    """
+    Renders an elegant, non-intrusive placeholder box when a product has no photograph
+    or if the photograph is inaccessible (when explicitly enabled).
+    """
+
+    def __init__(self, width: float = 154.0, height: float = 114.0):
+        super().__init__()
+        self.width = width
+        self.height = height
+
+    def wrap(self, availWidth: float, availHeight: float) -> tuple[float, float]:
+        return self.width, self.height
+
+    def draw(self) -> None:
+        self.canv.saveState()
+        self.canv.setStrokeColor(colors.HexColor("#e2e8f0"))
+        self.canv.setLineWidth(0.5)
+        self.canv.setFillColor(colors.HexColor("#f8fafc"))
+        self.canv.roundRect(0, 0, self.width, self.height, 2, fill=1, stroke=1)
+        self.canv.setFont("Helvetica", 7.5)
+        self.canv.setFillColor(colors.HexColor("#94a3b8"))
+        self.canv.drawCentredString(self.width / 2.0, self.height / 2.0 - 2, "No Image")
+        self.canv.restoreState()
+
+
+def resolve_product_image_flowable(
+    img_ref: str | None,
+    max_w: float = 150.0,
+    max_h: float = 110.0,
+    box_w: float = 154.0,
+    box_h: float = 114.0,
+    fallback_to_placeholder: bool = False,
+) -> Flowable | None:
+    """
+    Safely decode and resolve a product photograph into an aspect-ratio-preserved thumbnail.
+    Handles base64 data URIs, local files, and remote URLs.
+    Never fails or breaks PDF generation on broken or missing images.
+    Returns None on missing or broken images by default to avoid ugly placeholders.
+    """
+    if not img_ref or not str(img_ref).strip():
+        return PlaceholderThumbnail(box_w, box_h) if fallback_to_placeholder else None
+
+    clean = str(img_ref).strip()
+    raw_bytes: bytes | None = None
+    link_url: str | None = None
+
+    try:
+        from PIL import Image as PILImage
+
+        if clean.startswith("data:"):
+            # Base64 data URI
+            if "," in clean:
+                _, b64 = clean.split(",", 1)
+                raw_bytes = base64.b64decode(b64)
+            else:
+                raw_bytes = base64.b64decode(clean)
+        elif clean.startswith("http://") or clean.startswith("https://"):
+            # Remote public URL
+            link_url = clean
+            if clean in _REMOTE_IMAGE_CACHE:
+                raw_bytes = _REMOTE_IMAGE_CACHE[clean]
+            else:
+                try:
+                    req = urllib.request.Request(clean, headers={"User-Agent": "Inhyma-ERP-PDF/1.0"})
+                    with urllib.request.urlopen(req, timeout=3.0) as resp:
+                        if resp.status == 200:
+                            raw_bytes = resp.read()
+                            _REMOTE_IMAGE_CACHE[clean] = raw_bytes
+                except Exception as http_err:
+                    logger.debug("Could not fetch remote product image: %s", http_err)
+        else:
+            # Local filesystem path
+            clean_path = clean.split("?")[0].lstrip("/\\")
+            base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+            possible_paths = [
+                os.path.join(base_dir, clean_path),
+                os.path.join(base_dir, "uploads", clean_path),
+                os.path.join(base_dir, "..", clean_path),
+                os.path.join(os.getcwd(), clean_path),
+                os.path.join(os.getcwd(), "Inhyma_ERP", "backend", clean_path),
+                os.path.join(base_dir, "uploads", "products", os.path.basename(clean_path)),
+            ]
+            for p in possible_paths:
+                if os.path.isfile(p):
+                    try:
+                        with open(p, "rb") as f:
+                            raw_bytes = f.read()
+                        break
+                    except Exception:
+                        pass
+
+        if not raw_bytes:
+            return PlaceholderThumbnail(box_w, box_h) if fallback_to_placeholder else None
+
+        pil_img = PILImage.open(io.BytesIO(raw_bytes))
+        orig_w, orig_h = pil_img.size
+        if orig_w <= 0 or orig_h <= 0:
+            return PlaceholderThumbnail(box_w, box_h) if fallback_to_placeholder else None
+
+        # Proportional scaling preserving exact original aspect ratio
+        aspect = orig_w / orig_h
+        target_aspect = max_w / max_h
+        if aspect >= target_aspect:
+            w = max_w
+            h = w / aspect
+        else:
+            h = max_h
+            w = h * aspect
+
+        return ClickableThumbnail(
+            img_source=io.BytesIO(raw_bytes),
+            width=w,
+            height=h,
+            box_width=box_w,
+            box_height=box_h,
+            link_url=link_url,
+        )
+    except Exception as exc:
+        logger.debug("Error processing product image: %s", exc)
+        return PlaceholderThumbnail(box_w, box_h) if fallback_to_placeholder else None
+
+
 def _format_currency(amount: Any) -> str:
     try:
         val = Decimal(str(amount or 0))
@@ -102,7 +282,7 @@ def _format_currency(amount: Any) -> str:
 
 def _format_date(dt_val: Any) -> str:
     if not dt_val:
-        return "—"
+        return "-"
     if isinstance(dt_val, str):
         try:
             parsed = datetime.fromisoformat(dt_val.replace("Z", "+00:00"))
@@ -118,7 +298,7 @@ def _is_internal_placeholder(val: str | None) -> bool:
     if not val:
         return True
     s = val.strip().lower()
-    if s in {"", "-", "—", "n/a", "na", "none", "null", "undefined", "unassigned", "system", "no company", "customer"}:
+    if s in {"", "-", "-", "n/a", "na", "none", "null", "undefined", "unassigned", "system", "no company", "customer"}:
         return True
     internal_keywords = [
         "open lead only",
@@ -236,9 +416,12 @@ def generate_crm_quotation_pdf_bytes(
 ) -> bytes:
     """
     Generate an official Inhyma CRM Sales Quotation PDF from a saved quotation or revision snapshot.
+    Integrates Product Gallery photograph thumbnails with clickable hyperlinks, 8-column layout,
+    repeating table headers, and professional corporate styling.
 
     Args:
         snapshot_data: Serialized quotation dictionary containing header fields and line items.
+        company_branding: Organization Master details from ERP settings.
 
     Returns:
         bytes: Raw PDF document content.
@@ -255,8 +438,6 @@ def generate_crm_quotation_pdf_bytes(
         topMargin=32,
         bottomMargin=42,
     )
-
-    styles = getSampleStyleSheet()
 
     # Base typography styles
     style_brand = ParagraphStyle(
@@ -302,7 +483,7 @@ def generate_crm_quotation_pdf_bytes(
         fontName="Helvetica-Bold",
         fontSize=8,
         leading=11,
-        textColor=colors.HexColor("#1e293b"),
+        textColor=colors.HexColor("#0f172a"),
     )
     style_box_label = ParagraphStyle(
         "BoxLabel",
@@ -332,6 +513,14 @@ def generate_crm_quotation_pdf_bytes(
         leading=10,
         textColor=colors.white,
     )
+    style_th_c = ParagraphStyle(
+        "TableHeaderC",
+        fontName="Helvetica-Bold",
+        fontSize=7.5,
+        leading=10,
+        textColor=colors.white,
+        alignment=TA_CENTER,
+    )
     style_th_r = ParagraphStyle(
         "TableHeaderR",
         fontName="Helvetica-Bold",
@@ -347,12 +536,27 @@ def generate_crm_quotation_pdf_bytes(
         leading=10,
         textColor=colors.HexColor("#0f172a"),
     )
+    style_td_c = ParagraphStyle(
+        "TableBodyC",
+        fontName="Helvetica",
+        fontSize=7.5,
+        leading=10,
+        textColor=colors.HexColor("#0f172a"),
+        alignment=TA_CENTER,
+    )
     style_td_bold = ParagraphStyle(
         "TableBodyBold",
         fontName="Helvetica-Bold",
         fontSize=8,
         leading=10.5,
         textColor=colors.HexColor("#0f172a"),
+    )
+    style_td_code = ParagraphStyle(
+        "TableBodyCode",
+        fontName="Helvetica-Bold",
+        fontSize=7,
+        leading=9,
+        textColor=colors.HexColor("#0284c7"),
     )
     style_td_r = ParagraphStyle(
         "TableBodyR",
@@ -365,8 +569,8 @@ def generate_crm_quotation_pdf_bytes(
     style_grand_total = ParagraphStyle(
         "GrandTotal",
         fontName="Helvetica-Bold",
-        fontSize=9,
-        leading=12,
+        fontSize=9.5,
+        leading=12.5,
         textColor=colors.HexColor("#1d4ed8"),
         alignment=TA_RIGHT,
     )
@@ -417,23 +621,21 @@ def generate_crm_quotation_pdf_bytes(
     NumberedCanvas.current_company_name = org_comp_name
 
     logo_flowable = get_logo_flowable(logo_data=org_logo_data, logo_url=org_logo_url, max_height=50.0, max_width=180.0)
+    if not logo_flowable:
+        logo_flowable = get_inhyma_logo_flowable()
 
     left_header_items: list[Any] = []
     right_header_items: list[Any] = []
 
     if logo_flowable:
-        # Exactly ONE company logo rendered on left; no duplicate brand text beneath it
         left_header_items.append(logo_flowable)
-        # Render exactly ONE company name at the top of the details column
         right_header_items.append(Paragraph(f"<b>{org_comp_name.upper()}</b>", style_company_name_hdr))
         if org_legal_name and org_legal_name.lower() != org_comp_name.lower():
             right_header_items.append(Paragraph(f"<font color='#64748b'>({org_legal_name})</font>", style_company_info))
     else:
-        # No logo configured: render company name on left
         left_header_items.append(Paragraph(f"<b>{org_comp_name.upper()}</b>", style_brand))
         if org_legal_name and org_legal_name.lower() != org_comp_name.lower():
             left_header_items.append(Paragraph(f"<font color='#64748b'>({org_legal_name})</font>", style_tagline))
-        # Do not repeat company name on right when already on left
 
     addr_parts = [p for p in [org_address, org_city] if p]
     if addr_parts:
@@ -504,7 +706,7 @@ def generate_crm_quotation_pdf_bytes(
     # 3. Quotation Details & Customer / Bill To Box (2 Columns)
     # -------------------------------------------------------------------------
     hdr = snapshot_data.get("header") if isinstance(snapshot_data.get("header"), dict) else {}
-    q_num = snapshot_data.get("quotation_number") or hdr.get("quotation_number") or "—"
+    q_num = snapshot_data.get("quotation_number") or hdr.get("quotation_number") or "-"
     NumberedCanvas.current_quotation_number = q_num
     q_ver = snapshot_data.get("version") or hdr.get("version") or 1
     q_date = _format_date(snapshot_data.get("quotation_date") or hdr.get("quotation_date"))
@@ -528,8 +730,7 @@ def generate_crm_quotation_pdf_bytes(
         [Paragraph("Version / Status:", style_box_label), Paragraph(f"v{q_ver} ({q_status})", style_box_val)],
         [Paragraph("Quotation Date:", style_box_label), Paragraph(q_date, style_box_val)],
     ]
-    # Include Validity Date ONLY when provided
-    if q_valid and q_valid != "—":
+    if q_valid and q_valid != "-":
         meta_content_left.append([Paragraph("Valid Until:", style_box_label), Paragraph(q_valid, style_box_val)])
     meta_content_left.append([Paragraph("Currency:", style_box_label), Paragraph(q_curr, style_box_val)])
     prepared_by = snapshot_data.get("created_by_name") or hdr.get("created_by_name") or "Inhyma Sales"
@@ -540,43 +741,42 @@ def generate_crm_quotation_pdf_bytes(
         [Paragraph("<b>CUSTOMER / BILL TO</b>", style_box_section_hdr), ""],
     ]
 
-    has_company = comp_name and comp_name != "—" and not _is_internal_placeholder(comp_name)
+    has_company = comp_name and comp_name != "-" and not _is_internal_placeholder(comp_name)
 
     if has_company:
         meta_content_right.append([Paragraph("Company Name:", style_box_label), Paragraph(f"<b>{comp_name}</b>", style_box_val_bold)])
 
-        if cust_name and cust_name != "—" and not _is_internal_placeholder(cust_name):
+        if cust_name and cust_name != "-" and not _is_internal_placeholder(cust_name):
             desig_part = f" ({cust_desig})" if cust_desig else ""
             meta_content_right.append([Paragraph("Contact Person:", style_box_label), Paragraph(f"{cust_name}{desig_part}", style_box_val)])
         elif cust_desig:
             meta_content_right.append([Paragraph("Designation:", style_box_label), Paragraph(cust_desig, style_box_val)])
 
-        if cust_addr and cust_addr != "—":
+        if cust_addr and cust_addr != "-":
             meta_content_right.append([Paragraph("Billing Address:", style_box_label), Paragraph(cust_addr, style_box_val)])
 
-        if cust_gstin and cust_gstin != "—":
+        if cust_gstin and cust_gstin != "-":
             meta_content_right.append([Paragraph("GSTIN:", style_box_label), Paragraph(f"<b>{cust_gstin}</b>", style_box_val)])
 
-        if cust_phone and cust_phone != "—":
+        if cust_phone and cust_phone != "-":
             meta_content_right.append([Paragraph("Contact Phone:", style_box_label), Paragraph(cust_phone, style_box_val)])
 
-        if cust_email and cust_email != "—":
+        if cust_email and cust_email != "-":
             meta_content_right.append([Paragraph("Contact Email:", style_box_label), Paragraph(cust_email, style_box_val)])
     else:
-        # Lead not linked to a company: display actual contact as customer, omit company section
-        clean_cust_name = cust_name if (cust_name and cust_name != "—" and not _is_internal_placeholder(cust_name)) else "—"
+        clean_cust_name = cust_name if (cust_name and cust_name != "-" and not _is_internal_placeholder(cust_name)) else "-"
         meta_content_right.append([Paragraph("Customer Name:", style_box_label), Paragraph(f"<b>{clean_cust_name}</b>", style_box_val_bold)])
 
-        if cust_addr and cust_addr != "—":
+        if cust_addr and cust_addr != "-":
             meta_content_right.append([Paragraph("Billing Address:", style_box_label), Paragraph(cust_addr, style_box_val)])
 
-        if cust_gstin and cust_gstin != "—":
+        if cust_gstin and cust_gstin != "-":
             meta_content_right.append([Paragraph("GSTIN:", style_box_label), Paragraph(f"<b>{cust_gstin}</b>", style_box_val)])
 
-        if cust_phone and cust_phone != "—":
+        if cust_phone and cust_phone != "-":
             meta_content_right.append([Paragraph("Contact Phone:", style_box_label), Paragraph(cust_phone, style_box_val)])
 
-        if cust_email and cust_email != "—":
+        if cust_email and cust_email != "-":
             meta_content_right.append([Paragraph("Contact Email:", style_box_label), Paragraph(cust_email, style_box_val)])
 
     t_left = Table(meta_content_left, colWidths=[85, 165])
@@ -619,19 +819,20 @@ def generate_crm_quotation_pdf_bytes(
     story.append(Spacer(1, 8))
 
     # -------------------------------------------------------------------------
-    # 4. Product & Line Items Table (with Repeating Header for Multi-Page)
+    # 4. Product & Line Items Table (8 Columns with Image & Repeating Header)
     # -------------------------------------------------------------------------
-    # Widths sum = 24 + 200 + 46 + 68 + 48 + 44 + 93.27 = 523.27 pt
-    col_widths = [24, 200, 46, 68, 48, 44, 93.27]
+    # Total width: 16 + 166 + 135.27 + 32 + 56 + 28 + 30 + 60 = 523.27 pt
+    col_widths = [16, 166, 135.27, 32, 56, 28, 30, 60]
 
     table_rows: list[list[Any]] = [
         [
             Paragraph("Sr.", style_th),
+            Paragraph("Image", style_th_c),
             Paragraph("Product Description & Specifications", style_th),
             Paragraph("Qty", style_th_r),
             Paragraph("Unit Price", style_th_r),
-            Paragraph("Discount", style_th_r),
-            Paragraph("Tax Rate", style_th_r),
+            Paragraph("Disc.", style_th_r),
+            Paragraph("GST %", style_th_r),
             Paragraph("Line Total", style_th_r),
         ]
     ]
@@ -641,11 +842,17 @@ def generate_crm_quotation_pdf_bytes(
         item_paragraphs: list[Any] = []
         p_name = it.get("product_name") or "Product"
         p_code = it.get("product_code")
-        header_text = f"<b>{xml_escape(str(p_name))}</b>" + (f" <font color='#475569'>({xml_escape(str(p_code))})</font>" if p_code else "")
+
+        header_text = f"<b>{xml_escape(str(p_name))}</b>"
         item_paragraphs.append(Paragraph(header_text, style_td_bold))
 
+        if p_code and p_code.strip():
+            code_badge = f"<font color='#0284c7'><b>Code:</b> {xml_escape(p_code.strip())}</font>"
+            item_paragraphs.append(Paragraph(code_badge, style_td_code))
+
         desc = it.get("description")
-        if desc and desc.strip() and desc.strip() != p_name.strip():
+        if desc and desc.strip() and desc.strip().lower() != p_name.strip().lower():
+            item_paragraphs.append(Spacer(1, 1))
             item_paragraphs.append(Paragraph(xml_escape(desc.strip()), style_td))
 
         include_specs = it.get("include_specifications", True)
@@ -690,28 +897,46 @@ def generate_crm_quotation_pdf_bytes(
             safe_demo = xml_escape(clean_demo, {'"': "&quot;"})
             if clean_demo.startswith("http://") or clean_demo.startswith("https://"):
                 item_paragraphs.append(
-                    Paragraph(f'<b>Ref / Demo:</b> <a href="{safe_demo}" color="#0061f2"><u>{xml_escape(clean_demo)}</u></a>', style_td_link)
+                    Paragraph(f'<b>Demo / Ref:</b> <a href="{safe_demo}" color="#0284c7"><u>{xml_escape(clean_demo)}</u></a>', style_td_link)
                 )
             else:
-                item_paragraphs.append(Paragraph(f"<b>Ref / Demo:</b> {xml_escape(clean_demo)}", style_td_spec))
+                item_paragraphs.append(Paragraph(f"<b>Demo / Ref:</b> <font color='#0284c7'><u>{xml_escape(clean_demo)}</u></font>", style_td_spec))
+
+        # Thumbnail flowable (target ~150x110 pt, centered in cell, no broken placeholder)
+        img_url = it.get("selected_image_url")
+        include_img = it.get("include_images", True)
+        if include_img and img_url:
+            img_flowable = resolve_product_image_flowable(
+                img_url,
+                max_w=150.0,
+                max_h=110.0,
+                box_w=154.0,
+                box_h=114.0,
+                fallback_to_placeholder=False,
+            )
+        else:
+            img_flowable = None
+
+        img_cell = img_flowable if img_flowable is not None else Paragraph("-", style_td_c)
 
         qty_val = it.get("quantity", 1)
         uom_val = it.get("uom", "Nos")
         try:
             q_dec = Decimal(str(qty_val))
-            qty_str = f"{int(q_dec) if q_dec == int(q_dec) else q_dec} {uom_val}"
+            qty_str = f"{int(q_dec) if q_dec == int(q_dec) else q_dec}<br/><font color='#64748b' size='6.5'>{uom_val}</font>"
         except Exception:
             qty_str = f"{qty_val} {uom_val}"
 
         u_price_str = _format_currency(it.get("unit_price", 0))
         u_disc = Decimal(str(it.get("unit_discount", 0) or 0))
-        u_disc_str = _format_currency(u_disc) if u_disc > 0 else "—"
+        u_disc_str = _format_currency(u_disc) if u_disc > 0 else "-"
         tax_pct = Decimal(str(it.get("tax_rate", 0) or 0))
         tax_str = f"{tax_pct}%" if tax_pct > 0 else "0%"
         total_str = _format_currency(it.get("total_amount", 0))
 
         table_rows.append([
-            Paragraph(str(idx), style_td),
+            Paragraph(str(idx), style_td_c),
+            img_cell,
             item_paragraphs,
             Paragraph(qty_str, style_td_r),
             Paragraph(u_price_str, style_td_r),
@@ -725,13 +950,16 @@ def generate_crm_quotation_pdf_bytes(
         TableStyle([
             ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0f172a")),
             ("ALIGN", (0, 0), (-1, 0), "CENTER"),
-            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("VALIGN", (0, 0), (-1, 0), "MIDDLE"),
+            ("VALIGN", (0, 1), (-1, -1), "TOP"),
+            ("VALIGN", (1, 1), (1, -1), "MIDDLE"),
+            ("ALIGN", (1, 1), (1, -1), "CENTER"),
             ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#e2e8f0")),
             ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f8fafc")]),
             ("TOPPADDING", (0, 0), (-1, -1), 4),
             ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
-            ("LEFTPADDING", (0, 0), (-1, -1), 4),
-            ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+            ("LEFTPADDING", (0, 0), (-1, -1), 2.5),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 2.5),
         ])
     )
     story.append(items_table)
@@ -783,7 +1011,7 @@ def generate_crm_quotation_pdf_bytes(
     story.append(Spacer(1, 8))
 
     # -------------------------------------------------------------------------
-    # 6. Commercial Terms & Notes (Include ONLY Saved Content — No Invented Terms)
+    # 6. Commercial Terms, Notes & Authorized Signatory Block
     # -------------------------------------------------------------------------
     terms_paragraphs: list[Any] = []
 
@@ -803,7 +1031,8 @@ def generate_crm_quotation_pdf_bytes(
     if tc and str(tc).strip():
         terms_paragraphs.append(Paragraph(f"<b>Commercial Terms:</b> {str(tc).strip()}", style_notes))
 
-    # Display terms box ONLY if user-entered or saved terms exist
+    terms_signatory_blocks: list[Any] = []
+
     if terms_paragraphs:
         box_content: list[Any] = [
             Paragraph("<b>TERMS & CONDITIONS / NOTES</b>", style_box_section_hdr),
@@ -821,7 +1050,35 @@ def generate_crm_quotation_pdf_bytes(
                 ("RIGHTPADDING", (0, 0), (-1, -1), 8),
             ])
         )
-        story.append(KeepTogether(terms_box))
+        terms_signatory_blocks.append(terms_box)
+        terms_signatory_blocks.append(Spacer(1, 10))
+
+    # Authorized Signatory Block
+    signatory_table = Table(
+        [[
+            "",
+            [
+                Paragraph(f"For <b>{org_comp_name.upper()}</b>", style_notes),
+                Spacer(1, 26),
+                HRFlowable(width="100%", thickness=0.5, color=colors.HexColor("#94a3b8"), hAlign="LEFT"),
+                Spacer(1, 2),
+                Paragraph("<b>Authorized Signatory</b>", style_notes),
+            ],
+        ]],
+        colWidths=[353.27, 170],
+    )
+    signatory_table.setStyle(
+        TableStyle([
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 0),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+            ("TOPPADDING", (0, 0), (-1, -1), 0),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+        ])
+    )
+    terms_signatory_blocks.append(signatory_table)
+
+    story.append(KeepTogether(terms_signatory_blocks))
 
     # Build PDF with dynamic NumberedCanvas
     doc.build(story, canvasmaker=NumberedCanvas)

@@ -582,6 +582,60 @@ class CrmQuotationService:
 
         return f"{prefix}-{next_seq:04d}"
 
+    @staticmethod
+    def _normalize_image_reference(selected_img: str | None, product: Product) -> str | None:
+        """
+        Normalize image reference to ensure compatibility with crm_quotation_items.selected_image_url (VARCHAR 1000).
+        - If selected_img is a storage path/URL (<= 1000 chars and not data:), keep as is.
+        - If selected_img is a photo index/tag (e.g. 'photo:0'), keep as is.
+        - If selected_img is a raw Base64 data URI (> 1000 chars), map it to 'photo:<index>' within product.images.
+        - If selected_img is None or empty and product.images exists, default to 'photo:0' or first storage URL.
+        """
+        if not selected_img or not str(selected_img).strip():
+            if product.images and len(product.images) > 0:
+                first = product.images[0]
+                if isinstance(first, str) and len(first) <= 1000 and not first.startswith("data:"):
+                    return first
+                return "photo:0"
+            return None
+
+        clean = str(selected_img).strip()
+        if clean.startswith("photo:") or clean.startswith("gallery:"):
+            return clean
+
+        if len(clean) <= 1000 and not clean.startswith("data:"):
+            return clean
+
+        # Large Base64 string: find index in product.images
+        if product.images:
+            for idx, img in enumerate(product.images):
+                if img == clean:
+                    return f"photo:{idx}"
+            # If not exact match, default to photo:0
+            if len(product.images) > 0:
+                return "photo:0"
+
+        # Fallback to prevent PostgreSQL StringDataRightTruncationError
+        return clean[:1000]
+
+    @staticmethod
+    def _resolve_image_reference(img_ref: str | None, product: Product | None) -> str | None:
+        """
+        Resolve a stored image reference (such as 'photo:0' or storage URL) to the full image URI.
+        """
+        if not img_ref or not str(img_ref).strip():
+            return None
+        clean = str(img_ref).strip()
+        if clean.startswith("photo:"):
+            try:
+                idx = int(clean.split(":", 1)[1])
+                if product and product.images and 0 <= idx < len(product.images):
+                    return product.images[idx]
+            except Exception:
+                pass
+            return None
+        return clean
+
     def _calculate_commercials(
         self,
         items_in: list[CrmQuotationItemIn],
@@ -639,13 +693,10 @@ class CrmQuotationService:
             tax_total += line_tax
             total_amount += line_total
 
-            # Product snapshot
+            # Product snapshot - normalize reference for storage compatibility (<1000 chars)
             img_to_include = None
             if item.include_images:
-                if item.selected_image_url:
-                    img_to_include = item.selected_image_url
-                elif product.images and len(product.images) > 0:
-                    img_to_include = product.images[0]
+                img_to_include = self._normalize_image_reference(item.selected_image_url, product)
 
             prod_pdf_link = _resolve_product_spec_pdf_link(product)
             effective_include_specs = True if prod_pdf_link else item.include_specifications
@@ -685,7 +736,10 @@ class CrmQuotationService:
         items_data = []
         is_draft_quote = (getattr(q, "status", "") or "").lower() == "draft"
         for it in q.items:
-            loaded_prod = it.product if "product" not in sa_inspect(it).unloaded else None
+            try:
+                loaded_prod = it.product if "product" not in sa_inspect(it).unloaded else None
+            except Exception:
+                loaded_prod = getattr(it, "product", None)
             prod_pdf = _resolve_product_spec_pdf_link(loaded_prod)
             spec_val = it.specification
             inc_specs = it.include_specifications
@@ -693,6 +747,9 @@ class CrmQuotationService:
                 spec_val = prod_pdf
                 inc_specs = True
             spec_doc_name = getattr(loaded_prod, "specification_doc_name", None) if loaded_prod else None
+            resolved_img = _sanitize_crm_image_url(
+                self._resolve_image_reference(it.selected_image_url, loaded_prod)
+            )
             items_data.append(
                 {
                     "position": it.position,
@@ -704,7 +761,7 @@ class CrmQuotationService:
                     "specification_doc_name": spec_doc_name,
                     "uom": it.uom,
                     "include_images": it.include_images,
-                    "selected_image_url": it.selected_image_url,
+                    "selected_image_url": resolved_img,
                     "include_specifications": inc_specs,
                     "demo_link": it.demo_link,
                     "quantity": float(it.quantity),
@@ -1115,13 +1172,19 @@ class CrmQuotationService:
         is_draft_quote = (getattr(q, "status", "") or "").lower() == "draft"
         items: list[CrmQuotationItemRead] = []
         for it in (q.items or []):
-            loaded_prod = it.product if "product" not in sa_inspect(it).unloaded else None
+            try:
+                loaded_prod = it.product if "product" not in sa_inspect(it).unloaded else None
+            except Exception:
+                loaded_prod = getattr(it, "product", None)
             prod_pdf = _resolve_product_spec_pdf_link(loaded_prod)
             spec_val = it.specification
             inc_specs = it.include_specifications
             if prod_pdf and (not spec_val or is_draft_quote):
                 spec_val = prod_pdf
                 inc_specs = True
+            resolved_img = _sanitize_crm_image_url(
+                self._resolve_image_reference(it.selected_image_url, loaded_prod)
+            )
             items.append(
                 CrmQuotationItemRead(
                     id=it.id,
@@ -1135,8 +1198,8 @@ class CrmQuotationService:
                     specification_doc_name=getattr(loaded_prod, "specification_doc_name", None) if loaded_prod else None,
                     specification_doc_url=getattr(loaded_prod, "specification_doc_url", None) if loaded_prod else None,
                     uom=it.uom,
-                    include_images=bool(it.include_images and _sanitize_crm_image_url(it.selected_image_url)),
-                    selected_image_url=_sanitize_crm_image_url(it.selected_image_url),
+                    include_images=bool(it.include_images and resolved_img),
+                    selected_image_url=resolved_img,
                     include_specifications=inc_specs,
                     demo_link=it.demo_link,
                     quantity=float(it.quantity),
