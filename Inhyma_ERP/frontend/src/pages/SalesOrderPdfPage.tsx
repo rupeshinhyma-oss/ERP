@@ -177,9 +177,12 @@ export function SalesOrderPdfPage() {
   const [bankDetails, setBankDetails] = useState<any>(null);
 
   useEffect(() => {
-    apiGet<any>("/masters/banks")
+    apiGet<any>("/masters/banks?status=active")
       .then((res) => {
-        const list = res?.data?.items || (Array.isArray(res?.data) ? res.data : []);
+        const rawList = res?.data?.items || (Array.isArray(res?.data) ? res.data : []);
+        const list = Array.isArray(rawList)
+          ? rawList.filter((b: any) => String(b?.status ?? "active").toLowerCase() !== "inactive")
+          : [];
         if (list.length > 0) {
           const matched = list.find((b: any) =>
             (currentOrder?.company_name && b.account_holder_name?.toLowerCase().includes(currentOrder.company_name.toLowerCase())) ||

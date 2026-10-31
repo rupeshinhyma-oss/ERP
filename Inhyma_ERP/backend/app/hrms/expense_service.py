@@ -193,6 +193,21 @@ class HrmsExpenseService:
                 detail="Category is required.",
             )
 
+        from app.hrms.models import HrmsExpenseCategory
+        cat_row = (
+            await self.db.execute(
+                select(HrmsExpenseCategory).where(
+                    func.lower(HrmsExpenseCategory.name) == payload.category.strip().lower(),
+                    HrmsExpenseCategory.deleted_at.is_(None),
+                )
+            )
+        ).scalars().first()
+        if cat_row is not None and not cat_row.is_active:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Expense category '{payload.category.strip()}' is inactive.",
+            )
+
         # Verify employee exists and is active
         emp = await self.db.get(User, employee_id)
         if not emp or not emp.is_active or emp.deleted_at is not None:

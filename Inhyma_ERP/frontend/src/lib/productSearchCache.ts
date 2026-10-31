@@ -14,6 +14,15 @@ let lastFetchedAt = 0;
 let inFlightFetch: Promise<CachedMasterProduct[]> | null = null;
 const CACHE_TTL_MS = 3 * 60 * 1000; // 3 minutes cache validity
 
+function isProductActive(item: any): boolean {
+  if (!item || typeof item !== "object") return false;
+  if (item.is_active === false) return false;
+  if (typeof item.status === "string" && item.status.trim().toLowerCase() === "inactive") {
+    return false;
+  }
+  return true;
+}
+
 /**
  * Instant synchronous client-side filter of cached master products (0ms).
  */
@@ -50,7 +59,8 @@ export async function prefetchMasterProducts(): Promise<CachedMasterProduct[]> {
   inFlightFetch = (async () => {
     try {
       const res = await apiGet<any[]>("/masters/products?page=1&page_size=100&status=active");
-      const items = res?.data || [];
+      const rawItems = res?.data || [];
+      const items = Array.isArray(rawItems) ? rawItems.filter(isProductActive) : [];
       if (Array.isArray(items) && items.length > 0) {
         const map = new Map<string, CachedMasterProduct>();
         for (const item of items) {
@@ -91,7 +101,8 @@ export async function fetchMasterProducts(
 
   try {
     const res = await apiGet<any[]>(url);
-    const items = res?.data || [];
+    const rawItems = res?.data || [];
+    const items = Array.isArray(rawItems) ? rawItems.filter(isProductActive) : null;
     if (Array.isArray(items)) {
       const map = new Map<string, CachedMasterProduct>();
       for (const p of productCache) {

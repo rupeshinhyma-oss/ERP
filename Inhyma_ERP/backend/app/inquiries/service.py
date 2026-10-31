@@ -101,7 +101,7 @@ class InquiryService:
     async def list_consignment_codes(self, *, buyer_id: uuid.UUID | None = None) -> list[ConsignmentCode]:
         if buyer_id is not None:
             return await self.consignment_code_repository.list_for_buyer(buyer_id)
-        return await self.consignment_code_repository.list(limit=1000)
+        return await self.consignment_code_repository.list(limit=1000, filters={"status": "active"})
 
     async def deactivate_consignment_code(self, consignment_code_id: uuid.UUID) -> ConsignmentCode:
         code = await self.consignment_code_repository.get_by_id(consignment_code_id)
@@ -133,11 +133,17 @@ class InquiryService:
         distinct action), the header is created transparently the first
         time an item is added against a given buyer+code pair.
         """
-        if await self.buyer_repository.get_by_id(buyer_id) is None:
+        from app.core.constants import RecordStatus
+        buyer = await self.buyer_repository.get_by_id(buyer_id)
+        if buyer is None:
             raise BadRequestException("The specified buyer does not exist.")
+        if not buyer.is_active:
+            raise BadRequestException("The specified buyer is inactive.")
         code = await self.consignment_code_repository.get_by_id(consignment_code_id)
         if code is None:
             raise BadRequestException("The specified consignment code does not exist.")
+        if code.status != RecordStatus.ACTIVE:
+            raise BadRequestException("The specified consignment code is inactive.")
         if code.buyer_id != buyer_id:
             raise BadRequestException("This consignment code does not belong to the specified buyer.")
 
@@ -222,9 +228,12 @@ class InquiryService:
         if quantity <= 0:
             raise BadRequestException("Quantity must be greater than zero.")
 
+        from app.core.constants import RecordStatus
         product = await self.product_repository.get_by_id(product_id)
         if product is None:
             raise BadRequestException("The specified product does not exist.")
+        if product.status != RecordStatus.ACTIVE:
+            raise BadRequestException("The specified product is inactive in the Product Master.")
 
         inquiry = await self.get_or_create_consignment(
             buyer_id=buyer_id, consignment_code_id=consignment_code_id, user_id=user_id
@@ -270,8 +279,9 @@ class InquiryService:
             qty = float(p["quantity"])
             if qty <= 0:
                 continue
+            from app.core.constants import RecordStatus
             product = await self.product_repository.get_by_id(prod_id)
-            if not product:
+            if not product or product.status != RecordStatus.ACTIVE:
                 continue
             st = InquiryItemStatus(p.get("status", "proposed"))
             item = await self.item_repository.create(

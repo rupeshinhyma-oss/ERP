@@ -182,3 +182,7 @@ In physical manufacturing, machinery assembly, and trade distribution, negative 
   - All rows can be individually removed using the row `✕` button. Removing all rows safely displays the empty-state banner.
   - The submit button is strictly disabled with a grayed-out state (`#94a3b8`) and `cursor: not-allowed` whenever `items.length === 0`, completely preventing accidental submission of empty movements.
 - **Reset on Submit**: Upon successful creation of an Inward or Outward voucher, all form state is immediately wiped clean prior to closing the modal.
+
+
+## UI Standardization (Release 2026-10-29)
+- Added top `Stock Movement` page header, top-right `.btn-header-filter` funnel toggle button, collapsible **Filter Options** card (`Search`, `Date From`, `Date To`, `Reset Filters`), and inline quick search bar on the register tabs row.

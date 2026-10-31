@@ -595,7 +595,7 @@ export function SaleProcessListPage() {
   ]);
 
   useEffect(() => {
-    void apiGet<any>("/masters/warehouses")
+    void apiGet<any>("/masters/warehouses?status=active")
       .then((res) => {
         const raw = Array.isArray(res?.data) ? res.data : Array.isArray(res?.data?.items) ? res.data.items : [];
         if (raw.length > 0) {
@@ -605,7 +605,7 @@ export function SaleProcessListPage() {
       })
       .catch(() => {});
 
-    void apiGet<any>("/masters/transports")
+    void apiGet<any>("/masters/transports?status=active")
       .then((res) => {
         const raw = Array.isArray(res?.data) ? res.data : Array.isArray(res?.data?.items) ? res.data.items : [];
         if (raw.length > 0) {
@@ -644,7 +644,7 @@ export function SaleProcessListPage() {
       })
       .catch(() => {});
 
-    void apiGet<any>("/users")
+    void apiGet<any>("/users?status=ACTIVE")
       .then((res) => {
         const raw = Array.isArray(res?.data) ? res.data : Array.isArray(res?.data?.items) ? res.data.items : [];
         if (raw.length > 0) {

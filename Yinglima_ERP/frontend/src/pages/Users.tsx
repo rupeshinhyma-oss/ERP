@@ -293,7 +293,10 @@ export function UsersPage() {
   const [pageSize, setPageSize] = useState(50);
   const [searchInput, setSearchInput] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
+  const [filterOpen, setFilterOpen] = useState(false);
   const [reloadCounter, setReloadCounter] = useState(0);
+
+  const activeFiltersCount = statusFilter ? 1 : 0;
   const query = useDebouncedValue(searchInput, 300);
 
   const [roles, setRoles] = useState<Role[]>([]);
@@ -1066,27 +1069,198 @@ export function UsersPage() {
             >
               <span>Open Central Dashboard ↗</span>
             </a>
+            <button
+              type="button"
+              className={`btn btn-header-filter ${filterOpen ? "active" : ""}`}
+              onClick={() => setFilterOpen((v) => !v)}
+              style={{
+                background: filterOpen || activeFiltersCount > 0 ? "#0061f2" : "#475569",
+                color: "#ffffff",
+                padding: "8px 12px",
+                borderRadius: "6px",
+                border: "none",
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                cursor: "pointer",
+                boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
+                position: "relative",
+              }}
+              title="Toggle Filter Options"
+            >
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon>
+              </svg>
+              {activeFiltersCount > 0 && (
+                <span
+                  style={{
+                    position: "absolute",
+                    top: "-5px",
+                    right: "-5px",
+                    background: "#ef4444",
+                    color: "#ffffff",
+                    borderRadius: "10px",
+                    padding: "1px 5px",
+                    fontSize: "10px",
+                    fontWeight: 700,
+                    lineHeight: "1.2",
+                  }}
+                >
+                  {activeFiltersCount}
+                </span>
+              )}
+            </button>
           </div>
         </div>
         <Banner error={error} />
 
+        {filterOpen && (
+          <div
+            className="card"
+            style={{
+              marginBottom: "16px",
+              padding: "16px 20px",
+              background: "#ffffff",
+              border: "1px solid #e2e8f0",
+              borderRadius: "10px",
+              boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                marginBottom: "14px",
+                paddingBottom: "10px",
+                borderBottom: "1px solid #f1f5f9",
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "13.5px", fontWeight: 700, color: "#1e293b" }}>
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#2563eb" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                  <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon>
+                </svg>
+                <span>Filter Options</span>
+                {activeFiltersCount > 0 && (
+                  <span
+                    style={{
+                      background: "#eff6ff",
+                      color: "#2563eb",
+                      border: "1px solid #bfdbfe",
+                      borderRadius: "999px",
+                      padding: "1px 8px",
+                      fontSize: "11px",
+                      fontWeight: 700,
+                    }}
+                  >
+                    {activeFiltersCount} active
+                  </span>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setSearchInput("");
+                  setStatusFilter("");
+                  setCurrentPage(1);
+                }}
+                style={{
+                  background: "#f1f5f9",
+                  border: "1px solid #cbd5e1",
+                  color: "#475569",
+                  borderRadius: "6px",
+                  padding: "5px 12px",
+                  fontSize: "12px",
+                  fontWeight: 600,
+                  cursor: "pointer",
+                }}
+              >
+                Reset Filters
+              </button>
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 320px))", gap: "16px", alignItems: "flex-end" }}>
+              <div>
+                <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "6px" }}>
+                  Account Status
+                </label>
+                <select
+                  value={statusFilter}
+                  onChange={(e) => setStatusFilter(e.target.value)}
+                  style={{ width: "100%", height: "38px" }}
+                >
+                  <option value="">All Statuses</option>
+                  {STATUS_OPTIONS.map(([value, label]) => (
+                    <option key={value} value={value}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          </div>
+        )}
+
         <div className="card">
           <div className="toolbar" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>
-            <div style={{ display: "flex", gap: "10px", alignItems: "center", flex: 1, minWidth: "280px" }}>
-              <input
-                type="text"
-                placeholder="Search username, email, employee code..."
-                value={searchInput}
-                onChange={(e) => setSearchInput(e.target.value)}
-              />
-              <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
-                <option value="">All statuses</option>
-                {STATUS_OPTIONS.map(([value, label]) => (
-                  <option key={value} value={value}>
-                    {label}
-                  </option>
-                ))}
-              </select>
+            <div style={{ display: "flex", gap: "10px", alignItems: "center", flex: 1, minWidth: "280px", justifyContent: "space-between" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                {statusFilter && (
+                  <span
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: "6px",
+                      background: "#eff6ff",
+                      color: "#1d4ed8",
+                      border: "1px solid #bfdbfe",
+                      borderRadius: "6px",
+                      padding: "4px 10px",
+                      fontSize: "12px",
+                      fontWeight: 600,
+                    }}
+                  >
+                    Status: {STATUS_OPTIONS.find(([v]) => v === statusFilter)?.[1] || statusFilter}
+                    <button
+                      type="button"
+                      onClick={() => setStatusFilter("")}
+                      style={{ border: "none", background: "transparent", color: "#1d4ed8", cursor: "pointer", fontWeight: 700, padding: 0 }}
+                    >
+                      ✕
+                    </button>
+                  </span>
+                )}
+              </div>
+              <div style={{ position: "relative", minWidth: "280px", flex: "0 1 340px" }}>
+                <input
+                  type="text"
+                  placeholder="Search username, email, employee code..."
+                  value={searchInput}
+                  onChange={(e) => setSearchInput(e.target.value)}
+                  style={{ width: "100%", paddingRight: "28px" }}
+                />
+                {searchInput && (
+                  <button
+                    type="button"
+                    onClick={() => setSearchInput("")}
+                    title="Clear search"
+                    style={{
+                      position: "absolute",
+                      right: "8px",
+                      top: "50%",
+                      transform: "translateY(-50%)",
+                      border: "none",
+                      background: "transparent",
+                      color: "#94a3b8",
+                      cursor: "pointer",
+                      fontSize: "14px",
+                      padding: "2px",
+                    }}
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
             </div>
             {selectedIds.size > 0 && canManage && (
               <div

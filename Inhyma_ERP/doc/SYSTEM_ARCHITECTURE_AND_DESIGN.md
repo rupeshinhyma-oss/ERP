@@ -112,7 +112,7 @@ flowchart TD
 
 ### 2.6 Purchase Management & Costing Engine (`/purchase/localpurchase` & `/purchase/importpurchase`)
 - **Local Purchase Orders:** Full domestic PO workflow with overhead expense absorption (Freight, Handling, Insurance). Calculates dynamic itemized landing costs via the Expense Factor formula and supports atomic inventory stock-in into destination warehouses.
-- **Import Consignments:** Multi-currency international purchase tracking with live exchange rates, shipping logistics (BL, vessel, container references), Indian Customs statutory tariff computation (Assessable Value, BCD, SWS 10%, IGST), and dual landing cost matrices (with vs. without statutory duty/tax).
+- **Import Consignments:** Multi-currency international purchase tracking with live exchange rates, shipping logistics (`Ordered Date` capped at `maxDate="today"`, `ETD Origin Date` / `ETA Port Date` / `Expected Arrival Date` anchored to `minDate=effectiveCreatedDate`), automatic **`Expected Arrival Date = ETA Port Date + 5 days`** editable default (`addDaysToDDMMYYYY(val, 5)` on `ImportPurchasePage.tsx` and `eta_port_date + timedelta(days=5)` fallback on `POST /api/v1/purchase/import-orders` & `POST /api/v1/purchase/import-orders/import` when omitted, while keeping the `<DatePicker />` unlocked and freely editable), Indian Customs statutory tariff computation (Assessable Value, BCD, SWS 10%, IGST), and dual landing cost matrices (with vs. without statutory duty/tax).
 - **Multi-Line Bulk CSV/Excel Import Engine (`POST /api/v1/purchase/local-orders/import` & `POST /api/v1/purchase/import-orders/import`):**
   - Both Local Purchase (`LocalPurchasePage.tsx`) and Import Purchase (`ImportPurchasePage.tsx`) integrate the shared `ImpExpDropdown` (`SAMPLE FILE`, `IMPORT` column-mapping `WizardModal`, `EXPORT` UTF-8 BOM CSV) and `ImportSummaryPanel`.
   - Multi-line invoices/consignments in `.csv` or `.xlsx` uploads are grouped by `Invoice No.` / `Inv. / Con. No.`, validated against live Supplier, Warehouse, and Product masters, costed through the server landing-rate engine, isolated per invoice/consignment via nested SQLAlchemy savepoints (`db.begin_nested()`), and checked against duplicate invoice/consignment numbers.
@@ -224,9 +224,14 @@ Inhyma_ERP/
 │   │   ├── suppliers/            # Supplier directory with mandatory calling number
 │   │   ├── technical_tasks/      # Field service tickets & technician dispatch
 │   │   ├── api/v1/internal_users.py # Spoke user deprovisioning endpoint
-│   │   └── events/               # WebSocket connection manager & broadcast
+│   │   ├── events/               # WebSocket connection manager & broadcast
+│   │   ├── feed/                 # Internal broadcast announcements & 1-to-1 employee messaging
+│   │   ├── hrms/                 # Attendance, Leave, Assets, Expenses, Site Visits, Payroll & RBAC
+│   │   ├── rbac/                 # Departments & Permissions (super_admin + user system roles)
+│   │   └── users/                # Unified employee & user directory + ERP_Main identity sync
 │   ├── alembic/                  # Database migrations (single-head invariant)
-│   └── tests/                    # Backend test suites (inventory, sales, migrations, RBAC)
+│   ├── scripts/                  # Idempotent bootstrap seed.py (297 permissions, 2 system roles) & maintenance utilities
+│   └── tests/                    # SQLite-isolated backend test suites (conftest.py live-DB guard)
 ├── frontend/
 │   ├── src/
 │   │   ├── components/           # UI design tokens, SideDrawer, ActionMenu, Kanban, Pagination
@@ -360,6 +365,10 @@ To eliminate ambiguity between user-editable inputs and system-calculated or for
      - Dimensions: `packaging_unit_cbm` ($(\text{Length} \times \text{Width} \times \text{Height}) / 1,000,000$).
      - Multi-package totals: `packageTotals.cbm`, `net`, `gross`.
 
+4. **Locked Formula Fields vs. Editable Auto-Defaulted Fields:**
+   - Strictly formula-derived monetary/CBM outputs (`Purchase Invoice Total Value (INR)`, `Total Expenses`, `Gross Total Landing (INR)`, line-item landing rates) use `.calc-locked` (`#e9ecef` + lock icon) and cannot be typed into.
+   - Smart operational defaults that operators must remain free to adjust—such as Import Purchase **`Expected Arrival Date`** auto-defaulting to **`ETA Port Date + 5 days`**—render as standard unlocked `#ffffff` `<DatePicker />` inputs without `.calc-locked`, preserving manual operator overrides (`expectedArrivalCustomizedRef`).
+
 ### 11.2 Universal Empty State Standard (`"No Data"`)
 1. **Rule of Engagement:**
    - When a data table has completed loading and contains zero matching records, the empty state row MUST display the exact, standardized message: **`"No Data"`**.
@@ -465,7 +474,7 @@ During Render/Docker container boot, `python server.py` executes a four-phase in
 2. **Schema Upgrade (`alembic upgrade heads`):**
    - Executes `alembic upgrade heads` (plural), upgrading all active branch heads to current state without terminating container execution on branch divergences.
 3. **Idempotent Bootstrap Seeding (`scripts.seed`):**
-   - Provisions roles, permissions, geography, and default super-admin credentials if not already present.
+   - Provisions strictly the 2 system roles (`super_admin` displayed as `Admin` and `user` displayed as `User`), all `297` permissions (granted 100% to `super_admin`), geography, and default super-admin credentials on fresh install only—never seeding hardcoded business departments.
 4. **ASGI Process Launch (`uvicorn app.main:app`):**
    - Starts API server with DNS resilience and graceful shutdown signal handlers.
 
@@ -479,3 +488,30 @@ During Render/Docker container boot, `python server.py` executes a four-phase in
 2. **Strict Local vs Cloud Origin Parity (`sanitizeEnvMatchedUrl`):**
    - Even when local developers and Render cloud instances share a single `ERP_Main` database whose `erp_instances.base_url` rows hold `https://*.onrender.com/dashboard`, `ERP_Main` (`landing.py`) prioritizes `<KEY>_FRONTEND_URL` from its active environment and rejects cross-environment DB URLs (`LOCAL` vs `PRODUCTION`).
    - On the client, `sanitizeEnvMatchedUrl()` verifies that every SSO landing redirect (`routeForCentralSession`, `enforceCentralLanding`) and switcher target (`planSwitch`, `erpUrlFor`, `controlPlaneUrl`) belongs to the same network class as `window.location.hostname`—blocking `localhost` <-> `*.onrender.com` jumps while adapting `localhost` hostnames to the active LAN IP when accessed over Wi-Fi/LAN.
+
+---
+
+## 16. Pytest Live-Database Isolation, Canonical RBAC Bootstrap & HRMS Seed Non-Recreation
+
+1. **In-Memory SQLite Pytest Guard (`backend/tests/conftest.py`):**
+   - `conftest.py` never calls `load_dotenv(..., override=True)`. Whenever `DATABASE_URL` is unset or targets `supabase.com` / `supabase.co` (unless `ALLOW_LIVE_DB_TESTS=1`), `conftest.py` forces `DATABASE_URL="sqlite+aiosqlite:///:memory:"` and `ENVIRONMENT="test"` before `app.core.config.settings` loads, preventing automated test runs from inserting synthetic `@example.com` users, departments, or tasks into the live Supabase database.
+2. **Zero Synthetic QA Provisioners & Canonical 2-Role Bootstrap (`backend/scripts/seed.py`):**
+   - All standalone QA persona/demo seeders have been removed. `scripts/seed.py` seeds strictly two `is_system=True` roles (`super_admin` = `Admin` and `user` = `User`) and `297` granular permissions (`297/297` assigned to `super_admin`); all organizational departments are created dynamically by administrators (`is_system=False`).
+3. **HRMS Soft-Delete Non-Recreation (`app/hrms/service.py`, `app/hrms/leave_service.py`):**
+   - `ensure_seeds()` checks total row counts (including soft-deleted records) across `HrmsLocation`, `HrmsLeaveType`, `HrmsExpenseCategory`, `HrmsHoliday`, and `HrmsLeavePlan` so user-deleted defaults never re-create on subsequent requests.
+
+---
+
+## 17. System-Wide Active-Only Cross-Module Extraction & Historical Reference Architecture
+
+1. **Two-Boundary Lifecycle Contract:**
+   - **Boundary 1 (Own Management Views):** Every Master and Directory module (`Product Master`, all 28 `MasterPage` catalogs, `Companies`, `Suppliers`, `Buyers`, `Users`, `Positions`, HRMS `Setup`, CRM `Pipeline Setup` & `Salesperson Configuration`, HRMS `Payroll`) loads **both** `Active` and `Inactive` records in its own unfiltered management view so `Active (N)` and `Inactive (M)` tabs and re-activation toggles work without regression.
+   - **Boundary 2 (Cross-Module Extraction):** Whenever any operational, reporting, commercial, CRM, HRMS, directory, or search module extracts records from another module, **strictly `Active` records are returned and validated**.
+2. **Bidirectional Dynamic Filter Translation (`app/common/base_repository.py`):**
+   - `BaseRepository._apply_dynamic_filters` inspects real SQLAlchemy columns (`self.model.__table__.columns`, avoiding Python `@property` descriptors such as `Product.is_active`) and bidirectionally translates `?status=active|inactive` and `?is_active=true|false` across `RecordStatus` tables (`products`, `banks`, `warehouses`, all 28 masters) and boolean `is_active` tables (`companies`, `suppliers`, `buyers`).
+3. **Active-Only Lookups, Matrices & Non-Destructive Shipment Planning:**
+   - All 28 `app/masters/*/service.py` `/lookup` & `/dropdown` methods, cascading geography repositories (`CityRepository`, `DistrictRepository`), `ProductService.get_machine_spares_universal_view()`, `GET /api/v1/inventory/product-stock`, `GET /api/v1/inventory/product-reorder`, `PriceListRepository`, `ProductGallery.tsx`, `search_universal` (`/search`), and `?active_only=true` directory/HRMS endpoints filter strictly to active records.
+   - In **Shipment Planning** (`app/planning/repository.py`, `app/planning/service.py`, `Planning.tsx`), deactivating a linked `Product` dynamically hides its planning row and excludes it from `LINKED_LOOKUP` / `AGGREGATE` cells **without** deleting `PlanningRow` or `PlanningCell` records—re-activating the product restores the row and all saved cell values intact.
+4. **Frontend Shared Hooks & Historical / Cancellation Safety:**
+   - `useLookup` (`includeInactive = false` default), `useSearchableLookup` (`src/lib/lookups.ts`), and `productSearchCache.ts` (`prefetchMasterProducts`, `fetchMasterProducts`) enforce both `?status=active` query parameters and client-side `isRecordActive` filtering, while edit forms retain `item.id === currentSelectedId` so historical selections display cleanly.
+   - Single-record `GET /api/v1/.../{id}` endpoints remain unrestricted for historical orders/PDFs, and `StockService.find_product(..., require_active=False)` / `get_warehouse(..., require_active=False)` during order cancellation (`_release_stock`) allows reversing stock on historical orders even if a SKU or warehouse was deactivated afterwards.

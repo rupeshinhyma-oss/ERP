@@ -20,6 +20,7 @@ from sqlalchemy.orm import selectinload
 
 from app.auth.dependencies import get_current_user
 from app.auth.service import CurrentUser
+from app.core.constants import RecordStatus
 from app.core.logging import get_logger
 from app.inventory import stock_service
 from app.rbac.dependencies import require_permission
@@ -275,7 +276,7 @@ async def list_product_stock(
         .outerjoin(Brand, and_(Brand.id == Product.brand_id, Brand.deleted_at.is_(None)))
         .outerjoin(UnitOfMeasurement, and_(UnitOfMeasurement.id == Product.uom_id, UnitOfMeasurement.deleted_at.is_(None)))
         .outerjoin(Tax, and_(Tax.id == Product.hsn_id, Tax.deleted_at.is_(None)))
-        .where(Product.deleted_at.is_(None))
+        .where(Product.deleted_at.is_(None), Product.status == RecordStatus.ACTIVE)
     )
 
     for column_expr, value in ((category_expr, category), (sub_category_expr, sub_category), (brand_expr, brand)):
@@ -313,18 +314,18 @@ async def list_product_stock(
     breakup_map = await _compute_breakup_flags(db, [r.name for r in rows if r.name])
 
     cat_names = [
-        c for (c,) in (await db.execute(select(ProductCategory.name).where(ProductCategory.deleted_at.is_(None)).order_by(ProductCategory.name))).all() if c
+        c for (c,) in (await db.execute(select(ProductCategory.name).where(ProductCategory.deleted_at.is_(None), ProductCategory.status == RecordStatus.ACTIVE).order_by(ProductCategory.name))).all() if c
     ]
     sub_rows = (
         await db.execute(
             select(ProductSubCategory.name, ProductCategory.name)
             .outerjoin(ProductCategory, ProductCategory.id == ProductSubCategory.category_id)
-            .where(ProductSubCategory.deleted_at.is_(None))
+            .where(ProductSubCategory.deleted_at.is_(None), ProductSubCategory.status == RecordStatus.ACTIVE)
             .order_by(ProductSubCategory.name)
         )
     ).all()
     brand_names = [
-        b for (b,) in (await db.execute(select(Brand.name).where(Brand.deleted_at.is_(None)).order_by(Brand.name))).all() if b
+        b for (b,) in (await db.execute(select(Brand.name).where(Brand.deleted_at.is_(None), Brand.status == RecordStatus.ACTIVE).order_by(Brand.name))).all() if b
     ]
 
     items = []
@@ -644,7 +645,7 @@ async def list_product_reorder(
         .outerjoin(Brand, and_(Brand.id == Product.brand_id, Brand.deleted_at.is_(None)))
         .outerjoin(UnitOfMeasurement, and_(UnitOfMeasurement.id == Product.uom_id, UnitOfMeasurement.deleted_at.is_(None)))
         .outerjoin(Tax, and_(Tax.id == Product.hsn_id, Tax.deleted_at.is_(None)))
-        .where(Product.deleted_at.is_(None))
+        .where(Product.deleted_at.is_(None), Product.status == RecordStatus.ACTIVE)
     )
 
     for column_expr, value in ((category_expr, category), (sub_category_expr, sub_category), (brand_expr, brand)):
@@ -728,18 +729,18 @@ async def list_product_reorder(
 
     # Master dropdown options so filters always expose all active Categories, Sub-Categories, and Brands
     cat_names = [
-        c for (c,) in (await db.execute(select(ProductCategory.name).where(ProductCategory.deleted_at.is_(None)).order_by(ProductCategory.name))).all() if c
+        c for (c,) in (await db.execute(select(ProductCategory.name).where(ProductCategory.deleted_at.is_(None), ProductCategory.status == RecordStatus.ACTIVE).order_by(ProductCategory.name))).all() if c
     ]
     sub_rows = (
         await db.execute(
             select(ProductSubCategory.name, ProductCategory.name)
             .outerjoin(ProductCategory, ProductCategory.id == ProductSubCategory.category_id)
-            .where(ProductSubCategory.deleted_at.is_(None))
+            .where(ProductSubCategory.deleted_at.is_(None), ProductSubCategory.status == RecordStatus.ACTIVE)
             .order_by(ProductSubCategory.name)
         )
     ).all()
     brand_names = [
-        b for (b,) in (await db.execute(select(Brand.name).where(Brand.deleted_at.is_(None)).order_by(Brand.name))).all() if b
+        b for (b,) in (await db.execute(select(Brand.name).where(Brand.deleted_at.is_(None), Brand.status == RecordStatus.ACTIVE).order_by(Brand.name))).all() if b
     ]
 
     items = []
@@ -2089,7 +2090,7 @@ async def create_stock_adjustment(
     if payload.type not in ("Stock IN", "Stock OUT"):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Type must be 'Stock IN' or 'Stock OUT'.")
     adjustment_dt = _parse_ddmmyyyy(payload.adjustment_date)
-    await stock_service.get_warehouse(db, payload.warehouse)  # unknown warehouse -> 400 before anything is written
+    await stock_service.get_warehouse(db, payload.warehouse, require_active=True)  # unknown or inactive warehouse -> 400 before anything is written
 
     adj_no = (payload.adjustment_no or "").strip() or await _next_adjustment_no(db)
     clash = (
@@ -2117,6 +2118,7 @@ async def create_stock_adjustment(
     db.add(new_adj)
     await db.flush()
     for item in payload.items:
+        await stock_service.find_product(db, item.product_name, require_active=True)
         db.add(
             StockAdjustmentLineItem(
                 adjustment_id=new_adj.id, product_name=item.product_name, product_code=item.product_code,
@@ -2373,6 +2375,35 @@ async def create_stock_transfer(
     db: AsyncSession = Depends(get_db_session),
 ) -> dict:
     """Insert new stock transfer into PostgreSQL and update warehouse inventory."""
+    from app.masters.products.models import Product
+    from app.masters.warehouses.models import Warehouse
+
+    for wh_label, wh_name in (("Origin warehouse", payload.from_warehouse), ("Destination warehouse", payload.to_warehouse)):
+        if wh_name and wh_name.strip():
+            wh_row = (
+                await db.execute(
+                    select(Warehouse).where(func.lower(Warehouse.name) == wh_name.strip().lower(), Warehouse.deleted_at.is_(None))
+                )
+            ).scalars().first()
+            if wh_row is not None and wh_row.status != RecordStatus.ACTIVE:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"{wh_label} '{wh_name}' is inactive in the Warehouse Master.",
+                )
+
+    for item in payload.items:
+        p_conds = [func.lower(Product.product_name) == item.product_name.strip().lower(), func.lower(Product.product_name_tally) == item.product_name.strip().lower()]
+        if item.product_code and item.product_code.strip():
+            p_conds.append(func.lower(Product.product_code) == item.product_code.strip().lower())
+        prod_master = (
+            await db.execute(select(Product).where(Product.deleted_at.is_(None), or_(*p_conds)))
+        ).scalars().first()
+        if prod_master is not None and prod_master.status != RecordStatus.ACTIVE:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Product '{item.product_name}' is inactive in the Product Master.",
+            )
+
     calc_total = payload.total_amount or sum(item.amount for item in payload.items)
 
     count_stmt = select(func.count()).select_from(StockTransfer)

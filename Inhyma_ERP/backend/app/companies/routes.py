@@ -305,20 +305,28 @@ async def export_companies(
 async def import_companies(
     request: Request,
     file: UploadFile = File(...),
+    update_existing: bool = Query(False, description="Update existing records matching company name or GST number instead of skipping"),
     service: CompanyService = Depends(get_company_service),
     current_user: CurrentUser = Depends(require_any_permission("company.create", "supplier.create")),
     audit_service: AuditService = Depends(get_audit_service),
 ) -> dict:
     """Import companies from an uploaded CSV/XLSX file, validating every row."""
     raw_bytes = await file.read()
-    summary = await service.import_file(file.filename or "import.csv", raw_bytes)
+    summary = await service.import_file(
+        file.filename or "import.csv",
+        raw_bytes,
+        update_existing=update_existing,
+    )
     await _record_action(
         audit_service=audit_service,
         request=request,
         action=AuditAction.IMPORT,
         actor=current_user,
         entity_id="bulk",
-        description=f"Imported companies: {summary.created} created, {summary.failed} failed.",
+        description=(
+            f"Imported companies ({'update' if update_existing else 'create'} mode): "
+            f"{summary.created} created, {summary.updated} updated, {summary.unchanged} unchanged, {summary.failed} failed."
+        ),
         new_values=summary.as_dict(),
     )
     data = ImportSummaryRead(**summary.as_dict()).model_dump(mode="json")
@@ -349,11 +357,11 @@ async def list_sales_persons(
     _current_user: CurrentUser = Depends(require_any_permission("company.view", "company.create", "supplier.view", "supplier.create")),
 ) -> dict:
     """Return active users for sales person selection."""
-    from app.users.models import User
+    from app.users.models import User, UserStatus
     from sqlalchemy import select
     stmt = (
         select(User.id, User.username, User.first_name, User.last_name, User.display_name)
-        .where(User.is_active == True, User.deleted_at.is_(None))
+        .where(User.is_active == True, User.status == UserStatus.ACTIVE, User.deleted_at.is_(None))
         .order_by(User.username.asc())
     )
     result = await db.execute(stmt)
@@ -416,7 +424,7 @@ async def lookup_companies(
         )
         .outerjoin(City, City.id == Company.city_id)
         .outerjoin(State, State.id == Company.state_id)
-        .where(Company.deleted_at.is_(None))
+        .where(Company.deleted_at.is_(None), Company.is_active.is_(True))
     )
     if q.strip():
         term = f"%{q.strip()}%"

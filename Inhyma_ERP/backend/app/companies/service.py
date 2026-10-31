@@ -306,8 +306,24 @@ class CompanyService:
 
     async def _ensure_tax_id_unique(self, tax_id: str | None, *, exclude_id: uuid.UUID | None = None) -> None:
         """Spec: a duplicate GST number must be refused with an 'already exists' message."""
-        if tax_id and await self.repository.tax_id_exists(tax_id, exclude_id=exclude_id):
-            raise ConflictException(f"A company with GST number {tax_id.strip().upper()!r} already exists.")
+        if not tax_id or not tax_id.strip():
+            return
+        clean_gst = tax_id.strip().upper()
+        import inspect
+        if hasattr(self.repository, "get_company_by_tax_id"):
+            res = self.repository.get_company_by_tax_id(clean_gst, exclude_id=exclude_id)
+            if inspect.isawaitable(res):
+                existing_comp = await res
+                if existing_comp:
+                    raise ConflictException(
+                        f"A company with GST number {clean_gst!r} already exists (in company {existing_comp.company_name!r}).",
+                        details={"existing": model_to_dict(existing_comp)},
+                    )
+        if hasattr(self.repository, "tax_id_exists"):
+            res = self.repository.tax_id_exists(clean_gst, exclude_id=exclude_id)
+            exists = await res if inspect.isawaitable(res) else res
+            if exists:
+                raise ConflictException(f"A company with GST number {clean_gst!r} already exists.")
 
     async def _ensure_calling_number_unique(
         self,
@@ -751,75 +767,514 @@ class CompanyService:
     # Import / Export
     # ------------------------------------------------------------------
 
-    async def import_file(self, filename: str, raw_bytes: bytes) -> ImportSummary:
-        """Validate and import companies from an uploaded CSV/XLSX file."""
+    async def import_file(
+        self, filename: str, raw_bytes: bytes, *, update_existing: bool = False
+    ) -> ImportSummary:
+        """Validate and import companies from an uploaded CSV/XLSX file with duplicate GST/Name/Phone detection and safe update mode."""
+        import re
+
         rows = parse_rows_from_file(filename, raw_bytes)
 
         existing_companies = await self.repository.list_all()
-        existing_map = {s.company_name.strip().lower(): s for s in existing_companies}
+        existing_name_map: dict[str, Company] = {}
+        existing_gst_map: dict[str, Company] = {}
+        existing_calling_map: dict[str, Company] = {}
+        existing_whatsapp_map: dict[str, Company] = {}
+
+        def _phone_keys(num: str | None) -> list[str]:
+            if not num:
+                return []
+            digits = re.sub(r"\D", "", str(num))
+            if len(digits) < 7:
+                return []
+            keys = [digits]
+            if len(digits) > 10:
+                keys.append(digits[-10:])
+            return keys
+
+        for comp in existing_companies:
+            if comp.company_name and comp.company_name.strip():
+                existing_name_map[comp.company_name.strip().lower()] = comp
+            if comp.tax_id_number and comp.tax_id_number.strip():
+                existing_gst_map[comp.tax_id_number.strip().upper()] = comp
+            for pk in _phone_keys(comp.contact_calling_number):
+                existing_calling_map[pk] = comp
+            for pk in _phone_keys(comp.contact_whatsapp_number):
+                existing_whatsapp_map[pk] = comp
+            for c_row in getattr(comp, "contacts", []) or []:
+                if getattr(c_row, "deleted_at", None) is not None:
+                    continue
+                for pk in _phone_keys(getattr(c_row, "calling_number", None)):
+                    existing_calling_map.setdefault(pk, comp)
+                for pk in _phone_keys(getattr(c_row, "whatsapp_number", None)):
+                    existing_whatsapp_map.setdefault(pk, comp)
 
         all_countries = await self.country_repository.list_all()
         all_states = await self.state_repository.list_all()
         all_cities = await self.city_repository.list_all()
         all_cats = await self.category_repository.list_all()
         all_sub_cats = await self.sub_category_repository.list_all()
+        all_prods = []
+        if self.product_repository is not None:
+            try:
+                all_prods = await self.product_repository.list_all()
+            except Exception:
+                all_prods = []
 
         country_name_map = {str(c.id): c.name for c in all_countries}
         state_name_map = {str(s.id): s.name for s in all_states}
         city_name_map = {str(ct.id): ct.name for ct in all_cities}
 
         def _serialize_company_for_compare(s: Company) -> dict[str, Any]:
+            emails_str = ", ".join(e.email for e in getattr(s, "emails", []) if getattr(e, "email", None))
             return {
                 "Company Name": s.company_name,
+                "Tax ID / GST Number": s.tax_id_number or "—",
                 "Country": country_name_map.get(str(s.country_id), "—"),
-                "State": state_name_map.get(str(s.state_id), "—"),
+                "State / Province": state_name_map.get(str(s.state_id), "—"),
                 "City": city_name_map.get(str(s.city_id), "—"),
+                "Company Type": str(s.company_type) if s.company_type else "—",
+                "Company Grade": f"Grade {s.company_grade.value.upper()}" if s.company_grade else "—",
+                "Current Status": (s.current_status.value if hasattr(s.current_status, "value") else str(s.current_status or "—")).capitalize(),
+                "Contact Person": s.contact_full_name or "—",
+                "Designation": s.contact_designation or "—",
                 "Calling Number": s.contact_calling_number or "—",
                 "WhatsApp Number": s.contact_whatsapp_number or "—",
                 "WeChat Number": s.contact_wechat_number or "—",
-                "Email": s.emails[0].email if s.emails else (getattr(s, "email", "—") or "—"),
-                "Tax ID Number": s.tax_id_number or "—",
+                "Emails": emails_str or "—",
                 "Primary Website": s.primary_website or "—",
-                "Status": (s.current_status.value if hasattr(s.current_status, "value") else str(s.current_status or "active")).capitalize(),
+                "Status": "active" if s.is_active else "inactive",
             }
 
-        async def _create(field_values: dict[str, Any]) -> Company:
-            company_name = field_values["company_name"].strip()
+        seen_batch_names: set[str] = set()
+        seen_batch_gsts: set[str] = set()
 
-            if company_name.lower() in existing_map:
-                dup_company = existing_map[company_name.lower()]
+        def _register_company_in_maps(comp: Company) -> None:
+            if comp.company_name and comp.company_name.strip():
+                existing_name_map[comp.company_name.strip().lower()] = comp
+                seen_batch_names.add(comp.company_name.strip().lower())
+            if comp.tax_id_number and comp.tax_id_number.strip():
+                existing_gst_map[comp.tax_id_number.strip().upper()] = comp
+                seen_batch_gsts.add(comp.tax_id_number.strip().upper())
+            for pk in _phone_keys(comp.contact_calling_number):
+                existing_calling_map[pk] = comp
+            for pk in _phone_keys(comp.contact_whatsapp_number):
+                existing_whatsapp_map[pk] = comp
+
+        async def _create(field_values: dict[str, Any]) -> Company | tuple[str, Company]:
+            company_name = (field_values.get("company_name") or "").strip()
+            name_key = company_name.lower()
+            tax_id_raw = field_values.get("tax_id_number")
+            tax_id_clean = str(tax_id_raw).strip().upper() if tax_id_raw and str(tax_id_raw).strip() else ""
+            if tax_id_clean:
+                field_values["tax_id_number"] = tax_id_clean
+            else:
+                field_values["tax_id_number"] = None
+
+            calling_num = field_values.get("contact_calling_number")
+            wa_num = field_values.get("contact_whatsapp_number")
+
+            country_raw = (field_values.pop("country_code", None) or "").strip()
+            state_raw = (field_values.pop("state_name", None) or "").strip()
+            city_raw = (field_values.pop("city_name", None) or "").strip()
+            email_single = field_values.pop("email", None)
+            emails_list = field_values.pop("emails", None)
+            if not emails_list and email_single:
+                emails_list = [email_single]
+            cat_names_raw = field_values.pop("category_names_raw", None)
+            sub_cat_names_raw = field_values.pop("sub_category_names_raw", None)
+            prod_names_raw = field_values.pop("product_names_raw", None)
+            visited_provided = bool(field_values.pop("_visited_provided", False))
+            status_provided = bool(field_values.pop("_status_provided", False))
+
+            # In-batch duplicate protection (strict in Add New mode; in Update mode, allow matching existing records)
+            if not update_existing:
+                if name_key and name_key in seen_batch_names:
+                    dup = existing_name_map.get(name_key)
+                    raise ConflictException(
+                        f"Company '{company_name}' appears multiple times in the import file (duplicate company name).",
+                        details={"existing": _serialize_company_for_compare(dup)} if dup else None,
+                    )
+                if tax_id_clean and tax_id_clean in seen_batch_gsts:
+                    dup = existing_gst_map.get(tax_id_clean)
+                    raise ConflictException(
+                        f"GST / Tax ID '{tax_id_clean}' appears multiple times in the import file (duplicate GST number).",
+                        details={"existing": _serialize_company_for_compare(dup)} if dup else None,
+                    )
+
+            # ----------------------------------------------------------
+            # UPDATE EXISTING MODE: Match by Company Name or Tax ID / GST Number
+            # ----------------------------------------------------------
+            target_company: Company | None = None
+            if update_existing:
+                if name_key and name_key in existing_name_map:
+                    target_company = existing_name_map[name_key]
+                elif tax_id_clean and tax_id_clean in existing_gst_map:
+                    target_company = existing_gst_map[tax_id_clean]
+
+            if update_existing and target_company is not None:
+                update_kwargs: dict[str, Any] = {}
+                has_changes = False
+
+                # If matched by GST and a new Company Name is provided, ensure the new name doesn't belong to another company
+                if company_name and company_name.lower() != (target_company.company_name or "").strip().lower():
+                    other_by_name = existing_name_map.get(company_name.lower())
+                    if other_by_name is not None and other_by_name.id != target_company.id:
+                        raise ConflictException(
+                            f"Company '{company_name}' already exists as a separate record.",
+                            details={"existing": _serialize_company_for_compare(other_by_name)},
+                        )
+                    update_kwargs["company_name"] = company_name
+                    has_changes = True
+
+                # Prevent changing GST to a GST already owned by a DIFFERENT company
+                cur_gst = (target_company.tax_id_number or "").strip().upper()
+                if tax_id_clean:
+                    if tax_id_clean != cur_gst:
+                        other_by_gst = existing_gst_map.get(tax_id_clean)
+                        if other_by_gst is not None and other_by_gst.id != target_company.id:
+                            raise ConflictException(
+                                f"GST / Tax ID '{tax_id_clean}' already belongs to another company ('{other_by_gst.company_name}').",
+                                details={"existing": _serialize_company_for_compare(other_by_gst)},
+                            )
+                        update_kwargs["tax_id_number"] = tax_id_clean
+                        has_changes = True
+
+                # Geography updates (only when provided in the uploaded row)
+                target_country_id = target_company.country_id
+                if country_raw:
+                    matched_country = next(
+                        (c for c in all_countries if c.code.upper() == country_raw.upper() or c.name.lower() == country_raw.lower()),
+                        None,
+                    )
+                    if matched_country is None:
+                        raise BadRequestException(f"Country '{country_raw}' does not exist in Country Master.")
+                    if target_company.country_id != matched_country.id:
+                        update_kwargs["country_id"] = matched_country.id
+                        has_changes = True
+                    target_country_id = matched_country.id
+
+                target_state_id = target_company.state_id
+                if state_raw:
+                    matched_state = next(
+                        (s for s in all_states if s.country_id == target_country_id and (s.name.lower() == state_raw.lower() or (s.code and s.code.lower() == state_raw.lower()))),
+                        None,
+                    )
+                    if matched_state is None:
+                        matched_state = next(
+                            (s for s in all_states if s.name.lower() == state_raw.lower() or (s.code and s.code.lower() == state_raw.lower())),
+                            None,
+                        )
+                    if matched_state is None:
+                        raise BadRequestException(f"State '{state_raw}' does not exist in State Master.")
+                    if target_company.state_id != matched_state.id:
+                        update_kwargs["state_id"] = matched_state.id
+                        has_changes = True
+                    target_state_id = matched_state.id
+
+                if city_raw:
+                    matched_city = next(
+                        (c for c in all_cities if c.state_id == target_state_id and c.name.lower() == city_raw.lower()),
+                        None,
+                    )
+                    if matched_city is None:
+                        matched_city = next((c for c in all_cities if c.name.lower() == city_raw.lower()), None)
+                    if matched_city is None:
+                        raise BadRequestException(f"City '{city_raw}' does not exist in City Master.")
+                    if target_company.city_id != matched_city.id:
+                        update_kwargs["city_id"] = matched_city.id
+                        has_changes = True
+
+                # Calling number collision check (only if changing to a number used by another company)
+                call_keys = _phone_keys(calling_num)
+                cur_call_keys = set(_phone_keys(target_company.contact_calling_number))
+                if call_keys:
+                    if not (set(call_keys) & cur_call_keys):
+                        for ck in call_keys:
+                            dup = existing_calling_map.get(ck) or existing_whatsapp_map.get(ck)
+                            if dup is not None and dup.id != target_company.id:
+                                raise ConflictException(
+                                    f"Calling number '{calling_num}' already exists (used by '{dup.company_name}').",
+                                    details={"existing": _serialize_company_for_compare(dup)},
+                                )
+                        update_kwargs["contact_calling_number"] = calling_num
+                        has_changes = True
+                    elif re.sub(r"\D", "", target_company.contact_calling_number or "") != re.sub(r"\D", "", str(calling_num)):
+                        update_kwargs["contact_calling_number"] = calling_num
+                        has_changes = True
+
+                # WhatsApp number collision check
+                wa_keys = _phone_keys(wa_num)
+                cur_wa_keys = set(_phone_keys(target_company.contact_whatsapp_number))
+                if wa_keys:
+                    if not (set(wa_keys) & cur_wa_keys):
+                        for wk in wa_keys:
+                            dup = existing_whatsapp_map.get(wk) or existing_calling_map.get(wk)
+                            if dup is not None and dup.id != target_company.id:
+                                raise ConflictException(
+                                    f"WhatsApp number '{wa_num}' already exists (used by '{dup.company_name}').",
+                                    details={"existing": _serialize_company_for_compare(dup)},
+                                )
+                        update_kwargs["contact_whatsapp_number"] = wa_num
+                        has_changes = True
+                    elif re.sub(r"\D", "", target_company.contact_whatsapp_number or "") != re.sub(r"\D", "", str(wa_num)):
+                        update_kwargs["contact_whatsapp_number"] = wa_num
+                        has_changes = True
+
+                # Categories
+                category_ids: list[uuid.UUID] | None = None
+                category_changed = False
+                if cat_names_raw and str(cat_names_raw).strip():
+                    category_ids = []
+                    for cn in str(cat_names_raw).split(","):
+                        cn_clean = cn.strip().lower()
+                        if not cn_clean:
+                            continue
+                        matched_cat = next((c for c in all_cats if c.name.lower() == cn_clean), None)
+                        if not matched_cat:
+                            raise BadRequestException(f"Product Category '{cn.strip()}' does not exist in Category Master.")
+                        category_ids.append(matched_cat.id)
+                    curr_cat_ids = {link.category_id for link in getattr(target_company, "category_links", [])}
+                    if set(category_ids) != curr_cat_ids:
+                        category_changed = True
+                        has_changes = True
+
+                # Sub-Categories
+                sub_category_ids: list[uuid.UUID] | None = None
+                sub_category_changed = False
+                if sub_cat_names_raw and str(sub_cat_names_raw).strip():
+                    sub_category_ids = []
+                    for scn in str(sub_cat_names_raw).split(","):
+                        scn_clean = scn.strip().lower()
+                        if not scn_clean:
+                            continue
+                        matched_sc = next((sc for sc in all_sub_cats if sc.name.lower() == scn_clean), None)
+                        if not matched_sc:
+                            raise BadRequestException(f"Product Sub Category '{scn.strip()}' does not exist in Sub Category Master.")
+                        sub_category_ids.append(matched_sc.id)
+                    curr_sc_ids = {link.sub_category_id for link in getattr(target_company, "sub_category_links", [])}
+                    if set(sub_category_ids) != curr_sc_ids:
+                        sub_category_changed = True
+                        has_changes = True
+
+                # Products Supplied
+                product_ids: list[uuid.UUID] | None = None
+                product_changed = False
+                if prod_names_raw and str(prod_names_raw).strip() and all_prods:
+                    product_ids = []
+                    for pn in str(prod_names_raw).split(","):
+                        pn_clean = pn.strip().lower()
+                        if not pn_clean:
+                            continue
+                        matched_prod = next(
+                            (
+                                p for p in all_prods
+                                if (p.product_name and p.product_name.lower() == pn_clean)
+                                or (p.product_name_tally and p.product_name_tally.lower() == pn_clean)
+                                or (p.product_code and p.product_code.lower() == pn_clean)
+                            ),
+                            None,
+                        )
+                        if matched_prod:
+                            product_ids.append(matched_prod.id)
+                    curr_prod_ids = {link.product_id for link in getattr(target_company, "product_links", [])}
+                    if set(product_ids) != curr_prod_ids:
+                        product_changed = True
+                        has_changes = True
+
+                # Status transition check (Existing cannot move back to New)
+                if field_values.get("current_status") is not None:
+                    self._validate_status_transition(target_company.current_status, field_values["current_status"])
+
+                # Other non-blank fields (Zero Data Loss: blank cells never overwrite existing data)
+                skip_fields = {
+                    "company_name",
+                    "tax_id_number",
+                    "country_id",
+                    "state_id",
+                    "city_id",
+                    "contact_calling_number",
+                    "contact_whatsapp_number",
+                    "visited_factory_office",
+                    "is_active",
+                }
+                for k, v in field_values.items():
+                    if k in skip_fields or v is None:
+                        continue
+                    cur_v = getattr(target_company, k, None)
+                    cur_s = str(cur_v.value if hasattr(cur_v, "value") else (cur_v if cur_v is not None else "")).strip()
+                    new_s = str(v.value if hasattr(v, "value") else (v if v is not None else "")).strip()
+                    if new_s != "" and cur_s.lower() != new_s.lower():
+                        update_kwargs[k] = v
+                        has_changes = True
+
+                if visited_provided:
+                    new_vis = bool(field_values.get("visited_factory_office", False))
+                    if bool(target_company.visited_factory_office) != new_vis:
+                        update_kwargs["visited_factory_office"] = new_vis
+                        has_changes = True
+
+                if status_provided:
+                    new_act = bool(field_values.get("is_active", True))
+                    if bool(target_company.is_active) != new_act:
+                        update_kwargs["is_active"] = new_act
+                        has_changes = True
+
+                eff_visited = update_kwargs.get("visited_factory_office", target_company.visited_factory_office)
+                eff_visit_remarks = update_kwargs.get("visit_remarks", target_company.visit_remarks)
+                if "visit_remarks" in update_kwargs:
+                    self._validate_visit_remarks(bool(eff_visited), eff_visit_remarks)
+
+                if update_kwargs.get("gst_registration_date"):
+                    computed_age = compute_company_age(update_kwargs["gst_registration_date"])
+                    if computed_age is not None:
+                        update_kwargs["age_of_company"] = computed_age
+
+                # Emails check
+                emails_changed = False
+                if emails_list:
+                    curr_emails = [e.email.strip().lower() for e in getattr(target_company, "emails", []) if getattr(e, "email", None)]
+                    new_emails = [e.strip().lower() for e in emails_list if e.strip()]
+                    if sorted(curr_emails) != sorted(new_emails):
+                        emails_changed = True
+                        has_changes = True
+
+                # Sync primary contact ONLY if contact fields or emails actually changed on this company
+                contact_fields_changed = bool(
+                    {
+                        "contact_full_name",
+                        "contact_salutation",
+                        "contact_designation",
+                        "contact_calling_number",
+                        "contact_whatsapp_number",
+                        "contact_wechat_number",
+                    }
+                    & set(update_kwargs.keys())
+                ) or emails_changed
+                contact_name = update_kwargs.get("contact_full_name") or field_values.get("contact_full_name")
+                if contact_fields_changed and (contact_name or "contact_calling_number" in update_kwargs or "contact_whatsapp_number" in update_kwargs or "contact_designation" in update_kwargs):
+                    primary_contact = next(
+                        (c for c in getattr(target_company, "contacts", []) if c.is_primary and getattr(c, "deleted_at", None) is None),
+                        None,
+                    )
+                    if primary_contact is None:
+                        primary_contact = await self.contact_repository.get_primary_contact(target_company.id)
+                    if primary_contact is not None:
+                        c_updates: dict[str, Any] = {}
+                        if contact_name and (primary_contact.person_name or "").strip() != str(contact_name).strip():
+                            c_updates["person_name"] = str(contact_name).strip()
+                        if field_values.get("contact_salutation") and (primary_contact.salutation or "").strip() != str(field_values["contact_salutation"]).strip():
+                            c_updates["salutation"] = str(field_values["contact_salutation"]).strip()
+                        if field_values.get("contact_designation") and (primary_contact.designation or "").strip() != str(field_values["contact_designation"]).strip():
+                            c_updates["designation"] = str(field_values["contact_designation"]).strip()
+                        if calling_num and (primary_contact.calling_number or "").strip() != str(calling_num).strip():
+                            c_updates["calling_number"] = calling_num
+                        if wa_num and (primary_contact.whatsapp_number or "").strip() != str(wa_num).strip():
+                            c_updates["whatsapp_number"] = wa_num
+                        if field_values.get("contact_wechat_number") and (primary_contact.wechat_number or "").strip() != str(field_values["contact_wechat_number"]).strip():
+                            c_updates["wechat_number"] = str(field_values["contact_wechat_number"]).strip()
+                        if emails_list and (primary_contact.email or "").strip().lower() != emails_list[0].strip().lower():
+                            c_updates["email"] = emails_list[0].strip()
+                        if c_updates:
+                            has_changes = True
+                            await self.contact_repository.update(primary_contact, **c_updates)
+                    elif contact_name:
+                        has_changes = True
+                        await self.contact_repository.create(
+                            company_id=target_company.id,
+                            salutation=field_values.get("contact_salutation") or target_company.contact_salutation,
+                            person_name=str(contact_name).strip(),
+                            designation=field_values.get("contact_designation") or target_company.contact_designation,
+                            handling_territory=None,
+                            country_id=update_kwargs.get("country_id", target_company.country_id),
+                            calling_number=calling_num or target_company.contact_calling_number,
+                            whatsapp_number=wa_num or target_company.contact_whatsapp_number,
+                            wechat_number=field_values.get("contact_wechat_number") or target_company.contact_wechat_number,
+                            email=emails_list[0] if emails_list else None,
+                            is_primary=True,
+                        )
+
+                if update_kwargs:
+                    await self.repository.update(target_company, **update_kwargs)
+                if category_ids is not None and category_changed:
+                    await self.repository.replace_category_links(target_company.id, category_ids)
+                if sub_category_ids is not None and sub_category_changed:
+                    await self.repository.replace_sub_category_links(target_company.id, sub_category_ids)
+                if product_ids is not None and product_changed:
+                    await self.repository.replace_product_links(target_company.id, product_ids)
+                if emails_list and emails_changed:
+                    await self.repository.replace_emails(target_company.id, emails_list)
+
+                _register_company_in_maps(target_company)
+                if not has_changes:
+                    return ("unchanged", target_company)
+                return ("updated", target_company)
+
+            # ----------------------------------------------------------
+            # CREATE MODE (or new record in Update mode)
+            # ----------------------------------------------------------
+            if not company_name:
+                raise BadRequestException("'Company Name' is required when creating a new company.")
+            if not country_raw:
+                raise BadRequestException("'Country' is required when creating a new company.")
+            if not state_raw:
+                raise BadRequestException("'State / Province' is required when creating a new company.")
+            if not city_raw:
+                raise BadRequestException("'City' is required when creating a new company.")
+
+            # 1. Duplicate Company Name check
+            if name_key in existing_name_map:
+                dup_company = existing_name_map[name_key]
                 raise ConflictException(
                     f"Company '{company_name}' already exists (duplicate company name).",
                     details={"existing": _serialize_company_for_compare(dup_company)},
                 )
 
-            country_raw = field_values.pop("country_code", "").strip()
-            state_raw = field_values.pop("state_name", "").strip()
-            city_raw = field_values.pop("city_name", "").strip()
-            email = field_values.pop("email", None)
-            cat_names_raw = field_values.pop("category_names_raw", None)
-            sub_cat_names_raw = field_values.pop("sub_category_names_raw", None)
-            _prod_names_raw = field_values.pop("product_names_raw", None)
+            # 2. Duplicate Tax ID / GST Number check
+            if tax_id_clean and tax_id_clean in existing_gst_map:
+                dup_company = existing_gst_map[tax_id_clean]
+                raise ConflictException(
+                    f"GST / Tax ID '{tax_id_clean}' already exists (used by '{dup_company.company_name}').",
+                    details={"existing": _serialize_company_for_compare(dup_company)},
+                )
+
+            # 3. Duplicate Calling Number check
+            for ck in _phone_keys(calling_num):
+                dup_company = existing_calling_map.get(ck) or existing_whatsapp_map.get(ck)
+                if dup_company is not None:
+                    raise ConflictException(
+                        f"Calling number '{calling_num}' already exists (used by '{dup_company.company_name}').",
+                        details={"existing": _serialize_company_for_compare(dup_company)},
+                    )
+
+            # 4. Duplicate WhatsApp Number check
+            for wk in _phone_keys(wa_num):
+                dup_company = existing_whatsapp_map.get(wk) or existing_calling_map.get(wk)
+                if dup_company is not None:
+                    raise ConflictException(
+                        f"WhatsApp number '{wa_num}' already exists (used by '{dup_company.company_name}').",
+                        details={"existing": _serialize_company_for_compare(dup_company)},
+                    )
 
             country = next(
                 (c for c in all_countries if c.code.upper() == country_raw.upper() or c.name.lower() == country_raw.lower()),
-                None
+                None,
             )
             if country is None:
                 raise BadRequestException(f"Country '{country_raw}' does not exist in Country Master.")
 
             state = next(
-                (s for s in all_states if s.country_id == country.id and (s.name.lower() == state_raw.lower() or s.code.lower() == state_raw.lower())),
-                None
+                (s for s in all_states if s.country_id == country.id and (s.name.lower() == state_raw.lower() or (s.code and s.code.lower() == state_raw.lower()))),
+                None,
             )
             if state is None:
-                state = next((s for s in all_states if s.name.lower() == state_raw.lower() or s.code.lower() == state_raw.lower()), None)
+                state = next((s for s in all_states if s.name.lower() == state_raw.lower() or (s.code and s.code.lower() == state_raw.lower())), None)
             if state is None:
                 raise BadRequestException(f"State '{state_raw}' does not exist in State Master for Country '{country.name}'.")
 
             city = next(
                 (c for c in all_cities if c.state_id == state.id and c.name.lower() == city_raw.lower()),
-                None
+                None,
             )
             if city is None:
                 city = next((c for c in all_cities if c.name.lower() == city_raw.lower()), None)
@@ -832,7 +1287,7 @@ class CompanyService:
 
             category_ids = []
             if cat_names_raw:
-                for cn in cat_names_raw.split(","):
+                for cn in str(cat_names_raw).split(","):
                     cn_clean = cn.strip().lower()
                     if not cn_clean:
                         continue
@@ -844,7 +1299,7 @@ class CompanyService:
 
             sub_category_ids = []
             if sub_cat_names_raw:
-                for scn in sub_cat_names_raw.split(","):
+                for scn in str(sub_cat_names_raw).split(","):
                     scn_clean = scn.strip().lower()
                     if not scn_clean:
                         continue
@@ -854,40 +1309,41 @@ class CompanyService:
                     sub_category_ids.append(matched_sc.id)
             field_values["sub_category_ids"] = sub_category_ids
 
+            if prod_names_raw and all_prods:
+                product_ids = []
+                for pn in str(prod_names_raw).split(","):
+                    pn_clean = pn.strip().lower()
+                    if not pn_clean:
+                        continue
+                    matched_prod = next(
+                        (
+                            p for p in all_prods
+                            if (p.product_name and p.product_name.lower() == pn_clean)
+                            or (p.product_name_tally and p.product_name_tally.lower() == pn_clean)
+                            or (p.product_code and p.product_code.lower() == pn_clean)
+                        ),
+                        None,
+                    )
+                    if matched_prod:
+                        product_ids.append(matched_prod.id)
+                field_values["product_ids"] = product_ids
+
+            if emails_list:
+                field_values["emails"] = emails_list
+
             self._validate_visit_remarks(
                 field_values.get("visited_factory_office", False), field_values.get("visit_remarks")
             )
 
-            contact_name = field_values.pop("contact_full_name", None)
-            contact_desig = field_values.pop("contact_designation", None)
-            contact_call = field_values.pop("contact_calling_number", None)
-            contact_wa = field_values.pop("contact_whatsapp_number", None)
-            contact_wc = field_values.pop("contact_wechat_number", None)
-
             company = await self.create(**field_values)
-            if email:
-                await self.repository.replace_emails(company.id, [email])
-
-            if contact_name:
-                await self.contact_repository.create(
-                    company_id=company.id,
-                    salutation=None,
-                    person_name=contact_name,
-                    designation=contact_desig,
-                    handling_territory=None,
-                    country_id=country.id,
-                    calling_number=contact_call,
-                    whatsapp_number=contact_wa,
-                    wechat_number=contact_wc,
-                    email=email,
-                    is_primary=True,
-                )
-
-            existing_map[company_name.lower()] = company
+            _register_company_in_maps(company)
             return company
 
         summary = await run_import(
-            rows, row_validator=validate_company_row, row_creator=_create, dedupe_keys=("company_name",)
+            rows,
+            row_validator=lambda r, idx: validate_company_row(r, idx, allow_partial=update_existing),
+            row_creator=_create,
+            dedupe_keys=None if update_existing else ("company_name",),
         )
         await self._invalidate_cache()
         return summary
@@ -910,8 +1366,26 @@ class CompanyService:
             except Exception:
                 pass
 
+        import re
+
+        def _fmt_phone_for_excel(val: str | None) -> str:
+            if not val:
+                return ""
+            v = val.strip()
+            # Insert a space after +CC (e.g. +919876543210 -> +91 9876543210) so Excel keeps it as text instead of 9.19E+11
+            m = re.match(r"^\+(\d{1,3}?)(\d{10})$", v)
+            if m:
+                return f"+{m.group(1)} {m.group(2)}"
+            return v
+
         rows = []
+        seen_export_names: set[str] = set()
         for s in companies:
+            norm_cname = (s.company_name or "").strip().lower()
+            if norm_cname:
+                if norm_cname in seen_export_names:
+                    continue
+                seen_export_names.add(norm_cname)
             emails = [e.email for e in s.emails]
             cat_names = [categories.get(link.category_id, "") for link in s.category_links if link.category_id in categories]
             sub_cat_names = [sub_categories.get(link.sub_category_id, "") for link in s.sub_category_links if link.sub_category_id in sub_categories]
@@ -935,9 +1409,9 @@ class CompanyService:
                     "Potential Reason": s.potential_reason or "",
                     "Contact Person": s.contact_full_name or "",
                     "Designation": s.contact_designation or "",
-                    "Calling Number": s.contact_calling_number or "",
-                    "WhatsApp Number": s.contact_whatsapp_number or "",
-                    "WeChat Number": s.contact_wechat_number or "",
+                    "Calling Number": _fmt_phone_for_excel(s.contact_calling_number),
+                    "WhatsApp Number": _fmt_phone_for_excel(s.contact_whatsapp_number),
+                    "WeChat Number": _fmt_phone_for_excel(s.contact_wechat_number),
                     "Emails": ", ".join(emails),
                     "Tax ID / GST Number": s.tax_id_number or "",
                     "Address": s.address or "",

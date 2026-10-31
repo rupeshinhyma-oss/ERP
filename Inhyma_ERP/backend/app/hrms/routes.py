@@ -80,10 +80,11 @@ def require_setup_manage(ctx: HrmsUserContext = Depends(get_hrms_user_context)) 
 
 @router.get("/locations")
 async def list_locations(
+    active_only: bool = Query(default=False),
     service: HrmsSetupService = Depends(get_hrms_setup_service),
     ctx: HrmsUserContext = Depends(require_setup_read),
 ):
-    locations = await service.list_locations()
+    locations = await service.list_locations(active_only=active_only)
     return build_success_response(
         data=[loc.model_dump(mode="json") for loc in locations],
         message="Office locations retrieved successfully.",
@@ -163,10 +164,11 @@ async def delete_location(
 
 @router.get("/leave-types")
 async def list_leave_types(
+    active_only: bool = Query(default=False),
     service: HrmsSetupService = Depends(get_hrms_setup_service),
     ctx: HrmsUserContext = Depends(require_setup_read),
 ):
-    leaves = await service.list_leave_types()
+    leaves = await service.list_leave_types(active_only=active_only)
     return build_success_response(
         data=[LeaveTypeRead.model_validate(l).model_dump(mode="json") for l in leaves],
         message="Leave types retrieved successfully.",
@@ -246,10 +248,11 @@ async def delete_leave_type(
 
 @router.get("/expense-categories")
 async def list_expense_categories(
+    active_only: bool = Query(default=False),
     service: HrmsSetupService = Depends(get_hrms_setup_service),
     ctx: HrmsUserContext = Depends(require_setup_read),
 ):
-    cats = await service.list_expense_categories()
+    cats = await service.list_expense_categories(active_only=active_only)
     return build_success_response(
         data=[ExpenseCategoryRead.model_validate(c).model_dump(mode="json") for c in cats],
         message="Expense categories retrieved successfully.",

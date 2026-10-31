@@ -1514,6 +1514,7 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
   const [importSummary, setImportSummary] = useState<ImportSummary | null>(null);
   const [importError, setImportError] = useState<string | null>(null);
   const [isImportPageOpen, setIsImportPageOpen] = useState(false);
+  const [importMode, setImportMode] = useState<"create" | "update">("create");
   const [importFile, setImportFile] = useState<File | null>(null);
   const [importLoading, setImportLoading] = useState(false);
   const importFileInputRef = useRef<HTMLInputElement>(null);
@@ -1656,7 +1657,7 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
         })
         .catch(() => { });
 
-      void apiGet<Array<{ id: string; name: string }>>("/masters/countries?search=India&page_size=5")
+      void apiGet<Array<{ id: string; name: string }>>("/masters/countries?search=India&page_size=5&status=active")
         .then((res) => {
           const match = res?.data?.find((c) => c.name.toLowerCase().includes("india"));
           if (match) setDefaultIndiaId(match.id);
@@ -1675,7 +1676,7 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
           }
         })
         .catch(() => {
-          void apiGet<any[]>("/users/all")
+          void apiGet<any[]>("/users/all?active_only=true")
             .then((res) => {
               if (res?.data) {
                 const mapped = res.data.map((u) => ({
@@ -1786,7 +1787,7 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
     } catch (err: any) {
       try {
         const fetchRes = await apiGet<Array<{ id: string; name: string }>>(
-          `/masters/cities?state_id=${quickForm.state_id}&search=${encodeURIComponent(cityLabel)}&page_size=10`
+          `/masters/cities?state_id=${quickForm.state_id}&search=${encodeURIComponent(cityLabel)}&page_size=10&status=active`
         );
         const match = fetchRes.data?.find((c) => c.name.toLowerCase() === cityLabel.toLowerCase());
         if (match) {
@@ -1829,7 +1830,7 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
           if (quickErrors.state_id) setQuickErrors((prev) => ({ ...prev, state_id: "" }));
         } else {
           try {
-            const indiaRes = await apiGet<any[]>("/masters/countries?search=India&page_size=1");
+            const indiaRes = await apiGet<any[]>("/masters/countries?search=India&page_size=1&status=active");
             const indiaId = indiaRes.data?.[0]?.id;
             const { data: newState } = await apiPost<{ id: string; name: string }>("/masters/states", {
               name: stateName,
@@ -3184,7 +3185,7 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
 
   async function handleExport(format: "csv" | "xlsx") {
     try {
-      await downloadExport("/companies", format, "suppliers");
+      await downloadExport("/companies", format, "companies");
     } catch (err) {
       setError(err);
     }
@@ -3227,7 +3228,7 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
             <div>
               <h1 style={{ fontSize: "20px", fontWeight: 700, color: "#1e293b", margin: 0 }}>Import Companies</h1>
               <div style={{ fontSize: "13px", color: "#64748b", marginTop: "4px" }}>
-                Upload bulk supplier accounts, contacts, and sourcing capabilities from Excel (.xlsx, .xls) or CSV.
+                Upload bulk company profiles, GST numbers, contacts, and business classifications from Excel (.xlsx, .xls) or CSV.
               </div>
             </div>
             <button
@@ -3274,6 +3275,128 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
               padding: "28px 36px",
             }}
           >
+            {/* Import Mode Selection */}
+            <div style={{ marginBottom: "26px" }}>
+              <label style={{ display: "block", fontSize: "14px", fontWeight: 700, color: "#0f172a", marginBottom: "10px" }}>
+                Select Import Mode
+              </label>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: "14px", maxWidth: "800px" }}>
+                {/* Mode 1: Add New */}
+                <div
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => setImportMode("create")}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") setImportMode("create");
+                  }}
+                  style={{
+                    padding: "16px 18px",
+                    borderRadius: "8px",
+                    border: importMode === "create" ? "2px solid #2563eb" : "1px solid #cbd5e1",
+                    background: importMode === "create" ? "#eff6ff" : "#ffffff",
+                    cursor: "pointer",
+                    boxShadow: importMode === "create" ? "0 2px 8px rgba(37,99,235,0.12)" : "none",
+                    transition: "all 0.15s ease-in-out",
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "6px" }}>
+                    <span style={{ fontSize: "17px" }}>➕</span>
+                    <strong style={{ fontSize: "14px", color: importMode === "create" ? "#1d4ed8" : "#1e293b" }}>
+                      Add New Records Only
+                    </strong>
+                    {importMode === "create" && (
+                      <span
+                        style={{
+                          marginLeft: "auto",
+                          fontSize: "10px",
+                          fontWeight: 700,
+                          background: "#2563eb",
+                          color: "#ffffff",
+                          padding: "2px 8px",
+                          borderRadius: "10px",
+                          letterSpacing: "0.5px",
+                        }}
+                      >
+                        ACTIVE
+                      </span>
+                    )}
+                  </div>
+                  <div style={{ fontSize: "12px", color: "#64748b", lineHeight: 1.45 }}>
+                    Upload only brand new company records. Any duplicate rows matching Company Name, Tax ID / GST Number, or Contact Number already in the system will be safely flagged and skipped.
+                  </div>
+                </div>
+
+                {/* Mode 2: Update / Modify */}
+                <div
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => setImportMode("update")}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") setImportMode("update");
+                  }}
+                  style={{
+                    padding: "16px 18px",
+                    borderRadius: "8px",
+                    border: importMode === "update" ? "2px solid #2563eb" : "1px solid #cbd5e1",
+                    background: importMode === "update" ? "#eff6ff" : "#ffffff",
+                    cursor: "pointer",
+                    boxShadow: importMode === "update" ? "0 2px 8px rgba(37,99,235,0.12)" : "none",
+                    transition: "all 0.15s ease-in-out",
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "6px" }}>
+                    <span style={{ fontSize: "17px" }}>✏️</span>
+                    <strong style={{ fontSize: "14px", color: importMode === "update" ? "#1d4ed8" : "#1e293b" }}>
+                      Update / Modify Existing Records
+                    </strong>
+                    {importMode === "update" && (
+                      <span
+                        style={{
+                          marginLeft: "auto",
+                          fontSize: "10px",
+                          fontWeight: 700,
+                          background: "#2563eb",
+                          color: "#ffffff",
+                          padding: "2px 8px",
+                          borderRadius: "10px",
+                          letterSpacing: "0.5px",
+                        }}
+                      >
+                        ACTIVE
+                      </span>
+                    )}
+                  </div>
+                  <div style={{ fontSize: "12px", color: "#64748b", lineHeight: 1.45 }}>
+                    Update existing company records matching Company Name or Tax ID / GST Number. <strong>Zero Data Loss:</strong> Blank cells in your file are ignored and will never erase existing fields.
+                  </div>
+                </div>
+              </div>
+
+              {/* Mode Info Callout */}
+              <div
+                style={{
+                  marginTop: "12px",
+                  padding: "10px 14px",
+                  borderRadius: "6px",
+                  fontSize: "12.5px",
+                  maxWidth: "800px",
+                  background: importMode === "create" ? "#f8fafc" : "#fffbeb",
+                  color: importMode === "create" ? "#475569" : "#92400e",
+                  borderLeft: importMode === "create" ? "3px solid #64748b" : "3px solid #d97706",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
+                }}
+              >
+                <span>{importMode === "create" ? "ℹ️" : "🛡️"}</span>
+                <span>
+                  {importMode === "create"
+                    ? "Strict creation mode: Existing company records remain untouched. Any duplicate Company Name, GST Number, or Contact Number will be reported."
+                    : "Safe non-destructive update: Only columns with values in your uploaded file will update matching companies. Empty columns are kept intact."}
+                </span>
+              </div>
+            </div>
+
             {/* Import File Section */}
             <div style={{ marginBottom: "24px" }}>
               <label style={{ display: "block", fontSize: "14px", fontWeight: 600, color: "#1e293b", marginBottom: "8px" }}>
@@ -3361,7 +3484,7 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
 
                 <button
                   type="button"
-                  onClick={() => downloadSampleCsv("supplier", COMPANY_IMPORT_HEADERS)}
+                  onClick={() => downloadSampleCsv("company", COMPANY_IMPORT_HEADERS)}
                   style={{
                     display: "inline-flex",
                     alignItems: "center",
@@ -3408,7 +3531,7 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
                 <li>Maximum Allowed File Size: <strong>8 MB</strong>.</li>
                 <li>Only <strong>.Csv</strong>, <strong>.Xls</strong>, And <strong>.Xlsx</strong> Files Are Accepted.</li>
                 <li>Mandatory Columns: <strong>Company Name</strong>, <strong>Country</strong>, <strong>Province / State</strong>, And <strong>City</strong>.</li>
-                <li><strong>Company Name</strong> Must Be Unique.</li>
+                <li><strong>Company Name</strong>, <strong>Tax ID / GST Number</strong> (When Provided), And <strong>Calling / WhatsApp Number</strong> Must Be Unique. Duplicate GST Numbers Are Automatically Blocked In Add Mode Or Used To Match Existing Companies In Update Mode.</li>
                 <li><strong>Country, Province / State, City, Product Category, Key Strength Sub Category, And Company Type</strong> Must Already Exist In The System.</li>
                 <li><strong>Key Strength Sub Category</strong> Must Belong To The Selected <strong>Product Category</strong>.</li>
                 <li><strong>Calling Number</strong>, <strong>WhatsApp Number</strong>, And <strong>WeChat Number</strong> Must Include Country Code (Maximum 15 Digits Total).</li>
@@ -3461,20 +3584,21 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
                   boxShadow: !importFile || importLoading ? "none" : "0 2px 4px rgba(37,99,235,0.25)",
                 }}
               >
-                {importLoading ? "Importing..." : "Import"}
+                {importLoading ? "Parsing..." : importMode === "update" ? "Proceed with Update →" : "Next: Map Columns →"}
               </button>
             </div>
           </div>
 
-          {/* Column Mapping Wizard Modal (Matches Supplier & Buyer Master) */}
+          {/* Column Mapping Wizard Modal */}
           {wizardPending && (
             <WizardModal
               file={wizardPending.file}
               rows={wizardPending.rows}
               sheetColumns={wizardPending.sheetColumns}
               apiBase="/companies"
-              entityName="supplier"
+              entityName="company"
               importHeaders={COMPANY_IMPORT_HEADERS}
+              initialMode={importMode}
               onClose={() => setWizardPending(null)}
               onComplete={(summary) => {
                 setWizardPending(null);
@@ -5824,7 +5948,7 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
               )}
               <ImpExpDropdown
                 apiBase="/companies"
-                entityName="supplier"
+                entityName="company"
                 importHeaders={COMPANY_IMPORT_HEADERS}
                 onSummary={setImportSummary}
                 onError={setImportError}

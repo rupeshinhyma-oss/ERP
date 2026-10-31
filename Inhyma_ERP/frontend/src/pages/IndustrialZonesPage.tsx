@@ -231,9 +231,9 @@ export function IndustrialZonesPage() {
     async function loadMasters() {
       try {
         const [statesRes, districtsRes, citiesRes] = await Promise.all([
-          apiGet<Array<{ name: string }>>("/api/v1/masters/states?limit=500").catch(() => null),
-          apiGet<Array<{ name: string }>>("/api/v1/masters/districts?limit=500").catch(() => null),
-          apiGet<Array<{ name: string }>>("/api/v1/masters/cities?limit=500").catch(() => null),
+          apiGet<Array<{ name: string }>>("/api/v1/masters/states?limit=500&status=active").catch(() => null),
+          apiGet<Array<{ name: string }>>("/api/v1/masters/districts?limit=500&status=active").catch(() => null),
+          apiGet<Array<{ name: string }>>("/api/v1/masters/cities?limit=500&status=active").catch(() => null),
         ]);
 
         if (statesRes?.data && Array.isArray(statesRes.data)) {

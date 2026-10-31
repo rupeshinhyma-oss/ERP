@@ -48,8 +48,8 @@ class BrandService:
         """Return every active brand, using the shared dropdown cache."""
         cached = await self.cache_manager.get_dropdown(DROPDOWN_CACHE_NAME)
         if cached is not None:
-            return cached
-        brands = await self.repository.list_all()
+            return [i for i in cached if getattr(i.status, 'value', str(i.status)).lower() == 'active']
+        brands = [i for i in await self.repository.list_all() if getattr(i.status, 'value', str(i.status)).lower() == 'active']
         await self.cache_manager.set_dropdown(DROPDOWN_CACHE_NAME, brands)
         return brands
 

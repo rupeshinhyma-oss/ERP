@@ -19,10 +19,11 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-from sqlalchemy import func, or_, select, text
+from sqlalchemy import case, func, or_, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.constants import RecordStatus
 from app.core.exceptions import BadRequestException, ConflictException
 from app.inventory.models import ProductStock
 from app.masters.brands.models import Brand
@@ -61,11 +62,13 @@ def warehouse_column(name: str) -> str:
     return slug
 
 
-async def get_warehouse(db: AsyncSession, name: str) -> Warehouse:
+async def get_warehouse(db: AsyncSession, name: str, *, require_active: bool = False) -> Warehouse:
     stmt = select(Warehouse).where(func.lower(Warehouse.name) == name.strip().lower(), Warehouse.deleted_at.is_(None))
     warehouse = (await db.execute(stmt)).scalars().first()
     if warehouse is None:
         raise BadRequestException(f"Warehouse '{name}' does not exist.")
+    if require_active and warehouse.status != RecordStatus.ACTIVE:
+        raise BadRequestException(f"Warehouse '{name}' is inactive in the Warehouse Master.")
     return warehouse
 
 
@@ -79,12 +82,18 @@ def is_physical(warehouse: Warehouse) -> bool:
     return True
 
 
-async def find_product(db: AsyncSession, name: str) -> Product:
+async def find_product(db: AsyncSession, name: str, *, require_active: bool = False) -> Product:
     lowered = name.strip().lower()
-    stmt = select(Product).where(or_(func.lower(Product.product_name) == lowered, func.lower(Product.product_name_tally) == lowered))
-    product = (await db.execute(stmt.order_by(Product.created_at.asc(), Product.id))).scalars().first()
+    stmt = select(Product).where(
+        Product.deleted_at.is_(None),
+        or_(func.lower(Product.product_name) == lowered, func.lower(Product.product_name_tally) == lowered),
+    )
+    active_rank = case((Product.status == RecordStatus.ACTIVE, 0), else_=1)
+    product = (await db.execute(stmt.order_by(active_rank, Product.created_at.asc(), Product.id))).scalars().first()
     if product is None:
         raise BadRequestException(f"Product '{name}' is not in the Product Master.")
+    if require_active and product.status != RecordStatus.ACTIVE:
+        raise BadRequestException(f"Product '{name}' is inactive in the Product Master.")
     return product
 
 

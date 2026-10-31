@@ -258,11 +258,11 @@ export function AgentsPage() {
     async function loadMasters() {
       try {
         const [typesRes, statesRes, districtsRes, citiesRes, usersRes] = await Promise.all([
-          apiGet<Array<{ name: string }>>("/api/v1/masters/agent-types?limit=100").catch(() => null),
-          apiGet<Array<{ name: string }>>("/api/v1/masters/states?limit=500").catch(() => null),
-          apiGet<Array<{ name: string }>>("/api/v1/masters/districts?limit=500").catch(() => null),
-          apiGet<Array<{ name: string }>>("/api/v1/masters/cities?limit=500").catch(() => null),
-          apiGet<Array<{ full_name: string; username: string }>>("/api/v1/users?limit=100").catch(() => null),
+          apiGet<Array<{ name: string }>>("/api/v1/masters/agent-types?limit=100&status=active").catch(() => null),
+          apiGet<Array<{ name: string }>>("/api/v1/masters/states?limit=500&status=active").catch(() => null),
+          apiGet<Array<{ name: string }>>("/api/v1/masters/districts?limit=500&status=active").catch(() => null),
+          apiGet<Array<{ name: string }>>("/api/v1/masters/cities?limit=500&status=active").catch(() => null),
+          apiGet<Array<{ full_name: string; username: string }>>("/api/v1/users?limit=100&status=ACTIVE").catch(() => null),
         ]);
 
         if (typesRes?.data && Array.isArray(typesRes.data) && typesRes.data.length > 0) {

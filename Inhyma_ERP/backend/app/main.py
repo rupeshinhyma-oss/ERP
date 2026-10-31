@@ -198,6 +198,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
         # Read-only metadata check first so we NEVER acquire ACCESS EXCLUSIVE locks on `users` / `organizations`
         # during normal boots or --reload restarts when columns and tables already exist.
+        if engine.dialect.name == "sqlite":
+            async with engine.begin() as conn:
+                await conn.run_sync(Base.metadata.create_all)
+            return
         async with engine.connect() as conn:
             col_rows = (
                 await conn.execute(

@@ -13,10 +13,11 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common.base_repository import BaseRepository
+from app.core.constants import RecordStatus
 from app.buyers.models import Buyer
 from app.inquiries.models import ConsignmentCode, Inquiry, InquiryItem, InquiryItemStatus, Quotation, QuotationStatus, RFQ
 from app.masters.products.models import Product
@@ -41,7 +42,11 @@ class ConsignmentCodeRepository(BaseRepository[ConsignmentCode]):
 
     async def list_for_buyer(self, buyer_id: uuid.UUID) -> list[ConsignmentCode]:
         """Return every active consignment code belonging to one buyer (for the create-inquiry dropdown)."""
-        stmt = self._base_select().where(ConsignmentCode.buyer_id == buyer_id).order_by(ConsignmentCode.code)
+        stmt = (
+            self._base_select()
+            .where(ConsignmentCode.buyer_id == buyer_id, ConsignmentCode.status == RecordStatus.ACTIVE)
+            .order_by(ConsignmentCode.code)
+        )
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 
@@ -161,7 +166,7 @@ class InquiryRepository(BaseRepository[Inquiry]):
             )
             .join(Inquiry, Inquiry.buyer_id == Buyer.id)
             .join(ConsignmentCode, Inquiry.consignment_code_id == ConsignmentCode.id, isouter=True)
-            .where(Inquiry.deleted_at.is_(None), Buyer.deleted_at.is_(None))
+            .where(Inquiry.deleted_at.is_(None), Buyer.deleted_at.is_(None), Buyer.is_active.is_(True))
             .order_by(Inquiry.updated_at.desc())
         )
         result = await self.session.execute(stmt)
@@ -478,6 +483,13 @@ class QuotationRepository(BaseRepository[Quotation]):
             .where(
                 Quotation.deleted_at.is_(None),
                 Quotation.attachment_url.is_not(None),
+                InquiryItem.deleted_at.is_(None),
+                Product.deleted_at.is_(None),
+                Product.status == RecordStatus.ACTIVE,
+                or_(
+                    Quotation.supplier_id.is_(None),
+                    and_(Supplier.deleted_at.is_(None), Supplier.is_active.is_(True)),
+                ),
             )
             .order_by(Quotation.created_at.desc())
         )

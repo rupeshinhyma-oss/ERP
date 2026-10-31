@@ -3,20 +3,27 @@
 **System:** Yinglima_ERP (China Procurement)  
 **Scope:** Functional updates, schema changes, UI hardening, and bug fixes.
 
-## [Release 2026-10-29] — `.env`-Driven Cross-ERP Switching, Zero Hardcoded Ports & Strict Local/Render Isolation
+## [Release 2026-10-29] — 0ms Instant Product Line-Item Rendering, Stock Movement / Users Filter UI, Standardized Imp/Exp SVG Badges & Cross-ERP Isolation
 
-### 1. Zero Hardcoded Localhost/Port Links (`ssoBridge.ts`, `ecosystemSession.ts`, `EcosystemSwitcher.tsx`, `vite.config.ts`, `config.py`, `inquiries/routes.py`)
-- Removed all hardcoded `localhost`, `127.0.0.1`, and port (`5170`, `5173`, `5174`, `8000`, `8001`, `8002`) fallbacks across `frontend/vite.config.ts` (`loadEnv`), `frontend/src/lib/ssoBridge.ts`, `frontend/src/lib/ecosystemSession.ts`, `frontend/src/components/EcosystemSwitcher.tsx`, `backend/app/core/config.py`, and `backend/app/inquiries/routes.py`.
-- Peer frontend and API addresses (`VITE_CONTROL_PLANE_URL`, `VITE_CONTROL_PLANE_API_URL`, `VITE_CENTRAL_AUTH_API`, `VITE_YINGLIMA_URL`, `VITE_YINGLIMA_API_URL`, `VITE_INHYMA_URL`, `VITE_INHYMA_API_URL`, `VITE_PORT`, `VITE_API_PROXY_TARGET`) are loaded strictly from `.env` / `.env.defaults` locally and from Render environment variables when deployed on Render.
+### 0A. Standardized Imp / Exp (SAMPLE FILE, IMPORT, EXPORT) SVG Icon Badges (ImportWizard.tsx, style.css, ProductPrices.tsx, LocalPurchases.tsx)
+- Replaced legacy emojis inside all Imp / Exp and Export dropdown menus across Yinglima_ERP with clean SVG icon badges matching Inhyma_ERP.
 
-### 2. Strict Local vs Hosted Origin Guard (`sanitizeEnvMatchedUrl`)
-- Fixed the cross-ERP switching bug where opening `http://localhost:5173` while signed in as an Inhyma-only user (`User D`) redirected to `https://inhyma-erp-frontend.onrender.com/dashboard` due to shared `erp_instances.base_url` entries.
-- `routeForCentralSession()`, `enforceCentralLanding()`, `erpUrlFor()`, `controlPlaneUrl()`, and `planSwitch()` now prioritize `.env` (`VITE_*_URL`) and validate target URLs through `sanitizeEnvMatchedUrl()` so `localhost`/LAN tabs never jump to `*.onrender.com` and hosted tabs never jump to `localhost`/LAN.
-- Verified with expanded unit tests in `frontend/src/tests/ssoHandoverSession.test.ts` (`89/89` frontend tests passed) and backend federation suites (`26/26` passed).
+### 0. Stock Movement & Users Page Header + Filter Options Standardization (StockMovements.tsx & Users.tsx)
+- Added standardized page-header title, top-right Funnel Filter toggle button with active count badge, and collapsible Filter Options card.
+
+### 1. Zero Hardcoded Localhost/Port Links & Cross-ERP Isolation (ssoBridge.ts, ecosystemSession.ts, EcosystemSwitcher.tsx, ite.config.ts, config.py, inquiries/routes.py)
+- Peer frontend and API addresses are loaded strictly from .env / .env.defaults locally and from Render environment variables when deployed.
+- Strict Local vs Hosted Origin Guard prevents localhost tabs from jumping to hosted domains.
+
+### 2. 0ms Instant Product Line-Item Rendering in Sale Process & Local Purchase
+- Sale Process and Local Purchase summary endpoints include line items upfront, rendering table items in 0ms without waiting for background queries.
 
 ---
 
-## [Release 2026-10-28] — Sale Process Local Purchase Costing Resolution & Product Prices Quote Modal 100% Zoom Fix
+## [Release 2026-10-28] — Sale Process Local Purchase Costing Resolution, Product Prices Quote Modal 100% Zoom Fix & Product Gallery Filter Toggle
+
+### 0A. Product Gallery Top-Right Funnel Filter Toggle Button (ProductGallery.tsx)
+- Added the standardized top-right funnel filter toggle button on Product Gallery matching Product Master, Product Prices, Suppliers, and Buyers.
 
 ### 0. Product Prices "+ Add New Supplier Quotation" Modal 100% Zoom Footer Visibility Fix (`ProductPrices.tsx` & `style.css`)
 - **Root Cause:** `.modal-card form > :not(.form-actions):not(.modal-footer)` in `style.css` applied `padding: 20px 24px` to every direct child `<div>` inside `<form>`, adding 160px of vertical height and pushing the `Cancel` and `+ Add Supplier Quote` footer buttons outside the `max-height: 90vh` `.modal-dialog-card` box at 100% zoom.

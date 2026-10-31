@@ -25,6 +25,7 @@ from app.masters.import_export import (
     ImportSummary,
     build_csv_export,
     build_excel_export,
+    is_different,
     model_to_dict,
     parse_rows_from_file,
     run_import,
@@ -80,8 +81,8 @@ class ProductService:
         """Return every active product, using the shared dropdown cache."""
         cached = await self.cache_manager.get_dropdown(DROPDOWN_CACHE_NAME)
         if cached is not None:
-            return cached
-        products = await self.repository.list_all()
+            return [i for i in cached if getattr(i.status, 'value', str(i.status)).lower() == 'active']
+        products = [i for i in await self.repository.list_all() if getattr(i.status, 'value', str(i.status)).lower() == 'active']
         await self.cache_manager.set_dropdown(DROPDOWN_CACHE_NAME, products)
         return products
 
@@ -447,8 +448,12 @@ class ProductService:
         return bool(res.rowcount and res.rowcount > 0)
 
     async def get_machine_spares_universal_view(self, search: str | None = None) -> list[dict]:
-        """Universal view showing machine-wise spare parts mapping."""
-        q = select(Product).where(Product.product_type == "Machine", Product.deleted_at.is_(None))
+        """Universal view showing machine-wise spare parts mapping (active products only)."""
+        q = select(Product).where(
+            Product.product_type == "Machine",
+            Product.deleted_at.is_(None),
+            Product.status == RecordStatus.ACTIVE,
+        )
         if search and search.strip():
             term = f"%{search.strip()}%"
             q = q.where(
@@ -463,7 +468,7 @@ class ProductService:
         stmt = (
             select(ProductMachineSpare, Product)
             .join(Product, ProductMachineSpare.spare_part_id == Product.id)
-            .where(Product.deleted_at.is_(None))
+            .where(Product.deleted_at.is_(None), Product.status == RecordStatus.ACTIVE)
         )
         mappings_res = (await self.repository.session.execute(stmt)).all()
 
@@ -482,7 +487,11 @@ class ProductService:
                 "remarks": mapping.remarks,
             })
 
-        spare_stmt = select(Product).where(Product.product_type == "Spare Part", Product.deleted_at.is_(None))
+        spare_stmt = select(Product).where(
+            Product.product_type == "Spare Part",
+            Product.deleted_at.is_(None),
+            Product.status == RecordStatus.ACTIVE,
+        )
         all_spares = (await self.repository.session.execute(spare_stmt)).scalars().all()
         for spare in all_spares:
             if spare.applicable_machine_ids:
@@ -519,7 +528,7 @@ class ProductService:
         stmt = (
             select(ProductDimensionRow, Product)
             .join(Product, ProductDimensionRow.product_id == Product.id)
-            .where(Product.is_deleted.is_(False))
+            .where(Product.is_deleted.is_(False), Product.status == RecordStatus.ACTIVE)
             .order_by(Product.product_name_tally, ProductDimensionRow.sort_order)
         )
         if search and search.strip():
@@ -556,7 +565,7 @@ class ProductService:
     # Import / Export
     # ------------------------------------------------------------------
 
-    async def import_file(self, filename: str, raw_bytes: bytes) -> ImportSummary:
+    async def import_file(self, filename: str, raw_bytes: bytes, *, update_existing: bool = False) -> ImportSummary:
         """Validate and import products from an uploaded CSV/XLSX file."""
         rows = parse_rows_from_file(filename, raw_bytes)
 
@@ -583,58 +592,25 @@ class ProductService:
                 "Pack. Unit CBM": p.packaging_unit_cbm if p.packaging_unit_cbm is not None else "—",
                 "Refund VAT %": p.refund_vat_percent if p.refund_vat_percent is not None else "—",
                 "Compliance & License Requirements": p.license_certificate_required or "—",
+                "Specification": p.specification or p.description or "—",
                 "Status": (p.status.value if hasattr(p.status, "value") else str(p.status or "active")).capitalize(),
             }
 
-        async def _create(field_values: dict[str, Any]) -> Product:
-            category_code = field_values.pop("category_code")
+        async def _create(field_values: dict[str, Any]) -> Product | tuple[str, Product]:
+            category_code = field_values.pop("category_code", None)
             sub_category_code = field_values.pop("sub_category_code", None)
             brand_code = field_values.pop("brand_code", None)
-            uom_code = field_values.pop("uom_code")
+            hsn_code = field_values.pop("hsn_code", None)
+            uom_code = field_values.pop("uom_code", None)
             secondary_uom_code = field_values.pop("secondary_uom_code", None)
 
-            category = await self.category_repository.get_by_code(category_code)
-            if category is None:
-                cat_list = await self.category_repository.list(limit=500)
-                category = next((c for c in cat_list if c.code.lower() == category_code.lower() or c.name.lower() == category_code.lower()), None)
-            if category is None:
-                raise BadRequestException(f"Category '{category_code}' does not exist in Category Master.")
-            field_values["category_id"] = category.id
-
-            if sub_category_code:
-                sub_category = await self.sub_category_repository.get_by_code(sub_category_code)
-                if sub_category is None:
-                    sub_cats = await self.sub_category_repository.list(limit=1000)
-                    sub_category = next((sc for sc in sub_cats if sc.code.lower() == sub_category_code.lower() or sc.name.lower() == sub_category_code.lower()), None)
-                if sub_category is None:
-                    raise BadRequestException(f"Sub Category '{sub_category_code}' does not exist in Sub Category Master.")
-                if sub_category.category_id != category.id:
-                    raise BadRequestException(f"Sub Category '{sub_category.name}' does not belong to Category '{category.name}'.")
-                field_values["sub_category_id"] = sub_category.id
-
-            if brand_code:
-                brand = await self.brand_repository.get_by_code(brand_code)
-                if brand is None:
-                    brands = await self.brand_repository.list(limit=500)
-                    brand = next((b for b in brands if b.code.lower() == brand_code.lower() or b.name.lower() == brand_code.lower()), None)
-                if brand is None:
-                    raise BadRequestException(f"Brand '{brand_code}' does not exist in Brand Master.")
-                field_values["brand_id"] = brand.id
-
-            uom = await self.uom_repository.get_by_code(uom_code)
-            if uom is None:
-                uoms = await self.uom_repository.list(limit=500)
-                uom = next((u for u in uoms if u.code.lower() == uom_code.lower() or u.name.lower() == uom_code.lower() or (u.short_name and u.short_name.lower() == uom_code.lower())), None)
-            if uom is None:
-                raise BadRequestException(f"UOM '{uom_code}' does not exist in UOM Master.")
-            field_values["uom_id"] = uom.id
-
             raw_product_code = field_values.get("product_code")
+            is_auto_code = bool(raw_product_code and str(raw_product_code).startswith("AUTO-"))
             product_name = (field_values.get("product_name_tally") or field_values.get("product_name") or "").strip()
-            clean_name_key = product_name.lower().replace(" ", "").replace("-", "")
-            clean_code_key = (raw_product_code or "").strip().lower()
+            clean_name_key = product_name.lower().replace(" ", "").replace("-", "") if product_name else ""
+            clean_code_key = "" if is_auto_code else (raw_product_code or "").strip().lower()
 
-            if clean_name_key in seen_names:
+            if clean_name_key and clean_name_key in seen_names:
                 raise ConflictException(
                     f"Product '{product_name}' appears multiple times in the import file (in-file duplicate)."
                 )
@@ -643,10 +619,9 @@ class ProductService:
                     f"Product Code '{raw_product_code}' appears multiple times in the import file (in-file duplicate)."
                 )
 
-            # Check if Product Name already exists in DB
+            # Check if Product Name already exists in DB (exact case-insensitive match)
+            existing_dup = None
             if product_name:
-                from sqlalchemy import select, or_
-                # exact (case-insensitive) match -- a typed % or _ must not act as a wildcard and flag unrelated products
                 lowered_name = product_name.lower()
                 stmt_dup = select(Product).where(
                     Product.deleted_at.is_(None),
@@ -657,23 +632,172 @@ class ProductService:
                 )
                 res_dup = await self.repository.session.execute(stmt_dup)
                 existing_dup = res_dup.scalars().first()
+
+            # Check if Product Code already exists in DB
+            existing_code = None
+            if raw_product_code and not is_auto_code:
+                existing_code = await self.repository.get_by_code(raw_product_code)
+                if existing_code is None:
+                    # Free product_code if held by a previously soft-deleted product row
+                    stmt_soft = select(Product).where(
+                        Product.deleted_at.is_not(None),
+                        func.lower(Product.product_code) == raw_product_code.strip().lower(),
+                    )
+                    res_soft = await self.repository.session.execute(stmt_soft)
+                    for soft_row in res_soft.scalars().all():
+                        soft_row.product_code = f"{soft_row.product_code}__del_{str(soft_row.id)[:6]}"
+                    await self.repository.session.flush()
+
+            # ADD NEW RECORDS ONLY MODE: strictly detect duplicates by Name or Code and skip without saving
+            if not update_existing:
                 if existing_dup is not None:
                     raise ConflictException(
                         f"Product '{product_name}' already exists in Product Master (Code: {existing_dup.product_code}) — duplicate skipped.",
                         details={"existing": _serialize_for_compare(existing_dup)},
                     )
-
-            # Check if Product Code already exists in DB
-            if raw_product_code:
-                existing_code = await self.repository.get_by_code(raw_product_code)
                 if existing_code is not None:
                     raise ConflictException(
                         f"Product Code '{raw_product_code}' already exists in Product Master (used by '{existing_code.product_name_tally or existing_code.product_name}') — duplicate skipped.",
                         details={"existing": _serialize_for_compare(existing_code)},
                     )
 
+            # UPDATE EXISTING MODE: prevent cross-record conflict where Code matches Product A and Name matches Product B
+            if update_existing and existing_code is not None and existing_dup is not None and existing_code.id != existing_dup.id:
+                raise ConflictException(
+                    f"Product Name '{product_name}' already belongs to another product (Code: {existing_dup.product_code}) — cannot assign to Code '{raw_product_code}'.",
+                    details={"existing": _serialize_for_compare(existing_dup)},
+                )
+
+            target_prod = (existing_dup if existing_dup is not None else existing_code) if update_existing else None
+
+            # Resolve foreign keys when provided (or require them when creating a brand-new product)
+            category = None
+            if category_code:
+                category = await self.category_repository.get_by_code(category_code)
+                if category is None:
+                    cat_list = await self.category_repository.list(limit=500)
+                    category = next((c for c in cat_list if c.code.lower() == category_code.lower() or c.name.lower() == category_code.lower()), None)
+                if category is None:
+                    raise BadRequestException(f"Category '{category_code}' does not exist in Category Master.")
+                field_values["category_id"] = category.id
+            elif target_prod is None:
+                raise BadRequestException("Category is required.")
+
+            effective_cat_id = field_values.get("category_id") or (target_prod.category_id if target_prod is not None else None)
+
+            if sub_category_code:
+                sub_cats = await self.sub_category_repository.list(limit=1000)
+                sub_category = None
+                if effective_cat_id:
+                    sub_category = next(
+                        (
+                            sc for sc in sub_cats
+                            if sc.category_id == effective_cat_id
+                            and (sc.code.lower() == sub_category_code.lower() or sc.name.lower() == sub_category_code.lower())
+                        ),
+                        None,
+                    )
+                if sub_category is None:
+                    sub_category = await self.sub_category_repository.get_by_code(sub_category_code)
+                    if sub_category is None:
+                        sub_category = next(
+                            (sc for sc in sub_cats if sc.code.lower() == sub_category_code.lower() or sc.name.lower() == sub_category_code.lower()),
+                            None,
+                        )
+                if sub_category is None:
+                    raise BadRequestException(f"Sub Category '{sub_category_code}' does not exist in Sub Category Master.")
+                if effective_cat_id and sub_category.category_id != effective_cat_id:
+                    cat_name = categories_map.get(str(effective_cat_id), str(effective_cat_id))
+                    raise BadRequestException(f"Sub Category '{sub_category.name}' does not belong to Category '{cat_name}'.")
+                field_values["sub_category_id"] = sub_category.id
+            elif target_prod is None:
+                raise BadRequestException("Sub Category is required.")
+
+            if brand_code:
+                brand = await self.brand_repository.get_by_code(brand_code)
+                if brand is None:
+                    brands = await self.brand_repository.list(limit=500)
+                    brand = next((b for b in brands if b.code.lower() == brand_code.lower() or b.name.lower() == brand_code.lower()), None)
+                if brand is None:
+                    raise BadRequestException(f"Brand '{brand_code}' does not exist in Brand Master.")
+                field_values["brand_id"] = brand.id
+
+            if hsn_code and self.tax_repository is not None:
+                taxes = await self.tax_repository.list(limit=1000)
+                clean_hsn = str(hsn_code).strip().lower().replace(".", "").replace(" ", "")
+                tax_obj = next(
+                    (
+                        t for t in taxes
+                        if (t.hsn_number or "").strip().lower() == str(hsn_code).strip().lower()
+                        or (t.hsn_number or "").strip().lower().replace(".", "").replace(" ", "") == clean_hsn
+                    ),
+                    None,
+                )
+                if tax_obj is None:
+                    raise BadRequestException(f"HSN Code '{hsn_code}' does not exist in Taxes Master.")
+                field_values["hsn_id"] = tax_obj.id
+
+            if uom_code:
+                uom = await self.uom_repository.get_by_code(uom_code)
+                if uom is None:
+                    uoms = await self.uom_repository.list(limit=500)
+                    uom = next(
+                        (
+                            u for u in uoms
+                            if u.code.lower() == uom_code.lower()
+                            or u.name.lower() == uom_code.lower()
+                            or (u.short_name and u.short_name.lower() == uom_code.lower())
+                        ),
+                        None,
+                    )
+                if uom is None:
+                    raise BadRequestException(f"UOM '{uom_code}' does not exist in UOM Master.")
+                field_values["uom_id"] = uom.id
+            elif target_prod is None:
+                raise BadRequestException("UOM (Unit of Measure) is required.")
+
+            # UPDATE EXISTING RECORD
+            if update_existing and target_prod is not None:
+                skip_keys: set[str] = set()
+                if is_auto_code:
+                    skip_keys.add("product_code")
+                update_kwargs: dict[str, Any] = {}
+                for k, v in field_values.items():
+                    if k in skip_keys or v is None or v == "":
+                        continue
+                    old_v = getattr(target_prod, k, None)
+                    if is_different(old_v, v):
+                        update_kwargs[k] = v
+                has_changes = bool(update_kwargs)
+                if has_changes and update_kwargs:
+                    await self.repository.update(target_prod, **update_kwargs)
+                    await notify_source_record_changed("product", target_prod.id)
+                    await refresh_planning_cells_for_record(self.repository.session, "product", target_prod.id)
+                if clean_name_key:
+                    seen_names.add(clean_name_key)
+                if clean_code_key:
+                    seen_codes.add(clean_code_key)
+                if not has_changes:
+                    return ("unchanged", target_prod)
+                return ("updated", target_prod)
+
+            # CREATE NEW RECORD (when in Add New mode, or when a row in Update mode is a brand-new product)
+            if not product_name:
+                raise BadRequestException("Product Name (As Per Tally) is required.")
+            if not field_values.get("packaging_quantity") or field_values["packaging_quantity"] <= 0:
+                raise BadRequestException("Packaging Quantity (Pack. Qty) is required and must be greater than 0.")
+            if not field_values.get("packaging_gross_weight") or field_values["packaging_gross_weight"] <= 0:
+                raise BadRequestException("Packaging Gross Weight (kg) is required and must be greater than 0.")
+            if not field_values.get("packaging_unit_cbm") or field_values["packaging_unit_cbm"] <= 0:
+                raise BadRequestException("Packaging Unit CBM is required and must be greater than 0.")
+
+            field_values.setdefault("is_purchasable", True)
+            field_values.setdefault("is_sellable", True)
+            field_values.setdefault("status", RecordStatus.ACTIVE)
+
             created_prod = await self.repository.create(**field_values)
-            seen_names.add(clean_name_key)
+            if clean_name_key:
+                seen_names.add(clean_name_key)
             if clean_code_key:
                 seen_codes.add(clean_code_key)
             return created_prod
@@ -681,7 +805,11 @@ class ProductService:
         seen_names: set[str] = set()
         seen_codes: set[str] = set()
         summary = await run_import(
-            rows, row_validator=validate_product_row, row_creator=_create
+            rows,
+            row_validator=lambda raw_row, row_num: validate_product_row(
+                raw_row, row_num, allow_partial=update_existing
+            ),
+            row_creator=_create,
         )
         await self._invalidate_cache()
         return summary
@@ -735,8 +863,6 @@ class ProductService:
                 "Category": categories.get(str(p.category_id), "") if p.category_id else "",
                 "Sub Category": sub_categories.get(str(p.sub_category_id), "") if p.sub_category_id else "",
                 "UOM": uoms.get(str(p.uom_id), "") if p.uom_id else "",
-                "Organization": ", ".join(org_names),
-                "Branches": ", ".join(branch_names),
                 "Pack. Qty": float(p.packaging_quantity) if p.packaging_quantity is not None else "",
                 "Pack. Net Weight": float(p.packaging_net_weight) if p.packaging_net_weight is not None else "",
                 "Pack. Gross Weight": float(gross_wt) if gross_wt is not None else "",

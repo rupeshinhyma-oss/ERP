@@ -94,17 +94,33 @@ LIMIT_PER_ENTITY = 5
 
 def _not_deleted(model: Type) -> ColumnElement[bool] | bool:
     """
-    Return the ``deleted_at IS NULL`` filter for a soft-deletable model, or
-    ``True`` (a harmless always-true SQL condition) for a model that has no
-    soft-delete support at all (e.g. ``User``, ``Organization``).
+    Return the active, non-deleted SQL filter for universal search entities.
 
-    Centralized here so every search block below is automatically correct
-    if a model gains or loses ``SoftDeleteMixin`` in the future -- callers
-    never need to remember which models currently support it.
+    Excludes both soft-deleted rows (``deleted_at IS NULL``) and inactive
+    master/directory records (``is_active == True`` or ``status == ACTIVE``)
+    across cross-module search blocks while leaving ``Inquiry`` / ``InquiryItem``
+    workflow statuses untouched and leaving Section 11 (Trash) separate.
     """
+    from sqlalchemy import and_, func
+    from app.core.constants import RecordStatus
+    from app.users.models import UserStatus
+
+    clauses = []
+    table_cols = model.__table__.columns if hasattr(model, "__table__") else {}
     if issubclass(model, SoftDeleteMixin):
-        return model.deleted_at.is_(None)
-    return True
+        clauses.append(model.deleted_at.is_(None))
+    if "is_active" in table_cols:
+        clauses.append(model.is_active.is_(True))
+    if model is User and "status" in table_cols:
+        clauses.append(model.status == UserStatus.ACTIVE)
+    elif model not in (Inquiry, InquiryItem) and "status" in table_cols:
+        clauses.append(func.lower(model.status) == RecordStatus.ACTIVE.value)
+
+    if not clauses:
+        return True
+    if len(clauses) == 1:
+        return clauses[0]
+    return and_(*clauses)
 
 
 def escape_like_wildcards(val: str) -> str:

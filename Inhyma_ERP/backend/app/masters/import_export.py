@@ -33,6 +33,43 @@ from sqlalchemy import inspect as sa_inspect
 from app.core.exceptions import AppException, BadRequestException, ConflictException
 
 
+def is_different(old_val: Any, new_val: Any) -> bool:
+    """Return True if old_val and new_val differ meaningfully (ignoring whitespace/case for strings and numeric types)."""
+    if old_val is None and new_val is None:
+        return False
+    if old_val is None or new_val is None:
+        if isinstance(old_val, str) and not old_val.strip():
+            return False
+        if isinstance(new_val, str) and not new_val.strip():
+            return False
+        return True
+    if isinstance(old_val, bool) or isinstance(new_val, bool):
+        return bool(old_val) != bool(new_val)
+    if isinstance(old_val, Enum):
+        old_val = old_val.value
+    if isinstance(new_val, Enum):
+        new_val = new_val.value
+    if isinstance(old_val, (int, float, Decimal)) and isinstance(new_val, (int, float, Decimal)):
+        return float(old_val) != float(new_val)
+    if isinstance(old_val, UUID) or isinstance(new_val, UUID):
+        return str(old_val) != str(new_val)
+    if isinstance(old_val, str) and isinstance(new_val, str):
+        return old_val.strip() != new_val.strip()
+    return old_val != new_val
+
+
+def update_record_fields(record: Any, field_values: dict[str, Any]) -> bool:
+    """Apply non-blank field_values onto record and return True if at least one attribute actually changed."""
+    changed = False
+    for k, v in field_values.items():
+        if v is not None and v != "":
+            old_v = getattr(record, k, None)
+            if is_different(old_v, v):
+                setattr(record, k, v)
+                changed = True
+    return changed
+
+
 def model_to_dict(instance: Any) -> dict[str, Any]:
     """
     Serialize any SQLAlchemy ORM instance's plain columns into a JSON-safe dict.
@@ -82,6 +119,8 @@ class ImportSummary:
 
     total_rows: int = 0
     created: int = 0
+    updated: int = 0
+    unchanged: int = 0
     failed: int = 0
     duplicate_count: int = 0
     errors: list[dict[str, Any]] = field(default_factory=list)
@@ -98,6 +137,8 @@ class ImportSummary:
         return {
             "total_rows": self.total_rows,
             "created": self.created,
+            "updated": self.updated,
+            "unchanged": self.unchanged,
             "failed": self.failed,
             "duplicate_count": self.duplicate_count,
             "errors": self.errors,
@@ -209,8 +250,13 @@ async def run_import(
                         continue
                     seen_keys.add(key_values)
 
-            await row_creator(field_values)
-            summary.created += 1
+            res = await row_creator(field_values)
+            if isinstance(res, tuple) and len(res) == 2 and res[0] == "updated":
+                summary.updated += 1
+            elif isinstance(res, tuple) and len(res) == 2 and res[0] == "unchanged":
+                summary.unchanged += 1
+            else:
+                summary.created += 1
         except ConflictException as exc:
             summary.failed += 1
             summary.duplicate_count += 1

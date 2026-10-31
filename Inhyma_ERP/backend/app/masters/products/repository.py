@@ -74,10 +74,12 @@ class ProductRepository(BaseRepository[Product]):
 
         from sqlalchemy import func, select
 
+        from sqlalchemy import and_
+        from app.core.constants import RecordStatus
         from app.masters.cities.models import City
         from app.suppliers.models import Supplier, SupplierProductLink
 
-        # Rank each product's links by created_at (earliest = 1), then keep only rank 1.
+        # Rank each product's active supplier links by created_at (earliest = 1), then keep only rank 1.
         ranked = (
             select(
                 SupplierProductLink.product_id,
@@ -89,7 +91,12 @@ class ProductRepository(BaseRepository[Product]):
                 )
                 .label("rn"),
             )
-            .where(SupplierProductLink.product_id.in_(product_ids))
+            .join(Supplier, Supplier.id == SupplierProductLink.supplier_id)
+            .where(
+                SupplierProductLink.product_id.in_(product_ids),
+                Supplier.deleted_at.is_(None),
+                Supplier.is_active.is_(True),
+            )
             .subquery()
         )
 
@@ -100,7 +107,10 @@ class ProductRepository(BaseRepository[Product]):
                 City.name.label("city_name"),
             )
             .join(Supplier, Supplier.id == ranked.c.supplier_id)
-            .outerjoin(City, City.id == Supplier.city_id)
+            .outerjoin(
+                City,
+                and_(City.id == Supplier.city_id, City.deleted_at.is_(None), City.status == RecordStatus.ACTIVE),
+            )
             .where(ranked.c.rn == 1)
         )
         result = await self.session.execute(stmt)

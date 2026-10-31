@@ -2,7 +2,13 @@
 
 **Service Base URL:** `http://localhost:8002/api/v1`  
 **Authentication Scheme:** Bearer JWT (HS256) & WebSocket Query Tokens  
-**Standard Response Envelope:** `{ "success": true, "data": ..., "meta": ..., "error": null }`
+**Standard Response Envelope:** `{ "success": true, "data": ..., "meta": ..., "error": null }`  
+**Last Updated:** October 30, 2026
+
+> **Universal Cross-Module Active-Only Extraction & Filtering Convention:**
+> - **Management Lists vs Cross-Module Lookups:** Unfiltered management endpoints (`GET /api/v1/masters/*`, `/companies`, `/suppliers`, `/buyers`, `/users`, `/positions`, and `/hrms/setup/*` with default `active_only=false`) return **both** `Active` and `Inactive` rows so each module's own `Active` / `Inactive` tabs and status toggles remain functional. Conversely, every cross-module picker/lookup endpoint (`/api/v1/masters/*/lookup`, `/api/v1/masters/*/dropdown`, `/companies/lookup`, `/companies/sales-persons`, `/users/all?active_only=true`, `/positions/all?active_only=true`, `/inquiries/consignment-codes`, `/inquiries/companies`, `/hrms/setup/*?active_only=true`, `/products/machine-spares/universal-view`, and `/search`) returns **`Active` records only**.
+> - **Bidirectional Filter Translation (`BaseRepository._apply_dynamic_filters`):** All paginated endpoints backed by `BaseRepository` inspect real SQLAlchemy columns (`self.model.__table__.columns`) and bidirectionally translate `?status=active|inactive` and `?is_active=true|false` across both `RecordStatus` tables (`products`, `banks`, `warehouses`, all 28 masters) and boolean `is_active` tables (`companies`, `suppliers`, `buyers`).
+> - **Historical Reference & Cancellation Reversal Safety:** Single-record reads (`GET /api/v1/.../{id}`) continue resolving inactive historical references (`200 OK`), and order cancellation (`_release_stock`) invokes `StockService.find_product(..., require_active=False)` / `get_warehouse(..., require_active=False)` so stock reversals succeed even if a SKU or warehouse was deactivated later.
 
 ---
 
@@ -10,7 +16,9 @@
 
 | Method | Endpoint URI | Description | Permission Gate |
 | :--- | :--- | :--- | :--- |
-| `GET` | `/api/v1/companies` | List paginated companies with grade, potential, and search filters | `company.view` |
+| `GET` | `/api/v1/companies` | List paginated companies with grade, potential, status (`?status=active\|inactive` / `?is_active=true\|false`), and search filters | `company.view` |
+| `GET` | `/api/v1/companies/lookup` | Lightweight active-only company autocomplete lookup (`active_only=true` default) for commercial & service forms | Authenticated |
+| `GET` | `/api/v1/companies/sales-persons` | List active salespersons (`User.status == ACTIVE`) for Proforma, Sales Process, and Company filters | Authenticated |
 | `POST` | `/api/v1/companies` | Create company account with extended intelligence fields & contacts | `company.create` |
 | `GET` | `/api/v1/companies/{id}` | Inspect detailed profile (extended fields, social media matrix, Direct Import from China cluster) | `company.view` |
 | `PATCH` | `/api/v1/companies/{id}` | Update company details, credit terms, turnover, import volume, and intelligence | `company.update` |
@@ -36,9 +44,11 @@
 
 | Method | Endpoint URI | Description | Permission Gate |
 | :--- | :--- | :--- | :--- |
-| `GET` | `/api/v1/masters/states/lookup` | List all states/provinces | Authenticated |
-| `GET` | `/api/v1/masters/districts/lookup` | List districts filtered by `state_id` query param | Authenticated |
-| `GET` | `/api/v1/masters/cities/lookup` | List cities filtered by `district_id` and `state_id` query params | Authenticated |
+| `GET` | `/api/v1/masters/{master}/lookup` | Lightweight active-only (`RecordStatus.ACTIVE`) lookup list across all 28 master catalogs (`products`, `categories`, `sub-categories`, `brands`, `uom`, `taxes`, `banks`, `warehouses`, `transports`, `payment-terms`, `countries`, etc.) | Authenticated |
+| `GET` | `/api/v1/masters/{master}/dropdown` | Active-only (`RecordStatus.ACTIVE`) `{ id, label }` dropdown projection across master catalogs | Authenticated |
+| `GET` | `/api/v1/masters/states/lookup` | List active states/provinces (`RecordStatus.ACTIVE`, optional `country_id` filter) | Authenticated |
+| `GET` | `/api/v1/masters/districts/lookup` | List active districts (`RecordStatus.ACTIVE`) filtered by `state_id` query param | Authenticated |
+| `GET` | `/api/v1/masters/cities/lookup` | List active cities (`RecordStatus.ACTIVE`) filtered by `district_id` and `state_id` query params | Authenticated |
 | `POST` | `/api/v1/masters/cities` | Create new city with `state_id` and `district_id` references | `city.create` |
 
 ---
@@ -47,20 +57,20 @@
 
 | Method | Endpoint URI | Description | Permission Gate |
 | :--- | :--- | :--- | :--- |
-| `GET` | `/api/v1/inventory/product-stock` | Master-joined 9-warehouse Product Stock & Stock Transactions list (`limit` up to `5000`, `category`, `sub_category`, `brand`, `warehouse`, `negative_stock`, `low_stock`, `machine_id`, `search`; returns `filter_options` & `breakup_flags`) | `product.view` |
+| `GET` | `/api/v1/inventory/product-stock` | Master-joined 9-warehouse Product Stock & Stock Transactions list restricted strictly to `Active` products (`Product.status == RecordStatus.ACTIVE`; `limit` up to `5000`, `category`, `sub_category`, `brand`, `warehouse`, `negative_stock`, `low_stock`, `machine_id`, `search`; returns active-only `filter_options` & `breakup_flags`) | `product.view` |
 | `GET` | `/api/v1/inventory/product-stock/{id}` | Inspect single product's multi-warehouse stock record (resolves either `ProductStock.id` or `Product.id` with zero-stock fallback) | `product.view` |
 | `GET` | `/api/v1/inventory/product-stock/breakup` | Inspect warehouse cell breakup (`physical` adjustments/transfers, or `transit` / `ordered` expected consignments + FIFO `booked_orders` queue) | `product.view` |
 | `GET` | `/api/v1/inventory/stock-transactions/{product_ref}` | Chronological 5-source Per-Product Stock Transaction Ledger (`Sale`, `Stock IN`, `Stock OUT`, `Local Purchase`, `Import Purchase`, `Transfer IN`, `Transfer OUT`) with `available_qty`, `warehouse`, `tx_type`, `date_from`, `date_to`, and `search` filters. Aliased at `/api/v1/stock-transaction/list/{product_ref}`, `/api/v1/stock_transaction/list/{product_ref}`, and `/api/v1/inventory/product-stock/{product_ref}/transactions` | `product.view` |
-| `GET` | `/api/v1/inventory/product-reorder` | 16-column branch-scoped Product Re-Order matrix (`warehouse=Mumbai|Ahmedabad|Indore|All`, `category`, `sub_category`, `brand`, `shortfall`, `reorder`, `search`) | `product.view` |
+| `GET` | `/api/v1/inventory/product-reorder` | 16-column branch-scoped Product Re-Order matrix for `Active` products (`Product.status == RecordStatus.ACTIVE`, `warehouse=Mumbai|Ahmedabad|Indore|All`, `category`, `sub_category`, `brand`, `shortfall`, `reorder`, `search`) | `product.view` |
 | `PATCH` | `/api/v1/inventory/product-reorder/{product_id}` | Inline update `reorder_level` (`Re-Order`) and/or `minimum_order_quantity` (`MOQ`) on `Product` master | `product.update` |
 | `GET` | `/api/v1/inventory/goods-expected-report` | Expected incoming consignments report across Import Purchases and Shipment Planning | `product.view` |
 | `GET` | `/api/v1/inventory/stock-adjustment` | Paginated stock adjustment vouchers with type/date filters | `product.view` |
 | `GET` | `/api/v1/inventory/stock-adjustment/{id}` | Detailed voucher with multi-product line items | `product.view` |
-| `POST` | `/api/v1/inventory/stock-adjustment` | Create adjustment voucher and update warehouse balances | `product.create` |
+| `POST` | `/api/v1/inventory/stock-adjustment` | Create adjustment voucher and update warehouse balances (enforces active Warehouse & active Product validation) | `product.create` |
 | `DELETE`| `/api/v1/inventory/stock-adjustment/{id}`| Soft-delete voucher and reverse inventory adjustments | `product.delete` |
 | `GET` | `/api/v1/adjustment/adjustment-order-pdf/{id}` | Stream A4 adjustment order PDF document | `product.view` |
 | `GET` | `/api/v1/inventory/stock-transfer` | Paginated inter-warehouse stock transfer orders | `product.view` |
-| `POST` | `/api/v1/inventory/stock-transfer` | Create atomic inter-warehouse stock transfer (`from_warehouse` -> `to_warehouse`) | `product.create` |
+| `POST` | `/api/v1/inventory/stock-transfer` | Create atomic inter-warehouse stock transfer (`from_warehouse` -> `to_warehouse`; enforces active source/destination Warehouses & active Products) | `product.create` |
 
 ---
 
@@ -116,8 +126,8 @@ Machine-to-machine internal service endpoints invoked by `ERP_Main` over authent
 | Method | Endpoint URI | Description | Permission Gate |
 | :--- | :--- | :--- | :--- |
 | `GET` | `/api/v1/purchase/local-orders` | List local purchases with status counts (`all`, `pending`, `confirmed`), search, warehouse, and date filters | Authenticated |
-| `POST` | `/api/v1/purchase/local-orders` | Create local purchase with multi-product lines; server auto-calculates expense loading & landing rates | Authenticated |
-| `POST` | `/api/v1/purchase/local-orders/import` | Bulk import multi-line local purchase invoices from `.csv` / `.xlsx` (`file` + optional `column_map` JSON), validating Supplier/Warehouse/Product masters, calculating Expense Factor & Unit Landing Rate (INR) (VB), skipping duplicate Invoice Nos, and isolating row errors via nested DB savepoints | Authenticated |
+| `POST` | `/api/v1/purchase/local-orders` | Create local purchase with active Supplier, active physical Warehouse, and active Product lines; server auto-calculates expense loading & landing rates | Authenticated |
+| `POST` | `/api/v1/purchase/local-orders/import` | Bulk import multi-line local purchase invoices from `.csv` / `.xlsx` (`file` + optional `column_map` JSON), validating **active** Supplier/Warehouse/Product masters, calculating Expense Factor & Unit Landing Rate (INR) (VB), skipping duplicate Invoice Nos, and isolating row errors via nested DB savepoints | Authenticated |
 | `GET` | `/api/v1/purchase/local-orders/{id}` | Inspect detailed local purchase record and items | Authenticated |
 | `PUT` | `/api/v1/purchase/local-orders/{id}` | Update pending local purchase lines or invoice expenses | `localpurchase.update` |
 | `PATCH` | `/api/v1/purchase/local-orders/{id}/status` | Transition purchase status (`pending` -> `confirmed`); auto-applies physical stock-in movement | `localpurchase.confirm` |
@@ -133,8 +143,8 @@ Machine-to-machine internal service endpoints invoked by `ERP_Main` over authent
 | Method | Endpoint URI | Description | Permission Gate |
 | :--- | :--- | :--- | :--- |
 | `GET` | `/api/v1/purchase/import-orders` | List import consignments with status counts (`all`, `pending`, `confirmed`, `received`, `closed`) and 3-way date ranges | Authenticated |
-| `POST` | `/api/v1/purchase/import-orders` | Create import consignment with exchange rates, duty %, shipping, and dual VB/CB landing calculations | Authenticated |
-| `POST` | `/api/v1/purchase/import-orders/import` | Bulk import multi-line import consignments from `.csv` / `.xlsx` (`file` + optional `column_map` JSON), validating Supplier/Warehouse/Product masters, calculating dual VB/CB landing costs, applying workflow `stock_in_on_create` rules, skipping duplicate Consignment Nos, and isolating row errors via nested DB savepoints | Authenticated |
+| `POST` | `/api/v1/purchase/import-orders` | Create import consignment with active Supplier/Warehouse/Products, exchange rates, duty %, shipping, and dual VB/CB landing calculations; defaults `expected_arrival_date` to **`eta_port_date + 5 days`** when `eta_port_date` is provided and `expected_arrival_date` is omitted while honoring any explicit custom `expected_arrival_date` | Authenticated |
+| `POST` | `/api/v1/purchase/import-orders/import` | Bulk import multi-line import consignments from `.csv` / `.xlsx` (`file` + optional `column_map` JSON), validating **active** Supplier/Warehouse/Product masters, defaulting omitted `Expected Arrival Date` to `ETA Port Date + 5 days` (while preserving explicit custom dates), calculating dual VB/CB landing costs, applying workflow `stock_in_on_create` rules, skipping duplicate Consignment Nos, and isolating row errors via nested DB savepoints | Authenticated |
 | `POST` | `/api/v1/purchase/import-orders/preview` | Live preview calculation of CBM, duty, and landing expenses while typing in form | Authenticated |
 | `GET` | `/api/v1/purchase/import-orders/{id}` | Inspect detailed consignment record, line items, and landed costs | Authenticated |
 | `PUT` | `/api/v1/purchase/import-orders/{id}` | Update pending import consignment details or product lines | Authenticated |
@@ -144,7 +154,8 @@ Machine-to-machine internal service endpoints invoked by `ERP_Main` over authent
 | `DELETE`| `/api/v1/purchase/import-orders/{id}/bill` | Delete uploaded consignment document | Authenticated |
 | `GET` | `/api/v1/purchase/import-orders/{id}/bill-file` | Stream or download original uploaded invoice/bill file (supports query `?token=<access_token>` and `?download=true`) | Authenticated |
 
-> **Bill File Streaming & Zero-Synthetic-PDF Policy:**
+> **Expected Arrival Date Default (`ETA Port Date + 5 Days`, Editable), Bill File Streaming & Zero-Synthetic-PDF Policy:**
+> - **`Expected Arrival Date` Default & Override Contract:** On both `POST /api/v1/purchase/import-orders` (`_prepare` when `previous is None`) and `POST /api/v1/purchase/import-orders/import` (`import_import_purchases`), if `eta_port_date` is supplied and `expected_arrival_date` is blank/omitted, the server automatically computes `expected_arrival_date = eta_port_date + timedelta(days=5)`. In the Add/Edit UI (`ImportPurchasePage.tsx`), selecting or typing `ETA Port Date` auto-populates `Expected Arrival Date` (`addDaysToDDMMYYYY(val, 5)`) while keeping the field unlocked and editable so any custom `expected_arrival_date` (`>= Created Date`) is accepted and persisted.
 > - `GET /api/v1/purchase/import-orders/{id}/bill-file`: Authenticated via standard `Authorization: Bearer <token>` or `?token=<jwt>` query parameter (allowing clean HTML `<iframe>` previews without CORS header issues).
 > - **Zero Synthetic PDF Generation:** The endpoint serves only the real, operator-uploaded invoice file. Synthetic PDF generation is banned. Multi-format support: PDF (`<iframe src={blobUrl}>`), images (preview + download), and Office documents (`.docx`/`.xlsx` download cards).
 > - **Closed Status Action Menu Lock:** Consignments in `closed` status strictly restrict the row action menu to `Download Purchase` only. Edit, Confirm, and Delete operations are removed.
@@ -264,7 +275,7 @@ Machine-to-machine internal service endpoints invoked by `ERP_Main` over authent
 
 | Method | Endpoint URI | Description | Permission Gate |
 | :--- | :--- | :--- | :--- |
-| `GET` | `/api/v1/products/machine-spares/universal-view` | Inspect machine-wise spare parts compatibility matrix, linked codes, pricing, and stock levels | `product.view` |
+| `GET` | `/api/v1/products/machine-spares/universal-view` | Inspect machine-wise spare parts compatibility matrix, linked codes, pricing, and stock levels across `Active` machines and `Active` spare parts (`RecordStatus.ACTIVE`) | `product.view` |
 | `POST` | `/api/v1/products/machine-spares/map` | Map/associate a spare part to a machine model (`{ machine_id, spare_part_id, remarks? }`) | `product.update` |
 | `POST` | `/api/v1/products/machine-spares/unmap` | Unlink a spare part from a specific machine model (`{ machine_id, spare_part_id }`) | `product.update` |
 | `DELETE` | `/api/v1/products/machine-spares/unmap` | Idempotent alias to unlink a spare part from a machine model | `product.update` |
@@ -378,6 +389,11 @@ Machine-to-machine internal service endpoints invoked by `ERP_Main` over authent
 | `POST` | `/api/v1/hrms/payroll/adjustments` | Add payroll bonus/deduction adjustment (`hrms.payroll.configure`; self-adjustment strictly prohibited with `400 Bad Request`) | `hrms.payroll.configure` |
 | `GET` | `/api/v1/hrms/payroll/payslips` | Retrieve approved salary slips (employees see own only; managers with `employee_id=ALL` see managed department `APPROVED` slips) | `hrms.payroll` (Scoped) |
 | `GET` | `/api/v1/hrms/payroll/export` | Export non-destructive monthly payroll `.xlsx` workbook (`Payroll_Export_All_Employees_YYYY_MM.xlsx`) | Admin / HR |
+
+> **HRMS Setup Active-Only Extraction, Seed Idempotency & RBAC Bootstrap Notes:**
+> - **Cross-Module `?active_only=true` vs Setup Management (`active_only=false`):** HRMS Setup endpoints (`/api/v1/hrms/setup/{locations,leave-types,expense-categories,holidays,leave-plans}`) return both active and inactive rows by default (`active_only=false`) for `/hrms/setup`, and accept `?active_only=true` when consumed by Leave (`/hrms/leave`), Asset Management (`/hrms/assets`), and Expense Management (`/hrms/expenses`), backed by server-side active-status validation on mutations.
+> - **Soft-Delete Non-Recreation (`ensure_seeds()`):** HRMS setup endpoints inspect total row counts including soft-deleted rows (`deleted_at IS NOT NULL`) so user-deleted defaults never re-create on subsequent calls.
+> - **Canonical RBAC System Roles (`/api/v1/rbac/roles`):** Bootstrap seeding (`scripts/seed.py`) provisions strictly two `is_system=True` roles—`super_admin` (`Admin`, holding all `297/297` permissions) and `user` (`User`)—with zero hardcoded business departments.
 
 
 

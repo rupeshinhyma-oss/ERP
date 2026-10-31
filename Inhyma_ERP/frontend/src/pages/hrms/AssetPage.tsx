@@ -325,7 +325,7 @@ export function AssetPage() {
   // 2. Fetch Supporting Data (Locations & Active Employees from users DB)
   const fetchSupportingData = useCallback(async () => {
     try {
-      const locRes = await apiGet<DbLocation[]>("/hrms/setup/locations");
+      const locRes = await apiGet<DbLocation[]>("/hrms/setup/locations?active_only=true");
       setLocations(locRes.data || []);
     } catch (err) {
       console.warn("Could not load branches / locations:", err);
@@ -343,7 +343,7 @@ export function AssetPage() {
       }
       if (rawData.length === 0) {
         try {
-          const fallbackRes = await apiGet<any[]>("/users/all");
+          const fallbackRes = await apiGet<any[]>("/users/all?active_only=true");
           if (fallbackRes.data && fallbackRes.data.length > 0) {
             rawData = fallbackRes.data;
           }
@@ -351,7 +351,7 @@ export function AssetPage() {
           // ignore
         }
       }
-      const activeUsers = rawData.filter((u: any) => u.is_active !== false);
+      const activeUsers = rawData.filter((u: any) => u.is_active !== false && String(u.status || "ACTIVE").toUpperCase() !== "INACTIVE");
       setEmployees(activeUsers);
     } catch (err) {
       console.warn("Could not load database users:", err);

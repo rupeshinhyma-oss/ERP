@@ -762,6 +762,7 @@ class CrmQuotationService:
                 .where(
                     func.lower(Company.company_name) == lead.company_name.strip().lower(),
                     Company.deleted_at.is_(None),
+                    Company.is_active.is_(True),
                 )
             )
             company_obj = (await self.session.execute(c_stmt)).scalars().first()

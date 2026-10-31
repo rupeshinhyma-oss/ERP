@@ -48,8 +48,8 @@ class AgentTypeService:
         """Return every active agent type record, using the shared dropdown cache."""
         cached = await self.cache_manager.get_dropdown(DROPDOWN_CACHE_NAME)
         if cached is not None:
-            return cached
-        items = await self.repository.list_all()
+            return [i for i in cached if getattr(i.status, 'value', str(i.status)).lower() == 'active']
+        items = [i for i in await self.repository.list_all() if getattr(i.status, 'value', str(i.status)).lower() == 'active']
         await self.cache_manager.set_dropdown(DROPDOWN_CACHE_NAME, items)
         return items
 

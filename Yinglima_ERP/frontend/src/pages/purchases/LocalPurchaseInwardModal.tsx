@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { apiGet, apiPost, errorMessage } from "@/lib/api";
 import { useToast } from "@/lib/toast";
 import type { LocalPurchaseDetail } from "@/types/localPurchase";
+import { getLocalPurchaseDetailCache, updateLocalPurchaseInCache } from "@/lib/localPurchaseCache";
 
 interface LocalPurchaseInwardModalProps {
   isOpen: boolean;
@@ -53,33 +54,43 @@ export function LocalPurchaseInwardModal({
       return;
     }
 
-    setLoading(true);
+    const applyPurchase = (p: LocalPurchaseDetail) => {
+      setPurchase(p);
+      setMovementDate(new Date().toISOString().slice(0, 10));
+      setInwardRemarks(`Inward receipt from invoice ${p.invoice_no}`);
+      if (p.consignment_code) {
+        setContainerNo(p.consignment_code);
+      }
+      const rows: InwardItemRow[] = (p.items || []).map((it) => {
+        const qty = Number(it.quantity) || 0;
+        return {
+          product_id: it.product_id,
+          product_name: it.product_name,
+          product_code: it.product_code,
+          expected_quantity: qty,
+          quantity: qty,
+          damaged_quantity: "",
+          unit_rate: Number(it.unit_rate) || 0,
+          remarks: "",
+        };
+      });
+      setItems(rows);
+    };
+
+    const cached = getLocalPurchaseDetailCache(purchaseId);
+    if (cached && cached.items && cached.items.length > 0) {
+      applyPurchase(cached);
+      setLoading(false);
+    } else {
+      setLoading(true);
+    }
+
     apiGet<LocalPurchaseDetail>(`/purchases/local/${purchaseId}`)
       .then((res) => {
         const p = res.data;
         if (p) {
-          setPurchase(p);
-          setMovementDate(new Date().toISOString().slice(0, 10));
-          setInwardRemarks(`Inward receipt from invoice ${p.invoice_no}`);
-          if (p.consignment_code) {
-            setContainerNo(p.consignment_code);
-          }
-
-          // Populate line items pre-filled to 100% accepted
-          const rows: InwardItemRow[] = (p.items || []).map((it) => {
-            const qty = Number(it.quantity) || 0;
-            return {
-              product_id: it.product_id,
-              product_name: it.product_name,
-              product_code: it.product_code,
-              expected_quantity: qty,
-              quantity: qty, // Default received = 100% of purchase
-              damaged_quantity: "",
-              unit_rate: Number(it.unit_rate) || 0,
-              remarks: "",
-            };
-          });
-          setItems(rows);
+          applyPurchase(p);
+          updateLocalPurchaseInCache(p);
         }
       })
       .catch((err) => {

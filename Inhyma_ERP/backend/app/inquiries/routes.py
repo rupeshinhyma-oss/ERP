@@ -1022,11 +1022,25 @@ async def create_item_rfq(
         if prod and prod.category_id:
             conditions.append(Supplier.category_links.any(SupplierCategoryLink.category_id == prod.category_id))
         if conditions:
-            suppliers_res = (await db.execute(select(Supplier).where(Supplier.is_active == True, or_(*conditions)))).scalars().all()
+            suppliers_res = (
+                await db.execute(
+                    select(Supplier).where(Supplier.deleted_at.is_(None), Supplier.is_active.is_(True), or_(*conditions))
+                )
+            ).scalars().all()
         else:
-            suppliers_res = (await db.execute(select(Supplier).where(Supplier.is_active == True))).scalars().all()
+            suppliers_res = (
+                await db.execute(select(Supplier).where(Supplier.deleted_at.is_(None), Supplier.is_active.is_(True)))
+            ).scalars().all()
     elif supplier_uuids:
-        suppliers_res = (await db.execute(select(Supplier).where(Supplier.id.in_(supplier_uuids)))).scalars().all()
+        suppliers_res = (
+            await db.execute(
+                select(Supplier).where(
+                    Supplier.id.in_(supplier_uuids),
+                    Supplier.deleted_at.is_(None),
+                    Supplier.is_active.is_(True),
+                )
+            )
+        ).scalars().all()
     else:
         suppliers_res = []
 
@@ -1215,7 +1229,11 @@ async def create_bulk_rfqs(
         if category_ids:
             conditions.append(Supplier.category_links.any(SupplierCategoryLink.category_id.in_(category_ids)))
         
-        base_query = select(Supplier).options(selectinload(Supplier.emails)).where(Supplier.is_active == True)
+        base_query = (
+            select(Supplier)
+            .options(selectinload(Supplier.emails))
+            .where(Supplier.deleted_at.is_(None), Supplier.is_active.is_(True))
+        )
         if conditions:
             suppliers_res = (await db.execute(base_query.where(or_(*conditions)))).scalars().all()
         else:
@@ -1223,7 +1241,13 @@ async def create_bulk_rfqs(
     elif supplier_uuids:
         suppliers_res = (
             await db.execute(
-                select(Supplier).options(selectinload(Supplier.emails)).where(Supplier.id.in_(supplier_uuids))
+                select(Supplier)
+                .options(selectinload(Supplier.emails))
+                .where(
+                    Supplier.id.in_(supplier_uuids),
+                    Supplier.deleted_at.is_(None),
+                    Supplier.is_active.is_(True),
+                )
             )
         ).scalars().all()
     else:
@@ -1500,7 +1524,11 @@ async def inbound_quotation_webhook(
         if item.proposed_by:
             quote_supplier_id = item.proposed_by
         else:
-            first_supp = (await session.execute(select(Supplier.id).where(Supplier.deleted_at.is_(None)).limit(1))).scalar_one_or_none()
+            first_supp = (
+                await session.execute(
+                    select(Supplier.id).where(Supplier.deleted_at.is_(None), Supplier.is_active.is_(True)).limit(1)
+                )
+            ).scalar_one_or_none()
             quote_supplier_id = first_supp
 
     # Check if a quote already exists for this (Item, Supplier)

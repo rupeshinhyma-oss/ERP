@@ -62,9 +62,12 @@ export function ProformaInvoicePdfPage() {
   const [bankDetails, setBankDetails] = useState<any>(null);
 
   useEffect(() => {
-    apiGet<any>("/masters/banks")
+    apiGet<any>("/masters/banks?status=active")
       .then((res) => {
-        const list = res?.data?.items || (Array.isArray(res?.data) ? res.data : []);
+        const rawList = res?.data?.items || (Array.isArray(res?.data) ? res.data : []);
+        const list = Array.isArray(rawList)
+          ? rawList.filter((b: any) => String(b?.status ?? "active").toLowerCase() !== "inactive")
+          : [];
         if (list.length > 0) {
           const matched = list.find((b: any) =>
             (currentItem?.company_name && b.account_holder_name?.toLowerCase().includes(currentItem.company_name.toLowerCase())) ||

@@ -475,7 +475,7 @@ export function SiteVisitPage() {
     try {
       let res: any;
       try {
-        res = await apiGet<any>("/users");
+        res = await apiGet<any>("/users?status=ACTIVE");
         if (!res?.data || (Array.isArray(res.data) && res.data.length === 0)) {
           res = await apiGet<any>("/hrms/employees");
         }
@@ -489,7 +489,7 @@ export function SiteVisitPage() {
 
       const rawList = extractList<any>(res);
       const activeEmployees: EmployeeOption[] = rawList
-        .filter((u: any) => u && u.id && u.is_active !== false)
+        .filter((u: any) => u && u.id && u.is_active !== false && String(u.status || "ACTIVE").toUpperCase() !== "INACTIVE")
         .map((u: any) => ({
           id: String(u.id),
           username: u.username || "",

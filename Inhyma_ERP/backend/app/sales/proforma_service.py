@@ -130,7 +130,7 @@ async def price_items(db: AsyncSession, items: list[ProformaLineItemSchema]) -> 
                 func.coalesce(UnitOfMeasurement.short_name, UnitOfMeasurement.name),
             )
             .join(UnitOfMeasurement, UnitOfMeasurement.id == Product.uom_id, isouter=True)
-            .where(func.lower(Product.product_name).in_(names))
+            .where(Product.deleted_at.is_(None), func.lower(Product.product_name).in_(names))
         )
         for lname, min_price, uom in (await db.execute(stmt)).all():
             catalog[lname] = (float(min_price) if min_price is not None else None, uom)

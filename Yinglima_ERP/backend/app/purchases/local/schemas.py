@@ -155,6 +155,12 @@ class LocalPurchaseSummaryResponse(BaseModel):
     status: str
     stock_movement_id: uuid.UUID | None = None
     stock_movement_number: str | None = None
+    packing_forwarding: float = 0.0
+    transport_expense: float = 0.0
+    offloading_expense: float = 0.0
+    other_expense: float = 0.0
+    items: list[LocalPurchaseItemResponse] = Field(default_factory=list)
+
     created_by_name: str | None = None
     created_at: datetime
     updated_at: datetime

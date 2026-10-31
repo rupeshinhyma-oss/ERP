@@ -62,8 +62,8 @@ class ProductSubCategoryService:
         """Return every active sub-category, using the shared dropdown cache."""
         cached = await self.cache_manager.get_dropdown(DROPDOWN_CACHE_NAME)
         if cached is not None:
-            return cached
-        sub_categories = await self.repository.list_all()
+            return [i for i in cached if getattr(i.status, 'value', str(i.status)).lower() == 'active']
+        sub_categories = [i for i in await self.repository.list_all() if getattr(i.status, 'value', str(i.status)).lower() == 'active']
         await self.cache_manager.set_dropdown(DROPDOWN_CACHE_NAME, sub_categories)
         return sub_categories
 

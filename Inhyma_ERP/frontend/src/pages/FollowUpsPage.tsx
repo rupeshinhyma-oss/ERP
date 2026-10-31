@@ -252,7 +252,7 @@ function CompanyForm1Modal({ isOpen, onClose, onSuccess }: CompanyForm1ModalProp
     if (!isOpen) return;
     (async () => {
       try {
-        const res = await apiGet<any[]>("/masters/states?page_size=100");
+        const res = await apiGet<any[]>("/masters/states?page_size=100&status=active");
         if (res?.data && Array.isArray(res.data) && res.data.length > 0) {
           setStatesList(res.data.map((s: any) => ({ id: String(s.id), name: s.name })));
         } else {
@@ -271,7 +271,7 @@ function CompanyForm1Modal({ isOpen, onClose, onSuccess }: CompanyForm1ModalProp
     }
     (async () => {
       try {
-        const res = await apiGet<any[]>(`/masters/districts?state_id=${form.state_id}&page_size=100`);
+        const res = await apiGet<any[]>(`/masters/districts?state_id=${form.state_id}&page_size=100&status=active`);
         if (res?.data && Array.isArray(res.data)) {
           setDistrictsList(res.data.map((d: any) => ({ id: String(d.id), name: d.name })));
         }

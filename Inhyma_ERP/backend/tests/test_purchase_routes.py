@@ -601,3 +601,58 @@ async def test_import_csv_upload_creates_consignments_applies_stock_and_reports_
         # EXP-EXISTING had 10 Band Sealer + 20 Teflon Belt; EXP-CSV-1 added 10 Band Sealer + 20 Teflon Belt
         assert (await _stock(factory))["mumbai_ordered"] == 20.0
         assert (await _stock(factory, "Teflon Belt"))["mumbai_ordered"] == 40.0
+
+
+@pytest.mark.asyncio
+async def test_import_expected_arrival_defaults_to_eta_plus_5_days_and_stays_editable(factory):
+    eta_dt = TODAY + timedelta(days=10)
+    eta_str = eta_dt.strftime("%d-%m-%Y")
+    expected_default_str = (eta_dt + timedelta(days=5)).strftime("%d-%m-%Y")
+    custom_arrival_str = (eta_dt + timedelta(days=9)).strftime("%d-%m-%Y")
+
+    async with _client(factory, NORMAL) as c:
+        # 1. Create with ETA Port Date and omitted Expected Arrival Date -> defaults to ETA + 5 days
+        created = await _new_import(
+            c,
+            consignment_no="EXP-ETA-DEF",
+            eta_port_date=eta_str,
+            expected_arrival_date=None,
+        )
+        assert created["eta_port_date"] == eta_str
+        assert created["expected_arrival_date"] == expected_default_str
+
+        # 2. Create or update with an explicit custom Expected Arrival Date -> honors user's editable value
+        created_custom = await _new_import(
+            c,
+            consignment_no="EXP-ETA-CUSTOM",
+            eta_port_date=eta_str,
+            expected_arrival_date=custom_arrival_str,
+        )
+        assert created_custom["expected_arrival_date"] == custom_arrival_str
+
+        updated = (
+            await c.put(
+                f"/purchase/import-orders/{created['id']}",
+                json=_import(
+                    consignment_no="EXP-ETA-DEF",
+                    eta_port_date=eta_str,
+                    expected_arrival_date=custom_arrival_str,
+                ),
+            )
+        ).json()["data"]
+        assert updated["expected_arrival_date"] == custom_arrival_str
+
+        # 3. CSV import with ETA Port Date and blank Expected Arrival Date -> defaults to ETA + 5 days
+        csv_text = "\n".join([
+            "consignment_no,supplier_name,warehouse,ordered_date,eta_port_date,expected_arrival_date,conversion_rate,customs_conversion_rate,product_name,quantity,unit_rate_usd",
+            f"EXP-CSV-ETA-5,Yinglima,Mumbai Ordered,{PAST},{eta_str},,80,82,Band Sealer,5,60",
+        ])
+        res = await c.post(
+            "/purchase/import-orders/import",
+            files={"file": ("eta_default.csv", csv_text.encode("utf-8"), "text/csv")},
+        )
+        assert res.status_code == 200, res.text
+        listed = (await c.get("/purchase/import-orders")).json()["data"]["items"]
+        csv_imp = next(o for o in listed if o["consignment_no"] == "EXP-CSV-ETA-5")
+        assert csv_imp["eta_port_date"] == eta_str
+        assert csv_imp["expected_arrival_date"] == expected_default_str

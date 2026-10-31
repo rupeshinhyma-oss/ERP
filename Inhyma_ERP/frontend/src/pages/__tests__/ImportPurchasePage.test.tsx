@@ -724,6 +724,45 @@ describe("ImportPurchasePage: warehouses and supplier on the form (spec / Genera
     await waitFor(() => expect(calls(apiPost, "/purchase/import-orders").some((c: any[]) => c[0] === "/purchase/import-orders")).toBe(true));
   });
 
+  it("defaults Expected Arrival Date to ETA Port Date + 5 days while keeping Expected Arrival Date editable", async () => {
+    renderImportPage("/purchase-order/import-purchase/addedit");
+    await screen.findByDisplayValue("Mumbai Ordered");
+    const etaInput = screen.getByLabelText("ETA Port Date") as HTMLInputElement;
+    const expInput = screen.getByLabelText("Expected Arrival Date") as HTMLInputElement;
+
+    expect(expInput.readOnly).toBe(false);
+    expect(expInput.disabled).toBe(false);
+    expect(etaInput.value).toBe("");
+    expect(expInput.value).toBe("");
+
+    // Entering ETA Port Date auto-populates Expected Arrival Date = ETA + 5 days
+    fireEvent.change(etaInput, { target: { value: "05-11-2027" } });
+    expect(expInput.value).toBe("10-11-2027");
+
+    // Updating ETA Port Date across a month boundary updates the non-customized Expected Arrival Date
+    fireEvent.change(etaInput, { target: { value: "28-11-2027" } });
+    expect(expInput.value).toBe("03-12-2027");
+
+    // Operator manually edits Expected Arrival Date -> stays editable and submits the custom date
+    fireEvent.change(expInput, { target: { value: "08-12-2027" } });
+    expect(expInput.value).toBe("08-12-2027");
+
+    fireEvent.change(screen.getByLabelText("Supplier"), { target: { value: "Yinglima" } });
+    fireEvent.change(screen.getByLabelText("Invoice / Consignment No."), { target: { value: "EXP-ETA-PLUS-5" } });
+    fireEvent.change(screen.getByLabelText("Conversion Rate (USD to INR)"), { target: { value: "80" } });
+    fireEvent.change(screen.getByLabelText("Customs Conversion Rate (USD to INR)"), { target: { value: "82" } });
+    fireEvent.change(screen.getByLabelText("Product Search"), { target: { value: "ISL" } });
+    fireEvent.click(await screen.findByRole("option", { name: "ISL350XDAN Flow Wrap Machine" }));
+    fireEvent.click(screen.getByRole("button", { name: "Submit Consignment" }));
+
+    await waitFor(() =>
+      expect(calls(apiPost, "/purchase/import-orders").some((c: any[]) => c[0] === "/purchase/import-orders")).toBe(true)
+    );
+    const [, body] = calls(apiPost, "/purchase/import-orders").find((c: any[]) => c[0] === "/purchase/import-orders");
+    expect(body.eta_port_date).toBe("28-11-2027");
+    expect(body.expected_arrival_date).toBe("08-12-2027");
+  });
+
   it("only accepts a supplier that exists, and saves its exact name", async () => {
     renderImportPage("/purchase-order/import-purchase/addedit");
     await screen.findByDisplayValue("Mumbai Ordered");

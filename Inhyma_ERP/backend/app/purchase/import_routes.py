@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 import uuid
 from collections import defaultdict
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Optional
 
 from pathlib import Path
@@ -102,13 +102,15 @@ async def _get(db: AsyncSession, purchase_id: uuid.UUID) -> ImportPurchase:
 
 async def _prepare(db: AsyncSession, payload: ImportPurchaseIn, previous: Optional[ImportPurchase]):
     supplier = await resolve_supplier(db, payload.supplier_name, payload.supplier_id)
-    warehouse = await stock_service.get_warehouse(db, payload.warehouse)
+    warehouse = await stock_service.get_warehouse(db, payload.warehouse, require_active=True)
     today = date.today()
 
     if payload.ordered_date != (previous.ordered_date if previous else None) and payload.ordered_date > today:
         from app.core.exceptions import BadRequestException
 
         raise BadRequestException("Ordered date cannot be in the future.")
+    if previous is None and payload.expected_arrival_date is None and payload.eta_port_date is not None:
+        payload.expected_arrival_date = payload.eta_port_date + timedelta(days=5)
     for label, field in (("ETD origin date", "etd_origin_date"), ("ETA port date", "eta_port_date"),
                          ("Expected arrival date", "expected_arrival_date")):
         check_future(label, getattr(payload, field), getattr(previous, field) if previous else None, today)
@@ -305,15 +307,29 @@ async def _resolve_import_product(db: AsyncSession, product_name: str, product_c
             return await product_defaults(db, product_name)
         except BadRequestException:
             if not product_code:
+                from app.core.constants import RecordStatus
                 prod_by_code = (
-                    await db.execute(select(Product).where(func.lower(Product.product_code) == product_name.lower()))
+                    await db.execute(
+                        select(Product).where(
+                            Product.deleted_at.is_(None),
+                            Product.status == RecordStatus.ACTIVE,
+                            func.lower(Product.product_code) == product_name.lower(),
+                        )
+                    )
                 ).scalars().first()
                 if prod_by_code is not None:
                     return await product_defaults(db, prod_by_code.product_name)
                 raise
     if product_code:
+        from app.core.constants import RecordStatus
         prod = (
-            await db.execute(select(Product).where(func.lower(Product.product_code) == product_code.lower()))
+            await db.execute(
+                select(Product).where(
+                    Product.deleted_at.is_(None),
+                    Product.status == RecordStatus.ACTIVE,
+                    func.lower(Product.product_code) == product_code.lower(),
+                )
+            )
         ).scalars().first()
         if prod is not None:
             return await product_defaults(db, prod.product_name)
@@ -360,7 +376,7 @@ async def import_import_purchases(
                 warehouse_raw = _cell(norm, "warehouse", "warehouse name", "location")
                 if not warehouse_raw:
                     raise BadRequestException("Warehouse is required.")
-                warehouse = await stock_service.get_warehouse(db, warehouse_raw)
+                warehouse = await stock_service.get_warehouse(db, warehouse_raw, require_active=True)
 
                 ordered_date_raw = _cell(norm, "ordered_date", "ordered date dd mm yyyy", "ordered date", "order date")
                 if not ordered_date_raw:
@@ -377,6 +393,8 @@ async def import_import_purchases(
                     _cell(norm, "expected_arrival_date", "expected arrival date dd mm yyyy", "expected arrival date", "arrival date"),
                     "Expected arrival date",
                 )
+                if arrival_dt is None and eta_dt is not None:
+                    arrival_dt = eta_dt + timedelta(days=5)
                 invoice_dt = _opt_date_field(_cell(norm, "invoice_date", "invoice date dd mm yyyy", "invoice date"), "Invoice date")
 
                 check_future("ETD origin date", etd_dt, None, today)

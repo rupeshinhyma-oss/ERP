@@ -218,13 +218,14 @@ class PlanningRowRepository(BaseRepository[PlanningRow]):
         or duplicate a record.
         """
         from sqlalchemy import func
+        from app.core.constants import RecordStatus
         from app.masters.product_sub_categories.models import ProductSubCategory
         from app.masters.products.models import Product
 
         stmt = (
             select(Product.id, Product.organization_ids, Product.branch_ids)
             .outerjoin(ProductSubCategory, ProductSubCategory.id == Product.sub_category_id)
-            .where(Product.deleted_at.is_(None))
+            .where(Product.deleted_at.is_(None), Product.status == RecordStatus.ACTIVE)
             .order_by(
                 ProductSubCategory.name.is_(None),  # False (has a sub-category) sorts before True (none)
                 func.lower(ProductSubCategory.name).asc(),
@@ -250,6 +251,34 @@ class PlanningRowRepository(BaseRepository[PlanningRow]):
             for product_id, branch_ids in matching
             if branch_ids and branch_id in [str(x) for x in branch_ids]
         ]
+
+    def _exclude_inactive_linked_sources(self, stmt):
+        """Non-destructively hide PlanningRow rows whose linked source record is inactive or soft-deleted."""
+        from sqlalchemy import or_
+        from app.buyers.models import Buyer
+        from app.core.constants import RecordStatus
+        from app.masters.products.models import Product
+        from app.suppliers.models import Supplier
+
+        inactive_products = select(Product.id).where(
+            or_(Product.deleted_at.is_not(None), Product.status != RecordStatus.ACTIVE)
+        )
+        inactive_suppliers = select(Supplier.id).where(
+            or_(Supplier.deleted_at.is_not(None), Supplier.is_active.is_(False))
+        )
+        inactive_buyers = select(Buyer.id).where(
+            or_(Buyer.deleted_at.is_not(None), Buyer.is_active.is_(False))
+        )
+        return stmt.where(
+            or_(
+                PlanningRow.linked_record_id.is_(None),
+                (
+                    PlanningRow.linked_record_id.notin_(inactive_products)
+                    & PlanningRow.linked_record_id.notin_(inactive_suppliers)
+                    & PlanningRow.linked_record_id.notin_(inactive_buyers)
+                ),
+            )
+        )
 
     def _apply_search_column_filters(
         self, stmt, sheet_id: uuid.UUID, search_column_filters: list["ColumnSearchFilter"] | None
@@ -387,6 +416,7 @@ class PlanningRowRepository(BaseRepository[PlanningRow]):
             .where(PlanningRow.sheet_id == sheet_id, PlanningRow.deleted_at.is_(None))
             .options(selectinload(PlanningRow.cells))
         )
+        stmt = self._exclude_inactive_linked_sources(stmt)
         if organization_id is not None:
             matching_ids = await self._linked_record_ids_for_organization(organization_id, branch_id=branch_id)
             if not matching_ids:
@@ -422,6 +452,7 @@ class PlanningRowRepository(BaseRepository[PlanningRow]):
         stmt = select(func.count(PlanningRow.id)).where(
             PlanningRow.sheet_id == sheet_id, PlanningRow.deleted_at.is_(None)
         )
+        stmt = self._exclude_inactive_linked_sources(stmt)
         if organization_id is not None:
             matching_ids = await self._linked_record_ids_for_organization(organization_id, branch_id=branch_id)
             if not matching_ids:
@@ -474,6 +505,7 @@ class PlanningRowRepository(BaseRepository[PlanningRow]):
                 select(val_expr.label("val"), func.count(PlanningRow.id).label("cnt"))
                 .where(PlanningRow.sheet_id == sheet_id, PlanningRow.deleted_at.is_(None))
             )
+            stmt = self._exclude_inactive_linked_sources(stmt)
             if matching_ids is not None:
                 stmt = stmt.where(PlanningRow.linked_record_id.in_(matching_ids))
             if search_term:
@@ -493,6 +525,7 @@ class PlanningRowRepository(BaseRepository[PlanningRow]):
                     PlanningCell.column_id == column_id,
                 )
             )
+            stmt = self._exclude_inactive_linked_sources(stmt)
             if matching_ids is not None:
                 stmt = stmt.where(PlanningRow.linked_record_id.in_(matching_ids))
             if search_term:
@@ -520,14 +553,18 @@ class PlanningRowRepository(BaseRepository[PlanningRow]):
             PlanningRow.deleted_at.is_(None),
             PlanningRow.label.ilike(f"%{clean_query}%"),
         )
-        count_stmt = select(func.count(PlanningRow.id)).where(*base_where)
+        count_stmt = self._exclude_inactive_linked_sources(select(func.count(PlanningRow.id)).where(*base_where))
         count_res = await self.session.execute(count_stmt)
         count = int(count_res.scalar_one())
 
         if count == 0:
             return 0, []
 
-        items_stmt = select(PlanningRow).where(*base_where).order_by(PlanningRow.position.asc()).limit(limit)
+        items_stmt = (
+            self._exclude_inactive_linked_sources(select(PlanningRow).where(*base_where))
+            .order_by(PlanningRow.position.asc())
+            .limit(limit)
+        )
         items_res = await self.session.execute(items_stmt)
         items = list(items_res.scalars().all())
         return count, items

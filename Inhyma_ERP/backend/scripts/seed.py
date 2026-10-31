@@ -68,6 +68,15 @@ BOOTSTRAP_PERMISSIONS: list[tuple[str, str, str, str, str, str]] = [
     ("hrms.approve", "hrms", "hrms", "approve", "ALL", "Approve or reject leave requests and attendance regularizations."),
     ("hrms.manage", "hrms", "hrms", "manage", "ALL", "Full administrative control over HRMS setup, leave types, adjustments, and approvals."),
     ("hrms.location_assignments.manage", "hrms", "hrms-setup", "manage", "ALL", "Assign primary and additional office locations to employees for multi-location attendance."),
+    ("hrms.attendance", "hrms", "attendance", "view", "ALL", "Access HRMS Attendance module."),
+    ("hrms.leave", "hrms", "leave", "view", "ALL", "Access HRMS Leave module."),
+    ("hrms.assets", "hrms", "assets", "view", "ALL", "Access HRMS Asset Management module."),
+    ("hrms.expenses", "hrms", "expenses", "view", "ALL", "Access HRMS Expense Management module."),
+    ("hrms.site_visits", "hrms", "site_visits", "view", "ALL", "Access HRMS Site Visit module."),
+    ("hrms.payroll", "hrms", "payroll", "view", "ALL", "Access HRMS Payroll module."),
+    ("hrms.payroll.configure", "hrms", "payroll", "manage", "ALL", "Configure salary structures and payroll setup."),
+    ("hrms.payroll.approve", "hrms", "payroll", "approve", "ALL", "Approve and lock monthly payroll."),
+    ("hrms.setup", "hrms", "setup", "manage", "ALL", "Access HRMS Setup and global configuration."),
     # CRM Module
     ("crm.pipelines.view", "crm", "crm-pipelines", "view", "ALL", "View CRM pipelines and stage configuration"),
     ("crm.pipelines.manage", "crm", "crm-pipelines", "manage", "ALL", "Create, update, reorder and manage CRM pipelines and stages"),
@@ -393,6 +402,30 @@ BOOTSTRAP_PERMISSIONS: list[tuple[str, str, str, str, str, str]] = [
     ("feed.view", "feed", "feed", "view", "ALL", "View accessible announcements and broadcast messages."),
     ("feed.create", "feed", "feed", "create", "ALL", "Create and publish feed announcements to all or selected employees."),
     ("feed.manage", "feed", "feed", "manage", "ALL", "Full administrative management of all feed announcements, drafts, and recipients."),
+    # Banks Master
+    ("bank.view", "bank", "masters-banks", "view", "ALL", "View banks; use search, filters, and status tabs."),
+    ("bank.create", "bank", "masters-banks", "create", "ALL", "Create bank accounts."),
+    ("bank.update", "bank", "masters-banks", "update", "ALL", "Edit and activate/deactivate banks."),
+    ("bank.delete", "bank", "masters-banks", "delete", "ALL", "Delete banks."),
+    ("bank.export", "bank", "masters-banks", "export", "ALL", "Export bank data."),
+    ("bank.import", "bank", "masters-banks", "import", "ALL", "Import bank data."),
+    ("bank.bulk_action", "bank", "masters-banks", "manage", "ALL", "Use Bulk Actions in the bank list."),
+    # Billing Companies Master
+    ("billingcompany.view", "billingcompany", "masters-billing-company", "view", "ALL", "View billing companies; use search, filters, and status tabs."),
+    ("billingcompany.create", "billingcompany", "masters-billing-company", "create", "ALL", "Create billing companies."),
+    ("billingcompany.update", "billingcompany", "masters-billing-company", "update", "ALL", "Edit and activate/deactivate billing companies."),
+    ("billingcompany.delete", "billingcompany", "masters-billing-company", "delete", "ALL", "Delete billing companies."),
+    ("billingcompany.export", "billingcompany", "masters-billing-company", "export", "ALL", "Export billing company data."),
+    ("billingcompany.import", "billingcompany", "masters-billing-company", "import", "ALL", "Import billing company data."),
+    ("billingcompany.bulk_action", "billingcompany", "masters-billing-company", "manage", "ALL", "Use Bulk Actions in the billing company list."),
+    # Technicians Master
+    ("technician.view", "technician", "masters-technicians", "view", "ALL", "View technicians; use search, filters, and status tabs."),
+    ("technician.create", "technician", "masters-technicians", "create", "ALL", "Create technicians."),
+    ("technician.update", "technician", "masters-technicians", "update", "ALL", "Edit and activate/deactivate technicians."),
+    ("technician.delete", "technician", "masters-technicians", "delete", "ALL", "Delete technicians."),
+    ("technician.export", "technician", "masters-technicians", "export", "ALL", "Export technician data."),
+    ("technician.import", "technician", "masters-technicians", "import", "ALL", "Import technician data."),
+    ("technician.bulk_action", "technician", "masters-technicians", "manage", "ALL", "Use Bulk Actions in the technician list."),
 ]
 
 SUPER_ADMIN_ROLE_NAME = "super_admin"

@@ -1645,7 +1645,7 @@ export function LeadImportPage({ embedded = false, onClose, onSuccess }: LeadImp
                                       <button
                                         type="button"
                                         onClick={() => {
-                                          const eligibleIds = salespeople.filter(s => s.is_eligible).map(s => s.user_id);
+                                          const eligibleIds = salespeople.filter(s => s.is_eligible && s.is_active !== false).map(s => s.user_id);
                                           setSelectedRepIds(eligibleIds);
                                         }}
                                         style={{
@@ -1677,7 +1677,7 @@ export function LeadImportPage({ embedded = false, onClose, onSuccess }: LeadImp
                                   </div>
 
                                   <div style={{ maxHeight: "180px", overflowY: "auto", border: "1px solid #e2e8f0", borderRadius: "4px" }}>
-                                    {salespeople.map((sp) => {
+                                    {salespeople.filter((sp) => sp.is_active !== false).map((sp) => {
                                       const isChecked = selectedRepIds.includes(sp.user_id);
                                       const capInfo = sp.max_lead_capacity !== null && sp.max_lead_capacity !== undefined
                                         ? `Cap: ${sp.max_lead_capacity} (${sp.remaining_capacity ?? (sp.max_lead_capacity - sp.active_lead_count)} rem)`
@@ -1784,7 +1784,7 @@ export function LeadImportPage({ embedded = false, onClose, onSuccess }: LeadImp
                                     }}
                                   >
                                     <option value="">-- Select Sales Representative --</option>
-                                    {salespeople.map((sp) => {
+                                    {salespeople.filter((sp) => sp.is_active !== false).map((sp) => {
                                       const capInfo = sp.max_lead_capacity !== null && sp.max_lead_capacity !== undefined
                                         ? `Cap: ${sp.max_lead_capacity} (${sp.remaining_capacity ?? (sp.max_lead_capacity - sp.active_lead_count)} rem)`
                                         : "Unlimited";

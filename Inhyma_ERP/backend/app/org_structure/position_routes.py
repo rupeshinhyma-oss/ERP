@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends, Request, status
+from fastapi import APIRouter, Depends, Query, Request, status
 
 from app.audit.constants import AuditAction
 from app.audit.dependencies import get_audit_service
@@ -82,11 +82,18 @@ async def list_positions(
 
 @router.get("/all", summary="List every position (unpaginated, for dropdowns)")
 async def list_all_positions(
-    request: Request, service: PositionService = Depends(get_position_service),
+    request: Request,
+    active_only: bool = Query(default=False),
+    service: PositionService = Depends(get_position_service),
     _current_user: CurrentUser = Depends(require_permission("position.view")),
 ) -> dict:
-    """Return every position, for assignment-form dropdowns."""
+    """Return every position, optionally restricted to active positions for assignment dropdowns."""
     positions = await service.list_all()
+    if active_only:
+        positions = [
+            p for p in positions
+            if getattr(p.status, "value", str(p.status)).upper() == "ACTIVE"
+        ]
     pos_ids = [p.id for p in positions]
     counts = await service.get_employee_counts(pos_ids)
     data = []

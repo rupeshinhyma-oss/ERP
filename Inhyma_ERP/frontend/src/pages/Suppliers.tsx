@@ -75,7 +75,7 @@ const SUPPLIER_IMPORT_HEADERS: ImportHeader[] = [
   { key: "WhatsApp Number", label: "WhatsApp Number" },
   { key: "WeChat Number", label: "WeChat Number" },
   { key: "Emails", label: "Emails" },
-  { key: "Tax ID / GST Number", label: "Tax ID / GST Number" },
+  { key: "Tax ID / GST Number", label: "Tax ID / GST Number", required: true },
   { key: "Address", label: "Address" },
   { key: "Town", label: "Town" },
   { key: "Primary Website", label: "Primary Website" },
@@ -428,6 +428,7 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
   const [importSummary, setImportSummary] = useState<ImportSummary | null>(null);
   const [importError, setImportError] = useState<string | null>(null);
   const [isImportPageOpen, setIsImportPageOpen] = useState(false);
+  const [importMode, setImportMode] = useState<"create" | "update">("create");
   const [importFile, setImportFile] = useState<File | null>(null);
   const [importLoading, setImportLoading] = useState(false);
   const importFileInputRef = useRef<HTMLInputElement>(null);
@@ -834,7 +835,7 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
   const companyNameFetcher = useCallback(
     async (term: string, signal: AbortSignal): Promise<DropdownOption[]> => {
       const { data } = await apiGet<Supplier[]>(
-        "/suppliers" + toQueryString({ search: term, page: 1, page_size: 20 }),
+        "/suppliers" + toQueryString({ search: term, page: 1, page_size: 20, status: "active" }),
         { signal }
       );
       return data.map((d) => ({ value: d.company_name, label: d.company_name }));
@@ -1338,7 +1339,7 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
     if (!stateId && formStateCustomText.trim() && countryId) {
       try {
         const { data: searchStates } = await apiGet<{ id: string; name: string }[]>(
-          `/masters/states${toQueryString({ search: formStateCustomText.trim(), country_id: countryId, page: 1, page_size: 5 })}`
+          `/masters/states${toQueryString({ search: formStateCustomText.trim(), country_id: countryId, page: 1, page_size: 5, status: "active" })}`
         );
         const match = searchStates.find((s) => s.name.toLowerCase() === formStateCustomText.trim().toLowerCase());
         if (match) {
@@ -1360,7 +1361,7 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
     if (!cityId && formCityCustomText.trim() && stateId) {
       try {
         const { data: searchCities } = await apiGet<{ id: string; name: string }[]>(
-          `/masters/cities${toQueryString({ search: formCityCustomText.trim(), state_id: stateId, page: 1, page_size: 5 })}`
+          `/masters/cities${toQueryString({ search: formCityCustomText.trim(), state_id: stateId, page: 1, page_size: 5, status: "active" })}`
         );
         const match = searchCities.find((c) => c.name.toLowerCase() === formCityCustomText.trim().toLowerCase());
         if (match) {
@@ -1393,7 +1394,7 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
       } else {
         try {
           const { data: searchCats } = await apiGet<{ id: string; name: string }[]>(
-            `/masters/product-categories${toQueryString({ search: cat.trim(), page: 1, page_size: 5 })}`
+            `/masters/product-categories${toQueryString({ search: cat.trim(), page: 1, page_size: 5, status: "active" })}`
           );
           const match = searchCats.find((c) => c.name.toLowerCase() === cat.trim().toLowerCase());
           if (match) {
@@ -1819,6 +1820,128 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
               padding: "28px 36px",
             }}
           >
+            {/* Import Mode Selection */}
+            <div style={{ marginBottom: "26px" }}>
+              <label style={{ display: "block", fontSize: "14px", fontWeight: 700, color: "#0f172a", marginBottom: "10px" }}>
+                Select Import Mode
+              </label>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: "14px", maxWidth: "800px" }}>
+                {/* Mode 1: Add New */}
+                <div
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => setImportMode("create")}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") setImportMode("create");
+                  }}
+                  style={{
+                    padding: "16px 18px",
+                    borderRadius: "8px",
+                    border: importMode === "create" ? "2px solid #2563eb" : "1px solid #cbd5e1",
+                    background: importMode === "create" ? "#eff6ff" : "#ffffff",
+                    cursor: "pointer",
+                    boxShadow: importMode === "create" ? "0 2px 8px rgba(37,99,235,0.12)" : "none",
+                    transition: "all 0.15s ease-in-out",
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "6px" }}>
+                    <span style={{ fontSize: "17px" }}>➕</span>
+                    <strong style={{ fontSize: "14px", color: importMode === "create" ? "#1d4ed8" : "#1e293b" }}>
+                      Add New Records Only
+                    </strong>
+                    {importMode === "create" && (
+                      <span
+                        style={{
+                          marginLeft: "auto",
+                          fontSize: "10px",
+                          fontWeight: 700,
+                          background: "#2563eb",
+                          color: "#ffffff",
+                          padding: "2px 8px",
+                          borderRadius: "10px",
+                          letterSpacing: "0.5px",
+                        }}
+                      >
+                        ACTIVE
+                      </span>
+                    )}
+                  </div>
+                  <div style={{ fontSize: "12px", color: "#64748b", lineHeight: 1.45 }}>
+                    Upload only brand new supplier records. Any duplicate rows matching an existing Tax ID / GST Number in the system will be safely flagged and skipped.
+                  </div>
+                </div>
+
+                {/* Mode 2: Update / Modify */}
+                <div
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => setImportMode("update")}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") setImportMode("update");
+                  }}
+                  style={{
+                    padding: "16px 18px",
+                    borderRadius: "8px",
+                    border: importMode === "update" ? "2px solid #2563eb" : "1px solid #cbd5e1",
+                    background: importMode === "update" ? "#eff6ff" : "#ffffff",
+                    cursor: "pointer",
+                    boxShadow: importMode === "update" ? "0 2px 8px rgba(37,99,235,0.12)" : "none",
+                    transition: "all 0.15s ease-in-out",
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "6px" }}>
+                    <span style={{ fontSize: "17px" }}>✏️</span>
+                    <strong style={{ fontSize: "14px", color: importMode === "update" ? "#1d4ed8" : "#1e293b" }}>
+                      Update / Modify Existing Records
+                    </strong>
+                    {importMode === "update" && (
+                      <span
+                        style={{
+                          marginLeft: "auto",
+                          fontSize: "10px",
+                          fontWeight: 700,
+                          background: "#2563eb",
+                          color: "#ffffff",
+                          padding: "2px 8px",
+                          borderRadius: "10px",
+                          letterSpacing: "0.5px",
+                        }}
+                      >
+                        ACTIVE
+                      </span>
+                    )}
+                  </div>
+                  <div style={{ fontSize: "12px", color: "#64748b", lineHeight: 1.45 }}>
+                    Update existing supplier records matching Tax ID / GST Number (or Company Name). <strong>Zero Data Loss:</strong> Blank cells in your file are ignored and will never erase existing fields.
+                  </div>
+                </div>
+              </div>
+
+              {/* Mode Info Callout */}
+              <div
+                style={{
+                  marginTop: "12px",
+                  padding: "10px 14px",
+                  borderRadius: "6px",
+                  fontSize: "12.5px",
+                  maxWidth: "800px",
+                  background: importMode === "create" ? "#f8fafc" : "#fffbeb",
+                  color: importMode === "create" ? "#475569" : "#92400e",
+                  borderLeft: importMode === "create" ? "3px solid #64748b" : "3px solid #d97706",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
+                }}
+              >
+                <span>{importMode === "create" ? "ℹ️" : "🛡️"}</span>
+                <span>
+                  {importMode === "create"
+                    ? "Strict creation mode: Existing supplier records remain untouched. Any duplicate Tax ID / GST Number will be reported and not saved."
+                    : "Safe non-destructive update: Only columns with values in your uploaded file will update matching suppliers. Empty columns are kept intact."}
+                </span>
+              </div>
+            </div>
+
             {/* Import File Section */}
             <div style={{ marginBottom: "24px" }}>
               <label style={{ display: "block", fontSize: "14px", fontWeight: 600, color: "#1e293b", marginBottom: "8px" }}>
@@ -1947,8 +2070,8 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
                 <li>Avoid Special Characters (Like @ # $ % ^ & * ( ) ) In Text Fields.</li>
                 <li>Maximum Allowed File Size: <strong>8 MB</strong>.</li>
                 <li>Only <strong>.Csv</strong>, <strong>.Xls</strong>, And <strong>.Xlsx</strong> Files Are Accepted.</li>
-                <li>Mandatory Columns: <strong>Company Name</strong>, <strong>Country</strong>, <strong>State</strong>, And <strong>City</strong>.</li>
-                <li><strong>Company Name</strong> Must Be Unique.</li>
+                <li>Mandatory Columns: <strong>Company Name</strong>, <strong>Tax ID / GST Number</strong>, <strong>Country</strong>, <strong>State</strong>, And <strong>City</strong>.</li>
+                <li><strong>Tax ID / GST Number</strong> Must Be Unique (Duplicate GST Numbers Are Detected And Not Saved).</li>
                 <li><strong>Country, State, City, Product Category, Product Sub Category, And Supplier Type</strong> Must Already Exist In The System.</li>
                 <li><strong>Product Sub Category</strong> Must Belong To The Selected <strong>Product Category</strong>.</li>
                 <li><strong>Calling Number</strong>, And <strong>WhatsApp Number</strong> Must Include Country Code (Maximum 15 Digits Total).</li>
@@ -2015,6 +2138,7 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
               apiBase="/suppliers"
               entityName="supplier"
               importHeaders={SUPPLIER_IMPORT_HEADERS}
+              initialMode={importMode}
               onClose={() => setWizardPending(null)}
               onComplete={(summary) => {
                 setWizardPending(null);
@@ -2188,11 +2312,6 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
 
                         return (
                           <>
-                            {exact && (
-                              <div style={{ marginTop: "6px", fontSize: "12.5px", color: "#dc2626", fontWeight: 600, display: "flex", alignItems: "center", gap: "5px" }}>
-                                <span>⚠️</span> Supplier "{exact.company_name}" already exists!
-                              </div>
-                            )}
                             {matches.length > 0 && !exact && (
                               <div style={{ position: "absolute", top: "100%", left: 0, right: 0, zIndex: 100, background: "#ffffff", border: "1px solid #cbd5e0", borderRadius: "6px", boxShadow: "0 4px 12px rgba(0,0,0,0.15)", maxHeight: "160px", overflowY: "auto", marginTop: "2px" }}>
                                 <div style={{ padding: "6px 12px", fontSize: "11px", fontWeight: 700, color: "#64748b", background: "#f8fafc", borderBottom: "1px solid #f1f5f9" }}>
@@ -2270,21 +2389,37 @@ export function SuppliersPage({ defaultAdd = false }: { defaultAdd?: boolean } =
                         fetchLabelForValue={async (val) => val}
                       />
                     </div>
-                    <TextField
-                      id="tax_id_number"
-                      label={
-                        <>
-                          GST Number <span style={{ color: "#ef4444" }}>*</span>
-                        </>
-                      }
-                      required
-                      maxLength={100}
-                      placeholder="e.g. 27ABCDE1234F1Z5"
-                      value={form.tax_id_number}
-                      onChange={(v) => setField("tax_id_number", v.toUpperCase())}
-                      hasError={Boolean(validationErrors.tax_id_number)}
-                      errorMessage={validationErrors.tax_id_number}
-                    />
+                    <div>
+                      <TextField
+                        id="tax_id_number"
+                        label={
+                          <>
+                            GST Number <span style={{ color: "#ef4444" }}>*</span>
+                          </>
+                        }
+                        required
+                        maxLength={100}
+                        placeholder="e.g. 27ABCDE1234F1Z5"
+                        value={form.tax_id_number}
+                        onChange={(v) => setField("tax_id_number", v.toUpperCase())}
+                        hasError={Boolean(validationErrors.tax_id_number)}
+                        errorMessage={validationErrors.tax_id_number}
+                      />
+                      {(() => {
+                        const typedGst = (form.tax_id_number || "").trim().toUpperCase();
+                        if (!typedGst) return null;
+                        const exactGst = existingSuppliers.items.find((s) => {
+                          if (currentSupplierId && String(s.id).toLowerCase() === String(currentSupplierId).toLowerCase()) return false;
+                          return (s.tax_id_number || "").trim().toUpperCase() === typedGst;
+                        });
+                        if (!exactGst) return null;
+                        return (
+                          <div style={{ marginTop: "6px", fontSize: "12.5px", color: "#dc2626", fontWeight: 600, display: "flex", alignItems: "center", gap: "5px" }}>
+                            <span>⚠️</span> GST Number "{exactGst.tax_id_number}" already exists (used by "{exactGst.company_name}")!
+                          </div>
+                        );
+                      })()}
+                    </div>
                   </div>
 
 

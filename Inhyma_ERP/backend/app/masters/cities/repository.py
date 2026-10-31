@@ -7,6 +7,7 @@ import uuid
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common.base_repository import BaseRepository
+from app.core.constants import RecordStatus
 from app.masters.cities.models import City
 
 
@@ -51,7 +52,7 @@ class CityRepository(BaseRepository[City]):
 
     async def list_by_district(self, district_id: uuid.UUID) -> list[City]:
         """Return every non-deleted city in a specific district, ordered by name."""
-        stmt = self._base_select().where(City.district_id == district_id).order_by(City.name)
+        stmt = self._base_select().where(City.district_id == district_id, City.status == RecordStatus.ACTIVE).order_by(City.name)
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 
@@ -59,7 +60,7 @@ class CityRepository(BaseRepository[City]):
         self, state_id: uuid.UUID, district_id: uuid.UUID | None = None
     ) -> list[City]:
         """Return every non-deleted city in a specific state and optionally district, ordered by name."""
-        stmt = self._base_select().where(City.state_id == state_id)
+        stmt = self._base_select().where(City.state_id == state_id, City.status == RecordStatus.ACTIVE)
         if district_id is not None:
             stmt = stmt.where(City.district_id == district_id)
         stmt = stmt.order_by(City.name)

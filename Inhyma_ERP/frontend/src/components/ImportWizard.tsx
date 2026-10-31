@@ -204,14 +204,16 @@ async function uploadChunk(
   mapping: ColumnMapping,
   apiBase: string,
   importHeaders: ImportHeader[],
-  signal: AbortSignal
+  signal: AbortSignal,
+  updateExisting: boolean = false
 ): Promise<ImportSummary> {
   const csvBlob = buildRemappedCsv(rowsChunk, mapping, importHeaders);
   const formData = new FormData();
   formData.append("file", csvBlob, "import.csv");
 
   const token = Auth.getAccessToken();
-  const res = await fetch(`${API_BASE}${apiBase}/import`, {
+  const query = updateExisting ? "?update_existing=true" : "";
+  const res = await fetch(`${API_BASE}${apiBase}/import${query}`, {
     method: "POST",
     headers: { Authorization: `Bearer ${token}` },
     body: formData,
@@ -237,8 +239,9 @@ function mergeSummaries(
    */
   chunkRowToOriginalRow: (chunkRow: number) => number
 ): void {
-  target.total_rows += chunkSummary.total_rows || 0;
   target.created += chunkSummary.created || 0;
+  target.updated = (target.updated || 0) + (chunkSummary.updated || 0);
+  target.unchanged = (target.unchanged || 0) + (chunkSummary.unchanged || 0);
   target.failed += chunkSummary.failed || 0;
   target.duplicate_count += chunkSummary.duplicate_count || 0;
   // Row numbers inside each chunk's summary are 1-indexed *within that chunk's
@@ -268,13 +271,20 @@ function labelForRow(rowData?: Record<string, unknown>): string | null {
   const candidates = [
     "consignment_no",
     "invoice_no",
+    "Company Name",
     "company_name",
+    "Product Name (As Per Tally)",
+    "product_name_tally",
+    "Product Name",
     "product_name",
+    "Name",
     "name",
     "title",
     "display_name",
     "person_name",
+    "Code",
     "code",
+    "Product Code",
     "product_code",
     "employee_code",
   ];
@@ -291,7 +301,20 @@ function labelForRow(rowData?: Record<string, unknown>): string | null {
  */
 function idLabelForRow(rowData?: Record<string, unknown> | null): string | null {
   if (!rowData) return null;
-  const candidates = ["consignment_no", "invoice_no", "product_code", "code", "employee_code"];
+  const candidates = [
+    "Tax ID / GST Number",
+    "tax_id_number",
+    "GST No Of Company",
+    "consignment_no",
+    "invoice_no",
+    "Product Name (As Per Tally)",
+    "product_name_tally",
+    "Product Code",
+    "product_code",
+    "Code",
+    "code",
+    "employee_code",
+  ];
   for (const key of candidates) {
     if (rowData[key]) return String(rowData[key]);
   }
@@ -316,12 +339,16 @@ function idLabelForRow(rowData?: Record<string, unknown> | null): string | null 
  * different countries' "Central" state don't collide.
  */
 const IDENTITY_FIELD_GROUPS: string[][] = [
+  ["Product Name (As Per Tally)"],
+  ["product_name_tally"],
   ["product_code"],
   ["code", "category_code"], // sub-categories: code is only unique within a category
   ["code"],
+  ["Company Name"], // companies / suppliers with human-readable headers
   ["company_name", "country_code", "state_name", "city_name"], // suppliers
   ["name", "country_code", "state_name"], // cities
   ["name", "country_code"], // states
+  ["product_name"],
   ["name"],
 ];
 
@@ -369,38 +396,56 @@ function dedupeRowsInFile(
   mapping: ColumnMapping,
   identityFields: string[] | null
 ): DedupeResult {
-  if (!identityFields) {
+  const gstFieldKey = ["Tax ID / GST Number", "tax_id_number", "GST No Of Company"].find(
+    (k) => Boolean(mapping[k])
+  );
+
+  if (!identityFields && !gstFieldKey) {
     return { keptRows: rows, keptOriginalIndexes: rows.map((_, i) => i), duplicates: [] };
   }
 
   const seen = new Map<string, number>(); // composite key -> 1-indexed file row of first occurrence (header = row 1)
+  const seenGst = new Map<string, number>(); // normalized GST -> 1-indexed file row of first occurrence
   const keptRows: SheetRow[] = [];
   const keptOriginalIndexes: number[] = [];
   const duplicates: InFileDuplicate[] = [];
 
   rows.forEach((row, index) => {
     const fileRow = index + 2; // row 1 is the header
-    const values = identityFields.map((field) => {
-      const sourceCol = mapping[field];
-      return sourceCol ? normalizeKeyValue(row[sourceCol]) : "";
-    });
 
-    if (values.some((v) => v === "")) {
-      // Missing an identity field -- don't dedupe this row, let normal
-      // validation catch it (it may be a genuine validation error, or a
-      // module where the field is optional).
-      keptRows.push(row);
-      keptOriginalIndexes.push(index);
-      return;
+    let gstVal = "";
+    if (gstFieldKey && mapping[gstFieldKey]) {
+      gstVal = normalizeKeyValue(row[mapping[gstFieldKey]!]);
+    }
+    if (gstVal) {
+      const firstGstRow = seenGst.get(gstVal);
+      if (firstGstRow !== undefined) {
+        duplicates.push({ row: fileRow, row_data: row, matchedRow: firstGstRow });
+        return;
+      }
     }
 
-    const key = values.join("\u0001");
-    const firstRow = seen.get(key);
-    if (firstRow !== undefined) {
-      duplicates.push({ row: fileRow, row_data: row, matchedRow: firstRow });
-      return;
+    if (identityFields) {
+      const values = identityFields.map((field) => {
+        const sourceCol = mapping[field];
+        return sourceCol ? normalizeKeyValue(row[sourceCol]) : "";
+      });
+
+      if (!values.some((v) => v === "")) {
+        const key = values.join("\u0001");
+        const firstRow = seen.get(key);
+        if (firstRow !== undefined) {
+          duplicates.push({ row: fileRow, row_data: row, matchedRow: firstRow });
+          return;
+        }
+        seen.set(key, fileRow);
+      }
     }
-    seen.set(key, fileRow);
+
+    if (gstVal) {
+      seenGst.set(gstVal, fileRow);
+    }
+
     keptRows.push(row);
     keptOriginalIndexes.push(index);
   });
@@ -638,6 +683,18 @@ export function ImportSummaryPanel({
             <b style={{ color: "var(--color-success)" }}>{summary.created}</b>
             <span className="muted">Created</span>
           </div>
+          {Boolean(summary.updated) && (
+            <div className="import-stat">
+              <b style={{ color: "#2563eb" }}>{summary.updated}</b>
+              <span className="muted">Updated</span>
+            </div>
+          )}
+          {Boolean(summary.unchanged) && (
+            <div className="import-stat">
+              <b style={{ color: "#64748b" }}>{summary.unchanged}</b>
+              <span className="muted">Unchanged</span>
+            </div>
+          )}
           <div className="import-stat">
             <b style={{ color: "var(--color-danger)" }}>{summary.failed}</b>
             <span className="muted">Failed</span>
@@ -743,6 +800,7 @@ export interface WizardModalProps {
   apiBase: string;
   entityName: string;
   importHeaders: ImportHeader[];
+  initialMode?: "create" | "update";
   onClose: () => void;
   onComplete: (summary: ImportSummary | null) => void;
   onError: (message: string) => void;
@@ -755,6 +813,7 @@ export function WizardModal({
   apiBase,
   entityName,
   importHeaders,
+  initialMode,
   onClose,
   onComplete,
   onError,
@@ -768,6 +827,7 @@ export function WizardModal({
     }
     return initial;
   });
+  const [importMode, setImportMode] = useState<"create" | "update">(initialMode || "create");
   const [importing, setImporting] = useState(false);
   const [progressText, setProgressText] = useState("Importing...");
   const [progressPercent, setProgressPercent] = useState(0);
@@ -781,8 +841,35 @@ export function WizardModal({
   );
 
   const missingRequired = useMemo(
-    () => importHeaders.filter((h) => h.required && !mapping[h.key]),
-    [importHeaders, mapping]
+    () =>
+      importHeaders.filter((h) => {
+        if (!h.required) return false;
+        if (importMode === "update" && apiBase === "/companies") {
+          const isIdentity = h.key === "Company Name" || h.key === "company_name";
+          if (!isIdentity) return false;
+        }
+        if (importMode === "update" && apiBase === "/suppliers") {
+          const isIdentity =
+            h.key === "Company Name" ||
+            h.key === "company_name" ||
+            h.key === "Tax ID / GST Number" ||
+            h.key === "tax_id_number";
+          if (!isIdentity) return false;
+          // In update mode for suppliers, either Company Name OR Tax ID / GST Number is sufficient
+          const hasName = Boolean(mapping["Company Name"] || mapping["company_name"]);
+          const hasGst = Boolean(mapping["Tax ID / GST Number"] || mapping["tax_id_number"]);
+          if (hasName || hasGst) return false;
+        }
+        if (importMode === "update" && apiBase === "/masters/products") {
+          const isIdentity =
+            h.key === "Product Name (As Per Tally)" ||
+            h.key === "product_name_tally" ||
+            h.key === "product_name";
+          if (!isIdentity) return false;
+        }
+        return !mapping[h.key];
+      }),
+    [importHeaders, mapping, importMode, apiBase]
   );
   const canImport = missingRequired.length === 0;
 
@@ -807,17 +894,20 @@ export function WizardModal({
    */
   const runChunkedImport = useCallback(
     async (signal: AbortSignal): Promise<ImportSummary> => {
-      const identityFields = pickIdentityFields(importHeaders, mapping);
-      const { keptRows, keptOriginalIndexes, duplicates: inFileDuplicates } = dedupeRowsInFile(
-        rows,
-        mapping,
-        identityFields
-      );
+      const isUpdateMode = importMode === "update";
+      // For /suppliers, only Tax ID / GST Number is the duplicate criterion (handled by gstFieldKey in dedupeRowsInFile).
+      const identityFields =
+        apiBase === "/suppliers" ? null : pickIdentityFields(importHeaders, mapping);
+      const { keptRows, keptOriginalIndexes, duplicates: inFileDuplicates } = isUpdateMode
+        ? { keptRows: rows, keptOriginalIndexes: rows.map((_, i) => i), duplicates: [] }
+        : dedupeRowsInFile(rows, mapping, identityFields);
 
       const aggregated: ImportSummary = {
         total_rows: rows.length,
         created: 0,
-        failed: inFileDuplicates.length,
+        updated: 0,
+        unchanged: 0,
+        failed: 0,
         duplicate_count: 0,
         errors: [],
         duplicates: [],
@@ -848,7 +938,14 @@ export function WizardModal({
       if (total <= CHUNK_SIZE) {
         setProgressText(`Uploading ${total} row${total === 1 ? "" : "s"}...`);
         setProgressPercent(40);
-        const chunkSummary = await uploadChunk(keptRows, mapping, apiBase, importHeaders, signal);
+        const chunkSummary = await uploadChunk(
+          keptRows,
+          mapping,
+          apiBase,
+          importHeaders,
+          signal,
+          isUpdateMode
+        );
         setProgressPercent(100);
         setProgressText(`Imported ${total} of ${total} row${total === 1 ? "" : "s"}`);
         mergeSummaries(aggregated, chunkSummary, makeRowMapper(0));
@@ -858,7 +955,14 @@ export function WizardModal({
       let uploaded = 0;
       for (let start = 0; start < total; start += CHUNK_SIZE) {
         const chunk = keptRows.slice(start, start + CHUNK_SIZE);
-        const chunkSummary = await uploadChunk(chunk, mapping, apiBase, importHeaders, signal);
+        const chunkSummary = await uploadChunk(
+          chunk,
+          mapping,
+          apiBase,
+          importHeaders,
+          signal,
+          isUpdateMode
+        );
         mergeSummaries(aggregated, chunkSummary, makeRowMapper(start));
         uploaded += chunk.length;
 
@@ -869,7 +973,7 @@ export function WizardModal({
 
       return aggregated;
     },
-    [rows, mapping, apiBase, importHeaders]
+    [rows, mapping, apiBase, importHeaders, importMode]
   );
 
   async function handleImport() {
@@ -955,6 +1059,104 @@ export function WizardModal({
             gap: "16px",
           }}
         >
+          {["/companies", "/masters/products", "/suppliers"].includes(apiBase) && (
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                gap: "10px",
+                padding: "14px 16px",
+                borderRadius: "8px",
+                background: "#f8fafc",
+                border: "1px solid #e2e8f0",
+              }}
+            >
+              <div style={{ fontSize: "13px", fontWeight: 700, color: "#0f172a" }}>
+                Select Import Action
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+                <button
+                  type="button"
+                  disabled={importing}
+                  onClick={() => setImportMode("create")}
+                  style={{
+                    textAlign: "left",
+                    padding: "10px 14px",
+                    borderRadius: "6px",
+                    border: importMode === "create" ? "2px solid #2563eb" : "1px solid #cbd5e1",
+                    background: importMode === "create" ? "#eff6ff" : "#ffffff",
+                    cursor: importing ? "not-allowed" : "pointer",
+                  }}
+                >
+                  <div style={{ fontWeight: 700, fontSize: "13px", color: importMode === "create" ? "#1d4ed8" : "#1e293b", display: "flex", alignItems: "center", gap: "6px" }}>
+                    <span>➕</span> Add New Records Only
+                  </div>
+                  <div style={{ fontSize: "11.5px", color: "#64748b", marginTop: "3px", lineHeight: "1.35" }}>
+                    {apiBase === "/suppliers"
+                      ? "Skips rows if the Tax ID / GST Number already exists in the system."
+                      : apiBase === "/masters/products"
+                      ? "Skips rows if the Product Name (As Per Tally) or Product Code already exists in the system."
+                      : "Skips rows if the Company Name, GST Number, or Contact Number already exists in the system."}
+                  </div>
+                </button>
+
+                <button
+                  type="button"
+                  disabled={importing}
+                  onClick={() => setImportMode("update")}
+                  style={{
+                    textAlign: "left",
+                    padding: "10px 14px",
+                    borderRadius: "6px",
+                    border: importMode === "update" ? "2px solid #2563eb" : "1px solid #cbd5e1",
+                    background: importMode === "update" ? "#eff6ff" : "#ffffff",
+                    cursor: importing ? "not-allowed" : "pointer",
+                  }}
+                >
+                  <div style={{ fontWeight: 700, fontSize: "13px", color: importMode === "update" ? "#1d4ed8" : "#1e293b", display: "flex", alignItems: "center", gap: "6px" }}>
+                    <span>✏️</span> Update / Modify Existing Records
+                  </div>
+                  <div style={{ fontSize: "11.5px", color: "#64748b", marginTop: "3px", lineHeight: "1.35" }}>
+                    {apiBase === "/suppliers"
+                      ? "Matches existing suppliers by Tax ID / GST Number (or Company Name) and updates filled values. Blank cells never overwrite."
+                      : apiBase === "/masters/products"
+                      ? "Matches existing products by Product Name or Code and updates filled values. Blank cells never overwrite."
+                      : "Matches existing companies by Name or GST and updates filled values. Blank cells never overwrite."}
+                  </div>
+                </button>
+              </div>
+
+              <div
+                style={{
+                  fontSize: "12px",
+                  padding: "8px 12px",
+                  borderRadius: "6px",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
+                  background: importMode === "create" ? "#f1f5f9" : "#fffbeb",
+                  color: importMode === "create" ? "#475569" : "#92400e",
+                  borderLeft: importMode === "create" ? "3px solid #64748b" : "3px solid #d97706",
+                }}
+              >
+                {importMode === "create" ? (
+                  <span>
+                    ℹ️ <b>Strict Insert Mode:</b>{" "}
+                    {apiBase === "/suppliers"
+                      ? "Only new suppliers will be created. Any duplicate Tax ID / GST Number will be safely flagged and skipped."
+                      : apiBase === "/masters/products"
+                      ? "Only new products will be created. Any duplicate Product Name (As Per Tally) or Product Code will be safely skipped."
+                      : "Only new companies will be created. Any duplicate Company Name, GST / Tax ID, or Contact Number will be safely skipped."}
+                  </span>
+                ) : (
+                  <span>
+                    🛡️ <b>Safe Enrichment Mode:</b> Updates matching records with new data in your file. <b>Empty or blank cells in your spreadsheet will NEVER erase existing data in the system.</b>
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
+
           <div className="iw-file-info" style={{ margin: 0 }}>
             <span className="iw-file-name">📄 {file.name}</span>
             <span className="muted">{rowLabel} detected</span>
@@ -1088,7 +1290,11 @@ export function WizardModal({
             disabled={!canImport || importing}
             onClick={handleImport}
           >
-            {importing ? "Importing..." : `Import ${rowLabel}`}
+            {importing
+              ? "Importing..."
+              : importMode === "update"
+              ? `Update & Import ${rowLabel}`
+              : `Import ${rowLabel}`}
           </button>
         </div>
       </div>
@@ -1493,6 +1699,67 @@ const CURRENCY_SAMPLES: Record<string, string> = {
   "Status (active/inactive)": "Active",
 };
 
+const COMPANY_SAMPLES: Record<string, string> = {
+  "Company Name": "Apex Packaging & Automation Pvt. Ltd.",
+  company_name: "Apex Packaging & Automation Pvt. Ltd.",
+  "Company Type": "B2B",
+  company_type: "B2B",
+  "Product Categories": "Machines",
+  category_names: "Machines",
+  "Key Strength Sub-Categories": "Band Sealer",
+  sub_category_names: "Band Sealer",
+  "Products Supplied": "FR900 Continuous Band Sealer",
+  "Secondary Products": "Shrink tunnels, induction sealers, conveyor systems",
+  "Brand Description": "ApexPack",
+  Country: "India",
+  country: "India",
+  "State / Province": "Gujarat",
+  State: "Gujarat",
+  Province: "Gujarat",
+  state: "Gujarat",
+  City: "Ahmedabad",
+  city: "Ahmedabad",
+  Address: "Plot 42, GIDC Industrial Estate, Vatva",
+  address: "Plot 42, GIDC Industrial Estate, Vatva",
+  Town: "Vatva",
+  town: "Vatva",
+  "Contact Person": "Rajesh Sharma",
+  "Contact Salutation": "Mr.",
+  contact_full_name: "Rajesh Sharma",
+  Designation: "Procurement Head",
+  contact_designation: "Procurement Head",
+  "Calling Number": "+919825012345",
+  contact_calling_number: "+919825012345",
+  "WhatsApp Number": "+919825012345",
+  contact_whatsapp_number: "+919825012345",
+  "WeChat Number": "",
+  contact_wechat_number: "",
+  Emails: "purchase@apexpackaging.in, info@apexpackaging.in",
+  emails: "purchase@apexpackaging.in, info@apexpackaging.in",
+  "Tax ID / GST Number": "24AABCA1234F1Z5",
+  tax_id_number: "24AABCA1234F1Z5",
+  "Primary Website": "https://www.apexpackaging.in",
+  primary_website: "https://www.apexpackaging.in",
+  "Secondary Website": "",
+  secondary_website: "",
+  "Current Status": "New",
+  current_status: "New",
+  "Company Grade": "A",
+  company_grade: "A",
+  Potential: "Yes",
+  potential: "Yes",
+  "Potential Reason": "",
+  potential_reason: "",
+  "Visited Factory/Office": "Yes",
+  visited_factory_office: "Yes",
+  "Visit Remarks": "Inspected plant and packaging line requirements",
+  visit_remarks: "Inspected plant and packaging line requirements",
+  "Overall Remarks": "High-volume B2B packaging machinery client in Gujarat",
+  overall_remarks: "High-volume B2B packaging machinery client in Gujarat",
+  Status: "Active",
+  status: "Active",
+};
+
 const ORGANIZATION_SAMPLES: Record<string, string> = {
   "Organization Name": "Inhyma",
   "Company Name": "Inhyma",
@@ -1634,6 +1901,8 @@ export function downloadSampleCsv(entityName: string, headers: ImportHeader[]) {
     sampleMap = CITY_SAMPLES;
   } else if (ent.includes("currency")) {
     sampleMap = CURRENCY_SAMPLES;
+  } else if (ent === "company" || ent === "companies" || ent === "company profile") {
+    sampleMap = COMPANY_SAMPLES;
   } else if (ent.includes("organization") || ent.includes("company")) {
     sampleMap = ORGANIZATION_SAMPLES;
   } else if (ent.includes("product")) {
@@ -1710,6 +1979,8 @@ export async function downloadSampleExcel(entityName: string, headers: ImportHea
     sampleMap = CITY_SAMPLES;
   } else if (ent.includes("currency")) {
     sampleMap = CURRENCY_SAMPLES;
+  } else if (ent === "company" || ent === "companies" || ent === "company profile") {
+    sampleMap = COMPANY_SAMPLES;
   } else if (ent.includes("organization") || ent.includes("company")) {
     sampleMap = ORGANIZATION_SAMPLES;
   } else if (ent.includes("product")) {

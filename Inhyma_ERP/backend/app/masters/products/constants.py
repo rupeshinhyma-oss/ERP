@@ -39,8 +39,6 @@ EXPORT_HEADERS = [
     "Category",
     "Sub Category",
     "UOM",
-    "Organization",
-    "Branches",
     "Pack. Qty",
     "Pack. Net Weight",
     "Pack. Gross Weight",

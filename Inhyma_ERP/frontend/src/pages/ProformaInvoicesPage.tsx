@@ -950,7 +950,10 @@ export function ProformaInvoicesPage({
       .then((res) => {
         if (seq !== productSearchSeq.current) return;
         const raw = res?.data;
-        const list: any[] = Array.isArray(raw) ? raw : (raw && Array.isArray(raw.items) ? raw.items : []);
+        const rawList: any[] = Array.isArray(raw) ? raw : (raw && Array.isArray(raw.items) ? raw.items : []);
+        const list = rawList.filter(
+          (p) => p?.is_active !== false && String(p?.status ?? "active").toLowerCase() !== "inactive"
+        );
         const mapped: CatalogProduct[] = list.map((p) => {
           const avail = getWarehouseStock(p, currentWarehouse);
           const pName = p.product_name || p.product_name_tally || "";
