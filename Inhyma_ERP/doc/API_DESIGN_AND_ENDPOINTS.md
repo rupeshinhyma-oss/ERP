@@ -3,7 +3,7 @@
 **Service Base URL:** `http://localhost:8002/api/v1`  
 **Authentication Scheme:** Bearer JWT (HS256) & WebSocket Query Tokens  
 **Standard Response Envelope:** `{ "success": true, "data": ..., "meta": ..., "error": null }`  
-**Last Updated:** October 30, 2026
+**Last Updated:** October 31, 2026
 
 > **Universal Cross-Module Active-Only Extraction & Filtering Convention:**
 > - **Management Lists vs Cross-Module Lookups:** Unfiltered management endpoints (`GET /api/v1/masters/*`, `/companies`, `/suppliers`, `/buyers`, `/users`, `/positions`, and `/hrms/setup/*` with default `active_only=false`) return **both** `Active` and `Inactive` rows so each module's own `Active` / `Inactive` tabs and status toggles remain functional. Conversely, every cross-module picker/lookup endpoint (`/api/v1/masters/*/lookup`, `/api/v1/masters/*/dropdown`, `/companies/lookup`, `/companies/sales-persons`, `/users/all?active_only=true`, `/positions/all?active_only=true`, `/inquiries/consignment-codes`, `/inquiries/companies`, `/hrms/setup/*?active_only=true`, `/products/machine-spares/universal-view`, and `/search`) returns **`Active` records only**.
@@ -271,10 +271,13 @@ Machine-to-machine internal service endpoints invoked by `ERP_Main` over authent
 
 ---
 
-## 15. Product Master & Machine-Spares Compatibility Mapping Engine (`/products/machine-spares`)
+## 15. Product Master, DB-Backed Specification Documents & Machine-Spares Mapping (`/masters/products`, `/products/machine-spares`)
 
 | Method | Endpoint URI | Description | Permission Gate |
 | :--- | :--- | :--- | :--- |
+| `POST` | `/api/v1/masters/products/specification-document` | Upload a Product Master specification document (`.pdf`, `.doc`, `.docx`, `.xls`, `.xlsx`, `.csv`, `.txt`, `.rtf`, `.odt`, `.ods`, `.ppt`, `.pptx`, up to 25 MB), persist binary payload in PostgreSQL (`product_specification_documents`), and return saved `{ specification_doc_id, specification_doc_name, specification_doc_mime, specification_doc_url }` | Authenticated |
+| `GET` | `/api/v1/masters/products/specification-documents/{doc_id}` | Publicly stream/download DB-stored product specification document (`Content-Disposition: inline` for PDFs; `attachment` for Office documents) so links embedded inside external Quotation PDFs open directly | Public |
+| `GET` | `/api/v1/masters/products/specification-documents/{doc_id}/{filename}` | Filename-preserving public streaming route for DB-stored product specification documents | Public |
 | `GET` | `/api/v1/products/machine-spares/universal-view` | Inspect machine-wise spare parts compatibility matrix, linked codes, pricing, and stock levels across `Active` machines and `Active` spare parts (`RecordStatus.ACTIVE`) | `product.view` |
 | `POST` | `/api/v1/products/machine-spares/map` | Map/associate a spare part to a machine model (`{ machine_id, spare_part_id, remarks? }`) | `product.update` |
 | `POST` | `/api/v1/products/machine-spares/unmap` | Unlink a spare part from a specific machine model (`{ machine_id, spare_part_id }`) | `product.update` |

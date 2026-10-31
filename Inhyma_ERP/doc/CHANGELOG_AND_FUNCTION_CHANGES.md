@@ -3,6 +3,35 @@
 **System:** Inhyma_ERP (India Distribution)  
 **Scope:** Functional updates, schema migrations, UI hardening, and bug fixes.
 
+## [Release 2026-10-31] — DB-Backed Product Specification Documents & Auto-Linked CRM Quotation PDFs, CRM Gallery Thumbnail Layout, HRMS GPS Accuracy & Calendar Restoration, and Engine-Level Pytest Isolation & Colleague QA Sweeper
+
+### 1. DB-Backed Product Master Specification Documents & Automatic CRM Quotation Link Attachment (`Products.tsx`, `masters/products/*`, `crm/quotation_service.py`, `crm/quotation_pdf.py`)
+- **Database Schema & Migration (`z4b5c6d7e8f9_add_product_specification_documents.py`):**
+  - Created `product_specification_documents` (`id`, `file_name`, `mime_type`, `file_size`, `file_data` `BYTEA`, `uploaded_by`, `created_at`) to store uploaded specification documents directly in PostgreSQL without bloating `products` catalog queries.
+  - Added lightweight metadata columns (`specification_doc_id`, `specification_doc_name`, `specification_doc_mime`, `specification_doc_url`) on `products`.
+- **Upload & Public Streaming Endpoints (`backend/app/masters/products/routes.py`):**
+  - `POST /api/v1/masters/products/specification-document`: Validates and stores `.pdf`, `.doc`, `.docx`, `.xls`, `.xlsx`, `.csv`, `.txt`, `.rtf`, `.odt`, `.ods`, `.ppt`, `.pptx` documents (up to 25 MB) in PostgreSQL and returns `specification_doc_id` and `specification_doc_url`.
+  - `GET /api/v1/masters/products/specification-documents/{doc_id}` & `/{doc_id}/{filename}`: Streams stored documents directly from PostgreSQL (`inline` for PDFs so links open directly in the browser, `attachment` for Office documents).
+- **Saved Link in Product View & Zero-Manual-Copy CRM Quotation Transfer (`Products.tsx`, `CrmLeadsPage.tsx`, `quotation_pdf.py`):**
+  - Replaced the legacy rich-text specification box in `Products.tsx` with a document upload dropzone (`Select Document`, `Open / Download`, `Replace Document`, `Remove`).
+  - Automatically saves the generated document/PDF link on the product (no manual clipboard copying required), displays the clickable **Saved PDF / Document Link** in the **Product Details** View drawer (`data-testid="drawer-specification-link"`), and automatically transfers that link into CRM Sales Quotations and embeds clickable `Specification PDF: <filename>` URI annotations inside generated ReportLab Quotation PDFs (`reportlab>=4.2.0`).
+  - Added clear submit validation feedback (`data-testid="product-submit-error"`), strict `Packaging Gross Weight > 0 kg` & CBM validation messages, and automatic orphan/soft-deleted lookup cleanup when editing legacy products.
+
+### 2. CRM Quotation PDF Gallery Layout (`150x110` pt) & Base64 Image Reference Normalization (`quotation_pdf.py`, `quotation_service.py`, `CrmLeadsPage.tsx`)
+- **Aspect-Ratio Gallery Thumbnails (`quotation_pdf.py`):** Upgraded `resolve_product_image_flowable` and `ClickableThumbnail` to render ~`150x110` pt aspect-ratio-preserved product photos inside a `166` pt Image column with repeating multi-page table headers and clean `"-"` fallback when a line item has no image.
+- **PostgreSQL-Safe Base64 Photo Normalization (`quotation_service.py`):** Added `_normalize_image_reference` and `_resolve_image_reference` to store large Base64 product images (`>1000` chars) as compact `photo:<idx>` references on `crm_quotation_items.selected_image_url` (`VARCHAR(1000)`) and resolve them transparently during quotation reads and PDF rendering, alongside synthetic `.test`/`.invalid`/`.example` URL sanitization.
+
+### 3. HRMS GPS Accuracy, Multi-Location Geofencing & Monthly Attendance Calendar Restoration (`app/hrms/*`, `AttendancePage.tsx`)
+- **Migration `z3a4b5c6d7e8_add_gps_accuracy_to_hrms_attendance.py`:** Added GPS accuracy (`gps_accuracy_meters`), coordinate freshness verification, multi-location office geofence matching, and attendance punch reliability safeguards (Phases 1–3.2).
+- **Monthly Attendance Calendar Grid (`AttendancePage.tsx`):** Restored full month-date cell rendering across all calendar dates, verified by `HrmsAttendanceCalendar.test.tsx`.
+
+### 4. Engine-Level Pytest Supabase Block, Automatic Colleague QA File Sweeper & Live-DB Artifact Purge (`legacy_qa_guard.py`, `engine.py`, `conftest.py`, `main.py`, `z5c6d7e8f9a0`)
+- **Automatic Colleague Workstation Sweeper (`backend/app/core/legacy_qa_guard.py`):** Cataloged all 45 retired synthetic-QA scripts and live-DB `User(...)`-mutating test modules in `RETIRED_SYNTHETIC_QA_FILES`; `purge_retired_qa_files()` runs automatically on `pytest` boot (`conftest.py`) and local server startup (`main.py` lifespan) so colleagues pulling `main` have any lingering untracked/copied QA files automatically deleted.
+- **Engine-Level Hard Supabase Block (`backend/app/database/engine.py`):** Hardened `get_engine()` so whenever `pytest` is loaded in `sys.modules` (and `ALLOW_LIVE_DB_TESTS != "1"`), any `supabase.com` / `supabase.co` URL is forcibly overridden to `sqlite+aiosqlite:///:memory:` even if `Settings` loaded `.env` prior to `conftest.py`.
+- **Synthetic Artifact Purge Migration (`z5c6d7e8f9a0_purge_synthetic_pytest_artifacts.py`):** Idempotently removed historical synthetic pytest users (`rec_mgr_*`, `rec_user_*`, `outsider_rep_*`, `*@inhyma.test`), their `task_recurring_schedules`, spawned recurring test `tasks`, notifications, and unreferenced synthetic pytest `companies` while preserving real operational accounts (`admin`, `usera`, `userd`) and business records.
+
+---
+
 ## [Release 2026-10-30] — Import Purchase Expected Arrival Default (`ETA + 5 Days`), System-Wide Active-Only Cross-Module Extraction & Pytest Live-Database Isolation Guard
 
 ### 1. Import Purchase Expected Arrival Date Default (`ETA Port Date + 5 Days`, Editable) (`ImportPurchasePage.tsx`, `import_routes.py`)

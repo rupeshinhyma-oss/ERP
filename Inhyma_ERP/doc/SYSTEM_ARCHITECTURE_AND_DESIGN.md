@@ -108,7 +108,7 @@ flowchart TD
 - **360° Lead Activity Timeline:** Unified timeline consolidating chronological interaction events (phone calls, meetings, notes, stage advancements, quotation dispatches, and linked tasks).
 - **1-Click B2B Company Master Conversion:** Converts qualified leads into permanent enterprise `Company` accounts in the B2B directory, retaining full contact rosters and historical context.
 - **Workforce Task Synchronization:** Setting follow-up deadlines auto-provisions assigned tickets in the Workforce Task module with bidirectional linkbacks.
-- **Branded ReportLab Quotation PDF:** Server-side engine generating official A4 sales quotations with corporate headers, itemized pricing, tax breakdowns, commercial terms, and signature blocks.
+- **Branded ReportLab Quotation PDF & Auto-Attached Product Specification Links (`quotation_pdf.py`, `quotation_service.py`):** Server-side ReportLab engine generating official A4 sales quotations (`GET /api/v1/crm/quotations/{id}/pdf`) with corporate headers, `150x110` pt aspect-ratio-preserved Product Gallery photograph thumbnails (`photo:<idx>` Base64 reference normalization), itemized pricing, tax breakdowns, commercial terms, signature blocks, and automatic clickable `Specification PDF: <filename>` hyperlinks pointing directly to DB-stored Product Master specification documents.
 
 ### 2.6 Purchase Management & Costing Engine (`/purchase/localpurchase` & `/purchase/importpurchase`)
 - **Local Purchase Orders:** Full domestic PO workflow with overhead expense absorption (Freight, Handling, Insurance). Calculates dynamic itemized landing costs via the Expense Factor formula and supports atomic inventory stock-in into destination warehouses.
@@ -184,9 +184,10 @@ flowchart TD
   - Dedicated Machine Spares Page (`MachineSparesModal` / `/masters/products/machine-spares/:machineId`):
     - `Selected` tab: Shows strictly mapped spare components for this machine with rapid unlinking.
     - `All Spare Parts` tab: Global 11-column spare catalog with debounced keyword search and quick `+ Add` / `✓ Added` mapping actions.
-- **SideDrawer Elevated Action Header:**
+- **SideDrawer Elevated Action Header & Saved Specification Link:**
   - `SideDrawer.tsx` features a top-right `headerActions` slot positioning primary editing controls (`Edit Product`) next to the drawer close icon.
   - Machine products display an embedded **Spare Parts** section detailing linked parts with direct `Manage Spare Parts →` routing.
+  - **DB-Backed Specification Document Architecture (`product_specification_documents`):** Product Master replaces the legacy rich-text specification editor with direct PostgreSQL `BYTEA` document storage (`POST /api/v1/masters/products/specification-document`), saves the generated public document URL (`specification_doc_url`) on `products`, renders the clickable saved link in the Product Details View drawer (`drawer-specification-link`), and automatically transfers that link into CRM Sales Quotations and embeds clickable hyperlinks inside generated ReportLab Quotation PDFs.
 - **Master Catalog Safety:**
   - Row-level `Delete` action button removed from the Product Master list view (`ProductListPage.tsx`) to guard against accidental deletion of core catalog records.
 
@@ -491,12 +492,14 @@ During Render/Docker container boot, `python server.py` executes a four-phase in
 
 ---
 
-## 16. Pytest Live-Database Isolation, Canonical RBAC Bootstrap & HRMS Seed Non-Recreation
+## 16. Pytest Live-Database Isolation, Engine-Level Supabase Guard, Colleague QA Sweeper & Canonical RBAC Bootstrap
 
-1. **In-Memory SQLite Pytest Guard (`backend/tests/conftest.py`):**
-   - `conftest.py` never calls `load_dotenv(..., override=True)`. Whenever `DATABASE_URL` is unset or targets `supabase.com` / `supabase.co` (unless `ALLOW_LIVE_DB_TESTS=1`), `conftest.py` forces `DATABASE_URL="sqlite+aiosqlite:///:memory:"` and `ENVIRONMENT="test"` before `app.core.config.settings` loads, preventing automated test runs from inserting synthetic `@example.com` users, departments, or tasks into the live Supabase database.
-2. **Zero Synthetic QA Provisioners & Canonical 2-Role Bootstrap (`backend/scripts/seed.py`):**
-   - All standalone QA persona/demo seeders have been removed. `scripts/seed.py` seeds strictly two `is_system=True` roles (`super_admin` = `Admin` and `user` = `User`) and `297` granular permissions (`297/297` assigned to `super_admin`); all organizational departments are created dynamically by administrators (`is_system=False`).
+1. **Dual-Layer In-Memory SQLite Pytest Guard (`backend/tests/conftest.py` + `app/database/engine.py`):**
+   - `conftest.py` never calls `load_dotenv(..., override=True)`. Whenever `DATABASE_URL` is unset or targets `supabase.com` / `supabase.co` (unless `ALLOW_LIVE_DB_TESTS=1`), `conftest.py` forces `DATABASE_URL="sqlite+aiosqlite:///:memory:"` and `ENVIRONMENT="test"` before `app.core.config.settings` loads.
+   - `get_engine()` in `app/database/engine.py` enforces a second hard runtime guard: whenever `pytest` is loaded in `sys.modules` (and `ALLOW_LIVE_DB_TESTS != "1"`), any `supabase.com` / `supabase.co` URL—even if loaded early from `.env`—is forcibly diverted to `sqlite+aiosqlite:///:memory:`.
+2. **Automatic Colleague Workstation QA Sweeper & Canonical 2-Role Bootstrap (`legacy_qa_guard.py`, `scripts/seed.py`, `z5c6d7e8f9a0`):**
+   - `app/core/legacy_qa_guard.py` (`purge_retired_qa_files()`) runs automatically on `pytest` startup and local FastAPI server startup to sweep and delete any lingering untracked/copied copies of all 45 retired synthetic-QA scripts and live-DB test modules on developer/colleague workstations after `git pull`, backed by idempotent DB cleanup migration `z5c6d7e8f9a0_purge_synthetic_pytest_artifacts.py`.
+   - `scripts/seed.py` seeds strictly two `is_system=True` roles (`super_admin` = `Admin` and `user` = `User`) and `297` granular permissions (`297/297` assigned to `super_admin`); all organizational departments are created dynamically by administrators (`is_system=False`).
 3. **HRMS Soft-Delete Non-Recreation (`app/hrms/service.py`, `app/hrms/leave_service.py`):**
    - `ensure_seeds()` checks total row counts (including soft-deleted records) across `HrmsLocation`, `HrmsLeaveType`, `HrmsExpenseCategory`, `HrmsHoliday`, and `HrmsLeavePlan` so user-deleted defaults never re-create on subsequent requests.
 

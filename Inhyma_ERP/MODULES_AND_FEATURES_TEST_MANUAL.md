@@ -2783,10 +2783,10 @@ Positioned directly underneath the collapsible filter panel, these three metric 
 4. **Salesperson Distribution & Quotas (`/crm/distribution`):**
    - Round-robin lead routing rules distributing incoming leads proportionally across active sales reps based on capacity and target quotas.
    - Live workload dashboard displaying active, won, and lost lead counts per sales representative.
-5. **Branded Quotation Generation Engine:**
-   - Multi-item quotation creation modal with Product Master autocomplete, unit pricing, quantity, commercial discount %, HSN tax calculation (CGST/SGST/IGST), and total value.
+5. **Branded Quotation Generation Engine (`CrmLeadsPage.tsx`, `quotation_service.py`, `quotation_pdf.py`):**
+   - Multi-item quotation creation modal with Product Master autocomplete, unit pricing, quantity, commercial discount %, HSN tax calculation (CGST/SGST/IGST), total value, gallery photo selection (`Include Photo` + `photo:<idx>` Base64 normalization), and automatic transfer of the product's saved **Specification PDF / Document Link** (`— Auto-attached to Quotation & PDF`).
    - Configurable commercial terms: payment terms, delivery period, warranty terms, and validity date.
-   - Server and client PDF generation (`quotationPdf.ts`, `quotation_pdf.py`) with corporate logo, bank transfer details, and authorized signature.
+   - Server ReportLab PDF generation (`quotation_pdf.py`) with corporate logo, `150x110` pt aspect-ratio-preserved Product Gallery thumbnails (clean `"-"` fallback when no photo is attached), clickable `Specification PDF: <filename>` URI links to DB-stored Product Master specification documents, tax summary, and authorized signature.
 
 ### QA Verification Test Cases
 - [ ] Verify navigating to `/crm/leads` displays the Kanban board with dynamic pipeline stages, lead counts, and monetary totals.

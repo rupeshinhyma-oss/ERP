@@ -1201,7 +1201,7 @@ A user may be assigned any number of Roles simultaneously (`POST /users/{id}/rol
   - **360° Lead Activity Timeline:** Chronological timeline consolidating notes, stage progression logs, call summaries, quotation dispatches, and linked tasks.
   - **Company Master Conversion:** 1-click seamless conversion of qualified leads into official `Company` records within the B2B directory, linking existing contacts and past activity.
   - **Workforce Task Synchronization:** Scheduling follow-up reminders automatically spawns assigned tickets in the enterprise Workforce Task module with bidirectional linkbacks.
-  - **Branded ReportLab Quotation PDF (`backend/app/crm/quotation_pdf.py`):** Server-side ReportLab PDF engine (`reportlab>=4.2.0`) producing formatted A4 quotations (`GET /api/v1/crm/quotations/{quotation_id}/pdf`) with company branding, tax breakdown, terms & conditions, authorized signature blocks, and automatic clickable PDF URI hyperlinks (`Specification PDF: <filename>`) pointing directly to DB-stored Product Master specification PDFs.
+  - **Branded ReportLab Quotation PDF (`backend/app/crm/quotation_pdf.py`, `quotation_service.py`):** Server-side ReportLab PDF engine (`reportlab>=4.2.0`) producing formatted A4 quotations (`GET /api/v1/crm/quotations/{quotation_id}/pdf`) with company branding, `150x110` pt aspect-ratio-preserved Product Gallery photograph thumbnails (`photo:<idx>` Base64 photo reference normalization for `VARCHAR(1000)` DB storage + clean `"-"` fallback when no photo is attached), tax breakdown, terms & conditions, authorized signature blocks, and automatic clickable PDF URI hyperlinks (`Specification PDF: <filename>`) pointing directly to DB-stored Product Master specification PDFs.
 
 ### 8.27. Workforce: Recurring Tasks Scheduling Engine & Automated Spawning Worker
 - **Backend Architecture & Files:** `backend/app/tasks/recurring_models.py`, `backend/app/tasks/recurring_schemas.py`, `backend/app/tasks/recurring_routes.py`, `backend/app/tasks/recurring_service.py`, `backend/app/tasks/recurring_worker.py`.
@@ -1824,8 +1824,8 @@ To eliminate ambiguity between user-editable inputs and system-calculated or for
 - **Filtering & Navigation**:
   - Month and year navigation (`year`, `month` parameters).
   - Dynamic filter dropdowns for Department, Branch, and Employee text search.
-- **Attendance Day Details Modal**:
-  - Displays punch in/out timestamps (IST), working hours/minutes, shift timings, geofencing verification, approved leave reason, holiday titles, regularization notes, and Loss of Pay (LOP) impact.
+- **Attendance Day Details Modal & Monthly Calendar Grid (`AttendancePage.tsx`, `z3a4b5c6d7e8`):**
+  - Displays punch in/out timestamps (IST), working hours/minutes, shift timings, geofencing verification with GPS accuracy (`gps_accuracy_meters`), coordinate freshness, and multi-location office matching, plus approved leave reason, holiday titles, regularization notes, and Loss of Pay (LOP) impact across full month-date calendar cells.
   - Direct deep-link button enabling Admin/Manager to open an individual employee's detailed calendar.
 
 #### 2. Authoritative Payroll Excel Export Engine (`GET /api/v1/hrms/payroll/export`)
