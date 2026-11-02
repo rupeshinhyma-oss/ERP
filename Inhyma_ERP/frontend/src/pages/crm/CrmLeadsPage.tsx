@@ -5887,7 +5887,7 @@ export function CrmLeadsPage() {
 
                                 {/* Actions row */}
                                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderTop: "1px solid #f1f5f9", paddingTop: "0.5rem", flexWrap: "wrap", gap: "0.5rem" }}>
-                                  <div style={{ display: "flex", gap: "0.5rem" }}>
+                                  <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", alignItems: "center" }}>
                                     <button
                                       type="button"
                                       onClick={() => fetchQuotationDetailAndVersions(quote.id)}
@@ -5903,30 +5903,6 @@ export function CrmLeadsPage() {
                                       }}
                                     >
                                       View Details & History
-                                    </button>
-
-                                    <button
-                                      type="button"
-                                      data-testid={`view-quote-pdf-${quote.id}`}
-                                      disabled={downloadingPdfKey === `${quote.id}-${quote.version}-view`}
-                                      onClick={() => handleDownloadQuotationPdf(quote.id, quote.quotation_number, quote.version, "view")}
-                                      style={{
-                                        fontSize: "0.75rem",
-                                        fontWeight: 600,
-                                        padding: "0.3rem 0.6rem",
-                                        borderRadius: "0.25rem",
-                                        border: "1px solid #cbd5e1",
-                                        backgroundColor: "#f8fafc",
-                                        color: "#334155",
-                                        cursor: downloadingPdfKey === `${quote.id}-${quote.version}-view` ? "not-allowed" : "pointer",
-                                        opacity: downloadingPdfKey === `${quote.id}-${quote.version}-view` ? 0.7 : 1,
-                                        display: "inline-flex",
-                                        alignItems: "center",
-                                        gap: "0.25rem",
-                                      }}
-                                      title="View quotation PDF in new browser tab"
-                                    >
-                                      👁️ {downloadingPdfKey === `${quote.id}-${quote.version}-view` ? "Opening..." : "View PDF"}
                                     </button>
 
                                     <button
