@@ -3,7 +3,7 @@
 **Service Base URL:** `http://localhost:8002/api/v1`  
 **Authentication Scheme:** Bearer JWT (HS256) & WebSocket Query Tokens  
 **Standard Response Envelope:** `{ "success": true, "data": ..., "meta": ..., "error": null }`  
-**Last Updated:** October 31, 2026
+**Last Updated:** November 2, 2026
 
 > **Universal Cross-Module Active-Only Extraction & Filtering Convention:**
 > - **Management Lists vs Cross-Module Lookups:** Unfiltered management endpoints (`GET /api/v1/masters/*`, `/companies`, `/suppliers`, `/buyers`, `/users`, `/positions`, and `/hrms/setup/*` with default `active_only=false`) return **both** `Active` and `Inactive` rows so each module's own `Active` / `Inactive` tabs and status toggles remain functional. Conversely, every cross-module picker/lookup endpoint (`/api/v1/masters/*/lookup`, `/api/v1/masters/*/dropdown`, `/companies/lookup`, `/companies/sales-persons`, `/users/all?active_only=true`, `/positions/all?active_only=true`, `/inquiries/consignment-codes`, `/inquiries/companies`, `/hrms/setup/*?active_only=true`, `/products/machine-spares/universal-view`, and `/search`) returns **`Active` records only**.
@@ -18,7 +18,7 @@
 | :--- | :--- | :--- | :--- |
 | `GET` | `/api/v1/companies` | List paginated companies with grade, potential, status (`?status=active\|inactive` / `?is_active=true\|false`), and search filters | `company.view` |
 | `GET` | `/api/v1/companies/lookup` | Lightweight active-only company autocomplete lookup (`active_only=true` default) for commercial & service forms | Authenticated |
-| `GET` | `/api/v1/companies/sales-persons` | List active salespersons (`User.status == ACTIVE`) for Proforma, Sales Process, and Company filters | Authenticated |
+| `GET` | `/api/v1/companies/sales-persons` | List active salespersons (`User.status == ACTIVE`) returning `{ id, display_name, full_name, username }` with `display_name`-first resolution for Proforma, Sales Process, and Company filters | Authenticated |
 | `POST` | `/api/v1/companies` | Create company account with extended intelligence fields & contacts | `company.create` |
 | `GET` | `/api/v1/companies/{id}` | Inspect detailed profile (extended fields, social media matrix, Direct Import from China cluster) | `company.view` |
 | `PATCH` | `/api/v1/companies/{id}` | Update company details, credit terms, turnover, import volume, and intelligence | `company.update` |
@@ -99,7 +99,7 @@ Machine-to-machine internal service endpoints invoked by `ERP_Main` over authent
 | Method | Endpoint URI | Description | Auth Required |
 | :--- | :--- | :--- | :--- |
 | `POST` | `/api/v1/internal/users/check` | Inspect whether a user already exists locally by email or username | Internal Service Bearer |
-| `POST` | `/api/v1/internal/users/provision` | Provision minimal local account or reactivate previously deactivated account | Internal Service Bearer |
+| `POST` | `/api/v1/internal/users/provision` | Provision minimal local account or reactivate/re-sync existing local account (including idempotent `display_name` & optional password sync from `ERP_Main`) | Internal Service Bearer |
 | `POST` | `/api/v1/internal/users/{id}/access` | Block (`allow_login: false`) or restore (`allow_login: true`) local authentication | Internal Service Bearer |
 | `POST` | `/api/v1/internal/users/{id}/deprovision` | Soft-delete user and revoke all active sessions upon ERP_Main deprovisioning | Internal Service Bearer |
 | `DELETE`| `/api/v1/internal/users/{id}` | Idempotent alias for user deprovisioning | Internal Service Bearer |
@@ -194,11 +194,12 @@ Machine-to-machine internal service endpoints invoked by `ERP_Main` over authent
 
 | Method | Endpoint URI | Description | Auth Required |
 | :--- | :--- | :--- | :--- |
-| `POST` | `/api/v1/auth/login` | Local credential authentication returning token pair & profile | Public |
-| `POST` | `/api/v1/auth/sso-handover` | Authenticate incoming SSO handover token with mandatory live central session verification against ERP_Main | Public / Handover Token |
+| `POST` | `/api/v1/auth/login` | Local credential authentication (email / phone / internal username) returning token pair & `ProfileResponse` (`display_name` & `full_name` primary) | Public |
+| `GET` | `/api/v1/auth/profile` | Retrieve current authenticated user's `ProfileResponse` (`display_name`, `full_name`, roles, permissions) | Authenticated |
+| `POST` | `/api/v1/auth/sso-handover` | Authenticate incoming SSO handover token with mandatory live central session verification against ERP_Main and `display_name`-enriched `ProfileResponse` | Public / Handover Token |
 | `POST` | `/api/v1/auth/change-password` | Update current user's password and asynchronously push to ERP_Main | Authenticated |
 | `POST` | `/api/v1/users/{id}/reset-password` | Administrative password reset and automatic fanout push to ERP_Main | `user.manage` |
-| `PATCH` | `/api/v1/users/{id}` | Update user attributes; email is locked to central control plane | `user.update` |
+| `PATCH` | `/api/v1/users/{id}` | Update user profile & HR attributes (`display_name` primary, internal `username` preserved when omitted, email locked to central control plane) with best-effort `display_name` push to `ERP_Main` (`POST /internal/users/profile`) | `user.update` / Self |
 | `POST` | `/api/v1/internal/users/{id}/deprovision` | Invalidate spoke sessions and soft-delete user upon ERP_Main deprovisioning | Internal Service Key |
 | `GET` | `/api/v1/organizations/public` | Unauthenticated public branding endpoint returning company name, legal name, and DB-backed versioned logo URL | Public |
 | `GET` | `/api/v1/organizations/logo` | Stream company logo binary directly from database (`logo_data`) with `?v={sha1}` version hash for immutable client caching | Public |

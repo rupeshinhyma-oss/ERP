@@ -3,6 +3,33 @@
 **System:** Inhyma_ERP (India Distribution)  
 **Scope:** Functional updates, schema migrations, UI hardening, and bug fixes.
 
+## [Release 2026-11-02] ? Display Name Primary Identity Across All Modules, Removal of UI Username, Bidirectional ERP_Main Profile Sync, and CRM Quotation Card Action Cleanup
+
+### 1. `Display Name` Primary Auth, JWT Actor & Bidirectional `ERP_Main` Profile Sync (`auth/*`, `federation/*`, `internal_users.py`, `users/*`)
+- **Database & Login Compatibility (`users.username` Internal-Only):** Preserved `users.username` in PostgreSQL with zero destructive schema migrations; internal username auto-generation (`_generate_unique_username`) and multi-identifier login resolution (`UserRepository.get_by_identifier` for email, phone, and username) remain intact.
+- **Auth & Federation Profile Payloads (`backend/app/auth/schemas.py`, `auth/routes.py`, `federation/routes.py`):** Added `display_name: str | None = None` and `full_name: str | None = None` to `ProfileResponse` across `/api/v1/auth/login`, `/api/v1/auth/profile`, `/api/v1/auth/sso-handover`, and `/api/v1/auth/federation/*`.
+- **Authenticated Request Actor (`backend/app/auth/service.py`):** Extended `CurrentUser` with `display_name`, `full_name`, and `actor_label` (`display_name or full_name or username`) populated in `verify_access_token`.
+- **Bidirectional Cross-ERP `Display Name` Sync (`internal_users.py`, `erp_main_client.py`, `users/routes.py`, `users/service.py`):**
+  - Inbound (`ERP_Main` -> `Inhyma_ERP`): Updated `POST /api/v1/internal/users/provision` (`if existing:` branch) to synchronize `existing.display_name` when non-empty.
+  - Outbound (`Inhyma_ERP` -> `ERP_Main`): Updated `PATCH /api/v1/users/{user_id}` to validate/normalize `display_name`, preserve `user.username` when `username` is omitted on `has_login=True` accounts, and invoke best-effort `push_profile_to_erp_main(email, display_name)` (`POST {ERP_MAIN_API_BASE_URL}/internal/users/profile`).
+
+### 2. Removal of `Username` from UI & Required `Display Name *` (`Users.tsx`, `Profile.tsx`, `AppShell.tsx`, `Dashboard.tsx`, `Login.tsx`, `ssoBridge.ts`)
+- **User Accounts Directory & Modals (`frontend/src/pages/Users.tsx`):**
+  - Removed the `Username` table column (streamlining the directory to 7 columns: Selection Checkbox, `Employee`, `Email`, `Department`, `Status`, `Last Login`, `Actions`) and updated search placeholder to `"Search display name, email, employee code..."`.
+  - Removed `Username *` and `Username (optional)` inputs from both **Edit User Profile & HR Details** and **Create User** modals; elevated **`Display Name *`** (`required`, `minLength={1}`, `maxLength={200}`) as the primary identity field.
+  - Removed `@username` / `Username` rows from the **View User Details** drawer, Reporting Manager dropdowns, and Permission Overrides banners, and synced `Auth.updateProfile` + `EcosystemCookie` immediately when editing the signed-in user.
+- **Self-Service Profile & Shell (`Profile.tsx`, `AppShell.tsx`, `Dashboard.tsx`, `auth.ts`, `ssoBridge.ts`):** Added required **`Display Name *`** to `/profile`, removed `@username` display, and prioritized `display_name || full_name` across Topbar labels/initials, Dashboard welcome greetings, and cross-ERP SSO cookies.
+
+### 3. Cross-Module Salesperson Pickers & Actor Stamping (`40` Backend + `30` Frontend Files)
+- **Salesperson & Assignee Lookups (`companies/routes.py`, `tasks/service.py`, `tasks/schemas.py`):** Updated `GET /api/v1/companies/sales-persons` and `GET /api/v1/tasks/assignees` to expose `display_name` and compute `full_name` with `display_name` prioritized first (`display_name or "{first_name} {last_name}" or username`).
+- **Transactional & Governance Stamps:** Standardized `display_name` first across Proforma Invoices & Sales Orders (`sales/routes.py`, `sales/service.py`, `ProformaInvoicesPage.tsx`, `SaleProcessForm.tsx`, `SaleProcessList.tsx`, `DiscountPaymentsPage.tsx`), Local & Import Purchases (`purchase/local_routes.py`, `purchase/import_routes.py`), Stock Adjustments (`inventory/routes.py`), Inquiries (`inquiries/routes.py`, `Inquiries.tsx`), Technical Tasks & Technician Operations (`technical_tasks/*`, `technician_operations/service.py`, `TechnicalTasksPage.tsx`), Shipment Planning cell change logs (`planning/routes.py`), CRM Leads & Follow-Ups (`crm/*`, `leads/*`, `follow_ups/*` with backwards-compatible `{display_name, full_name, username}` salesperson scoping), HRMS services/exports (`hrms/*`), Feed/Comments/Kanban/RBAC, and Trash (`trash/service.py`).
+- **Automated Regression Coverage:** Added `backend/tests/test_display_name_primary.py` and `frontend/src/lib/__tests__/displayNamePrimary.test.ts` (`220+` backend Pytest and `281` frontend Vitest assertions passing).
+
+### 4. CRM Lead Detail Drawer Quotation Card Action Cleanup (`CrmLeadsPage.tsx`, `CrmQuotationModal.test.tsx`)
+- **Single Authoritative PDF Action:** Removed the redundant `View PDF` button (`view-quote-pdf-{id}`) from quotation cards in **Lead Detail Drawer -> Quotations** tab, retaining **`Download PDF`** alongside **`View Details & History`**, **`Email`**, and **`WhatsApp`** inside a responsive `flexWrap` button row, verified by `CrmQuotationModal.test.tsx`.
+
+---
+
 ## [Release 2026-10-31] — DB-Backed Product Specification Documents & Auto-Linked CRM Quotation PDFs, CRM Gallery Thumbnail Layout, HRMS GPS Accuracy & Calendar Restoration, and Engine-Level Pytest Isolation & Colleague QA Sweeper
 
 ### 1. DB-Backed Product Master Specification Documents & Automatic CRM Quotation Link Attachment (`Products.tsx`, `masters/products/*`, `crm/quotation_service.py`, `crm/quotation_pdf.py`)

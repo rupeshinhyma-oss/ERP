@@ -465,7 +465,7 @@ Manage complete vendor team directory:
   - Document upload dropzone & `Select Document` button (`data-testid="specification-doc-input"`) replacing the legacy rich-text editor.
   - Uploads any document (`.pdf`, `.doc`, `.docx`, `.xls`, `.xlsx`, `.csv`, `.txt`) via `POST /api/v1/masters/products/specification-document` and stores its binary payload in PostgreSQL (`product_specification_documents`).
   - Displays `DOC` / `PDF` badge, `"Stored in Database"` status, `Open / Download`, `Replace Document`, and `Remove` controls.
-  - Automatically generates and saves the public document/PDF link (`data-testid="specification-pdf-link-box"`) on the product without requiring manual clipboard copying, displays the saved clickable link inside the Product Details View drawer (`data-testid="drawer-specification-link"`), and automatically attaches that link into CRM Sales Quotations and Quotation PDFs (`View PDF` / `Download PDF`) whenever the product is selected.
+  - Automatically generates and saves the public document/PDF link (`data-testid="specification-pdf-link-box"`) on the product without requiring manual clipboard copying, displays the saved clickable link inside the Product Details View drawer (`data-testid="drawer-specification-link"`), and automatically attaches that link into CRM Sales Quotations and Quotation PDFs (`Download PDF`) whenever the product is selected.
 - **Dynamic Technical Specifications Builder:**
   - Key-Value attribute table (e.g. `Voltage: 380V`, `Power: 4.5kW`, `Speed: 120 pcs/min`).
 - **Cloud Media & Photo Upload:**
@@ -2787,6 +2787,7 @@ Positioned directly underneath the collapsible filter panel, these three metric 
    - Multi-item quotation creation modal with Product Master autocomplete, unit pricing, quantity, commercial discount %, HSN tax calculation (CGST/SGST/IGST), total value, gallery photo selection (`Include Photo` + `photo:<idx>` Base64 normalization), and automatic transfer of the product's saved **Specification PDF / Document Link** (`— Auto-attached to Quotation & PDF`).
    - Configurable commercial terms: payment terms, delivery period, warranty terms, and validity date.
    - Server ReportLab PDF generation (`quotation_pdf.py`) with corporate logo, `150x110` pt aspect-ratio-preserved Product Gallery thumbnails (clean `"-"` fallback when no photo is attached), clickable `Specification PDF: <filename>` URI links to DB-stored Product Master specification documents, tax summary, and authorized signature.
+   - Saved quotation cards in **Lead Detail Drawer -> Quotations** expose `View Details & History`, `Download PDF` (single authoritative PDF action; `View PDF` removed), `Email`, and `WhatsApp` in a responsive `flexWrap` button row.
 
 ### QA Verification Test Cases
 - [ ] Verify navigating to `/crm/leads` displays the Kanban board with dynamic pipeline stages, lead counts, and monetary totals.
@@ -2799,6 +2800,7 @@ Positioned directly underneath the collapsible filter panel, these three metric 
 - [ ] Verify navigating to `/crm/pipeline` allows adding, editing, and re-ordering pipeline stages.
 - [ ] Verify navigating to `/crm/distribution` displays salesperson lead allocation quotas and distribution rules.
 - [ ] Verify generating a quotation for a lead creates an itemized quotation and downloads the branded A4 PDF.
+- [ ] Verify saved quotation cards in the Lead Detail Drawer -> Quotations tab display `View Details & History`, `Download PDF`, `Email`, and `WhatsApp` with no redundant `View PDF` button.
 
 ---
 
