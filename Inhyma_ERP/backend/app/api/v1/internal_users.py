@@ -154,6 +154,8 @@ async def provision_local_user(
         existing.is_active = True
         from app.users.models import UserStatus
         existing.status = UserStatus.ACTIVE
+        if payload.display_name and payload.display_name.strip():
+            existing.display_name = payload.display_name.strip()
         if payload.password:
             from app.auth.security import hash_password
             existing.password_hash = hash_password(payload.password)
@@ -164,6 +166,7 @@ async def provision_local_user(
                 "local_user_id": str(existing.id),
                 "username": existing.username,
                 "email": existing.email,
+                "display_name": existing.display_name,
                 "created": False,
             },
             request_id=req_id,

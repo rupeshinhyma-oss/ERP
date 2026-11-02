@@ -367,7 +367,7 @@ class RoleRepository(BaseRepository[Role]):
 
         role_perms_set = set(role_name_map.keys())
 
-        employee_name = user.full_name or user.display_name or user.username
+        employee_name = user.display_name or user.full_name or user.username
 
         # Individual User Overrides
         stmt_user_perms = (
@@ -410,6 +410,8 @@ class RoleRepository(BaseRepository[Role]):
             "user_info": {
                 "user_id": str(user.id),
                 "username": user.username,
+                "display_name": user.display_name or user.full_name,
+                "email": user.email,
                 "employee_name": employee_name,
                 "system_roles": system_roles,
                 "status": user.status.value,

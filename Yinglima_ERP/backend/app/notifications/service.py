@@ -175,7 +175,7 @@ class NotificationService:
                 User.is_active.is_(True),
                 User.status == UserStatus.ACTIVE,
             )
-            .order_by(User.first_name.nulls_last(), User.username)
+            .order_by(User.display_name.nulls_last(), User.first_name.nulls_last(), User.username)
         )
         result = await db.execute(stmt)
         users = result.scalars().all()
@@ -183,7 +183,8 @@ class NotificationService:
             {
                 "id": str(u.id),
                 "username": u.username or u.employee_code or "user",
-                "display_name": u.display_name,
+                "display_name": (u.display_name or "").strip() or u.full_name,
+                "full_name": u.full_name,
                 "first_name": u.first_name,
                 "last_name": u.last_name,
                 "email": u.email,

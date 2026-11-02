@@ -124,19 +124,19 @@ class HrmsExpenseService:
         emp_code = None
         if exp.employee:
             full = f"{exp.employee.first_name or ''} {exp.employee.last_name or ''}".strip()
-            emp_name = full or exp.employee.username or exp.employee.email
+            emp_name = exp.employee.display_name or full or exp.employee.username or exp.employee.email
             emp_email = exp.employee.email
             emp_code = getattr(exp.employee, "employee_code", None)
 
         rev_name = None
         if exp.reviewer:
             full = f"{exp.reviewer.first_name or ''} {exp.reviewer.last_name or ''}".strip()
-            rev_name = full or exp.reviewer.username or exp.reviewer.email
+            rev_name = exp.reviewer.display_name or full or exp.reviewer.username or exp.reviewer.email
 
         reimb_name = None
         if exp.reimburser:
             full = f"{exp.reimburser.first_name or ''} {exp.reimburser.last_name or ''}".strip()
-            reimb_name = full or exp.reimburser.username or exp.reimburser.email
+            reimb_name = exp.reimburser.display_name or full or exp.reimburser.username or exp.reimburser.email
 
         return ExpenseRead(
             id=exp.id,

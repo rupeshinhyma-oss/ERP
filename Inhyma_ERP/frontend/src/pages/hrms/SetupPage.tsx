@@ -2732,7 +2732,7 @@ export function SetupPage() {
                     )}
                     {employeesList.map((emp) => (
                       <option key={emp.id} value={emp.id}>
-                        {emp.first_name} {emp.last_name} ({emp.employee_code || emp.code || emp.id.slice(0, 8)}) — {emp.department || "General"}
+                        {emp.display_name || emp.full_name || `${emp.first_name || ""} ${emp.last_name || ""}`.trim() || emp.email || "Employee"} ({emp.employee_code || emp.code || emp.id.slice(0, 8)}) — {emp.department || "General"}
                       </option>
                     ))}
                   </select>

@@ -30,11 +30,23 @@ class FollowUpService:
             return True
         return False
 
+    @staticmethod
+    def _actor_label(actor: CurrentUser) -> str:
+        return actor.display_name or actor.full_name or actor.username
+
+    @staticmethod
+    def _actor_names(actor: CurrentUser) -> set[str]:
+        return {
+            str(n).strip().lower()
+            for n in (actor.display_name, actor.full_name, actor.username, str(actor.id))
+            if n and str(n).strip()
+        }
+
     def _can_access_follow_up(self, item: FollowUp, actor: CurrentUser | None) -> bool:
         if self._is_manager_or_admin(actor) or actor is None:
             return True
-        actor_names = {actor.username.lower(), str(actor.id).lower()}
-        person = (item.marketing_person or "").lower()
+        actor_names = self._actor_names(actor)
+        person = (item.marketing_person or "").strip().lower()
         return person in actor_names
 
     async def list_follow_ups(
@@ -67,15 +79,20 @@ class FollowUpService:
         limit: int = 50,
         offset: int = 0,
     ) -> tuple[list[FollowUp], int]:
+        marketing_person_names: set[str] | None = None
         if actor is not None and not self._is_manager_or_admin(actor):
-            if marketing_person and marketing_person.strip().lower() not in {actor.username.lower(), str(actor.id).lower()}:
+            allowed_names = self._actor_names(actor)
+            if marketing_person and marketing_person.strip().lower() not in allowed_names:
                 raise ForbiddenException("Users can only query their own follow-ups.")
-            marketing_person = actor.username
+            marketing_person_names = allowed_names
+            marketing_person = self._actor_label(actor)
 
+        extra_scope = {"marketing_person_names": marketing_person_names} if marketing_person_names is not None else {}
         return await self.repository.list_follow_ups(
             search=search,
             call_type=call_type,
             marketing_person=marketing_person,
+            **extra_scope,
             business_type=business_type,
             state=state,
             district=district,
@@ -113,7 +130,7 @@ class FollowUpService:
         if not data.get("added_on"):
             data["added_on"] = date.today()
         if actor is not None and not data.get("marketing_person"):
-            data["marketing_person"] = actor.username
+            data["marketing_person"] = self._actor_label(actor)
         item = await self.repository.create(**data)
         return item
 

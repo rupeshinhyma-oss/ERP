@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { render, screen, waitFor, fireEvent } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { GlobalUsers } from "../pages/GlobalUsers";
 import { Auth } from "../lib/auth";
 import * as apiModule from "../lib/api";
@@ -654,6 +654,47 @@ describe("GlobalUsers Page", () => {
     await waitFor(() => {
       expect(screen.getByText("Assigned User")).toBeDefined();
       expect(screen.getByText("Unassigned User")).toBeDefined();
+    });
+  });
+
+  it("opens the signed-in user's profile modal when routed to /access/users/me", async () => {
+    const usersWithAdmin = [
+      ...mockUsers,
+      {
+        id: "u-admin",
+        display_name: "Super Admin",
+        primary_email: "admin@example.com",
+        status: "ACTIVE",
+        created_at: "2026-01-01T00:00:00Z",
+      },
+    ];
+
+    vi.spyOn(apiModule, "apiGet").mockImplementation((url: string) => {
+      if (url.includes("/global/users/u-admin/memberships") || url.includes("/global/authz/users/u-admin/roles")) {
+        return Promise.resolve([]);
+      }
+      if (url.includes("/global/users")) {
+        return Promise.resolve(usersWithAdmin);
+      }
+      if (url.includes("/global/erps")) {
+        return Promise.resolve(mockErps);
+      }
+      return Promise.resolve([]);
+    });
+
+    render(
+      <MemoryRouter initialEntries={["/access/users/me"]}>
+        <Routes>
+          <Route path="/access/users/:id" element={<GlobalUsers />} />
+          <Route path="/access/users" element={<GlobalUsers />} />
+        </Routes>
+      </MemoryRouter>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("Global User: Super Admin")).toBeDefined();
+      expect(screen.getByText("Platform Identity & Unified Access Control")).toBeDefined();
+      expect(screen.queryByText("Platform User ID")).toBeNull();
     });
   });
 });

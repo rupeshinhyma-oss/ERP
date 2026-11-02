@@ -408,7 +408,7 @@ export const KanbanPage: React.FC = () => {
                             <div className="task-avatar-group">
                               {t.assignees &&
                                 t.assignees.slice(0, 3).map((a: TaskAssignee) => {
-                                  const name = a.user?.full_name || a.user?.username || "U";
+                                  const name = a.user?.display_name || a.user?.full_name || a.user?.email || "U";
                                   return (
                                     <span
                                       key={a.id}

@@ -380,7 +380,8 @@ export async function getAvailableAssignees(): Promise<AvailableUser[]> {
     const items = res.data?.items || res.data || [];
     return items.map((u: any) => ({
       id: u.id,
-      full_name: u.full_name || u.display_name || u.username || "Team Member",
+      display_name: u.display_name || u.full_name || null,
+      full_name: u.display_name || u.full_name || u.email || "Team Member",
       username: u.username,
       email: u.email,
       department: u.department || "General",

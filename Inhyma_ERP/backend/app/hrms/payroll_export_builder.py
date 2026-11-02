@@ -122,7 +122,7 @@ async def build_monthly_payroll_excel(
     items.sort(
         key=lambda it: (
             (getattr(it.employee, "employee_code", None) or ""),
-            (getattr(it.employee, "first_name", None) or ""),
+            (getattr(it.employee, "display_name", None) or getattr(it.employee, "first_name", None) or ""),
         )
     )
 
@@ -163,7 +163,7 @@ async def build_monthly_payroll_excel(
     if payroll.approved_by:
         approver = await db.get(User, payroll.approved_by)
         if approver:
-            approver_name = f"{approver.first_name or ''} {approver.last_name or ''}".strip() or approver.username or "Admin"
+            approver_name = approver.display_name or f"{approver.first_name or ''} {approver.last_name or ''}".strip() or approver.username or "Admin"
 
     # 6. Dynamically collect all configured earning and deduction components present across items
     # Maintain canonical display order from HrmsPayrollComponent
@@ -299,7 +299,7 @@ async def build_monthly_payroll_excel(
         emp_code = getattr(emp, "employee_code", None) or f"EMP-{str(it.employee_id)[:6].upper()}"
         first = getattr(emp, "first_name", "") or ""
         last = getattr(emp, "last_name", "") or ""
-        emp_name = f"{first} {last}".strip() or getattr(emp, "display_name", None) or getattr(emp, "username", "Employee")
+        emp_name = getattr(emp, "display_name", None) or f"{first} {last}".strip() or getattr(emp, "username", "Employee")
         dept = dept_map.get(it.employee_id) or getattr(emp, "department", "General") or "General"
         branch = branch_map.get(it.employee_id) or "Thane"
 
@@ -426,7 +426,7 @@ async def build_monthly_payroll_excel(
     if employee_id and len(items) == 1:
         single_emp = items[0].employee
         code_part = getattr(single_emp, "employee_code", None) or f"EMP-{str(employee_id)[:6].upper()}"
-        name_part = (getattr(single_emp, "first_name", "") or "Employee").replace(" ", "_")
+        name_part = (getattr(single_emp, "display_name", None) or getattr(single_emp, "first_name", "") or "Employee").strip().replace(" ", "_")
         target_label = f"{code_part}_{name_part}"
 
     filename = f"Payroll_Export_{target_label}_{cleaned_month.replace('-', '_')}.xlsx"

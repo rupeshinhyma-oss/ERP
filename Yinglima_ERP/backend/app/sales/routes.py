@@ -257,7 +257,7 @@ async def update_order_status(
     req_id = getattr(request.state, "request_id", "-")
     if payload.status.strip().lower() == "dispatched":
         # Dispatch warehouse stock movement
-        user_name = getattr(current_user, "name", getattr(current_user, "username", "Admin"))
+        user_name = getattr(current_user, "display_name", None) or getattr(current_user, "full_name", None) or getattr(current_user, "name", None) or getattr(current_user, "username", None) or "Admin"
         order = await service.dispatch_order(
             order_id=id,
             created_by_id=getattr(current_user, "id", None),
@@ -283,7 +283,7 @@ async def dispatch_sale_order(
     current_user: CurrentUser = Depends(require_permission("sale_process.approve")),
 ) -> dict:
     req_id = getattr(request.state, "request_id", "-") if request else "-"
-    user_name = getattr(current_user, "name", getattr(current_user, "username", "Admin"))
+    user_name = getattr(current_user, "display_name", None) or getattr(current_user, "full_name", None) or getattr(current_user, "name", None) or getattr(current_user, "username", None) or "Admin"
     order = await service.dispatch_order(
         order_id=id,
         dispatch_data=payload,
@@ -308,7 +308,7 @@ async def delete_sale_order(
     current_user: CurrentUser = Depends(require_permission("sale_process.delete")),
 ) -> dict:
     req_id = getattr(request.state, "request_id", "-")
-    deleted_by = getattr(current_user, "name", getattr(current_user, "username", "Admin"))
+    deleted_by = getattr(current_user, "display_name", None) or getattr(current_user, "full_name", None) or getattr(current_user, "name", None) or getattr(current_user, "username", None) or "Admin"
     ok = await service.repo.soft_delete(id, deleted_by=deleted_by)
     if not ok:
         raise NotFoundException(f"Sale order {id} not found.")

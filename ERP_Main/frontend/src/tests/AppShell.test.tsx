@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { AppShell } from "../components/AppShell";
 import { Auth } from "../lib/auth";
@@ -48,6 +48,12 @@ describe("AppShell Component", () => {
     expect(screen.queryByText("Sync Policies")).toBeNull();
     expect(screen.getByText("Global Audit Logs")).toBeDefined();
     expect(screen.queryByText("System Health")).toBeNull();
+
+    // Open top-right user dropdown: should show "Profile" (not "Platform Settings") linking to User Dashboard profile
+    fireEvent.click(screen.getByText("Master Admin"));
+    const profileLink = screen.getByRole("link", { name: /^Profile$/i });
+    expect(profileLink.getAttribute("href")).toBe("/access/users/me");
+    expect(screen.queryByText("Platform Settings")).toBeNull();
   });
 
   it("shows only Dashboard module when authenticated as a user with None role / no platform permissions", () => {
@@ -84,7 +90,7 @@ describe("AppShell Component", () => {
     expect(screen.queryByText("USERS & ACCESS")).toBeNull();
     expect(screen.queryByText("Global Audit Logs")).toBeNull();
     expect(screen.queryByText("MONITORING & AUDIT")).toBeNull();
-    expect(screen.queryByText("ERP_Main Settings")).toBeNull();
+    expect(screen.queryByText("System Settings")).toBeNull();
     expect(screen.queryByText("SETTINGS")).toBeNull();
 
     // Role badge should show None

@@ -70,6 +70,8 @@ function getCurrentUserDisplayName(): string {
       const p = profile as unknown as Record<string, unknown>;
       const disp = typeof p.display_name === "string" ? p.display_name.trim() : "";
       if (disp) return disp;
+      const fn = typeof p.full_name === "string" ? p.full_name.trim() : "";
+      if (fn) return fn;
       const full = [p.first_name, p.last_name]
         .filter((x): x is string => typeof x === "string" && x.trim().length > 0)
         .map((x) => x.trim())

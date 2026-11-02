@@ -48,7 +48,7 @@ export const NAV_SECTIONS: NavSection[] = [
   {
     label: "SETTINGS",
     items: [
-      { key: "settings-general", label: "ERP_Main Settings", path: "/settings", icon: "settings", permission: "platform.system.manage" },
+      { key: "settings-general", label: "System Settings", path: "/settings", icon: "settings", permission: "platform.system.manage" },
     ],
   },
 ];
@@ -104,8 +104,8 @@ export const PAGE_TITLES: Record<string, string> = {
   "/audit": "Global Compliance Audit Log",
 
   // Settings
-  "/settings": "Control Plane Settings",
-  "/settings/general": "Control Plane Settings",
+  "/settings": "System Settings",
+  "/settings/general": "System Settings",
 
   // Reports
   "/reporting": "Global Reporting & Export Jobs",

@@ -106,6 +106,8 @@ async def _establish_local_session_from_id_token(
         id=user.id,
         first_name=user.first_name,
         last_name=user.last_name,
+        display_name=user.display_name,
+        full_name=user.full_name,
         employee_code=user.employee_code,
         username=user.username or "",
         email=user.email or "",

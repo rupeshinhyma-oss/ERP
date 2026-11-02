@@ -153,14 +153,14 @@ async def _revalidate_cached(db: AsyncSession, sess: Dict[str, Any], now: dateti
                         return None  # this admin signed out after this session began
                 except ValueError:
                     pass
-            return sess
+            return {**sess, "display_name": admin_row.display_name or sess.get("display_name") or "Super Admin"}
         # No PlatformAdmin row: only sessions minted by the unseeded-DB fallback may exist.
         return sess if email in _DEFAULT_ADMIN_IDS else None
 
     user = await db.scalar(select(GlobalUser).where(func.lower(GlobalUser.primary_email) == email))
     if user is None or user.status != GlobalUserStatus.ACTIVE:
         return None
-    return {**sess, "allowed_erps": await _active_erp_keys(db, user.id) + [_CONTROL_PLANE_KEY]}
+    return {**sess, "display_name": user.display_name or user.primary_email, "allowed_erps": await _active_erp_keys(db, user.id) + [_CONTROL_PLANE_KEY]}
 
 
 async def _session_from_db(db: AsyncSession, session_id: str, now: datetime) -> Optional[Dict[str, Any]]:

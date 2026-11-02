@@ -623,7 +623,7 @@ async def export_attendance(
         if resolved_emp_id:
             emp = await service.db.get(User, resolved_emp_id)
             if emp:
-                name_part = (emp.first_name or emp.username or "Employee").strip().replace(" ", "_")
+                name_part = (emp.display_name or emp.first_name or emp.username or "Employee").strip().replace(" ", "_")
                 code_part = getattr(emp, "employee_code", None) or getattr(emp, "code", None)
                 if code_part:
                     target_label = f"{code_part}_{name_part}"

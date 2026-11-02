@@ -638,7 +638,7 @@ export function SaleProcessListPage() {
       .then((res) => {
         const raw = Array.isArray(res?.data) ? res.data : Array.isArray(res?.data?.items) ? res.data.items : [];
         if (raw.length > 0) {
-          const names = raw.map((u: any) => u.full_name || u.username || u.name).filter(Boolean);
+          const names = raw.map((u: any) => u.display_name || u.full_name || u.name || u.username).filter(Boolean);
           setSalesPersonOptions((prev) => Array.from(new Set([...prev, ...names])));
         }
       })
@@ -648,7 +648,7 @@ export function SaleProcessListPage() {
       .then((res) => {
         const raw = Array.isArray(res?.data) ? res.data : Array.isArray(res?.data?.items) ? res.data.items : [];
         if (raw.length > 0) {
-          const names = raw.map((u: any) => u.full_name || u.name || u.username).filter(Boolean);
+          const names = raw.map((u: any) => u.display_name || u.full_name || u.name || u.username).filter(Boolean);
           setSalesPersonOptions((prev) => Array.from(new Set([...prev, ...names])));
         }
       })
@@ -1046,7 +1046,7 @@ export function SaleProcessListPage() {
       `GP-${new Date().getFullYear().toString().slice(-2)}-${(new Date().getFullYear() + 1).toString().slice(-2)}/0123`;
     setModalGpNo(curGp);
     setModalGpDate(order.gatepass_date || new Date().toLocaleDateString("en-GB").split("/").join("-"));
-    setModalGpHandledBy(order.gatepass_handled_by || profile?.full_name || profile?.username || "Warehouse Team");
+    setModalGpHandledBy(order.gatepass_handled_by || profile?.display_name || profile?.full_name || [profile?.first_name, profile?.last_name].filter(Boolean).join(" ").trim() || "Warehouse Team");
     setModalGpTransporter(order.transport_name || order.transporter_name || "Road");
     setModalGpDestination(order.transport_destination || order.city || "");
     setModalGpDeliveryType(order.delivery_type || "Godown");
@@ -1376,7 +1376,11 @@ export function SaleProcessListPage() {
         ? "Generated"
         : editingStatusOrder.gatepass || "Pending";
       const actorName =
-        profile?.full_name || profile?.username || editingStatusOrder.sales_person || "Admin";
+        profile?.display_name ||
+        profile?.full_name ||
+        [profile?.first_name, profile?.last_name].filter(Boolean).join(" ").trim() ||
+        editingStatusOrder.sales_person ||
+        "Admin";
 
       setOrders((prev) =>
         prev.map((it) => {

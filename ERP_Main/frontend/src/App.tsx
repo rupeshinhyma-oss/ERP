@@ -60,7 +60,6 @@ import { PlatformAuthz } from "./pages/PlatformAuthz";
 
 // Monitoring & Audit Section
 import { GlobalAudit } from "./pages/GlobalAudit";
-import { Health } from "./pages/Health";
 import { Reporting } from "./pages/Reporting";
 
 // Settings & Utilities
@@ -255,14 +254,7 @@ export function App() {
             }
           />
           <Route path="/monitoring/*" element={<Navigate to="/monitoring/audit" replace />} />
-          <Route
-            path="/health"
-            element={
-              <ProtectedRoute permission="platform.system.manage">
-                <Health />
-              </ProtectedRoute>
-            }
-          />
+          <Route path="/health" element={<Navigate to="/access/users/me" replace />} />
           <Route
             path="/reporting"
             element={

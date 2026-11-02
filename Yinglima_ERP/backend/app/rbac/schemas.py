@@ -130,6 +130,7 @@ class RoleDeletionAffectedUser(BaseModel):
 
     id: uuid.UUID
     username: str
+    email: str | None = None
     display_name: str
 
 

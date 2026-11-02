@@ -293,6 +293,7 @@ class RBACService:
             {
                 "id": str(link.user.id),
                 "username": link.user.username,
+                "email": link.user.email,
                 "display_name": link.user.display_name or link.user.full_name or link.user.username,
             }
             for link in assignments

@@ -251,6 +251,42 @@ async def push_password_to_erp_main(email: str | None, new_password: str) -> boo
         return False
 
 
+async def push_profile_to_erp_main(email: str | None, display_name: str | None) -> bool:
+    """
+    Tell ERP_Main that this person's display_name changed in THIS ERP so central profile stays aligned.
+
+    Best effort: returns False (never raises) if ERP_Main is unreachable, has no matching user, or no
+    service credential is configured.
+    """
+    try:
+        headers = _service_headers()
+        clean_email = (email or "").strip()
+        clean_display_name = (display_name or "").strip()
+        if not headers or not clean_email or not clean_display_name:
+            return False
+        bases = erp_main_api_base_urls()
+        if not bases:
+            return False
+        for base in bases:
+            url = f"{base.rstrip('/')}/internal/users/profile"
+            try:
+                async with httpx.AsyncClient(timeout=10.0) as http_client:
+                    response = await http_client.post(
+                        url,
+                        json={"email": clean_email, "display_name": clean_display_name},
+                        headers=headers,
+                    )
+                if response.status_code == 200:
+                    return True
+                if response.status_code not in (404, 429, 500, 502, 503, 504):
+                    return False
+            except Exception:
+                continue
+        return False
+    except Exception:
+        return False
+
+
 # --- Per-session (one login = one session id) -------------------------------------------------------------------
 _SESSION_STATE_CACHE: dict[str, tuple[float, str]] = {}
 _SESSION_STATE_TTL_SECONDS = 45.0           # a session known to be active is not re-checked for this long

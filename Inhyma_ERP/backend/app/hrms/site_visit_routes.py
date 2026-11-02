@@ -130,7 +130,7 @@ async def list_site_visit_employees(
     stmt = (
         select(User)
         .where(User.status == UserStatus.ACTIVE, User.is_active == True, User.deleted_at.is_(None))
-        .order_by(User.first_name, User.username)
+        .order_by(User.display_name, User.first_name, User.username)
     )
 
     if not (ctx.is_admin or ctx.is_hr):
@@ -145,6 +145,7 @@ async def list_site_visit_employees(
         {
             "id": str(u.id),
             "username": u.username or "",
+            "display_name": u.display_name or u.full_name,
             "full_name": u.full_name,
             "first_name": u.first_name or "",
             "last_name": u.last_name or "",

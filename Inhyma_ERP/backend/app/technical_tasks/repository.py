@@ -97,16 +97,20 @@ class TechnicalTaskRepository(BaseRepository[TechnicalTask]):
         *,
         creator_user_id: uuid.UUID | None = None,
         creator_username: str | None = None,
+        creator_names: Iterable[str] = (),
         exclude_tabs: Iterable[str] = (),
     ) -> Any:
         """Data isolation: restrict to a user's own tasks and/or hide whole statuses (None = no restriction)."""
-        if creator_user_id is not None or creator_username:
+        names_set = {n for n in creator_names if n}
+        if creator_username:
+            names_set.add(creator_username)
+        if creator_user_id is not None or names_set:
             conds = []
             if creator_user_id is not None:
                 conds.append(TechnicalTask.created_by_user_id == creator_user_id)
-            if creator_username:
+            if names_set:
                 # Rows created before created_by_user_id existed only carry the name.
-                conds.append(TechnicalTask.created_by_name == creator_username)
+                conds.append(TechnicalTask.created_by_name.in_(sorted(names_set)))
             stmt = stmt.where(or_(*conds))
         hidden: list[str] = []
         for tab in exclude_tabs:
@@ -118,7 +122,7 @@ class TechnicalTaskRepository(BaseRepository[TechnicalTask]):
     # ------------------------------------------------------------------ counts
     async def get_counts(self, **scope: Any) -> dict[str, int]:
         """All tab counts in ONE grouped query (index-only scan on ix_tt_status_created), cached a few seconds."""
-        cache_key = (id(self.session.sync_session.get_bind()), scope.get("creator_user_id"), scope.get("creator_username"), tuple(scope.get("exclude_tabs", ())))
+        cache_key = (id(self.session.sync_session.get_bind()), scope.get("creator_user_id"), scope.get("creator_username"), tuple(scope.get("creator_names", ())), tuple(scope.get("exclude_tabs", ())))
         hit = _counts_cache.get(cache_key)
         now = time.monotonic()
         if hit and now - hit[0] < _COUNTS_TTL_SECONDS:
@@ -390,7 +394,7 @@ class TechnicalTaskRepository(BaseRepository[TechnicalTask]):
         """Per month: tasks raised vs tasks completed (Open vs Closed month-wise dashboard). Two grouped queries."""
         months = max(1, min(months, 36))
         cache_key = (id(self.session.sync_session.get_bind()), months, scope.get("creator_user_id"),
-                     scope.get("creator_username"), tuple(scope.get("exclude_tabs", ())))
+                     scope.get("creator_username"), tuple(scope.get("creator_names", ())), tuple(scope.get("exclude_tabs", ())))
         hit = _summary_cache.get(cache_key)
         if hit and time.monotonic() - hit[0] < _SUMMARY_TTL_SECONDS:
             return [dict(r) for r in hit[1]]

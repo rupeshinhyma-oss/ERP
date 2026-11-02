@@ -1043,7 +1043,7 @@ class HrmsPayrollService:
             )
 
         admin_user = await self.db.get(User, admin_id)
-        admin_name = f"{admin_user.first_name} {admin_user.last_name or ''}".strip() if admin_user else "Admin"
+        admin_name = (admin_user.display_name or f"{admin_user.first_name or ''} {admin_user.last_name or ''}".strip() or admin_user.username or "Admin") if admin_user else "Admin"
 
         changes_list = []
 
@@ -1200,7 +1200,7 @@ class HrmsPayrollService:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Payroll not found.")
 
         admin_user = await self.db.get(User, admin_id)
-        admin_name = f"{admin_user.first_name} {admin_user.last_name or ''}".strip() if admin_user else "Admin"
+        admin_name = (admin_user.display_name or f"{admin_user.first_name or ''} {admin_user.last_name or ''}".strip() or admin_user.username or "Admin") if admin_user else "Admin"
 
         payroll.status = "REVIEW"
         payroll.approved_at = None

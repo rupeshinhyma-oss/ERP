@@ -369,7 +369,8 @@ async def list_sales_persons(
         {
             "id": str(r.id),
             "username": r.username,
-            "full_name": (f"{r.first_name or ''} {r.last_name or ''}").strip() or r.display_name or r.username,
+            "display_name": r.display_name,
+            "full_name": (r.display_name or f"{r.first_name or ''} {r.last_name or ''}".strip() or r.username),
         }
         for r in result.all()
     ]

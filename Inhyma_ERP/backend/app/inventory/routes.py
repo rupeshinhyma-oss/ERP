@@ -2112,7 +2112,7 @@ async def create_stock_adjustment(
         type=payload.type,
         purpose=payload.purpose,
         total_amount=sum(li.amount for li in payload.items),
-        created_by=getattr(current_user, "username", None) or "Admin User",
+        created_by=getattr(current_user, "display_name", None) or getattr(current_user, "full_name", None) or getattr(current_user, "username", None) or "Admin User",
         remarks=payload.remarks,
     )
     db.add(new_adj)

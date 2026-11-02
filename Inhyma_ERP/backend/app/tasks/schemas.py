@@ -670,6 +670,7 @@ class TaskDepartmentRead(BaseModel):
 
 class TaskAssigneeOptionRead(BaseModel):
     id: uuid.UUID
+    display_name: str | None = None
     full_name: str | None = None
     username: str | None = None
     email: str | None = None

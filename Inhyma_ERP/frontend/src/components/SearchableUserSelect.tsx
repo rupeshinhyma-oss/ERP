@@ -40,6 +40,10 @@ function getUserColor(name?: string | null): string {
   return colors[Math.abs(hash) % colors.length];
 }
 
+function getUserLabel(user: AvailableUser): string {
+  return user.display_name || user.full_name || user.email || "Team Member";
+}
+
 function getUserDepartment(user: AvailableUser): string {
   if (user.department) return user.department;
   if (user.roles && user.roles.length > 0) {
@@ -86,13 +90,13 @@ export const SearchableUserSelect: React.FC<SearchableUserSelectProps> = ({
     if (!term) return candidates;
 
     return candidates.filter((u) => {
+      const dname = (u.display_name || "").toLowerCase();
       const name = (u.full_name || "").toLowerCase();
-      const uname = (u.username || "").toLowerCase();
       const email = (u.email || "").toLowerCase();
       const dept = getUserDepartment(u).toLowerCase();
       return (
+        dname.includes(term) ||
         name.includes(term) ||
-        uname.includes(term) ||
         email.includes(term) ||
         dept.includes(term)
       );
@@ -192,7 +196,8 @@ export const SearchableUserSelect: React.FC<SearchableUserSelectProps> = ({
           }}
         >
           {selectedUsers.map((user) => {
-            const color = getUserColor(user.full_name || user.username);
+            const label = getUserLabel(user);
+            const color = getUserColor(label);
             const dept = getUserDepartment(user);
             return (
               <span
@@ -225,9 +230,9 @@ export const SearchableUserSelect: React.FC<SearchableUserSelectProps> = ({
                     fontWeight: 700,
                   }}
                 >
-                  {getUserInitials(user.full_name || user.username)}
+                  {getUserInitials(label)}
                 </span>
-                <span>{user.full_name || user.username}</span>
+                <span>{label}</span>
                 <span style={{ fontSize: "11px", color: "#64748b" }}>
                   ({dept})
                 </span>
@@ -245,7 +250,7 @@ export const SearchableUserSelect: React.FC<SearchableUserSelectProps> = ({
                       lineHeight: 1,
                       padding: "0 2px",
                     }}
-                    title={`Remove ${user.full_name || user.username}`}
+                    title={`Remove ${label}`}
                   >
                     ✕
                   </button>
@@ -283,7 +288,7 @@ export const SearchableUserSelect: React.FC<SearchableUserSelectProps> = ({
           ref={inputRef}
           type="text"
           value={searchTerm}
-          placeholder={selectedUsers.length > 0 && !multiple ? `${selectedUsers[0].full_name || selectedUsers[0].username} (click to change)` : placeholder}
+          placeholder={selectedUsers.length > 0 && !multiple ? `${getUserLabel(selectedUsers[0])} (click to change)` : placeholder}
           disabled={disabled}
           onChange={(e) => {
             setSearchTerm(e.target.value);
@@ -358,7 +363,8 @@ export const SearchableUserSelect: React.FC<SearchableUserSelectProps> = ({
             filteredUsers.map((u, idx) => {
               const isHighlighted = idx === highlightedIndex;
               const isSelected = selectedUserIds.includes(u.id);
-              const color = getUserColor(u.full_name || u.username);
+              const label = getUserLabel(u);
+              const color = getUserColor(label);
               const dept = getUserDepartment(u);
 
               return (
@@ -411,7 +417,7 @@ export const SearchableUserSelect: React.FC<SearchableUserSelectProps> = ({
                         flexShrink: 0,
                       }}
                     >
-                      {getUserInitials(u.full_name || u.username)}
+                      {getUserInitials(label)}
                     </div>
                     <div style={{ minWidth: 0 }}>
                       <div
@@ -424,7 +430,7 @@ export const SearchableUserSelect: React.FC<SearchableUserSelectProps> = ({
                           textOverflow: "ellipsis",
                         }}
                       >
-                        {u.full_name || u.username}{" "}
+                        {label}{" "}
                         <span
                           style={{
                             fontSize: "11.5px",

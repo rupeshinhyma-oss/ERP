@@ -1830,7 +1830,7 @@ export function AttendancePage() {
                       <div style={{ padding: "20px 24px", background: "#f8fafc", borderRadius: "10px", border: "1px solid #cbd5e1", textAlign: "center", width: "100%", margin: "8px 0" }}>
                         <div style={{ fontSize: "32px", marginBottom: "8px" }}>👤</div>
                         <h3 style={{ fontSize: "15px", fontWeight: 700, color: "#1e293b", margin: "0 0 6px 0" }}>
-                          Viewing Attendance: {selectedEmployee ? `${selectedEmployee.full_name || `${selectedEmployee.first_name || ""} ${selectedEmployee.last_name || ""}`.trim() || selectedEmployee.username || "Selected Employee"} (${selectedEmployee.employee_code || selectedEmployee.code || "EMP"})` : "Selected Employee"}
+                          Viewing Attendance: {selectedEmployee ? `${selectedEmployee.display_name || selectedEmployee.full_name || `${selectedEmployee.first_name || ""} ${selectedEmployee.last_name || ""}`.trim() || selectedEmployee.email || "Selected Employee"} (${selectedEmployee.employee_code || selectedEmployee.code || "EMP"})` : "Selected Employee"}
                         </h3>
                         <p style={{ color: "#64748b", fontSize: "12.5px", margin: "0 0 12px 0" }}>
                           Punch In and Punch Out controls are restricted to your own personal employee session.
@@ -2041,7 +2041,7 @@ export function AttendancePage() {
                 {selectedEmployee && (
                   <div style={{ gridColumn: "1 / -1", padding: "8px 14px", background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: "8px", fontSize: "12.5px", color: "#1e40af", fontWeight: 600, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                     <span>
-                      ℹ️ Displaying Today's Summary for: <strong>{selectedEmployee.first_name} {selectedEmployee.last_name}</strong> ({selectedEmployee.employee_code || selectedEmployee.code || "EMP"} • {selectedEmployee.department || "General"})
+                      ℹ️ Displaying Today's Summary for: <strong>{selectedEmployee.display_name || selectedEmployee.full_name || `${selectedEmployee.first_name || ""} ${selectedEmployee.last_name || ""}`.trim() || "Employee"}</strong> ({selectedEmployee.employee_code || selectedEmployee.code || "EMP"} • {selectedEmployee.department || "General"})
                     </span>
                     <button
                       type="button"
@@ -2111,14 +2111,14 @@ export function AttendancePage() {
                       {calendarViewMode === "all"
                         ? "All Employees Attendance Calendar"
                         : selectedEmployee
-                        ? `${selectedEmployee.full_name || `${selectedEmployee.first_name || ""} ${selectedEmployee.last_name || ""}`.trim() || selectedEmployee.username || "Employee"} (${selectedEmployee.employee_code || selectedEmployee.code || "EMP"}) — Monthly Attendance Calendar`
+                        ? `${selectedEmployee.display_name || selectedEmployee.full_name || `${selectedEmployee.first_name || ""} ${selectedEmployee.last_name || ""}`.trim() || selectedEmployee.email || "Employee"} (${selectedEmployee.employee_code || selectedEmployee.code || "EMP"}) — Monthly Attendance Calendar`
                         : "Monthly Attendance Calendar"}
                     </h2>
                     <div className="hrms-section-desc">
                       {calendarViewMode === "all"
                         ? "Monthly matrix across all authorized employees with date details and filters."
                         : selectedEmployee
-                        ? `Viewing detailed attendance history, punches, work duration, and regularizations for ${selectedEmployee.full_name || `${selectedEmployee.first_name || ""} ${selectedEmployee.last_name || ""}`.trim() || selectedEmployee.username || "Employee"} (${selectedEmployee.department || "General"}).`
+                        ? `Viewing detailed attendance history, punches, work duration, and regularizations for ${selectedEmployee.display_name || selectedEmployee.full_name || `${selectedEmployee.first_name || ""} ${selectedEmployee.last_name || ""}`.trim() || selectedEmployee.email || "Employee"} (${selectedEmployee.department || "General"}).`
                         : "Personal and authorized employee attendance calendar view."}
                     </div>
                   </div>
@@ -2173,7 +2173,7 @@ export function AttendancePage() {
                         <option value="">My Attendance</option>
                         {employees.map((emp) => (
                           <option key={emp.id} value={emp.id}>
-                            {emp.first_name} {emp.last_name} ({emp.employee_code || emp.code || "EMP"} • {emp.department || "No Dept"})
+                            {emp.display_name || emp.full_name || `${emp.first_name || ""} ${emp.last_name || ""}`.trim() || emp.email || "Employee"} ({emp.employee_code || emp.code || "EMP"} • {emp.department || "No Dept"})
                           </option>
                         ))}
                       </select>

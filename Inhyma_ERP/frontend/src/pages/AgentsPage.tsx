@@ -262,7 +262,7 @@ export function AgentsPage() {
           apiGet<Array<{ name: string }>>("/api/v1/masters/states?limit=500&status=active").catch(() => null),
           apiGet<Array<{ name: string }>>("/api/v1/masters/districts?limit=500&status=active").catch(() => null),
           apiGet<Array<{ name: string }>>("/api/v1/masters/cities?limit=500&status=active").catch(() => null),
-          apiGet<Array<{ full_name: string; username: string }>>("/api/v1/users?limit=100&status=ACTIVE").catch(() => null),
+          apiGet<Array<{ display_name?: string | null; full_name: string; username: string }>>("/api/v1/users?limit=100&status=ACTIVE").catch(() => null),
         ]);
 
         if (typesRes?.data && Array.isArray(typesRes.data) && typesRes.data.length > 0) {
@@ -292,7 +292,7 @@ export function AgentsPage() {
         if (usersRes?.data && Array.isArray(usersRes.data)) {
           setSalesPersons(
             usersRes.data
-              .map((u: { full_name?: string; username?: string }) => u.full_name || u.username)
+              .map((u: { display_name?: string | null; full_name?: string; username?: string }) => u.display_name || u.full_name || u.username)
               .filter(Boolean) as string[]
           );
         } else {

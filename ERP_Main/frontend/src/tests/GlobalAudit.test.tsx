@@ -87,6 +87,7 @@ describe("GlobalAudit Page", () => {
     renderAudit();
 
     await waitFor(() => {
+      expect(apiModule.apiGet).toHaveBeenCalledWith("/global/audit");
       expect(screen.getByRole("heading", { name: /Global Audit Log/i })).toBeDefined();
       expect(screen.getByText("GLOBAL USER CREATED")).toBeDefined();
       expect(screen.getByText("INTEGRATION EVENT ROUTED")).toBeDefined();

@@ -212,6 +212,7 @@ export function LoginPage() {
         central?.session_id ||
         (tokens.session_mode === "central" ? tokens.session_id : undefined) ||
         `ihm-sess-${Date.now()}`;
+      let resolvedUser: Profile | undefined = tokens.user;
       if (tokens.user) {
         Auth.setSession(tokens, tokens.user, sessionId);
       } else {
@@ -219,6 +220,7 @@ export function LoginPage() {
         try {
           const { data: profile } = await apiGet<Profile>("/auth/profile");
           Auth.updateProfile(profile);
+          resolvedUser = profile;
         } catch {
           /* navigate to dashboard regardless */
         }
@@ -227,8 +229,13 @@ export function LoginPage() {
       if (!central) {
         const sessionData = {
           session_id: sessionId,
-          email: tokens.user?.email || email,
-          display_name: tokens.user?.username || email.split("@")[0],
+          email: resolvedUser?.email || email,
+          display_name:
+            resolvedUser?.display_name ||
+            resolvedUser?.full_name ||
+            [resolvedUser?.first_name, resolvedUser?.last_name].filter(Boolean).join(" ").trim() ||
+            resolvedUser?.email ||
+            email.split("@")[0],
           role: (tokens.user?.role === "super_admin" ? "super_admin" : "admin") as any,
           user_type: (tokens.user?.role === "super_admin" ? "platform_admin" : "global_user") as any,
           allowed_erps: ["yinglima"],

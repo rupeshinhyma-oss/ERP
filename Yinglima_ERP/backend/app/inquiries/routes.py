@@ -129,7 +129,7 @@ async def _record_action(
         action=action,
         module="inquiries",
         user_id=actor.id,
-        username_snapshot=actor.username,
+        username_snapshot=actor.display_name or actor.full_name or actor.username,
         entity_type="InquiryItem",
         entity_id=str(entity_id),
         new_values=new_values,
@@ -385,7 +385,7 @@ async def create_item(
             db,
             event_key="inquiry_created",
             title=f"📩 New Inquiry Item: {p_name} ({item.quantity})",
-            message=f"{current_user.username} created an inquiry for {item.quantity} pcs of {p_name}.",
+            message=f"{current_user.display_name or current_user.full_name or current_user.username} created an inquiry for {item.quantity} pcs of {p_name}.",
             link=f"/inquiries",
             sender_id=current_user.id,
         )
@@ -1807,7 +1807,7 @@ async def send_inquiry_email_message(
         """
 
     # Format email content
-    user_name = getattr(current_user, "full_name", None) or current_user.username or "Yinglima Procurement Team"
+    user_name = getattr(current_user, "display_name", None) or getattr(current_user, "full_name", None) or current_user.username or "Yinglima Procurement Team"
     html_body = f"""
     <div style="font-family: Arial, sans-serif; font-size: 14px; color: #1e293b; line-height: 1.6;">
         <div style="white-space: pre-wrap;">{payload.body}</div>
@@ -1862,7 +1862,7 @@ async def send_inquiry_email_message(
         supplier_id=supplier_id,
         channel="email",
         direction="outbound",
-        sender_name=getattr(current_user, "full_name", None) or current_user.username or "Yinglima Procurement",
+        sender_name=getattr(current_user, "display_name", None) or getattr(current_user, "full_name", None) or current_user.username or "Yinglima Procurement",
         sender_contact=settings.SMTP_FROM_EMAIL,
         recipient_contact=", ".join(clean_recipients),
         message_text=f"Subject: {payload.subject}\n\n{payload.body}",
@@ -1983,7 +1983,7 @@ async def send_inquiry_wechat_message(
                     supplier_id = supp_match
                     break
 
-    sender_display = getattr(current_user, "full_name", None) or current_user.username or "Salesperson"
+    sender_display = getattr(current_user, "display_name", None) or getattr(current_user, "full_name", None) or current_user.username or "Salesperson"
 
     # Log outbound message in InquiryMessage table
     new_msg = InquiryMessage(

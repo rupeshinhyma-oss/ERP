@@ -726,7 +726,7 @@ class HrmsSetupService:
         if s.employee:
             first = s.employee.first_name or ""
             last = s.employee.last_name or ""
-            emp_name = f"{first} {last}".strip() or s.employee.username
+            emp_name = s.employee.display_name or f"{first} {last}".strip() or s.employee.username
             emp_code = getattr(s.employee, "employee_code", None)
             dept = getattr(s.employee, "department", None)
 
@@ -734,7 +734,7 @@ class HrmsSetupService:
         if s.updater:
             first = s.updater.first_name or ""
             last = s.updater.last_name or ""
-            updater_name = f"{first} {last}".strip() or s.updater.username
+            updater_name = s.updater.display_name or f"{first} {last}".strip() or s.updater.username
 
         return TrackingSettingsRead(
             id=s.id,
@@ -917,6 +917,7 @@ class HrmsSetupService:
             s_term = f"%{search.strip()}%"
             query = query.where(
                 or_(
+                    User.display_name.ilike(s_term),
                     User.first_name.ilike(s_term),
                     User.last_name.ilike(s_term),
                     User.username.ilike(s_term),
@@ -956,7 +957,7 @@ class HrmsSetupService:
         for u in users:
             first = u.first_name or ""
             last = u.last_name or ""
-            emp_name = f"{first} {last}".strip() or u.username
+            emp_name = u.display_name or f"{first} {last}".strip() or u.username
             dept = dept_map.get(u.id) or "General"
             st = settings_map.get(u.id)
             items.append(
@@ -1015,7 +1016,7 @@ class HrmsSetupService:
 
         first = emp.first_name or ""
         last = emp.last_name or ""
-        emp_name = f"{first} {last}".strip() or emp.username
+        emp_name = emp.display_name or f"{first} {last}".strip() or emp.username
         return DetailedTrackingEmployeeItem(
             employee_id=emp.id,
             employee_name=emp_name,
@@ -1044,6 +1045,7 @@ class HrmsSetupService:
             s_term = f"%{search.strip()}%"
             query = query.where(
                 or_(
+                    User.display_name.ilike(s_term),
                     User.first_name.ilike(s_term),
                     User.last_name.ilike(s_term),
                     User.username.ilike(s_term),
@@ -1083,7 +1085,7 @@ class HrmsSetupService:
         for u in users:
             first = u.first_name or ""
             last = u.last_name or ""
-            emp_name = f"{first} {last}".strip() or u.username
+            emp_name = u.display_name or f"{first} {last}".strip() or u.username
             dept = dept_map.get(u.id) or "General"
             st = settings_map.get(u.id)
 
@@ -1162,7 +1164,7 @@ class HrmsSetupService:
 
         first = emp.first_name or ""
         last = emp.last_name or ""
-        emp_name = f"{first} {last}".strip() or emp.username
+        emp_name = emp.display_name or f"{first} {last}".strip() or emp.username
 
         has_override = (st is not None and not payload.use_org_default)
         is_unlim = st.is_unlimited_return if (st and has_override) else org.is_unlimited_return
@@ -1257,9 +1259,9 @@ class HrmsSetupService:
         assigner_ids = {el.assigned_by for el, _ in el_rows if el.assigned_by}
         assigner_name_map: dict[uuid.UUID, str] = {}
         if assigner_ids:
-            asgn_res = await self.db.execute(select(User.id, User.first_name, User.last_name, User.username).where(User.id.in_(assigner_ids)))
-            for au_id, afirst, alast, aun in asgn_res.all():
-                name = f"{afirst or ''} {alast or ''}".strip() or aun
+            asgn_res = await self.db.execute(select(User.id, User.display_name, User.first_name, User.last_name, User.username).where(User.id.in_(assigner_ids)))
+            for au_id, adisp, afirst, alast, aun in asgn_res.all():
+                name = adisp or f"{afirst or ''} {alast or ''}".strip() or aun
                 assigner_name_map[au_id] = name
 
         for el, loc in el_rows:
@@ -1298,7 +1300,7 @@ class HrmsSetupService:
                 first = u.first_name or ""
                 last = u.last_name or ""
                 emp_code = getattr(u, "employee_code", "") or ""
-                match_txt = f"{first} {last} {u.username} {u.email or ''} {emp_code} {resolved_dept}".lower()
+                match_txt = f"{u.display_name or ''} {first} {last} {u.username} {u.email or ''} {emp_code} {resolved_dept}".lower()
                 if st not in match_txt:
                     continue
 
@@ -1318,7 +1320,7 @@ class HrmsSetupService:
 
             first_n = u.first_name or ""
             last_n = u.last_name or ""
-            full_name = f"{first_n} {last_n}".strip() or u.username
+            full_name = u.display_name or f"{first_n} {last_n}".strip() or u.username
 
             items.append(
                 EmployeeLocationOverview(
@@ -1357,9 +1359,9 @@ class HrmsSetupService:
         assigner_ids = {el.assigned_by for el, _ in el_rows if el.assigned_by}
         assigner_name_map: dict[uuid.UUID, str] = {}
         if assigner_ids:
-            asgn_res = await self.db.execute(select(User.id, User.first_name, User.last_name, User.username).where(User.id.in_(assigner_ids)))
-            for au_id, afirst, alast, aun in asgn_res.all():
-                name = f"{afirst or ''} {alast or ''}".strip() or aun
+            asgn_res = await self.db.execute(select(User.id, User.display_name, User.first_name, User.last_name, User.username).where(User.id.in_(assigner_ids)))
+            for au_id, adisp, afirst, alast, aun in asgn_res.all():
+                name = adisp or f"{afirst or ''} {alast or ''}".strip() or aun
                 assigner_name_map[au_id] = name
 
         loc_items: list[EmployeeLocationItem] = []
@@ -1390,7 +1392,7 @@ class HrmsSetupService:
 
         first_n = emp.first_name or ""
         last_n = emp.last_name or ""
-        full_name = f"{first_n} {last_n}".strip() or emp.username
+        full_name = emp.display_name or f"{first_n} {last_n}".strip() or emp.username
 
         return EmployeeLocationOverview(
             employee_id=emp.id,
@@ -1562,7 +1564,7 @@ class HrmsSetupService:
             raise NotFoundException("Employee not found.")
 
         stmt = (
-            select(HrmsLocationAssignmentHistory, HrmsLocation.name, User.first_name, User.last_name, User.username)
+            select(HrmsLocationAssignmentHistory, HrmsLocation.name, User.display_name, User.first_name, User.last_name, User.username)
             .join(HrmsLocation, HrmsLocation.id == HrmsLocationAssignmentHistory.location_id)
             .outerjoin(User, User.id == HrmsLocationAssignmentHistory.performed_by)
             .where(HrmsLocationAssignmentHistory.user_id == employee_id)
@@ -1571,10 +1573,10 @@ class HrmsSetupService:
         rows = (await self.db.execute(stmt)).all()
 
         items: List[EmployeeLocationHistoryItem] = []
-        for hist, loc_name, pfirst, plast, pun in rows:
+        for hist, loc_name, pdisp, pfirst, plast, pun in rows:
             pname = None
             if hist.performed_by:
-                pname = f"{pfirst or ''} {plast or ''}".strip() or pun
+                pname = pdisp or f"{pfirst or ''} {plast or ''}".strip() or pun
 
             items.append(
                 EmployeeLocationHistoryItem(

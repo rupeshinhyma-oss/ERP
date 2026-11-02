@@ -78,6 +78,13 @@ class CurrentUser:
     must_change_password: bool = False
     is_super_admin: bool = False
     session_id: str = ""  # the login (session) this request belongs to; "" for an older token without one
+    display_name: str = ""
+    full_name: str = ""
+
+    @property
+    def actor_label(self) -> str:
+        """Primary human-readable identity (Display Name first, falling back to full_name then username)."""
+        return self.display_name or self.full_name or self.username
 
     @property
     def is_admin(self) -> bool:
@@ -554,4 +561,6 @@ class AuthService:
             must_change_password=user.must_change_password,
             is_super_admin=is_super,
             session_id=str(token_sid or ""),
+            display_name=user.display_name or user.full_name or "",
+            full_name=user.full_name or "",
         )

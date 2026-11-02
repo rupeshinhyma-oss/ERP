@@ -66,8 +66,8 @@ export const CommentComposer: React.FC<CommentComposerProps> = ({
       setMentionQuery(q);
       const matches = availableUsers.filter(
         (u) =>
+          (u.display_name && u.display_name.toLowerCase().includes(q)) ||
           u.full_name.toLowerCase().includes(q) ||
-          (u.username && u.username.toLowerCase().includes(q)) ||
           (u.email ? u.email.toLowerCase().includes(q) : false)
       );
       setFilteredUsers(matches.slice(0, 6));
@@ -302,11 +302,11 @@ export const CommentComposer: React.FC<CommentComposerProps> = ({
               className={`task-mention-item ${idx === mentionIndex ? "active" : ""}`}
             >
               <div style={{ width: "20px", height: "20px", borderRadius: "50%", background: "#eff6ff", color: "#2563eb", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "10px", fontWeight: 700 }}>
-                {u.full_name.charAt(0)}
+                {(u.display_name || u.full_name || "U").charAt(0).toUpperCase()}
               </div>
               <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                <span style={{ fontWeight: 600 }}>{u.full_name}</span>
-                {u.username && <span style={{ fontSize: "10.5px", color: "#94a3b8", marginLeft: "6px" }}>@{u.username}</span>}
+                <span style={{ fontWeight: 600 }}>{u.display_name || u.full_name}</span>
+                {u.email && <span style={{ fontSize: "10.5px", color: "#94a3b8", marginLeft: "6px" }}>{u.email}</span>}
               </div>
             </button>
           ))}

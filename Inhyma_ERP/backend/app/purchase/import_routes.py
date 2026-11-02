@@ -520,7 +520,7 @@ async def import_import_purchases(
                         expenses=expenses_vals,
                         items=items_in,
                     )
-                    record = ImportPurchase(status=first, created_by=user.username)
+                    record = ImportPurchase(status=first, created_by=user.display_name or user.full_name or user.username)
                     record.supplier_name, record.supplier_id, record.warehouse = supplier.company_name, supplier.id, warehouse.name
                     record.consignment_no = consignment_no
                     record.ordered_date = ordered_dt
@@ -603,7 +603,7 @@ async def create_import_purchase(
     rules = await wf.load_status_rules(db, GROUP)
     supplier, warehouse, result = await _prepare(db, payload, None)
     first = wf.initial_status(rules)
-    record = ImportPurchase(status=first, created_by=user.username)
+    record = ImportPurchase(status=first, created_by=user.display_name or user.full_name or user.username)
     _apply(record, payload, supplier, warehouse, result)
     if rules[first].get("stock_in"):
         await move_stock(db, record.warehouse, [(i.product_name, i.quantity) for i in record.items], +1)
@@ -671,7 +671,7 @@ async def update_import_status(
     now = datetime.now(timezone.utc)
     record.status = target
     if target == "confirmed":
-        record.confirmed_by, record.confirmed_at = user.username, now
+        record.confirmed_by, record.confirmed_at = (user.display_name or user.full_name or user.username), now
     elif target == "received":
         record.received_at = now
     elif target == "closed":

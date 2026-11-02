@@ -959,9 +959,10 @@ function Topbar() {
 
   const fullName = [profile?.first_name, profile?.last_name].filter(Boolean).join(" ").trim();
   const displayName =
+    (typeof profile?.display_name === "string" && profile.display_name.trim() ? profile.display_name.trim() : "") ||
+    (typeof profile?.full_name === "string" && profile.full_name.trim() ? profile.full_name.trim() : "") ||
     fullName ||
-    (typeof profile?.full_name === "string" && profile.full_name ? profile.full_name : "") ||
-    profile?.username ||
+    profile?.email ||
     "User";
   const userInitials = initials(displayName);
   const displayRole = isSuperAdmin ? "Super Admin" : roleLabel(profile);

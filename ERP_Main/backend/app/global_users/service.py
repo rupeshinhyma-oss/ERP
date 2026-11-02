@@ -130,6 +130,7 @@ class GlobalUserService:
         user = await self.get(user_id)
         updates = payload.model_dump(exclude_unset=True, by_alias=False)
         old_email = user.primary_email
+        old_display_name = user.display_name
         old_password = (user.metadata_json or {}).get("default_password") or (user.metadata_json or {}).get("password")
         if "metadata" in updates:
             updates["metadata_json"] = updates.pop("metadata")
@@ -141,12 +142,25 @@ class GlobalUserService:
             setattr(user, field, value)
         await self.repository.create(user)  # flush + refresh
 
+        from sqlalchemy import func, select
+        from app.platform_auth.models import PlatformAdmin
+
+        admin_stmt = select(PlatformAdmin).where(
+            (func.lower(PlatformAdmin.email) == user.primary_email.lower())
+            | (func.lower(PlatformAdmin.email) == old_email.lower())
+        )
+        admin = await self.repository.db.scalar(admin_stmt)
+        if admin:
+            admin.email = user.primary_email
+            if user.display_name:
+                admin.display_name = user.display_name
+            await self.repository.db.flush()
+
         # If password in metadata was updated, sync credential and PlatformAdmin login
         meta = user.metadata_json or {}
         pwd = meta.get("default_password") or meta.get("password")
         if pwd:
             from app.global_auth.models import GlobalUserCredential
-            from sqlalchemy import select
             cred_stmt = select(GlobalUserCredential).where(GlobalUserCredential.global_user_id == user.id)
             cred = await self.repository.db.scalar(cred_stmt)
             if cred:
@@ -159,20 +173,19 @@ class GlobalUserService:
                 )
                 self.repository.db.add(cred)
 
-            from app.platform_auth.models import PlatformAdmin
-            admin_stmt = select(PlatformAdmin).where(
-                (PlatformAdmin.email == user.primary_email) | (PlatformAdmin.email == old_email)
-            )
-            admin = await self.repository.db.scalar(admin_stmt)
             if admin:
-                admin.email = user.primary_email
                 admin.password_hash = pwd
             await self.repository.db.flush()
-            if pwd != old_password:
-                # Password edited in ERP_Main: keep every ERP the person can use on the SAME password.
-                from app.global_users.password_sync import push_password_to_memberships
 
-                await push_password_to_memberships(self.repository.db, user, pwd)
+        password_changed = bool(pwd and pwd != old_password)
+        display_name_changed = bool(user.display_name and user.display_name != old_display_name)
+        if password_changed or display_name_changed:
+            # Keep every ERP the person can use on the SAME display_name / password.
+            from app.global_users.password_sync import push_password_to_memberships
+
+            await push_password_to_memberships(
+                self.repository.db, user, pwd if password_changed else None
+            )
 
         await self.audit.record(
             event_type=AuditEventType.GLOBAL_USER_UPDATED,

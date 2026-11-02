@@ -67,7 +67,7 @@ MODEL_MAP: dict[str, tuple[Type[Any], str, str | None]] = {
     "Supplier Contact": (SupplierContact, "person_name", None),
     "Buyer": (Buyer, "company_name", None),
     "Buyer Contact": (BuyerContact, "person_name", None),
-    "User": (User, "username", "employee_code"),
+    "User": (User, "display_name", "employee_code"),
     "Role": (Role, "name", None),
     "Consignment Code": (ConsignmentCode, "code", None),
     "Inquiry": (Inquiry, "id", None),
@@ -113,7 +113,7 @@ class TrashService:
                 continue
             table_name = model_cls.__tablename__
             if entity_type == "User":
-                name_expr = "TRIM(CONCAT(COALESCE(first_name, ''), ' ', COALESCE(last_name, '')))"
+                name_expr = "COALESCE(NULLIF(TRIM(display_name), ''), NULLIF(TRIM(CONCAT(COALESCE(first_name, ''), ' ', COALESCE(last_name, ''))), ''), username)"
             elif hasattr(model_cls, name_attr):
                 name_expr = f"COALESCE(CAST({name_attr} AS text), CAST(id AS text))"
             else:
@@ -320,7 +320,7 @@ class TrashService:
         if row is None:
             raise NotFoundException(f"{entity_type} with ID '{item_id}' not found.")
 
-        item_name = getattr(row, name_attr, None) or f"{entity_type} {item_id}"
+        item_name = (getattr(row, "full_name", None) if entity_type == "User" else getattr(row, name_attr, None)) or getattr(row, name_attr, None) or f"{entity_type} {item_id}"
 
         # 1. Check for historical foreign-key dependencies before deleting
         deps = await self.check_dependencies(entity_type, uid)

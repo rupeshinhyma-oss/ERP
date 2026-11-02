@@ -148,6 +148,7 @@ export interface TaskBulkActionRequest {
 
 export interface UserMini {
   id: string;
+  display_name?: string | null;
   full_name?: string | null;
   username?: string | null;
   email?: string | null;
@@ -399,6 +400,7 @@ export type TaskListItem = TaskSummary;
 
 export interface AvailableUser {
   id: string;
+  display_name?: string | null;
   full_name: string;
   username?: string;
   email?: string;

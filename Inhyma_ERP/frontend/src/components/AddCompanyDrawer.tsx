@@ -61,6 +61,7 @@ interface CityItem {
 
 interface SalesPersonItem {
   id: string;
+  display_name?: string | null;
   full_name: string;
   username: string;
 }
@@ -134,7 +135,10 @@ export function AddCompanyDrawer({ isOpen, onClose, onSuccess }: AddCompanyDrawe
         if (res?.data && Array.isArray(res.data) && res.data.length > 0) {
           setSalesPersons(res.data);
           const rupesh = res.data.find(
-            (sp: any) => sp.full_name?.toLowerCase().includes("rupesh") || sp.username?.toLowerCase().includes("rupesh")
+            (sp: any) =>
+              sp.display_name?.toLowerCase().includes("rupesh") ||
+              sp.full_name?.toLowerCase().includes("rupesh") ||
+              sp.username?.toLowerCase().includes("rupesh")
           );
           if (rupesh) {
             setSalesPersonId(String(rupesh.id));
@@ -245,7 +249,7 @@ export function AddCompanyDrawer({ isOpen, onClose, onSuccess }: AddCompanyDrawe
         contact_whatsapp_number: whatsAppNumber.trim(),
         primary_website: webpage.trim(),
         sales_person_id: salesPersonId,
-        sales_person_name: selectedSalesPersonObj?.full_name || selectedSalesPersonObj?.username || "",
+        sales_person_name: selectedSalesPersonObj?.display_name || selectedSalesPersonObj?.full_name || selectedSalesPersonObj?.username || "",
         is_proforma_only: true,
       };
 
@@ -655,7 +659,7 @@ export function AddCompanyDrawer({ isOpen, onClose, onSuccess }: AddCompanyDrawe
             >
               {salesPersons.map((sp) => (
                 <option key={sp.id} value={sp.id}>
-                  {sp.full_name || sp.username}
+                  {sp.display_name || sp.full_name || sp.username}
                 </option>
               ))}
             </select>

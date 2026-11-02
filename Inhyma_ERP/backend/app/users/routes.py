@@ -22,7 +22,7 @@ from app.auth.schemas import SessionRead
 from app.auth.service import AuthService, CurrentUser
 from app.common.pagination import PageMeta, PageParams
 from app.core.exceptions import BadRequestException, ForbiddenException
-from app.federation.erp_main_client import push_password_to_erp_main
+from app.federation.erp_main_client import push_password_to_erp_main, push_profile_to_erp_main
 from app.core.responses import build_success_response
 from app.database.session import get_db_session
 from app.integration.jobs import enqueue_dispatch
@@ -411,12 +411,21 @@ async def update_user(
 
     update_dict = payload.model_dump(exclude_unset=True)
     update_dict.pop("position_id", None)
+    if "username" in update_dict and not update_dict["username"]:
+        update_dict.pop("username", None)
+    if "display_name" in update_dict and isinstance(update_dict["display_name"], str):
+        stripped_dn = update_dict["display_name"].strip()
+        if not stripped_dn:
+            raise BadRequestException("Display name cannot be empty.")
+        update_dict["display_name"] = stripped_dn
 
     user = await user_service.update_user(
         user_id,
         updated_by=current_user.id,
         **update_dict,
     )
+    if "display_name" in update_dict and user.email and user.display_name:
+        await push_profile_to_erp_main(user.email, user.display_name)
 
     pos_id = None
     pos_name = None

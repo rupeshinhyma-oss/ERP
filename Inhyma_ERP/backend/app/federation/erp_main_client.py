@@ -251,6 +251,35 @@ async def push_password_to_erp_main(email: str | None, new_password: str) -> boo
         return False
 
 
+async def push_profile_to_erp_main(email: str | None, display_name: str | None) -> bool:
+    """
+    Tell ERP_Main that this person's display_name changed in THIS ERP, so ERP_Main and peer ERPs stay synced.
+
+    Best effort: returns False (never raises) if ERP_Main is unreachable, has no matching user, or no service
+    credential is configured.
+    """
+    try:
+        creds = settings.get_expected_erp_main_credentials()
+        if not creds or not email or not display_name or not display_name.strip():
+            return False
+        base = (settings.ERP_MAIN_API_BASE_URL or "").strip().rstrip("/")
+        if not base:
+            bases = erp_main_api_base_urls()
+            base = bases[0].rstrip("/") if bases else ""
+        if not base:
+            return False
+        url = f"{base}/internal/users/profile"
+        async with httpx.AsyncClient(timeout=10.0) as http_client:
+            response = await http_client.post(
+                url,
+                json={"email": email, "display_name": display_name.strip()},
+                headers={"Authorization": f"Bearer {creds[0]}", "X-ERP-Key": settings.ERP_KEY},
+            )
+        return response.status_code == 200
+    except Exception:  # never break a successful local profile update
+        return False
+
+
 # --- Per-session (one login = one session id) -------------------------------------------------------------------
 _SESSION_STATE_CACHE: dict[str, tuple[float, str]] = {}
 _SESSION_STATE_TTL_SECONDS = 45.0           # a session known to be active is not re-checked for this long

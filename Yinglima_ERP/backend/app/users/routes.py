@@ -22,7 +22,7 @@ from app.auth.schemas import SessionRead
 from app.auth.service import AuthService, CurrentUser
 from app.common.pagination import PageMeta, PageParams
 from app.core.exceptions import BadRequestException, ForbiddenException
-from app.federation.erp_main_client import push_password_to_erp_main
+from app.federation.erp_main_client import push_password_to_erp_main, push_profile_to_erp_main
 from app.core.responses import build_success_response
 from app.database.session import get_db_session
 from app.integration.jobs import enqueue_dispatch
@@ -152,9 +152,9 @@ async def _batch_users_with_roles(
     manager_ids = {u.manager_id for u in users if u.manager_id}
     mgr_map: dict[uuid.UUID, str] = {}
     if manager_ids:
-        mgr_stmt = select(User.id, User.full_name).where(User.id.in_(manager_ids))
+        mgr_stmt = select(User).where(User.id.in_(manager_ids))
         mgr_res = await db.execute(mgr_stmt)
-        mgr_map = dict(mgr_res.all())
+        mgr_map = {m.id: m.full_name for m in mgr_res.scalars().all()}
 
     # 3. Batch fetch positions for all users in one query
     pos_map: dict[uuid.UUID, tuple[uuid.UUID, str]] = {}
@@ -208,7 +208,7 @@ async def _record_user_action(
         action=action,
         module="users",
         user_id=actor.id,
-        username_snapshot=actor.username,
+        username_snapshot=actor.display_name or actor.full_name or actor.username,
         entity_type="User",
         entity_id=str(target_user_id),
         new_values=new_values,
@@ -468,12 +468,25 @@ async def update_user(
 
     update_dict = payload.model_dump(exclude_unset=True)
     update_dict.pop("position_id", None)
+    if "username" in update_dict and not (update_dict["username"] or "").strip():
+        update_dict.pop("username", None)
+
+    display_name_updated = False
+    if "display_name" in update_dict:
+        cleaned_dn = (update_dict["display_name"] or "").strip() if update_dict["display_name"] is not None else ""
+        if cleaned_dn:
+            update_dict["display_name"] = cleaned_dn
+            display_name_updated = True
+        else:
+            update_dict.pop("display_name", None)
 
     user = await user_service.update_user(
         user_id,
         updated_by=current_user.id,
         **update_dict,
     )
+    if display_name_updated and user.email and user.display_name:
+        await push_profile_to_erp_main(user.email, user.display_name)
 
     pos_id = None
     pos_name = None

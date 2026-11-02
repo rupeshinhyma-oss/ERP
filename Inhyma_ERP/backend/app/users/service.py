@@ -363,6 +363,8 @@ class UserService:
         if updated_by is not None and await self.is_super_admin(user_id) and not await self.is_super_admin(updated_by):
             raise ForbiddenException("Only Super Administrators can modify Super Administrator accounts.")
 
+        if user.has_login and "username" in fields and not fields.get("username"):
+            fields.pop("username", None)
         username = fields.get("username")
         if username and isinstance(username, str) and await self.user_repository.username_exists(username, exclude_user_id=user_id):
             raise ConflictException("A user with that username already exists.")

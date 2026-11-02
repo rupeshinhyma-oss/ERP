@@ -72,6 +72,10 @@ router = APIRouter(prefix="/planning", tags=["Shipment Planning"])
 logger = get_logger(__name__)
 
 
+def _actor_display_name(current_user: CurrentUser) -> str:
+    return current_user.display_name or current_user.full_name or current_user.username
+
+
 # ---------------------------------------------------------------------------
 # Live updates (WebSocket)
 # ---------------------------------------------------------------------------
@@ -304,7 +308,7 @@ async def create_sheet(
         mum_group_label=payload.mum_group_label or "Mum",
         description=payload.description,
         user_id=current_user.id,
-        username=current_user.username,
+        username=_actor_display_name(current_user),
     )
     data = PlanningSheetRead.model_validate(sheet).model_dump(mode="json")
     await _publish_planning_sheet_event(
@@ -352,7 +356,7 @@ async def duplicate_sheet(
         mum_group_label=payload.mum_group_label,
         description=payload.description,
         user_id=current_user.id,
-        username=current_user.username,
+        username=_actor_display_name(current_user),
     )
     data = PlanningSheetRead.model_validate(sheet).model_dump(mode="json")
     return build_success_response(data=data, request_id=request.state.request_id, message="Sheet duplicated.")
@@ -379,7 +383,7 @@ async def rename_sheet(
     dispatcher: EventDispatcher = Depends(get_event_dispatcher),
 ) -> dict:
     sheet = await service.rename_sheet(
-        sheet_id, name=payload.name, version=payload.version, user_id=current_user.id, username=current_user.username
+        sheet_id, name=payload.name, version=payload.version, user_id=current_user.id, username=_actor_display_name(current_user)
     )
     data = PlanningSheetRead.model_validate(sheet).model_dump(mode="json")
     await _publish_planning_sheet_event(
@@ -409,7 +413,7 @@ async def update_sheet_group_label(
     PlanningService.update_mum_group_label for exactly what gets renamed.
     """
     sheet = await service.update_mum_group_label(
-        sheet_id, mum_group_label=payload.mum_group_label, user_id=current_user.id, username=current_user.username
+        sheet_id, mum_group_label=payload.mum_group_label, user_id=current_user.id, username=_actor_display_name(current_user)
     )
     data = PlanningSheetRead.model_validate(sheet).model_dump(mode="json")
     return build_success_response(data=data, request_id=request.state.request_id, message="Group label updated.")
@@ -432,7 +436,7 @@ async def normalize_column_order(
     why some existing sheets need this. Never touches row/cell data --
     only column `position` values.
     """
-    columns = await service.normalize_column_order(sheet_id, user_id=current_user.id, username=current_user.username)
+    columns = await service.normalize_column_order(sheet_id, user_id=current_user.id, username=_actor_display_name(current_user))
     data = [PlanningColumnRead.model_validate(c).model_dump(mode="json") for c in columns]
     return build_success_response(data=data, request_id=request.state.request_id, message="Column order fixed.")
 
@@ -455,7 +459,7 @@ async def repair_fixed_mum_formulas(
     PlanningService.repair_fixed_mum_formulas. Never touches row/cell
     data, and never touches a column that's already correctly wired.
     """
-    columns = await service.repair_fixed_mum_formulas(sheet_id, user_id=current_user.id, username=current_user.username)
+    columns = await service.repair_fixed_mum_formulas(sheet_id, user_id=current_user.id, username=_actor_display_name(current_user))
     data = [PlanningColumnRead.model_validate(c).model_dump(mode="json") for c in columns]
     return build_success_response(data=data, request_id=request.state.request_id, message="Formula columns repaired.")
 
@@ -471,7 +475,7 @@ async def create_next_mum_group(
     Create the next Mum/group column set in a single fast, atomic operation.
     """
     columns = await service.create_next_mum_group(
-        sheet_id, user_id=current_user.id, username=current_user.username
+        sheet_id, user_id=current_user.id, username=_actor_display_name(current_user)
     )
     data = [PlanningColumnRead.model_validate(c).model_dump(mode="json") for c in columns]
     await _broadcast(sheet_id, "columns_updated", data, current_user=current_user, service=service)
@@ -486,7 +490,7 @@ async def delete_sheet(
     current_user: CurrentUser = Depends(require_permission("planning.sheet.manage")),
     dispatcher: EventDispatcher = Depends(get_event_dispatcher),
 ) -> dict:
-    await service.delete_sheet(sheet_id, user_id=current_user.id, username=current_user.username)
+    await service.delete_sheet(sheet_id, user_id=current_user.id, username=_actor_display_name(current_user))
     await _publish_planning_sheet_event(
         service=service,
         dispatcher=dispatcher,
@@ -754,7 +758,7 @@ async def add_column(
         data_type=payload.data_type,
         position=payload.position,
         user_id=current_user.id,
-        username=current_user.username,
+        username=_actor_display_name(current_user),
     )
     data = PlanningColumnRead.model_validate(column).model_dump(mode="json")
     await _broadcast(sheet_id, "column_added", data, current_user=current_user, service=service)
@@ -771,7 +775,7 @@ async def rename_column(
     current_user: CurrentUser = Depends(require_permission("planning.column.manage")),
 ) -> dict:
     column = await service.rename_column(
-        sheet_id, column_id, name=payload.name, user_id=current_user.id, username=current_user.username
+        sheet_id, column_id, name=payload.name, user_id=current_user.id, username=_actor_display_name(current_user)
     )
     data = PlanningColumnRead.model_validate(column).model_dump(mode="json")
     await _broadcast(sheet_id, "column_renamed", data, current_user=current_user, service=service)
@@ -812,7 +816,7 @@ async def move_column(
     current_user: CurrentUser = Depends(require_permission("planning.column.manage")),
 ) -> dict:
     column = await service.move_column(
-        sheet_id, column_id, new_position=payload.position, user_id=current_user.id, username=current_user.username
+        sheet_id, column_id, new_position=payload.position, user_id=current_user.id, username=_actor_display_name(current_user)
     )
     data = PlanningColumnRead.model_validate(column).model_dump(mode="json")
     await _broadcast(sheet_id, "column_moved", data, current_user=current_user, service=service)
@@ -827,7 +831,7 @@ async def delete_column(
     service: PlanningService = Depends(get_planning_service),
     current_user: CurrentUser = Depends(require_permission("planning.column.manage")),
 ) -> dict:
-    await service.delete_column(sheet_id, column_id, user_id=current_user.id, username=current_user.username)
+    await service.delete_column(sheet_id, column_id, user_id=current_user.id, username=_actor_display_name(current_user))
     await _broadcast(sheet_id, "column_deleted", {"column_id": str(column_id)}, current_user=current_user, service=service)
     return build_success_response(data=None, request_id=request.state.request_id, message="Column deleted.")
 
@@ -895,7 +899,7 @@ async def configure_column_source(
         auto_populate_enabled=payload.auto_populate_enabled,
         auto_populate_limit=payload.auto_populate_limit,
         user_id=current_user.id,
-        username=current_user.username,
+        username=_actor_display_name(current_user),
     )
     data = PlanningColumnRead.model_validate(column).model_dump(mode="json")
     await _broadcast(sheet_id, "column_source_configured", data, current_user=current_user, service=service)
@@ -927,7 +931,7 @@ async def configure_item_source(
         item_auto_populate_enabled=payload.item_auto_populate_enabled,
         item_auto_populate_limit=payload.item_auto_populate_limit,
         user_id=current_user.id,
-        username=current_user.username,
+        username=_actor_display_name(current_user),
     )
     data = PlanningSheetRead.model_validate(sheet).model_dump(mode="json")
     return build_success_response(data=data, request_id=request.state.request_id, message="ITEM column source configured.")
@@ -951,7 +955,7 @@ async def link_row_to_item_source_record(
     # via get_grid just to reach into grid["sheet"].
     sheet = await service.get_sheet_or_raise(sheet_id)
     row = await service.link_row_to_item_source_record(
-        sheet_id, row_id, record_id=payload.record_id, user_id=current_user.id, username=current_user.username
+        sheet_id, row_id, record_id=payload.record_id, user_id=current_user.id, username=_actor_display_name(current_user)
     )
     display_value = await service.compute_row_item_display(sheet, row)
     data = PlanningRowRead.model_validate(_row_to_read_dict(row)).model_dump(mode="json")
@@ -993,7 +997,7 @@ async def auto_populate_rows_from_item_source(
         sheet_id,
         limit=payload.limit,
         user_id=current_user.id,
-        username=current_user.username,
+        username=_actor_display_name(current_user),
         organization_id=effective_organization_id,
         branch_id=effective_branch_id,
     )
@@ -1028,7 +1032,7 @@ async def link_row_to_source_record(
 ) -> dict:
     """Document: admin picks, per row, which record (e.g. which Product) that row's linked-lookup column pulls from."""
     cell = await service.link_row_to_source_record(
-        sheet_id, row_id, column_id, record_id=payload.record_id, user_id=current_user.id, username=current_user.username
+        sheet_id, row_id, column_id, record_id=payload.record_id, user_id=current_user.id, username=_actor_display_name(current_user)
     )
     display_value = await service.compute_cell_display_value(
         await service.get_column(sheet_id, column_id), cell, row_id=row_id
@@ -1058,7 +1062,7 @@ async def auto_link_column_to_item_records(
     module).
     """
     cells = await service.auto_link_column_to_item_records(
-        sheet_id, column_id, user_id=current_user.id, username=current_user.username
+        sheet_id, column_id, user_id=current_user.id, username=_actor_display_name(current_user)
     )
     column = await service.get_column(sheet_id, column_id)
     data = []
@@ -1110,7 +1114,7 @@ async def set_column_role_lock(
     permission. Passing an empty role_ids list clears the restriction.
     """
     column = await service.set_column_role_lock(
-        sheet_id, column_id, role_ids=payload.role_ids, user_id=current_user.id, username=current_user.username
+        sheet_id, column_id, role_ids=payload.role_ids, user_id=current_user.id, username=_actor_display_name(current_user)
     )
     data = PlanningColumnRead.model_validate(column).model_dump(mode="json")
     await _broadcast(sheet_id, "column_role_lock_changed", data, current_user=current_user, service=service)
@@ -1136,7 +1140,7 @@ async def set_column_status_color_enabled(
     to every user, not just the one who set it.
     """
     column = await service.set_column_status_color_enabled(
-        sheet_id, column_id, enabled=payload.enable_status_color, user_id=current_user.id, username=current_user.username
+        sheet_id, column_id, enabled=payload.enable_status_color, user_id=current_user.id, username=_actor_display_name(current_user)
     )
     data = PlanningColumnRead.model_validate(column).model_dump(mode="json")
     await _broadcast(sheet_id, "column_status_color_toggled", data, current_user=current_user, service=service)
@@ -1165,7 +1169,7 @@ async def set_column_description(
     exists for any note already written into a specific cell.
     """
     column = await service.set_column_description(
-        sheet_id, column_id, description=payload.description, user_id=current_user.id, username=current_user.username
+        sheet_id, column_id, description=payload.description, user_id=current_user.id, username=_actor_display_name(current_user)
     )
     data = PlanningColumnRead.model_validate(column).model_dump(mode="json")
     await _broadcast(sheet_id, "column_description_changed", data, current_user=current_user, service=service)
@@ -1184,7 +1188,7 @@ async def set_item_column_description(
     current_user: CurrentUser = Depends(require_permission("planning.column.manage")),
 ) -> dict:
     sheet = await service.set_item_column_description(
-        sheet_id, description=payload.description, user_id=current_user.id, username=current_user.username
+        sheet_id, description=payload.description, user_id=current_user.id, username=_actor_display_name(current_user)
     )
     data = PlanningSheetRead.model_validate(sheet).model_dump(mode="json")
     await _broadcast(sheet_id, "item_description_changed", data, current_user=current_user, service=service)
@@ -1226,7 +1230,7 @@ async def rename_row(
     service: PlanningService = Depends(get_planning_service),
     current_user: CurrentUser = Depends(require_permission("planning.row.manage")),
 ) -> dict:
-    row = await service.rename_row(sheet_id, row_id, label=payload.label, user_id=current_user.id, username=current_user.username)
+    row = await service.rename_row(sheet_id, row_id, label=payload.label, user_id=current_user.id, username=_actor_display_name(current_user))
     data = PlanningRowRead.model_validate(_row_to_read_dict(row)).model_dump(mode="json")
     await _broadcast(sheet_id, "row_renamed", data, current_user=current_user, service=service)
     return build_success_response(data=data, request_id=request.state.request_id, message="Row renamed.")
@@ -1248,7 +1252,7 @@ async def set_row_description(
     lives directly on the row rather than as a separate cell.
     """
     row = await service.set_row_description(
-        sheet_id, row_id, description=payload.description, user_id=current_user.id, username=current_user.username
+        sheet_id, row_id, description=payload.description, user_id=current_user.id, username=_actor_display_name(current_user)
     )
     data = PlanningRowRead.model_validate(_row_to_read_dict(row)).model_dump(mode="json")
     await _broadcast(sheet_id, "row_description_changed", data, current_user=current_user, service=service)
@@ -1265,7 +1269,7 @@ async def move_row(
     current_user: CurrentUser = Depends(require_permission("planning.row.manage")),
 ) -> dict:
     row = await service.move_row(
-        sheet_id, row_id, new_position=payload.position, user_id=current_user.id, username=current_user.username
+        sheet_id, row_id, new_position=payload.position, user_id=current_user.id, username=_actor_display_name(current_user)
     )
     data = PlanningRowRead.model_validate(_row_to_read_dict(row)).model_dump(mode="json")
     await _broadcast(sheet_id, "row_moved", data, current_user=current_user, service=service)
@@ -1280,7 +1284,7 @@ async def delete_row(
     service: PlanningService = Depends(get_planning_service),
     current_user: CurrentUser = Depends(require_permission("planning.row.manage")),
 ) -> dict:
-    await service.delete_row(sheet_id, row_id, user_id=current_user.id, username=current_user.username)
+    await service.delete_row(sheet_id, row_id, user_id=current_user.id, username=_actor_display_name(current_user))
     await _broadcast(sheet_id, "row_deleted", {"row_id": str(row_id)}, current_user=current_user, service=service)
     return build_success_response(data=None, request_id=request.state.request_id, message="Row deleted.")
 
@@ -1342,7 +1346,7 @@ async def set_cell_value(
     ),
 ) -> dict:
     cell = await service.set_cell_value(
-        sheet_id, row_id, column_id, value=payload.value, user_id=current_user.id, username=current_user.username,
+        sheet_id, row_id, column_id, value=payload.value, user_id=current_user.id, username=_actor_display_name(current_user),
         user_permissions=current_user.permissions,
     )
     data = PlanningCellRead.model_validate(cell).model_dump(mode="json")
@@ -1419,7 +1423,7 @@ async def set_cell_status(
         status_color=payload.status_color,
         custom_status_tag_id=payload.custom_status_tag_id,
         user_id=current_user.id,
-        username=current_user.username,
+        username=_actor_display_name(current_user),
         user_permissions=current_user.permissions,
     )
     data = PlanningCellRead.model_validate(cell).model_dump(mode="json")
@@ -1446,7 +1450,7 @@ async def set_cell_description(
     written while the setting was on is preserved if it's later turned off.
     """
     cell = await service.set_cell_description(
-        sheet_id, row_id, column_id, description=payload.description, user_id=current_user.id, username=current_user.username
+        sheet_id, row_id, column_id, description=payload.description, user_id=current_user.id, username=_actor_display_name(current_user)
     )
     data = PlanningCellRead.model_validate(cell).model_dump(mode="json")
     await _broadcast(sheet_id, "cell_description_changed", {"cell": data, "row_id": str(row_id)}, current_user=current_user, service=service)

@@ -450,6 +450,7 @@ export function ProformaInvoicesPage({
   const loggedInUserName = useMemo(() => {
     if (!profile) return "";
     return (
+      profile.display_name ||
       profile.full_name ||
       (profile.first_name ? `${profile.first_name} ${profile.last_name || ""}`.trim() : (profile.username === "admin" ? "Admin" : profile.username))
     );
@@ -458,10 +459,10 @@ export function ProformaInvoicesPage({
   const [salesPersonOptions, setSalesPersonOptions] = useState<string[]>([]);
 
   useEffect(() => {
-    void apiGet<Array<{ id: string; full_name: string; username: string }>>("/companies/sales-persons")
+    void apiGet<Array<{ id: string; display_name?: string | null; full_name: string; username: string }>>("/companies/sales-persons")
       .then((res) => {
         if (res?.data) {
-          setSalesPersonOptions(res.data.map((u) => u.full_name || u.username));
+          setSalesPersonOptions(res.data.map((u) => u.display_name || u.full_name || u.username));
         }
       })
       .catch(() => { });

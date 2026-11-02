@@ -33,6 +33,23 @@ from app.users.models import User
 logger = logging.getLogger(__name__)
 
 
+def _emp_display_name(emp: object) -> str:
+    if emp is None:
+        return "Employee"
+    dn = getattr(emp, "display_name", None)
+    if isinstance(dn, str) and dn.strip():
+        return dn.strip()
+    first = getattr(emp, "first_name", "")
+    last = getattr(emp, "last_name", "")
+    fn = f"{first if isinstance(first, str) else ''} {last if isinstance(last, str) else ''}".strip()
+    if fn:
+        return fn
+    un = getattr(emp, "username", None)
+    if isinstance(un, str) and un.strip():
+        return un.strip()
+    return "Employee" 
+
+
 async def resolve_hrms_approvers(
     db: AsyncSession,
     employee_id: uuid.UUID,
@@ -129,7 +146,7 @@ async def notify_leave_requested(
 ) -> None:
     """Notify responsible manager or HR fallback about a new leave request."""
     emp = await db.get(User, employee_id)
-    emp_name = f"{emp.first_name or ''} {emp.last_name or ''}".strip() or (emp.username if emp else "Employee")
+    emp_name = _emp_display_name(emp)
 
     approvers = await resolve_hrms_approvers(db, employee_id)
     num_disp = int(number_of_days) if float(number_of_days).is_integer() else number_of_days
@@ -191,7 +208,7 @@ async def notify_regularization_requested(
 ) -> None:
     """Notify responsible manager or HR fallback about an attendance regularization request."""
     emp = await db.get(User, employee_id)
-    emp_name = f"{emp.first_name or ''} {emp.last_name or ''}".strip() or (emp.username if emp else "Employee")
+    emp_name = _emp_display_name(emp)
 
     approvers = await resolve_hrms_approvers(db, employee_id)
     for approver_id in approvers:
@@ -250,7 +267,7 @@ async def notify_expense_submitted(
 ) -> None:
     """Notify responsible manager or HR fallback about a submitted expense claim."""
     emp = await db.get(User, employee_id)
-    emp_name = f"{emp.first_name or ''} {emp.last_name or ''}".strip() or (emp.username if emp else "Employee")
+    emp_name = _emp_display_name(emp)
 
     approvers = await resolve_hrms_approvers(db, employee_id)
     for approver_id in approvers:

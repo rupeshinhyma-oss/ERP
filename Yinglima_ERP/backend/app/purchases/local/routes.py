@@ -138,7 +138,7 @@ async def create_local_purchase(
     service: LocalPurchaseService = Depends(get_service),
     current_user: CurrentUser = Depends(require_permission('local_purchase.create')),
 ) -> dict:
-    user_name = current_user.username if current_user and current_user.username else "Admin"
+    user_name = (current_user.display_name or current_user.full_name or current_user.username) if current_user else "Admin"
     created = await service.create_purchase(
         payload=payload,
         created_by_id=current_user.id,
@@ -336,7 +336,7 @@ async def inward_local_purchase(
     service: LocalPurchaseService = Depends(get_service),
     current_user: CurrentUser = Depends(require_permission('local_purchase.inward')),
 ) -> dict:
-    user_name = current_user.username if current_user and current_user.username else "Admin"
+    user_name = (current_user.display_name or current_user.full_name or current_user.username) if current_user else "Admin"
     updated = await service.inward_purchase(
         purchase_id=purchase_id,
         inward_data=payload,

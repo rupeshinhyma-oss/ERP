@@ -110,7 +110,7 @@ export function GlobalAudit() {
     }
     setError(null);
     try {
-      const data = await apiGet<GlobalAuditEvent[]>("/global/audit?limit=200");
+      const data = await apiGet<GlobalAuditEvent[]>("/global/audit");
       setEvents(Array.isArray(data) ? data : []);
     } catch (err) {
       setError(err);

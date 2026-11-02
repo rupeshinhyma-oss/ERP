@@ -171,8 +171,8 @@ class User(Base, UUIDPrimaryKeyMixin, TimestampMixin, VersionMixin, SoftDeleteMi
     @property
     def full_name(self) -> str:
         """Return computed full name, falling back to username, then employee_code, then a placeholder."""
-        if self.display_name:
-            return self.display_name
+        if self.display_name and self.display_name.strip():
+            return self.display_name.strip()
         parts = [p for p in (self.first_name, self.middle_name, self.last_name) if p]
         if parts:
             return " ".join(parts)

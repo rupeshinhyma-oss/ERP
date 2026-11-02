@@ -201,14 +201,14 @@ class HrmsSiteVisitService:
         if v.employee:
             first = v.employee.first_name or ""
             last = v.employee.last_name or ""
-            emp_name = f"{first} {last}".strip() or v.employee.username
+            emp_name = v.employee.display_name or f"{first} {last}".strip() or v.employee.username
             emp_email = v.employee.email
 
         creator_name = None
         if v.creator:
             first = v.creator.first_name or ""
             last = v.creator.last_name or ""
-            creator_name = f"{first} {last}".strip() or v.creator.username
+            creator_name = v.creator.display_name or f"{first} {last}".strip() or v.creator.username
 
         ts_dto = None
         tr_status = "Not Started"
@@ -283,7 +283,7 @@ class HrmsSiteVisitService:
         if s.employee:
             first = s.employee.first_name or ""
             last = s.employee.last_name or ""
-            emp_name = f"{first} {last}".strip() or s.employee.username
+            emp_name = s.employee.display_name or f"{first} {last}".strip() or s.employee.username
 
         cust_name = None
         if s.site_visit:
@@ -383,7 +383,7 @@ class HrmsSiteVisitService:
         if hasattr(st, "employee") and st.employee:
             first = st.employee.first_name or ""
             last = st.employee.last_name or ""
-            emp_name = f"{first} {last}".strip() or st.employee.username
+            emp_name = st.employee.display_name or f"{first} {last}".strip() or st.employee.username
 
         return TrackingStopRead(
             id=st.id,
@@ -1046,7 +1046,7 @@ class HrmsSiteVisitService:
         if emp:
             first = emp.first_name or ""
             last = emp.last_name or ""
-            emp_name = f"{first} {last}".strip() or emp.username
+            emp_name = emp.display_name or f"{first} {last}".strip() or emp.username
 
         # 2. Fetch site visits for that date
         v_stmt = (

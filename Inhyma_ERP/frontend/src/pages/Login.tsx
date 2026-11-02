@@ -262,12 +262,14 @@ export function LoginPage() {
         central?.session_id ||
         (tokens.session_mode === "central" ? tokens.session_id : undefined) ||
         `ihm-sess-${Date.now()}`;
+      let resolvedProfile: Profile | undefined = tokens.user;
       if (tokens.user) {
         Auth.setSession(tokens, tokens.user, sessionId);
       } else {
         Auth.setSession(tokens, undefined, sessionId);
         try {
           const { data: profile } = await apiGet<Profile>("/auth/profile");
+          resolvedProfile = profile;
           Auth.updateProfile(profile);
         } catch {
           /* navigate to dashboard regardless */
@@ -275,12 +277,18 @@ export function LoginPage() {
       }
 
       if (!central) {
+        const resolvedDisplayName =
+          resolvedProfile?.display_name ||
+          resolvedProfile?.full_name ||
+          [resolvedProfile?.first_name, resolvedProfile?.last_name].filter(Boolean).join(" ").trim() ||
+          resolvedProfile?.email ||
+          email;
         const sessionData = {
           session_id: sessionId,
-          email: tokens.user?.email || email,
-          display_name: tokens.user?.username || email.split("@")[0],
-          role: (tokens.user?.role === "super_admin" ? "super_admin" : "admin") as any,
-          user_type: (tokens.user?.role === "super_admin" ? "platform_admin" : "global_user") as any,
+          email: resolvedProfile?.email || email,
+          display_name: resolvedDisplayName,
+          role: (resolvedProfile?.role === "super_admin" ? "super_admin" : "admin") as any,
+          user_type: (resolvedProfile?.role === "super_admin" ? "platform_admin" : "global_user") as any,
           allowed_erps: ["inhyma"],
         };
         setEcosystemCookie(sessionData);

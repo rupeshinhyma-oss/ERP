@@ -183,7 +183,22 @@ export const Auth = {
 
 export const auth = Auth;
 
-/** Two-letter initials, matching user full name or username. */
+/** Resolve the primary human-readable display name for a user profile. */
+export function userDisplayName(profile?: Profile | null): string {
+  if (!profile) return "User";
+  const dn = typeof profile.display_name === "string" ? profile.display_name.trim() : "";
+  if (dn) return dn;
+  const fn = typeof profile.full_name === "string" ? profile.full_name.trim() : "";
+  if (fn) return fn;
+  const joined = [profile.first_name, profile.last_name]
+    .filter((p): p is string => typeof p === "string" && p.trim().length > 0)
+    .map((p) => p.trim())
+    .join(" ");
+  if (joined) return joined;
+  return profile.email || "User";
+}
+
+/** Two-letter initials, prioritizing display_name / full_name first. */
 export function initials(name?: string | null): string {
   if (!name) return "U";
   const parts = name.trim().split(/\s+/);
@@ -191,6 +206,12 @@ export function initials(name?: string | null): string {
     return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
   }
   return name.trim().slice(0, 2).toUpperCase() || "U";
+}
+
+/** Two-letter initials from a Profile object, prioritizing display_name || full_name first. */
+export function userInitials(profile?: Profile | null): string {
+  if (!profile) return "U";
+  return initials(userDisplayName(profile));
 }
 
 /**

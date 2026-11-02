@@ -30,12 +30,24 @@ class LeadService:
             return True
         return False
 
+    @staticmethod
+    def _actor_label(actor: CurrentUser) -> str:
+        return actor.display_name or actor.full_name or actor.username
+
+    @staticmethod
+    def _actor_names(actor: CurrentUser) -> set[str]:
+        return {
+            str(n).strip().lower()
+            for n in (actor.display_name, actor.full_name, actor.username, str(actor.id))
+            if n and str(n).strip()
+        }
+
     def _can_access_lead(self, lead: Lead, actor: CurrentUser | None) -> bool:
         if self._is_manager_or_admin(actor) or actor is None:
             return True
-        actor_names = {actor.username.lower(), str(actor.id).lower()}
-        allotted = (lead.allotted_to or "").lower()
-        creator = (lead.created_by or "").lower()
+        actor_names = self._actor_names(actor)
+        allotted = (lead.allotted_to or "").strip().lower()
+        creator = (lead.created_by or "").strip().lower()
         return allotted in actor_names or creator in actor_names
 
     async def list_leads(
@@ -61,17 +73,22 @@ class LeadService:
         limit: int = 50,
         offset: int = 0,
     ) -> tuple[list[Lead], int]:
+        allotted_to_names: set[str] | None = None
         if actor is not None and not self._is_manager_or_admin(actor):
-            if allotted_to and allotted_to.strip().lower() not in {actor.username.lower(), str(actor.id).lower()}:
+            allowed_names = self._actor_names(actor)
+            if allotted_to and allotted_to.strip().lower() not in allowed_names:
                 raise ForbiddenException("Salespeople can only query their own leads.")
-            allotted_to = actor.username
+            allotted_to_names = allowed_names
+            allotted_to = self._actor_label(actor)
 
+        extra_scope = {"allotted_to_names": allotted_to_names} if allotted_to_names is not None else {}
         return await self.repository.list_leads(
             search=search,
             source=source,
             priority=priority,
             business_type=business_type,
             allotted_to=allotted_to,
+            **extra_scope,
             created_by=created_by,
             status=status,
             city=city,
@@ -100,11 +117,12 @@ class LeadService:
         if not data.get("added_on"):
             data["added_on"] = date.today()
         if actor is not None:
+            primary_name = self._actor_label(actor)
             if not data.get("created_by"):
-                data["created_by"] = actor.username
+                data["created_by"] = primary_name
             if not self._is_manager_or_admin(actor):
                 if not data.get("allotted_to"):
-                    data["allotted_to"] = actor.username
+                    data["allotted_to"] = primary_name
         lead = await self.repository.create(**data)
         return lead
 

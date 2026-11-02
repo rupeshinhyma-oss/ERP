@@ -35,13 +35,13 @@ def _request_id(request: Request) -> str:
 @router.get("", summary="List recent control-plane audit entries")
 async def list_audit_entries(
     request: Request,
-    limit: int = Query(default=100, ge=1, le=1000),
+    limit: int | None = Query(default=None, ge=1),
     event_type: AuditEventType | None = None,
     target_id: uuid.UUID | None = None,
     _principal: AuthorizedPrincipal = Depends(require_platform_permission("platform.audit.view")),
     service: GlobalAuditService = Depends(get_global_audit_service),
 ) -> dict:
-    """List the most recent control-plane audit entries, optionally filtered by event type or target."""
+    """List control-plane audit entries newest-first, optionally filtered by event type, target, or limit."""
     entries = await service.list_recent(limit=limit, event_type=event_type, target_id=target_id)
     data = [GlobalAuditLogRead.model_validate(e).model_dump(mode="json") for e in entries]
     return build_success_response(data, request_id=_request_id(request))

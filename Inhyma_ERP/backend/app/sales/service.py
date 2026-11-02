@@ -18,7 +18,7 @@ from typing import Any
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.service import CurrentUser
@@ -1279,7 +1279,7 @@ class SaleService:
             order.cancel_reason = reason
         if reason:
             order.remarks = (
-                f"{order.remarks or ''}\n[{date.today()}] {current_user.username}: {previous} -> {target}: {reason}".strip()
+                f"{order.remarks or ''}\n[{date.today()}] {current_user.display_name or current_user.full_name or current_user.username}: {previous} -> {target}: {reason}".strip()
             )
         updated = await self.repo.update(order)
         if target in ("sales_confirmed", "confirmed", "acc_confirmed") or updated.invoice_no:
@@ -1295,7 +1295,7 @@ class SaleService:
         rules = await self.load_status_rules()
         wf.check_deletable(rules, order.status, current_user)
         await self._release_stock(order)
-        await self.repo.soft_delete(order, deleted_by=current_user.username)
+        await self.repo.soft_delete(order, deleted_by=current_user.display_name or current_user.full_name or current_user.username)
         try:
             from app.sales.models import DiscountPayment
 
@@ -1318,7 +1318,7 @@ class SaleService:
             from app.core.exceptions import ForbiddenException
 
             raise ForbiddenException("Only an administrator can restore a deleted order.")
-        if not await self.repo.restore(order_id, restored_by=current_user.username):
+        if not await self.repo.restore(order_id, restored_by=current_user.display_name or current_user.full_name or current_user.username):
             raise NotFoundException(f"Sale order {order_id} not found.")
         order = await self.repo.get_by_id(order_id)
         rules = await self.load_status_rules()

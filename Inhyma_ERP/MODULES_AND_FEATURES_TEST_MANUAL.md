@@ -4,7 +4,7 @@
 > **Location:** Root Workspace (`/MODULES_AND_FEATURES_TEST_MANUAL.md`)  
 > **Purpose:** Exhaustive reference catalog detailing every single module, page layout, table column, action button, modal window, drawer, form tab, and form field across the entire ERP. Designed for developers, QA testers, and autonomous AI agents to execute manual and automated regression tests before and after code changes.  
 > **Strict Policy:** When developing or modifying features, no existing module, form, or field listed in this document may be removed, broken, or regressed.  
-> **Last Updated:** October 31, 2026
+> **Last Updated:** November 2, 2026
 
 ---
 
@@ -165,7 +165,7 @@
 - **Purpose:** Primary landing screen upon successful login.
 
 ### Visual Elements & Layout
-1. **Top Greeting:** `Welcome To {User Full Name / Username}` (e.g. `Welcome To Rupesh Malla` or `Welcome To Admin`).
+1. **Top Greeting:** `Welcome To {Display Name / Full Name}` (prioritizing `profile.display_name || profile.full_name || "First Last" || "Inhyma ERP"`, e.g. `Welcome To Rupesh Malla`).
 2. **Top Navigation Bar:**
    - Universal Global Search Input: `Search entire ERP (e.g. company, users, products...)`
    - Notification Bell Icon (`🔔`)
@@ -805,16 +805,15 @@ Manage complete vendor team directory:
 - **Route:** `/users` (also aliased from `/employees`)
 - **Purpose:** Complete enterprise person directory for both login-enabled staff and workforce personnel without system access, HR profiles, positions held, reporting hierarchy, and password governance.
 
-### 15.1. Users Table Columns
-1. **Checkbox:** Row selector.
-2. **SR. NO.:** Index.
-3. **EMPLOYEE NAME & AVATAR:** Initials circle + Full Name.
-4. **USERNAME:** System login ID (or placeholder for workforce members with `has_login=False`).
-5. **EMAIL:** Official corporate email (null for `has_login=False`).
-6. **DEPARTMENT / ROLE:** Assigned role/department badges (e.g. `Sales`, `Procurement`, `Admin`).
-7. **REPORTING MANAGER:** Manager's full name.
-8. **STATUS:** `ACTIVE`, `INACTIVE`, `SUSPENDED`, `LOCKED`, `PASSWORD_CHANGE_REQUIRED`.
-9. **ACTIONS:**
+### 15.1. Users Table Columns (7 Columns — `Username` Column Removed, `Display Name` Primary)
+- **Toolbar Search Input Placeholder:** `"Search display name, email, employee code..."`.
+1. **Checkbox:** Row selector (`select-all-checkbox` in header).
+2. **EMPLOYEE (Display Name & Avatar):** Initials circle (derived from `display_name || full_name` first) + Primary Display Name (`u.display_name || u.full_name || u.employee_name || u.email || "—"`), plus `No Login` badge for workforce-only records (`has_login=False`) and employee code sub-label.
+3. **EMAIL:** Official corporate email (`—` for `has_login=False`).
+4. **DEPARTMENT:** Assigned role/department badges (e.g. `Sales`, `Procurement`, `Admin`).
+5. **STATUS:** `ACTIVE`, `INACTIVE`, `SUSPENDED`, `LOCKED`, `PASSWORD_CHANGE_REQUIRED`.
+6. **LAST LOGIN:** Formatted timestamp of most recent sign-in (`Never` if none).
+7. **ACTIONS:**
    - 👁️ **View Profile Drawer:**
      - HR Profile details (contact, gender, DOB, joining date, address, emergency contact, notes)
      - **Section 6.5: Positions & Reporting Structure:**
@@ -849,12 +848,12 @@ Manage complete vendor team directory:
 ### 15.2. Add / Edit User Form Fields
 - **Login Credentials Toggle:**
   - **Give this person ERP login access (`has_login`)** (*Checkbox, default checked*).
-  - Uncheck for workforce records with no login (e.g. factory worker, driver, temporary labor, consultant) -- Username, Email, Phone, and Password become optional/disabled.
-- **Account Identity (when `has_login=True`):**
+  - Uncheck for workforce records with no login (e.g. factory worker, driver, temporary labor, consultant) -- Email, Phone, and Password become optional/disabled.
+- **Account Identity:**
+  - **Display Name** (*Required*, `minLength=1`, `maxLength=200`): Primary prominent field at the top of the modal, used throughout the entire ERP (Topbar, Dashboard, Salesperson dropdowns, Task assignees, CRM, HRMS, and audit/workflow actor stamps).
   - **First Name** (*Required*), **Middle Name**, **Last Name** (*Optional*).
-  - **Display Name** (*Required*): Shown throughout the system in place of raw username.
-  - **Position** (*Optional, not red-marked*): Dropdown placed alongside Display Name, dynamically extracted from active positions in the Positions catalog (`/positions/all`). When selected, establishes an initial primary position assignment for the user.
-  - **Username** (*Optional*): If left blank, derived automatically from email.
+  - **Position** (*Optional, not red-marked*): Dropdown dynamically extracted from active positions in the Positions catalog (`/positions/all`). When selected, establishes an initial primary position assignment for the user.
+  - *(Internal `username` is auto-generated on the backend and is NOT shown in the Create User, Edit User, or View User UI.)*
   - **Work Email** (*Required if has_login=True*).
   - **Mobile Number** (*Required if has_login=True*): Phone number with country dial code.
   - **Password** (*Required if has_login=True*): Initial temporary password field equipped with an integrated **Eye toggle button** (`👁️` / `👁️‍🗨️`) allowing the administrator to preview or conceal the plaintext password before submitting.
@@ -880,7 +879,7 @@ Manage complete vendor team directory:
 - **Drawer Layout & Usability:** Side-drawer overlay with full viewport height (`calc(100vh - 60px)`), smooth vertical scroll container (`flex: 1`, `overflowY: auto`), and a pinned sticky footer (`.form-actions`).
 - **Footer Action Buttons:** `Cancel` (secondary outline button) and `Save Changes` (primary blue button) pinned neatly at the bottom with fixed height (38px), aligned horizontally to the right without vertical distortion.
 - **Sections Included:**
-  - **Basic & Identity Details:** First Name, Middle Name, Last Name, Username (*Required*), Display Name, Employee Code.
+  - **Basic & Identity Details:** **Display Name** (*Required*, primary field pre-filled from `display_name || full_name`), First Name (*Required*), Middle Name, Last Name (*Optional*), Employee Code. *(The `Username` field is completely removed from the UI; `PATCH /users/{id}` omits `username` so the backend preserves the internal `username`, syncs updated `display_name` best-effort to `ERP_Main`, and immediately updates `Auth` cached profile + `EcosystemCookie` if editing the currently signed-in user).*
   - **Contact Information:** Work Email (*Required*), Mobile / Phone Number (*Required*), Emergency Contact.
   - **Employment & HR Profile:**
     - **Reporting Manager & Position:** Side-by-side dropdown selectors. The **Position** dropdown is dynamically populated from active positions in `/positions/all` and automatically pre-selected with the employee's current primary position assignment. Selecting a new position or `-- None (No Position) --` updates the assignment atomically upon clicking `Save Changes`.
@@ -1079,7 +1078,8 @@ Manage complete vendor team directory:
 ## 24. USER ACCOUNT: Profile, Security & Active Sessions
 
 - **Route:** `/profile`
-- **Section 1: Personal Details:** First Name, Last Name, Email, Contact Number, `Save Profile` button.
+- **Header Identity:** Displays `Display Name` (falling back to `full_name` / `first_name + last_name`) with `{profile.email}` subtitle (no `@username` handle).
+- **Section 1: Personal Details:** **Display Name** (*Required*, primary field), First Name (*Required*), Last Name (*Optional*), Email, Contact Number, `Save Changes` button (persists `display_name` via `PATCH /users/{id}` and immediately updates `Auth` cached profile + `EcosystemCookie` so Topbar and Dashboard update live).
 - **Section 2: Security & Password:** Current Password, New Password, Confirm Password, show/hide eye icons, `Update Password` button.
 - **Section 3: Active Device Sessions:** List of active browser sessions (Browser, OS, IP Address, Device Category, Last Active). Action: `Revoke Session` button.
 
@@ -3603,4 +3603,20 @@ Positioned directly underneath the collapsible filter panel, these three metric 
 - [ ] **TC-ACT-08 (Historical Order View, Print & Cancellation Stock Reversal):** Create and confirm a Sale Order or Purchase Order for an `Active` product, then mark that product `Inactive` in `Product Master`. Verify viewing/printing the saved historical order succeeds with full product/party names (`200 OK`) and cancelling the historical order reverses stock cleanly without throwing an inactive-product error.
 
 ---
-*End of Master Features & Testing Specification Manual. Maintained for Inhyma Solutions Enterprise ERP. Last updated: October 31, 2026 (Sections 9, 48, 56 & 61-76 & Global Updates: DB-Backed Product Specification Documents with Saved Links & Auto-Linked CRM Quotation PDFs, Engine-Level Pytest Supabase Guard, Automatic Colleague QA File Sweeper & Synthetic Artifact DB Purge, Import Purchase Expected Arrival Date Editable Default [ETA Port Date + 5 Days], System-Wide Active-Only Cross-Module Extraction & Inactive Isolation, `.env`-Driven Cross-ERP Switching & Strict Local/Hosted Environment Isolation, Local & Import Purchase Multi-Line CSV/Excel Bulk Import, Standardized Golden-Amber Export & Vector SVG Imp/Exp Controls, Suppliers Sidebar Active Highlight & Goods Expected Report Removal, HRMS Integrity Remediation & Payroll Approval Persistence, Dynamic Organization Company Logo, Product Master Category Rewiring & Floating Duplicate Overlay, Platform Migration Idempotency, Sales Process Workflow & 13-Field Filter Grid, Feed & Broadcast Open Access & 1-to-1 Employee Messaging, Sale Status Update Side Drawer & Chronological Timeline, Discount Payments Multi-Installment Ledger, Product Re-Order Branch-Scoped Matrix & FIFO Stock Breakup, and Product Stock Transactions Master List & Per-Product Stock Transaction Ledger).*
+
+## 77. IDENTITY & UX GOVERNANCE: Display Name Primary Across All Modules & Removal of Username from UI
+
+- **Module Name:** System-Wide Display Name Primary Identity & Internal-Only Username Governance
+- **Routes Affected:** `/users`, `/profile`, `/dashboard`, `/rbac`, `/companies`, `/purchase/suppliers`, `/buyers`, `/proforma-invoice`, `/sales/process`, `/sales/discount-payments`, `/inquiries`, `/crm/leads`, `/crm/import`, `/tasks`, `/technical-tasks`, `/planning`, `/feed`, `/hrms/*`
+- **Files:**
+  - Backend Auth, Provisioning & Users: `backend/app/auth/{schemas,routes,service}.py`, `backend/app/federation/{routes,erp_main_client}.py`, `backend/app/api/v1/internal_users.py`, `backend/app/users/{routes,service}.py`
+  - Backend Cross-Module Consumers: `backend/app/companies/routes.py`, `backend/app/tasks/{schemas,service}.py`, `backend/app/sales/{routes,service}.py`, `backend/app/purchase/{local_routes,import_routes}.py`, `backend/app/inventory/routes.py`, `backend/app/technical_tasks/{routes,repository}.py`, `backend/app/technician_operations/service.py`, `backend/app/inquiries/routes.py`, `backend/app/planning/routes.py`, `backend/app/leads/{service,repository}.py`, `backend/app/follow_ups/{service,repository}.py`, `backend/app/crm/{lead_service,follow_up_task_sync}.py`, `backend/app/hrms/{employee_routes,payroll_service,payroll_export_builder,attendance_service,attendance_export_builder,attendance_routes,asset_service,expense_service,site_visit_routes,site_visit_service,service,notifications}.py`, `backend/app/trash/service.py`
+  - Frontend Core & Pages: `frontend/src/types/{index,tasks}.ts`, `frontend/src/lib/{auth,ssoBridge,tasksApi}.ts`, `frontend/src/components/{AppShell,SearchableUserSelect,CommentComposer,AttachmentList,AddCompanyDrawer}.tsx`, `frontend/src/pages/{Users,Profile,Dashboard,Login,Rbac,Companies,AgentsPage,Inquiries,ProformaInvoicesPage}.tsx`, `frontend/src/pages/sales/{SaleProcessForm,SaleProcessList,DiscountPaymentsPage}.tsx`, `frontend/src/pages/crm/LeadImportPage.tsx`, `frontend/src/pages/tasks/KanbanPage.tsx`, `frontend/src/pages/technicalTasks/TechnicalTasksPage.tsx`, `frontend/src/pages/feed/FeedPage.tsx`, `frontend/src/pages/hrms/{AttendancePage,AssetPage,SetupPage,SiteVisitPage}.tsx`
+
+### QA Verification Test Cases
+- [ ] **TC-DSP-01 (Users Table & Modals — Username Removed, Display Name Primary):** Open `/users`. Verify search placeholder reads `"Search display name, email, employee code..."`, the `Username` column is absent (7 columns total), Create User and Edit User modals require `Display Name *` as the primary field with zero `Username` input, and View User Details shows `Display Name` first with `{email}` subtitle (no `@username`).
+- [ ] **TC-DSP-02 (Live Topbar, Dashboard, Profile & Ecosystem Sync):** Update your own `Display Name` on `/profile` or via `/users` `Edit Profile`. Verify Topbar badge, `/dashboard` greeting, and `EcosystemCookie` reflect the new `Display Name` immediately without requiring re-login, internal `users.username` remains intact in DB, and `ERP_Main` (`POST /api/v1/internal/users/profile`) is notified best-effort.
+- [ ] **TC-DSP-03 (Salesperson, Assignee & HRMS Display Name Priority):** Verify `GET /api/v1/companies/sales-persons`, `GET /api/v1/tasks/assignees`, `SearchableUserSelect`, `CommentComposer`, Proforma Invoices, Sales Orders, Companies, CRM, Technical Tasks, and HRMS pages/exports always display `display_name` first.
+
+---
+*End of Master Features & Testing Specification Manual. Maintained for Inhyma Solutions Enterprise ERP. Last updated: November 2, 2026 (Section 77 & Sections 3, 15, 24: Display Name Primary Identity Across All Modules & Removal of Username from UI, Sections 9, 48, 56 & 61-76 & Global Updates: DB-Backed Product Specification Documents with Saved Links & Auto-Linked CRM Quotation PDFs, Engine-Level Pytest Supabase Guard, Automatic Colleague QA File Sweeper & Synthetic Artifact DB Purge, Import Purchase Expected Arrival Date Editable Default [ETA Port Date + 5 Days], System-Wide Active-Only Cross-Module Extraction & Inactive Isolation, `.env`-Driven Cross-ERP Switching & Strict Local/Hosted Environment Isolation, Local & Import Purchase Multi-Line CSV/Excel Bulk Import, Standardized Golden-Amber Export & Vector SVG Imp/Exp Controls, Suppliers Sidebar Active Highlight & Goods Expected Report Removal, HRMS Integrity Remediation & Payroll Approval Persistence, Dynamic Organization Company Logo, Product Master Category Rewiring & Floating Duplicate Overlay, Platform Migration Idempotency, Sales Process Workflow & 13-Field Filter Grid, Feed & Broadcast Open Access & 1-to-1 Employee Messaging, Sale Status Update Side Drawer & Chronological Timeline, Discount Payments Multi-Installment Ledger, Product Re-Order Branch-Scoped Matrix & FIFO Stock Breakup, and Product Stock Transactions Master List & Per-Product Stock Transaction Ledger).*

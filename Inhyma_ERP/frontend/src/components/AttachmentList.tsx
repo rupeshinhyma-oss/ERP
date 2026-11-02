@@ -7,7 +7,7 @@ export interface AttachmentItem {
   file_type?: string;
   file_size: number;
   uploaded_by?: string | null;
-  uploader?: { full_name?: string | null; username?: string | null } | null;
+  uploader?: { display_name?: string | null; full_name?: string | null; username?: string | null } | null;
   created_at?: string;
 }
 
@@ -186,7 +186,7 @@ export const AttachmentList: React.FC<AttachmentListProps> = ({
       >
         {attachments.map((item, idx) => {
           const fileMeta = getFileIcon(item.file_name, item.file_type);
-          const uploaderName = item.uploader?.full_name || item.uploader?.username;
+          const uploaderName = item.uploader?.display_name || item.uploader?.full_name || item.uploader?.username;
 
           return (
             <div

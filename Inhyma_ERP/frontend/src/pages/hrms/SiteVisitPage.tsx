@@ -108,6 +108,7 @@ export interface TrackingSessionItem {
 export interface EmployeeOption {
   id: string;
   username: string;
+  display_name?: string;
   full_name?: string;
   first_name?: string;
   last_name?: string;
@@ -493,9 +494,11 @@ export function SiteVisitPage() {
         .map((u: any) => ({
           id: String(u.id),
           username: u.username || "",
+          display_name: u.display_name || "",
           full_name:
+            u.display_name ||
             u.full_name ||
-            (u.first_name ? `${u.first_name} ${u.last_name || ""}`.trim() : u.display_name || u.username || ""),
+            (u.first_name ? `${u.first_name} ${u.last_name || ""}`.trim() : u.email || ""),
           first_name: u.first_name || "",
           last_name: u.last_name || "",
           email: u.email || "",
@@ -2185,7 +2188,7 @@ export function SiteVisitPage() {
                       <option value="">Select Employee...</option>
                       {employees.map((emp) => (
                         <option key={emp.id} value={emp.id}>
-                          {emp.full_name || (emp.first_name ? `${emp.first_name} ${emp.last_name || ""}` : emp.username)} ({emp.email || "No email"})
+                          {emp.display_name || emp.full_name || (emp.first_name ? `${emp.first_name} ${emp.last_name || ""}`.trim() : emp.email || "Employee")} ({emp.email || "No email"})
                         </option>
                       ))}
                     </select>

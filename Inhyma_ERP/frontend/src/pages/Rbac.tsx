@@ -446,9 +446,9 @@ export function RbacPage() {
    * override-resolution logic: checked = explicit GRANT, or
    * department-inherited and not explicitly DENYed).
    */
-  async function openUserOverridesModal(userId: string, username: string) {
+  async function openUserOverridesModal(userId: string, userLabel: string) {
     setOverridesUserId(userId);
-    setOverridesUsername(username);
+    setOverridesUsername(userLabel);
     setOverridesSearch("");
     setOverridesLoading(true);
     setOverridesBreakdown(null);
@@ -1019,7 +1019,7 @@ export function RbacPage() {
                             const currentRole = u.roles?.length ? roleDisplayName(u.roles[0]) : "User";
                             return (
                               <option key={u.id} value={u.id}>
-                                {u.display_name || u.username} ({currentRole})
+                                {u.display_name || u.full_name || u.email || "User"} ({currentRole})
                               </option>
                             );
                           })}
@@ -1057,7 +1057,7 @@ export function RbacPage() {
                       {assignedManagers.length ? (
                         <div style={{ display: "flex", flexDirection: "column" }}>
                           {assignedManagers.map((u) => {
-                            const initials = (u.display_name || u.username || "M").slice(0, 2).toUpperCase();
+                            const initials = (u.display_name || u.full_name || u.email || "M").slice(0, 2).toUpperCase();
                             return (
                               <div
                                 key={u.id}
@@ -1090,10 +1090,10 @@ export function RbacPage() {
                                   </div>
                                   <div style={{ minWidth: 0 }}>
                                     <div style={{ fontWeight: 600, color: "#1e293b", fontSize: "13px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                                      {u.display_name || u.username || u.full_name || "Unnamed"}
+                                      {u.display_name || u.full_name || u.email || "Unnamed"}
                                     </div>
                                     <div style={{ fontSize: "11.5px", color: "#64748b", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                                      {u.email || u.username || "No login access"}
+                                      {u.email || "No login access"}
                                     </div>
                                   </div>
                                 </div>
@@ -1112,7 +1112,7 @@ export function RbacPage() {
                                         fontWeight: 600,
                                         padding: "4px 8px",
                                       }}
-                                      onClick={() => openUserOverridesModal(u.id, u.display_name || u.username || u.full_name || "this user")}
+                                      onClick={() => openUserOverridesModal(u.id, u.display_name || u.full_name || u.email || "this user")}
                                       title="Set this manager's individual extra permissions"
                                     >
                                       🔑 Edit permissions
@@ -1199,7 +1199,7 @@ export function RbacPage() {
                             const currentRole = u.roles?.length ? roleDisplayName(u.roles[0]) : "User";
                             return (
                               <option key={u.id} value={u.id}>
-                                {u.display_name || u.username} ({currentRole})
+                                {u.display_name || u.full_name || u.email || "User"} ({currentRole})
                               </option>
                             );
                           })}
@@ -1237,7 +1237,7 @@ export function RbacPage() {
                       {assignedUsers.length ? (
                         <div style={{ display: "flex", flexDirection: "column" }}>
                           {assignedUsers.map((u) => {
-                            const initials = (u.display_name || u.username || "U").slice(0, 2).toUpperCase();
+                            const initials = (u.display_name || u.full_name || u.email || "U").slice(0, 2).toUpperCase();
                             const isThisDeptManager = assignedManagers.some((m) => m.id === u.id);
                             return (
                               <div
@@ -1271,7 +1271,7 @@ export function RbacPage() {
                                   </div>
                                   <div style={{ minWidth: 0 }}>
                                     <div style={{ fontWeight: 600, color: "#1e293b", fontSize: "13px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", display: "flex", alignItems: "center", gap: "6px" }}>
-                                      {u.display_name || u.username}
+                                      {u.display_name || u.full_name || u.email || "Unnamed"}
                                       {isThisDeptManager && (
                                         <span
                                           style={{
@@ -1289,7 +1289,7 @@ export function RbacPage() {
                                       )}
                                     </div>
                                     <div style={{ fontSize: "11.5px", color: "#64748b", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                                      {u.email || u.username}
+                                      {u.email || "No login access"}
                                     </div>
                                   </div>
                                 </div>
@@ -1976,7 +1976,6 @@ export function RbacPage() {
                         <tr key={u.id} style={{ borderBottom: "1px solid #f1f5f9" }}>
                           <td style={{ padding: "8px 12px" }}>
                             <div style={{ fontWeight: 600, color: "#1e293b" }}>{u.display_name}</div>
-                            <div style={{ fontSize: "11.5px", color: "#64748b" }}>{u.username}</div>
                           </td>
                         </tr>
                       ))}

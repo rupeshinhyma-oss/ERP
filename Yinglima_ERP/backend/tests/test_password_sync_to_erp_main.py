@@ -49,7 +49,27 @@ async def test_never_raises_when_erp_main_is_down_or_rejects(monkeypatch):
 @pytest.mark.asyncio
 async def test_does_nothing_without_a_configured_credential(monkeypatch):
     monkeypatch.setattr(settings, "ERP_MAIN_SERVICE_CREDENTIAL", "CHANGE-ME-placeholder")
+    monkeypatch.setattr(settings, "ERP_MAIN_SERVICE_CREDENTIAL_PREVIOUS", None)
     monkeypatch.setattr(settings, "FEDERATION_SERVICE_CREDENTIAL", "")
+    monkeypatch.setattr(settings, "PEER_SERVICE_CREDENTIALS", "")
     seen = _patch_http(monkeypatch)
     assert await erp_main_client.push_password_to_erp_main("a@example.com", "x") is False
     assert seen == {}, "no request should even be attempted"
+
+
+@pytest.mark.asyncio
+async def test_push_profile_to_erp_main_reports_display_name_and_never_raises(monkeypatch):
+    monkeypatch.setattr(settings, "ERP_MAIN_SERVICE_CREDENTIAL", "shared-secret-0123456789")
+    monkeypatch.setattr(settings, "ERP_MAIN_API_BASE_URL", "https://main.example/api/v1/")
+    monkeypatch.setattr(settings, "ERP_MAIN_URL", "")
+    monkeypatch.setattr(settings, "ERP_MAIN_ISSUER", "")
+    monkeypatch.setattr(settings, "ERP_MAIN_JWKS_URL", "")
+    seen = _patch_http(monkeypatch)
+    assert await erp_main_client.push_profile_to_erp_main(" sales@example.com ", " Priya Sharma ") is True
+    assert seen["url"] == "https://main.example/api/v1/internal/users/profile"
+    assert seen["json"] == {"email": "sales@example.com", "display_name": "Priya Sharma"}
+    assert seen["headers"]["Authorization"] == "Bearer shared-secret-0123456789"
+    assert seen["headers"]["X-ERP-Key"] == settings.ERP_KEY
+
+    _patch_http(monkeypatch, boom=True)
+    assert await erp_main_client.push_profile_to_erp_main("sales@example.com", "Priya Sharma") is False

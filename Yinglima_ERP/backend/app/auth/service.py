@@ -73,6 +73,8 @@ class CurrentUser:
 
     id: uuid.UUID
     username: str
+    display_name: str = ""
+    full_name: str = ""
     permissions: set[str] = field(default_factory=set)
     access_token_jti: str = ""
     must_change_password: bool = False
@@ -499,6 +501,8 @@ class AuthService:
         return CurrentUser(
             id=user.id,
             username=user.username or user.email or str(user.id),
+            display_name=(user.display_name or "").strip() or user.full_name,
+            full_name=user.full_name,
             permissions=live_permissions,
             access_token_jti=payload["jti"],
             must_change_password=user.must_change_password,

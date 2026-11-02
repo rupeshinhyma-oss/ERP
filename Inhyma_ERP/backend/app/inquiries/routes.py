@@ -254,7 +254,7 @@ async def _record_action(
         action=action,
         module="inquiries",
         user_id=actor.id,
-        username_snapshot=actor.username,
+        username_snapshot=actor.display_name or actor.full_name or actor.username,
         entity_type="InquiryItem",
         entity_id=str(entity_id),
         new_values=new_values,
@@ -1726,7 +1726,7 @@ async def send_inquiry_email_message(
         {quoted_html}
         <br/><hr style="border: none; border-top: 1px solid #e2e8f0; margin: 20px 0;" />
         <div style="font-size: 12px; color: #64748b;">
-            Sent by <strong>{current_user.full_name or 'Yinglima Procurement Team'}</strong> via Yinglima ERP.<br/>
+            Sent by <strong>{current_user.display_name or current_user.full_name or current_user.username or 'Yinglima Procurement Team'}</strong> via Yinglima ERP.<br/>
             You can reply directly to this email.
         </div>
     </div>
@@ -1773,7 +1773,7 @@ async def send_inquiry_email_message(
         supplier_id=supplier_id,
         channel="email",
         direction="outbound",
-        sender_name=current_user.full_name or "Yinglima Procurement",
+        sender_name=current_user.display_name or current_user.full_name or current_user.username or "Yinglima Procurement",
         sender_contact=settings.SMTP_FROM_EMAIL,
         recipient_contact=", ".join(clean_recipients),
         message_text=f"Subject: {payload.subject}\n\n{payload.body}",

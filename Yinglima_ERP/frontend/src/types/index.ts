@@ -67,6 +67,7 @@ export interface Profile {
   id?: string;
   first_name?: string | null;
   last_name?: string | null;
+  display_name?: string | null;
   full_name?: string | null;
   employee_code?: string | null;
   username: string;
@@ -352,6 +353,7 @@ export interface DepartmentHierarchy {
 export interface RoleDeletionAffectedUser {
   id: string;
   username: string;
+  email?: string | null;
   display_name: string;
 }
 
@@ -436,6 +438,8 @@ export interface EffectivePermissionsBreakdown {
   is_super_admin?: boolean;
   user_info?: {
     employee_name: string;
+    display_name?: string | null;
+    email?: string | null;
     username: string;
     system_roles?: string[];
     status: string;

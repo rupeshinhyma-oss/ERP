@@ -49,6 +49,7 @@ class LeadRepository(BaseRepository[Lead]):
         priority: str | None = None,
         business_type: str | None = None,
         allotted_to: str | None = None,
+        allotted_to_names: set[str] | None = None,
         created_by: str | None = None,
         status: str | None = None,
         city: str | None = None,
@@ -79,7 +80,9 @@ class LeadRepository(BaseRepository[Lead]):
             stmt = stmt.where(func.lower(Lead.priority) == priority.strip().lower())
         if business_type and business_type.strip():
             stmt = stmt.where(func.lower(Lead.business_type) == business_type.strip().lower())
-        if allotted_to and allotted_to.strip():
+        if allotted_to_names:
+            stmt = stmt.where(func.lower(Lead.allotted_to).in_(sorted(allotted_to_names)))
+        elif allotted_to and allotted_to.strip():
             stmt = stmt.where(func.lower(Lead.allotted_to) == allotted_to.strip().lower())
         if created_by and created_by.strip():
             stmt = stmt.where(func.lower(Lead.created_by) == created_by.strip().lower())

@@ -56,7 +56,7 @@ class GlobalAuditService:
         return await self.repository.create(entry)
 
     async def list_recent(
-        self, *, limit: int = 100, event_type: AuditEventType | None = None, target_id: uuid.UUID | None = None
+        self, *, limit: int | None = None, event_type: AuditEventType | None = None, target_id: uuid.UUID | None = None
     ) -> list[GlobalAuditLog]:
-        """List the most recent audit entries, optionally filtered."""
+        """List control-plane audit entries newest-first, optionally filtered or limited."""
         return await self.repository.list_recent(limit=limit, event_type=event_type, target_id=target_id)

@@ -40,9 +40,9 @@ router = APIRouter(prefix="/internal/users", tags=["Internal (service credential
 
 
 async def push_password_to_memberships(
-    db: AsyncSession, user: GlobalUser, new_password: str, *, exclude_erp_key: str | None = None
+    db: AsyncSession, user: GlobalUser, new_password: str | None = None, *, exclude_erp_key: str | None = None
 ) -> dict[str, list[str]]:
-    """Push `new_password` to every ERP the user has an ACTIVE membership in. Never raises."""
+    """Push `display_name` (and optional `new_password`) to every ERP the user has an ACTIVE membership in. Never raises."""
     result: dict[str, list[str]] = {"synced": [], "failed": []}
     try:
         rows = (
@@ -124,6 +124,39 @@ async def sync_password_from_erp(
     await db.commit()  # persist before any network fan-out
 
     fanout = await push_password_to_memberships(db, user, payload.new_password, exclude_erp_key=erp_key)
+    data: dict[str, Any] = {"stored": True, "pushed_to": fanout["synced"], "push_failed": fanout["failed"]}
+    return build_success_response(data, request_id=getattr(request.state, "request_id", ""))
+
+
+class ProfileSyncRequest(BaseModel):
+    email: str = Field(..., min_length=3, max_length=320)
+    display_name: str = Field(..., min_length=1, max_length=200)
+
+
+@router.post("/profile", summary="An ERP reports that a user's display name changed there")
+async def sync_profile_from_erp(
+    payload: ProfileSyncRequest,
+    request: Request,
+    authorization: str | None = Header(default=None),
+    x_erp_key: str | None = Header(default=None, alias="X-ERP-Key"),
+    db: AsyncSession = Depends(get_db_session),
+) -> dict:
+    """Store the updated display_name centrally and fan it out to the person's other ERPs (best effort)."""
+    erp_key = _verify_erp_caller(authorization, x_erp_key)
+    email = payload.email.strip().lower()
+    clean_name = payload.display_name.strip()
+    user = await db.scalar(select(GlobalUser).where(func.lower(GlobalUser.primary_email) == email))
+    if user is None or user.status != GlobalUserStatus.ACTIVE:
+        raise NotFoundException("No active central user for that email.")
+
+    user.display_name = clean_name
+    admin = await db.scalar(select(PlatformAdmin).where(func.lower(PlatformAdmin.email) == email))
+    if admin is not None:
+        admin.display_name = clean_name
+    await db.flush()
+    await db.commit()
+
+    fanout = await push_password_to_memberships(db, user, None, exclude_erp_key=erp_key)
     data: dict[str, Any] = {"stored": True, "pushed_to": fanout["synced"], "push_failed": fanout["failed"]}
     return build_success_response(data, request_id=getattr(request.state, "request_id", ""))
 

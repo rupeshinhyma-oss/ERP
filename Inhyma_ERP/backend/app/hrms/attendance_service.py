@@ -1365,7 +1365,7 @@ class HrmsAttendanceService:
         # Resolve employee name
         user_res = await self.db.execute(select(User).where(User.id == user_id))
         user = user_res.scalar_one_or_none()
-        emp_name = f"{user.first_name} {user.last_name}".strip() if user else "Employee"
+        emp_name = (user.display_name or f"{user.first_name or ''} {user.last_name or ''}".strip() or user.username or "Employee") if user else "Employee"
         emp_email = user.email if user else None
 
         return RegularizationRead(
@@ -1433,11 +1433,11 @@ class HrmsAttendanceService:
         output = []
         for r in records:
             emp = users_map.get(r.employee_id)
-            emp_name = f"{emp.first_name} {emp.last_name}".strip() if emp else "Employee"
+            emp_name = (emp.display_name or f"{emp.first_name or ''} {emp.last_name or ''}".strip() or emp.username or "Employee") if emp else "Employee"
             emp_email = emp.email if emp else None
 
             rev = users_map.get(r.reviewed_by) if r.reviewed_by else None
-            rev_name = f"{rev.first_name} {rev.last_name}".strip() if rev else None
+            rev_name = (rev.display_name or f"{rev.first_name or ''} {rev.last_name or ''}".strip() or rev.username) if rev else None
 
             att = att_map.get(r.attendance_record_id)
             punch_in_str = r.punch_in_time or format_time_ist(att.punch_in if att else None)
@@ -1665,7 +1665,7 @@ class HrmsAttendanceService:
         return RegularizationRead(
             id=reg_req.id,
             employee_id=reg_req.employee_id,
-            employee_name=f"{emp.first_name} {emp.last_name}".strip() if emp else "Employee",
+            employee_name=(emp.display_name or f"{emp.first_name or ''} {emp.last_name or ''}".strip() or emp.username or "Employee") if emp else "Employee",
             employee_email=emp.email if emp else None,
             attendance_record_id=reg_req.attendance_record_id,
             attendance_date=reg_req.attendance_date.isoformat(),
@@ -1683,7 +1683,7 @@ class HrmsAttendanceService:
             submitted_at=reg_req.submitted_at,
             reviewed_at=reg_req.reviewed_at,
             reviewed_by=reg_req.reviewed_by,
-            reviewed_by_name=f"{rev.first_name} {rev.last_name}".strip() if rev else None,
+            reviewed_by_name=(rev.display_name or f"{rev.first_name or ''} {rev.last_name or ''}".strip() or rev.username) if rev else None,
             manager_remarks=reg_req.manager_remarks,
             action_taken=reg_req.action_taken,
         )
@@ -1764,7 +1764,7 @@ class HrmsAttendanceService:
         return RegularizationRead(
             id=reg_req.id,
             employee_id=reg_req.employee_id,
-            employee_name=f"{emp.first_name} {emp.last_name}".strip() if emp else "Employee",
+            employee_name=(emp.display_name or f"{emp.first_name or ''} {emp.last_name or ''}".strip() or emp.username or "Employee") if emp else "Employee",
             employee_email=emp.email if emp else None,
             attendance_record_id=reg_req.attendance_record_id,
             attendance_date=reg_req.attendance_date.isoformat(),
@@ -1782,7 +1782,7 @@ class HrmsAttendanceService:
             submitted_at=reg_req.submitted_at,
             reviewed_at=reg_req.reviewed_at,
             reviewed_by=reg_req.reviewed_by,
-            reviewed_by_name=f"{rev.first_name} {rev.last_name}".strip() if rev else None,
+            reviewed_by_name=(rev.display_name or f"{rev.first_name or ''} {rev.last_name or ''}".strip() or rev.username) if rev else None,
             manager_remarks=reg_req.manager_remarks,
             action_taken=reg_req.action_taken,
         )
@@ -2135,7 +2135,7 @@ class HrmsAttendanceService:
             s_term = search.strip().lower()
             users = [
                 u for u in users
-                if s_term in f"{u.first_name or ''} {u.last_name or ''} {u.username or ''} {u.employee_code or ''}".lower()
+                if s_term in f"{u.display_name or ''} {u.first_name or ''} {u.last_name or ''} {u.username or ''} {u.employee_code or ''}".lower()
             ]
 
         filtered_uids = [u.id for u in users]
@@ -2193,7 +2193,7 @@ class HrmsAttendanceService:
             emp_code = u.employee_code or getattr(u, "code", None) or f"EMP-{str(u.id)[:6].upper()}"
             first = u.first_name or ""
             last = u.last_name or ""
-            emp_name = f"{first} {last}".strip() or getattr(u, "display_name", None) or u.username or "Employee"
+            emp_name = getattr(u, "display_name", None) or f"{first} {last}".strip() or u.username or "Employee"
             doj = getattr(u, "date_of_joining", None)
 
             # Holiday resolution for this employee

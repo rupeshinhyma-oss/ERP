@@ -1533,7 +1533,7 @@ export function LeadImportPage({ embedded = false, onClose, onSuccess }: LeadImp
                         <div style={{ fontSize: "24px" }}>👤</div>
                         <div>
                           <div style={{ fontSize: "13px", fontWeight: 600, color: "#166534" }}>
-                            Assigned Directly to You ({profile?.full_name || profile?.username || "You"})
+                            Assigned Directly to You ({profile?.display_name || profile?.full_name || [profile?.first_name, profile?.last_name].filter(Boolean).join(" ").trim() || "You"})
                           </div>
                           <div style={{ fontSize: "12px", color: "#15803d", marginTop: "2px" }}>
                             All new valid leads created from this CSV import will be automatically assigned to your personal account. Team distribution and other assignees are not available for salesperson accounts.

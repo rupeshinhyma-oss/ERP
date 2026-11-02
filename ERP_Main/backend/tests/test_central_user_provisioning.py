@@ -80,6 +80,7 @@ class ConfigurableTestAdapter(BaseErpProvisioningAdapter):
         first_name: str | None = None,
         last_name: str | None = None,
         target_organization_id: str | None = None,
+        password: str | None = None,
     ) -> dict[str, Any]:
         self.provision_call_count += 1
         if callable(self.provision_behavior):
@@ -89,6 +90,7 @@ class ConfigurableTestAdapter(BaseErpProvisioningAdapter):
 
         norm = email.strip().lower()
         if norm in self.users:
+            self.users[norm]["display_name"] = display_name
             return {"local_user_id": self.users[norm]["local_user_id"], "created": False}
 
         local_id = str(uuid.uuid4())
@@ -469,3 +471,53 @@ async def test_erp_local_rbac_remains_untouched(admin_client, test_adapter):
     data = resp.json()["data"]
     assert "roles" not in data
     assert "permissions" not in data
+
+
+# -----------------------------------------------------------------------------
+# 16. Display Name sync from ERP_Main -> spoke ERPs & spoke ERP -> ERP_Main
+# -----------------------------------------------------------------------------
+@pytest.mark.asyncio
+async def test_global_user_display_name_update_pushes_to_active_erps(admin_client, test_adapter):
+    erp_id = await _create_test_erp(admin_client, key="erp_dn_push")
+    user_id = await _create_test_global_user(admin_client, email="dnpusher@example.com", name="Initial Name")
+
+    resp = await admin_client.post(f"/api/v1/global/users/{user_id}/provision", json={"erp_instance_id": erp_id})
+    assert resp.status_code == 201
+    assert test_adapter.users["dnpusher@example.com"]["display_name"] == "Initial Name"
+    before_calls = test_adapter.provision_call_count
+
+    patch_resp = await admin_client.patch(
+        f"/api/v1/global/users/{user_id}",
+        json={"display_name": "Updated Sales Name"},
+    )
+    assert patch_resp.status_code == 200
+    assert patch_resp.json()["data"]["display_name"] == "Updated Sales Name"
+    assert test_adapter.provision_call_count == before_calls + 1
+    assert test_adapter.users["dnpusher@example.com"]["display_name"] == "Updated Sales Name"
+
+
+@pytest.mark.asyncio
+async def test_sync_profile_from_erp_updates_central_and_fans_out(admin_client, client, test_adapter, monkeypatch):
+    from app.core.config import settings
+
+    monkeypatch.setattr(type(settings), "get_service_credential_for_erp", lambda self, key: "test-svc-secret")
+    erp_inhyma = await _create_test_erp(admin_client, key="inhyma_sync")
+    erp_yinglima = await _create_test_erp(admin_client, key="yinglima_sync")
+    user_id = await _create_test_global_user(admin_client, email="fanout@example.com", name="Before Sync")
+
+    await admin_client.post(f"/api/v1/global/users/{user_id}/provision", json={"erp_instance_id": erp_inhyma})
+    await admin_client.post(f"/api/v1/global/users/{user_id}/provision", json={"erp_instance_id": erp_yinglima})
+
+    sync_resp = await client.post(
+        "/api/v1/internal/users/profile",
+        json={"email": "fanout@example.com", "display_name": "Synced Display Name"},
+        headers={"Authorization": "Bearer test-svc-secret", "X-ERP-Key": "inhyma_sync"},
+    )
+    assert sync_resp.status_code == 200, sync_resp.text
+    sync_data = sync_resp.json()["data"]
+    assert sync_data["stored"] is True
+    assert sync_data["pushed_to"] == ["yinglima_sync"]
+
+    get_resp = await admin_client.get(f"/api/v1/global/users/{user_id}")
+    assert get_resp.json()["data"]["display_name"] == "Synced Display Name"
+    assert test_adapter.users["fanout@example.com"]["display_name"] == "Synced Display Name"

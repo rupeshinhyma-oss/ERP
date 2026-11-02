@@ -471,7 +471,7 @@ async def build_monthly_attendance_excel(
         emp_code = u.employee_code or getattr(u, "code", None) or f"EMP-{str(u.id)[:6].upper()}"
         first = u.first_name or ""
         last = u.last_name or ""
-        emp_name = f"{first} {last}".strip() or getattr(u, "username", "Employee") or "Employee"
+        emp_name = getattr(u, "display_name", None) or f"{first} {last}".strip() or getattr(u, "username", "Employee") or "Employee"
         emp_branch = branch_map.get(u.id) or "Main Office"
         emp_dept = dept_map.get(u.id) or getattr(u, "department", None) or "General"
         raw_emp_type = getattr(u.employment_type, "value", u.employment_type) or getattr(u, "employment_status", None) or "Full-Time"

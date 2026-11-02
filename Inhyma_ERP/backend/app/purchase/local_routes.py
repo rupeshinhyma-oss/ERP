@@ -394,7 +394,7 @@ async def import_local_purchases(
                         offloading=off,
                         items=items_in,
                     )
-                    record = LocalPurchase(status=initial_st, created_by=user.username)
+                    record = LocalPurchase(status=initial_st, created_by=user.display_name or user.full_name or user.username)
                     record.supplier_name, record.supplier_id = supplier.company_name, supplier.id
                     record.warehouse = warehouse.name
                     record.invoice_no = invoice_no
@@ -470,7 +470,7 @@ async def create_local_purchase(
 ) -> dict:
     rules = await wf.load_status_rules(db, GROUP)
     supplier, warehouse, result = await _prepare(db, payload)
-    record = LocalPurchase(status=wf.initial_status(rules), created_by=user.username)
+    record = LocalPurchase(status=wf.initial_status(rules), created_by=user.display_name or user.full_name or user.username)
     _apply(record, payload, supplier, warehouse, result)
     db.add(record)
     await db.flush()
@@ -512,7 +512,7 @@ async def update_local_status(
     if rules[target].get("stock_in") and not record.stock_applied:
         await move_stock(db, record.warehouse, [(i.product_name, i.quantity) for i in record.items], +1)
         record.stock_applied = True
-        record.confirmed_by, record.confirmed_at = user.username, datetime.now(timezone.utc)
+        record.confirmed_by, record.confirmed_at = (user.display_name or user.full_name or user.username), datetime.now(timezone.utc)
     record.status = target
     await db.flush()
     await db.refresh(record, attribute_names=["items"])

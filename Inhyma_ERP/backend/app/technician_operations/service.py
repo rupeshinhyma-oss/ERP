@@ -108,8 +108,13 @@ class TechnicianOperationsService:
         current_user: CurrentUser | None = None,
     ) -> GatepassRead:
         """Create an Outward Spare Parts Gatepass for technician field visit."""
-        if current_user and current_user.full_name:
-            payload.issued_by_name = current_user.full_name
+        actor_name = (
+            getattr(current_user, "display_name", None)
+            or getattr(current_user, "full_name", None)
+            or getattr(current_user, "username", None)
+        )
+        if actor_name:
+            payload.issued_by_name = actor_name
 
         gatepass = await self.repo.create_gatepass(payload)
         await self.session.commit()

@@ -1515,15 +1515,22 @@ function TechnicalTasksPageContent() {
   // The API enforces the same rules; these only decide which menu items are shown.
   const { profile: authProfile, isSuperAdmin, hasPermission } = useAuth();
   const isAdminLevel = isSuperAdmin || hasPermission("technicaltask.manage");
-  const myUsername = authProfile?.username || "";
+  const myActorLabels = new Set(
+    [authProfile?.display_name, authProfile?.full_name, authProfile?.username]
+      .map((v) => String(v || "").trim())
+      .filter(Boolean)
+  );
   const canEditTask = (t: TechnicalTask) => {
     const st = t.status.toLowerCase();
     if (st === "pending") return true;
-    if (st === "approved") return isAdminLevel || t.task_approved_by === myUsername;
+    if (st === "approved") {
+      return isAdminLevel || (Boolean(t.task_approved_by) && myActorLabels.has(String(t.task_approved_by).trim()));
+    }
     return false;
   };
   const canDeleteTask = (t: TechnicalTask) => t.status.toLowerCase() === "pending" || isAdminLevel;
-  const canReopenTask = (t: TechnicalTask) => isAdminLevel || !t.task_approved_by || t.task_approved_by === myUsername;
+  const canReopenTask = (t: TechnicalTask) =>
+    isAdminLevel || !t.task_approved_by || myActorLabels.has(String(t.task_approved_by).trim());
 
   const loadCompanyContacts = useCallback(async (companyId?: string | null) => {
     if (!companyId) {

@@ -91,7 +91,7 @@ async def create_stock_movement(
     movement = await service.create_movement(
         payload,
         created_by_id=current_user.id if hasattr(current_user, "id") else None,
-        created_by_name=getattr(current_user, "full_name", None) or getattr(current_user, "username", "Admin"),
+        created_by_name=getattr(current_user, "display_name", None) or getattr(current_user, "full_name", None) or getattr(current_user, "username", None) or "Admin",
     )
     return build_success_response(
         data=StockMovementResponse.model_validate(movement).model_dump(mode="json"),

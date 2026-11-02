@@ -592,10 +592,10 @@ export function AppShell({
                     </div>
                   </div>
 
-                  {hasPermission("platform.system.manage") && (
+                  {hasPermission("platform.user.read") && (
                     <div style={{ padding: "4px 0" }}>
                       <Link
-                        to="/health"
+                        to={Auth.getPrincipalType() === "global_user" && profile?.id ? `/access/users/${profile.id}` : "/access/users/me"}
                         onClick={() => setUserDropdownOpen(false)}
                         style={{
                           display: "flex",
@@ -607,8 +607,8 @@ export function AppShell({
                           textDecoration: "none",
                         }}
                       >
-                        <ICONS.settings width={15} height={15} />
-                        Platform Settings
+                        <ICONS.user width={15} height={15} />
+                        Profile
                       </Link>
                     </div>
                   )}

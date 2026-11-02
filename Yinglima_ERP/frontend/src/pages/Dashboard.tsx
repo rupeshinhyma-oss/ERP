@@ -4,9 +4,12 @@ import { useAuth } from "@/lib/hooks";
 export function DashboardPage() {
   const { profile } = useAuth();
 
-  const titleName = profile && typeof profile === "object"
-    ? profile.full_name || profile.username || "Rupesh Malla"
-    : "Rupesh Malla";
+  const titleName =
+    (profile && typeof profile === "object"
+      ? profile.display_name ||
+        profile.full_name ||
+        [profile.first_name, profile.last_name].filter(Boolean).join(" ").trim()
+      : "") || "Yinglima ERP";
 
   return (
     <AppShell activeKey="dashboard">

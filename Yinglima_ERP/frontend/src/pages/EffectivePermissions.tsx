@@ -205,7 +205,7 @@ export function EffectivePermissionsPage() {
             <option value="">Select User...</option>
             {users.map((u) => (
               <option key={u.id} value={u.id}>
-                {`${u.username} (${u.email}) - Status: ${u.status}`}
+                {`${u.display_name || u.full_name || u.email || "Unnamed"} (${u.email || "No email"}) - Status: ${u.status}`}
               </option>
             ))}
           </select>
@@ -226,8 +226,8 @@ export function EffectivePermissionsPage() {
             <div className="info-card">
               <div className="section-header-title">👤 User Information</div>
               <div className="info-grid">
-                <InfoItem label="Employee Name" value={info.employee_name} />
-                <InfoItem label="Username" value={info.username} />
+                <InfoItem label="Display Name" value={info.display_name || info.employee_name} />
+                <InfoItem label="Email" value={info.email || "—"} />
                 <InfoItem label="Assigned Role(s)" value={rolesText} />
                 <InfoItem
                   label="Account Status"

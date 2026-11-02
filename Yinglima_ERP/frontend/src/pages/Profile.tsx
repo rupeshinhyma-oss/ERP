@@ -10,15 +10,19 @@ import { useNavigate } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
 import { Banner } from "@/components/ui";
 import { apiGet, apiPatch, apiPost } from "@/lib/api";
+import { Auth } from "@/lib/auth";
+import { getEcosystemCookie, setEcosystemCookie } from "@/lib/ecosystemSession";
 import { useAuth } from "@/lib/hooks";
 
 interface UserProfileData {
   id: string;
+  display_name?: string | null;
+  full_name?: string | null;
   first_name?: string | null;
   last_name?: string | null;
   email: string;
   phone?: string | null;
-  username: string;
+  username?: string;
 }
 
 function ProfileFormSkeleton() {
@@ -50,6 +54,7 @@ export function ProfilePage() {
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
   /* Profile Form state */
+  const [displayName, setDisplayName] = useState("");
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
   const [email, setEmail] = useState("");
@@ -74,6 +79,12 @@ export function ProfilePage() {
         const res = await apiGet<UserProfileData>("/auth/profile");
         const data = res.data;
         if (data) {
+          setDisplayName(
+            data.display_name ||
+              data.full_name ||
+              [data.first_name, data.last_name].filter(Boolean).join(" ").trim() ||
+              ""
+          );
           setFirstName(data.first_name || "");
           setLastName(data.last_name || "");
           setEmail(data.email || "");
@@ -94,13 +105,30 @@ export function ProfilePage() {
     setSuccessMsg(null);
     setSavingProfile(true);
 
+    const cleanDisplayName = displayName.trim();
+    const cleanFirstName = firstName.trim() || null;
+    const cleanLastName = lastName.trim() || null;
+
     try {
       await apiPatch(`/users/${profile.id}`, {
-        first_name: firstName.trim() || null,
-        last_name: lastName.trim() || null,
+        display_name: cleanDisplayName,
+        first_name: cleanFirstName,
+        last_name: cleanLastName,
         email: email.trim(),
         phone: phone.trim() || null,
       });
+      Auth.updateProfile({
+        ...profile,
+        display_name: cleanDisplayName,
+        full_name: cleanDisplayName,
+        first_name: cleanFirstName,
+        last_name: cleanLastName,
+        phone: phone.trim() || null,
+      });
+      const currentCookie = getEcosystemCookie();
+      if (currentCookie && cleanDisplayName) {
+        setEcosystemCookie({ ...currentCookie, display_name: cleanDisplayName });
+      }
       setSuccessMsg("Profile information updated successfully!");
     } catch (err) {
       setError(err);
@@ -202,6 +230,31 @@ export function ProfilePage() {
                   marginBottom: "28px",
                 }}
               >
+              <div>
+                <label style={{ display: "block", fontSize: "14px", fontWeight: 600, color: "#334155", marginBottom: "8px" }}>
+                  Display Name <span style={{ color: "#dc2626" }}>*</span>
+                </label>
+                <input
+                  type="text"
+                  value={displayName}
+                  disabled={loading}
+                  minLength={1}
+                  maxLength={200}
+                  onChange={(e) => setDisplayName(e.target.value)}
+                  placeholder="Enter Display Name"
+                  style={{
+                    width: "100%",
+                    padding: "10px 14px",
+                    borderRadius: "6px",
+                    border: "1px solid #cbd5e1",
+                    fontSize: "14px",
+                    color: "#0f172a",
+                    outline: "none",
+                  }}
+                  required
+                />
+              </div>
+
               <div>
                 <label style={{ display: "block", fontSize: "14px", fontWeight: 600, color: "#334155", marginBottom: "8px" }}>
                   First Name <span style={{ color: "#dc2626" }}>*</span>

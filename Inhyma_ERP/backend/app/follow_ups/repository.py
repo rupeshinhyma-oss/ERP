@@ -94,6 +94,7 @@ class FollowUpRepository(BaseRepository[FollowUp]):
         search: str | None = None,
         call_type: str | None = None,
         marketing_person: str | None = None,
+        marketing_person_names: set[str] | None = None,
         business_type: str | None = None,
         state: str | None = None,
         district: str | None = None,
@@ -127,7 +128,9 @@ class FollowUpRepository(BaseRepository[FollowUp]):
             stmt = stmt.where(func.lower(FollowUp.call_category) == call_category.strip().lower())
         if call_type and call_type.strip() and call_type.strip().lower() not in ("all", "select"):
             stmt = stmt.where(func.lower(FollowUp.call_type) == call_type.strip().lower())
-        if marketing_person and marketing_person.strip() and marketing_person.strip().lower() not in ("all", "select"):
+        if marketing_person_names:
+            stmt = stmt.where(func.lower(FollowUp.marketing_person).in_(sorted(marketing_person_names)))
+        elif marketing_person and marketing_person.strip() and marketing_person.strip().lower() not in ("all", "select"):
             stmt = stmt.where(func.lower(FollowUp.marketing_person) == marketing_person.strip().lower())
         if business_type and business_type.strip() and business_type.strip().lower() not in ("all", "select"):
             stmt = stmt.where(func.lower(FollowUp.business_type) == business_type.strip().lower())

@@ -235,6 +235,7 @@ export function SaleProcessFormPage() {
   const loggedInUserName = useMemo(() => {
     if (!profile) return "Admin";
     return (
+      profile.display_name ||
       profile.full_name ||
       (profile.first_name ? `${profile.first_name} ${profile.last_name || ""}`.trim() : (profile.username === "admin" ? "Admin" : profile.username))
     );
@@ -243,10 +244,10 @@ export function SaleProcessFormPage() {
   const [salesPersonOptions, setSalesPersonOptions] = useState<string[]>([]);
 
   useEffect(() => {
-    void apiGet<Array<{ id: string; full_name: string; username: string }>>("/companies/sales-persons")
+    void apiGet<Array<{ id: string; display_name?: string | null; full_name: string; username: string }>>("/companies/sales-persons")
       .then((res) => {
         if (res?.data && res.data.length > 0) {
-          const names = res.data.map((u) => u.full_name || u.username);
+          const names = res.data.map((u) => u.display_name || u.full_name || u.username);
           setSalesPersonOptions((prev) => Array.from(new Set([...names, ...prev])));
         }
       })

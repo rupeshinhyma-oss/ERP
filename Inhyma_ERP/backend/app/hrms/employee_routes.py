@@ -48,7 +48,7 @@ async def list_hrms_employees(
             User.is_active.is_(True),
             User.status == UserStatus.ACTIVE,
         )
-        .order_by(User.first_name.asc(), User.username.asc())
+        .order_by(User.display_name.asc(), User.first_name.asc(), User.username.asc())
     )
 
     if not (ctx.is_admin or ctx.is_hr):
@@ -101,7 +101,7 @@ async def list_hrms_employees(
         # Optional search filter
         if search and search.strip():
             term = search.strip().lower()
-            match_str = f"{u.first_name or ''} {u.last_name or ''} {u.username or ''} {u.email or ''} {u.employee_code or ''}".lower()
+            match_str = f"{u.display_name or ''} {u.first_name or ''} {u.last_name or ''} {u.username or ''} {u.email or ''} {u.employee_code or ''}".lower()
             if term not in match_str:
                 continue
 
@@ -114,6 +114,7 @@ async def list_hrms_employees(
             {
                 "id": str(u.id),
                 "employee_code": u.employee_code or f"EMP-{str(u.id)[:6].upper()}",
+                "display_name": u.display_name or u.full_name,
                 "full_name": u.full_name,
                 "first_name": u.first_name or "",
                 "last_name": u.last_name or "",

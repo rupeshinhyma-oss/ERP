@@ -1305,8 +1305,8 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
   const [filterDistricts, setFilterDistricts] = useState<Array<{ id: string; name: string; state_id?: string }>>([]);
   const [filterCities, setFilterCities] = useState<Array<{ id: string; name: string; state_id?: string; district_id?: string }>>([]);
   const [companyCategories, setCompanyCategories] = useState<Array<{ id: string; name: string; business_type?: string }>>([]);
-  const [filterSalesPersons, setFilterSalesPersons] = useState<Array<{ id: string; full_name: string; username: string }>>([]);
-  const [salesPersons, setSalesPersons] = useState<Array<{ id: string; full_name: string; username: string }>>([]);
+  const [filterSalesPersons, setFilterSalesPersons] = useState<Array<{ id: string; display_name?: string | null; full_name: string; username: string }>>([]);
+  const [salesPersons, setSalesPersons] = useState<Array<{ id: string; display_name?: string | null; full_name: string; username: string }>>([]);
   const [filterBusinessTypes] = useState<Array<{ value: string; label: string }>>([
     { value: "", label: "All" },
     { value: "B2B", label: "B2B" },
@@ -1338,7 +1338,7 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
       })
       .catch(() => { });
 
-    void apiGet<Array<{ id: string; full_name: string; username: string }>>("/companies/sales-persons")
+    void apiGet<Array<{ id: string; display_name?: string | null; full_name: string; username: string }>>("/companies/sales-persons")
       .then((res) => {
         if (res?.data && res.data.length > 0) {
           setFilterSalesPersons(res.data);
@@ -1597,15 +1597,18 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
   const getLoggedInSalesPersonId = useCallback((): string => {
     if (!profile) return "";
     const pId = profile.id ? String(profile.id).toLowerCase() : "";
+    const pDisp = (profile.display_name || "").trim().toLowerCase();
     const pUser = (profile.username || "").toLowerCase();
-    const pFull = (profile.full_name || `${profile.first_name || ""} ${profile.last_name || ""}`).trim().toLowerCase();
+    const pFull = (profile.display_name || profile.full_name || `${profile.first_name || ""} ${profile.last_name || ""}`).trim().toLowerCase();
 
     const match = salesPersons.find((u) => {
       const uId = String(u.id).toLowerCase();
+      const uDisp = (u.display_name || "").trim().toLowerCase();
       const uUser = (u.username || "").toLowerCase();
-      const uFull = (u.full_name || "").toLowerCase();
+      const uFull = (u.display_name || u.full_name || "").toLowerCase();
       return (
         (pId && uId === pId) ||
+        (pDisp && (uDisp === pDisp || uFull === pDisp)) ||
         (pUser && (uUser === pUser || uFull === pUser)) ||
         (pFull && (uFull === pFull || uUser === pFull))
       );
@@ -1624,10 +1627,15 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
         return (pId && uId === pId) || (pUser && uUser === pUser);
       });
       if (!exists && profile.id) {
+        const primaryLabel =
+          profile.display_name ||
+          profile.full_name ||
+          (profile.first_name ? `${profile.first_name} ${profile.last_name || ""}`.trim() : (profile.username === "admin" ? "Admin" : profile.username));
         list.unshift({
           id: profile.id,
           username: profile.username || "admin",
-          full_name: profile.full_name || (profile.first_name ? `${profile.first_name} ${profile.last_name || ""}`.trim() : (profile.username === "admin" ? "Admin" : profile.username)),
+          display_name: profile.display_name || primaryLabel,
+          full_name: primaryLabel,
         });
       }
     }
@@ -1665,7 +1673,7 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
         .catch(() => { });
 
 
-      void apiGet<Array<{ id: string; full_name: string; username: string }>>("/companies/sales-persons")
+      void apiGet<Array<{ id: string; display_name?: string | null; full_name: string; username: string }>>("/companies/sales-persons")
         .then((res) => {
           if (res?.data && res.data.length > 0) {
             setSalesPersons(res.data);
@@ -1682,7 +1690,8 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
                 const mapped = res.data.map((u) => ({
                   id: u.id,
                   username: u.username,
-                  full_name: u.full_name || u.username,
+                  display_name: u.display_name || null,
+                  full_name: u.display_name || u.full_name || u.username,
                 }));
                 setSalesPersons(mapped);
               }
@@ -4705,7 +4714,7 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
                       <option value="">Select Sales Person</option>
                       {effectiveSalesPersons.map((sp) => (
                         <option key={sp.id} value={sp.id}>
-                          {sp.full_name || sp.username}
+                          {sp.display_name || sp.full_name || sp.username}
                         </option>
                       ))}
                     </select>
@@ -6429,7 +6438,7 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
                     <option value="">All</option>
                     <option value="blank">Blank</option>
                     {filterSalesPersons.map((sp) => (
-                      <option key={sp.id} value={sp.id}>{sp.full_name || sp.username}</option>
+                      <option key={sp.id} value={sp.id}>{sp.display_name || sp.full_name || sp.username}</option>
                     ))}
                   </select>
                 </div>
@@ -6907,7 +6916,7 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
                                 <td key="cell-13" style={getFreezeStyle(13, false)}>
                                   {(() => {
                                     const sp = filterSalesPersons.find((u) => u.id === s.sales_person_id) || salesPersons.find((u) => u.id === s.sales_person_id);
-                                    const spName = sp ? (sp.full_name || sp.username) : (s.sales_person_id ? "Assigned" : "—");
+                                    const spName = sp ? (sp.display_name || sp.full_name || sp.username) : (s.sales_person_id ? "Assigned" : "—");
                                     return (
                                       <div>
                                         <div style={{ fontWeight: 600, color: "#1e293b", fontSize: "12px" }}>
@@ -7028,7 +7037,7 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
                     label: "Sales Person (Assigned)",
                     value: (() => {
                       const sp = filterSalesPersons.find((u) => u.id === drawerCompany.sales_person_id) || salesPersons.find((u) => u.id === drawerCompany.sales_person_id);
-                      return sp ? (sp.full_name || sp.username) : (drawerCompany.sales_person_id ? "Assigned" : "—");
+                      return sp ? (sp.display_name || sp.full_name || sp.username) : (drawerCompany.sales_person_id ? "Assigned" : "—");
                     })(),
                   },
                   { label: "Country", value: resolver.get("countries", drawerCompany.country_id) || "—" },
@@ -7671,7 +7680,7 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
                 id="quick_sales_person"
                 value={quickForm.sales_person_id}
                 placeholder="Select Sales Person"
-                options={effectiveSalesPersons.map((u) => ({ value: u.id, label: u.full_name || u.username }))}
+                options={effectiveSalesPersons.map((u) => ({ value: u.id, label: u.display_name || u.full_name || u.username }))}
                 onChange={(val) => setQuickForm((p) => ({ ...p, sales_person_id: val }))}
               />
             </div>

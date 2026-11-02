@@ -65,6 +65,7 @@ export interface TokenPair {
 
 export interface Profile {
   id?: string;
+  display_name?: string | null;
   first_name?: string | null;
   last_name?: string | null;
   full_name?: string | null;

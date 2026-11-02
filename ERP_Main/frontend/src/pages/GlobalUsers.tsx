@@ -13,6 +13,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { apiDelete, apiGet, apiPatch, apiPost } from "@/lib/api";
+import { Auth } from "@/lib/auth";
+import { getEcosystemCookie, setEcosystemCookie } from "@/lib/ecosystemSession";
 import { useToast } from "@/lib/toast";
 import { AppShell } from "@/components/AppShell";
 import { SectionNavTabs } from "@/components/SectionNavTabs";
@@ -194,14 +196,42 @@ export function GlobalUsers() {
   };
 
   useEffect(() => {
-    if (routeUserId && users.length > 0) {
-      const found = users.find((u) => u.id === routeUserId);
-      if (found) {
-        setDetailUser(found);
-        loadUserDetailData(found.id);
-      } else {
-        // The user may be on another page of the list: fetch them directly.
-        apiGet<GlobalUser>(`/global/users/${routeUserId}`)
+    if (!routeUserId) return;
+    if (detailUser && (detailUser.id === routeUserId || routeUserId === "me")) {
+      return;
+    }
+
+    if (routeUserId === "me") {
+      const currentProfile = Auth.getProfile();
+      const principalType = Auth.getPrincipalType();
+      const currentEmail = (
+        currentProfile
+          ? "primary_email" in currentProfile
+            ? currentProfile.primary_email
+            : currentProfile.email
+          : ""
+      )
+        .trim()
+        .toLowerCase();
+
+      const foundInPage = users.find((u) => {
+        if (principalType === "global_user" && currentProfile?.id && u.id === currentProfile.id) {
+          return true;
+        }
+        const uEmail = (u.primary_email || u.email || "").trim().toLowerCase();
+        return Boolean(currentEmail && uEmail === currentEmail);
+      });
+
+      if (foundInPage) {
+        setDetailUser(foundInPage);
+        loadUserDetailData(foundInPage.id);
+        return;
+      }
+
+      if (loading) return;
+
+      if (principalType === "global_user" && currentProfile?.id) {
+        apiGet<GlobalUser>(`/global/users/${currentProfile.id}`)
           .then((res) => {
             const u = (res as any)?.data ?? res;
             if (u?.id) {
@@ -210,9 +240,63 @@ export function GlobalUsers() {
             }
           })
           .catch(() => undefined);
+        return;
       }
+
+      if (currentEmail) {
+        apiGet<GlobalUser[]>(`/global/users?search=${encodeURIComponent(currentEmail)}&limit=50`)
+          .then((res) => {
+            const list: GlobalUser[] = Array.isArray(res) ? res : ((res as any)?.data || []);
+            const matched = list.find(
+              (u) => (u.primary_email || u.email || "").trim().toLowerCase() === currentEmail
+            );
+            if (matched) {
+              setDetailUser(matched);
+              loadUserDetailData(matched.id);
+            } else if (currentProfile) {
+              setDetailUser({
+                id: currentProfile.id,
+                primary_email: currentEmail,
+                email: currentEmail,
+                display_name: currentProfile.display_name || "Super Admin",
+                status:
+                  "is_active" in currentProfile && currentProfile.is_active === false
+                    ? "DISABLED"
+                    : "ACTIVE",
+                created_at: ("created_at" in currentProfile && currentProfile.created_at) ? currentProfile.created_at : new Date().toISOString(),
+                metadata: {
+                  role:
+                    "role" in currentProfile && currentProfile.role === "SUPER_ADMIN"
+                      ? "PLATFORM_SUPER_ADMIN"
+                      : "PLATFORM_ADMIN",
+                },
+              } as unknown as GlobalUser);
+              setUserMemberships([]);
+              setUserRoles([]);
+            }
+          })
+          .catch(() => undefined);
+      }
+      return;
     }
-  }, [routeUserId, users, loadUserDetailData]);
+
+    const found = users.find((u) => u.id === routeUserId);
+    if (found) {
+      setDetailUser(found);
+      loadUserDetailData(found.id);
+    } else if (!loading) {
+      // The user may be on another page of the list: fetch them directly.
+      apiGet<GlobalUser>(`/global/users/${routeUserId}`)
+        .then((res) => {
+          const u = (res as any)?.data ?? res;
+          if (u?.id) {
+            setDetailUser(u);
+            loadUserDetailData(u.id);
+          }
+        })
+        .catch(() => undefined);
+    }
+  }, [routeUserId, users, loading, detailUser, loadUserDetailData]);
 
   // Spoke ERP Resolution
   const yinglimaErp = useMemo(
@@ -285,9 +369,11 @@ export function GlobalUsers() {
     if (!u) return false;
     const email = (u.primary_email || u.email || "").toLowerCase();
     const name = (u.display_name || "").toLowerCase();
+    const metaRole = String(((u as any).metadata || (u as any).metadata_json || {}).role || "").toUpperCase();
     return (
       email === "admin@example.com" ||
       email.startsWith("admin@") ||
+      metaRole === "PLATFORM_SUPER_ADMIN" ||
       name.includes("super admin") ||
       name === "admin" ||
       name === "administrator"
@@ -710,6 +796,36 @@ export function GlobalUsers() {
         }
       }
 
+      const nextDisplayName = editDisplayName.trim() || editingUser.display_name;
+      const nextEmail = !isRowUserAdmin(editingUser) && editEmail.trim()
+        ? editEmail.trim().toLowerCase()
+        : (editingUser.primary_email || editingUser.email || "").trim().toLowerCase();
+
+      // Keep active session profile (topbar header, Dashboard greeting, ecosystem cookie) in sync if editing self
+      const currentProfile = Auth.getProfile();
+      if (currentProfile) {
+        const currentEmail = (
+          "primary_email" in currentProfile ? currentProfile.primary_email : currentProfile.email
+        )
+          .trim()
+          .toLowerCase();
+        const editedOriginalEmail = (editingUser.primary_email || editingUser.email || "").trim().toLowerCase();
+        const isEditingSelf =
+          (Auth.getPrincipalType() === "global_user" && currentProfile.id === editingUser.id) ||
+          Boolean(currentEmail && currentEmail === editedOriginalEmail);
+        if (isEditingSelf) {
+          const updatedSessionProfile =
+            "primary_email" in currentProfile
+              ? { ...currentProfile, display_name: nextDisplayName, primary_email: nextEmail }
+              : { ...currentProfile, display_name: nextDisplayName, email: nextEmail };
+          Auth.updateProfile(updatedSessionProfile);
+          const cookie = getEcosystemCookie();
+          if (cookie) {
+            setEcosystemCookie({ ...cookie, display_name: nextDisplayName, email: nextEmail });
+          }
+        }
+      }
+
       toast("Global user updated successfully.", "success");
       setEditModalOpen(false);
       setEditingUser(null);
@@ -717,8 +833,8 @@ export function GlobalUsers() {
       if (detailUser && detailUser.id === editingUser.id) {
         setDetailUser((prev) => (prev ? {
           ...prev,
-          display_name: editDisplayName,
-          primary_email: !isRowUserAdmin(editingUser) ? editEmail.trim().toLowerCase() : prev.primary_email,
+          display_name: nextDisplayName,
+          primary_email: nextEmail || prev.primary_email,
           metadata: updatedMeta,
           metadata_json: updatedMeta,
         } : null));
@@ -1720,46 +1836,6 @@ export function GlobalUsers() {
                   </div>
 
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "14px 20px" }}>
-                    <div>
-                      <span style={{ fontSize: "11px", fontWeight: 600, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.02em" }}>
-                        Platform User ID
-                      </span>
-                      <div style={{ display: "flex", alignItems: "center", gap: "6px", marginTop: "4px" }}>
-                        <code
-                          style={{
-                            fontFamily: "monospace",
-                            fontSize: "11.5px",
-                            background: "#f8fafc",
-                            padding: "3px 8px",
-                            borderRadius: "4px",
-                            border: "1px solid #e2e8f0",
-                            color: "#334155",
-                            wordBreak: "break-all",
-                          }}
-                        >
-                          {detailUser.id}
-                        </code>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            navigator.clipboard.writeText(detailUser.id);
-                            toast("Platform User ID copied.", "info");
-                          }}
-                          style={{
-                            background: "transparent",
-                            border: "none",
-                            color: "#94a3b8",
-                            cursor: "pointer",
-                            padding: "2px",
-                            display: "inline-flex",
-                          }}
-                          title="Copy Platform User ID"
-                        >
-                          <ICONS.copy width={12} height={12} />
-                        </button>
-                      </div>
-                    </div>
-
                     <div>
                       <span style={{ fontSize: "11px", fontWeight: 600, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.02em" }}>
                         Password

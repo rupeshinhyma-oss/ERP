@@ -52,6 +52,8 @@ class ProfileResponse(BaseModel):
     id: uuid.UUID
     first_name: str | None = None
     last_name: str | None = None
+    display_name: str | None = None
+    full_name: str | None = None
     employee_code: str | None
     username: str
     email: str

@@ -10,16 +10,19 @@ import { useNavigate } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
 import { Banner } from "@/components/ui";
 import { apiGet, apiPatch, apiPost, errorMessage } from "@/lib/api";
+import { Auth } from "@/lib/auth";
+import { getEcosystemCookie, setEcosystemCookie } from "@/lib/ecosystemSession";
 import { useAuth } from "@/lib/hooks";
 import { useToast } from "@/lib/toast";
 
 interface UserProfileData {
   id: string;
+  display_name?: string | null;
+  full_name?: string | null;
   first_name?: string | null;
   last_name?: string | null;
   email: string;
   phone?: string | null;
-  username: string;
 }
 
 function ProfileFormSkeleton() {
@@ -32,7 +35,7 @@ function ProfileFormSkeleton() {
         marginBottom: "28px",
       }}
     >
-      {Array.from({ length: 4 }).map((_, i) => (
+      {Array.from({ length: 5 }).map((_, i) => (
         <div key={i}>
           <div className="skeleton-line" style={{ width: "80px", height: "14px", marginBottom: "8px", borderRadius: "4px" }} />
           <div className="skeleton-line" style={{ width: "100%", height: "40px", borderRadius: "6px" }} />
@@ -51,6 +54,7 @@ export function ProfilePage() {
   const [error, setError] = useState<unknown>(null);
 
   /* Profile Form state */
+  const [displayName, setDisplayName] = useState("");
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
   const [email, setEmail] = useState("");
@@ -73,6 +77,12 @@ export function ProfilePage() {
         const res = await apiGet<UserProfileData>("/auth/profile");
         const data = res.data;
         if (data) {
+          setDisplayName(
+            data.display_name ||
+              data.full_name ||
+              [data.first_name, data.last_name].filter(Boolean).join(" ").trim() ||
+              ""
+          );
           setFirstName(data.first_name || "");
           setLastName(data.last_name || "");
           setEmail(data.email || "");
@@ -90,16 +100,44 @@ export function ProfilePage() {
   async function handleProfileSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!profile?.id) return;
+    const trimmedDisplayName = displayName.trim();
+    if (!trimmedDisplayName) {
+      showToast("Display Name is required.", "warning");
+      return;
+    }
     setError(null);
     setSavingProfile(true);
 
     try {
-      await apiPatch(`/users/${profile.id}`, {
+      const { data: updatedUser } = await apiPatch<{
+        display_name?: string | null;
+        full_name?: string | null;
+        first_name?: string | null;
+        last_name?: string | null;
+        email?: string;
+        phone?: string | null;
+      }>(`/users/${profile.id}`, {
+        display_name: trimmedDisplayName,
         first_name: firstName.trim() || null,
         last_name: lastName.trim() || null,
         email: email.trim(),
         phone: phone.trim() || null,
       });
+      const nextDisplayName = updatedUser?.display_name || trimmedDisplayName;
+      const nextFullName = updatedUser?.full_name || nextDisplayName;
+      Auth.updateProfile({
+        ...profile,
+        display_name: nextDisplayName,
+        full_name: nextFullName,
+        first_name: updatedUser?.first_name ?? (firstName.trim() || null),
+        last_name: updatedUser?.last_name ?? (lastName.trim() || null),
+        email: updatedUser?.email ?? email.trim(),
+        phone: updatedUser?.phone ?? (phone.trim() || null),
+      });
+      const existingCookie = getEcosystemCookie();
+      if (existingCookie) {
+        setEcosystemCookie({ ...existingCookie, display_name: nextDisplayName });
+      }
       showToast("Profile information updated successfully!", "success");
     } catch (err) {
       setError(err);
@@ -147,9 +185,16 @@ export function ProfilePage() {
       <main className="page">
         {/* Top Header */}
         <div className="page-header">
-          <h1 style={{ color: "#1e293b", fontWeight: 700, fontSize: "20px", margin: 0 }}>
-            Profile
-          </h1>
+          <div>
+            <h1 style={{ color: "#1e293b", fontWeight: 700, fontSize: "20px", margin: 0 }}>
+              Profile
+            </h1>
+            {(email || profile?.email) && (
+              <p style={{ margin: "4px 0 0", fontSize: "13px", color: "#64748b" }}>
+                {email || profile?.email}
+              </p>
+            )}
+          </div>
           <div className="page-header-actions">
           <button
             type="button"
@@ -197,6 +242,31 @@ export function ProfilePage() {
                   marginBottom: "28px",
                 }}
               >
+              <div>
+                <label style={{ display: "block", fontSize: "14px", fontWeight: 600, color: "#334155", marginBottom: "8px" }}>
+                  Display Name <span style={{ color: "#dc2626" }}>*</span>
+                </label>
+                <input
+                  type="text"
+                  value={displayName}
+                  disabled={loading}
+                  minLength={1}
+                  maxLength={200}
+                  onChange={(e) => setDisplayName(e.target.value)}
+                  placeholder="Enter Display Name"
+                  style={{
+                    width: "100%",
+                    padding: "10px 14px",
+                    borderRadius: "6px",
+                    border: "1px solid #cbd5e1",
+                    fontSize: "14px",
+                    color: "#0f172a",
+                    outline: "none",
+                  }}
+                  required
+                />
+              </div>
+
               <div>
                 <label style={{ display: "block", fontSize: "14px", fontWeight: 600, color: "#334155", marginBottom: "8px" }}>
                   First Name <span style={{ color: "#dc2626" }}>*</span>

@@ -237,7 +237,17 @@ async def complete_follow_up_task(
     if c_notes and "Completion Notes:" not in (task.description or ""):
         task.description = f"{task.description or ''}\n\nCompletion Notes: {c_notes}".strip()
 
-    comment_body = f"Follow-up completed in CRM by {actor_username}."
+    actor_label = actor_username
+    try:
+        from app.users.models import User
+        actor_obj = await session.get(User, actor_id)
+        if actor_obj is not None and isinstance(getattr(actor_obj, "display_name", None), str) and actor_obj.display_name.strip():
+            actor_label = actor_obj.display_name.strip()
+        elif actor_obj is not None and isinstance(getattr(actor_obj, "full_name", None), str) and actor_obj.full_name.strip():
+            actor_label = actor_obj.full_name.strip()
+    except Exception:
+        pass
+    comment_body = f"Follow-up completed in CRM by {actor_label}."
     if outcome:
         comment_body += f" Outcome: {outcome.strip()}"
     if c_notes:
@@ -281,9 +291,19 @@ async def cancel_follow_up_task(
     if not task:
         return None
 
+    actor_label = actor_username
+    try:
+        from app.users.models import User
+        actor_obj = await session.get(User, actor_id)
+        if actor_obj is not None and isinstance(getattr(actor_obj, "display_name", None), str) and actor_obj.display_name.strip():
+            actor_label = actor_obj.display_name.strip()
+        elif actor_obj is not None and isinstance(getattr(actor_obj, "full_name", None), str) and actor_obj.full_name.strip():
+            actor_label = actor_obj.full_name.strip()
+    except Exception:
+        pass
     now_dt = _utcnow()
     task.status = TaskStatus.ON_HOLD
-    task.hold_reason = f"CRM follow-up was cancelled by {actor_username}"
+    task.hold_reason = f"CRM follow-up was cancelled by {actor_label}"
     task.deleted_at = now_dt
     task.deleted_by = actor_id
     task.updated_at = now_dt
@@ -291,7 +311,7 @@ async def cancel_follow_up_task(
     comment = TaskComment(
         task_id=task.id,
         user_id=actor_id,
-        message=f"Follow-up was cancelled in CRM by {actor_username}.",
+        message=f"Follow-up was cancelled in CRM by {actor_label}.",
     )
     session.add(comment)
     return task

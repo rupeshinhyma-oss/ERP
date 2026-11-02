@@ -13,8 +13,9 @@ interface RoleOption {
 
 interface UserOption {
   id: string;
-  username: string;
+  username?: string;
   display_name?: string;
+  full_name?: string;
   first_name?: string;
   last_name?: string;
   email?: string;
@@ -84,8 +85,8 @@ export function NotificationSettings() {
       setUsers(
         userList.map((u) => ({
           id: String(u.id),
-          username: u.username || u.employee_code || "user",
           display_name: u.display_name,
+          full_name: u.full_name,
           first_name: u.first_name,
           last_name: u.last_name,
           email: u.email,
@@ -111,8 +112,8 @@ export function NotificationSettings() {
   const usersMap = useMemo(() => {
     const map = new Map<string, string>();
     users.forEach((u) => {
-      const full = [u.first_name, u.last_name].filter(Boolean).join(" ");
-      map.set(u.id, full || u.display_name || u.username);
+      const full = [u.first_name, u.last_name].filter(Boolean).join(" ").trim();
+      map.set(u.id, u.display_name || u.full_name || full || u.email || "Unnamed");
     });
     return map;
   }, [users]);
@@ -166,8 +167,8 @@ export function NotificationSettings() {
     const tokens = q.split(/\s+/).filter(Boolean);
 
     return users.filter((u) => {
-      const full = [u.first_name, u.last_name].filter(Boolean).join(" ");
-      const combined = `${full} ${u.username || ""} ${u.display_name || ""} ${u.email || ""} ${u.first_name || ""} ${u.last_name || ""}`.toLowerCase();
+      const full = [u.first_name, u.last_name].filter(Boolean).join(" ").trim();
+      const combined = `${u.display_name || ""} ${u.full_name || ""} ${full} ${u.email || ""} ${u.first_name || ""} ${u.last_name || ""}`.toLowerCase();
       return tokens.every((token) => combined.includes(token));
     });
   }, [users, userSearch]);
@@ -604,7 +605,7 @@ export function NotificationSettings() {
                 <div style={{ position: "relative", marginBottom: "10px" }}>
                   <input
                     type="text"
-                    placeholder="🔍 Search users by name, username, or email..."
+                    placeholder="🔍 Search users by display name or email..."
                     value={userSearch}
                     onChange={(e) => setUserSearch(e.target.value)}
                     className="input"
@@ -688,10 +689,10 @@ export function NotificationSettings() {
                             />
                             <div>
                               <div style={{ fontSize: "13px", fontWeight: isSelected ? 600 : 500, color: "#1e293b" }}>
-                                {full || u.display_name || u.username}
+                                {u.display_name || u.full_name || full || u.email || "Unnamed"}
                               </div>
                               <div style={{ fontSize: "11px", color: "#64748b" }}>
-                                @{u.username} {u.email ? `• ${u.email}` : ""}
+                                {u.email || "—"}
                               </div>
                             </div>
                           </div>

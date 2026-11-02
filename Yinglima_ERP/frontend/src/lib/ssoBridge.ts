@@ -174,7 +174,7 @@ export function createSsoHandoverUrl(targetBaseUrl: string, targetPath?: string)
   const currentCookie = getEcosystemCookie();
   const profile = Auth.getProfile();
   const email = profile?.email || currentCookie?.email || "admin@example.com";
-  const user = profile?.username || profile?.first_name || currentCookie?.display_name || currentCookie?.email || email;
+  const user = profile?.display_name || profile?.full_name || [profile?.first_name, profile?.last_name].filter(Boolean).join(" ").trim() || currentCookie?.display_name || profile?.email || currentCookie?.email || email;
   const role = profile?.roles?.includes("super_admin") ? "super_admin" : (currentCookie?.role || "global_user");
 
   const payload: SsoHandoverPayload = {
@@ -549,7 +549,7 @@ async function runIncomingSsoHandover(): Promise<HandoverResult> {
       const sessionData: EcosystemSessionData = {
         session_id: finalSessionId,
         email: tokens.user?.email || targetEmail,
-        display_name: tokens.user?.username || targetEmail.split("@")[0],
+        display_name: tokens.user?.display_name || tokens.user?.full_name || [tokens.user?.first_name, tokens.user?.last_name].filter(Boolean).join(" ").trim() || tokens.user?.email || targetEmail.split("@")[0],
         role: targetRole,
         user_type: targetRole === "super_admin" ? "platform_admin" : "global_user",
         allowed_erps: Array.from(new Set([...allowedErps, "yinglima"])),

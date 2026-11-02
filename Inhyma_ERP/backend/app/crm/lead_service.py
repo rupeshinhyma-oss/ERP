@@ -721,7 +721,7 @@ class CrmLeadService:
             lead_id=new_lead.id,
             activity_type="lead_created",
             subject=f"Lead Created: {new_lead.name}",
-            description=f"Lead manually created by {actor.username}",
+            description=f"Lead manually created by {actor.display_name or actor.full_name or actor.username}",
             performed_by=actor.id,
         )
         self.session.add(activity)
@@ -825,7 +825,7 @@ class CrmLeadService:
                 lead_id=lead.id,
                 activity_type="lead_updated",
                 subject="Lead Details Updated",
-                description="; ".join(material_changes) + f" by {actor.username}",
+                description="; ".join(material_changes) + f" by {actor.display_name or actor.full_name or actor.username}",
                 performed_by=actor.id,
             )
             self.session.add(activity)
@@ -850,7 +850,7 @@ class CrmLeadService:
                     lead_id=lead.id,
                     activity_type="company_changed",
                     subject=f"Company Changed: {old_comp_name or 'None'} -> {new_comp_name}",
-                    description=f"Company updated from '{old_comp_name}' to '{new_comp_name}' by {actor.username}",
+                    description=f"Company updated from '{old_comp_name}' to '{new_comp_name}' by {actor.display_name or actor.full_name or actor.username}",
                     performed_by=actor.id,
                 )
                 self.session.add(activity)
@@ -866,7 +866,7 @@ class CrmLeadService:
                     lead_id=lead.id,
                     activity_type="lead_updated",
                     subject=f"Priority Changed: {old_p.capitalize()} -> {new_p.capitalize()}",
-                    description=f"Priority updated from '{old_p}' to '{new_p}' by {actor.username}",
+                    description=f"Priority updated from '{old_p}' to '{new_p}' by {actor.display_name or actor.full_name or actor.username}",
                     performed_by=actor.id,
                 )
                 self.session.add(activity)
@@ -1421,7 +1421,7 @@ class CrmLeadService:
             status=follow_up.status,
             completed_at=follow_up.completed_at,
             created_by=follow_up.created_by,
-            creator_name=actor.username,
+            creator_name=actor.display_name or actor.full_name or actor.username,
             task_id=follow_up.task_id,
             created_at=follow_up.created_at,
             updated_at=follow_up.updated_at,
@@ -1498,7 +1498,7 @@ class CrmLeadService:
                 self.session,
                 follow_up,
                 actor.id,
-                actor.username,
+                actor.display_name or actor.full_name or actor.username,
                 completion_notes=data.completion_notes,
                 outcome=data.outcome,
             )
@@ -1513,7 +1513,7 @@ class CrmLeadService:
                 lead_id=lead.id,
                 activity_type="follow_up_cancelled",
                 subject=f"Follow-up Cancelled: {follow_up.follow_up_type.capitalize()}",
-                description=f"Scheduled follow-up was cancelled by {actor.username}",
+                description=f"Scheduled follow-up was cancelled by {actor.display_name or actor.full_name or actor.username}",
                 performed_by=actor.id,
                 activity_at=now_dt,
                 created_at=now_dt,
@@ -1525,7 +1525,7 @@ class CrmLeadService:
                 self.session,
                 follow_up,
                 actor.id,
-                actor.username,
+                actor.display_name or actor.full_name or actor.username,
             )
 
         await self._recalculate_next_follow_up(lead)
@@ -1704,10 +1704,11 @@ class CrmLeadService:
         await self._check_lead_scope(lead, actor, action="mutate")
 
         await sync_follow_up_to_task(self.session, follow_up, lead, actor.id)
+        actor_label = actor.display_name or actor.full_name or actor.username
         if follow_up.status == "completed":
-            await complete_follow_up_task(self.session, follow_up, actor.id, actor.username)
+            await complete_follow_up_task(self.session, follow_up, actor.id, actor_label)
         elif follow_up.status == "cancelled":
-            await cancel_follow_up_task(self.session, follow_up, actor.id, actor.username)
+            await cancel_follow_up_task(self.session, follow_up, actor.id, actor_label)
 
         await self.session.commit()
         await self.session.refresh(follow_up)

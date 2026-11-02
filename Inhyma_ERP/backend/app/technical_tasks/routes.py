@@ -58,13 +58,22 @@ def _is_privileged(user: CurrentUser | None) -> bool:
     return user.is_admin or "*" in user.permissions or "technicaltask.manage" in user.permissions
 
 
+def _actor_label(user: CurrentUser | None, default: str | None = None) -> str | None:
+    if user is None:
+        return default
+    return user.display_name or user.full_name or user.username or default
+
+
 def _scope_for(user: CurrentUser | None) -> dict[str, Any]:
     if user is None or user.is_admin or "*" in user.permissions:
         return {}
     scope: dict[str, Any] = {}
     if SCOPE_OWN_PERMISSION in user.permissions:
         scope["creator_user_id"] = user.id
-        scope["creator_username"] = user.username
+        scope["creator_username"] = _actor_label(user)
+        scope["creator_names"] = tuple(
+            sorted({n for n in (user.display_name, user.full_name, user.username) if n})
+        )
     if HIDE_PAYMENT_PENDING_PERMISSION in user.permissions:
         scope["exclude_tabs"] = ("payment_pending",)
     return scope
@@ -265,7 +274,7 @@ async def create_technical_task(
     service: TechnicalTaskService = Depends(get_service),
     current_user: CurrentUser | None = Depends(get_current_user),
 ) -> dict:
-    creator = current_user.username if current_user else "Admin"
+    creator = _actor_label(current_user, "Admin") or "Admin"
     task = await service.create(
         payload, creator_name=creator, creator_user_id=current_user.id if current_user else None
     )
@@ -280,7 +289,7 @@ async def update_technical_task(
     current_user: CurrentUser | None = Depends(get_current_user),
 ) -> dict:
     task = await service.update(
-        task_id, payload, user_name=current_user.username if current_user else None, privileged=_is_privileged(current_user)
+        task_id, payload, user_name=_actor_label(current_user, None), privileged=_is_privileged(current_user)
     )
     return {"success": True, "data": _to_dict(task), "message": "Technical task updated successfully."}
 
@@ -292,7 +301,7 @@ async def update_technical_task_status(
     service: TechnicalTaskService = Depends(get_service),
     current_user: CurrentUser | None = Depends(get_current_user),
 ) -> dict:
-    user_name = current_user.username if current_user else None
+    user_name = _actor_label(current_user, None)
     task = await service.update_status(task_id, payload, user_name=user_name, privileged=_is_privileged(current_user))
     return {"success": True, "data": _to_dict(task), "message": f"Task status updated to {task.status}."}
 
@@ -304,7 +313,7 @@ async def reopen_technical_task(
     service: TechnicalTaskService = Depends(get_service),
     current_user: CurrentUser | None = Depends(get_current_user),
 ) -> dict:
-    user_name = current_user.username if current_user else "Admin"
+    user_name = _actor_label(current_user, "Admin")
     if payload.status.lower() not in ("approved", "pending"):
         payload.status = "Approved" if payload.task_allotted_to else "Pending"
     task = await service.update_status(task_id, payload, user_name=user_name, privileged=_is_privileged(current_user))
@@ -322,7 +331,7 @@ async def record_technical_task_payment(
     service: TechnicalTaskService = Depends(get_service),
     current_user: CurrentUser | None = Depends(get_current_user),
 ) -> dict:
-    user_name = current_user.username if current_user else "Accounts"
+    user_name = _actor_label(current_user, "Accounts")
     task = await service.record_payment(
         task_id=task_id,
         amount=payload.amount,
@@ -380,6 +389,6 @@ async def create_task_call_log(
     service: TechnicalTaskService = Depends(get_service),
     current_user: CurrentUser | None = Depends(get_current_user),
 ) -> dict:
-    creator = current_user.username if current_user else "Technician"
+    creator = _actor_label(current_user, "Technician") or "Technician"
     log = await service.add_call_log(task_id, payload, creator_name=creator)
     return {"success": True, "data": _log_to_dict(log), "message": "Call log recorded successfully."}

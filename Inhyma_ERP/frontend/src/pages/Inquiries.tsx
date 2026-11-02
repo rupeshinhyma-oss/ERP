@@ -6272,7 +6272,12 @@ function QuickInquiryDrawer({
   const [saving, setSaving] = useState(false);
 
   const stampedDateStr = new Date().toLocaleDateString("en-GB", { day: "2-digit", month: "2-digit", year: "numeric" });
-  const stampedUserName = String(profile?.full_name || profile?.username || "Rahul Patel");
+  const stampedUserName = String(
+    profile?.display_name ||
+      profile?.full_name ||
+      [profile?.first_name, profile?.last_name].filter(Boolean).join(" ").trim() ||
+      "Rahul Patel"
+  );
 
   useEffect(() => {
     (async () => {

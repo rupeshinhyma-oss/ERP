@@ -747,7 +747,7 @@ class SaleService:
             total_container_cbm=float(payload.total_container_cbm or 0.0),
             remarks=payload.remarks,
             created_by_id=getattr(current_user, "id", None),
-            created_by_name=getattr(current_user, "name", getattr(current_user, "username", "Admin")),
+            created_by_name=getattr(current_user, "display_name", None) or getattr(current_user, "full_name", None) or getattr(current_user, "name", None) or getattr(current_user, "username", None) or "Admin",
             items=item_entities,
         )
 

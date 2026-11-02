@@ -103,6 +103,8 @@ export interface DbLocation {
 
 export interface DbUser {
   id: string;
+  display_name?: string | null;
+  full_name?: string | null;
   first_name?: string | null;
   last_name?: string | null;
   username?: string | null;
@@ -369,11 +371,11 @@ export function AssetPage() {
     if (!employeeSearch.trim()) return employees;
     const q = employeeSearch.toLowerCase();
     return employees.filter((emp) => {
+      const dispName = (emp.display_name || emp.full_name || "").toLowerCase();
       const fullName = `${emp.first_name || ""} ${emp.last_name || ""}`.toLowerCase();
-      const uName = (emp.username || "").toLowerCase();
       const code = (emp.employee_code || "").toLowerCase();
       const email = (emp.email || "").toLowerCase();
-      return fullName.includes(q) || uName.includes(q) || code.includes(q) || email.includes(q);
+      return dispName.includes(q) || fullName.includes(q) || code.includes(q) || email.includes(q);
     });
   }, [employees, employeeSearch]);
 
@@ -1589,7 +1591,12 @@ export function AssetPage() {
                     >
                       <option value="">-- Choose employee from database --</option>
                       {filteredEmployees.map((emp) => {
-                        const fullName = `${emp.first_name || ""} ${emp.last_name || ""}`.trim() || emp.username || "Employee";
+                        const fullName =
+                          emp.display_name ||
+                          emp.full_name ||
+                          `${emp.first_name || ""} ${emp.last_name || ""}`.trim() ||
+                          emp.email ||
+                          "Employee";
                         const code = emp.employee_code || "No Code";
                         return (
                           <option key={emp.id} value={emp.id}>
@@ -1601,7 +1608,7 @@ export function AssetPage() {
 
                     {selectedAssignEmployee && (
                       <div style={{ marginTop: 8, padding: "8px 12px", background: "#f8fafc", borderRadius: 6, border: "1px solid #e2e8f0", fontSize: 12 }}>
-                        <div><strong>Name:</strong> {selectedAssignEmployee.first_name} {selectedAssignEmployee.last_name}</div>
+                        <div><strong>Name:</strong> {selectedAssignEmployee.display_name || selectedAssignEmployee.full_name || `${selectedAssignEmployee.first_name || ""} ${selectedAssignEmployee.last_name || ""}`.trim() || "—"}</div>
                         <div><strong>Code:</strong> {selectedAssignEmployee.employee_code || "—"}</div>
                         <div><strong>Email:</strong> {selectedAssignEmployee.email || "—"}</div>
                       </div>

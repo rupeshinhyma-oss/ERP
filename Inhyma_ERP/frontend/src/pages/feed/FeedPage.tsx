@@ -253,7 +253,7 @@ export function FeedPage() {
         {/* Composer */}
         {canCreate && composerOpen && (
           <FeedComposer
-            currentUserName={String(profile?.display_name || profile?.full_name || "Me")}
+            currentUserName={String(profile?.display_name || profile?.full_name || [profile?.first_name, profile?.last_name].filter(Boolean).join(" ").trim() || "Me")}
             onPostCreated={() => {
               setPage(1);
               fetchPosts();

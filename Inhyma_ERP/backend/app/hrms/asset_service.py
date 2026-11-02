@@ -123,7 +123,7 @@ class HrmsAssetService:
         if emp:
             first = emp.first_name or ""
             last = emp.last_name or ""
-            emp_name = f"{first} {last}".strip() or emp.username or "Employee"
+            emp_name = emp.display_name or f"{first} {last}".strip() or emp.username or "Employee"
             emp_code = emp.employee_code
             emp_dept = await self._resolve_employee_department(emp.id)
             emp_branch = await self._resolve_employee_branch(emp.id)
@@ -132,27 +132,27 @@ class HrmsAssetService:
         if a.assigner:
             first = a.assigner.first_name or ""
             last = a.assigner.last_name or ""
-            assigner_name = f"{first} {last}".strip() or a.assigner.username
+            assigner_name = a.assigner.display_name or f"{first} {last}".strip() or a.assigner.username
         elif a.assigned_by:
             u_res = await self.db.execute(select(User).where(User.id == a.assigned_by))
             u = u_res.scalar_one_or_none()
             if u:
                 first = u.first_name or ""
                 last = u.last_name or ""
-                assigner_name = f"{first} {last}".strip() or u.username
+                assigner_name = u.display_name or f"{first} {last}".strip() or u.username
 
         returner_name = None
         if a.returner:
             first = a.returner.first_name or ""
             last = a.returner.last_name or ""
-            returner_name = f"{first} {last}".strip() or a.returner.username
+            returner_name = a.returner.display_name or f"{first} {last}".strip() or a.returner.username
         elif a.returned_by:
             u_res = await self.db.execute(select(User).where(User.id == a.returned_by))
             u = u_res.scalar_one_or_none()
             if u:
                 first = u.first_name or ""
                 last = u.last_name or ""
-                returner_name = f"{first} {last}".strip() or u.username
+                returner_name = u.display_name or f"{first} {last}".strip() or u.username
 
         return AssetAssignmentRead(
             id=a.id,
@@ -184,27 +184,27 @@ class HrmsAssetService:
         if m.creator:
             first = m.creator.first_name or ""
             last = m.creator.last_name or ""
-            c_name = f"{first} {last}".strip() or m.creator.username
+            c_name = m.creator.display_name or f"{first} {last}".strip() or m.creator.username
         elif m.created_by:
             u_res = await self.db.execute(select(User).where(User.id == m.created_by))
             u = u_res.scalar_one_or_none()
             if u:
                 first = u.first_name or ""
                 last = u.last_name or ""
-                c_name = f"{first} {last}".strip() or u.username
+                c_name = u.display_name or f"{first} {last}".strip() or u.username
 
         u_name = None
         if m.updater:
             first = m.updater.first_name or ""
             last = m.updater.last_name or ""
-            u_name = f"{first} {last}".strip() or m.updater.username
+            u_name = m.updater.display_name or f"{first} {last}".strip() or m.updater.username
         elif m.updated_by:
             u_res = await self.db.execute(select(User).where(User.id == m.updated_by))
             u = u_res.scalar_one_or_none()
             if u:
                 first = u.first_name or ""
                 last = u.last_name or ""
-                u_name = f"{first} {last}".strip() or u.username
+                u_name = u.display_name or f"{first} {last}".strip() or u.username
 
         return AssetMaintenanceRead(
             id=m.id,
@@ -240,7 +240,7 @@ class HrmsAssetService:
         if assigned_user:
             first = assigned_user.first_name or ""
             last = assigned_user.last_name or ""
-            assigned_name = f"{first} {last}".strip() or assigned_user.username or "Employee"
+            assigned_name = assigned_user.display_name or f"{first} {last}".strip() or assigned_user.username or "Employee"
             assigned_code = assigned_user.employee_code
             assigned_dept = await self._resolve_employee_department(assigned_user.id)
             assigned_branch = await self._resolve_employee_branch(assigned_user.id)
@@ -255,13 +255,13 @@ class HrmsAssetService:
         if asset.creator:
             c_first = asset.creator.first_name or ""
             c_last = asset.creator.last_name or ""
-            created_by_name = f"{c_first} {c_last}".strip() or asset.creator.username
+            created_by_name = asset.creator.display_name or f"{c_first} {c_last}".strip() or asset.creator.username
 
         updated_by_name = None
         if asset.updater:
             u_first = asset.updater.first_name or ""
             u_last = asset.updater.last_name or ""
-            updated_by_name = f"{u_first} {u_last}".strip() or asset.updater.username
+            updated_by_name = asset.updater.display_name or f"{u_first} {u_last}".strip() or asset.updater.username
 
         history_items: list[AssetHistoryRead] = []
         if include_history and asset.history:
@@ -270,13 +270,13 @@ class HrmsAssetService:
                 if h.performer:
                     p_first = h.performer.first_name or ""
                     p_last = h.performer.last_name or ""
-                    perf_name = f"{p_first} {p_last}".strip() or h.performer.username or "System User"
+                    perf_name = h.performer.display_name or f"{p_first} {p_last}".strip() or h.performer.username or "System User"
 
                 user_name = None
                 if h.user:
                     u_first = h.user.first_name or ""
                     u_last = h.user.last_name or ""
-                    user_name = f"{u_first} {u_last}".strip() or h.user.username or "Employee"
+                    user_name = h.user.display_name or f"{u_first} {u_last}".strip() or h.user.username or "Employee"
 
                 history_items.append(
                     AssetHistoryRead(
@@ -450,6 +450,7 @@ class HrmsAssetService:
                     func.lower(HrmsAsset.brand).like(term),
                     func.lower(HrmsAsset.model).like(term),
                     func.lower(HrmsAsset.vendor).like(term),
+                    func.lower(User.display_name).like(term),
                     func.lower(User.first_name).like(term),
                     func.lower(User.last_name).like(term),
                     func.lower(User.username).like(term),
@@ -860,7 +861,7 @@ class HrmsAssetService:
         assigned_condition = payload.condition_at_assignment or payload.condition or asset.condition or "GOOD"
         asset.condition = assigned_condition
 
-        emp_full_name = f"{employee.first_name or ''} {employee.last_name or ''}".strip() or employee.username or "Employee"
+        emp_full_name = employee.display_name or f"{employee.first_name or ''} {employee.last_name or ''}".strip() or employee.username or "Employee"
         emp_display = f"{emp_full_name} ({employee.employee_code or 'No Code'})"
 
         # Update Asset master
@@ -932,7 +933,7 @@ class HrmsAssetService:
         if asset.assigned_to:
             first = asset.assigned_to.first_name or ""
             last = asset.assigned_to.last_name or ""
-            prev_name = f"{first} {last}".strip() or asset.assigned_to.username or "Employee"
+            prev_name = asset.assigned_to.display_name or f"{first} {last}".strip() or asset.assigned_to.username or "Employee"
 
         ret_condition = payload.condition_after_return or payload.condition or "GOOD"
         asset.condition = ret_condition
@@ -1153,13 +1154,13 @@ class HrmsAssetService:
             if h.performer:
                 p_first = h.performer.first_name or ""
                 p_last = h.performer.last_name or ""
-                perf_name = f"{p_first} {p_last}".strip() or h.performer.username or "System User"
+                perf_name = h.performer.display_name or f"{p_first} {p_last}".strip() or h.performer.username or "System User"
 
             user_name = None
             if h.user:
                 u_first = h.user.first_name or ""
                 u_last = h.user.last_name or ""
-                user_name = f"{u_first} {u_last}".strip() or h.user.username or "Employee"
+                user_name = h.user.display_name or f"{u_first} {u_last}".strip() or h.user.username or "Employee"
 
             history_items.append(
                 AssetHistoryRead(

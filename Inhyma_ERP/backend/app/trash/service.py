@@ -84,7 +84,7 @@ MODEL_MAP: dict[str, tuple[Type[Any], str, str | None]] = {
     "Supplier Contact": (SupplierContact, "person_name", None),
     "Buyer": (Buyer, "company_name", None),
     "Buyer Contact": (BuyerContact, "person_name", None),
-    "User": (User, "username", "employee_code"),
+    "User": (User, "display_name", "employee_code"),
     "Role": (Role, "name", None),
     "Consignment Code": (ConsignmentCode, "code", None),
     "Inquiry": (Inquiry, "id", None),
@@ -139,8 +139,13 @@ class TrashService:
 
             for row in rows:
                 name_val = getattr(row, name_attr, None) or f"{entity_type} {row.id}"
-                if entity_type == "User" and hasattr(row, "first_name") and row.first_name:
-                    name_val = f"{row.first_name} {row.last_name or ''}".strip()
+                if entity_type == "User":
+                    name_val = (
+                        getattr(row, "display_name", None)
+                        or f"{getattr(row, 'first_name', '') or ''} {getattr(row, 'last_name', '') or ''}".strip()
+                        or getattr(row, "username", None)
+                        or f"User {row.id}"
+                    )
 
                 code_val = getattr(row, code_attr, None) if code_attr else None
                 details = f"Code: {code_val}" if code_val else None

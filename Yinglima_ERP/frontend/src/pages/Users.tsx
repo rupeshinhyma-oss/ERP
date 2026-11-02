@@ -15,6 +15,8 @@ import { Banner, Modal, TableMessageRow } from "@/components/ui";
 import { Pagination } from "@/components/Pagination";
 import { SelectField, TextField } from "@/components/fields";
 import { apiDelete, apiGet, apiPatch, apiPost, apiPut, toQueryString } from "@/lib/api";
+import { Auth } from "@/lib/auth";
+import { getEcosystemCookie, setEcosystemCookie } from "@/lib/ecosystemSession";
 import { useAuth, useDebouncedValue, useModalHistorySync, usePendingGuard } from "@/lib/hooks";
 import { useToast } from "@/lib/toast";
 import { useConfirm } from "@/lib/confirm";
@@ -57,7 +59,6 @@ const RESERVED_ROLE_NAMES = new Set(["super_admin", "user", "admin"]);
 
 function UserTableSkeletonRows({ count = 8 }: { count?: number }) {
   const nameWidths = ["75%", "60%", "85%", "70%", "90%", "65%"];
-  const userWidths = ["60%", "50%", "70%", "55%", "65%", "45%"];
   const emailWidths = ["80%", "70%", "85%", "75%", "90%", "65%"];
 
   return (
@@ -75,12 +76,6 @@ function UserTableSkeletonRows({ count = 8 }: { count?: number }) {
                 style={{ width: nameWidths[idx % nameWidths.length], height: "15px", borderRadius: "4px" }}
               />
             </div>
-          </td>
-          <td style={{ padding: "12px 14px" }}>
-            <div
-              className="skeleton-line"
-              style={{ width: userWidths[idx % userWidths.length], height: "14px", borderRadius: "4px" }}
-            />
           </td>
           <td style={{ padding: "12px 14px" }}>
             <div
@@ -135,20 +130,23 @@ function getUserInitials(u: User | string | null): string {
   if (!u) return "U";
   if (typeof u === "string") {
     const parts = u.trim().split(/\s+/);
-    if (parts.length >= 2 && parts[0] && parts[1]) {
-      return (parts[0][0] + parts[1][0]).toUpperCase();
+    if (parts.length >= 2 && parts[0] && parts[parts.length - 1]) {
+      return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
     }
-    return u.slice(0, 2).toUpperCase() || "U";
+    return u.trim().slice(0, 2).toUpperCase() || "U";
   }
-  if (u.first_name && u.last_name) {
-    return (u.first_name[0] + u.last_name[0]).toUpperCase();
+  const primaryName =
+    u.display_name ||
+    u.full_name ||
+    [u.first_name, u.last_name].filter(Boolean).join(" ").trim() ||
+    u.employee_name ||
+    u.email ||
+    "";
+  const parts = primaryName.trim().split(/\s+/);
+  if (parts.length >= 2 && parts[0] && parts[parts.length - 1]) {
+    return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
   }
-  const name = u.full_name || u.display_name || u.employee_name || u.username || "";
-  const parts = name.trim().split(/\s+/);
-  if (parts.length >= 2 && parts[0] && parts[1]) {
-    return (parts[0][0] + parts[1][0]).toUpperCase();
-  }
-  return name.slice(0, 2).toUpperCase() || "U";
+  return primaryName.trim().slice(0, 2).toUpperCase() || "U";
 }
 
 function renderDetailField(
@@ -236,7 +234,6 @@ const EMPTY_CREATE = {
   last_name: "",
   display_name: "",
   has_login: true,
-  username: "",
   email: "",
   employee_code: "",
   phone: "",
@@ -248,7 +245,6 @@ const EMPTY_CREATE = {
 
 const EMPTY_EDIT = {
   id: "",
-  username: "",
   first_name: "",
   middle_name: "",
   last_name: "",
@@ -645,11 +641,14 @@ export function UsersPage() {
     // 1. Immediately render edit modal at 0ms with local user data
     setEditForm({
       id: user.id,
-      username: user.username || "",
       first_name: user.first_name || "",
       middle_name: user.middle_name || "",
       last_name: user.last_name || "",
-      display_name: user.display_name || "",
+      display_name:
+        user.display_name ||
+        user.full_name ||
+        [user.first_name, user.last_name].filter(Boolean).join(" ").trim() ||
+        "",
       employee_code: user.employee_code || "",
       email: user.email || "",
       phone: user.phone || "",
@@ -744,7 +743,6 @@ export function UsersPage() {
         last_name: createForm.last_name.trim(),
         display_name: createForm.display_name.trim(),
         has_login: createForm.has_login,
-        username: createForm.has_login ? createForm.username.trim() || null : null,
         email: createForm.has_login ? createForm.email.trim() : null,
         employee_code: createForm.employee_code.trim() || null,
         phone: createForm.has_login ? createForm.phone.trim() : null,
@@ -789,13 +787,13 @@ export function UsersPage() {
     setEditSubmitting(true);
     try {
       const existingUser = rows.find((u) => u.id === editForm.id);
+      const cleanDisplayName = editForm.display_name.trim();
       const payload: Record<string, unknown> = {
         version: existingUser?.version,
-        username: editForm.username.trim() || null,
         first_name: editForm.first_name.trim() || null,
         middle_name: editForm.middle_name.trim() || null,
         last_name: editForm.last_name.trim() || null,
-        display_name: editForm.display_name.trim() || null,
+        display_name: cleanDisplayName,
         email: editForm.email.trim(),
         employee_code: editForm.employee_code.trim() || null,
         phone: editForm.phone.trim() || null,
@@ -818,6 +816,26 @@ export function UsersPage() {
       const { data: updatedUser } = await apiPatch<User>(`/users/${editForm.id}`, payload);
       setEditOpen(false);
       showToast(`User profile updated successfully.`, "success");
+      if (profile?.id && editForm.id === profile.id) {
+        const nextDisplayName =
+          updatedUser?.display_name ||
+          cleanDisplayName ||
+          updatedUser?.full_name ||
+          profile.display_name ||
+          profile.full_name ||
+          null;
+        Auth.updateProfile({
+          ...profile,
+          display_name: nextDisplayName,
+          full_name: nextDisplayName,
+          first_name: updatedUser?.first_name ?? (editForm.first_name.trim() || null),
+          last_name: updatedUser?.last_name ?? (editForm.last_name.trim() || null),
+        });
+        const currentCookie = getEcosystemCookie();
+        if (currentCookie && nextDisplayName) {
+          setEcosystemCookie({ ...currentCookie, display_name: nextDisplayName });
+        }
+      }
       if (updatedUser) {
         const nextPosId = editForm.position_id || null;
         const nextPosName = nextPosId ? positionNames[nextPosId] : null;
@@ -1234,7 +1252,7 @@ export function UsersPage() {
               <div style={{ position: "relative", minWidth: "280px", flex: "0 1 340px" }}>
                 <input
                   type="text"
-                  placeholder="Search username, email, employee code..."
+                  placeholder="Search display name, email, employee code..."
                   value={searchInput}
                   onChange={(e) => setSearchInput(e.target.value)}
                   style={{ width: "100%", paddingRight: "28px" }}
@@ -1333,8 +1351,7 @@ export function UsersPage() {
                       }}
                     />
                   </th>
-                  <th>Employee</th>
-                  <th>Username</th>
+                  <th>Display Name</th>
                   <th>Email</th>
                   <th>Department</th>
                   <th>Status</th>
@@ -1346,7 +1363,7 @@ export function UsersPage() {
                 {loading ? (
                   <UserTableSkeletonRows count={8} />
                 ) : rows.length === 0 ? (
-                  <TableMessageRow colSpan={8}>No user accounts found.</TableMessageRow>
+                  <TableMessageRow colSpan={7}>No user accounts found.</TableMessageRow>
                 ) : (
                   rows.map((u) => {
                     const statusUpper = (u.status || "").toUpperCase();
@@ -1354,7 +1371,7 @@ export function UsersPage() {
                     const hasAdminRole = Boolean(u.roles?.includes("super_admin") || u.roles?.includes("admin"));
                     const canActOnTarget = !isTargetSuperAdmin || isSuperAdmin;
                     const displayName =
-                      u.full_name || u.display_name || u.employee_name || u.username;
+                      u.display_name || u.full_name || u.employee_name || u.email || "—";
 
                     const actions: ActionDropdownEntry[] = [];
                     if (canManage) {
@@ -1376,13 +1393,13 @@ export function UsersPage() {
                             key: "remove-admin",
                             label: changingAdminRole ? "🛡️ Removing..." : "🛡️ Remove Legacy Admin Role",
                             danger: true,
-                            onClick: () => removeAdminRole(u.id, u.username ?? u.full_name ?? u.display_name ?? "this user"),
+                            onClick: () => removeAdminRole(u.id, u.display_name || u.full_name || u.employee_name || u.email || "this user"),
                           });
                         }
                         actions.push({
                           key: "permission-overrides",
                           label: "🔑 Permission Overrides",
-                          onClick: () => openUserOverridesModal(u.id, u.username ?? u.full_name ?? u.display_name ?? "this user"),
+                          onClick: () => openUserOverridesModal(u.id, u.display_name || u.full_name || u.employee_name || u.email || "this user"),
                         });
 
                         if (statusUpper === "LOCKED") {
@@ -1414,12 +1431,9 @@ export function UsersPage() {
                           />
                         </td>
                         <td>
-                          <strong>{displayName}</strong>
+                          <strong className="cell-primary">{displayName}</strong>
                         </td>
-                        <td>
-                          <strong className="cell-primary">{u.username}</strong>
-                        </td>
-                        <td>{u.email}</td>
+                        <td>{u.email || "—"}</td>
                         <td>
                           {u.roles && u.roles.length ? (
                             Array.from(new Set(u.roles.map((r) => roleDisplayName(r)))).map((r) => (
@@ -1492,6 +1506,16 @@ export function UsersPage() {
             }}
           >
             <TextField
+              id="display_name"
+              label="Display Name *"
+              required
+              minLength={1}
+              maxLength={200}
+              placeholder="Shown everywhere in the system (e.g. John Doe)"
+              value={createForm.display_name}
+              onChange={(v) => setCreateForm((f) => ({ ...f, display_name: v }))}
+            />
+            <TextField
               id="first_name"
               label="First Name *"
               required
@@ -1530,15 +1554,6 @@ export function UsersPage() {
                 })
               }
             />
-            <TextField
-              id="display_name"
-              label="Display Name *"
-              required
-              maxLength={200}
-              placeholder="Shown everywhere in the system (e.g. John Doe)"
-              value={createForm.display_name}
-              onChange={(v) => setCreateForm((f) => ({ ...f, display_name: v }))}
-            />
             <SelectField
               id="create_position_id"
               label="Position"
@@ -1565,10 +1580,9 @@ export function UsersPage() {
               </label>
               <span className="muted" style={{ fontSize: "12px", marginTop: "4px", display: "block" }}>
                 Uncheck for a workforce record with no login (e.g. factory worker, driver, temporary
-                labor, consultant) -- username, email, phone, and password won't be required.
+                labor, consultant) -- email, phone, and password won't be required.
               </span>
             </div>
-            <TextField id="username" label="Username (optional)" minLength={3} maxLength={100} placeholder="Leave blank to auto-generate" value={createForm.username} onChange={(v) => setCreateForm((f) => ({ ...f, username: v }))} readOnly={!createForm.has_login} />
             <TextField id="email" label={createForm.has_login ? "Work Email *" : "Work Email"} type="email" required={createForm.has_login} placeholder="e.g. john@inhyma.com" value={createForm.email} onChange={(v) => setCreateForm((f) => ({ ...f, email: v }))} readOnly={!createForm.has_login} />
             <TextField id="employee_code" label="Employee Code" disableAutoCapitalize placeholder="e.g. EMP-001" value={createForm.employee_code} onChange={(v) => setCreateForm((f) => ({ ...f, employee_code: v }))} />
             <TextField id="phone" label={createForm.has_login ? "Mobile Number *" : "Mobile Number"} required={createForm.has_login} placeholder="+256..." value={createForm.phone} onChange={(v) => setCreateForm((f) => ({ ...f, phone: v }))} readOnly={!createForm.has_login} />
@@ -1609,7 +1623,7 @@ export function UsersPage() {
               <option value="">-- None (No Manager) --</option>
               {(allUsers.length > 0 ? allUsers : rows).map((u) => (
                 <option key={u.id} value={u.id}>
-                  {u.full_name || u.display_name || u.employee_name || u.username} ({u.username || u.email || "No Login"})
+                  {u.display_name || u.full_name || u.employee_name || u.email || "Unnamed"}{u.email ? ` (${u.email})` : ""}
                 </option>
               ))}
             </SelectField>
@@ -1698,15 +1712,14 @@ export function UsersPage() {
                 <span>👤</span>
                 <span>Basic & Identity Details</span>
               </div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "14px", marginBottom: "14px" }}>
+              <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: "14px", marginBottom: "14px" }}>
+                <TextField id="editDisplayName" label="Display Name *" required minLength={1} maxLength={200} value={editForm.display_name} onChange={(v) => setEditForm((f) => ({ ...f, display_name: v }))} placeholder="Shown everywhere in the system (e.g. John Doe)" />
+                <TextField id="editEmployeeCode" label="Employee Code" maxLength={50} disableAutoCapitalize value={editForm.employee_code} onChange={(v) => setEditForm((f) => ({ ...f, employee_code: v }))} placeholder="e.g. EMP-001" />
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "14px" }}>
                 <TextField id="editFirstName" label="First Name" maxLength={100} value={editForm.first_name} onChange={(v) => setEditForm((f) => ({ ...f, first_name: v }))} placeholder="e.g. John" />
                 <TextField id="editMiddleName" label="Middle Name" maxLength={100} value={editForm.middle_name} onChange={(v) => setEditForm((f) => ({ ...f, middle_name: v }))} placeholder="e.g. Robert" />
                 <TextField id="editLastName" label="Last Name" maxLength={100} value={editForm.last_name} onChange={(v) => setEditForm((f) => ({ ...f, last_name: v }))} placeholder="e.g. Doe" />
-              </div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "14px" }}>
-                <TextField id="editUsername" label="Username *" minLength={3} maxLength={100} required disableAutoCapitalize value={editForm.username} onChange={(v) => setEditForm((f) => ({ ...f, username: v }))} placeholder="e.g. john.doe" />
-                <TextField id="editDisplayName" label="Display Name" maxLength={200} value={editForm.display_name} onChange={(v) => setEditForm((f) => ({ ...f, display_name: v }))} placeholder="e.g. John Doe" />
-                <TextField id="editEmployeeCode" label="Employee Code" maxLength={50} disableAutoCapitalize value={editForm.employee_code} onChange={(v) => setEditForm((f) => ({ ...f, employee_code: v }))} placeholder="e.g. EMP-001" />
               </div>
             </div>
 
@@ -1743,7 +1756,7 @@ export function UsersPage() {
                     .filter((u) => u.id !== editForm.id)
                     .map((u) => (
                       <option key={u.id} value={u.id}>
-                        {u.full_name || u.display_name || u.employee_name || u.username} ({u.username})
+                        {u.display_name || u.full_name || u.employee_name || u.email || "Unnamed"}{u.email ? ` (${u.email})` : ""}
                       </option>
                     ))}
                 </SelectField>
@@ -2033,12 +2046,10 @@ export function UsersPage() {
                 </div>
                 <div>
                   <div style={{ fontSize: "17px", fontWeight: 700, display: "flex", alignItems: "center", gap: "8px" }}>
-                    <span>{viewUser.full_name || viewUser.display_name || viewUser.employee_name || viewUser.username}</span>
+                    <span>{viewUser.display_name || viewUser.full_name || viewUser.employee_name || "—"}</span>
                   </div>
                   <div style={{ fontSize: "12.5px", color: "#94a3b8", display: "flex", alignItems: "center", gap: "8px", marginTop: "3px" }}>
-                    <span>@{viewUser.username}</span>
-                    <span>•</span>
-                    <span>{viewUser.email}</span>
+                    <span>{viewUser.email || "—"}</span>
                   </div>
                 </div>
               </div>
@@ -2061,12 +2072,10 @@ export function UsersPage() {
                 "👤",
                 "Basic & Identity Details",
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "10px" }}>
-                  {renderDetailField("Full Name", viewUser.full_name)}
-                  {renderDetailField("Display Name", viewUser.display_name)}
+                  {renderDetailField("Display Name", viewUser.display_name || viewUser.full_name)}
                   {renderDetailField("First Name", viewUser.first_name)}
                   {renderDetailField("Middle Name", viewUser.middle_name)}
                   {renderDetailField("Last Name", viewUser.last_name)}
-                  {renderDetailField("Username", viewUser.username, { isCode: true })}
                   {renderDetailField("Employee Code", viewUser.employee_code, { isCode: true })}
                 </div>
               )}
@@ -2428,9 +2437,9 @@ export function UsersPage() {
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "8px" }}>
                   <div>
                     <span style={{ fontWeight: 600, color: "#0f172a", fontSize: "14px" }}>User: {overridesUsername}</span>
-                    {overridesBreakdown.user_info?.employee_name && (
+                    {overridesBreakdown.user_info?.email && (
                       <span style={{ color: "#64748b", fontSize: "13px", marginLeft: "8px" }}>
-                        ({overridesBreakdown.user_info.employee_name})
+                        ({overridesBreakdown.user_info.email})
                       </span>
                     )}
                   </div>

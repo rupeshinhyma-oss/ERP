@@ -295,7 +295,7 @@ async def create_proforma_invoice(
         record = ProformaInvoice(
             proforma_no=await next_proforma_no(db),
             status=_initial_status(rules),
-            created_by=current_user.username,
+            created_by=current_user.display_name or current_user.full_name or current_user.username,
             **header,
         )
         _apply_priced_lines(record, priced)
@@ -333,9 +333,9 @@ async def update_proforma_status(
     now = datetime.now(timezone.utc)
     record.status = target
     if target == "admin_approved":
-        record.approved_by, record.approved_at = current_user.username, now
+        record.approved_by, record.approved_at = (current_user.display_name or current_user.full_name or current_user.username), now
     elif target == "confirmed":
-        record.confirmed_by, record.confirmed_at = current_user.username, now
+        record.confirmed_by, record.confirmed_at = (current_user.display_name or current_user.full_name or current_user.username), now
 
         # Auto-create Sale Order matching Sales & PI Process workflow
         created_so = None
@@ -412,7 +412,7 @@ async def update_proforma_status(
                         total_amount=float(record.amount_inc_gst or 0.0),
                         total_quantity=sum(float(i.quantity) for i in record.items),
                         remarks=f"Generated from Proforma {record.proforma_no}. {record.remark or ''}".strip(),
-                        created_by_name=current_user.username,
+                        created_by_name=current_user.display_name or current_user.full_name or current_user.username,
                         items=so_items,
                     )
                     db.add(created_so)
@@ -426,7 +426,7 @@ async def update_proforma_status(
         except Exception:
             pass
     elif target == "cancelled":
-        record.cancelled_by, record.cancelled_at = current_user.username, now
+        record.cancelled_by, record.cancelled_at = (current_user.display_name or current_user.full_name or current_user.username), now
         record.cancel_reason = (payload.reason or "").strip()
     await db.flush()
     await db.refresh(record, attribute_names=["items"])

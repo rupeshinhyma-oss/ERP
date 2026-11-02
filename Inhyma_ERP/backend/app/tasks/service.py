@@ -621,7 +621,7 @@ class TaskService:
             action=AuditAction.CREATE,
             module="tasks",
             user_id=current_user.id,
-            username_snapshot=current_user.username,
+            username_snapshot=getattr(current_user, "display_name", None) or getattr(current_user, "full_name", None) or current_user.username,
             entity_type="Task",
             entity_id=str(refreshed.id),
             new_values={
@@ -770,7 +770,7 @@ class TaskService:
                 session=self.repository.session,
                 task_id=task.id,
                 actor_id=current_user.id,
-                actor_username=current_user.username,
+                actor_username=getattr(current_user, "display_name", None) or getattr(current_user, "full_name", None) or current_user.username,
                 completion_notes=notes,
             )
 
@@ -794,7 +794,7 @@ class TaskService:
             action=AuditAction.UPDATE,
             module="tasks",
             user_id=current_user.id,
-            username_snapshot=current_user.username,
+            username_snapshot=getattr(current_user, "display_name", None) or getattr(current_user, "full_name", None) or current_user.username,
             entity_type="Task",
             entity_id=str(refreshed.id),
             old_values=old_values,
@@ -815,7 +815,7 @@ class TaskService:
                     user_id=uid,
                     type="task_completed",
                     title="Task Completed",
-                    message=f"Task '{refreshed.title}' has been marked as Completed by {current_user.username}",
+                    message=f"Task '{refreshed.title}' has been marked as Completed by {getattr(current_user, 'display_name', None) or getattr(current_user, 'full_name', None) or current_user.username}",
                     link=f"/tasks?id={refreshed.id}",
                 )
         elif status_changed_to_hold:
@@ -842,7 +842,7 @@ class TaskService:
                     user_id=uid,
                     type="task_updated",
                     title="Task Updated",
-                    message=f"Task '{refreshed.title}' was updated by {current_user.username}",
+                    message=f"Task '{refreshed.title}' was updated by {getattr(current_user, 'display_name', None) or getattr(current_user, 'full_name', None) or current_user.username}",
                     link=f"/tasks?id={refreshed.id}",
                 )
 
@@ -1060,7 +1060,7 @@ class TaskService:
             action=AuditAction.ROLE_ASSIGNED,
             module="tasks",
             user_id=current_user.id,
-            username_snapshot=current_user.username,
+            username_snapshot=getattr(current_user, "display_name", None) or getattr(current_user, "full_name", None) or current_user.username,
             entity_type="Task",
             entity_id=str(refreshed.id),
             new_values={"role": role, "user_ids": [str(u) for u in user_ids]},
@@ -1116,7 +1116,7 @@ class TaskService:
                 )
                 mentions_created.append(mention)
 
-                author_name = author.username or getattr(author, "full_name", "Someone")
+                author_name = getattr(author, "display_name", None) or getattr(author, "full_name", None) or author.username or "Someone"
                 await self.notification_service.notify_user(
                     user_id=user.id,
                     type="task_mention",
@@ -1163,7 +1163,7 @@ class TaskService:
             action=AuditAction.UPDATE,
             module="tasks",
             user_id=current_user.id,
-            username_snapshot=current_user.username,
+            username_snapshot=getattr(current_user, "display_name", None) or getattr(current_user, "full_name", None) or current_user.username,
             entity_type="TaskComment",
             entity_id=str(comment.id),
             new_values={"task_id": str(task.id), "message": message[:100], "audio_url": audio_url},
@@ -1185,7 +1185,7 @@ class TaskService:
                 user_id=uid,
                 type="comment_added",
                 title="New Task Comment",
-                message=f"{current_user.username} commented on '{task.title}'{addon_text}: {message[:80]}",
+                message=f"{getattr(current_user, 'display_name', None) or getattr(current_user, 'full_name', None) or current_user.username} commented on '{task.title}'{addon_text}: {message[:80]}",
                 link=f"/tasks?id={task.id}",
             )
 
@@ -1193,7 +1193,7 @@ class TaskService:
             "TASK_COMMENT",
             task,
             actor_id=current_user.id,
-            extra_payload={"comment_id": str(comment.id), "author": current_user.username},
+            extra_payload={"comment_id": str(comment.id), "author": getattr(current_user, "display_name", None) or getattr(current_user, "full_name", None) or current_user.username},
         )
         return comment
 
@@ -1223,7 +1223,7 @@ class TaskService:
             action=AuditAction.UPDATE,
             module="tasks",
             user_id=current_user.id,
-            username_snapshot=current_user.username,
+            username_snapshot=getattr(current_user, "display_name", None) or getattr(current_user, "full_name", None) or current_user.username,
             entity_type="TaskAttachment",
             entity_id=str(attachment.id),
             new_values={"task_id": str(task.id), "file_name": file_name, "file_url": file_url},
@@ -1240,7 +1240,7 @@ class TaskService:
                 user_id=uid,
                 type="task_attachment_added",
                 title="New Task Attachment",
-                message=f"{current_user.username} added attachment '{file_name}' to task: {task.title}",
+                message=f"{getattr(current_user, 'display_name', None) or getattr(current_user, 'full_name', None) or current_user.username} added attachment '{file_name}' to task: {task.title}",
                 link=f"/tasks?id={task.id}",
             )
 
@@ -1337,7 +1337,7 @@ class TaskService:
             action=AuditAction.UPDATE,
             module="tasks",
             user_id=current_user.id,
-            username_snapshot=current_user.username,
+            username_snapshot=getattr(current_user, "display_name", None) or getattr(current_user, "full_name", None) or current_user.username,
             entity_type="TaskVoiceNote",
             entity_id=str(vn.id),
             new_values={"task_id": str(task.id), "duration_seconds": duration_seconds, "audio_url": audio_url},
@@ -1354,7 +1354,7 @@ class TaskService:
                 user_id=uid,
                 type="task_voice_note_added",
                 title="New Task Voice Note",
-                message=f"{current_user.username} recorded a voice note ({duration_seconds}s) on task: {task.title}",
+                message=f"{getattr(current_user, 'display_name', None) or getattr(current_user, 'full_name', None) or current_user.username} recorded a voice note ({duration_seconds}s) on task: {task.title}",
                 link=f"/tasks?id={task.id}",
             )
 
@@ -1456,7 +1456,7 @@ class TaskService:
                 user_id=uid,
                 type="subtask_comment_added",
                 title="Subtask Discussion Update",
-                message=f"{current_user.username} replied on subtask '{subtask.title}' ({task.title}): {message[:80]}",
+                message=f"{getattr(current_user, 'display_name', None) or getattr(current_user, 'full_name', None) or current_user.username} replied on subtask '{subtask.title}' ({task.title}): {message[:80]}",
                 link=f"/tasks?id={task.id}",
             )
 
@@ -1549,7 +1549,7 @@ class TaskService:
                 user_id=uid,
                 type="escalation_comment_added",
                 title="Escalation Thread Update",
-                message=f"{current_user.username} replied on escalation ({task.title}): {message[:80]}",
+                message=f"{getattr(current_user, 'display_name', None) or getattr(current_user, 'full_name', None) or current_user.username} replied on escalation ({task.title}): {message[:80]}",
                 link=f"/tasks?id={task.id}",
             )
 
@@ -1602,7 +1602,7 @@ class TaskService:
             action=AuditAction.UPDATE,
             module="tasks",
             user_id=current_user.id,
-            username_snapshot=current_user.username,
+            username_snapshot=getattr(current_user, "display_name", None) or getattr(current_user, "full_name", None) or current_user.username,
             entity_type="TaskEscalation",
             entity_id=str(esc.id),
             new_values={
@@ -1620,7 +1620,7 @@ class TaskService:
             user_id=to_user,
             type="task_escalated",
             title="Task Escalated to You",
-            message=f"Task '{task.title}' was escalated to you by {current_user.username}: {reason}",
+            message=f"Task '{task.title}' was escalated to you by {getattr(current_user, 'display_name', None) or getattr(current_user, 'full_name', None) or current_user.username}: {reason}",
             link=f"/tasks?id={task.id}&drawerTab=escalations",
         )
 
@@ -1739,7 +1739,7 @@ class TaskService:
                     user_id=uid,
                     type="subtask_completed",
                     title="Subtask Completed",
-                    message=f"Subtask '{updated.title}' was marked complete by {current_user.username}",
+                    message=f"Subtask '{updated.title}' was marked complete by {getattr(current_user, 'display_name', None) or getattr(current_user, 'full_name', None) or current_user.username}",
                     link=f"/tasks?id={task.id}",
                 )
 
@@ -1767,7 +1767,7 @@ class TaskService:
             action=AuditAction.DELETE,
             module="tasks",
             user_id=current_user.id,
-            username_snapshot=current_user.username,
+            username_snapshot=getattr(current_user, "display_name", None) or getattr(current_user, "full_name", None) or current_user.username,
             entity_type="Task",
             entity_id=str(task.id),
             description=f"Soft-deleted task '{task.title}'",
@@ -2000,7 +2000,7 @@ class TaskService:
                         name=u.full_name,
                         email=u.email,
                         category="ORGANIZATION_USER",
-                        detail=u.username or "Employee",
+                        detail=u.email or "Employee",
                     )
                 )
 
@@ -2089,7 +2089,7 @@ class TaskService:
             action=AuditAction.UPDATE,
             module="tasks",
             user_id=current_user.id,
-            username_snapshot=current_user.username,
+            username_snapshot=getattr(current_user, "display_name", None) or getattr(current_user, "full_name", None) or current_user.username,
             entity_type="TaskDependency",
             entity_id=str(dep.id),
             new_values={"task_id": str(task.id), "depends_on": str(payload.depends_on_task_id), "type": dep_type_str},
@@ -2138,7 +2138,7 @@ class TaskService:
             user_id=payload.approver_id,
             type="task_approval_requested",
             title="Task Approval Requested",
-            message=f"{current_user.username} requested your approval for task: {task.title}",
+            message=f"{getattr(current_user, 'display_name', None) or getattr(current_user, 'full_name', None) or current_user.username} requested your approval for task: {task.title}",
             link=f"/tasks?id={task.id}",
         )
 
@@ -2146,11 +2146,11 @@ class TaskService:
             action=AuditAction.UPDATE,
             module="tasks",
             user_id=current_user.id,
-            username_snapshot=current_user.username,
+            username_snapshot=getattr(current_user, "display_name", None) or getattr(current_user, "full_name", None) or current_user.username,
             entity_type="Task",
             entity_id=str(task.id),
             new_values={"status": "PENDING_APPROVAL", "approver_id": str(payload.approver_id)},
-            description=f"Submitted task '{task.title}' for approval to {approver.username}",
+            description=f"Submitted task '{task.title}' for approval to {approver.display_name or approver.full_name or approver.username}",
         )
 
         await self._broadcast_task_event("TASK_APPROVAL_REQUESTED", refreshed, actor_id=current_user.id)
@@ -2201,7 +2201,7 @@ class TaskService:
                 session=self.repository.session,
                 task_id=task.id,
                 actor_id=current_user.id,
-                actor_username=current_user.username,
+                actor_username=getattr(current_user, "display_name", None) or getattr(current_user, "full_name", None) or current_user.username,
                 completion_notes=payload.notes,
             )
         else:
@@ -2225,7 +2225,7 @@ class TaskService:
                 user_id=uid,
                 type=f"task_approval_{action_str.lower()}",
                 title=f"Task {action_str}",
-                message=f"Task '{task.title}' was {action_str.lower()} by {current_user.username}.",
+                message=f"Task '{task.title}' was {action_str.lower()} by {getattr(current_user, 'display_name', None) or getattr(current_user, 'full_name', None) or current_user.username}.",
                 link=f"/tasks?id={task.id}",
             )
 
@@ -2233,7 +2233,7 @@ class TaskService:
             action=AuditAction.UPDATE,
             module="tasks",
             user_id=current_user.id,
-            username_snapshot=current_user.username,
+            username_snapshot=getattr(current_user, "display_name", None) or getattr(current_user, "full_name", None) or current_user.username,
             entity_type="Task",
             entity_id=str(task.id),
             new_values={"status": task.status.value, "approval_status": task.approval_status},
@@ -2328,7 +2328,7 @@ class TaskService:
             action=AuditAction.CREATE,
             module="tasks",
             user_id=current_user.id,
-            username_snapshot=current_user.username,
+            username_snapshot=getattr(current_user, "display_name", None) or getattr(current_user, "full_name", None) or current_user.username,
             entity_type="Task",
             entity_id=str(refreshed.id),
             new_values={"title": refreshed.title, "duplicated_from": str(orig.id)},
@@ -2379,7 +2379,7 @@ class TaskService:
                         session=self.repository.session,
                         task_id=tid,
                         actor_id=current_user.id,
-                        actor_username=current_user.username,
+                        actor_username=getattr(current_user, "display_name", None) or getattr(current_user, "full_name", None) or current_user.username,
                     )
         await self.repository.session.commit()
 
@@ -2387,7 +2387,7 @@ class TaskService:
             action=AuditAction.UPDATE,
             module="tasks",
             user_id=current_user.id,
-            username_snapshot=current_user.username,
+            username_snapshot=getattr(current_user, "display_name", None) or getattr(current_user, "full_name", None) or current_user.username,
             entity_type="Task",
             entity_id="bulk",
             new_values={"action": payload.action, "count": success_count},
@@ -2695,7 +2695,7 @@ class TaskService:
             action=AuditAction.CREATE,
             module="tasks",
             user_id=current_user.id,
-            username_snapshot=getattr(current_user, "username", "system"),
+            username_snapshot=getattr(current_user, "display_name", None) or getattr(current_user, "full_name", None) or getattr(current_user, "username", "system"),
             entity_type="TaskRecurringSchedule",
             entity_id=str(created.id),
             new_values={"title": created.title, "frequency": created.frequency},
@@ -2794,7 +2794,7 @@ class TaskService:
             action=AuditAction.UPDATE,
             module="tasks",
             user_id=current_user.id,
-            username_snapshot=getattr(current_user, "username", "system"),
+            username_snapshot=getattr(current_user, "display_name", None) or getattr(current_user, "full_name", None) or getattr(current_user, "username", "system"),
             entity_type="TaskRecurringSchedule",
             entity_id=str(schedule.id),
             new_values={"title": schedule.title, "status": schedule.status},
@@ -2820,7 +2820,7 @@ class TaskService:
             action=AuditAction.UPDATE,
             module="tasks",
             user_id=current_user.id,
-            username_snapshot=getattr(current_user, "username", "system"),
+            username_snapshot=getattr(current_user, "display_name", None) or getattr(current_user, "full_name", None) or getattr(current_user, "username", "system"),
             entity_type="TaskRecurringSchedule",
             entity_id=str(schedule.id),
             new_values={"status": "PAUSED"},
@@ -2853,7 +2853,7 @@ class TaskService:
             action=AuditAction.UPDATE,
             module="tasks",
             user_id=current_user.id,
-            username_snapshot=getattr(current_user, "username", "system"),
+            username_snapshot=getattr(current_user, "display_name", None) or getattr(current_user, "full_name", None) or getattr(current_user, "username", "system"),
             entity_type="TaskRecurringSchedule",
             entity_id=str(schedule.id),
             new_values={"status": "ACTIVE"},
@@ -2881,7 +2881,7 @@ class TaskService:
             action=AuditAction.UPDATE,
             module="tasks",
             user_id=current_user.id,
-            username_snapshot=getattr(current_user, "username", "system"),
+            username_snapshot=getattr(current_user, "display_name", None) or getattr(current_user, "full_name", None) or getattr(current_user, "username", "system"),
             entity_type="TaskRecurringSchedule",
             entity_id=str(schedule.id),
             new_values={"status": "ARCHIVED"},
@@ -2926,7 +2926,7 @@ class TaskService:
             action=AuditAction.UPDATE,
             module="tasks",
             user_id=current_user.id,
-            username_snapshot=getattr(current_user, "username", "system"),
+            username_snapshot=getattr(current_user, "display_name", None) or getattr(current_user, "full_name", None) or getattr(current_user, "username", "system"),
             entity_type="TaskRecurringSchedule",
             entity_id=str(schedule.id),
             new_values={"status": schedule.status},
@@ -2946,7 +2946,7 @@ class TaskService:
             action=AuditAction.DELETE,
             module="tasks",
             user_id=current_user.id,
-            username_snapshot=getattr(current_user, "username", "system"),
+            username_snapshot=getattr(current_user, "display_name", None) or getattr(current_user, "full_name", None) or getattr(current_user, "username", "system"),
             entity_type="TaskRecurringSchedule",
             entity_id=str(schedule.id),
         )
@@ -3334,10 +3334,11 @@ class TaskService:
                 dept_role = await self.repository.session.get(Role, dept_id)
                 dept_name = dept_role.name if dept_role else None
 
-            full_name = f"{u.first_name or ''} {u.last_name or ''}".strip() or u.username or u.email
+            full_name = (u.display_name or f"{u.first_name or ''} {u.last_name or ''}".strip() or u.username or u.email)
             options.append(
                 TaskAssigneeOptionRead(
                     id=u.id,
+                    display_name=u.display_name,
                     full_name=full_name,
                     username=u.username,
                     email=u.email,

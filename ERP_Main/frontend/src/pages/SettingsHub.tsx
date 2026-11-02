@@ -26,7 +26,7 @@ export function SettingsHub() {
   return (
     <AppShell
       activeKey="settings-general"
-      pageTitle="ERP_Main System Settings"
+      pageTitle="System Settings"
     >
       {/* General Settings Form */}
       <div className="card" style={{ padding: "24px", maxWidth: "680px" }}>
