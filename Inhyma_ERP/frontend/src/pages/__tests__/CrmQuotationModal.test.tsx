@@ -540,6 +540,14 @@ describe("CRM Phase 7 — Quotation Form Cleanup, Lead Products Tab, Save & PDF 
       expect(screen.getByText("₹16,520.00")).toBeTruthy();
     });
 
+    // View PDF is completely removed from the quotation card
+    expect(screen.queryByTestId("view-quote-pdf-quote-1")).toBeNull();
+    expect(screen.queryByText(/View PDF/i)).toBeNull();
+
+    // View Details & History button is available on the saved quotation
+    const historyBtn = screen.getByRole("button", { name: /View Details & History/i });
+    expect(historyBtn).toBeTruthy();
+
     // PDF Download button is available on the saved quotation
     const pdfBtn = screen.getByTestId("download-quote-pdf-quote-1");
     expect(pdfBtn).toBeTruthy();
