@@ -224,15 +224,16 @@ Inhyma_ERP/
 │   │   ├── tasks/                # Workforce tasks, Jira board & recurring_worker.py
 │   │   ├── common/workflow.py    # Database-driven workflow transition validator
 │   │   ├── suppliers/            # Supplier directory with mandatory calling number
-│   │   ├── technical_tasks/      # Field service tickets & technician dispatch
+│   │   ├── technical_tasks/      # Field service tickets, sequential task_number, call/task logs & payments
+│   │   ├── technician_operations/# Field technician trip operations & wallet ledger (Self collect auto-sync)
 │   │   ├── api/v1/internal_users.py # Spoke user deprovisioning endpoint
 │   │   ├── events/               # WebSocket connection manager & broadcast
 │   │   ├── feed/                 # Internal broadcast announcements & 1-to-1 employee messaging
 │   │   ├── hrms/                 # Attendance, Leave, Assets, Expenses, Site Visits, Payroll & RBAC
 │   │   ├── rbac/                 # Departments & Permissions (super_admin + user system roles)
 │   │   └── users/                # Unified employee & user directory + ERP_Main identity sync
-│   ├── alembic/                  # Database migrations (single-head invariant)
-│   ├── scripts/                  # Idempotent bootstrap seed.py (297 permissions, 2 system roles) & maintenance utilities
+│   ├── alembic/                  # Database migrations (single-head invariant, head z6d7e8f9a0b1)
+│   ├── scripts/                  # Idempotent bootstrap seed.py (306 permissions, 2 system roles) & maintenance utilities
 │   └── tests/                    # SQLite-isolated backend test suites (conftest.py live-DB guard)
 ├── frontend/
 │   ├── src/
@@ -240,8 +241,9 @@ Inhyma_ERP/
 │   │   ├── lib/                  # autocompleteBlocker.ts, api.ts, purchaseApi.ts, workflowRules.ts
 │   │   ├── pages/                # Companies, Suppliers, LocalPurchase, ImportPurchase,
 │   │   │                         # ProductStockPage, StockTransactionDetailPage, ProductReorderPage,
-│   │   │                         # SaleProcessList, DiscountPaymentsPage, crm/*, tasks/TasksPage
-│   │   ├── styles/               # style.css, productStock.css (warehouse tints, ledger styles, calc-locked, toasts)
+│   │   │                         # SaleProcessList, DiscountPaymentsPage, crm/*, tasks/TasksPage,
+│   │   │                         # technicalTasks/{TechnicalTasksPage,TechnicalTaskDetailPage,PaymentsPage}
+│   │   ├── styles/               # style.css, productStock.css, technicalTasks.css, payments.css
 │   │   ├── App.tsx               # App lifecycle, routes & blocker initialization
 │   │   └── main.tsx              # Wheel scroll lockout listener
 │   └── package.json
@@ -476,7 +478,7 @@ During Render/Docker container boot, `python server.py` executes a four-phase in
 2. **Schema Upgrade (`alembic upgrade heads`):**
    - Executes `alembic upgrade heads` (plural), upgrading all active branch heads to current state without terminating container execution on branch divergences.
 3. **Idempotent Bootstrap Seeding (`scripts.seed`):**
-   - Provisions strictly the 2 system roles (`super_admin` displayed as `Admin` and `user` displayed as `User`), all `297` permissions (granted 100% to `super_admin`), geography, and default super-admin credentials on fresh install only—never seeding hardcoded business departments.
+   - Provisions strictly the 2 system roles (`super_admin` displayed as `Admin` and `user` displayed as `User`), all `306` permissions (granted 100% to `super_admin`), geography, and default super-admin credentials on fresh install only—never seeding hardcoded business departments.
 4. **ASGI Process Launch (`uvicorn app.main:app`):**
    - Starts API server with DNS resilience and graceful shutdown signal handlers.
 
@@ -500,7 +502,7 @@ During Render/Docker container boot, `python server.py` executes a four-phase in
    - `get_engine()` in `app/database/engine.py` enforces a second hard runtime guard: whenever `pytest` is loaded in `sys.modules` (and `ALLOW_LIVE_DB_TESTS != "1"`), any `supabase.com` / `supabase.co` URL—even if loaded early from `.env`—is forcibly diverted to `sqlite+aiosqlite:///:memory:`.
 2. **Automatic Colleague Workstation QA Sweeper & Canonical 2-Role Bootstrap (`legacy_qa_guard.py`, `scripts/seed.py`, `z5c6d7e8f9a0`):**
    - `app/core/legacy_qa_guard.py` (`purge_retired_qa_files()`) runs automatically on `pytest` startup and local FastAPI server startup to sweep and delete any lingering untracked/copied copies of all 45 retired synthetic-QA scripts and live-DB test modules on developer/colleague workstations after `git pull`, backed by idempotent DB cleanup migration `z5c6d7e8f9a0_purge_synthetic_pytest_artifacts.py`.
-   - `scripts/seed.py` seeds strictly two `is_system=True` roles (`super_admin` = `Admin` and `user` = `User`) and `297` granular permissions (`297/297` assigned to `super_admin`); all organizational departments are created dynamically by administrators (`is_system=False`).
+   - `scripts/seed.py` seeds strictly two `is_system=True` roles (`super_admin` = `Admin` and `user` = `User`) and `306` granular permissions (`306/306` assigned to `super_admin`); all organizational departments are created dynamically by administrators (`is_system=False`).
 3. **HRMS Soft-Delete Non-Recreation (`app/hrms/service.py`, `app/hrms/leave_service.py`):**
    - `ensure_seeds()` checks total row counts (including soft-deleted records) across `HrmsLocation`, `HrmsLeaveType`, `HrmsExpenseCategory`, `HrmsHoliday`, and `HrmsLeavePlan` so user-deleted defaults never re-create on subsequent requests.
 
@@ -530,3 +532,22 @@ During Render/Docker container boot, `python server.py` executes a four-phase in
 2. **End-to-End `Display Name` Resolution Chain:**
    - `User.full_name` (`app/users/models.py`), `ProfileResponse` (`app/auth/schemas.py`), and `CurrentUser.actor_label` (`app/auth/service.py`) resolve `display_name` first (`display_name -> first/middle/last -> username -> employee_code`).
    - Cross-module pickers (`GET /api/v1/companies/sales-persons`, `GET /api/v1/tasks/assignees`, `SearchableUserSelect.tsx`, `Companies.tsx`) and transactional actor stamps (Proforma Invoices, Sales Orders, Local/Import Purchases, Stock Adjustments, Inquiries, Technical Tasks, Technician Operations, Shipment Planning change logs, CRM Leads/Follow-Ups, HRMS modules & Excel exports, and Trash) consistently display and stamp `display_name` first, while scoped repositories match `{display_name, full_name, username}` so historical records remain visible.
+
+---
+
+## 19. Technical Tasks Lifecycle, Granular RBAC & Technician Wallet Auto-Sync Architecture
+
+1. **8-Permission Granular RBAC Matrix (`module="technicaltask"`, `page="technical-tasks"`):**
+   - Enforces independent action permissions across `technicaltask.view`, `technicaltask.create`, `technicaltask.update`, `technicaltask.approve`, `technicaltask.delete`, `technicaltask.export`, `technicaltask.bulk_action`, and `technicaltask.manage` (`seed.py` & `seed_technical_task_permissions.py`).
+   - Synchronized end-to-end across sidebar navigation (`nav.ts` gating both `/technical-task/list` and `/payments`), WebSocket subscriptions (`app/events/channels.py`), FastAPI route dependencies (`require_any_permission`), and React button/action visibility (`TechnicalTasksPage.tsx`, `TechnicalTaskDetailPage.tsx`, `PaymentsPage.tsx`).
+   - Non-master viewers holding `technicaltask.*` permissions seamlessly populate dropdowns via authenticated `/masters/cities/lookup`, `/masters/technicians/lookup`, and `/masters/call-types/lookup` fallbacks (`Depends(get_current_user)`).
+2. **Sequential `task_number`, Call Logs & Immutable Lifecycle Logs (`z6d7e8f9a0b1`):**
+   - `technical_tasks.task_number` (`INTEGER`, indexed) assigns sequential human-readable ticket numbers (`#1`, `#2`, ...) resolved interchangeably with UUIDs via `TechnicalTaskRepository.resolve_task()`.
+   - `technical_task_logs` records an immutable lifecycle audit trail (`Create Technical Task`, `Approve Technical Task`, `Complete Technical Task`, `Cancel Technical Task`, `Reopen Technical Task`, `Record Task Payment`, `Update Technical Task`) surfaced alongside technician `Telecall` / `Physical Visit` call logs on `/technical-task/detail/:id`.
+3. **Doc-Compliant State Machine & Viewport-Centered Fixed Modals:**
+   - `Pending` ➔ **`Approved`** (mandatory `task_allotted_to`, approver commercial overrides, Onsite-only `scheduled_visit_date`, separate `approver_remarks`).
+   - `Approved` ➔ **`Completed`** (*Free* tasks go directly to `Completed` with `technician_remarks`; *Chargeable* tasks branch on payment collection: `No` ➔ `Payment Pending`, `Yes` ➔ `Completed` + `Paid` via `Company Acc` or `Self collect`) OR **`Cancel`** (strictly mandatory `cancel_remarks`).
+   - `.tech-modal-overlay` and `.tech-modal-card` in `technicalTasks.css` are unscoped fixed overlays (`position: fixed; inset: 0; z-index: 2000`) so workflow modals always open centered inside `<main className="page">` with inline `status-modal-error` validation banners.
+4. **Payments Stage Tabs, Cancelled-Task Exclusion & `Self collect` Wallet Auto-Sync:**
+   - `/payments` (`PaymentsPage.tsx`) exposes `All (<all_count>)`, `Pending (<pending_count>)`, and `Completed (<completed_count>)` tabs with slate `TOTAL PAYMENT` (`#0f172a`), emerald `PAID` (`#16a34a`), and crimson red **`DUE`** (`#dc2626`) KPI cards, strictly excluding `Cancel` / `Cancelled` tasks via NULL-safe `func.coalesce` SQL predicates.
+   - Whenever a payment is recorded with `payment_mode == "Self collect"` (during task completion or `/payments` `Record Payment`), `TechnicalTaskService._sync_self_collect_wallet()` atomically inserts an idempotent `VERIFIED` `COLLECTION` `TechnicianWalletTransaction` (`TXN-TECH-YYYY-NNNN-XXXX`) linked by `technical_task_id` for immediate field-cash reconciliation in `/technician-operations`.

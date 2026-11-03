@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.audit.constants import AuditAction
 from app.audit.dependencies import get_audit_service
 from app.audit.service import AuditService
+from app.auth.dependencies import get_current_user
 from app.auth.service import CurrentUser
 from app.common.list_query import ListQueryParams, get_list_query_params
 from app.common.pagination import PageMeta
@@ -124,7 +125,7 @@ async def list_call_types(
 async def dropdown_call_types(
     request: Request,
     service: CallTypeService = Depends(get_call_type_service),
-    _perm: CurrentUser = Depends(require_permission("call_type.view")),
+    _current_user: CurrentUser = Depends(get_current_user),
 ) -> dict:
     """Return lightweight call types list for selects/dropdowns."""
     items = await service.list_all_cached()

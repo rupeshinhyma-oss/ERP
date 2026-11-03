@@ -134,7 +134,9 @@ MODULE_CHANNEL_PERMISSIONS: dict[str, str] = {
     module_channel("call_type"): "call_type.view",
     module_channel("call-type"): "call_type.view",
     # --- Task management ---
-    module_channel("tasks"):         "task.view",
+    module_channel("tasks"):           "task.view",
+    module_channel("technical_tasks"): "technicaltask.view",
+    module_channel("technical-tasks"): "technicaltask.view",
 }
 
 

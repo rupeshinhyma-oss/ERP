@@ -14,7 +14,7 @@ vi.mock("@/lib/hooks", async (importOriginal) => {
     useAuth: () => ({
       profile: { username: authState.username },
       isSuperAdmin: authState.isSuperAdmin,
-      hasPermission: (code?: string | null) => !code || authState.perms.includes(code),
+      hasPermission: (code?: string | null) => authState.isSuperAdmin || !code || authState.perms.includes(code),
     }),
   };
 });
@@ -468,57 +468,186 @@ describe("TechnicalTasksPage", () => {
     fireEvent.click(screen.getByText("⋮"));
   };
 
-  it("lets the approver override task type, service type, amount and payment terms when approving", async () => {
-    const pending = { ...sampleTasks[0], status: "Pending", task_allotted_to: "Devendra Marade", task_approved_by: null };
+  it("opens Approve & Allot Task modal on Approved click, enforces technician allotment, and supports approver overrides", async () => {
+    (apiGet as any).mockImplementation(async (path: string) => {
+      if (path.startsWith("/masters/technicians?")) {
+        throw new Error("403 Forbidden: technician.view required");
+      }
+      if (path === "/masters/technicians/lookup") {
+        return { data: [{ name: "Devendra Marade" }] };
+      }
+      return { data: [] };
+    });
+    try {
+      const pending = {
+        ...sampleTasks[0],
+        status: "Pending",
+        service_type: "Free",
+        service_charge: 0,
+        payment_terms: "",
+        task_allotted_to: null,
+        task_approved_by: null,
+      };
+      vi.spyOn(technicalTasksApi, "fetchTechnicalTasks").mockResolvedValue({
+        data: [pending] as any,
+        meta: { total: 1, page: 1, page_size: 50, total_pages: 1 } as any,
+      });
+      const statusSpy = vi
+        .spyOn(technicalTasksApi, "updateTechnicalTaskStatus")
+        .mockResolvedValue({ ...pending, status: "Approved", task_allotted_to: "Devendra Marade" } as any);
+
+      render(<MemoryRouter><TechnicalTasksPage /></MemoryRouter>);
+      await openMenuFor("SHREE KHODIYAR ENTERPRISE");
+
+      expect(screen.queryByText("Approve")).toBeNull();
+      const approvedBtn = screen.getByRole("button", { name: /✅\s*Approved/ });
+      expect(approvedBtn).toBeTruthy();
+      fireEvent.click(approvedBtn);
+
+      await waitFor(() => {
+        expect(screen.getByTestId("status-task-modal")).toBeTruthy();
+        expect(screen.getByText(/Approve & Allot Task/i)).toBeTruthy();
+      });
+
+      // Saving without selecting Task Allotted To is blocked with inline modal error
+      fireEvent.click(screen.getByTestId("btn-save-status"));
+      await waitFor(() => {
+        expect(screen.getByTestId("status-modal-error").textContent).toMatch(
+          /Select the technician \(Task Allotted To\) before approving/i
+        );
+      });
+      expect(statusSpy).not.toHaveBeenCalled();
+
+      // Select technician (loaded via /masters/technicians/lookup fallback) and override Free -> Chargeable
+      const techSelect = screen.getByTestId("approve-technician") as HTMLSelectElement;
+      await screen.findByRole("option", { name: "Devendra Marade" });
+      fireEvent.change(techSelect, { target: { value: "Devendra Marade" } });
+      expect(screen.queryByTestId("status-modal-error")).toBeNull();
+      fireEvent.change(screen.getByTestId("approve-service-type"), { target: { value: "Chargeable" } });
+      fireEvent.change(await screen.findByTestId("approve-amount"), { target: { value: "3500" } });
+      fireEvent.change(screen.getByTestId("approve-terms"), { target: { value: "50% advance" } });
+      fireEvent.click(screen.getByTestId("btn-save-status"));
+
+      await waitFor(() => {
+        expect(statusSpy).toHaveBeenCalledWith(
+          "task-1",
+          "Approved",
+          "",
+          expect.objectContaining({
+            task_allotted_to: "Devendra Marade",
+            service_type: "Chargeable",
+            service_charge: 3500,
+            payment_terms: "50% advance",
+          })
+        );
+      });
+    } finally {
+      (apiGet as any).mockImplementation(async () => ({ data: [] }));
+    }
+  });
+
+  it("opens Complete Technical Task modal on Completed click and mandatory remarks modal on Cancel click", async () => {
+    const approved = { ...sampleTasks[0], status: "Approved", task_approved_by: "Admin" };
     vi.spyOn(technicalTasksApi, "fetchTechnicalTasks").mockResolvedValue({
-      data: [pending] as any,
+      data: [approved] as any,
       meta: { total: 1, page: 1, page_size: 50, total_pages: 1 } as any,
     });
-    const statusSpy = vi.spyOn(technicalTasksApi, "updateTechnicalTaskStatus").mockResolvedValue({ ...pending, status: "Approved" } as any);
+    const statusSpy = vi
+      .spyOn(technicalTasksApi, "updateTechnicalTaskStatus")
+      .mockResolvedValue({ ...approved, status: "Payment Pending" } as any);
 
-    render(<MemoryRouter><TechnicalTasksPage /></MemoryRouter>);
+    const { unmount } = render(<MemoryRouter><TechnicalTasksPage /></MemoryRouter>);
     await openMenuFor("SHREE KHODIYAR ENTERPRISE");
-    fireEvent.click(screen.getByText("Approve"));
 
-    const amount = (await screen.findByTestId("approve-amount")) as HTMLInputElement;
-    expect(amount.value).toBe("4500");
-    fireEvent.change(amount, { target: { value: "5200" } });
-    fireEvent.change(screen.getByTestId("approve-terms"), { target: { value: "Pay on visit" } });
+    expect(screen.queryByText("Complete Task")).toBeNull();
+    expect(screen.queryByText("Cancel Task")).toBeNull();
+    const completedBtn = screen.getByRole("button", { name: /✔️\s*Completed/ });
+    const cancelBtn = screen.getByRole("button", { name: /❌\s*Cancel/ });
+    expect(completedBtn).toBeTruthy();
+    expect(cancelBtn).toBeTruthy();
+
+    // Chargeable task -> Completed opens payment collection modal; choosing 'No' moves to Payment Pending
+    fireEvent.click(completedBtn);
+    await waitFor(() => {
+      expect(screen.getByText(/Complete Technical Task/i)).toBeTruthy();
+      expect(screen.getByText(/Did you collect payment/i)).toBeTruthy();
+    });
+    fireEvent.click(screen.getByLabelText(/No \(Move to Payment Pending\)/i));
     fireEvent.click(screen.getByTestId("btn-save-status"));
 
     await waitFor(() => {
       expect(statusSpy).toHaveBeenCalledWith(
         "task-1",
-        "Approved",
-        expect.anything(),
+        "Payment Pending",
+        "",
         expect.objectContaining({
-          task_type: "In-House", service_type: "Chargeable", service_charge: 5200, payment_terms: "Pay on visit",
+          payment_status: "Pending",
+          payment_collected: false,
+        })
+      );
+    });
+    unmount();
+
+    // Cancel opens mandatory remarks modal and blocks blank submission
+    statusSpy.mockClear();
+    statusSpy.mockResolvedValue({ ...approved, status: "Cancel" } as any);
+    render(<MemoryRouter><TechnicalTasksPage /></MemoryRouter>);
+    await openMenuFor("SHREE KHODIYAR ENTERPRISE");
+    fireEvent.click(screen.getByRole("button", { name: /❌\s*Cancel/ }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("cancel-task-modal")).toBeTruthy();
+    });
+    fireEvent.click(screen.getByTestId("btn-confirm-cancel"));
+    expect(screen.getByText("Cancellation remarks are strictly mandatory.")).toBeTruthy();
+    expect(statusSpy).not.toHaveBeenCalled();
+
+    fireEvent.change(screen.getByTestId("cancel-remarks-input"), {
+      target: { value: "Client requested cancellation due to plant shutdown" },
+    });
+    fireEvent.click(screen.getByTestId("btn-confirm-cancel"));
+
+    await waitFor(() => {
+      expect(statusSpy).toHaveBeenCalledWith(
+        "task-1",
+        "Cancel",
+        "Client requested cancellation due to plant shutdown",
+        expect.objectContaining({
+          cancel_remarks: "Client requested cancellation due to plant shutdown",
         })
       );
     });
   });
 
-  it("blocks approval of a chargeable task without an amount", async () => {
-    const pending = { ...sampleTasks[0], status: "Pending", task_allotted_to: "Devendra Marade", service_charge: 0 };
+  it("blocks reopen to Approved of a chargeable task without an amount in the Reopen modal", async () => {
+    const cancelled = { ...sampleTasks[0], status: "Cancel", task_allotted_to: "Devendra Marade", service_charge: 0 };
     vi.spyOn(technicalTasksApi, "fetchTechnicalTasks").mockResolvedValue({
-      data: [pending] as any,
+      data: [cancelled] as any,
       meta: { total: 1, page: 1, page_size: 50, total_pages: 1 } as any,
     });
-    const statusSpy = vi.spyOn(technicalTasksApi, "updateTechnicalTaskStatus").mockResolvedValue({} as any);
+    const reopenSpy = vi.spyOn(technicalTasksApi, "reopenTechnicalTask").mockResolvedValue({} as any);
 
     render(<MemoryRouter><TechnicalTasksPage /></MemoryRouter>);
     await openMenuFor("SHREE KHODIYAR ENTERPRISE");
-    fireEvent.click(screen.getByText("Approve"));
+    fireEvent.click(screen.getByText("Reopen / Reassign"));
+    fireEvent.change(await screen.findByTestId("approve-service-type"), { target: { value: "Chargeable" } });
     await screen.findByTestId("approve-amount");
     fireEvent.click(screen.getByTestId("btn-save-status"));
 
     await waitFor(() => expect(screen.getByText(/Amount is required for chargeable tasks/i)).toBeTruthy());
-    expect(statusSpy).not.toHaveBeenCalled();
+    expect(reopenSpy).not.toHaveBeenCalled();
   });
 
   it("hides admin-level actions (edit approved by others, delete after Pending) from normal users", async () => {
     authState.isSuperAdmin = false;
     authState.username = "sales1";
+    authState.perms = [
+      "technicaltask.view",
+      "technicaltask.create",
+      "technicaltask.update",
+      "technicaltask.approve",
+      "technicaltask.delete",
+    ];
     try {
       vi.spyOn(technicalTasksApi, "fetchTechnicalTasks").mockResolvedValue({
         data: [sampleTasks[0]] as any, // Approved by "Sushant Dhawade"
@@ -527,18 +656,27 @@ describe("TechnicalTasksPage", () => {
       render(<MemoryRouter><TechnicalTasksPage /></MemoryRouter>);
       await openMenuFor("SHREE KHODIYAR ENTERPRISE");
       expect(screen.getByText("Call Logs")).toBeTruthy();
-      expect(screen.getByText("Complete Task")).toBeTruthy();
+      expect(screen.getByRole("button", { name: /✔️\s*Completed/ })).toBeTruthy();
+      expect(screen.getByRole("button", { name: /❌\s*Cancel/ })).toBeTruthy();
       expect(screen.queryByText("Edit")).toBeNull();
       expect(screen.queryByText("Delete")).toBeNull();
     } finally {
       authState.isSuperAdmin = true;
       authState.username = "admin";
+      authState.perms = [];
     }
   });
 
   it("shows Edit and Delete for a Pending task to normal users, and Delete for admins on any stage", async () => {
     authState.isSuperAdmin = false;
     authState.username = "sales1";
+    authState.perms = [
+      "technicaltask.view",
+      "technicaltask.create",
+      "technicaltask.update",
+      "technicaltask.approve",
+      "technicaltask.delete",
+    ];
     try {
       vi.spyOn(technicalTasksApi, "fetchTechnicalTasks").mockResolvedValue({
         data: [{ ...sampleTasks[0], status: "Pending", task_approved_by: null }] as any,
@@ -551,6 +689,50 @@ describe("TechnicalTasksPage", () => {
     } finally {
       authState.isSuperAdmin = true;
       authState.username = "admin";
+      authState.perms = [];
+    }
+  });
+
+  it("gates header buttons and row actions by granular technicaltask.* permissions and registers RBAC metadata", async () => {
+    const { NAV_ITEMS_BY_KEY } = await import("@/lib/nav");
+    const { MODULE_NAMES, friendlyPermissionLabel } = await import("@/lib/permissionLabels");
+
+    expect(NAV_ITEMS_BY_KEY["technical-tasks"]?.permission).toBe("technicaltask.view");
+    expect(NAV_ITEMS_BY_KEY["payments"]?.permission).toBe("technicaltask.view");
+    expect(MODULE_NAMES.technicaltask).toBe("Technical Tasks");
+    expect(friendlyPermissionLabel("technicaltask.view")).toBe("View");
+    expect(friendlyPermissionLabel("technicaltask.create")).toBe("Create");
+    expect(friendlyPermissionLabel("technicaltask.update")).toBe("Edit");
+    expect(friendlyPermissionLabel("technicaltask.approve")).toBe("Approve");
+    expect(friendlyPermissionLabel("technicaltask.delete")).toBe("Delete");
+    expect(friendlyPermissionLabel("technicaltask.export")).toBe("Export");
+    expect(friendlyPermissionLabel("technicaltask.bulk_action")).toBe("Bulk Actions");
+    expect(friendlyPermissionLabel("technicaltask.manage")).toBe("Manage All");
+
+    authState.isSuperAdmin = false;
+    authState.username = "viewer1";
+    authState.perms = ["technicaltask.view"];
+    try {
+      vi.spyOn(technicalTasksApi, "fetchTechnicalTasks").mockResolvedValue({
+        data: [{ ...sampleTasks[0], status: "Pending", task_approved_by: null }] as any,
+        meta: { total: 1, page: 1, page_size: 50, total_pages: 1 } as any,
+      });
+      render(<MemoryRouter><TechnicalTasksPage /></MemoryRouter>);
+
+      expect(screen.queryByText("+ ADD NEW")).toBeNull();
+      expect(screen.queryByText(/Imp \/ Exp/)).toBeNull();
+      expect(screen.queryByText(/Bulk Actions/)).toBeNull();
+
+      await openMenuFor("SHREE KHODIYAR ENTERPRISE");
+      expect(screen.queryByText("View Details")).toBeNull();
+      expect(screen.getByText("Call Logs")).toBeTruthy();
+      expect(screen.queryByRole("button", { name: /✅\s*Approved/ })).toBeNull();
+      expect(screen.queryByText("Edit")).toBeNull();
+      expect(screen.queryByText("Delete")).toBeNull();
+    } finally {
+      authState.isSuperAdmin = true;
+      authState.username = "admin";
+      authState.perms = [];
     }
   });
 

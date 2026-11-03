@@ -44,8 +44,8 @@ export const NAV_SECTIONS: NavSection[] = [
     label: "TASK",
     items: [
       { key: "tasks", label: "Tasks", path: "/tasks", icon: "task", permission: "task.view" },
-      { key: "technical-tasks", label: "Technical Tasks", path: "/technical-task/list", icon: "wrench" },
-      { key: "payments", label: "Payments", path: "/payments", icon: "currency" },
+      { key: "technical-tasks", label: "Technical Tasks", path: "/technical-task/list", icon: "wrench", permission: "technicaltask.view" },
+      { key: "payments", label: "Payments", path: "/payments", icon: "currency", permission: "technicaltask.view" },
       { key: "technician-operations", label: "Technician Ops & Wallet", path: "/technician-operations", icon: "truck" },
     ],
   },

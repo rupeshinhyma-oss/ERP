@@ -8,10 +8,10 @@ repairs, technician allocations, status lifecycles, and technical call logs.
 from __future__ import annotations
 
 import uuid
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from decimal import Decimal
 
-from sqlalchemy import Computed, Date, DateTime, ForeignKey, Numeric, SmallInteger, String, Text
+from sqlalchemy import Computed, Date, DateTime, ForeignKey, Integer, Numeric, SmallInteger, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database.base import GUID, Base, SoftDeleteMixin, TimestampMixin, UUIDPrimaryKeyMixin, VersionMixin
@@ -22,6 +22,7 @@ class TechnicalTask(Base, UUIDPrimaryKeyMixin, TimestampMixin, VersionMixin, Sof
 
     __tablename__ = "technical_tasks"
 
+    task_number: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     company_name: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     # Link to the company master (company_name stays as a denormalised display value for old rows).
     company_id: Mapped[uuid.UUID | None] = mapped_column(GUID(), nullable=True)
@@ -80,12 +81,19 @@ class TechnicalTask(Base, UUIDPrimaryKeyMixin, TimestampMixin, VersionMixin, Sof
     )
     completed_date: Mapped[date | None] = mapped_column(Date, nullable=True)
 
-    # Call Logs relationship
+    # Call Logs & Task Lifecycle Logs relationships
     call_logs: Mapped[list[TechnicalTaskCallLog]] = relationship(
         "TechnicalTaskCallLog",
         back_populates="task",
         cascade="all, delete-orphan",
         order_by="desc(TechnicalTaskCallLog.created_at)",
+        lazy="noload",
+    )
+    task_logs: Mapped[list[TechnicalTaskLog]] = relationship(
+        "TechnicalTaskLog",
+        back_populates="task",
+        cascade="all, delete-orphan",
+        order_by="desc(TechnicalTaskLog.created_at)",
         lazy="noload",
     )
 
@@ -108,9 +116,28 @@ class TechnicalTaskCallLog(Base, UUIDPrimaryKeyMixin):
     call_type: Mapped[str] = mapped_column(String(50), nullable=False, default="Telecall")
     remarks: Mapped[str] = mapped_column(Text, nullable=False)
     created_by: Mapped[str] = mapped_column(String(100), nullable=False, default="Technician")
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     task: Mapped[TechnicalTask] = relationship("TechnicalTask", back_populates="call_logs")
 
     def __repr__(self) -> str:
         return f"<TechnicalTaskCallLog id={self.id!r} task_id={self.task_id!r} type={self.call_type!r}>"
+
+
+class TechnicalTaskLog(Base, UUIDPrimaryKeyMixin):
+    """An immutable lifecycle activity entry for a technical task (Task Log Summary)."""
+
+    __tablename__ = "technical_task_logs"
+
+    task_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("technical_tasks.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    updated_by: Mapped[str] = mapped_column(String(150), nullable=False, default="Admin")
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    status: Mapped[str] = mapped_column(String(50), nullable=False, default="Pending")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+    task: Mapped[TechnicalTask] = relationship("TechnicalTask", back_populates="task_logs")
+
+    def __repr__(self) -> str:
+        return f"<TechnicalTaskLog id={self.id!r} task_id={self.task_id!r} title={self.title!r} status={self.status!r}>"

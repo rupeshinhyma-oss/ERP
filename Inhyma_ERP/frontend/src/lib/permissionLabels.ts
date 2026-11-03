@@ -38,6 +38,7 @@ export const MODULE_NAMES: Record<string, string> = {
   roles_permissions: "Departments & Permissions",
   hrms: "HRMS & Workforce",
   task: "Tasks & Work Management",
+  technicaltask: "Technical Tasks",
 };
 
 const ACTION_LABELS: Record<string, string> = {

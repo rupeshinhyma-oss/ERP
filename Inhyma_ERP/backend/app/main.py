@@ -149,6 +149,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         from app.purchase.models import LocalPurchase, LocalPurchaseItem, ImportPurchase, ImportPurchaseItem
         from app.feed.models import FeedConversation, FeedConversationParticipant, FeedDirectMessage
         from app.masters.products.models import ProductSpecificationDocument
+        from app.technical_tasks.models import TechnicalTaskLog
 
         required_column_ddls = [
             ("organizations", "logo_data", "ALTER TABLE organizations ADD COLUMN IF NOT EXISTS logo_data TEXT;"),
@@ -177,6 +178,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             ("hrms_expenses", "reimbursement_notes", "ALTER TABLE hrms_expenses ADD COLUMN IF NOT EXISTS reimbursement_notes TEXT;"),
             ("hrms_expenses", "receipt_filename", "ALTER TABLE hrms_expenses ADD COLUMN IF NOT EXISTS receipt_filename VARCHAR(255);"),
             ("users", "has_login", "ALTER TABLE users ADD COLUMN IF NOT EXISTS has_login BOOLEAN DEFAULT false;"),
+            ("technical_tasks", "task_number", "ALTER TABLE technical_tasks ADD COLUMN IF NOT EXISTS task_number INTEGER;"),
         ]
         startup_tables = [
             User.__table__,
@@ -207,6 +209,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             FeedConversationParticipant.__table__,
             FeedDirectMessage.__table__,
             ProductSpecificationDocument.__table__,
+            TechnicalTaskLog.__table__,
         ]
 
         # Read-only metadata check first so we NEVER acquire ACCESS EXCLUSIVE locks on `users` / `organizations`

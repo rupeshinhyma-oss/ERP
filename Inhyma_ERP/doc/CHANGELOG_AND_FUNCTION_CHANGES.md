@@ -3,7 +3,53 @@
 **System:** Inhyma_ERP (India Distribution)  
 **Scope:** Functional updates, schema migrations, UI hardening, and bug fixes.
 
-## [Release 2026-11-02] ? Display Name Primary Identity Across All Modules, Removal of UI Username, Bidirectional ERP_Main Profile Sync, and CRM Quotation Card Action Cleanup
+## [Release 2026-11-03] — Technical Tasks Granular RBAC (`306` Permissions), Dedicated Call Logs & Task Log Summary Detail Page, Doc-Compliant `Approved` / `Completed` / `Cancel` Centered Modals, Payments Stage Tabs & Red `DUE` KPI, and `Self collect` Technician Wallet Auto-Sync
+
+### 1. Granular Technical Tasks RBAC Permissions (`technicaltask.*`, `306` Total Bootstrap Permissions)
+- **8-Action Permission Matrix (`backend/scripts/seed.py`, `backend/scripts/seed_technical_task_permissions.py`):**
+  - Provisioned `technicaltask.view` (*View*), `technicaltask.create` (*Create*), `technicaltask.update` (*Edit*), `technicaltask.approve` (*Approve*), `technicaltask.delete` (*Delete*), `technicaltask.export` (*Export*), `technicaltask.bulk_action` (*Bulk Actions*), and `technicaltask.manage` (*Manage All*) under `module="technicaltask"` and `page="technical-tasks"` (increasing canonical bootstrap permissions from `298` to `306` with `306/306` assigned to `super_admin`).
+  - Added standalone idempotent sync script `backend/scripts/seed_technical_task_permissions.py` for non-destructive execution on existing environments.
+- **Full-Stack Enforcement (`nav.ts`, `permissionLabels.ts`, `channels.py`, `technical_tasks/routes.py`, `TechnicalTasksPage.tsx`, `TechnicalTaskDetailPage.tsx`, `PaymentsPage.tsx`):**
+  - Sidebar & Route Guards: Wired `permission: "technicaltask.view"` on both `Technical Tasks` (`/technical-task/list`) and `Payments` (`/payments`) in `frontend/src/lib/nav.ts`, and mapped `"technical-tasks": "Technical Tasks"` in `frontend/src/lib/permissionLabels.ts`.
+  - WebSocket & REST Guards: Updated `backend/app/events/channels.py` (`module:technical_tasks` & `module:technical-tasks`) and every endpoint in `backend/app/technical_tasks/routes.py` using `require_any_permission(...)` (allowing `technicaltask.manage` as full module override, `technicaltask.approve` for `Approved` / `Reopen` transitions, `technicaltask.bulk_action` for `POST /bulk-delete`, and `report.view` co-access on summary analytics).
+  - Granular UI Controls: Gated `+ ADD NEW`, `+ ADD NEW CALL LOG`, `Imp / Exp ▾`, `Bulk Actions ▾`, row `Approved`, `Completed`, `Cancel`, `Edit`, `Payment Collected`, `Reopen / Reassign`, `Record Payment`, and `Delete` via `useAuth()` permission checks.
+
+### 2. Dedicated Call Logs & Task Log Summary Detail Page (`/technical-task/detail/:id`) & Schema Migration (`z6d7e8f9a0b1`)
+- **Database Migration & Models (`z6d7e8f9a0b1_add_technical_task_logs_and_number.py`, `technical_tasks/models.py`, `schemas.py`):**
+  - Added sequential `task_number` (`INTEGER`, indexed, backfilled in chronological `created_at` order) on `technical_tasks` so service tickets expose human-friendly identifiers (`Technical Task #1`, `#2`, ...).
+  - Created `technical_task_logs` (`id`, `task_id` FK -> `technical_tasks.id`, `title`, `status`, `updated_by_name`, `created_at`) and `TechnicalTaskLog` ORM model to persist immutable lifecycle audit entries (`Create Technical Task`, `Approve Technical Task`, `Complete Technical Task`, `Cancel Technical Task`, `Reopen Technical Task`, `Record Task Payment`, `Update Technical Task`).
+- **Backend Resolution & Endpoint (`repository.py`, `service.py`, `routes.py`):**
+  - Added `TechnicalTaskRepository.resolve_task()` accepting either a UUID or sequential `task_number` across `GET /technical-tasks/{task_id}`, `GET /technical-tasks/{task_id}/call-logs`, `POST /technical-tasks/{task_id}/call-logs`, and new `GET /api/v1/technical-tasks/{task_id}/task-logs`.
+- **Dedicated Detail Page & Action Menu Streamlining (`TechnicalTaskDetailPage.tsx`, `TechnicalTasksPage.tsx`, `App.tsx`):**
+  - Mounted `TechnicalTaskDetailPage.tsx` at `/technical-task/detail/:id` with dynamic `Technical Task #<number>` header, top-right `+ ADD NEW CALL LOG` slide-over drawer (`Telecall` / `Physical Visit` radio options + `Remarks` + sticky `Submit`), left `Task Details` & `Company Details` cards, and right `Call Log Summary` (5 sortable columns, `Items/Page`, instant search, pagination) & `Task Log Summary` (3-column lifecycle log) tabs.
+  - Removed the redundant `View Details` item from the row `ACTION` (`⋮`) dropdown on `/technical-task/list` (since clicking Company Name or `Details Of Task` already opens the preview drawer), placing `📞 Call Logs` at the top of `ACTION`.
+
+### 3. Doc-Compliant `Approved` / `Completed` / `Cancel` Workflow Modals, Centered Fixed-Overlay CSS & Lookup Fallbacks (`TechnicalTasksPage.tsx`, `technicalTasks.css`, `masters/*`)
+- **Action Labels & Specification-Exact Transitions (`Phase 2: Technical task module.docx`, `General New points inhyma.docx`):**
+  - Renamed row `ACTION` (`⋮`) workflow triggers to **`✅ Approved`** (`Pending` rows), **`✔️ Completed`** (`Approved` rows), and **`❌ Cancel`** (`Approved` rows).
+  - **`Approved` Modal (`Approve & Allot Task`):** Enforces mandatory `Allot Technician *` (`task_allotted_to`), allows approver overrides for `Task Type`, `Service Type` (`Free` / `Chargeable`), `Amount (₹) *`, and `Payment Terms *`, conditionally renders `Scheduled / Visit Date` exclusively when `Task Type` is `Onsite Visit - Client Location` or `Onsite Visit - Third-Party Location`, and persists `Approver Remarks` in `approver_remarks` while transitioning stage & status to `Approved`.
+  - **`Completed` Modal (`Complete Technical Task`):**
+    - *Free tasks:* Displays `Remarks` (`technician_remarks`, never overwriting `approver_remarks`) and transitions directly to `Completed` (never `Payment Pending`).
+    - *Chargeable tasks:* Prompts `"Did you collect payment of ₹...?"` (`Yes` / `No`); `No` moves the task to `Payment Pending` stage & status, while `Yes` captures `Payment Collection Mode` (`Company Acc` or `Self collect`), optional `Payment Screenshot / Receipt`, `Amount Collected *`, and `Remarks`, transitioning to `Completed` + `Paid`.
+  - **`Cancel` Modal (`Cancel Technical Task`):** Enforces strictly mandatory `Cancellation Remarks *` (`cancel_remarks`) on both frontend and backend (`TechnicalTaskStatusUpdate` & `TechnicalTaskService.update_status`), transitioning stage & status to `Cancel`.
+- **Viewport-Centered Fixed Overlay & Lookup Fallbacks (`technicalTasks.css`, `technicians/routes.py`, `call_types/routes.py`):**
+  - Unscoped `.tech-modal-overlay`, `.tech-modal-card`, `.tech-modal-card > form`, `.tech-modal-header`, `.btn-close-modal`, `.tech-modal-body`, and `.tech-modal-footer` in `frontend/src/styles/technicalTasks.css` so modals render fixed and centered (`position: fixed; inset: 0; z-index: 2000`) inside `<main className="page">` instead of flowing off-screen below the table, with visible inline `data-testid="status-modal-error"` alerts and `"Saving..."` double-submit protection.
+  - Added canonical `TASK_TYPE_OPTIONS` & `SERVICE_TYPE_OPTIONS` fallbacks when `system_options` is empty, and relaxed `GET /api/v1/masters/technicians/lookup` and `GET /api/v1/masters/call-types/lookup` to `Depends(get_current_user)` with automatic client fallback in `TechnicalTasksPage.tsx` for users without master-table `.view` permissions.
+
+### 4. Payments Module (`/payments`) Stage Tabs, Cancelled Exclusion, Red `DUE` KPI & `Self collect` Technician Wallet Sync (`PaymentsPage.tsx`, `payments.css`, `repository.py`, `service.py`)
+- **`All` / `Pending` / `Completed` Stage Tabs & NULL-Safe Cancelled Exclusion (`PaymentsPage.tsx`, `repository.py`, `schemas.py`):**
+  - Added `All (<all_count>)`, `Pending (<pending_count>)`, and `Completed (<completed_count>)` tabs (`payment_collected=all|pending|completed`, `all_count` in `PaymentSummaryResponse`).
+  - Upgraded `TechnicalTaskRepository.list_tasks()` and `get_payment_summary()` with NULL-safe `func.coalesce` SQL predicates and strictly excluded `Cancel` / `Cancelled` tasks so cancelled service tickets never inflate `TOTAL PAYMENT`, `DUE`, or `/payments` tab counts.
+- **Red `DUE` KPI Card, Spelling & Dynamic Fallbacks (`PaymentsPage.tsx`, `payments.css`):**
+  - Styled the top **`DUE`** KPI metric value in crimson red (`#dc2626`, `data-testid="payment-kpi-due"`, `.payment-kpi-value.due`) alongside slate `TOTAL PAYMENT` (`#0f172a`) and emerald `PAID` (`#16a34a`).
+  - Corrected `"Chargable"` -> `"Chargeable"` badge spelling and replaced hardcoded `"ABC"` / `"Inhyma Admin"` mock strings with clean `"—"` dashes when optional fields are unassigned.
+- **Automatic `Self collect` -> Technician Wallet Sync (`TechnicalTaskService._sync_self_collect_wallet`):**
+  - Recording a `Self collect` payment (either during `Complete Technical Task` or via `/payments` `Record Payment`) automatically inserts an idempotent `VERIFIED` `COLLECTION` `TechnicianWalletTransaction` (`TXN-TECH-YYYY-NNNN-XXXX`) linked via `technical_task_id`, `technician_name`, `customer_name`, `amount`, and `receipt_url` so `/technician-operations` reflects technician cash collections immediately.
+- **Automated Verification:** Verified with `31/31` frontend Vitest tests (`PaymentsPage.test.tsx`, `TechnicalTaskDetailPage.test.tsx`, `TechnicalTasksPage.test.tsx`), `31/31` backend Pytest tests (`test_technical_tasks.py`, `test_technicians.py`), and `0` TypeScript errors (`tsc --noEmit --noUnusedLocals --noUnusedParameters`).
+
+---
+
+## [Release 2026-11-02] — Display Name Primary Identity Across All Modules, Removal of UI Username, Bidirectional ERP_Main Profile Sync, and CRM Quotation Card Action Cleanup
 
 ### 1. `Display Name` Primary Auth, JWT Actor & Bidirectional `ERP_Main` Profile Sync (`auth/*`, `federation/*`, `internal_users.py`, `users/*`)
 - **Database & Login Compatibility (`users.username` Internal-Only):** Preserved `users.username` in PostgreSQL with zero destructive schema migrations; internal username auto-generation (`_generate_unique_username`) and multi-identifier login resolution (`UserRepository.get_by_identifier` for email, phone, and username) remain intact.

@@ -18,6 +18,7 @@ import type {
 } from "@/types/technicalTasks";
 import { ClientNameAutocomplete, type CompanyAutocompleteItem } from "@/components/ClientNameAutocomplete";
 import { errorMessage } from "@/lib/api";
+import { useAuth } from "@/lib/hooks";
 import { Banner, Modal } from "@/components/ui";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import "@/styles/payments.css";
@@ -35,7 +36,7 @@ function formatNumber(amount: number | null | undefined): string {
   return val.toLocaleString("en-IN");
 }
 
-type TabType = "pending" | "completed";
+type TabType = "all" | "pending" | "completed";
 
 const TechnicalPaymentsSkeletonRows: React.FC<{ count?: number }> = ({ count = 8 }) => (
   <>
@@ -65,15 +66,23 @@ const TechnicalPaymentsSkeletonRows: React.FC<{ count?: number }> = ({ count = 8
 );
 
 export function PaymentsPage() {
+  const { isSuperAdmin, hasPermission } = useAuth();
+  const canManageAll = isSuperAdmin || hasPermission("technicaltask.manage");
+  const canCreate = canManageAll || hasPermission("technicaltask.create");
+  const canUpdate = canManageAll || hasPermission("technicaltask.update");
+  const canDelete = canManageAll || hasPermission("technicaltask.delete");
+
   // Tabs & Summary
   const [activeTab, setActiveTab] = useState<TabType>("pending");
   const [summary, setSummary] = useState<TechnicalTaskPaymentSummary>({
     total_payment: 0,
     paid: 0,
     due: 0,
+    all_count: 0,
     pending_count: 0,
     completed_count: 0,
   });
+  const allCount = summary.all_count ?? summary.pending_count + summary.completed_count;
 
   // Table Data & State
   const [tasks, setTasks] = useState<TechnicalTask[]>([]);
@@ -124,12 +133,12 @@ export function PaymentsPage() {
   const [newCompanyName, setNewCompanyName] = useState("");
   const [newCompanyId, setNewCompanyId] = useState<string | null>(null);
   const [newCity, setNewCity] = useState("");
-  const [newTaskType, setNewTaskType] = useState("Physical Visit");
-  const [newMachineModel, setNewMachineModel] = useState("GF5000F Granular Filler FFS");
+  const [newTaskType, setNewTaskType] = useState("In-House");
+  const [newMachineModel, setNewMachineModel] = useState("");
   const [newContactPerson, setNewContactPerson] = useState("");
   const [newContactPhone, setNewContactPhone] = useState("");
-  const [newServiceCharge, setNewServiceCharge] = useState("10000");
-  const [newCollectedAmount, setNewCollectedAmount] = useState("5000");
+  const [newServiceCharge, setNewServiceCharge] = useState("");
+  const [newCollectedAmount, setNewCollectedAmount] = useState("");
   const [newPaymentMode, setNewPaymentMode] = useState("Company Acc");
   const [newPaymentDate, setNewPaymentDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [newRefNo, setNewRefNo] = useState("");
@@ -163,7 +172,7 @@ export function PaymentsPage() {
     try {
       const params: TechnicalTaskListParams = {
         service_type: "Chargeable",
-        payment_collected: activeTab === "pending" ? "pending" : "completed",
+        payment_collected: activeTab,
         page,
         page_size: pageSize,
       };
@@ -313,6 +322,14 @@ export function PaymentsPage() {
       setBanner({ type: "error", message: "Please provide City." });
       return;
     }
+    if (!newContactPhone.trim()) {
+      setBanner({ type: "error", message: "Please provide Contact Phone." });
+      return;
+    }
+    if (!newMachineModel.trim()) {
+      setBanner({ type: "error", message: "Please provide Machine & Model." });
+      return;
+    }
     const charge = parseFloat(newServiceCharge);
     if (isNaN(charge) || charge <= 0) {
       setBanner({ type: "error", message: "Please enter a valid Total Amount greater than 0." });
@@ -326,17 +343,18 @@ export function PaymentsPage() {
         company_name: newCompanyName.trim(),
         company_id: newCompanyId,
         city: newCity.trim(),
+        third_party_city:
+          newTaskType === "Onsite Visit - Third-Party Location" ? newCity.trim() : undefined,
         task_type: newTaskType,
-        machine_model: newMachineModel.trim() || "Service Charges",
+        machine_model: newMachineModel.trim(),
+        task_description: newRemarks.trim() || "Chargeable service task",
         contact_person_name: newContactPerson.trim() || undefined,
-        contact_phone: newContactPhone.trim() || undefined,
+        contact_phone: newContactPhone.trim(),
         service_type: "Chargeable",
         service_charge: charge,
         payment_terms: "100% Against Completion",
-        call_type: "Physical Visit",
+        call_type: "Repair",
         priority: "A",
-        status: collected >= charge ? "Completed" : "Approved",
-        payment_status: collected >= charge ? "Paid" : "Pending",
       };
 
       const created = await createTechnicalTask(payload);
@@ -371,12 +389,12 @@ export function PaymentsPage() {
     setNewCompanyName("");
     setNewCompanyId(null);
     setNewCity("");
-    setNewTaskType("Physical Visit");
-    setNewMachineModel("GF5000F Granular Filler FFS");
+    setNewTaskType("In-House");
+    setNewMachineModel("");
     setNewContactPerson("");
     setNewContactPhone("");
-    setNewServiceCharge("10000");
-    setNewCollectedAmount("5000");
+    setNewServiceCharge("");
+    setNewCollectedAmount("");
     setNewPaymentMode("Company Acc");
     setNewRefNo("");
     setNewRemarks("");
@@ -499,61 +517,65 @@ export function PaymentsPage() {
               </button>
 
               {/* + ADD NEW */}
-              <button
-                type="button"
-                className="btn btn-add-new"
-                style={{
-                  height: "36px",
-                  padding: "0 18px",
-                  background: "#0061f2",
-                  color: "#ffffff",
-                  fontWeight: 600,
-                  fontSize: "13px",
-                  borderRadius: "6px",
-                  border: "none",
-                  cursor: "pointer",
-                  display: "inline-flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  boxShadow: "0 1px 2px rgba(0, 97, 242, 0.2)",
-                  whiteSpace: "nowrap",
-                }}
-                onClick={() => setAddNewOpen(true)}
-              >
-                + ADD NEW
-              </button>
+              {canCreate && (
+                <button
+                  type="button"
+                  className="btn btn-add-new"
+                  style={{
+                    height: "36px",
+                    padding: "0 18px",
+                    background: "#0061f2",
+                    color: "#ffffff",
+                    fontWeight: 600,
+                    fontSize: "13px",
+                    borderRadius: "6px",
+                    border: "none",
+                    cursor: "pointer",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    boxShadow: "0 1px 2px rgba(0, 97, 242, 0.2)",
+                    whiteSpace: "nowrap",
+                  }}
+                  onClick={() => setAddNewOpen(true)}
+                >
+                  + ADD NEW
+                </button>
+              )}
 
               {/* DELETE */}
-              <button
-                type="button"
-                className="btn btn-delete"
-                style={{
-                  height: "36px",
-                  padding: "0 16px",
-                  background: selectedIds.size > 0 ? "#dc2626" : "#cbd5e1",
-                  color: "#ffffff",
-                  fontWeight: 600,
-                  fontSize: "13px",
-                  border: "none",
-                  borderRadius: "6px",
-                  cursor: selectedIds.size > 0 ? "pointer" : "not-allowed",
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: "6px",
-                  transition: "background 0.15s ease",
-                  whiteSpace: "nowrap",
-                }}
-                disabled={selectedIds.size === 0}
-                onClick={() => {
-                  if (selectedIds.size > 0) setDeleteConfirmOpen(true);
-                }}
-              >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <polyline points="3 6 5 6 21 6" />
-                  <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-                </svg>
-                DELETE {selectedIds.size > 0 ? `(${selectedIds.size})` : ""}
-              </button>
+              {canDelete && (
+                <button
+                  type="button"
+                  className="btn btn-delete"
+                  style={{
+                    height: "36px",
+                    padding: "0 16px",
+                    background: selectedIds.size > 0 ? "#dc2626" : "#cbd5e1",
+                    color: "#ffffff",
+                    fontWeight: 600,
+                    fontSize: "13px",
+                    border: "none",
+                    borderRadius: "6px",
+                    cursor: selectedIds.size > 0 ? "pointer" : "not-allowed",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "6px",
+                    transition: "background 0.15s ease",
+                    whiteSpace: "nowrap",
+                  }}
+                  disabled={selectedIds.size === 0}
+                  onClick={() => {
+                    if (selectedIds.size > 0) setDeleteConfirmOpen(true);
+                  }}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <polyline points="3 6 5 6 21 6" />
+                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                  </svg>
+                  DELETE {selectedIds.size > 0 ? `(${selectedIds.size})` : ""}
+                </button>
+              )}
             </div>
           </div>
 
@@ -597,10 +619,10 @@ export function PaymentsPage() {
                     style={{ width: "100%", height: "36px", padding: "0 10px", border: "1px solid #cbd5e1", borderRadius: "6px", fontSize: "13px", outline: "none", boxSizing: "border-box", background: "#ffffff", color: "#334155" }}
                   >
                     <option value="">All</option>
-                    <option value="Physical Visit">Physical Visit</option>
                     <option value="Telecall">Telecall</option>
-                    <option value="Online Support">Online Support</option>
-                    <option value="Installation">Installation</option>
+                    <option value="Onsite Visit - Client Location">Onsite Visit - Client Location</option>
+                    <option value="Onsite Visit - Third-Party Location">Onsite Visit - Third-Party Location</option>
+                    <option value="In-House">In-House</option>
                   </select>
                 </div>
                 <div>
@@ -613,7 +635,6 @@ export function PaymentsPage() {
                     <option value="">All</option>
                     <option value="A">Priority A</option>
                     <option value="B">Priority B</option>
-                    <option value="C">Priority C</option>
                   </select>
                 </div>
                 <div>
@@ -699,7 +720,7 @@ export function PaymentsPage() {
                 <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: "4px" }}>
                   DUE
                 </div>
-                <div style={{ fontSize: "24px", fontWeight: 700, color: "#0f172a" }}>
+                <div data-testid="payment-kpi-due" style={{ fontSize: "24px", fontWeight: 700, color: "#dc2626" }}>
                   ₹ {formatCurrency(summary.due)}
                 </div>
               </div>
@@ -728,6 +749,23 @@ export function PaymentsPage() {
                 overflowX: "auto",
               }}
             >
+              <button
+                type="button"
+                style={{
+                  background: "none",
+                  border: "none",
+                  borderBottom: activeTab === "all" ? "2.5px solid #0061f2" : "2.5px solid transparent",
+                  color: activeTab === "all" ? "#0061f2" : "#64748b",
+                  fontWeight: 700,
+                  fontSize: "13.5px",
+                  paddingBottom: "8px",
+                  cursor: "pointer",
+                  whiteSpace: "nowrap",
+                }}
+                onClick={() => handleTabChange("all")}
+              >
+                All ({allCount})
+              </button>
               <button
                 type="button"
                 style={{
@@ -893,7 +931,9 @@ export function PaymentsPage() {
                         <div style={{ fontSize: "13px", color: "#64748b" }}>
                           {searchQuery || Object.values(appliedFilters).some(Boolean)
                             ? "Try clearing or adjusting your search / filter criteria."
-                            : `No ${activeTab} payments available.`}
+                            : activeTab === "all"
+                              ? "No payment records available."
+                              : `No ${activeTab} payments available.`}
                         </div>
                       </td>
                     </tr>
@@ -906,19 +946,20 @@ export function PaymentsPage() {
 
                       // Task type badge class
                       const taskTypeLower = (task.task_type || "").toLowerCase();
-                      const taskTypeBadge = taskTypeLower.includes("physical")
-                        ? "physical"
-                        : taskTypeLower.includes("telecall")
-                        ? "telecall"
-                        : "default";
+                      const taskTypeBadge =
+                        taskTypeLower.includes("onsite") || taskTypeLower.includes("physical")
+                          ? "physical"
+                          : taskTypeLower.includes("telecall")
+                            ? "telecall"
+                            : "default";
 
                       // Status badge class
                       const statusLower = (task.status || "").toLowerCase();
                       const statusBadge = statusLower.includes("complete")
                         ? "completed"
                         : statusLower.includes("approve")
-                        ? "approved"
-                        : "pending";
+                          ? "approved"
+                          : "pending";
 
                       return (
                         <tr key={task.id} className={isSelected ? "selected" : ""}>
@@ -944,29 +985,34 @@ export function PaymentsPage() {
                           </td>
                           <td>
                             <span className={`badge-task-type ${taskTypeBadge}`}>
-                              {task.task_type || "Physical Visit"}
+                              {task.task_type || "—"}
                             </span>
                           </td>
-                          <td>{task.city || "-"}</td>
-                          <td style={{ textAlign: "center", fontWeight: 600 }}>{task.priority || "A"}</td>
+                          <td>{task.city || "—"}</td>
+                          <td style={{ textAlign: "center", fontWeight: 600 }}>{task.priority || "—"}</td>
                           <td style={{ maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis" }} title={task.machine_model}>
-                            {task.machine_model || "Service Charges"}
+                            {task.machine_model || "—"}
                           </td>
                           <td>
-                            {task.contact_person_name || "-"}{" "}
+                            {task.contact_person_name || "—"}{" "}
                             {task.contact_phone ? (
                               <span style={{ color: "#64748b" }}>/ {task.contact_phone}</span>
                             ) : null}
                           </td>
                           <td>
-                            <span>{task.task_created_date || "-"}</span>{" "}
-                            <span style={{ color: "#64748b" }}>{task.created_by_name || "Inhyma Admin"}</span>
+                            <span>{task.task_created_date || "—"}</span>
+                            {task.created_by_name ? (
+                              <>
+                                {" "}
+                                <span style={{ color: "#64748b" }}>{task.created_by_name}</span>
+                              </>
+                            ) : null}
                           </td>
-                          <td>{task.task_approved_by || "Inhyma Admin"}</td>
-                          <td>{task.task_allotted_to || "ABC"}</td>
+                          <td>{task.task_approved_by || "—"}</td>
+                          <td>{task.task_allotted_to || "—"}</td>
                           <td>
                             <div className="payment-amount-cell">
-                              <span className="badge-chargeable">Chargable</span>
+                              <span className="badge-chargeable">Chargeable</span>
                               <span style={{ fontWeight: 600 }}>₹{formatNumber(serviceCharge)}</span>
                             </div>
                           </td>
@@ -988,7 +1034,7 @@ export function PaymentsPage() {
                           </td>
                           <td>
                             <span className={`badge-task-status ${statusBadge}`}>
-                              {task.status || "Approved"}
+                              {task.status || "Pending"}
                             </span>
                           </td>
                           <td style={{ textAlign: "center" }}>
@@ -1008,19 +1054,21 @@ export function PaymentsPage() {
                                 const openUpward = tasks.length >= 3 && idx >= tasks.length - (tasks.length >= 4 ? 2 : 1);
                                 return (
                                 <div className={`payment-action-dropdown ${openUpward ? "open-upward" : ""}`}>
-                                  <button
-                                    type="button"
-                                    onClick={() => openRecordPayment(task)}
-                                  >
-                                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                      <path d="M6 3h12" />
-                                      <path d="M6 8h12" />
-                                      <path d="m6 13 8.5 8" />
-                                      <path d="M6 13h3" />
-                                      <path d="M9 13c6.667 0 6.667-10 0-10" />
-                                    </svg>
-                                    Record Payment
-                                  </button>
+                                  {canUpdate && (
+                                    <button
+                                      type="button"
+                                      onClick={() => openRecordPayment(task)}
+                                    >
+                                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                        <path d="M6 3h12" />
+                                        <path d="M6 8h12" />
+                                        <path d="m6 13 8.5 8" />
+                                        <path d="M6 13h3" />
+                                        <path d="M9 13c6.667 0 6.667-10 0-10" />
+                                      </svg>
+                                      Record Payment
+                                    </button>
+                                  )}
                                   <button
                                     type="button"
                                     onClick={() => {
@@ -1261,17 +1309,18 @@ export function PaymentsPage() {
                       value={newTaskType}
                       onChange={(e) => setNewTaskType(e.target.value)}
                     >
-                      <option value="Physical Visit">Physical Visit</option>
+                      <option value="In-House">In-House</option>
                       <option value="Telecall">Telecall</option>
-                      <option value="Online Support">Online Support</option>
-                      <option value="Installation">Installation</option>
+                      <option value="Onsite Visit - Client Location">Onsite Visit - Client Location</option>
+                      <option value="Onsite Visit - Third-Party Location">Onsite Visit - Third-Party Location</option>
                     </select>
                   </div>
 
                   <div className="payment-form-group full-width">
-                    <label>Machine & Model</label>
+                    <label>Machine & Model *</label>
                     <input
                       type="text"
+                      required
                       placeholder="e.g. GF5000F Granular Filler FFS"
                       value={newMachineModel}
                       onChange={(e) => setNewMachineModel(e.target.value)}
@@ -1289,9 +1338,10 @@ export function PaymentsPage() {
                   </div>
 
                   <div className="payment-form-group">
-                    <label>Contact Phone</label>
+                    <label>Contact Phone *</label>
                     <input
                       type="text"
+                      required
                       placeholder="Phone number"
                       value={newContactPhone}
                       onChange={(e) => setNewContactPhone(e.target.value)}
@@ -1450,17 +1500,19 @@ export function PaymentsPage() {
                   >
                     Close
                   </button>
-                  <button
-                    type="button"
-                    className="btn-primary"
-                    onClick={() => {
-                      const t = detailTask;
-                      setDetailTask(null);
-                      openRecordPayment(t);
-                    }}
-                  >
-                    Record Payment
-                  </button>
+                  {canUpdate && (
+                    <button
+                      type="button"
+                      className="btn-primary"
+                      onClick={() => {
+                        const t = detailTask;
+                        setDetailTask(null);
+                        openRecordPayment(t);
+                      }}
+                    >
+                      Record Payment
+                    </button>
+                  )}
                 </div>
               </div>
             </Modal>

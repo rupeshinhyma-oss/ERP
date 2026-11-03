@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { useNavigate } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
 import { Pagination } from "@/components/Pagination";
 import {
@@ -9,8 +10,6 @@ import {
   updateTechnicalTaskStatus,
   deleteTechnicalTask,
   bulkDeleteTechnicalTasks,
-  fetchTaskCallLogs,
-  createTaskCallLog,
   uploadPaymentScreenshot,
   reopenTechnicalTask,
   lookupTaskSerialNumber,
@@ -18,7 +17,6 @@ import {
 } from "@/lib/technicalTasksApi";
 import type {
   TechnicalTask,
-  TechnicalTaskCallLog,
   TechnicalTaskCounts,
   TechnicalTaskCreatePayload,
 } from "@/types/technicalTasks";
@@ -581,6 +579,7 @@ function TypableCombobox({
 }
 
 function TechnicalTasksPageContent() {
+  const navigate = useNavigate();
   // Tabs & Data State
   const [activeTab, setActiveTab] = useState<string>("all");
   const [tasks, setTasks] = useState<TechnicalTask[]>([]);
@@ -635,11 +634,15 @@ function TechnicalTasksPageContent() {
   const [technicianOptions, setTechnicianOptions] = useState<string[]>([]);
   const [callTypeOptions, setCallTypeOptions] = useState<string[]>([]);
   const { options: optionGroups } = useOptions(TECHNICAL_TASK_OPTION_GROUPS);
-  const TASK_TYPE_OPTIONS = optionValues(optionGroups, "technical_task.task_type");
+  const baseTaskTypeOptions = optionValues(optionGroups, "technical_task.task_type");
+  const TASK_TYPE_OPTIONS = baseTaskTypeOptions.length > 0
+    ? baseTaskTypeOptions
+    : ["Telecall", "Onsite Visit - Client Location", "Onsite Visit - Third-Party Location", "In-House"];
   const CALL_TYPE_OPTIONS = callTypeOptions;
   // Workflow doc: Priority is A or B only.
   const PRIORITY_OPTIONS = ["A", "B"];
-  const SERVICE_TYPE_OPTIONS = optionValues(optionGroups, "technical_task.service_type");
+  const baseServiceTypeOptions = optionValues(optionGroups, "technical_task.service_type");
+  const SERVICE_TYPE_OPTIONS = baseServiceTypeOptions.length > 0 ? baseServiceTypeOptions : ["Free", "Chargeable"];
   const baseStatusOptions = optionValues(optionGroups, "technical_task.status");
   const STATUS_OPTIONS = useMemo(() => {
     const list = baseStatusOptions.length > 0 ? [...baseStatusOptions] : ["Pending", "Approved", "Completed", "Cancel"];
@@ -704,21 +707,14 @@ function TechnicalTasksPageContent() {
   const [statusScreenshotFile, setStatusScreenshotFile] = useState<File | null>(null);
   const [statusScreenshotUrl, setStatusScreenshotUrl] = useState<string>("");
   const [uploadingScreenshot, setUploadingScreenshot] = useState<boolean>(false);
+  const [statusModalError, setStatusModalError] = useState<string | null>(null);
+  const [submittingStatus, setSubmittingStatus] = useState<boolean>(false);
 
-  // Cancellation Modal State (Mandatory Remarks)
+  // Mandatory Cancellation Remarks Modal
   const [cancelModalTask, setCancelModalTask] = useState<TechnicalTask | null>(null);
   const [cancelRemarks, setCancelRemarks] = useState<string>("");
   const [cancelError, setCancelError] = useState<string | null>(null);
   const [submittingCancel, setSubmittingCancel] = useState<boolean>(false);
-
-  // Call Logs Modal State
-  const [callLogModalTask, setCallLogModalTask] = useState<TechnicalTask | null>(null);
-  const [callLogsList, setCallLogsList] = useState<TechnicalTaskCallLog[]>([]);
-  const [loadingCallLogs, setLoadingCallLogs] = useState<boolean>(false);
-  const [newCallLogType, setNewCallLogType] = useState<string>("Telecall");
-  const [newCallLogRemarks, setNewCallLogRemarks] = useState<string>("");
-  const [callLogError, setCallLogError] = useState<string | null>(null);
-  const [submittingCallLog, setSubmittingCallLog] = useState<boolean>(false);
 
   // Product Combobox Options for Machine & Model
   const [productOptions, setProductOptions] = useState<string[]>(DEFAULT_MACHINE_MODELS);
@@ -808,28 +804,46 @@ function TechnicalTasksPageContent() {
     return () => document.removeEventListener("click", handleDocClick);
   }, []);
 
-  // Load lookups from their master tables (no hardcoded fallbacks)
+  // Load lookups from their master tables (falling back to lightweight /lookup endpoints for non-master viewers)
   useEffect(() => {
+    const extractRows = (res: any): any[] =>
+      Array.isArray(res?.data) ? res.data : Array.isArray(res?.data?.items) ? res.data.items : [];
+
     async function loadLookups() {
       try {
-        const cityRes = await apiGet<any[]>("/masters/cities?page=1&page_size=200&status=active");
-        setCityOptions(cityRes?.data?.map((c: any) => c.name || c.city_name).filter(Boolean) || []);
+        let rows: any[] = [];
+        try {
+          rows = extractRows(await apiGet<any>("/masters/cities?page=1&page_size=200&status=active"));
+        } catch {
+          rows = extractRows(await apiGet<any>("/masters/cities/lookup"));
+        }
+        setCityOptions(rows.map((c: any) => c.name || c.city_name).filter(Boolean));
       } catch (err) {
         console.warn("Could not load cities lookup:", err);
         setCityOptions([]);
       }
 
       try {
-        const techRes = await apiGet<any[]>("/masters/technicians?page=1&page_size=100&status=active");
-        setTechnicianOptions(techRes?.data?.map((t: any) => t.name || t.technician_name).filter(Boolean) || []);
+        let rows: any[] = [];
+        try {
+          rows = extractRows(await apiGet<any>("/masters/technicians?page=1&page_size=100&status=active"));
+        } catch {
+          rows = extractRows(await apiGet<any>("/masters/technicians/lookup"));
+        }
+        setTechnicianOptions(rows.map((t: any) => t.name || t.technician_name).filter(Boolean));
       } catch (err) {
         console.warn("Could not load technicians lookup:", err);
         setTechnicianOptions([]);
       }
 
       try {
-        const callRes = await apiGet<any[]>("/masters/call-types?page=1&page_size=100&status=active");
-        setCallTypeOptions(callRes?.data?.map((c: any) => c.name).filter(Boolean) || []);
+        let rows: any[] = [];
+        try {
+          rows = extractRows(await apiGet<any>("/masters/call-types?page=1&page_size=100&status=active"));
+        } catch {
+          rows = extractRows(await apiGet<any>("/masters/call-types/lookup"));
+        }
+        setCallTypeOptions(rows.map((c: any) => c.name).filter(Boolean));
       } catch (err) {
         console.warn("Could not load call types lookup:", err);
         setCallTypeOptions([]);
@@ -1144,64 +1158,28 @@ function TechnicalTasksPageContent() {
     }
   };
 
-  // Open Call Logs modal
-  const handleOpenCallLogs = async (task: TechnicalTask) => {
-    setCallLogModalTask(task);
-    setNewCallLogRemarks("");
-    setNewCallLogType("Telecall");
-    setCallLogError(null);
-    setLoadingCallLogs(true);
-    try {
-      const logs = await fetchTaskCallLogs(task.id);
-      setCallLogsList(logs);
-    } catch (err: any) {
-      setCallLogError(errorMessage(err));
-    } finally {
-      setLoadingCallLogs(false);
-    }
+  // Navigate to dedicated Technical Task Call Logs & Task Log Summary page
+  const handleOpenCallLogs = (task: TechnicalTask, srNo?: number) => {
+    const ref = task.task_number ?? task.id;
+    navigate(`/technical-task/detail/${encodeURIComponent(String(ref))}`, srNo ? { state: { srNo } } : undefined);
   };
 
-  // Submit New Call Log
-  const handleCreateCallLogSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!callLogModalTask) return;
-    if (!newCallLogRemarks.trim()) {
-      setCallLogError("Remarks / Feedback by technician is required.");
-      return;
-    }
-    setSubmittingCallLog(true);
-    setCallLogError(null);
-    try {
-      await createTaskCallLog(callLogModalTask.id, {
-        call_type: newCallLogType,
-        remarks: newCallLogRemarks.trim(),
-      });
-      showSuccess("Call log recorded successfully.");
-      setNewCallLogRemarks("");
-      const refreshed = await fetchTaskCallLogs(callLogModalTask.id);
-      setCallLogsList(refreshed);
-    } catch (err: any) {
-      setCallLogError(errorMessage(err));
-    } finally {
-      setSubmittingCallLog(false);
-    }
-  };
-
-  // Cancel Task Submit with Mandatory Remarks
+  // Submit mandatory cancellation remarks (Phase 2 Technical task module spec)
   const handleCancelTaskSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!cancelModalTask) return;
-    if (!cancelRemarks.trim()) {
-      setCancelError("Remarks are mandatory when cancelling a technical task.");
+    const trimmed = cancelRemarks.trim();
+    if (!trimmed) {
+      setCancelError("Cancellation remarks are strictly mandatory.");
       return;
     }
     setSubmittingCancel(true);
     setCancelError(null);
     try {
-      await updateTechnicalTaskStatus(cancelModalTask.id, "Cancel", cancelRemarks.trim(), {
-        cancel_remarks: cancelRemarks.trim(),
+      await updateTechnicalTaskStatus(cancelModalTask.id, "Cancel", trimmed, {
+        cancel_remarks: trimmed,
       });
-      showSuccess(`Task cancelled for ${cancelModalTask.company_name}.`);
+      showSuccess(`Status updated to Cancel for ${cancelModalTask.company_name}.`);
       setCancelModalTask(null);
       setCancelRemarks("");
       await Promise.all([loadTasks(), loadCounts()]);
@@ -1212,8 +1190,9 @@ function TechnicalTasksPageContent() {
     }
   };
 
-  // Stage Modal Openers
   const openApproveModal = (task: TechnicalTask) => {
+    setActionError(null);
+    setStatusModalError(null);
     setStatusModalTask(task);
     setNewStatusValue("Approved");
     setStatusAllottedTo(task.task_allotted_to || "");
@@ -1226,6 +1205,8 @@ function TechnicalTasksPageContent() {
   };
 
   const openCompleteModal = (task: TechnicalTask) => {
+    setActionError(null);
+    setStatusModalError(null);
     setStatusModalTask(task);
     setNewStatusValue("Completed");
     setStatusPaymentCollected(
@@ -1239,11 +1220,17 @@ function TechnicalTasksPageContent() {
   };
 
   const openReopenModal = (task: TechnicalTask) => {
+    setActionError(null);
+    setStatusModalError(null);
     setStatusModalTask(task);
     setNewStatusValue("Approved");
     setStatusAllottedTo(task.task_allotted_to || "");
     setStatusVisitDate("");
     setStatusRemarks("");
+    setApproveTaskType(task.task_type || "");
+    setApproveServiceType("");
+    setApproveAmount("");
+    setApproveTerms("");
   };
 
   // Open Add New Task
@@ -1396,40 +1383,48 @@ function TechnicalTasksPageContent() {
     e.preventDefault();
     if (!statusModalTask) return;
 
-    try {
-      setActionError(null);
-      let targetStatus = newStatusValue;
-      let targetPaymentStatus: string | undefined = undefined;
-      let uploadedScreenshotUrl = statusScreenshotUrl;
+    setActionError(null);
+    setStatusModalError(null);
+    let targetStatus = newStatusValue;
+    let targetPaymentStatus: string | undefined = undefined;
+    let uploadedScreenshotUrl = statusScreenshotUrl;
 
-      // Mandatory cancellation remarks check
-      if (targetStatus.toLowerCase() === "cancel" || targetStatus.toLowerCase() === "cancelled") {
-        if (!statusRemarks.trim()) {
-          setActionError("Cancellation remarks are strictly mandatory when cancelling a technical task.");
-          return;
-        }
-      }
+    if (targetStatus === "Approved" && !(statusAllottedTo || statusModalTask.task_allotted_to)) {
+      setStatusModalError("Select the technician (Task Allotted To) before approving.");
+      return;
+    }
 
-      // A task cannot be approved without a technician (also enforced by the API).
-      if (
-        targetStatus === "Approved" &&
-        !(statusAllottedTo || statusModalTask.task_allotted_to)
-      ) {
-        setActionError("Select the technician (Task Allotted To) before approving.");
+    if (
+      (targetStatus.toLowerCase() === "cancel" || targetStatus.toLowerCase() === "cancelled") &&
+      !statusRemarks.trim()
+    ) {
+      setStatusModalError("Cancellation remarks are strictly mandatory when cancelling a task.");
+      return;
+    }
+
+    if (targetStatus === "Approved" && approveServiceType === "Chargeable") {
+      if (!(Number(approveAmount) > 0)) {
+        setStatusModalError("Amount is required for chargeable tasks.");
         return;
       }
-
-      if (targetStatus === "Approved" && approveServiceType === "Chargeable") {
-        if (!(Number(approveAmount) > 0)) {
-          setActionError("Amount is required for chargeable tasks.");
-          return;
-        }
-        if (!approveTerms.trim()) {
-          setActionError("Payment Terms are required for chargeable tasks.");
-          return;
-        }
+      if (!approveTerms.trim()) {
+        setStatusModalError("Payment Terms are required for chargeable tasks.");
+        return;
       }
+    }
 
+    if (
+      newStatusValue === "Completed" &&
+      (statusModalTask.service_type === "Chargeable" || (statusModalTask.service_charge ?? 0) > 0) &&
+      statusPaymentCollected &&
+      !(Number(statusCollectedAmount || statusModalTask.service_charge || 0) > 0)
+    ) {
+      setStatusModalError("Enter the amount collected.");
+      return;
+    }
+
+    setSubmittingStatus(true);
+    try {
       // Reopen workflow if currently in Cancel / Cancelled stage
       if (statusModalTask.status.toLowerCase() === "cancel" || statusModalTask.status.toLowerCase() === "cancelled") {
         await reopenTechnicalTask(statusModalTask.id, {
@@ -1440,6 +1435,7 @@ function TechnicalTasksPageContent() {
         });
         showSuccess(`Task for ${statusModalTask.company_name} reopened and updated to ${targetStatus}.`);
         setStatusModalTask(null);
+        setStatusModalError(null);
         setStatusRemarks("");
         setStatusAllottedTo("");
         setStatusVisitDate("");
@@ -1455,10 +1451,6 @@ function TechnicalTasksPageContent() {
           targetStatus = "Payment Pending";
           targetPaymentStatus = "Pending";
         } else {
-          if (!(Number(statusCollectedAmount || statusModalTask.service_charge || 0) > 0)) {
-            setActionError("Enter the amount collected.");
-            return;
-          }
           targetPaymentStatus = "Paid";
           if (statusScreenshotFile) {
             setUploadingScreenshot(true);
@@ -1500,6 +1492,7 @@ function TechnicalTasksPageContent() {
 
       showSuccess(`Status updated to ${targetStatus} for ${statusModalTask.company_name}.`);
       setStatusModalTask(null);
+      setStatusModalError(null);
       setStatusRemarks("");
       setStatusAllottedTo("");
       setStatusVisitDate("");
@@ -1507,7 +1500,9 @@ function TechnicalTasksPageContent() {
       setStatusScreenshotUrl("");
       await Promise.all([loadTasks(), loadCounts()]);
     } catch (err) {
-      setActionError(err);
+      setStatusModalError(errorMessage(err));
+    } finally {
+      setSubmittingStatus(false);
     }
   };
 
@@ -1515,12 +1510,19 @@ function TechnicalTasksPageContent() {
   // The API enforces the same rules; these only decide which menu items are shown.
   const { profile: authProfile, isSuperAdmin, hasPermission } = useAuth();
   const isAdminLevel = isSuperAdmin || hasPermission("technicaltask.manage");
+  const canCreate = isAdminLevel || hasPermission("technicaltask.create");
+  const canUpdate = isAdminLevel || hasPermission("technicaltask.update");
+  const canApprove = isAdminLevel || hasPermission("technicaltask.approve");
+  const canDeletePerm = isAdminLevel || hasPermission("technicaltask.delete");
+  const canExport = isAdminLevel || hasPermission("technicaltask.export");
+  const canBulkAction = isAdminLevel || hasPermission("technicaltask.bulk_action");
   const myActorLabels = new Set(
     [authProfile?.display_name, authProfile?.full_name, authProfile?.username]
       .map((v) => String(v || "").trim())
       .filter(Boolean)
   );
   const canEditTask = (t: TechnicalTask) => {
+    if (!canUpdate) return false;
     const st = t.status.toLowerCase();
     if (st === "pending") return true;
     if (st === "approved") {
@@ -1528,9 +1530,10 @@ function TechnicalTasksPageContent() {
     }
     return false;
   };
-  const canDeleteTask = (t: TechnicalTask) => t.status.toLowerCase() === "pending" || isAdminLevel;
+  const canDeleteTask = (t: TechnicalTask) => canDeletePerm && (t.status.toLowerCase() === "pending" || isAdminLevel);
   const canReopenTask = (t: TechnicalTask) =>
-    isAdminLevel || !t.task_approved_by || myActorLabels.has(String(t.task_approved_by).trim());
+    (canApprove || canUpdate) &&
+    (isAdminLevel || !t.task_approved_by || myActorLabels.has(String(t.task_approved_by).trim()));
 
   const loadCompanyContacts = useCallback(async (companyId?: string | null) => {
     if (!companyId) {
@@ -1767,15 +1770,18 @@ function TechnicalTasksPageContent() {
             </button>
 
             {/* + ADD NEW */}
-            <button
-              type="button"
-              className="btn btn-add-new"
-              onClick={handleOpenAdd}
-            >
-              + ADD NEW
-            </button>
+            {canCreate && (
+              <button
+                type="button"
+                className="btn btn-add-new"
+                onClick={handleOpenAdd}
+              >
+                + ADD NEW
+              </button>
+            )}
 
             {/* Imp / Exp ▾ */}
+            {canExport && (
             <div ref={impExpRef} style={{ position: "relative", display: "inline-block" }}>
               <button
                 type="button"
@@ -1829,8 +1835,10 @@ function TechnicalTasksPageContent() {
                 </div>
               )}
             </div>
+            )}
 
             {/* Bulk Actions ▾ */}
+            {canBulkAction && (
             <div ref={bulkActionsRef} style={{ position: "relative", display: "inline-block" }}>
               <button
                 type="button"
@@ -1864,6 +1872,7 @@ function TechnicalTasksPageContent() {
                     </div>
                   ) : (
                     <>
+                      {canApprove && (
                       <button
                         type="button"
                         onClick={() => {
@@ -1887,6 +1896,8 @@ function TechnicalTasksPageContent() {
                       >
                         ✓ Bulk Mark Approved ({selectedIds.size})
                       </button>
+                      )}
+                      {canUpdate && (
                       <button
                         type="button"
                         onClick={() => {
@@ -1911,6 +1922,8 @@ function TechnicalTasksPageContent() {
                       >
                         🏁 Bulk Mark Completed ({selectedIds.size})
                       </button>
+                      )}
+                      {canDeletePerm && (
                       <button
                         type="button"
                         onClick={() => {
@@ -1935,11 +1948,13 @@ function TechnicalTasksPageContent() {
                       >
                         🗑️ Bulk Delete ({selectedIds.size})
                       </button>
+                      )}
                     </>
                   )}
                 </div>
               )}
             </div>
+            )}
           </div>
         </div>
 
@@ -2839,29 +2854,7 @@ function TechnicalTasksPageContent() {
                                         <button
                                           type="button"
                                           onClick={() => {
-                                            setDetailTask(task);
-                                            setOpenActionMenuId(null);
-                                          }}
-                                          style={{
-                                            padding: "8px 12px",
-                                            background: "none",
-                                            border: "none",
-                                            textAlign: "left",
-                                            fontSize: "13px",
-                                            cursor: "pointer",
-                                            display: "flex",
-                                            alignItems: "center",
-                                            gap: "6px",
-                                            color: "#334155",
-                                          }}
-                                        >
-                                          <span>👁</span>
-                                          <span>View Details</span>
-                                        </button>
-                                        <button
-                                          type="button"
-                                          onClick={() => {
-                                            handleOpenCallLogs(task);
+                                            handleOpenCallLogs(task, srNo);
                                             setOpenActionMenuId(null);
                                           }}
                                           style={{
@@ -2881,108 +2874,116 @@ function TechnicalTasksPageContent() {
                                           <span>Call Logs</span>
                                         </button>
 
-                                        {/* Stage 1: Pending -> Approve, Edit, Delete */}
+                                        {/* Stage 1: Pending -> Approved, Edit, Delete */}
                                         {task.status.toLowerCase() === "pending" && (
                                           <>
-                                            <button
-                                              type="button"
-                                              onClick={() => {
-                                                openApproveModal(task);
-                                                setOpenActionMenuId(null);
-                                              }}
-                                              style={{
-                                                padding: "8px 12px",
-                                                background: "none",
-                                                border: "none",
-                                                textAlign: "left",
-                                                fontSize: "13px",
-                                                cursor: "pointer",
-                                                display: "flex",
-                                                alignItems: "center",
-                                                gap: "6px",
-                                                color: "#16a34a",
-                                                fontWeight: 600,
-                                              }}
-                                            >
-                                              <span>✅</span>
-                                              <span>Approve</span>
-                                            </button>
-                                            <button
-                                              type="button"
-                                              onClick={() => {
-                                                handleOpenEdit(task);
-                                                setOpenActionMenuId(null);
-                                              }}
-                                              style={{
-                                                padding: "8px 12px",
-                                                background: "none",
-                                                border: "none",
-                                                textAlign: "left",
-                                                fontSize: "13px",
-                                                cursor: "pointer",
-                                                display: "flex",
-                                                alignItems: "center",
-                                                gap: "6px",
-                                                color: "#334155",
-                                              }}
-                                            >
-                                              <span>✏️</span>
-                                              <span>Edit</span>
-                                            </button>
+                                            {canApprove && (
+                                              <button
+                                                type="button"
+                                                onClick={() => {
+                                                  openApproveModal(task);
+                                                  setOpenActionMenuId(null);
+                                                }}
+                                                style={{
+                                                  padding: "8px 12px",
+                                                  background: "none",
+                                                  border: "none",
+                                                  textAlign: "left",
+                                                  fontSize: "13px",
+                                                  cursor: "pointer",
+                                                  display: "flex",
+                                                  alignItems: "center",
+                                                  gap: "6px",
+                                                  color: "#16a34a",
+                                                  fontWeight: 600,
+                                                }}
+                                              >
+                                                <span>✅</span>
+                                                <span>Approved</span>
+                                              </button>
+                                            )}
+                                            {canEditTask(task) && (
+                                              <button
+                                                type="button"
+                                                onClick={() => {
+                                                  handleOpenEdit(task);
+                                                  setOpenActionMenuId(null);
+                                                }}
+                                                style={{
+                                                  padding: "8px 12px",
+                                                  background: "none",
+                                                  border: "none",
+                                                  textAlign: "left",
+                                                  fontSize: "13px",
+                                                  cursor: "pointer",
+                                                  display: "flex",
+                                                  alignItems: "center",
+                                                  gap: "6px",
+                                                  color: "#334155",
+                                                }}
+                                              >
+                                                <span>✏️</span>
+                                                <span>Edit</span>
+                                              </button>
+                                            )}
                                           </>
                                         )}
 
-                                        {/* Stage 2: Approved -> Complete Task, Cancel Task, Edit, Delete */}
+                                        {/* Stage 2: Approved -> Completed, Cancel, Edit, Delete */}
                                         {task.status.toLowerCase() === "approved" && (
                                           <>
-                                            <button
-                                              type="button"
-                                              onClick={() => {
-                                                openCompleteModal(task);
-                                                setOpenActionMenuId(null);
-                                              }}
-                                              style={{
-                                                padding: "8px 12px",
-                                                background: "none",
-                                                border: "none",
-                                                textAlign: "left",
-                                                fontSize: "13px",
-                                                cursor: "pointer",
-                                                display: "flex",
-                                                alignItems: "center",
-                                                gap: "6px",
-                                                color: "#16a34a",
-                                                fontWeight: 600,
-                                              }}
-                                            >
-                                              <span>✔️</span>
-                                              <span>Complete Task</span>
-                                            </button>
-                                            <button
-                                              type="button"
-                                              onClick={() => {
-                                                setCancelModalTask(task);
-                                                setCancelRemarks("");
-                                                setCancelError(null);
-                                                setOpenActionMenuId(null);
-                                              }}
-                                              style={{
-                                                padding: "8px 12px",
-                                                background: "none",
-                                                border: "none",
-                                                textAlign: "left",
-                                                fontSize: "13px",
-                                                cursor: "pointer",
-                                                display: "flex",
-                                                alignItems: "center",
-                                                gap: "6px",
-                                                color: "#ea580c",
-                                                fontWeight: 500,
-                                              }}
-                                            >
-                                              <span>❌</span>
-                                              <span>Cancel Task</span>
-                                            </button>
+                                            {canUpdate && (
+                                              <>
+                                                <button
+                                                  type="button"
+                                                  onClick={() => {
+                                                    openCompleteModal(task);
+                                                    setOpenActionMenuId(null);
+                                                  }}
+                                                  style={{
+                                                    padding: "8px 12px",
+                                                    background: "none",
+                                                    border: "none",
+                                                    textAlign: "left",
+                                                    fontSize: "13px",
+                                                    cursor: "pointer",
+                                                    display: "flex",
+                                                    alignItems: "center",
+                                                    gap: "6px",
+                                                    color: "#16a34a",
+                                                    fontWeight: 600,
+                                                  }}
+                                                >
+                                                  <span>✔️</span>
+                                                  <span>Completed</span>
+                                                </button>
+                                                <button
+                                                  type="button"
+                                                  onClick={() => {
+                                                    setCancelModalTask(task);
+                                                    setCancelRemarks("");
+                                                    setCancelError(null);
+                                                    setOpenActionMenuId(null);
+                                                  }}
+                                                  style={{
+                                                    padding: "8px 12px",
+                                                    background: "none",
+                                                    border: "none",
+                                                    textAlign: "left",
+                                                    fontSize: "13px",
+                                                    cursor: "pointer",
+                                                    display: "flex",
+                                                    alignItems: "center",
+                                                    gap: "6px",
+                                                    color: "#ea580c",
+                                                    fontWeight: 500,
+                                                  }}
+                                                >
+                                                  <span>❌</span>
+                                                  <span>Cancel</span>
+                                                </button>
+                                              </>
+                                            )}
                                             {canEditTask(task) && (
                                               <button
                                                 type="button"
@@ -3036,7 +3037,7 @@ function TechnicalTasksPageContent() {
                                             <span>Reopen / Reassign</span>
                                           </button>
                                         )}
-                                        {task.status.toLowerCase() === "payment pending" && (
+                                        {task.status.toLowerCase() === "payment pending" && canUpdate && (
                                           <button
                                             type="button"
                                             onClick={() => {
@@ -4558,7 +4559,16 @@ function TechnicalTasksPageContent() {
 
         {/* STATUS MODAL */}
         {statusModalTask && (
-          <div className="tech-modal-overlay" onClick={() => setStatusModalTask(null)}>
+          <div
+            className="tech-modal-overlay"
+            data-testid="status-task-modal"
+            onClick={() => {
+              if (!submittingStatus) {
+                setStatusModalTask(null);
+                setStatusModalError(null);
+              }
+            }}
+          >
             <div
               className="tech-modal-card"
               style={{ maxWidth: "480px" }}
@@ -4580,17 +4590,41 @@ function TechnicalTasksPageContent() {
                   <button
                     type="button"
                     className="btn-close-modal"
-                    onClick={() => setStatusModalTask(null)}
+                    disabled={submittingStatus}
+                    onClick={() => {
+                      setStatusModalTask(null);
+                      setStatusModalError(null);
+                    }}
                   >
                     ✕
                   </button>
                 </div>
                 <div className="tech-modal-body">
+                  {statusModalError && (
+                    <div
+                      role="alert"
+                      data-testid="status-modal-error"
+                      style={{
+                        marginBottom: "12px",
+                        padding: "8px 12px",
+                        background: "#fef2f2",
+                        border: "1px solid #fecaca",
+                        borderRadius: "6px",
+                        color: "#dc2626",
+                        fontSize: "12.5px",
+                      }}
+                    >
+                      {statusModalError}
+                    </div>
+                  )}
                   <div className="field">
                     <label>Select Status</label>
                     <select
                       value={newStatusValue}
-                      onChange={(e) => setNewStatusValue(e.target.value)}
+                      onChange={(e) => {
+                        setNewStatusValue(e.target.value);
+                        if (statusModalError) setStatusModalError(null);
+                      }}
                     >
                       {STATUS_OPTIONS.map((st) => (
                         <option key={st} value={st}>
@@ -4603,13 +4637,19 @@ function TechnicalTasksPageContent() {
                   {newStatusValue === "Approved" && (
                     <>
                       <div className="field" style={{ marginTop: "12px" }}>
-                        <label>Allot Technician</label>
+                        <label>
+                          Allot Technician <span style={{ color: "#ef4444" }}>*</span>
+                        </label>
                         <select
+                          data-testid="approve-technician"
                           value={statusAllottedTo}
-                          onChange={(e) => setStatusAllottedTo(e.target.value)}
+                          onChange={(e) => {
+                            setStatusAllottedTo(e.target.value);
+                            if (statusModalError) setStatusModalError(null);
+                          }}
                         >
                           <option value="">-- Select Technician --</option>
-                          {technicianOptions.map((t) => (
+                          {[...new Set([statusAllottedTo, ...technicianOptions].filter(Boolean))].map((t) => (
                             <option key={t} value={t}>
                               {t}
                             </option>
@@ -4619,7 +4659,14 @@ function TechnicalTasksPageContent() {
                       {/* Approver may override what the creator entered (workflow doc) */}
                       <div className="field" style={{ marginTop: "12px" }}>
                         <label>Task Type</label>
-                        <select data-testid="approve-task-type" value={approveTaskType} onChange={(e) => setApproveTaskType(e.target.value)}>
+                        <select
+                          data-testid="approve-task-type"
+                          value={approveTaskType}
+                          onChange={(e) => {
+                            setApproveTaskType(e.target.value);
+                            if (statusModalError) setStatusModalError(null);
+                          }}
+                        >
                           {[...new Set([statusModalTask.task_type, ...TASK_TYPE_OPTIONS].filter(Boolean))].map((t) => (
                             <option key={t} value={t}>{t}</option>
                           ))}
@@ -4627,7 +4674,14 @@ function TechnicalTasksPageContent() {
                       </div>
                       <div className="field" style={{ marginTop: "12px" }}>
                         <label>Service Type</label>
-                        <select data-testid="approve-service-type" value={approveServiceType} onChange={(e) => setApproveServiceType(e.target.value)}>
+                        <select
+                          data-testid="approve-service-type"
+                          value={approveServiceType}
+                          onChange={(e) => {
+                            setApproveServiceType(e.target.value);
+                            if (statusModalError) setStatusModalError(null);
+                          }}
+                        >
                           {[...new Set([statusModalTask.service_type, ...SERVICE_TYPE_OPTIONS].filter(Boolean))].map((t) => (
                             <option key={t} value={t}>{t}</option>
                           ))}
@@ -4636,20 +4690,41 @@ function TechnicalTasksPageContent() {
                       {approveServiceType === "Chargeable" && (
                         <>
                           <div className="field" style={{ marginTop: "12px" }}>
-                            <label>Amount (₹)</label>
-                            <input type="number" min="0" step="0.01" data-testid="approve-amount" value={approveAmount} onChange={(e) => setApproveAmount(e.target.value)} />
+                            <label>
+                              Amount (₹) <span style={{ color: "#ef4444" }}>*</span>
+                            </label>
+                            <input
+                              type="number"
+                              min="0"
+                              step="0.01"
+                              data-testid="approve-amount"
+                              value={approveAmount}
+                              onChange={(e) => {
+                                setApproveAmount(e.target.value);
+                                if (statusModalError) setStatusModalError(null);
+                              }}
+                            />
                           </div>
                           <div className="field" style={{ marginTop: "12px" }}>
-                            <label>Payment Terms</label>
-                            <input type="text" data-testid="approve-terms" value={approveTerms} onChange={(e) => setApproveTerms(e.target.value)} />
+                            <label>
+                              Payment Terms <span style={{ color: "#ef4444" }}>*</span>
+                            </label>
+                            <input
+                              type="text"
+                              data-testid="approve-terms"
+                              value={approveTerms}
+                              onChange={(e) => {
+                                setApproveTerms(e.target.value);
+                                if (statusModalError) setStatusModalError(null);
+                              }}
+                            />
                           </div>
                         </>
                       )}
                       {/* Conditionally visible based on task type: only for Onsite / Client / Third-Party visits */}
                       {((approveTaskType || statusModalTask.task_type)?.toLowerCase().includes("onsite") ||
                         (approveTaskType || statusModalTask.task_type)?.toLowerCase().includes("client location") ||
-                        (approveTaskType || statusModalTask.task_type)?.toLowerCase().includes("third-party") ||
-                        (approveTaskType || statusModalTask.task_type)?.toLowerCase().includes("visit")) && (
+                        (approveTaskType || statusModalTask.task_type)?.toLowerCase().includes("third-party")) && (
                           <div className="field" style={{ marginTop: "12px" }}>
                             <label>Scheduled / Visit Date</label>
                             <input
@@ -4831,15 +4906,26 @@ function TechnicalTasksPageContent() {
                   <button
                     type="button"
                     className="btn"
-                    onClick={() => setStatusModalTask(null)}
+                    disabled={submittingStatus || uploadingScreenshot}
+                    onClick={() => {
+                      setStatusModalTask(null);
+                      setStatusModalError(null);
+                    }}
                   >
                     Cancel
                   </button>
-                  <button type="submit" className="btn btn-primary" data-testid="btn-save-status">
-                    {statusModalTask.status.toLowerCase() === "cancel" ||
-                      statusModalTask.status.toLowerCase() === "cancelled"
-                      ? "Confirm Reopen & Reassign"
-                      : "Save Status"}
+                  <button
+                    type="submit"
+                    className="btn btn-primary"
+                    data-testid="btn-save-status"
+                    disabled={submittingStatus || uploadingScreenshot}
+                  >
+                    {submittingStatus
+                      ? "Saving..."
+                      : statusModalTask.status.toLowerCase() === "cancel" ||
+                          statusModalTask.status.toLowerCase() === "cancelled"
+                        ? "Confirm Reopen & Reassign"
+                        : "Save Status"}
                   </button>
                 </div>
               </form>
@@ -4847,17 +4933,17 @@ function TechnicalTasksPageContent() {
           </div>
         )}
 
-        {/* CANCEL TASK MODAL (Mandatory Remarks) */}
+        {/* MANDATORY CANCELLATION REMARKS MODAL */}
         {cancelModalTask && (
-          <div className="tech-modal-overlay" onClick={() => setCancelModalTask(null)}>
+          <div className="tech-modal-overlay" data-testid="cancel-task-modal" onClick={() => setCancelModalTask(null)}>
             <div
               className="tech-modal-card"
-              style={{ maxWidth: "480px" }}
+              style={{ maxWidth: "460px" }}
               onClick={(e) => e.stopPropagation()}
             >
               <form onSubmit={handleCancelTaskSubmit}>
-                <div className="tech-modal-header" style={{ borderBottom: "1px solid #fee2e2", background: "#fef2f2" }}>
-                  <h2 style={{ color: "#991b1b" }}>Cancel Technical Task</h2>
+                <div className="tech-modal-header">
+                  <h2>Cancel Technical Task — {cancelModalTask.company_name}</h2>
                   <button
                     type="button"
                     className="btn-close-modal"
@@ -4866,35 +4952,34 @@ function TechnicalTasksPageContent() {
                     ✕
                   </button>
                 </div>
-                <div className="tech-modal-body" style={{ display: "flex", flexDirection: "column", gap: "14px", padding: "20px" }}>
+                <div className="tech-modal-body">
                   {cancelError && (
-                    <div style={{ background: "#fee2e2", color: "#991b1b", padding: "8px 12px", borderRadius: "6px", fontSize: "13px" }}>
+                    <div
+                      style={{
+                        marginBottom: "12px",
+                        padding: "8px 12px",
+                        background: "#fef2f2",
+                        border: "1px solid #fecaca",
+                        borderRadius: "6px",
+                        color: "#dc2626",
+                        fontSize: "12.5px",
+                      }}
+                    >
                       {cancelError}
                     </div>
                   )}
-                  <div style={{ fontSize: "13.5px", color: "#334155", lineHeight: 1.5 }}>
-                    Are you sure you want to cancel the technical task for <strong>{cancelModalTask.company_name}</strong>?
-                  </div>
-                  <div>
-                    <label style={{ display: "block", fontSize: "12.5px", fontWeight: 600, color: "#475569", marginBottom: "6px" }}>
-                      Reason / Cancellation Remarks <span style={{ color: "#ef4444" }}>*</span>
+                  <div className="field">
+                    <label>
+                      Cancellation Remarks <span style={{ color: "#ef4444" }}>*</span>
                     </label>
                     <textarea
-                      required
-                      rows={4}
-                      placeholder="Provide a mandatory reason for cancelling this task..."
+                      rows={3}
+                      data-testid="cancel-remarks-input"
+                      placeholder="Enter mandatory reason for cancelling this technical task..."
                       value={cancelRemarks}
-                      onChange={(e) => setCancelRemarks(e.target.value)}
-                      style={{
-                        width: "100%",
-                        borderRadius: "5px",
-                        border: "1px solid #cbd5e1",
-                        padding: "10px 12px",
-                        fontSize: "13px",
-                        color: "#1e293b",
-                        boxSizing: "border-box",
-                        outline: "none",
-                        fontFamily: "inherit",
+                      onChange={(e) => {
+                        setCancelRemarks(e.target.value);
+                        if (cancelError) setCancelError(null);
                       }}
                     />
                   </div>
@@ -4906,21 +4991,16 @@ function TechnicalTasksPageContent() {
                     onClick={() => setCancelModalTask(null)}
                     disabled={submittingCancel}
                   >
-                    Keep Task
+                    Close
                   </button>
                   <button
                     type="submit"
-                    className="btn"
+                    className="btn btn-primary"
                     data-testid="btn-confirm-cancel"
-                    style={{
-                      background: !cancelRemarks.trim() || submittingCancel ? "#fca5a5" : "#dc2626",
-                      color: "#ffffff",
-                      border: "none",
-                      cursor: !cancelRemarks.trim() || submittingCancel ? "not-allowed" : "pointer",
-                    }}
-                    disabled={submittingCancel || !cancelRemarks.trim()}
+                    style={{ background: "#dc2626", borderColor: "#dc2626" }}
+                    disabled={submittingCancel}
                   >
-                    {submittingCancel ? "Cancelling..." : "Confirm Cancellation"}
+                    {submittingCancel ? "Cancelling..." : "Confirm Cancel"}
                   </button>
                 </div>
               </form>
@@ -4928,245 +5008,6 @@ function TechnicalTasksPageContent() {
           </div>
         )}
 
-        {/* CALL LOGS MODAL (Combined Remarks Summary, Add Call Log, Call History Table) */}
-        {callLogModalTask && (
-          <div className="tech-modal-overlay" onClick={() => setCallLogModalTask(null)}>
-            <div
-              className="tech-modal-card"
-              style={{ maxWidth: "760px", width: "95vw", maxHeight: "90vh", display: "flex", flexDirection: "column" }}
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className="tech-modal-header">
-                <div>
-                  <h2>Technical Call Logs</h2>
-                  <div style={{ fontSize: "12px", color: "#64748b", marginTop: "2px" }}>
-                    {callLogModalTask.company_name} — #{callLogModalTask.id.slice(0, 8)}
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  className="btn-close-modal"
-                  onClick={() => setCallLogModalTask(null)}
-                >
-                  ✕
-                </button>
-              </div>
-
-              <div style={{ flex: 1, overflowY: "auto", padding: "20px", display: "flex", flexDirection: "column", gap: "20px" }}>
-                {/* Top Summary: 3 Combined Remarks */}
-                <div
-                  style={{
-                    background: "#f8fafc",
-                    border: "1px solid #e2e8f0",
-                    borderRadius: "8px",
-                    padding: "14px 16px",
-                    display: "grid",
-                    gridTemplateColumns: "1fr 1fr 1fr",
-                    gap: "14px",
-                  }}
-                >
-                  <div>
-                    <div style={{ fontSize: "11px", fontWeight: 700, textTransform: "uppercase", color: "#64748b", marginBottom: "4px" }}>
-                      1. Creator Remarks
-                    </div>
-                    <div style={{ fontSize: "12.5px", color: "#1e293b", whiteSpace: "pre-wrap" }}>
-                      {callLogModalTask.creator_remarks || "—"}
-                    </div>
-                  </div>
-                  <div>
-                    <div style={{ fontSize: "11px", fontWeight: 700, textTransform: "uppercase", color: "#64748b", marginBottom: "4px" }}>
-                      2. Approver Remarks
-                    </div>
-                    <div style={{ fontSize: "12.5px", color: "#1e293b", whiteSpace: "pre-wrap" }}>
-                      {callLogModalTask.approver_remarks || "—"}
-                    </div>
-                  </div>
-                  <div>
-                    <div style={{ fontSize: "11px", fontWeight: 700, textTransform: "uppercase", color: "#64748b", marginBottom: "4px" }}>
-                      3. Completion / Cancel Remarks
-                    </div>
-                    <div style={{ fontSize: "12.5px", color: "#1e293b", whiteSpace: "pre-wrap" }}>
-                      {callLogModalTask.cancel_remarks || (callLogsList.length > 0 ? callLogsList[0].remarks : "—")}
-                    </div>
-                  </div>
-                </div>
-
-                {/* Add New Call Log Form */}
-                <form
-                  onSubmit={handleCreateCallLogSubmit}
-                  style={{
-                    background: "#ffffff",
-                    border: "1px solid #cbd5e1",
-                    borderRadius: "8px",
-                    padding: "16px",
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: "12px",
-                  }}
-                >
-                  <div style={{ fontWeight: 600, fontSize: "13.5px", color: "#0f172a" }}>
-                    Add Call Log / Visit Update
-                  </div>
-                  {callLogError && (
-                    <div style={{ background: "#fee2e2", color: "#991b1b", padding: "8px 12px", borderRadius: "6px", fontSize: "12.5px" }}>
-                      {callLogError}
-                    </div>
-                  )}
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px", alignItems: "center" }}>
-                    <div>
-                      <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "6px" }}>
-                        Call / Visit Type
-                      </label>
-                      <div style={{ display: "flex", gap: "20px" }}>
-                        <label style={{ display: "inline-flex", alignItems: "center", gap: "6px", fontSize: "13px", cursor: "pointer" }}>
-                          <input
-                            type="radio"
-                            name="callLogType"
-                            value="Telecall"
-                            checked={newCallLogType === "Telecall"}
-                            onChange={(e) => setNewCallLogType(e.target.value)}
-                          />
-                          📞 Telecall
-                        </label>
-                        <label style={{ display: "inline-flex", alignItems: "center", gap: "6px", fontSize: "13px", cursor: "pointer" }}>
-                          <input
-                            type="radio"
-                            name="callLogType"
-                            value="Physical Visit"
-                            checked={newCallLogType === "Physical Visit"}
-                            onChange={(e) => setNewCallLogType(e.target.value)}
-                          />
-                          🏢 Physical Visit
-                        </label>
-                      </div>
-                    </div>
-                    <div>
-                      <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px" }}>
-                        Date
-                      </label>
-                      <div style={{ fontSize: "13px", color: "#334155", fontWeight: 500 }}>
-                        {new Date().toLocaleDateString("en-GB")} (System Date)
-                      </div>
-                    </div>
-                  </div>
-
-                  <div>
-                    <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px" }}>
-                      Feedback / Remarks by Technician <span style={{ color: "#ef4444" }}>*</span>
-                    </label>
-                    <textarea
-                      required
-                      rows={3}
-                      placeholder="Enter discussion summary, technical findings, or next steps..."
-                      value={newCallLogRemarks}
-                      onChange={(e) => setNewCallLogRemarks(e.target.value)}
-                      style={{
-                        width: "100%",
-                        borderRadius: "5px",
-                        border: "1px solid #cbd5e1",
-                        padding: "8px 12px",
-                        fontSize: "13px",
-                        color: "#1e293b",
-                        boxSizing: "border-box",
-                        outline: "none",
-                        fontFamily: "inherit",
-                      }}
-                    />
-                  </div>
-
-                  <div style={{ display: "flex", justifyContent: "flex-end" }}>
-                    <button
-                      type="submit"
-                      className="btn btn-primary"
-                      disabled={submittingCallLog}
-                      style={{ padding: "8px 18px", fontSize: "13px" }}
-                    >
-                      {submittingCallLog ? "Saving Log..." : "+ Add Call Log"}
-                    </button>
-                  </div>
-                </form>
-
-                {/* Call Logs History List */}
-                <div>
-                  <div style={{ fontWeight: 600, fontSize: "13.5px", color: "#0f172a", marginBottom: "10px" }}>
-                    Call Logs History ({callLogsList.length})
-                  </div>
-
-                  {loadingCallLogs ? (
-                    <div style={{ textAlign: "center", padding: "20px", color: "#64748b", fontSize: "13px" }}>
-                      Loading call logs...
-                    </div>
-                  ) : callLogsList.length === 0 ? (
-                    <div style={{ textAlign: "center", padding: "24px", color: "#94a3b8", background: "#f8fafc", borderRadius: "6px", fontSize: "13px" }}>
-                      No call logs recorded yet.
-                    </div>
-                  ) : (
-                    <div style={{ border: "1px solid #e2e8f0", borderRadius: "6px", overflow: "hidden" }}>
-                      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "12.5px" }}>
-                        <thead>
-                          <tr style={{ background: "#f1f5f9", textAlign: "left", color: "#475569" }}>
-                            <th style={{ padding: "8px 12px", width: "40px" }}>#</th>
-                            <th style={{ padding: "8px 12px", width: "110px" }}>Type</th>
-                            <th style={{ padding: "8px 12px", width: "130px" }}>Date & Time</th>
-                            <th style={{ padding: "8px 12px", width: "130px" }}>Logged By</th>
-                            <th style={{ padding: "8px 12px" }}>Remarks / Feedback</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {callLogsList.length === 0 ? (
-                            <tr>
-                              <td colSpan={5} style={{ padding: "24px", textAlign: "center", color: "#64748b" }}>
-                                No Data
-                              </td>
-                            </tr>
-                          ) : (
-                            callLogsList.map((log, idx) => (
-                            <tr key={log.id} style={{ borderTop: "1px solid #e2e8f0" }}>
-                              <td style={{ padding: "10px 12px", color: "#64748b" }}>{idx + 1}</td>
-                              <td style={{ padding: "10px 12px", fontWeight: 600 }}>
-                                <span
-                                  style={{
-                                    padding: "2px 8px",
-                                    borderRadius: "12px",
-                                    fontSize: "11px",
-                                    background: log.call_type === "Physical Visit" ? "#e0f2fe" : "#f1f5f9",
-                                    color: log.call_type === "Physical Visit" ? "#0369a1" : "#475569",
-                                  }}
-                                >
-                                  {log.call_type}
-                                </span>
-                              </td>
-                              <td style={{ padding: "10px 12px", color: "#334155" }}>
-                                {log.call_date || (log.created_at ? new Date(log.created_at).toLocaleString("en-GB") : "—")}
-                              </td>
-                              <td style={{ padding: "10px 12px", color: "#334155", fontWeight: 500 }}>
-                                {log.created_by || "System"}
-                              </td>
-                              <td style={{ padding: "10px 12px", color: "#1e293b", whiteSpace: "pre-wrap" }}>
-                                {log.remarks}
-                              </td>
-                            </tr>
-                          ))
-                        )}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              <div className="tech-modal-footer">
-                <button
-                  type="button"
-                  className="btn"
-                  onClick={() => setCallLogModalTask(null)}
-                >
-                  Close
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
       </main>
     </AppShell>
   );

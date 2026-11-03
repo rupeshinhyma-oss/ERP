@@ -21,13 +21,14 @@ from typing import Any
 from fastapi import APIRouter, Depends, File, Query, Request, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.dependencies import get_current_user
 from app.auth.service import CurrentUser
+from app.core.exceptions import ForbiddenException
 from app.core.responses import build_success_response
 from app.database.session import get_db_session
 from app.common.storage import save_uploaded_file
-from app.technical_tasks.models import TechnicalTask, TechnicalTaskCallLog
-from app.technical_tasks.repository import TechnicalTaskRepository
+from app.rbac.dependencies import require_any_permission
+from app.technical_tasks.models import TechnicalTask, TechnicalTaskCallLog, TechnicalTaskLog
+from app.technical_tasks.repository import COUNT_CAP, TechnicalTaskRepository
 from app.technical_tasks.schemas import (
     TechnicalTaskBulkDeleteRequest,
     TechnicalTaskCallLogCreate,
@@ -35,13 +36,13 @@ from app.technical_tasks.schemas import (
     TechnicalCallLogReportRow,
     TechnicalTaskCountsResponse,
     TechnicalTaskCreate,
+    TechnicalTaskLogRead,
     TechnicalTaskPaymentRecordRequest,
     TechnicalTaskRead,
     TechnicalTaskStatusUpdate,
     TechnicalTaskUpdate,
 )
-from app.technical_tasks.repository import COUNT_CAP
-from app.technical_tasks.service import TechnicalTaskService
+from app.technical_tasks.service import TechnicalTaskService, canonical_status
 
 router = APIRouter(prefix="/technical-tasks", tags=["Technical Tasks"])
 
@@ -91,6 +92,10 @@ def _log_to_dict(log: TechnicalTaskCallLog) -> dict[str, Any]:
     return TechnicalTaskCallLogRead.model_validate(log).model_dump(mode="json")
 
 
+def _task_log_to_dict(log: TechnicalTaskLog) -> dict[str, Any]:
+    return TechnicalTaskLogRead.model_validate(log).model_dump(mode="json")
+
+
 @router.get("", summary="List technical tasks with filtering and pagination")
 async def list_technical_tasks(
     request: Request,
@@ -117,7 +122,7 @@ async def list_technical_tasks(
     page: int | None = Query(default=None, ge=1),
     page_size: int | None = Query(default=None, ge=1, le=500),
     service: TechnicalTaskService = Depends(get_service),
-    current_user: CurrentUser | None = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_any_permission("technicaltask.view", "technicaltask.manage")),
 ) -> dict:
     effective_tab = status or tab
     effective_dir = sort_dir or ("desc" if sort_desc is None or sort_desc else "asc")
@@ -174,7 +179,7 @@ async def list_technical_tasks(
 @router.get("/counts", summary="Get status tab counts")
 async def get_task_counts(
     service: TechnicalTaskService = Depends(get_service),
-    current_user: CurrentUser | None = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_any_permission("technicaltask.view", "technicaltask.manage")),
 ) -> dict:
     counts = await service.get_counts(**_scope_for(current_user))
     return {"success": True, "data": counts}
@@ -183,7 +188,7 @@ async def get_task_counts(
 @router.get("/payment-summary", summary="Get payment summary KPIs (total, paid, due, pending/completed counts)")
 async def get_payment_summary(
     service: TechnicalTaskService = Depends(get_service),
-    current_user: CurrentUser | None = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_any_permission("technicaltask.view", "technicaltask.manage")),
 ) -> dict:
     summary = await service.get_payment_summary(**_scope_for(current_user))
     return {"success": True, "data": summary}
@@ -199,7 +204,7 @@ async def call_log_report(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, ge=1, le=500),
     service: TechnicalTaskService = Depends(get_service),
-    current_user: CurrentUser | None = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_any_permission("technicaltask.view", "technicaltask.manage", "report.view")),
 ) -> dict:
     offset = (page - 1) * page_size
     items, total = await service.call_log_report(
@@ -221,7 +226,7 @@ async def call_log_report(
 async def monthly_summary(
     months: int = Query(default=12, ge=1, le=36),
     service: TechnicalTaskService = Depends(get_service),
-    current_user: CurrentUser | None = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_any_permission("technicaltask.view", "technicaltask.manage", "report.view")),
 ) -> dict:
     return {"success": True, "data": await service.monthly_summary(months, **_scope_for(current_user))}
 
@@ -230,7 +235,7 @@ async def monthly_summary(
 async def upload_payment_screenshot(
     request: Request,
     file: UploadFile = File(...),
-    current_user: CurrentUser | None = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_any_permission("technicaltask.update", "technicaltask.create", "technicaltask.manage")),
 ) -> dict:
     content = await file.read()
     public_url, stored_name = await save_uploaded_file(
@@ -254,17 +259,21 @@ async def upload_payment_screenshot(
 async def lookup_by_serial_number(
     serial_number: str,
     service: TechnicalTaskService = Depends(get_service),
+    _current_user: CurrentUser = Depends(
+        require_any_permission("technicaltask.view", "technicaltask.create", "technicaltask.update", "technicaltask.manage")
+    ),
 ) -> dict:
     data = await service.lookup_serial(serial_number)
     return {"success": True, "data": data}
 
 
-@router.get("/{task_id}", summary="Get technical task details")
+@router.get("/{task_id}", summary="Get technical task details (by UUID or task_number)")
 async def get_technical_task(
-    task_id: uuid.UUID,
+    task_id: str,
     service: TechnicalTaskService = Depends(get_service),
+    current_user: CurrentUser = Depends(require_any_permission("technicaltask.view", "technicaltask.manage")),
 ) -> dict:
-    task = await service.get_by_id(task_id)
+    task = await service.resolve_task(task_id, **_scope_for(current_user))
     return {"success": True, "data": _to_dict(task)}
 
 
@@ -272,7 +281,7 @@ async def get_technical_task(
 async def create_technical_task(
     payload: TechnicalTaskCreate,
     service: TechnicalTaskService = Depends(get_service),
-    current_user: CurrentUser | None = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_any_permission("technicaltask.create", "technicaltask.manage")),
 ) -> dict:
     creator = _actor_label(current_user, "Admin") or "Admin"
     task = await service.create(
@@ -286,7 +295,7 @@ async def update_technical_task(
     task_id: uuid.UUID,
     payload: TechnicalTaskUpdate,
     service: TechnicalTaskService = Depends(get_service),
-    current_user: CurrentUser | None = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_any_permission("technicaltask.update", "technicaltask.manage")),
 ) -> dict:
     task = await service.update(
         task_id, payload, user_name=_actor_label(current_user, None), privileged=_is_privileged(current_user)
@@ -299,8 +308,18 @@ async def update_technical_task_status(
     task_id: uuid.UUID,
     payload: TechnicalTaskStatusUpdate,
     service: TechnicalTaskService = Depends(get_service),
-    current_user: CurrentUser | None = Depends(get_current_user),
+    current_user: CurrentUser = Depends(
+        require_any_permission("technicaltask.update", "technicaltask.approve", "technicaltask.manage")
+    ),
 ) -> dict:
+    target = canonical_status(payload.status)
+    if not _is_privileged(current_user):
+        if target == "Approved":
+            if "technicaltask.approve" not in current_user.permissions:
+                raise ForbiddenException("This action requires the 'technicaltask.approve' permission.")
+        else:
+            if "technicaltask.update" not in current_user.permissions:
+                raise ForbiddenException("This action requires the 'technicaltask.update' permission.")
     user_name = _actor_label(current_user, None)
     task = await service.update_status(task_id, payload, user_name=user_name, privileged=_is_privileged(current_user))
     return {"success": True, "data": _to_dict(task), "message": f"Task status updated to {task.status}."}
@@ -311,7 +330,9 @@ async def reopen_technical_task(
     task_id: uuid.UUID,
     payload: TechnicalTaskStatusUpdate,
     service: TechnicalTaskService = Depends(get_service),
-    current_user: CurrentUser | None = Depends(get_current_user),
+    current_user: CurrentUser = Depends(
+        require_any_permission("technicaltask.approve", "technicaltask.update", "technicaltask.manage")
+    ),
 ) -> dict:
     user_name = _actor_label(current_user, "Admin")
     if payload.status.lower() not in ("approved", "pending"):
@@ -329,7 +350,7 @@ async def record_technical_task_payment(
     task_id: uuid.UUID,
     payload: TechnicalTaskPaymentRecordRequest,
     service: TechnicalTaskService = Depends(get_service),
-    current_user: CurrentUser | None = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_any_permission("technicaltask.update", "technicaltask.manage")),
 ) -> dict:
     user_name = _actor_label(current_user, "Accounts")
     task = await service.record_payment(
@@ -353,7 +374,7 @@ async def record_technical_task_payment(
 async def delete_technical_task(
     task_id: uuid.UUID,
     service: TechnicalTaskService = Depends(get_service),
-    current_user: CurrentUser | None = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_any_permission("technicaltask.delete", "technicaltask.manage")),
 ) -> dict:
     await service.delete(task_id, privileged=_is_privileged(current_user))
     return {"success": True, "message": "Technical task deleted successfully."}
@@ -363,7 +384,9 @@ async def delete_technical_task(
 async def bulk_delete_technical_tasks(
     payload: TechnicalTaskBulkDeleteRequest,
     service: TechnicalTaskService = Depends(get_service),
-    current_user: CurrentUser | None = Depends(get_current_user),
+    current_user: CurrentUser = Depends(
+        require_any_permission("technicaltask.bulk_action", "technicaltask.delete", "technicaltask.manage")
+    ),
 ) -> dict:
     deleted_count = await service.bulk_delete(payload.ids, privileged=_is_privileged(current_user))
     return {
@@ -375,20 +398,33 @@ async def bulk_delete_technical_tasks(
 
 @router.get("/{task_id}/call-logs", summary="Get call logs for a task")
 async def get_task_call_logs(
-    task_id: uuid.UUID,
+    task_id: str,
     service: TechnicalTaskService = Depends(get_service),
+    current_user: CurrentUser = Depends(require_any_permission("technicaltask.view", "technicaltask.manage")),
 ) -> dict:
-    logs = await service.list_call_logs(task_id)
+    logs = await service.list_call_logs(task_id, **_scope_for(current_user))
     return {"success": True, "data": [_log_to_dict(l) for l in logs]}
+
+
+@router.get("/{task_id}/task-logs", summary="Get lifecycle task logs for Task Log Summary")
+async def get_technical_task_logs(
+    task_id: str,
+    service: TechnicalTaskService = Depends(get_service),
+    current_user: CurrentUser = Depends(require_any_permission("technicaltask.view", "technicaltask.manage")),
+) -> dict:
+    logs = await service.list_task_logs(task_id, **_scope_for(current_user))
+    return {"success": True, "data": [_task_log_to_dict(l) for l in logs]}
 
 
 @router.post("/{task_id}/call-logs", status_code=status.HTTP_201_CREATED, summary="Add a call log for a task")
 async def create_task_call_log(
-    task_id: uuid.UUID,
+    task_id: str,
     payload: TechnicalTaskCallLogCreate,
     service: TechnicalTaskService = Depends(get_service),
-    current_user: CurrentUser | None = Depends(get_current_user),
+    current_user: CurrentUser = Depends(
+        require_any_permission("technicaltask.update", "technicaltask.create", "technicaltask.manage")
+    ),
 ) -> dict:
     creator = _actor_label(current_user, "Technician") or "Technician"
-    log = await service.add_call_log(task_id, payload, creator_name=creator)
+    log = await service.add_call_log(task_id, payload, creator_name=creator, **_scope_for(current_user))
     return {"success": True, "data": _log_to_dict(log), "message": "Call log recorded successfully."}

@@ -8,6 +8,7 @@ import type {
   TechnicalMonthlySummary,
   TechnicalTask,
   TechnicalTaskCallLog,
+  TechnicalTaskLog,
   TechnicalTaskCounts,
   TechnicalTaskCreatePayload,
   SerialLookupResult,
@@ -172,6 +173,13 @@ export async function bulkDeleteTechnicalTasks(ids: string[]): Promise<number> {
 export async function fetchTaskCallLogs(taskId: string): Promise<TechnicalTaskCallLog[]> {
   const res = await apiGet<TechnicalTaskCallLog[]>(
     `/technical-tasks/${encodeURIComponent(taskId)}/call-logs`
+  );
+  return res.data || [];
+}
+
+export async function fetchTaskLogs(taskId: string): Promise<TechnicalTaskLog[]> {
+  const res = await apiGet<TechnicalTaskLog[]>(
+    `/technical-tasks/${encodeURIComponent(taskId)}/task-logs`
   );
   return res.data || [];
 }

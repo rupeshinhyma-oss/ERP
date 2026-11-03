@@ -21,11 +21,11 @@ import uuid
 from datetime import date, datetime, timezone
 from typing import Any, Iterable
 
-from sqlalchemy import extract, func, or_, select, update
+from sqlalchemy import and_, extract, func, or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common.base_repository import BaseRepository
-from app.technical_tasks.models import TechnicalTask, TechnicalTaskCallLog
+from app.technical_tasks.models import TechnicalTask, TechnicalTaskCallLog, TechnicalTaskLog
 
 # Tab key -> every stored spelling of that status (older rows used a few variants).
 TAB_STATUSES: dict[str, tuple[str, ...]] = {
@@ -57,6 +57,7 @@ def invalidate_counts_cache() -> None:
 
 
 _SORTABLE = {
+    "task_number": TechnicalTask.task_number,
     "company_name": TechnicalTask.company_name,
     "city": TechnicalTask.city,
     "priority": TechnicalTask.priority,
@@ -89,6 +90,39 @@ class TechnicalTaskRepository(BaseRepository[TechnicalTask]):
 
     def __init__(self, session: AsyncSession) -> None:
         super().__init__(session, TechnicalTask)
+
+    async def create(self, **kwargs: Any) -> TechnicalTask:
+        """Create a technical task and assign sequential ``task_number`` across Postgres & SQLite."""
+        if kwargs.get("task_number") is None:
+            bind = self.session.sync_session.get_bind()
+            if bind is not None and bind.dialect.name == "postgresql":
+                next_num = (
+                    await self.session.execute(text("SELECT nextval('technical_tasks_task_number_seq')"))
+                ).scalar_one()
+            else:
+                next_num = (
+                    await self.session.execute(select(func.coalesce(func.max(TechnicalTask.task_number), 0) + 1))
+                ).scalar_one()
+            kwargs["task_number"] = int(next_num)
+        return await super().create(**kwargs)
+
+    async def get_by_ref(self, task_ref: str | uuid.UUID, **scope: Any) -> TechnicalTask | None:
+        """Look up a non-deleted task by UUID ``id`` or integer ``task_number`` under ``scope``."""
+        if isinstance(task_ref, uuid.UUID):
+            stmt = self._apply_scope(self._base_select().where(TechnicalTask.id == task_ref), **scope)
+            return (await self.session.execute(stmt)).scalar_one_or_none()
+        raw = str(task_ref or "").strip()
+        if not raw:
+            return None
+        if raw.isdigit():
+            stmt = self._apply_scope(self._base_select().where(TechnicalTask.task_number == int(raw)), **scope)
+            return (await self.session.execute(stmt)).scalar_one_or_none()
+        try:
+            parsed_id = uuid.UUID(raw)
+        except ValueError:
+            return None
+        stmt = self._apply_scope(self._base_select().where(TechnicalTask.id == parsed_id), **scope)
+        return (await self.session.execute(stmt)).scalar_one_or_none()
 
     # ------------------------------------------------------------------ scoping
     def _apply_scope(
@@ -148,39 +182,39 @@ class TechnicalTaskRepository(BaseRepository[TechnicalTask]):
         return dict(result)
 
     async def get_payment_summary(self, **scope: Any) -> dict[str, Any]:
-        """Aggregate payment summary for Chargeable technical tasks: total_payment, paid, due, counts."""
+        """Aggregate payment summary for active (non-cancelled) Chargeable technical tasks."""
+        is_paid_cond = or_(
+            func.coalesce(TechnicalTask.payment_status, "").in_(("Paid", "paid")),
+            and_(
+                func.coalesce(TechnicalTask.service_charge, 0) > 0,
+                func.coalesce(TechnicalTask.collected_amount, 0) >= func.coalesce(TechnicalTask.service_charge, 0),
+            ),
+        )
         stmt = (
             select(
                 func.coalesce(func.sum(TechnicalTask.service_charge), 0).label("total_payment"),
                 func.coalesce(func.sum(TechnicalTask.collected_amount), 0).label("paid"),
-                func.count(TechnicalTask.id).filter(
-                    or_(
-                        TechnicalTask.payment_status.is_(None),
-                        TechnicalTask.payment_status.in_(("Pending", "pending", "Partial", "partial")),
-                        func.coalesce(TechnicalTask.collected_amount, 0) < func.coalesce(TechnicalTask.service_charge, 0),
-                    )
-                ).label("pending_count"),
-                func.count(TechnicalTask.id).filter(
-                    or_(
-                        TechnicalTask.payment_status.in_(("Paid", "paid")),
-                        func.coalesce(TechnicalTask.collected_amount, 0) >= func.coalesce(TechnicalTask.service_charge, 0),
-                    )
-                ).label("completed_count"),
+                func.count(TechnicalTask.id).filter(~is_paid_cond).label("pending_count"),
+                func.count(TechnicalTask.id).filter(is_paid_cond).label("completed_count"),
             )
             .where(TechnicalTask.deleted_at.is_(None))
             .where(TechnicalTask.service_type == "Chargeable")
+            .where(func.coalesce(TechnicalTask.status, "").not_in(TAB_STATUSES["cancel"]))
         )
         stmt = self._apply_scope(stmt, **scope)
         row = (await self.session.execute(stmt)).one()
         total_payment = float(row.total_payment or 0)
         paid = float(row.paid or 0)
         due = max(0.0, total_payment - paid)
+        pending_count = int(row.pending_count or 0)
+        completed_count = int(row.completed_count or 0)
         return {
             "total_payment": total_payment,
             "paid": paid,
             "due": due,
-            "pending_count": int(row.pending_count or 0),
-            "completed_count": int(row.completed_count or 0),
+            "all_count": pending_count + completed_count,
+            "pending_count": pending_count,
+            "completed_count": completed_count,
         }
 
     # ------------------------------------------------------------------ list
@@ -235,20 +269,29 @@ class TechnicalTaskRepository(BaseRepository[TechnicalTask]):
             stmt = stmt.where(TechnicalTask.task_created_date <= date_to)
         if payment_collected and payment_collected.strip():
             pc = payment_collected.strip().lower()
-            if pc in ("yes", "paid", "collected", "true", "completed"):
-                stmt = stmt.where(TechnicalTask.service_type == "Chargeable").where(
-                    or_(
-                        TechnicalTask.payment_status.in_(("Paid", "paid")),
-                        func.coalesce(TechnicalTask.collected_amount, 0) >= func.coalesce(TechnicalTask.service_charge, 0),
-                    )
+            is_paid_cond = or_(
+                func.coalesce(TechnicalTask.payment_status, "").in_(("Paid", "paid")),
+                and_(
+                    func.coalesce(TechnicalTask.service_charge, 0) > 0,
+                    func.coalesce(TechnicalTask.collected_amount, 0) >= func.coalesce(TechnicalTask.service_charge, 0),
+                ),
+            )
+            if pc == "all":
+                stmt = (
+                    stmt.where(TechnicalTask.service_type == "Chargeable")
+                    .where(func.coalesce(TechnicalTask.status, "").not_in(TAB_STATUSES["cancel"]))
+                )
+            elif pc in ("yes", "paid", "collected", "true", "completed"):
+                stmt = (
+                    stmt.where(TechnicalTask.service_type == "Chargeable")
+                    .where(func.coalesce(TechnicalTask.status, "").not_in(TAB_STATUSES["cancel"]))
+                    .where(is_paid_cond)
                 )
             elif pc in ("no", "pending", "false"):
-                stmt = stmt.where(TechnicalTask.service_type == "Chargeable").where(
-                    or_(
-                        TechnicalTask.payment_status.is_(None),
-                        TechnicalTask.payment_status.in_(("Pending", "pending", "Partial", "partial")),
-                        func.coalesce(TechnicalTask.collected_amount, 0) < func.coalesce(TechnicalTask.service_charge, 0),
-                    )
+                stmt = (
+                    stmt.where(TechnicalTask.service_type == "Chargeable")
+                    .where(func.coalesce(TechnicalTask.status, "").not_in(TAB_STATUSES["cancel"]))
+                    .where(~is_paid_cond)
                 )
 
         if search and search.strip():
@@ -336,6 +379,37 @@ class TechnicalTaskRepository(BaseRepository[TechnicalTask]):
             select(TechnicalTaskCallLog)
             .where(TechnicalTaskCallLog.task_id == task_id)
             .order_by(TechnicalTaskCallLog.created_at.desc())
+            .limit(limit)
+        )
+        return list((await self.session.execute(stmt)).scalars().all())
+
+    async def create_task_log(
+        self,
+        task_id: uuid.UUID,
+        updated_by: str,
+        title: str,
+        status: str,
+        created_at: datetime | None = None,
+    ) -> TechnicalTaskLog:
+        """Record an immutable lifecycle entry for Task Log Summary."""
+        log = TechnicalTaskLog(
+            id=uuid.uuid4(),
+            task_id=task_id,
+            updated_by=updated_by or "Admin",
+            title=title,
+            status=status,
+            created_at=created_at or datetime.now(timezone.utc),
+        )
+        self.session.add(log)
+        await self.session.flush()
+        return log
+
+    async def list_task_logs(self, task_id: uuid.UUID, limit: int = 500) -> list[TechnicalTaskLog]:
+        """Lifecycle task logs for one task, newest first."""
+        stmt = (
+            select(TechnicalTaskLog)
+            .where(TechnicalTaskLog.task_id == task_id)
+            .order_by(TechnicalTaskLog.created_at.desc(), TechnicalTaskLog.id)
             .limit(limit)
         )
         return list((await self.session.execute(stmt)).scalars().all())

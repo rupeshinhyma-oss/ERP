@@ -1,5 +1,6 @@
 export interface TechnicalTask {
   id: string;
+  task_number?: number | null;
   company_name: string;
   company_id?: string | null;
   task_type: string;
@@ -47,6 +48,15 @@ export interface TechnicalTaskCallLog {
   call_type: string; // "Telecall" | "Physical Visit"
   remarks: string;
   created_by: string;
+  created_at: string;
+}
+
+export interface TechnicalTaskLog {
+  id: string;
+  task_id: string;
+  updated_by: string;
+  title: string;
+  status: string;
   created_at: string;
 }
 
@@ -139,6 +149,7 @@ export interface TechnicalTaskPaymentSummary {
   total_payment: number;
   paid: number;
   due: number;
+  all_count?: number;
   pending_count: number;
   completed_count: number;
 }

@@ -4,6 +4,19 @@ import { MemoryRouter } from "react-router-dom";
 import { PaymentsPage } from "../PaymentsPage";
 import * as technicalTasksApi from "@/lib/technicalTasksApi";
 
+const authState = vi.hoisted(() => ({ isSuperAdmin: true, username: "admin", perms: [] as string[] }));
+vi.mock("@/lib/hooks", async (importOriginal) => {
+  const actual = await importOriginal<Record<string, unknown>>();
+  return {
+    ...actual,
+    useAuth: () => ({
+      profile: { username: authState.username },
+      isSuperAdmin: authState.isSuperAdmin,
+      hasPermission: (code?: string | null) => authState.isSuperAdmin || !code || authState.perms.includes(code),
+    }),
+  };
+});
+
 // Mock AppShell to render children simply
 vi.mock("@/components/AppShell", () => ({
   AppShell: ({ children }: { children: React.ReactNode }) => <div data-testid="app-shell">{children}</div>,
@@ -22,6 +35,7 @@ describe("PaymentsPage", () => {
     total_payment: 150000,
     paid: 95000,
     due: 55000,
+    all_count: 13,
     pending_count: 5,
     completed_count: 8,
   };
@@ -79,11 +93,14 @@ describe("PaymentsPage", () => {
       expect(screen.getByText("DUE")).toBeTruthy();
       expect(screen.getByText("₹ 1,50,000.00")).toBeTruthy();
       expect(screen.getByText("₹ 95,000.00")).toBeTruthy();
-      expect(screen.getByText("₹ 55,000.00")).toBeTruthy();
+      const dueEl = screen.getByTestId("payment-kpi-due");
+      expect(dueEl.textContent).toBe("₹ 55,000.00");
+      expect(dueEl.style.color).toBe("rgb(220, 38, 38)");
     });
   });
 
-  it("renders Pending and Completed tabs inside the card with counts", async () => {
+  it("renders All, Pending, and Completed tabs inside the card with counts and switches stage", async () => {
+    const fetchSpy = vi.spyOn(technicalTasksApi, "fetchTechnicalTasks");
     render(
       <MemoryRouter>
         <PaymentsPage />
@@ -91,13 +108,24 @@ describe("PaymentsPage", () => {
     );
 
     await waitFor(() => {
+      expect(screen.getByRole("button", { name: /All \(13\)/i })).toBeTruthy();
       expect(screen.getByRole("button", { name: /Pending \(5\)/i })).toBeTruthy();
       expect(screen.getByRole("button", { name: /Completed \(8\)/i })).toBeTruthy();
     });
+
+    fireEvent.click(screen.getByRole("button", { name: /All \(13\)/i }));
+    await waitFor(() => {
+      expect(fetchSpy).toHaveBeenCalledWith(expect.objectContaining({ payment_collected: "all" }));
+    });
   });
 
-  it("renders table row with payment details and action menu", async () => {
-    render(
+  it("renders table row with payment details, dynamic dashes for unassigned fields, and RBAC gating", async () => {
+    vi.spyOn(technicalTasksApi, "fetchTechnicalTasks").mockResolvedValue({
+      data: [{ ...sampleTasks[0], task_approved_by: null, task_allotted_to: null }] as any,
+      meta: { total: 1, page: 1, page_size: 10, total_pages: 1 } as any,
+    });
+
+    const { unmount } = render(
       <MemoryRouter>
         <PaymentsPage />
       </MemoryRouter>
@@ -107,10 +135,27 @@ describe("PaymentsPage", () => {
       expect(screen.getByText("SUN PHARMA LTD")).toBeTruthy();
       expect(screen.getByText("Vadodara")).toBeTruthy();
       expect(screen.getByText("GF5000F Granular Filler FFS")).toBeTruthy();
-      expect(screen.getByText("Chargable")).toBeTruthy();
+      expect(screen.getByText("Chargeable")).toBeTruthy();
+      expect(screen.queryByText("ABC")).toBeNull();
       expect(screen.getByText("Paid: ₹15,000")).toBeTruthy();
       expect(screen.getByText("Due: ₹10,000")).toBeTruthy();
     });
+    unmount();
+
+    authState.isSuperAdmin = false;
+    authState.perms = ["technicaltask.view"];
+    try {
+      render(
+        <MemoryRouter>
+          <PaymentsPage />
+        </MemoryRouter>
+      );
+      expect(screen.queryByRole("button", { name: /\+ ADD NEW/i })).toBeNull();
+      expect(screen.queryByRole("button", { name: /DELETE/i })).toBeNull();
+    } finally {
+      authState.isSuperAdmin = true;
+      authState.perms = [];
+    }
   });
 
   it("toggles filter panel and applies deferred filter on Search click, and clears on Reset", async () => {

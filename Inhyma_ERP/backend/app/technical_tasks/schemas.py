@@ -31,6 +31,17 @@ class TechnicalTaskCallLogRead(TechnicalTaskCallLogBase):
     created_at: datetime
 
 
+class TechnicalTaskLogRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    task_id: uuid.UUID
+    updated_by: str
+    title: str
+    status: str
+    created_at: datetime
+
+
 class TechnicalTaskBase(BaseModel):
     company_name: str = Field(..., min_length=1, max_length=255)
     company_id: uuid.UUID | None = None
@@ -178,6 +189,7 @@ class TechnicalTaskRead(TechnicalTaskBase):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
+    task_number: int | None = None
     created_by_name: str
     task_created_date: date
     version: int

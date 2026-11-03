@@ -3,7 +3,7 @@
 **Service Base URL:** `http://localhost:8002/api/v1`  
 **Authentication Scheme:** Bearer JWT (HS256) & WebSocket Query Tokens  
 **Standard Response Envelope:** `{ "success": true, "data": ..., "meta": ..., "error": null }`  
-**Last Updated:** November 2, 2026
+**Last Updated:** November 3, 2026
 
 > **Universal Cross-Module Active-Only Extraction & Filtering Convention:**
 > - **Management Lists vs Cross-Module Lookups:** Unfiltered management endpoints (`GET /api/v1/masters/*`, `/companies`, `/suppliers`, `/buyers`, `/users`, `/positions`, and `/hrms/setup/*` with default `active_only=false`) return **both** `Active` and `Inactive` rows so each module's own `Active` / `Inactive` tabs and status toggles remain functional. Conversely, every cross-module picker/lookup endpoint (`/api/v1/masters/*/lookup`, `/api/v1/masters/*/dropdown`, `/companies/lookup`, `/companies/sales-persons`, `/users/all?active_only=true`, `/positions/all?active_only=true`, `/inquiries/consignment-codes`, `/inquiries/companies`, `/hrms/setup/*?active_only=true`, `/products/machine-spares/universal-view`, and `/search`) returns **`Active` records only**.
@@ -49,6 +49,8 @@
 | `GET` | `/api/v1/masters/states/lookup` | List active states/provinces (`RecordStatus.ACTIVE`, optional `country_id` filter) | Authenticated |
 | `GET` | `/api/v1/masters/districts/lookup` | List active districts (`RecordStatus.ACTIVE`) filtered by `state_id` query param | Authenticated |
 | `GET` | `/api/v1/masters/cities/lookup` | List active cities (`RecordStatus.ACTIVE`) filtered by `district_id` and `state_id` query params | Authenticated |
+| `GET` | `/api/v1/masters/technicians/lookup` | List active field service technicians (`RecordStatus.ACTIVE`) for Technical Tasks approval/allotment & filter dropdowns | Authenticated |
+| `GET` | `/api/v1/masters/call-types/lookup` | List active technical service call types (`RecordStatus.ACTIVE`) for Technical Tasks creation & filter dropdowns | Authenticated |
 | `POST` | `/api/v1/masters/cities` | Create new city with `state_id` and `district_id` references | `city.create` |
 
 ---
@@ -78,17 +80,24 @@
 
 | Method | Endpoint URI | Description | Permission Gate |
 | :--- | :--- | :--- | :--- |
-| `GET` | `/api/v1/technical-tasks` | List service tickets by status tab, priority, and payment status (`payment_collected=pending|completed`) | `technicaltask.view` |
-| `GET` | `/api/v1/technical-tasks/counts` | Status tab badge counts (Pending, Approved, Payment Pending, Completed, Cancel) | `technicaltask.view` |
-| `GET` | `/api/v1/technical-tasks/payment-summary` | Aggregated payment KPIs (`total_payment`, `paid`, `due`, `pending_count`, `completed_count`) | `technicaltask.view` |
-| `POST` | `/api/v1/technical-tasks` | Create field service ticket / breakdown maintenance call | `technicaltask.create` |
-| `GET` | `/api/v1/technical-tasks/{id}` | Inspect detailed service ticket | `technicaltask.view` |
-| `PATCH` | `/api/v1/technical-tasks/{id}` | Update machine details, problem notes, payment fields, or scheduled visit | `technicaltask.update` |
-| `PATCH` | `/api/v1/technical-tasks/{id}/status` | Transition ticket status with resolution remarks and optional payment collection | `technicaltask.update` |
-| `POST` | `/api/v1/technical-tasks/{id}/record-payment` | Atomically record collected payment amount, payment mode, reference no, date, and receipt | `technicaltask.update` |
-| `POST` | `/api/v1/technical-tasks/upload-screenshot` | Upload payment screenshot / receipt image or PDF | Authenticated |
-| `POST` | `/api/v1/technical-tasks/bulk-delete` | Bulk soft-delete technical tasks by array of IDs | `technicaltask.delete` |
-| `DELETE`| `/api/v1/technical-tasks/{id}` | Soft-delete technical service task | `technicaltask.delete` |
+| `GET` | `/api/v1/technical-tasks` | List paginated service tickets with status tab (`all`, `Pending`, `Approved`, `Payment Pending`, `Completed`, `Cancel`), `task_type`, `service_type`, `call_type`, `priority`, `city`, `third_party_city`, `task_allotted_to`, date range, and payment stage (`payment_collected=all\|pending\|completed`, strictly excluding cancelled tasks in `/payments` mode) | `technicaltask.view \| technicaltask.manage` |
+| `GET` | `/api/v1/technical-tasks/counts` | Status tab badge counts (`all`, `pending`, `approved`, `payment_pending`, `completed`, `cancel`) | `technicaltask.view \| technicaltask.manage` |
+| `GET` | `/api/v1/technical-tasks/payment-summary` | Real-time financial KPIs (`total_payment`, `paid`, `due`, `all_count`, `pending_count`, `completed_count`) across active (non-cancelled) `Chargeable` tasks using NULL-safe `coalesce` SQL predicates | `technicaltask.view \| technicaltask.manage` |
+| `GET` | `/api/v1/technical-tasks/call-log-report` | Paginated cross-ticket technician call/visit log analytics report | `technicaltask.view \| technicaltask.manage \| report.view` |
+| `GET` | `/api/v1/technical-tasks/monthly-summary` | Monthly technician service call & resolution summary metrics | `technicaltask.view \| technicaltask.manage \| report.view` |
+| `GET` | `/api/v1/technical-tasks/lookup/serial/{serial_number}` | Lookup machine model, warranty status, customer details, and historical ticket count by machine serial number | `technicaltask.view \| technicaltask.create \| technicaltask.manage` |
+| `POST` | `/api/v1/technical-tasks` | Create field service ticket with sequential `task_number` and initial `Create Technical Task` audit log | `technicaltask.create \| technicaltask.manage` |
+| `GET` | `/api/v1/technical-tasks/{id}` | Inspect detailed service ticket (accepts either UUID `id` or sequential integer `task_number`) | `technicaltask.view \| technicaltask.manage` |
+| `GET` | `/api/v1/technical-tasks/{id}/call-logs` | List chronological technician `Telecall` / `Physical Visit` call logs (resolves UUID or `task_number`) | `technicaltask.view \| technicaltask.manage` |
+| `POST` | `/api/v1/technical-tasks/{id}/call-logs` | Append technician call log (`task_type`: `Telecall` or `Physical Visit`, `remarks`) (resolves UUID or `task_number`) | `technicaltask.update \| technicaltask.create \| technicaltask.manage` |
+| `GET` | `/api/v1/technical-tasks/{id}/task-logs` | List immutable lifecycle task logs (`Create Technical Task`, `Approve Technical Task`, `Complete Technical Task`, `Cancel Technical Task`, `Reopen Technical Task`, `Record Task Payment`, `Update Technical Task`) | `technicaltask.view \| technicaltask.manage` |
+| `PATCH` | `/api/v1/technical-tasks/{id}` | Update machine details, problem notes, contact person, payment fields, or scheduled visit | `technicaltask.update \| technicaltask.manage` |
+| `PATCH` | `/api/v1/technical-tasks/{id}/status` | Transition ticket status (`Approved` enforces mandatory `task_allotted_to` & `technicaltask.approve \| technicaltask.manage`; `Completed` handles Free vs Chargeable `Yes`/`No` collection & `Self collect` wallet sync; `Cancel` enforces mandatory `cancel_remarks`) | `technicaltask.approve \| technicaltask.update \| technicaltask.manage` |
+| `POST` | `/api/v1/technical-tasks/{id}/reopen` | Reopen/reassign cancelled or completed ticket back to `Approved` with technician allotment | `technicaltask.approve \| technicaltask.update \| technicaltask.manage` |
+| `POST` | `/api/v1/technical-tasks/{id}/record-payment` | Atomically record collected payment (`amount_collected`, `payment_mode`, `payment_screenshot`, `payment_reference`, `payment_date`, `remarks`), auto-transition `Payment Pending` -> `Completed` when fully paid, and auto-sync `Self collect` into `technician_wallet_transactions` (`VERIFIED` `COLLECTION`) | `technicaltask.update \| technicaltask.manage` |
+| `POST` | `/api/v1/technical-tasks/upload-screenshot` | Upload payment screenshot / receipt image (`.jpg`, `.png`, `.webp`) or `.pdf` | `technicaltask.update \| technicaltask.create \| technicaltask.manage` |
+| `POST` | `/api/v1/technical-tasks/bulk-delete` | Bulk soft-delete technical tasks by array of IDs | `technicaltask.bulk_action \| technicaltask.delete \| technicaltask.manage` |
+| `DELETE`| `/api/v1/technical-tasks/{id}` | Soft-delete technical service task | `technicaltask.delete \| technicaltask.manage` |
 
 ---
 

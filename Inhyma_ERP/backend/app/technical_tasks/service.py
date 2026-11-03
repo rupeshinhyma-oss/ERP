@@ -15,12 +15,12 @@ from __future__ import annotations
 
 import logging
 import uuid
-from datetime import date
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Any
 
 from app.core.exceptions import BadRequestException, ForbiddenException, NotFoundException
-from app.technical_tasks.models import TechnicalTask, TechnicalTaskCallLog
+from app.technical_tasks.models import TechnicalTask, TechnicalTaskCallLog, TechnicalTaskLog
 from app.technical_tasks.repository import TechnicalTaskRepository, invalidate_counts_cache
 from app.technical_tasks.schemas import (
     TechnicalTaskCallLogCreate,
@@ -133,6 +133,13 @@ class TechnicalTaskService:
             raise NotFoundException(f"Technical task {task_id} not found.")
         return task
 
+    async def resolve_task(self, task_ref: str | uuid.UUID, **scope: Any) -> TechnicalTask:
+        """Resolve a technical task by UUID ``id`` or sequential ``task_number``."""
+        task = await self.repository.get_by_ref(task_ref, **scope)
+        if not task:
+            raise NotFoundException(f"Technical task {task_ref} not found.")
+        return task
+
     async def get_counts(self, **scope: Any) -> dict[str, int]:
         return await self.repository.get_counts(**scope)
 
@@ -155,6 +162,13 @@ class TechnicalTaskService:
         data["task_created_date"] = data.get("task_created_date") or date.today()
         validate_business_rules(data)
         task = await self.repository.create(**data)
+        await self.repository.create_task_log(
+            task_id=task.id,
+            updated_by=task.created_by_name or "Admin",
+            title="Create Technical Task",
+            status=PENDING,
+            created_at=task.created_at,
+        )
         invalidate_counts_cache()
         return task
 
@@ -188,6 +202,12 @@ class TechnicalTaskService:
         # Persist only what validation may have normalised plus the caller's own changes.
         final = {k: merged[k] for k in set(updates) | set(_NORMALISED_FIELDS)}
         result = await self.repository.update(task, expected_version=expected_version, **final)
+        await self.repository.create_task_log(
+            task_id=result.id,
+            updated_by=user_name or "Admin",
+            title="Update Technical Task",
+            status=canonical_status(result.status),
+        )
         invalidate_counts_cache()
         return result
 
@@ -263,14 +283,15 @@ class TechnicalTaskService:
             updates["cancel_remarks"] = reason
             logs.append(("Cancellation", f"Task cancelled. Reason: {reason}"))
 
-        elif target in (COMPLETED, PAYMENT_PENDING):
+        was_paid = (task.payment_status or "").strip().lower() == "paid"
+        if target in (COMPLETED, PAYMENT_PENDING):
             updates.update(self._completion_updates(task, current, target, payload, remarks))
             target = updates["status"]
             if remarks:
                 logs.append(("Completion", remarks))  # technician remark shows in the call-log history
             if target == PAYMENT_PENDING:
                 logs.append(("Payment Pending", "Work completed; payment not yet collected."))
-            elif _is_chargeable(task.service_type):
+            elif _is_chargeable(task.service_type) and updates.get("payment_status") == "Paid":
                 amt = updates.get("collected_amount")
                 logs.append(("Payment Collected", f"Collected {amt} via {updates.get('payment_mode') or '-'}."))
 
@@ -279,6 +300,40 @@ class TechnicalTaskService:
                 task_id=task.id, call_date=date.today(), call_type=log_type, remarks=log_remarks, created_by=actor
             )
         result = await self.repository.update(task, expected_version=task.version, **updates)
+        if (
+            not was_paid
+            and updates.get("payment_status") == "Paid"
+            and (updates.get("payment_mode") or "").strip().lower() == "self collect"
+            and updates.get("collected_amount")
+        ):
+            await self._sync_self_collect_wallet(
+                task=result,
+                amount=Decimal(str(updates["collected_amount"])),
+                payment_date=updates.get("completed_date") or date.today(),
+                reference_no=None,
+                receipt_url=updates.get("payment_screenshot"),
+                notes=remarks or f"Self-collected on task completion ({result.company_name})",
+                actor=actor,
+            )
+        final_status = canonical_status(result.status)
+        if reopening:
+            task_log_title = "Reopen Technical Task"
+        elif final_status == APPROVED:
+            task_log_title = "Approve Technical Task" if current != APPROVED else "Update Technical Task"
+        elif final_status == COMPLETED:
+            task_log_title = "Complete Technical Task"
+        elif final_status == PAYMENT_PENDING:
+            task_log_title = "Task Payment Pending"
+        elif final_status == CANCEL:
+            task_log_title = "Cancel Technical Task"
+        else:
+            task_log_title = "Update Technical Task"
+        await self.repository.create_task_log(
+            task_id=result.id,
+            updated_by=actor,
+            title=task_log_title,
+            status=final_status,
+        )
         invalidate_counts_cache()
         return result
 
@@ -330,8 +385,68 @@ class TechnicalTaskService:
             created_by=user_name or "Accounts",
         )
         result = await self.repository.update(task, expected_version=task.version, **updates)
+        if payment_mode.strip().lower() == "self collect" and amount > 0:
+            await self._sync_self_collect_wallet(
+                task=result,
+                amount=amount,
+                payment_date=payment_date or date.today(),
+                reference_no=reference_no,
+                receipt_url=payment_screenshot,
+                notes=remarks or f"Self-collected payment ({result.company_name})",
+                actor=user_name or "Accounts",
+            )
+        await self.repository.create_task_log(
+            task_id=result.id,
+            updated_by=user_name or "Accounts",
+            title="Record Task Payment",
+            status=canonical_status(result.status),
+        )
         invalidate_counts_cache()
         return result
+
+    async def _sync_self_collect_wallet(
+        self,
+        *,
+        task: TechnicalTask,
+        amount: Decimal,
+        payment_date: date,
+        reference_no: str | None,
+        receipt_url: str | None,
+        notes: str | None,
+        actor: str,
+    ) -> None:
+        """Auto-post Self collect task payments into Technician Wallet Ledger (COLLECTION)."""
+        try:
+            from sqlalchemy import func, select
+            from app.technician_operations.models import TechnicianWalletTransaction
+
+            tech_name = (task.task_allotted_to or actor or "Technician").strip()
+            async with self.repository.session.begin_nested():
+                year = payment_date.year
+                count_res = await self.repository.session.execute(select(func.count(TechnicianWalletTransaction.id)))
+                next_seq = (count_res.scalar() or 0) + 1
+                txn_num = f"TXN-TECH-{year}-{next_seq:04d}-{uuid.uuid4().hex[:4].upper()}"
+                txn = TechnicianWalletTransaction(
+                    transaction_number=txn_num,
+                    technician_id=None,
+                    technician_name=tech_name,
+                    technical_task_id=task.id,
+                    customer_name=task.company_name,
+                    transaction_type="COLLECTION",
+                    amount=float(amount),
+                    payment_mode="Self collect",
+                    reference_no=(reference_no or "").strip() or None,
+                    transaction_date=payment_date,
+                    receipt_url=receipt_url,
+                    status="VERIFIED",
+                    verified_by=actor,
+                    verified_at=datetime.now(timezone.utc),
+                    notes=notes,
+                )
+                self.repository.session.add(txn)
+                await self.repository.session.flush()
+        except Exception as exc:
+            logger.warning("Could not auto-sync Self collect wallet entry for task %s: %s", task.id, exc)
 
     def _completion_updates(
         self, task: TechnicalTask, current: str, target: str, payload: TechnicalTaskStatusUpdate, remarks: str
@@ -460,10 +575,10 @@ class TechnicalTaskService:
         return deleted
 
     async def add_call_log(
-        self, task_id: uuid.UUID, payload: TechnicalTaskCallLogCreate, creator_name: str
+        self, task_ref: str | uuid.UUID, payload: TechnicalTaskCallLogCreate, creator_name: str, **scope: Any
     ) -> TechnicalTaskCallLog:
         """Log a call or physical visit for a task."""
-        task = await self.get_by_id(task_id)
+        task = await self.resolve_task(task_ref, **scope)
         return await self.repository.create_call_log(
             task_id=task.id,
             call_date=payload.call_date or date.today(),
@@ -472,9 +587,26 @@ class TechnicalTaskService:
             created_by=creator_name,
         )
 
-    async def list_call_logs(self, task_id: uuid.UUID) -> list[TechnicalTaskCallLog]:
-        await self.get_by_id(task_id)
-        return await self.repository.list_call_logs(task_id)
+    async def list_call_logs(self, task_ref: str | uuid.UUID, **scope: Any) -> list[TechnicalTaskCallLog]:
+        task = await self.resolve_task(task_ref, **scope)
+        return await self.repository.list_call_logs(task.id)
+
+    async def list_task_logs(self, task_ref: str | uuid.UUID, **scope: Any) -> list[TechnicalTaskLog]:
+        """Return lifecycle Task Log Summary entries for a task (synthesizing baseline creation if absent)."""
+        task = await self.resolve_task(task_ref, **scope)
+        logs = await self.repository.list_task_logs(task.id)
+        if logs:
+            return logs
+        return [
+            TechnicalTaskLog(
+                id=task.id,
+                task_id=task.id,
+                updated_by=task.created_by_name or "Admin",
+                title="Create Technical Task",
+                status="Pending",
+                created_at=task.created_at or datetime.now(timezone.utc),
+            )
+        ]
 
     async def call_log_report(self, **kwargs: Any) -> tuple[list[dict[str, Any]], int]:
         return await self.repository.call_log_report(**kwargs)

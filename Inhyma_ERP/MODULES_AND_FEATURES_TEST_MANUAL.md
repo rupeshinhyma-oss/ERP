@@ -4,7 +4,7 @@
 > **Location:** Root Workspace (`/MODULES_AND_FEATURES_TEST_MANUAL.md`)  
 > **Purpose:** Exhaustive reference catalog detailing every single module, page layout, table column, action button, modal window, drawer, form tab, and form field across the entire ERP. Designed for developers, QA testers, and autonomous AI agents to execute manual and automated regression tests before and after code changes.  
 > **Strict Policy:** When developing or modifying features, no existing module, form, or field listed in this document may be removed, broken, or regressed.  
-> **Last Updated:** November 2, 2026
+> **Last Updated:** November 3, 2026
 
 ---
 
@@ -131,8 +131,11 @@
 | **REPORTS** | Stock Transaction Detail | `/stock-transaction/list/:id` | `reports-stock-transactions` | `activity` | `product.view` |
 | **REPORTS** | Deleted Orders | `/reports/deleted-orders` | `reports-deleted-orders` | `fileX` | `saleorder.view` |
 | **REPORTS** | General Reports | `/reports/general` | `reports-general` | `pieChart` | Authenticated |
-| **TASK** | Tasks | `/tasks` | `tasks` | `checkSquare` | `task.view` |
-| **TASK** | Technical Tasks | `/technical-task/list` | `technical-tasks` | `wrench` | `technicaltask.view` |
+| **TASK** | Tasks | `/tasks` | `tasks` | `task` | `task.view` |
+| **TASK** | Technical Tasks | `/technical-task/list` (`/technical-tasks` redirect) | `technical-tasks` | `wrench` | `technicaltask.view` |
+| **TASK** | Technical Task Call & Task Logs | `/technical-task/detail/:id` | `technical-tasks` | `wrench` | `technicaltask.view` |
+| **TASK** | Payments | `/payments` | `payments` | `currency` | `technicaltask.view` |
+| **TASK** | Technician Ops & Wallet | `/technician-operations` | `technician-operations` | `truck` | Authenticated |
 | **USER MANAGEMENT** | Users | `/users` | `users` | `user` | `user.view` |
 | **USER MANAGEMENT** | Positions | `/positions` | `positions` | `briefcase` | `position.view` |
 | **USER MANAGEMENT** | Organization Chart | `/org-chart` | `org-chart` | `orgChart` | `reporting.view` |
@@ -937,7 +940,7 @@ Manage complete vendor team directory:
 - **Columns:** Checkbox, Sr. No., Department Name, Created Date, Actions.
 - **Header Actions:** `+ ADD NEW`, `DELETE` (bulk delete selected custom departments), `Clone Department Permissions`.
 - **Canonical System Roles vs. Custom Organizational Departments:**
-  - Strictly **two** bootstrap roles carry the `SYSTEM` badge (`is_system=True`): **`Admin`** (`super_admin`, full `297/297` permission access, reserved for the bootstrap admin) and **`User`** (`user`, default fallback role). Their row checkboxes are disabled and they cannot be renamed or deleted.
+  - Strictly **two** bootstrap roles carry the `SYSTEM` badge (`is_system=True`): **`Admin`** (`super_admin`, full `306/306` permission access, reserved for the bootstrap admin) and **`User`** (`user`, default fallback role). Their row checkboxes are disabled and they cannot be renamed or deleted.
   - Zero business departments (`Sales`, `HR`, `Operations`, `Engineering`, `Sales Manager`, etc.) are hardcoded or auto-seeded; every organizational department is created dynamically by administrators (`is_system=False`) and can be edited, nested, or deleted without ever re-creating automatically.
 
 ### 16.2. Department View / Edit Modal
@@ -968,9 +971,9 @@ Manage complete vendor team directory:
 - **Bidirectional Live Auto-Sync:** Connecting a child department under a parent (e.g. Sales under Operations) immediately updates both departments' rosters so Operations lists Sales as a child, and Sales lists Operations as a parent.
 - **DAG Cycle Detection:** Server-side validation prevents circular hierarchies (e.g. A -> B -> A or A -> B -> C -> A) and returns HTTP 409 Conflict with an alert.
 - **Permission Matrix Grid:**
-  - Grouped by module cards: `Dashboard`, `Contact`, `Inventory`, `Sale`, `Planning`, `User Management`, `Configurations`, `Audit`, `Trash`.
-  - `Select All` / `Deselect All` toggles per module.
-  - Checkboxes for granular permissions (`.view`, `.create`, `.update`, `.delete`, `.export`, `.import`, `.bulk_action`, etc.).
+  - Grouped by module cards (`306` total permissions across all modules, including `Technical Tasks` with `8` permissions: `technicaltask.view`, `technicaltask.create`, `technicaltask.update`, `technicaltask.approve`, `technicaltask.delete`, `technicaltask.export`, `technicaltask.bulk_action`, `technicaltask.manage`).
+  - `Select All` / `Select Group` toggles per module.
+  - Checkboxes for granular permissions (`.view`, `.create`, `.update`, `.approve`, `.delete`, `.export`, `.import`, `.bulk_action`, `.manage`, etc.).
 - **Clone Department Button:** Creates a copy of the department with all permissions pre-checked.
 - **Safe Delete with Reassignment Modal:** If users exist in a department scheduled for deletion, prompts administrator to select a replacement department to reassign those employees before deletion proceeds.
 
@@ -985,6 +988,7 @@ Manage complete vendor team directory:
 - [ ] In `Sales`, select another parent department (e.g. `Executive Management`) and click `+ Add Parent`. Verify `Sales` now lists multiple parents (`Operations` and `Executive Management`).
 - [ ] Attempt to add `Operations` as a child department of `Sales`. Verify cycle detection triggers and rejects the circular connection with the error: *"This would create a circular department hierarchy."*
 - [ ] In `Operations` -> Child Departments, click `Remove` next to `Sales`. Verify `Sales` is unlinked and no longer appears under Child Departments or as Sales's parent.
+- [ ] In any department on `/rbac` (and in User Direct Permission Overrides), verify the **TECHNICAL TASKS** permission group (`0 / 8 active`) is displayed with all 8 checkboxes: `View` (`technicaltask.view`), `Create` (`technicaltask.create`), `Edit` (`technicaltask.update`), `Approve` (`technicaltask.approve`), `Delete` (`technicaltask.delete`), `Export` (`technicaltask.export`), `Bulk Actions` (`technicaltask.bulk_action`), and `Manage All` (`technicaltask.manage`), and that total assigned permissions denominator reflects `306`.
 
 ---
 
@@ -1806,57 +1810,100 @@ Checklist to execute:
 
 ## 39. TASK: Technical Tasks Module
 
-- **Route:** `/technical-task/list`
-- **Legacy Redirects:** `/technical-tasks`
-- **Required Permission:** `technicaltask.view` (Mutations: `technicaltask.create`, `technicaltask.update`, `technicaltask.delete`)
+- **Route:** `/technical-task/list`, `/technical-task/detail/:id`
+- **Legacy Redirects:** `/technical-tasks`, `/technical-tasks/detail/:id`
+- **Required Permissions (`module="technicaltask"`, `page="technical-tasks"`):**
+  - `technicaltask.view` (*View* — sidebar link visibility, `/technical-task/list` route guard, list/counts/detail/call-logs read APIs, and `module:technical_tasks` WebSocket channel)
+  - `technicaltask.create` (*Create* — `+ ADD NEW` header button and `POST /api/v1/technical-tasks`)
+  - `technicaltask.update` (*Edit* — row `Edit`, `Completed`, `Cancel`, `Payment Collected`, `/payments` `Record Payment`, Call Log submission, `PATCH /{id}`, `PATCH /{id}/status`, `POST /{id}/record-payment`)
+  - `technicaltask.approve` (*Approve* — row `Approved` action, `Reopen / Reassign`, and `PATCH /{id}/status` to `Approved`)
+  - `technicaltask.delete` (*Delete* — row `Delete` action and `DELETE /{id}`)
+  - `technicaltask.export` (*Export* — `Imp / Exp ▾` header menu and `Export Selected` bulk option)
+  - `technicaltask.bulk_action` (*Bulk Actions* — `Bulk Actions ▾` menu and `POST /api/v1/technical-tasks/bulk-delete`)
+  - `technicaltask.manage` (*Manage All* — grants full administrative access across all Technical Tasks UI actions, non-creator edits on approved tasks, post-Pending deletes, and all API routes)
 - **Purpose:** Field service ticket management, preventive maintenance scheduling, machine breakdown triage, and service technician engineering dispatch.
 
 ### Visual Elements & Layout
-1. **Breadcrumbs:** `Task` > `Technical Tasks`
-2. **Page Title:** `Technical Tasks`
-3. **Subtitle:** `Manage field service calls, machine maintenance tickets, technician allocation, and customer support requests.`
-4. **Action Buttons:**
-   - `+ ADD NEW` (Primary blue button) — Opens the technical service ticket creation drawer.
-   - `DELETE` — Bulk delete selected technical tasks.
-   - `Refresh` — Refetches tickets and updates status tab counters.
-5. **Status Workflow Tabs (with Live Counter Badges):**
-   - `All` — Total technical service tasks.
-   - `Pending` — Unassigned or newly lodged customer service tickets.
-   - `Allotted` — Assigned to a field service technician with scheduled visit date.
-   - `Under Process` — Work in progress, machine inspection, or part replacement underway.
-   - `Completed` — Service signed off and resolved by client.
-   - `Cancelled` — Ticket cancelled or customer rescheduled.
-6. **Filter Toolbar & Sub-Toolbar:**
-   - Single unified sub-toolbar search bar (`placeholder="Search..."`) querying Customer Name, Machine Model, Serial No, Contact Person, Phone, or City, with 1-click serial badge deep-filtering on table rows.
-   - Collapsible filter panel positioned above data tabs with:
-   - Call Type filter dropdown (`Installation`, `Preventive Maintenance`, `Breakdown Service`, `Warranty Inspection`).
-   - Service Mode filter dropdown (`On-Site`, `Remote Support`, `Workshop Repair`).
-   - Priority filter dropdown (`Low`, `Medium`, `High`, `Critical`).
-   - Technician filter dropdown (populated from Technicians master / employee directory).
-7. **Master Technical Tasks Table:**
+1. **Sidebar Placement:** `TASK` > `Technical Tasks` (`/technical-task/list`, with `/technical-tasks` redirect)
+2. **Page Title:** `Technical Task List`
+3. **Header Action Buttons (`.page-header-actions`, 35px Universal Standard):**
+   - **Funnel Filter Toggle (`#556987`)** — Expands/collapses the top 10-control filter card above the main table card (default collapsed).
+   - **`+ ADD NEW`** (Primary blue button, gated by `technicaltask.create | technicaltask.manage`) — Opens the **Add Technical Task** slide-over drawer.
+   - **`Imp / Exp ▾`** (Golden-amber `#f59e0b`, gated by `technicaltask.export | technicaltask.manage`) — Opens dropdown containing `📤 Export to CSV`.
+   - **`Bulk Actions ▾`** (Emerald button, gated by `technicaltask.bulk_action | technicaltask.manage`) — Multi-row dropdown containing `✓ Bulk Mark Approved (N)` (`technicaltask.approve`), `🏁 Bulk Mark Completed (N)` (`technicaltask.update`), and `🗑️ Bulk Delete (N)` (`technicaltask.delete`).
+4. **Status Workflow Tabs (with Live Counter Badges from `GET /api/v1/technical-tasks/counts`):**
+   - `All (N)` — Total technical service tasks across all stages.
+   - `Pending (N)` — Newly created customer service tickets awaiting approval & technician allotment.
+   - `Approved (N)` — Approved tickets allotted to a field service technician.
+   - `Payment Pending (N)` — Completed chargeable tickets awaiting customer/technician payment collection.
+   - `Completed (N)` — Resolved service tickets (free tasks completed, or chargeable tasks fully paid).
+   - `Cancel (N)` — Cancelled service tickets with mandatory cancellation remarks.
+5. **Filter Toolbar & Sub-Toolbar:**
+   - **Sub-Toolbar:** `Items/Page` selector (`10`, `20`, `50`, `100`, default `50`) and single unified `Search...` input (`data-testid="filter-serial-number"`) querying Company Name, Machine Model, Serial Number, Task Description, Contact Person, Phone, or City, with 1-click serial badge deep-filtering on table rows.
+   - **Collapsible Filter Card (3-column grid with `Reset` and `Search` buttons):**
+     - `Task Create Date Range` (`Created from` — `Created to` date inputs)
+     - `Task Type` (`All`, `Telecall`, `Onsite Visit - Client Location`, `Onsite Visit - Third-Party Location`, `In-House`)
+     - `Current Status` (`All`, `Pending`, `Approved`, `Payment Pending`, `Completed`, `Cancel`)
+     - `City` (`TypableCombobox` populated from `/masters/cities` with `/masters/cities/lookup` fallback)
+     - `Call Type` (`All`, populated from `/masters/call-types` with `/masters/call-types/lookup` fallback)
+     - `Service Type` (`All`, `Free`, `Chargeable`)
+     - `Task Allotted To` (`All`, populated from `/masters/technicians` with `/masters/technicians/lookup` fallback)
+     - `Priority` (`All`, `A`, `B`)
+     - `Third-Party Site City` (`TypableCombobox`)
+     - `Payment Collected` (`All`, `Yes (Collected)`, `Pending`)
+6. **Master Technical Tasks Table (18 Resizable / Freeze-Aware Columns):**
    - `Checkbox` — Multi-row selection for bulk operations.
-   - `Sr. No.` — Sequence index counter.
-   - `Ticket No.` — Unique service call identifier (e.g. `TECH-2026-042`).
-   - `Customer / Company` — Client entity name with contact phone.
-   - `Machine & Model` — Equipment description and machine serial number.
-   - `Call Type` — Service classification pill.
-   - `Technician` — Assigned service engineer name with avatar pill.
-   - `Scheduled Date` — Target service visit date and time slot.
-   - `Priority` — Color-coded priority pill (`Critical` red, `High` orange, `Medium` blue, `Low` gray).
-   - `Status` — Current workflow status pill.
-   - `Action` — Quick Edit (pencil icon), Status Transition dropdown, and Soft-Delete (trash can icon).
-8. **Technical Service Creation / Edit Modal:**
-   - Customer / Company autocomplete selector.
-   - Machine Model, Serial Number, and Warranty Status (`Under Warranty`, `Out of Warranty`, `AMC Contract`).
-   - Call Type selector and Service Mode selector.
-   - Assigned Technician autocomplete selector.
-   - Scheduled Visit Date and Time.
-   - Problem Description and Customer Complaint text notes.
+   - `SR. NO.` — Sequence index counter.
+   - `COMPANY` (*Sortable*) — Client entity link (opens the quick preview drawer).
+   - `TASK TYPE` — Service delivery mode pill (`Telecall`, `Onsite Visit - Client Location`, `Onsite Visit - Third-Party Location`, `In-House`).
+   - `CITY` (*Sortable*) — Client city.
+   - `THIRD-PARTY` — Third-party site name, city, and contact when applicable (`—` otherwise).
+   - `PRIORITY` (*Sortable*) — Priority grade (`A` / `B`).
+   - `MACHINE & MODEL` — Equipment description + clickable `Serial No.` filter badge.
+   - `DESC. OF TASK` — Truncated complaint summary + eye icon button (`Details Of Task` quick preview drawer).
+   - `CONTACT PERSON` — Contact person name, designation, clickable `tel:` phone, and WhatsApp link.
+   - `TASK CREATED DATE & TASK BY` — Creation date (`YYYY-MM-DD`) and creator `display_name`.
+   - `SERVICE TYPE` — `Free` (blue pill) or `Chargeable` (green pill + `₹` charge amount).
+   - `CALL TYPE` — Service classification (`Repair`, `Installation`, `Demo`, `Trial`, etc.).
+   - `TASK APPROVED BY` — Approver `display_name` and approval date (`—` when pending).
+   - `TASK ALLOTTED TO` — Assigned technician name (`—` until allotted).
+   - `PAYMENT` — Payment status, collected amount, mode (`Company Acc` / `Self collect`), or `—` for free tasks.
+   - `STATUS` (*Sortable*) — Current workflow status pill (`Pending`, `Approved`, `Payment Pending`, `Completed`, `Cancel`).
+   - `ACTION` — Three-dot (`⋮`) action menu containing `📞 Call Logs` (top item — `View Details` is omitted since `COMPANY` and `DESC. OF TASK` open the quick preview drawer) plus stage/permission-gated workflow actions:
+     - **`✅ Approved` (`Pending` rows):** Opens the centered fixed-overlay **Approve & Allot Task** modal (`data-testid="status-task-modal"`) requiring `Allot Technician *` (`Task Allotted To`), optional approver overrides (`Task Type`, `Service Type`, `Amount (₹) *`, `Payment Terms *`), conditional `Scheduled / Visit Date` (visible exclusively when `Task Type` is `Onsite Visit - Client Location` or `Onsite Visit - Third-Party Location`), and `Approver Remarks` (`approver_remarks`).
+     - **`✔️ Completed` (`Approved` rows):** Opens the centered fixed-overlay **Complete Technical Task** modal — for `Free` tasks displays `Remarks` (`technician_remarks`) only and moves straight to `Completed`; for `Chargeable` tasks prompts `"Did you collect payment of ₹...?"` (`Yes` / `No`), moving unpaid tasks to `Payment Pending` and paid tasks (`Company Acc` or `Self collect`, optional `Payment Screenshot / Receipt`, `Amount Collected *`) to `Completed` + `Paid`.
+     - **`❌ Cancel` (`Approved` rows):** Opens the centered fixed-overlay **Cancel Technical Task** modal (`data-testid="cancel-task-modal"`) requiring strictly mandatory `Cancellation Remarks *` (`cancel_remarks`).
+     - Plus stage-specific `✏️ Edit`, `💰 Payment Collected` (`Payment Pending` rows), `🔄 Reopen / Reassign` (`Cancel` rows), and `🗑️ Delete`.
+7. **Add / Edit Technical Task Slide-Over Drawer:**
+   - `Company Name *` (`ClientNameAutocomplete` auto-populating City & Contact Person options from `companies`).
+   - `Task Type *` (`Telecall`, `Onsite Visit - Client Location`, `Onsite Visit - Third-Party Location`, `In-House`) + conditional `Third-Party` site name, city, contact name & phone when `Onsite Visit - Third-Party Location` is chosen.
+   - `City *`, `Priority *` (`A`, `B`), and Product Mode radio toggle (`All Products` searchable catalog dropdown vs `Product by Serial No.` with instant `GET /api/v1/technical-tasks/lookup/serial/{serial_number}` verification).
+   - `Nature Of Complain / Description *`, `Contact Person Name *`, `Designation`, and `Contact Phone *`.
+   - `Service Type *` (`Free` or `Chargeable` — `Chargeable` unlocks required `Amount (₹) *` and `Payment Terms *`), `Call Type *`, and `Creator Remarks`.
+8. **Details Of Task Quick Preview Slide-Over Drawer:**
+   - Triggered by clicking a row's **`COMPANY`** link or the **`DESC. OF TASK`** eye icon (`btn-detail-eye`) — replacing the removed `View Details` action menu item.
+   - Displays full customer, contact, third-party site, machine/serial, complaint, commercial/payment, approver/technician remarks, and quick navigation to `View / Log Call Logs`.
+9. **Dedicated Call Logs & Task Log Summary Page (`/technical-task/detail/:id`):**
+   - Triggered when clicking **`📞 Call Logs`** in any row's `Action` (`⋮`) menu (or `View / Log Call Logs` in the detail drawer).
+   - **Header:** Dynamic title `Technical Task #<number>` on top-left and **`+ ADD NEW CALL LOG`** primary blue button on top-right.
+   - **Left Column:**
+     - **`Task Details` Card:** Status pill badge, `Nature Of Complain / Description`, `Task Type`, `Machine & Model`, `Priority`, `Created By`, `Created At` (formatted long date), and `Assign To`.
+     - **`Company Details` Card:** Client Company Name, Contact Person Name, and Phone icon + Contact Number.
+   - **Right Column Tabs:**
+     - **`Call Log Summary` Tab:** `Items/Page` selector (`10`, `25`, `50`, `100`), `Search...` input, 5 sortable columns (`Sr. No.`, `Name`, `Remarks`, `Task Type`, `Call Date`), `No Data Available In Table` empty row, and `Showing X To Y Of Z Entries` + `Previous` / `Next` pagination footer.
+     - **`Task Log Summary` Tab:** 3-column table (`Updated By` with display name + italicized `DD-MM-YYYY hh:mm AM/PM` timestamp, `Title`, and `Status` pill badge).
+   - **`Add Call Log` Right-Side Slide-Over Drawer:** Header `Add Call Log`, `Task Type` radio buttons (`Telecall` default, `Physical Visit`), `Remarks` textarea, and sticky bottom full-width `Submit` button.
+10. **Technical Tasks Payments Module (`/payments` — `PaymentsPage.tsx`) & Technician Wallet Auto-Sync:**
+    - **Route & RBAC:** `/payments` under `TASK` sidebar (`permission: "technicaltask.view"`); `+ ADD NEW` (`technicaltask.create`), `Record Payment` (`technicaltask.update`), and `DELETE` (`technicaltask.delete`) gated via `useAuth()`.
+    - **KPI Summary Cards:** `TOTAL PAYMENT` (slate `#0f172a`), `PAID` (green `#16a34a`), and `DUE` (red `#dc2626`) aggregated across active (non-cancelled) `Chargeable` tasks (`Cancel` / `Cancelled` tasks are strictly excluded).
+    - **Stage Tabs (`Discount.docx`):** `All (<all_count>)`, `Pending (<pending_count>)` (default active), and `Completed (<completed_count>)`.
+    - **Table & Filters:** Renders `Chargeable` badge, `Paid: ₹...` / `Due: ₹...`, dynamic `"—"` dashes for unassigned `Task Approved By` / `Task Allotted To` / `Machine & Model` (zero hardcoded mock strings), and collapsible filters for `City`, `Task Type` (`Telecall`, `Onsite Visit - Client Location`, `Onsite Visit - Third-Party Location`, `In-House`), `Priority` (`A`, `B`), `Task Allotted To`, and `Task Create Date Range`.
+    - **Automatic `Self collect` Wallet Sync:** Recording a payment with `Payment Mode = Self collect` (via `Complete Technical Task` modal OR `/payments` `Record Payment` modal) automatically creates a `VERIFIED` `COLLECTION` row in `technician_wallet_transactions` linked via `technical_task_id` for immediate reconciliation on `/technician-operations`.
 
 ### Test Cases
 - [ ] Verify navigating to `/technical-tasks` automatically redirects to `/technical-task/list`.
 - [ ] Verify status tabs render with dynamic badge counts matching database records.
-- [ ] Verify switching between status tabs (`Pending`, `Allotted`, `Under Process`, `Completed`, `Cancelled`) filters tickets accurately.
+- [ ] Verify switching between status tabs (`All`, `Pending`, `Approved`, `Payment Pending`, `Completed`, `Cancel`) filters tickets accurately.
 - [ ] Verify clicking `+ ADD NEW` opens the creation drawer with all customer, machine, and technician fields.
 - [ ] Verify technician dropdown populates with active technicians from the Technicians master.
 - [ ] Verify status transitions update ticket state and log the action in the audit trail.
@@ -1865,6 +1912,11 @@ Checklist to execute:
 - [ ] Verify the table sub-toolbar renders a single unified search input (`placeholder="Search..."`) that filters across serial number, company, model, and task description.
 - [ ] Verify clicking a serial number badge on any row filters the table and populates the unified search input.
 - [ ] Verify the table body empty state displays a clean illustration without any redundant '+ Add New Task' button (using the primary '+ ADD NEW' button in the page header).
+- [ ] **RBAC Sidebar & Route Guard (`technicaltask.view`):** Assign a user to a department without `technicaltask.view` (or `technicaltask.manage`). Verify `Technical Tasks` is hidden in the `TASK` sidebar section, direct navigation to `/technical-task/list` redirects to `/403`, and `GET /api/v1/technical-tasks` returns `403 Forbidden`.
+- [ ] **RBAC Granular Action Gating (`technicaltask.*`):** Grant `technicaltask.view` only and verify `+ ADD NEW`, `+ ADD NEW CALL LOG`, `Imp / Exp ▾`, `Bulk Actions ▾`, row `Approved` / `Edit` / `Completed` / `Cancel` / `Delete` are hidden while read-only `Detail` and `/technical-task/detail/:id` (`Call Log Summary` & `Task Log Summary`) remain accessible; then grant `create`, `update`, `approve`, `export`, `bulk_action`, and `delete` individually and verify each corresponding UI button and API endpoint unlocks accurately.
+- [ ] **Call Logs Detail Page & Add Call Log Drawer (`/technical-task/detail/:id`):** Click `⋮` ➔ `Call Logs` on any row in `/technical-task/list`. Verify it navigates to `/technical-task/detail/<number>`, dynamically renders `Task Details` (`Nature Of Complain / Description`, `Task Type`, `Machine & Model`, `Priority`, `Created By`, `Created At`, `Assign To`) and `Company Details`, switches cleanly between `Call Log Summary` and `Task Log Summary` (showing `Create Technical Task` + status transitions), and clicking `+ ADD NEW CALL LOG` opens the right-side `Add Call Log` drawer (`Telecall` / `Physical Visit` + `Remarks` + `Submit`) and appends the new entry immediately.
+- [ ] **Doc-Compliant `Approved` / `Completed` / `Cancel` Centered Modals (`/technical-task/list`):** Click `⋮` ➔ `Approved` on a `Pending` row and verify `Approve & Allot Task` immediately opens centered over the viewport (`position: fixed`), populates active technicians (including via `/masters/technicians/lookup` for non-master viewers), displays an inline red validation banner if saved without `Allot Technician *`, allows overriding `Task Type` / `Service Type` / `Amount *` / `Payment Terms *`, and shows `Scheduled / Visit Date` only for Onsite / Client / Third-Party visits; click `⋮` ➔ `Completed` on a `Chargeable` `Approved` row and verify `No` moves the task to `Payment Pending` while `Yes` captures `Company Acc` / `Self collect` + `Amount Collected` and moves it to `Completed` + `Paid`; click `⋮` ➔ `Cancel` and verify blank remarks are blocked with `"Cancellation remarks are strictly mandatory."`.
+- [ ] **Payments Stage Tabs, Cancelled Exclusion & `Self collect` Wallet Sync (`/payments` & `/technician-operations`):** Open `/payments` and verify `All (N)`, `Pending (N)`, and `Completed (N)` tabs render with `Chargeable` spelling and `"—"` for unassigned fields; cancel a chargeable task and verify its amount is excluded from `TOTAL PAYMENT`, `DUE`, and `/payments` tabs; record a `Self collect` payment and verify a `VERIFIED` `COLLECTION` transaction automatically appears in Technician Wallet (`/technician-operations`).
 
 ---
 
@@ -2708,54 +2760,55 @@ The following modules strictly implement the Filter-Above-KPI structure:
 
 ---
 
-## 55. PAYMENTS: Customer & Supplier Payments Engine, Cash Flow, and Technician Payment Handover
+## 55. PAYMENTS: Technical Service Payments Engine, Stage Tabs, Red DUE KPI & Technician Wallet Handover
 
-### 1. Module Overview & Routing
-- **Route:** `/payments`
-- **Navigation Placement:** Direct Topbar navigation access under Tasks (`/payments`).
-- **Core Functionality:** Dedicated field service and commercial collections interface enabling finance managers to track real-time payments collected by field technicians, pending balances, and overdue accounts.
+### 1. Module Overview, Routing & RBAC
+- **Route:** `/payments` (`frontend/src/pages/technicalTasks/PaymentsPage.tsx`, `frontend/src/styles/payments.css`)
+- **Navigation Placement:** Left Sidebar under **`TASK`** (`Payments`, `₹` currency icon, `permission: "technicaltask.view"`).
+- **Granular RBAC Gating (`useAuth()`):**
+  - Sidebar & Route Access: `technicaltask.view` (or `technicaltask.manage`).
+  - Header `+ ADD NEW` Button: `technicaltask.create` (or `technicaltask.manage`).
+  - Row `Record Payment` Action: `technicaltask.update` (or `technicaltask.manage`).
+  - Header `DELETE` Button & Bulk Delete Modal: `technicaltask.delete` (or `technicaltask.manage`).
+- **Core Functionality:** Dedicated field-service collections ledger tracking all active (non-cancelled) `Chargeable` technical tasks across `All`, `Pending`, and `Completed` payment stages with automatic `Self collect` synchronization into Technician Wallet (`/technician-operations`).
 
-### 2. High-Impact Financial KPI Summary Cards
-Positioned directly underneath the collapsible filter panel, these three metric cards provide instantaneous cash flow visibility:
-1. **TOTAL PAYMENT:** Cumulative monetary amount of all billable tickets within current filter scope.
-2. **PAID:** Total payment collected and verified from customers.
-3. **DUE:** Outstanding balance remaining across pending and overdue service calls.
+### 2. High-Impact Financial KPI Summary Cards (Filter-Above-KPI Hierarchy)
+Positioned directly underneath the collapsible filter card and powered by `GET /api/v1/technical-tasks/payment-summary` (strictly excluding `Cancel` / `Cancelled` tasks via NULL-safe SQL `coalesce` predicates):
+1. **`TOTAL PAYMENT` (`#0f172a` Slate Bold):** Cumulative service charge amount (`₹`) across all active (non-cancelled) chargeable tickets within filter scope.
+2. **`PAID` (`#16a34a` Emerald Green Bold):** Total amount collected and reconciled from customers / technicians (`₹`).
+3. **`DUE` (`#dc2626` Crimson Red Bold, `data-testid="payment-kpi-due"`, `.payment-kpi-value.due`):** Outstanding balance remaining (`Total - Paid`) highlighted in red (`₹`).
 
-### 3. Filter & Search Controls
-- **Funnel Filter Toggle:** Standard `#556987` button (8×14px padding, badge-less, default collapsed).
-- **Available Filters:**
-  - Date Range (`date_from`, `date_to`)
-  - Technician Picker (`task_allotted_to`)
-  - Payment Status (`pending`, `completed`)
-  - Service Type & Call Type
-  - City & Third-Party City
-  - Priority (`low`, `medium`, `high`, `urgent`)
-  - Global Text Search (Customer name, ticket ID, phone)
-- **Live Reactivity:** Adjusting any filter recalculates KPI metrics and refetches matching records from `GET /api/v1/technical-tasks/payment-summary` and `GET /api/v1/technical-tasks`.
+### 3. Stage Tabs, Sub-Toolbar, Filter Card & 14-Column Table
+- **Stage Tabs (`Discount.docx`):**
+  - `All (<all_count>)` (`payment_collected=all`) — All active (non-cancelled) chargeable technical tasks.
+  - `Pending (<pending_count>)` (`payment_collected=pending`, default active tab) — Active chargeable tasks with unpaid or partial balance.
+  - `Completed (<completed_count>)` (`payment_collected=completed`) — Active chargeable tasks with full payment collected.
+- **Sub-Toolbar:** `Items/Page` selector (`10`, `25`, `50`, `100`) and instant `Search...` input (`260px`) filtering across Company Name, City, Machine & Model, Contact Person, Technician, and Priority.
+- **Funnel Filter Toggle (`#556987`):** Default collapsed; expands a 3-column filter card above the KPI strip with `City`, `Task Type` (`Telecall`, `Onsite Visit - Client Location`, `Onsite Visit - Third-Party Location`, `In-House`), `Priority` (`A`, `B`), `Task Allotted To` (active technicians), and `Task Create Date Range` (`date_from` — `date_to`), plus `Reset` and `Search` buttons.
+- **14-Column Payments Data Table (`payments-table`):**
+  - `Checkbox`, `Company Name`, `Task Type`, `City`, `Priority`, `Machine & Model`, `Contact Person`, `Task Date & Task By`, `Task Approved By`, `Task Allotted To`, `Total Amount` (green `Chargeable` pill + `₹` charge), `Paid/Due` (`Paid: ₹...` in blue + `Due: ₹...` in red), `Task Status`, and `Action` (`⋮` menu with `View Payment Details` and `Record Payment`).
+  - Dynamic `"—"` fallbacks when optional fields (`Task Approved By`, `Task Allotted To`, `Machine & Model`, `Task Type`, `Priority`) are unassigned — zero hardcoded mock strings (`"ABC"`, `"Inhyma Admin"` removed).
 
-### 4. Technician Payment Collection Modal
-- **Trigger:** Clicking `Record Payment` or the collection icon on any pending ticket row.
+### 4. Record Payment Modal & Automatic `Self collect` Technician Wallet Sync
+- **Trigger:** Clicking `Record Payment` in the row `Action` (`⋮`) menu on an unpaid/partially paid ticket.
 - **Fields:**
-  - **Payment Amount** (*Required*): Pre-filled with outstanding balance, allows partial or full payment entry.
-  - **Payment Mode** (*Required*): Dropdown (`Cash`, `UPI`, `NEFT/RTGS`, `Cheque`).
-  - **Reference / Transaction ID**: Bank transaction number, UTR number, or cheque number.
-  - **Payment Date** (*Required*): Date and timestamp of collection.
-  - **Payment Screenshot / Receipt Upload**: Uploads proof image (JPG, PNG) or PDF voucher via `POST /api/v1/technical-tasks/upload-screenshot`.
-- **Atomic Submission:** Submits to `POST /api/v1/technical-tasks/{id}/record-payment`, automatically logs an immutable call log entry in the audit trail, updates payment collection status to `completed`, and moves the ticket from the Pending tab to the Completed tab.
+  - **Amount to Collect (₹)** (*Required*): Pre-filled with remaining due balance; supports partial or full payment entry.
+  - **Payment Mode** (*Required*): Dropdown supporting `Company Acc`, `Self collect`, `UPI / QR`, `Cheque`, `Cash`, and `Bank Transfer`.
+  - **Payment Date** (*Required*), **Reference / UTR No**, **Receipt Screenshot / Document Upload** (`POST /api/v1/technical-tasks/upload-screenshot`), and **Remarks**.
+- **Atomic Submission & Wallet Handover:**
+  - Submits to `POST /api/v1/technical-tasks/{id}/record-payment`, updating `collected_amount` and `payment_status` (`Paid` when balance reaches `0`, transitioning `Payment Pending` tasks to `Completed`), and recording `Payment Collected` / `Record Task Payment` audit logs.
+  - When `Payment Mode` is **`Self collect`**, `TechnicalTaskService._sync_self_collect_wallet()` automatically inserts an idempotent `VERIFIED` `COLLECTION` transaction (`TXN-TECH-YYYY-NNNN-XXXX`) in `technician_wallet_transactions` linked via `technical_task_id` so the technician's cash-on-hand balance in `/technician-operations` updates immediately.
 
 ### 5. Zero-Synthetic Data Policy Compliance
-- Fully sanitized production database: all 18 mock QA generation scripts purged.
-- Preserves authentic corporate users (User A, User B, User C, User D) and actual customer organizations.
-- Ensures all financial KPIs reflect authentic business transactions.
+- Fully sanitized database with zero synthetic QA scripts; preserves authentic corporate accounts and customer records and renders clean zero states when no records exist.
 
 ### 6. QA Verification Test Cases
-- [ ] Verify navigating to `/payments` renders the 3 KPI summary cards (`TOTAL PAYMENT`, `PAID`, `DUE`) with formatted INR currency (`₹`).
-- [ ] Verify clicking the Funnel filter button expands the filter drawer directly above the KPI cards.
-- [ ] Verify selecting a date range or technician updates the KPI cards and table without page reload.
-- [ ] Verify switching between 'Pending' and 'Completed' tabs filters records appropriately.
-- [ ] Verify clicking 'Record Payment' opens the payment modal with the due amount pre-populated.
-- [ ] Verify entering valid payment details and uploading a screenshot records the transaction and moves the record to Completed.
-- [ ] Verify attempting to record payment without required fields triggers validation messages.
+- [ ] Verify navigating to `/payments` renders the 3 KPI summary cards with `TOTAL PAYMENT` in dark slate (`#0f172a`), `PAID` in emerald green (`#16a34a`), and `DUE` (`data-testid="payment-kpi-due"`) in crimson red (`#dc2626`).
+- [ ] Verify clicking the Funnel filter button expands the filter card directly above the KPI cards, and applying `City`, `Task Type`, `Priority`, `Task Allotted To`, or `Date Range` recalculates KPI totals and table rows.
+- [ ] Verify switching between `All (N)`, `Pending (N)`, and `Completed (N)` tabs filters records accurately (`payment_collected=all|pending|completed`), badges spell `Chargeable` accurately, and unassigned columns render `"—"`.
+- [ ] Verify cancelling a `Chargeable` technical task immediately excludes its charge from `TOTAL PAYMENT`, `DUE`, and all `/payments` stage tabs.
+- [ ] Verify recording a payment with `Payment Mode = Self collect` moves fully paid records to `Completed` and automatically logs a `VERIFIED` `COLLECTION` entry in Technician Wallet (`/technician-operations`).
+- [ ] Verify users with `technicaltask.view` only can view `/payments` KPIs and rows, while `+ ADD NEW`, `Record Payment`, and `DELETE` remain hidden unless `create` / `update` / `delete` (or `manage`) are granted.
 
 ---
 
@@ -3561,8 +3614,8 @@ Positioned directly underneath the collapsible filter panel, these three metric 
    - `purge_retired_qa_files()` runs automatically on `pytest` startup (`conftest.py`) and local FastAPI server startup (`app/main.py` lifespan) to delete any lingering untracked or copied copies of all 45 retired synthetic-QA scripts, live-DB `User(...)`-mutating test suites (`test_tasks_recurring.py`, `test_crm_*`, `test_feed_*`, `test_hrms_*`), and `scratch/` seeders on developer/colleague machines after `git pull`.
 3. **Idempotent Synthetic Artifact Purge Migration (`z5c6d7e8f9a0_purge_synthetic_pytest_artifacts.py`):**
    - Surgically removes synthetic pytest users (`rec_mgr_*`, `rec_user_*`, `outsider_rep_*`, `*@inhyma.test`, etc.), their `task_recurring_schedules`, spawned recurring test `tasks`, notifications, and unreferenced synthetic pytest `companies` during `alembic upgrade head`, while leaving real users (`admin`, `usera`, `userd`, etc.) and real operational records untouched.
-4. **Canonical 2-System-Role & 297-Permission Bootstrap (`backend/scripts/seed.py`):**
-   - `scripts/seed.py` seeds strictly `super_admin` (`Admin SYSTEM`, `297/297` permissions including granular `hrms.*`, `bank.*`, `billingcompany.*`, and `technician.*` permissions) and `user` (`User SYSTEM`), without creating hardcoded business roles.
+4. **Canonical 2-System-Role & 306-Permission Bootstrap (`backend/scripts/seed.py`, `backend/scripts/seed_technical_task_permissions.py`):**
+   - `scripts/seed.py` seeds strictly `super_admin` (`Admin SYSTEM`, `306/306` permissions including granular `hrms.*`, `bank.*`, `billingcompany.*`, `technician.*`, and `technicaltask.*` permissions) and `user` (`User SYSTEM`), without creating hardcoded business roles.
 5. **HRMS Default Seed Soft-Delete Non-Recreation (`app/hrms/service.py`, `app/hrms/leave_service.py`):**
    - `ensure_seeds()` checks total row existence (including soft-deleted rows) for `HrmsLocation`, `HrmsLeaveType`, `HrmsExpenseCategory`, `HrmsHoliday`, and `HrmsLeavePlan`, ensuring soft-deleted defaults never re-create on subsequent page loads.
 
@@ -3621,4 +3674,4 @@ Positioned directly underneath the collapsible filter panel, these three metric 
 - [ ] **TC-DSP-03 (Salesperson, Assignee & HRMS Display Name Priority):** Verify `GET /api/v1/companies/sales-persons`, `GET /api/v1/tasks/assignees`, `SearchableUserSelect`, `CommentComposer`, Proforma Invoices, Sales Orders, Companies, CRM, Technical Tasks, and HRMS pages/exports always display `display_name` first.
 
 ---
-*End of Master Features & Testing Specification Manual. Maintained for Inhyma Solutions Enterprise ERP. Last updated: November 2, 2026 (Section 77 & Sections 3, 15, 24: Display Name Primary Identity Across All Modules & Removal of Username from UI, Sections 9, 48, 56 & 61-76 & Global Updates: DB-Backed Product Specification Documents with Saved Links & Auto-Linked CRM Quotation PDFs, Engine-Level Pytest Supabase Guard, Automatic Colleague QA File Sweeper & Synthetic Artifact DB Purge, Import Purchase Expected Arrival Date Editable Default [ETA Port Date + 5 Days], System-Wide Active-Only Cross-Module Extraction & Inactive Isolation, `.env`-Driven Cross-ERP Switching & Strict Local/Hosted Environment Isolation, Local & Import Purchase Multi-Line CSV/Excel Bulk Import, Standardized Golden-Amber Export & Vector SVG Imp/Exp Controls, Suppliers Sidebar Active Highlight & Goods Expected Report Removal, HRMS Integrity Remediation & Payroll Approval Persistence, Dynamic Organization Company Logo, Product Master Category Rewiring & Floating Duplicate Overlay, Platform Migration Idempotency, Sales Process Workflow & 13-Field Filter Grid, Feed & Broadcast Open Access & 1-to-1 Employee Messaging, Sale Status Update Side Drawer & Chronological Timeline, Discount Payments Multi-Installment Ledger, Product Re-Order Branch-Scoped Matrix & FIFO Stock Breakup, and Product Stock Transactions Master List & Per-Product Stock Transaction Ledger).*
+*End of Master Features & Testing Specification Manual. Maintained for Inhyma Solutions Enterprise ERP. Last updated: November 3, 2026 (Sections 2, 16, 39 & 55: Technical Tasks Granular RBAC Permissions [306 Total Permissions], Doc-Compliant Approved/Completed/Cancel Viewport-Centered Modals & Authenticated Master Lookup Fallbacks, Call Logs & Task Log Summary Detail Page [z6d7e8f9a0b1], `/payments` All/Pending/Completed Stage Tabs, Red `DUE` KPI [#dc2626], Cancelled-Task Exclusion & Automatic `Self collect` Technician Wallet Sync, Section 77 & Sections 3, 15, 24: Display Name Primary Identity Across All Modules & Removal of Username from UI, Sections 9, 48, 56 & 61-76 & Global Updates: DB-Backed Product Specification Documents with Saved Links & Auto-Linked CRM Quotation PDFs, Engine-Level Pytest Supabase Guard, Automatic Colleague QA File Sweeper & Synthetic Artifact DB Purge, Import Purchase Expected Arrival Date Editable Default [ETA Port Date + 5 Days], System-Wide Active-Only Cross-Module Extraction & Inactive Isolation, `.env`-Driven Cross-ERP Switching & Strict Local/Hosted Environment Isolation, Local & Import Purchase Multi-Line CSV/Excel Bulk Import, Standardized Golden-Amber Export & Vector SVG Imp/Exp Controls, Suppliers Sidebar Active Highlight & Goods Expected Report Removal, HRMS Integrity Remediation & Payroll Approval Persistence, Dynamic Organization Company Logo, Product Master Category Rewiring & Floating Duplicate Overlay, Platform Migration Idempotency, Sales Process Workflow & 13-Field Filter Grid, Feed & Broadcast Open Access & 1-to-1 Employee Messaging, Sale Status Update Side Drawer & Chronological Timeline, Discount Payments Multi-Installment Ledger, Product Re-Order Branch-Scoped Matrix & FIFO Stock Breakup, and Product Stock Transactions Master List & Per-Product Stock Transaction Ledger).*

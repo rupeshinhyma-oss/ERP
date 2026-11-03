@@ -373,6 +373,15 @@ BOOTSTRAP_PERMISSIONS: list[tuple[str, str, str, str, str, str]] = [
     ("task.escalate", "task", "tasks", "action", "ALL", "Manually escalate tasks to managers or candidate users."),
     ("task.manage", "task", "tasks", "manage", "ALL", "Full task management: edit, delete, or change status of any task."),
     ("task.delete", "task", "tasks", "delete", "ALL", "Delete tasks and recurring task schedules."),
+    # Technical Tasks Module
+    ("technicaltask.view", "technicaltask", "technical-tasks", "view", "ALL", "View technical tasks, status tabs, call logs, and machine serial lookups."),
+    ("technicaltask.create", "technicaltask", "technical-tasks", "create", "ALL", "Create new technical tasks and field service tickets."),
+    ("technicaltask.update", "technicaltask", "technical-tasks", "update", "ALL", "Edit technical tasks, record call logs, complete/cancel tasks, and record payments."),
+    ("technicaltask.approve", "technicaltask", "technical-tasks", "approve", "ALL", "Approve technical tasks, allot technicians, and override service/charge details."),
+    ("technicaltask.delete", "technicaltask", "technical-tasks", "delete", "ALL", "Delete technical tasks."),
+    ("technicaltask.export", "technicaltask", "technical-tasks", "export", "ALL", "Export technical tasks to CSV."),
+    ("technicaltask.bulk_action", "technicaltask", "technical-tasks", "manage", "ALL", "Use Bulk Actions (bulk approve, bulk complete, bulk delete) in Technical Tasks."),
+    ("technicaltask.manage", "technicaltask", "technical-tasks", "manage", "ALL", "Full administrative control over technical tasks, including editing/deleting approved tasks and reopening cancelled tasks."),
     # Inquiries & Quotations (Sale > Inquiries)
     ("inquiry.view", "inquiry", "inquiries", "view", "ALL", "View inquiries and consignment lists."),
     ("inquiry.create", "inquiry", "inquiries", "create", "ALL", "Create new inquiries and consignments."),

@@ -55,6 +55,7 @@ import { ImportPurchasePage } from "@/pages/purchase/ImportPurchasePage";
 import { ImportPurchasePdfPage } from "@/pages/ImportPurchasePdfPage";
 import { TasksPage } from "@/pages/tasks/TasksPage";
 import { TechnicalTasksPage } from "@/pages/technicalTasks/TechnicalTasksPage";
+import { TechnicalTaskDetailPage } from "@/pages/technicalTasks/TechnicalTaskDetailPage";
 import { PaymentsPage } from "@/pages/PaymentsPage";
 import { GeneralReportsPage } from "@/pages/GeneralReportsPage";
 import { TechnicalTaskTypesPage } from "@/pages/masters/TechnicalTaskTypes";
@@ -343,6 +344,8 @@ export function App() {
           <Route path="/tasks/kanban" element={<Navigate to="/tasks?tab=kanban" replace />} />
           <Route path="/tasks/calendar" element={<Navigate to="/tasks?tab=calendar" replace />} />
           <Route path="/technical-task/list" element={<TechnicalTasksPage />} />
+          <Route path="/technical-task/detail/:id" element={<TechnicalTaskDetailPage />} />
+          <Route path="/technical-tasks/detail/:id" element={<TechnicalTaskDetailPage />} />
           <Route path="/technical-tasks" element={<Navigate to="/technical-task/list" replace />} />
           <Route path="/technical-task/call-logs" element={<Navigate to="/reports/general?tab=call-logs" replace />} />
           <Route path="/payments" element={<PaymentsPage />} />

@@ -10,6 +10,7 @@ from decimal import Decimal
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.auth.dependencies import get_current_user
@@ -17,8 +18,8 @@ from app.auth.service import CurrentUser
 from app.database.base import Base
 from app.database.session import get_db_session
 from app.main import create_application
-from app.technical_tasks.models import TechnicalTask, TechnicalTaskCallLog
-from app.technician_operations.models import MachineWarranty
+from app.technical_tasks.models import TechnicalTask, TechnicalTaskCallLog, TechnicalTaskLog
+from app.technician_operations.models import MachineWarranty, TechnicianWalletTransaction
 from app.technical_tasks.schemas import TechnicalTaskCreate, TechnicalTaskStatusUpdate, TechnicalTaskUpdate
 from app.technical_tasks.service import TechnicalTaskService
 from app.technical_tasks.repository import TechnicalTaskRepository
@@ -31,7 +32,13 @@ async def test_db():
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")
     # Create only the tables this module uses. (A full ``Base.metadata.create_all`` breaks whenever the whole
     # application's models are loaded in one pytest run because of an unrelated duplicate CRM index definition.)
-    tables = [TechnicalTask.__table__, TechnicalTaskCallLog.__table__, MachineWarranty.__table__]
+    tables = [
+        TechnicalTask.__table__,
+        TechnicalTaskCallLog.__table__,
+        TechnicalTaskLog.__table__,
+        MachineWarranty.__table__,
+        TechnicianWalletTransaction.__table__,
+    ]
     async with engine.begin() as conn:
         await conn.run_sync(lambda sync_conn: Base.metadata.create_all(sync_conn, tables=tables))
 
@@ -199,14 +206,14 @@ async def test_cancellation_mandatory_remarks_and_reopen_workflow(test_db: Async
     assert resp.status_code == 201
     task_id = resp.json()["data"]["id"]
 
-    # 2. Try to cancel WITHOUT remarks -> strictly blocked (422 from Pydantic validator or 400 from service)
+    # 2. Cancelling without mandatory remarks is rejected
     bad_cancel_resp = await test_client.patch(
         f"/api/v1/technical-tasks/{task_id}/status",
-        json={"status": "Cancel", "remarks": "", "cancel_remarks": ""},
+        json={"status": "Cancel"},
     )
     assert bad_cancel_resp.status_code in (400, 422)
 
-    # 3. Cancel with mandatory remarks -> succeeds
+    # 3. Cancel WITH mandatory remarks transitions to Cancel status and stage
     cancel_resp = await test_client.patch(
         f"/api/v1/technical-tasks/{task_id}/status",
         json={"status": "Cancel", "cancel_remarks": "Customer postponed production shut-down to next quarter."},
@@ -215,6 +222,8 @@ async def test_cancellation_mandatory_remarks_and_reopen_workflow(test_db: Async
     task_data = cancel_resp.json()["data"]
     assert task_data["status"] == "Cancel"
     assert task_data["cancel_remarks"] == "Customer postponed production shut-down to next quarter."
+    cancel_tab_resp = await test_client.get("/api/v1/technical-tasks?tab=cancel")
+    assert any(t["id"] == task_id for t in cancel_tab_resp.json()["data"])
 
     # 4. Reopen and reassign cancelled task to a new technician
     reopen_resp = await test_client.post(
@@ -292,9 +301,16 @@ async def test_conditional_required_fields_enforced_by_api(test_client: AsyncCli
 async def test_status_machine_and_technician_required(test_client: AsyncClient):
     t = await _create(test_client)
     tid = t["id"]
-    assert (await test_client.patch(f"/api/v1/technical-tasks/{tid}/status", json={"status": "Approved"})).status_code == 400
+    # Pending cannot jump straight to Completed before being Approved
     assert (await test_client.patch(f"/api/v1/technical-tasks/{tid}/status", json={"status": "Completed"})).status_code == 400
-    assert (await _approve(test_client, tid)).status_code == 200
+    # Approving without selecting Task Allotted To is rejected per workflow specification
+    no_tech = await test_client.patch(f"/api/v1/technical-tasks/{tid}/status", json={"status": "Approved"})
+    assert no_tech.status_code == 400
+    # Approving with technician allotment transitions Pending -> Approved
+    app_res = await _approve(test_client, tid)
+    assert app_res.status_code == 200
+    assert app_res.json()["data"]["status"] == "Approved"
+    assert app_res.json()["data"]["task_approved_by"] is not None
     done = await test_client.patch(f"/api/v1/technical-tasks/{tid}/status", json={"status": "Completed", "remarks": "Replaced heater"})
     assert done.status_code == 200 and done.json()["data"]["status"] == "Completed"
     # Completed is final: no further status change, no edit.
@@ -320,10 +336,10 @@ async def test_remarks_stay_separate_and_free_tasks_never_payment_pending(test_c
     assert any(l["call_type"] == "Completion" and l["remarks"] == "Fixed on site" for l in logs)
 
 
-async def test_chargeable_payment_flow(test_client: AsyncClient):
+async def test_chargeable_payment_flow(test_db: AsyncSession, test_client: AsyncClient):
     t = await _create(test_client, service_type="Chargeable", service_charge="5000", payment_terms="On completion")
     tid = t["id"]
-    await _approve(test_client, tid)
+    await _approve(test_client, tid, tech="Mangal Pandey")
     # Not collected -> Payment Pending (even if the client asked for Completed)
     r = await test_client.patch(
         f"/api/v1/technical-tasks/{tid}/status", json={"status": "Completed", "payment_collected": False}
@@ -344,6 +360,19 @@ async def test_chargeable_payment_flow(test_client: AsyncClient):
     d = r.json()["data"]
     assert d["status"] == "Completed" and d["payment_status"] == "Paid"
     assert d["payment_mode"] == "Self collect" and Decimal(str(d["collected_amount"])) == Decimal("4800")
+
+    # Self collect payment automatically syncs a VERIFIED COLLECTION entry into Technician Wallet
+    wallet_rows = (
+        await test_db.execute(
+            select(TechnicianWalletTransaction).where(TechnicianWalletTransaction.technical_task_id == uuid.UUID(tid))
+        )
+    ).scalars().all()
+    assert len(wallet_rows) == 1
+    assert wallet_rows[0].transaction_type == "COLLECTION"
+    assert wallet_rows[0].status == "VERIFIED"
+    assert wallet_rows[0].technician_name == "Mangal Pandey"
+    assert wallet_rows[0].payment_mode == "Self collect"
+    assert Decimal(str(wallet_rows[0].amount)) == Decimal("4800")
 
 
 async def test_edit_ignores_workflow_fields_and_honours_version(test_client: AsyncClient):
@@ -425,7 +454,18 @@ async def limited_client(test_db: AsyncSession):
     async def _override_db():
         yield test_db
 
-    user = CurrentUser(id=uuid.uuid4(), username="sales1", permissions=set())
+    user = CurrentUser(
+        id=uuid.uuid4(),
+        username="sales1",
+        permissions={
+            "technicaltask.view",
+            "technicaltask.create",
+            "technicaltask.update",
+            "technicaltask.approve",
+            "technicaltask.delete",
+            "technicaltask.bulk_action",
+        },
+    )
     app.dependency_overrides[get_db_session] = _override_db
     app.dependency_overrides[get_current_user] = lambda: user
     transport = ASGITransport(app=app)
@@ -506,21 +546,37 @@ async def test_admin_level_actions_for_normal_users(test_client: AsyncClient, li
     assert allowed.status_code == 200
 
 
-async def test_payment_summary_and_recording(test_client: AsyncClient):
+async def test_payment_summary_and_recording(test_db: AsyncSession, test_client: AsyncClient):
     chargeable = await _create(test_client, service_type="Chargeable", service_charge=10000, payment_terms="Immediate")
-    await _approve(test_client, chargeable["id"])
+    await _approve(test_client, chargeable["id"], tech="Suresh Patil")
+
+    # Cancelled chargeable task must NEVER inflate payment summary or appear in payment tabs
+    cancelled_chargeable = await _create(
+        test_client, company_name="Cancelled Order Co", service_type="Chargeable", service_charge=7000, payment_terms="Advance"
+    )
+    cancel_r = await test_client.patch(
+        f"/api/v1/technical-tasks/{cancelled_chargeable['id']}/status",
+        json={"status": "Cancel", "cancel_remarks": "Customer cancelled service visit"},
+    )
+    assert cancel_r.status_code == 200
 
     res = await test_client.get("/api/v1/technical-tasks/payment-summary")
     summary = res.json()["data"]
     assert summary["total_payment"] == 10000.0
     assert summary["paid"] == 0.0
     assert summary["due"] == 10000.0
+    assert summary["all_count"] == 1
     assert summary["pending_count"] == 1
     assert summary["completed_count"] == 0
 
+    all_pay_rows = (await test_client.get("/api/v1/technical-tasks?payment_collected=all")).json()["data"]
+    assert [row["id"] for row in all_pay_rows] == [chargeable["id"]]
+    pend_pay_rows = (await test_client.get("/api/v1/technical-tasks?payment_collected=pending")).json()["data"]
+    assert [row["id"] for row in pend_pay_rows] == [chargeable["id"]]
+
     p1 = await test_client.post(
         f"/api/v1/technical-tasks/{chargeable['id']}/record-payment",
-        json={"amount": 4000, "payment_mode": "UPI / QR", "reference_no": "UPI987654"},
+        json={"amount": 4000, "payment_mode": "Company Acc", "reference_no": "UPI987654"},
     )
     assert p1.status_code == 200
     assert float(p1.json()["data"]["collected_amount"]) == 4000.0
@@ -531,12 +587,13 @@ async def test_payment_summary_and_recording(test_client: AsyncClient):
     assert summary2["total_payment"] == 10000.0
     assert summary2["paid"] == 4000.0
     assert summary2["due"] == 6000.0
+    assert summary2["all_count"] == 1
     assert summary2["pending_count"] == 1
     assert summary2["completed_count"] == 0
 
     p2 = await test_client.post(
         f"/api/v1/technical-tasks/{chargeable['id']}/record-payment",
-        json={"amount": 6000, "payment_mode": "Company Acc", "reference_no": "NEFT123"},
+        json={"amount": 6000, "payment_mode": "Self collect", "reference_no": "CASH-6000"},
     )
     assert p2.status_code == 200
     assert float(p2.json()["data"]["collected_amount"]) == 10000.0
@@ -547,6 +604,156 @@ async def test_payment_summary_and_recording(test_client: AsyncClient):
     assert summary3["total_payment"] == 10000.0
     assert summary3["paid"] == 10000.0
     assert summary3["due"] == 0.0
+    assert summary3["all_count"] == 1
     assert summary3["pending_count"] == 0
     assert summary3["completed_count"] == 1
+
+    comp_pay_rows = (await test_client.get("/api/v1/technical-tasks?payment_collected=completed")).json()["data"]
+    assert [row["id"] for row in comp_pay_rows] == [chargeable["id"]]
+
+    wallet_rows = (
+        await test_db.execute(
+            select(TechnicianWalletTransaction).where(
+                TechnicianWalletTransaction.technical_task_id == uuid.UUID(chargeable["id"])
+            )
+        )
+    ).scalars().all()
+    assert len(wallet_rows) == 1
+    assert wallet_rows[0].transaction_type == "COLLECTION"
+    assert wallet_rows[0].technician_name == "Suresh Patil"
+    assert Decimal(str(wallet_rows[0].amount)) == Decimal("6000")
+
+
+async def test_technical_task_rbac_permissions(test_db: AsyncSession, test_client: AsyncClient):
+    """Verify RBAC permission enforcement across Technical Tasks endpoints and seed definitions."""
+    from scripts.seed import BOOTSTRAP_PERMISSIONS
+
+    seeded_codes = {row[0] for row in BOOTSTRAP_PERMISSIONS if row[1] == "technicaltask"}
+    assert seeded_codes == {
+        "technicaltask.view",
+        "technicaltask.create",
+        "technicaltask.update",
+        "technicaltask.approve",
+        "technicaltask.delete",
+        "technicaltask.export",
+        "technicaltask.bulk_action",
+        "technicaltask.manage",
+    }
+
+    task = await _create(test_client, company_name="RBAC Corp")
+    tid = task["id"]
+
+    active_perms: set[str] = set()
+    app = create_application()
+
+    async def _override_db():
+        yield test_db
+
+    app.dependency_overrides[get_db_session] = _override_db
+    app.dependency_overrides[get_current_user] = lambda: CurrentUser(
+        id=uuid.uuid4(),
+        username="rbac_user",
+        permissions=set(active_perms),
+    )
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://testserver") as client:
+        # 1. Zero permissions -> 403 across endpoints
+        assert (await client.get("/api/v1/technical-tasks")).status_code == 403
+        assert (await client.get("/api/v1/technical-tasks/counts")).status_code == 403
+        assert (await client.post("/api/v1/technical-tasks", json={"company_name": "X"})).status_code == 403
+        assert (await client.patch(f"/api/v1/technical-tasks/{tid}", json={"city": "Pune"})).status_code == 403
+        assert (await client.delete(f"/api/v1/technical-tasks/{tid}")).status_code == 403
+        assert (await client.post("/api/v1/technical-tasks/bulk-delete", json={"ids": [tid]})).status_code == 403
+
+        # 2. View-only -> 200 on read, 403 on write
+        active_perms.update({"technicaltask.view"})
+        assert (await client.get("/api/v1/technical-tasks")).status_code == 200
+        assert (await client.get("/api/v1/technical-tasks/counts")).status_code == 200
+        assert (await client.get(f"/api/v1/technical-tasks/{tid}")).status_code == 200
+        assert (await client.post("/api/v1/technical-tasks", json={"company_name": "X"})).status_code == 403
+
+        # 3. Update without Approve -> cannot transition Pending -> Approved
+        active_perms.clear()
+        active_perms.update({"technicaltask.view", "technicaltask.update"})
+        assert (
+            await client.patch(
+                f"/api/v1/technical-tasks/{tid}/status",
+                json={"status": "Approved", "task_allotted_to": "Tech 1"},
+            )
+        ).status_code == 403
+
+        # 4. Approve without Update -> can approve Pending -> Approved, cannot Complete
+        active_perms.clear()
+        active_perms.update({"technicaltask.view", "technicaltask.approve"})
+        approve_res = await client.patch(
+            f"/api/v1/technical-tasks/{tid}/status",
+            json={"status": "Approved", "task_allotted_to": "Tech 1"},
+        )
+        assert approve_res.status_code == 200
+        assert (
+            await client.patch(f"/api/v1/technical-tasks/{tid}/status", json={"status": "Completed"})
+        ).status_code == 403
+
+        # 5. technicaltask.manage -> full access including deleting an Approved task approved by someone else
+        active_perms.clear()
+        active_perms.update({"technicaltask.manage"})
+        assert (await client.get("/api/v1/technical-tasks")).status_code == 200
+        assert (await client.delete(f"/api/v1/technical-tasks/{tid}")).status_code == 200
+
+
+async def test_technical_task_detail_by_number_call_logs_and_task_logs(test_client: AsyncClient):
+    created = await _create(
+        test_client,
+        company_name="Dynamic Machinery Pvt Ltd",
+        contact_person_name="Arun Nair",
+        contact_phone="9898989898",
+        task_type="Telecall",
+        machine_model="GF100 Granular Filler",
+        task_description="Installation",
+    )
+    tid = created["id"]
+    tnum = created["task_number"]
+    assert isinstance(tnum, int) and tnum >= 1
+
+    # Detail lookup works by sequential task_number as well as UUID
+    by_num = await test_client.get(f"/api/v1/technical-tasks/{tnum}")
+    assert by_num.status_code == 200
+    assert by_num.json()["data"]["id"] == tid
+    assert by_num.json()["data"]["task_number"] == tnum
+
+    # Initial Task Log Summary contains 'Create Technical Task' with Pending status
+    task_logs_initial = (await test_client.get(f"/api/v1/technical-tasks/{tnum}/task-logs")).json()["data"]
+    assert len(task_logs_initial) == 1
+    assert task_logs_initial[0]["title"] == "Create Technical Task"
+    assert task_logs_initial[0]["status"] == "Pending"
+
+    # Add Call Logs (Telecall & Physical Visit) via task_number endpoint
+    r1 = await test_client.post(
+        f"/api/v1/technical-tasks/{tnum}/call-logs",
+        json={"call_type": "Telecall", "remarks": "Spoke with plant supervisor regarding power supply."},
+    )
+    assert r1.status_code == 201
+    r2 = await test_client.post(
+        f"/api/v1/technical-tasks/{tid}/call-logs",
+        json={"call_type": "Physical Visit", "remarks": "Completed on-site alignment check."},
+    )
+    assert r2.status_code == 201
+
+    call_logs = (await test_client.get(f"/api/v1/technical-tasks/{tnum}/call-logs")).json()["data"]
+    assert len(call_logs) == 2
+    assert {c["call_type"] for c in call_logs} == {"Telecall", "Physical Visit"}
+
+    # Transition status -> Task Log Summary appends lifecycle entries
+    await _approve(test_client, tid, tech="Ramesh Kumar")
+    await test_client.patch(
+        f"/api/v1/technical-tasks/{tid}/status",
+        json={"status": "Completed", "remarks": "Commissioned successfully"},
+    )
+    task_logs_after = (await test_client.get(f"/api/v1/technical-tasks/{tid}/task-logs")).json()["data"]
+    titles = [entry["title"] for entry in task_logs_after]
+    assert "Create Technical Task" in titles
+    assert "Approve Technical Task" in titles
+    assert "Complete Technical Task" in titles
+
 

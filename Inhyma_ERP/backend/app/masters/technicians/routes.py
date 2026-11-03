@@ -152,7 +152,7 @@ async def list_technicians(
 async def lookup_technicians(
     request: Request,
     service: TechnicianService = Depends(get_technician_service),
-    current_user: CurrentUser = Depends(require_permission("technician.view")),
+    _current_user: CurrentUser = Depends(get_current_user),
 ) -> dict:
     """Return cached minimal technician list for dropdown selectors."""
     items = await service.list_all_cached()
