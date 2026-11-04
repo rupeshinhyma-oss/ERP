@@ -3,6 +3,36 @@
 **System:** Inhyma_ERP (India Distribution)  
 **Scope:** Functional updates, schema migrations, UI hardening, and bug fixes.
 
+## [Release 2026-11-04] — Technician Ops & Wallet End-to-End Stock/SO Upgrade & Enterprise Vector Icons, Removal of Redundant Technical Tasks `Payment Pending` Tab, and New `Financial Planning Report` & `Cargo Overview` Modules
+
+### 1. Technician Ops & Wallet Full-Stack Stock Conservation, Sales Order Pre-Fill Bridge & Machine Warranty Sync (`z7e8f9a0b1c2`, `technician_operations/*`, `sales/*`, `TechnicianOperationsPage.tsx`, `SaleProcessForm.tsx`)
+- **Database Migration & Schema (`z7e8f9a0b1c2_upgrade_technician_ops_stock_and_so.py`, `technician_operations/models.py`, `sales/schemas.py`):**
+  - Added `warehouse_name`, `stock_deducted` on `technician_gatepasses`, `stock_returned_qty`, `stock_billed_released_qty` on `technician_gatepass_items`, and `technician_gatepass_id` on `SaleOrderCreate` (`sales/schemas.py`).
+- **Master-Driven Lookups & RBAC (`technician_operations/repository.py`, `routes.py`, `TechnicianOperationsPage.tsx`):**
+  - Added `GET /api/v1/technician-operations/lookups` aggregating active Technicians, Companies, physical Warehouses (`is_physical`), Machines, Spare Parts (with `compatible_machine_ids` from `ProductMachineSpare` + `applicable_machine_ids`, `hsn_code`, `gst_percent`, and per-warehouse `stock_by_warehouse`), Cities, open Technical Tasks, non-cancelled Sales Orders, and unified Machine Serial Registry.
+  - Wired `require_any_permission(...)` across read, write, and Sales Order bridge endpoints in `technician_operations/routes.py`, and enforced `Read-Only Access` UI gating (`canMutateTechOps` / `canCreateSaleOrder`) in `TechnicianOperationsPage.tsx`.
+- **Physical Warehouse Stock Conservation & Sales Process Bridge (`technician_operations/service.py`, `sales/service.py`, `SaleProcessForm.tsx`):**
+  - **Outward Gatepass (`POST /gatepasses`):** Deducts physical warehouse stock via `StockService.apply_stock_delta(..., delta=-qty)` (`409 Conflict` on shortage) with live warehouse availability pills (`Avail: X UOM`) and shortage guard in the Issue Outward Gatepass modal.
+  - **Return Reconciliation (`POST /gatepasses/{id}/return`):** Enforces `quantity_returned + quantity_consumed <= quantity_issued` (`400 Bad Request` + inline red `role="alert"` banner), restores `RETURNED_GOOD` units idempotently to the dispatch warehouse, quarantines `RETURNED_DEFECTIVE` units without restoring saleable stock, and sets `so_required=True` on non-warranty consumed spares.
+  - **Pre-Filled Sales Order Bridge (`/sales/process/add?gatepass_id=<uuid>` & `POST /sales/orders`):** `SaleProcessForm.tsx` fetches `GET /gatepasses/{id}/draft-so` to pre-fill Warehouse, Company, Billing/Shipping Addresses, Remarks, and consumed spare-part line items (`HSN`, `GST %`, `Qty`, `Rate`), displaying a linked-gatepass banner and submitting `technician_gatepass_id`.
+  - **Zero Double-Deduction & Cancellation Reversal (`SaleService`):** `_get_gatepass_held_credits` credits gatepass-held stock during physical availability checks, `_release_gatepass_stock_for_order` releases the gatepass hold immediately before `_take_stock` deducts once for the Sales Order, `_link_gatepass_to_order` marks the gatepass `CLOSED`, and `_rehold_and_unlink_gatepass_for_order` re-holds stock and reopens `so_required=True` (`PARTIALLY_RETURNED`) if the linked Sales Order is cancelled or deleted.
+- **Automatic Sales Order Machine Serial -> Warranty Sync, Wallet Vouchers & Printable Slip:**
+  - Added `SaleService._sync_machine_warranties()` to auto-register/update `MachineWarranty` policies whenever a `SaleOrder` has `SaleOrderItem.serial_numbers`, plus historical `SaleOrderItem.serial_numbers` fallback in `/technician-operations/warranty/validate` and `/technical-tasks/lookup/serial/{serial}`.
+  - Added `TechnicalTaskService._reverse_self_collect_wallet()` so cancelling/deleting a `Self collect` technical task automatically reverses its synced `TechnicianWalletTransaction`, collision-safe `MAX` suffix numbering (`GP-TECH-YYYY-NNNN` & `WTX-YYYY-NNNN`), printable Outward/Return Gatepass Voucher Slips (`printGatepassSlip`), and multipart Wallet receipt uploads (`apiPostMultipart` -> `/technical-tasks/upload-screenshot` + clickable `View Receipt` links).
+
+### 2. Enterprise Vector SVG Icon System on Technician Ops & Wallet (`TechnicianOperationsPage.tsx`)
+- Replaced all OS cartoon emojis (`🚚`, `⚠️`, `💵`, `🛡️`, `📦`, `👛`, `🖨️`, `📎`, `🔧`, etc.) across the 4 KPI cards (`Truck`, `AlertTriangle`, `Banknote`, `ShieldCheck`), module tabs (`Package`, `Wallet`, `ShieldCheck`), header buttons, table badges, and modals/drawers with crisp `24x24` stroke `<svg aria-hidden="true">` icons matching the ERP design system, and fixed a TypeScript `resolveGstPercent` call signature in `SaleProcessForm.tsx`.
+
+### 3. Removal of Redundant `Payment Pending` Status & Tab from Technical Tasks (`technical_tasks/*`, `TechnicalTasksPage.tsx`, `TechnicalTaskDetailPage.tsx`, `GeneralReportsPage.tsx`)
+- **5 Clean Service-Lifecycle Tabs (`/technical-task/list`):** Removed the redundant `Payment Pending` tab, `payment_pending` count field (`TechnicalTaskCountsResponse`), `"payment pending"` filter option, and row `Payment Collected` action from Technical Tasks (`All`, `Pending`, `Approved`, `Completed`, `Cancel`), eliminating duplication with the dedicated **Payments** module (`/payments`).
+- **Unified Completion & Legacy Normalization (`technical_tasks/service.py`, `repository.py`, `routes.py`):** Completing a Chargeable task with `"No (Pending in Payments)"` sets `status = "Completed"` and `payment_status = "Pending"` (tracked exclusively in `/payments`), while `stored_status()` and `TAB_STATUSES["completed"]` seamlessly normalize any legacy `"Payment Pending"` rows to `"Completed"`, and `monthly_summary` computes `open_now = counts["pending"] + counts["approved"]`.
+
+### 4. New Report Modules under `REPORTS`: `Financial Planning Report` & `Cargo Overview` (`FinancialPlanningReportPage.tsx`, `CargoOverviewPage.tsx`, `nav.ts`, `App.tsx`, `permissionLabels.ts`)
+- Created `FinancialPlanningReportPage.tsx` (`/reports/financial-planning`, redirect alias `/financial-planning-report`, icon `barChart`, permission `report.view`) and `CargoOverviewPage.tsx` (`/reports/cargo-overview`, redirect alias `/cargo-overview`, icon `anchor`, permission `report.view`) under the **`REPORTS`** sidebar section as clean blank module shells, and mapped `report: "Reports & Analytics"` in `permissionLabels.ts`.
+- **Automated Verification:** Verified with `28/28` backend Pytest tests (`test_technical_tasks.py`, `test_technician_operations.py`), frontend Vitest suites (`NewReportModules.test.tsx`, `NavIconsUniqueness.test.tsx`, `TechnicalTasksPage.test.tsx`, `TechnicianOperationsPage.test.tsx`, `SaleProcessFormPage.test.tsx`), and `0` TypeScript errors (`tsc -p tsconfig.app.json --noEmit`).
+
+---
+
 ## [Release 2026-11-03] — Technical Tasks Granular RBAC (`306` Permissions), Dedicated Call Logs & Task Log Summary Detail Page, Doc-Compliant `Approved` / `Completed` / `Cancel` Centered Modals, Payments Stage Tabs & Red `DUE` KPI, and `Self collect` Technician Wallet Auto-Sync
 
 ### 1. Granular Technical Tasks RBAC Permissions (`technicaltask.*`, `306` Total Bootstrap Permissions)

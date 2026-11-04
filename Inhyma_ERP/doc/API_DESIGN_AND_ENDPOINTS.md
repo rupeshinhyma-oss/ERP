@@ -3,7 +3,7 @@
 **Service Base URL:** `http://localhost:8002/api/v1`  
 **Authentication Scheme:** Bearer JWT (HS256) & WebSocket Query Tokens  
 **Standard Response Envelope:** `{ "success": true, "data": ..., "meta": ..., "error": null }`  
-**Last Updated:** November 3, 2026
+**Last Updated:** November 4, 2026
 
 > **Universal Cross-Module Active-Only Extraction & Filtering Convention:**
 > - **Management Lists vs Cross-Module Lookups:** Unfiltered management endpoints (`GET /api/v1/masters/*`, `/companies`, `/suppliers`, `/buyers`, `/users`, `/positions`, and `/hrms/setup/*` with default `active_only=false`) return **both** `Active` and `Inactive` rows so each module's own `Active` / `Inactive` tabs and status toggles remain functional. Conversely, every cross-module picker/lookup endpoint (`/api/v1/masters/*/lookup`, `/api/v1/masters/*/dropdown`, `/companies/lookup`, `/companies/sales-persons`, `/users/all?active_only=true`, `/positions/all?active_only=true`, `/inquiries/consignment-codes`, `/inquiries/companies`, `/hrms/setup/*?active_only=true`, `/products/machine-spares/universal-view`, and `/search`) returns **`Active` records only**.
@@ -80,8 +80,8 @@
 
 | Method | Endpoint URI | Description | Permission Gate |
 | :--- | :--- | :--- | :--- |
-| `GET` | `/api/v1/technical-tasks` | List paginated service tickets with status tab (`all`, `Pending`, `Approved`, `Payment Pending`, `Completed`, `Cancel`), `task_type`, `service_type`, `call_type`, `priority`, `city`, `third_party_city`, `task_allotted_to`, date range, and payment stage (`payment_collected=all\|pending\|completed`, strictly excluding cancelled tasks in `/payments` mode) | `technicaltask.view \| technicaltask.manage` |
-| `GET` | `/api/v1/technical-tasks/counts` | Status tab badge counts (`all`, `pending`, `approved`, `payment_pending`, `completed`, `cancel`) | `technicaltask.view \| technicaltask.manage` |
+| `GET` | `/api/v1/technical-tasks` | List paginated service tickets with status tab (`all`, `Pending`, `Approved`, `Completed`, `Cancel`; legacy `Payment Pending` rows normalized into `Completed`), `task_type`, `service_type`, `call_type`, `priority`, `city`, `third_party_city`, `task_allotted_to`, date range, and payment stage (`payment_collected=all\|pending\|completed`, strictly excluding cancelled tasks in `/payments` mode) | `technicaltask.view \| technicaltask.manage` |
+| `GET` | `/api/v1/technical-tasks/counts` | Status tab badge counts (`all`, `pending`, `approved`, `completed`, `cancel`) | `technicaltask.view \| technicaltask.manage` |
 | `GET` | `/api/v1/technical-tasks/payment-summary` | Real-time financial KPIs (`total_payment`, `paid`, `due`, `all_count`, `pending_count`, `completed_count`) across active (non-cancelled) `Chargeable` tasks using NULL-safe `coalesce` SQL predicates | `technicaltask.view \| technicaltask.manage` |
 | `GET` | `/api/v1/technical-tasks/call-log-report` | Paginated cross-ticket technician call/visit log analytics report | `technicaltask.view \| technicaltask.manage \| report.view` |
 | `GET` | `/api/v1/technical-tasks/monthly-summary` | Monthly technician service call & resolution summary metrics | `technicaltask.view \| technicaltask.manage \| report.view` |
@@ -92,12 +92,12 @@
 | `POST` | `/api/v1/technical-tasks/{id}/call-logs` | Append technician call log (`task_type`: `Telecall` or `Physical Visit`, `remarks`) (resolves UUID or `task_number`) | `technicaltask.update \| technicaltask.create \| technicaltask.manage` |
 | `GET` | `/api/v1/technical-tasks/{id}/task-logs` | List immutable lifecycle task logs (`Create Technical Task`, `Approve Technical Task`, `Complete Technical Task`, `Cancel Technical Task`, `Reopen Technical Task`, `Record Task Payment`, `Update Technical Task`) | `technicaltask.view \| technicaltask.manage` |
 | `PATCH` | `/api/v1/technical-tasks/{id}` | Update machine details, problem notes, contact person, payment fields, or scheduled visit | `technicaltask.update \| technicaltask.manage` |
-| `PATCH` | `/api/v1/technical-tasks/{id}/status` | Transition ticket status (`Approved` enforces mandatory `task_allotted_to` & `technicaltask.approve \| technicaltask.manage`; `Completed` handles Free vs Chargeable `Yes`/`No` collection & `Self collect` wallet sync; `Cancel` enforces mandatory `cancel_remarks`) | `technicaltask.approve \| technicaltask.update \| technicaltask.manage` |
+| `PATCH` | `/api/v1/technical-tasks/{id}/status` | Transition ticket status (`Approved` enforces mandatory `task_allotted_to` & `technicaltask.approve \| technicaltask.manage`; `Completed` moves both Free and Chargeable tickets to `status="Completed"` with `payment_status="Pending"` when unpaid—tracked in `/payments`—or `payment_status="Paid"` + `Self collect` wallet sync when paid; `Cancel` enforces mandatory `cancel_remarks` and reverses any `Self collect` wallet entry) | `technicaltask.approve \| technicaltask.update \| technicaltask.manage` |
 | `POST` | `/api/v1/technical-tasks/{id}/reopen` | Reopen/reassign cancelled or completed ticket back to `Approved` with technician allotment | `technicaltask.approve \| technicaltask.update \| technicaltask.manage` |
-| `POST` | `/api/v1/technical-tasks/{id}/record-payment` | Atomically record collected payment (`amount_collected`, `payment_mode`, `payment_screenshot`, `payment_reference`, `payment_date`, `remarks`), auto-transition `Payment Pending` -> `Completed` when fully paid, and auto-sync `Self collect` into `technician_wallet_transactions` (`VERIFIED` `COLLECTION`) | `technicaltask.update \| technicaltask.manage` |
+| `POST` | `/api/v1/technical-tasks/{id}/record-payment` | Atomically record collected payment (`amount_collected`, `payment_mode`, `payment_screenshot`, `payment_reference`, `payment_date`, `remarks`), normalize any legacy `Payment Pending` status to `Completed`, update `payment_status` (`Paid` / `Pending`), and auto-sync `Self collect` into `technician_wallet_transactions` (`VERIFIED` `COLLECTION`) | `technicaltask.update \| technicaltask.manage` |
 | `POST` | `/api/v1/technical-tasks/upload-screenshot` | Upload payment screenshot / receipt image (`.jpg`, `.png`, `.webp`) or `.pdf` | `technicaltask.update \| technicaltask.create \| technicaltask.manage` |
-| `POST` | `/api/v1/technical-tasks/bulk-delete` | Bulk soft-delete technical tasks by array of IDs | `technicaltask.bulk_action \| technicaltask.delete \| technicaltask.manage` |
-| `DELETE`| `/api/v1/technical-tasks/{id}` | Soft-delete technical service task | `technicaltask.delete \| technicaltask.manage` |
+| `POST` | `/api/v1/technical-tasks/bulk-delete` | Bulk soft-delete technical tasks by array of IDs and reverse linked `Self collect` technician wallet entries | `technicaltask.bulk_action \| technicaltask.delete \| technicaltask.manage` |
+| `DELETE`| `/api/v1/technical-tasks/{id}` | Soft-delete technical service task and reverse any linked `Self collect` technician wallet entries | `technicaltask.delete \| technicaltask.manage` |
 
 ---
 
@@ -330,17 +330,17 @@ Machine-to-machine internal service endpoints invoked by `ERP_Main` over authent
 | Method | Endpoint URI | Description | Permission Gate |
 | :--- | :--- | :--- | :--- |
 | `GET` | `/api/v1/sales/orders` | Paginated list of Sales Orders with status tabs, search, warehouse, buyer, and date filters | `saleorder.view` |
-| `POST` | `/api/v1/sales/orders` | Create Sales Order defaulting to `pending` status with line items & commercial terms | `saleorder.create` |
+| `POST` | `/api/v1/sales/orders` | Create Sales Order defaulting to `pending` status with line items & commercial terms; supports optional `technician_gatepass_id` (credits gatepass-held physical stock without double-deduction and closes the linked gatepass) and auto-syncs `SaleOrderItem.serial_numbers` into `MachineWarranty` | `saleorder.create` |
 | `GET` | `/api/v1/sales/orders/{id}` | Inspect detailed Sales Order record with line items, tax, and address breakdown | `saleorder.view` |
-| `PATCH`| `/api/v1/sales/orders/{id}` | Update Sales Order details, line items, and commercial fields | `saleorder.update` |
-| `PATCH`| `/api/v1/sales/orders/{id}/status` | Advance Sales Order stage (`pending` -> `sales_confirmed` -> `admin_approved` -> `acc_confirmed` -> `gatepass_created` -> `dispatched` -> `lr`) with PO & Tally Bill metadata | Authenticated (Workflow RBAC) |
+| `PATCH`| `/api/v1/sales/orders/{id}` | Update Sales Order details, line items, and commercial fields (syncing updated `serial_numbers` to `MachineWarranty`) | `saleorder.update` |
+| `PATCH`| `/api/v1/sales/orders/{id}/status` | Advance Sales Order stage (`pending` -> `sales_confirmed` -> `admin_approved` -> `acc_confirmed` -> `gatepass_created` -> `dispatched` -> `lr` or `cancelled`, re-holding and unlinking any linked Technician Gatepass on cancellation) with PO & Tally Bill metadata | Authenticated (Workflow RBAC) |
 | `POST` | `/api/v1/sales/upload-po` | Upload client Purchase Order (PO) document (`inhyma-sales-docs` / `/uploads/private/sales_po/`) | Authenticated |
 | `POST` | `/api/v1/sales/upload-tally-bill` | Upload Tally Bill document (`inhyma-sales-docs` / `/uploads/private/sales_tally_bills/`) | Authenticated |
 | `POST` | `/api/v1/sales/upload-eway-bill` | Upload E-Way Bill document when `E-Way Bill = Yes` (`inhyma-sales-docs` / `/uploads/private/sales_eway_bills/`) | Authenticated |
 | `POST` | `/api/v1/sales/upload-lr` | Upload Lorry Receipt (LR) file (`inhyma-sales-docs` / `/uploads/private/sales_lr/`) | Authenticated |
 | `POST` | `/api/v1/sales/upload-dispatch-media` | Upload multiple dispatch photos/videos (`inhyma-sales-docs` / `/uploads/private/sales_dispatch_media/`) | Authenticated |
 | `POST` | `/api/v1/sales/orders/{id}/status-with-po` | Atomic multipart status update with optional PO file upload | Authenticated (Workflow RBAC) |
-| `DELETE`| `/api/v1/sales/orders/{id}` | Soft-delete Sales Order and revert inventory stock deductions | `saleorder.delete` |
+| `DELETE`| `/api/v1/sales/orders/{id}` | Soft-delete Sales Order, revert inventory stock deductions, and re-hold/reopen any linked Technician Gatepass (`so_required=True`) | `saleorder.delete` |
 | `POST` | `/api/v1/sales/orders/{id}/restore` | Restore soft-deleted Sales Order (Admin only) | `saleorder.manage` |
 | `GET` | `/api/v1/sales/metrics` | Grouped sales order KPI metrics by status tabs | `saleorder.view` |
 | `GET` | `/api/v1/sales/next-gatepass-no` | Generate next sequential gate pass reference number | `saleorder.view` |
@@ -360,6 +360,7 @@ Machine-to-machine internal service endpoints invoked by `ERP_Main` over authent
 > - **Dynamic Masters & Drawers:** Uses `useMasterNames` for live database masters, `ClientNameAutocomplete` with `AddCompanyDrawer`, and `EditAddressDrawer` for non-destructive Billing/Shipping address overrides.
 > - **Stock Exceeded Alerts:** Real-time query against `/inventory/product-stock?limit=500` warns users when quantity exceeds available warehouse stock with top banner, in-table alert, red border, and red badge.
 > - **Upward Dropdown Positioning (`placement="up"`):** Searchable Comboboxes inside table rows open upward, completely avoiding scrollbar boundary clipping.
+> - **Technician Gatepass Pre-Fill Bridge (`?gatepass_id=<uuid>`):** Navigating to `/sales/process/add?gatepass_id=<uuid>` fetches `GET /api/v1/technician-operations/gatepasses/{id}/draft-so`, pre-fills Dispatch Warehouse, Company, Billing/Shipping Addresses, Remarks, and consumed non-warranty spare parts (`HSN`, `GST %`, `Qty`, `Rate`), displays a linked-gatepass banner, and submits `technician_gatepass_id` on `POST /api/v1/sales/orders`.
 
 ---
 
@@ -406,7 +407,29 @@ Machine-to-machine internal service endpoints invoked by `ERP_Main` over authent
 > **HRMS Setup Active-Only Extraction, Seed Idempotency & RBAC Bootstrap Notes:**
 > - **Cross-Module `?active_only=true` vs Setup Management (`active_only=false`):** HRMS Setup endpoints (`/api/v1/hrms/setup/{locations,leave-types,expense-categories,holidays,leave-plans}`) return both active and inactive rows by default (`active_only=false`) for `/hrms/setup`, and accept `?active_only=true` when consumed by Leave (`/hrms/leave`), Asset Management (`/hrms/assets`), and Expense Management (`/hrms/expenses`), backed by server-side active-status validation on mutations.
 > - **Soft-Delete Non-Recreation (`ensure_seeds()`):** HRMS setup endpoints inspect total row counts including soft-deleted rows (`deleted_at IS NOT NULL`) so user-deleted defaults never re-create on subsequent calls.
-> - **Canonical RBAC System Roles (`/api/v1/rbac/roles`):** Bootstrap seeding (`scripts/seed.py`) provisions strictly two `is_system=True` roles—`super_admin` (`Admin`, holding all `297/297` permissions) and `user` (`User`)—with zero hardcoded business departments.
+> - **Canonical RBAC System Roles (`/api/v1/rbac/roles`):** Bootstrap seeding (`scripts/seed.py`) provisions strictly two `is_system=True` roles—`super_admin` (`Admin`, holding all `306/306` permissions) and `user` (`User`)—with zero hardcoded business departments.
+
+---
+
+## 21. Technician Operations — Spare Parts Gatepass, Stock Conservation, Wallet Ledger & Machine Warranty (`/technician-operations`)
+
+| Method | Endpoint URI | Description | Permission Gate |
+| :--- | :--- | :--- | :--- |
+| `GET` | `/api/v1/technician-operations/lookups` | Unified active master lookups (`technicians`, `companies`, physical `warehouses`, `machines`, `spare_parts` with `compatible_machine_ids` & `stock_by_warehouse`, `cities`, open `technical_tasks`, non-cancelled `sale_orders`, and `serials`) | `technicaltask.view \| technicaltask.manage \| technician.view \| saleorder.view` |
+| `GET` | `/api/v1/technician-operations/metrics` | Top KPI ribbon counters (`active_gatepasses`, `pending_sales_orders`, `cash_in_hand`, `active_warranties`) | `technicaltask.view \| technicaltask.manage \| technician.view \| saleorder.view` |
+| `GET` | `/api/v1/technician-operations/gatepasses` | Paginated technician spare-parts outward gatepasses (`status`, `search`, `page`, `page_size`) | `technicaltask.view \| technicaltask.manage \| technician.view \| saleorder.view` |
+| `POST` | `/api/v1/technician-operations/gatepasses` | Issue outward spare-parts gatepass (`GP-TECH-YYYY-NNNN`) and deduct physical warehouse stock (`409 Conflict` if insufficient stock) | `technicaltask.create \| technicaltask.update \| technicaltask.manage \| technician.create \| technician.update` |
+| `GET` | `/api/v1/technician-operations/gatepasses/{id}` | Inspect detailed technician gatepass header, issued/returned/consumed items, and reconciliation metadata | `technicaltask.view \| technicaltask.manage \| technician.view \| saleorder.view` |
+| `POST` | `/api/v1/technician-operations/gatepasses/{id}/return` | Reconcile returned vs consumed parts (`returned + consumed <= issued`), restore `RETURNED_GOOD` to physical warehouse, quarantine `RETURNED_DEFECTIVE`, and set `so_required=True` on non-warranty consumed spares | `technicaltask.create \| technicaltask.update \| technicaltask.manage \| technician.create \| technician.update` |
+| `GET` | `/api/v1/technician-operations/gatepasses/{id}/draft-so` | Generate pre-filled Draft Sales Order payload (`warehouse`, `company`, `addresses`, `remarks`, consumed `items` with `hsn_code` & `gst_percent`) for `SaleProcessForm.tsx` | `technicaltask.view \| technicaltask.manage \| saleorder.create \| saleorder.update \| saleorder.view` |
+| `POST` | `/api/v1/technician-operations/gatepasses/{id}/link-so` | Verify and link an existing non-cancelled `SaleOrder` (`sale_order_id` or `so_number`), release gatepass-held stock if `order.stock_applied` is true, and close reconciliation | `technicaltask.create \| technicaltask.update \| technicaltask.manage \| saleorder.create \| saleorder.update` |
+| `GET` | `/api/v1/technician-operations/wallet/summaries` | Live per-technician wallet balances (`total_collected`, `total_deposited`, `total_expenses`, `net_cash_in_hand`) | `technicaltask.view \| technicaltask.manage \| technician.view \| saleorder.view` |
+| `GET` | `/api/v1/technician-operations/wallet/transactions` | Paginated technician wallet ledger (`COLLECTION`, `HANDOVER_DEPOSIT`, `FIELD_EXPENSE`, including auto-synced `Self collect` `Task Sync` entries and uploaded `receipt_url` vouchers) | `technicaltask.view \| technicaltask.manage \| technician.view \| saleorder.view` |
+| `POST` | `/api/v1/technician-operations/wallet/transactions` | Record manual wallet collection, cash handover deposit, or field expense (`WTX-YYYY-NNNN`) with optional uploaded receipt URL | `technicaltask.create \| technicaltask.update \| technicaltask.manage \| technician.create \| technician.update` |
+| `GET` | `/api/v1/technician-operations/warranty` | Paginated Machine Warranty Registry (`machine_warranties` + auto-synced Sales Order machine serials) | `technicaltask.view \| technicaltask.manage \| technician.view \| saleorder.view` |
+| `POST` | `/api/v1/technician-operations/warranty` | Register or update a Machine Warranty Policy (`serial_number`, `machine_model`, `customer_name`, `warranty_months`, `start_date`, `end_date`) | `technicaltask.create \| technicaltask.update \| technicaltask.manage \| technician.create \| technician.update` |
+| `GET` | `/api/v1/technician-operations/warranty/validate` | Live serial coverage check (`?serial_number=...`) across both `MachineWarranty` policies and historical `SaleOrderItem.serial_numbers` | `technicaltask.view \| technicaltask.manage \| technician.view \| saleorder.view` |
+
 
 
 

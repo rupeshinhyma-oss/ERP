@@ -225,14 +225,14 @@ Inhyma_ERP/
 │   │   ├── common/workflow.py    # Database-driven workflow transition validator
 │   │   ├── suppliers/            # Supplier directory with mandatory calling number
 │   │   ├── technical_tasks/      # Field service tickets, sequential task_number, call/task logs & payments
-│   │   ├── technician_operations/# Field technician trip operations & wallet ledger (Self collect auto-sync)
+│   │   ├── technician_operations/# Spare parts gatepass stock conservation, wallet ledger & machine warranty
 │   │   ├── api/v1/internal_users.py # Spoke user deprovisioning endpoint
 │   │   ├── events/               # WebSocket connection manager & broadcast
 │   │   ├── feed/                 # Internal broadcast announcements & 1-to-1 employee messaging
 │   │   ├── hrms/                 # Attendance, Leave, Assets, Expenses, Site Visits, Payroll & RBAC
 │   │   ├── rbac/                 # Departments & Permissions (super_admin + user system roles)
 │   │   └── users/                # Unified employee & user directory + ERP_Main identity sync
-│   ├── alembic/                  # Database migrations (single-head invariant, head z6d7e8f9a0b1)
+│   ├── alembic/                  # Database migrations (single-head invariant, head z7e8f9a0b1c2)
 │   ├── scripts/                  # Idempotent bootstrap seed.py (306 permissions, 2 system roles) & maintenance utilities
 │   └── tests/                    # SQLite-isolated backend test suites (conftest.py live-DB guard)
 ├── frontend/
@@ -242,6 +242,7 @@ Inhyma_ERP/
 │   │   ├── pages/                # Companies, Suppliers, LocalPurchase, ImportPurchase,
 │   │   │                         # ProductStockPage, StockTransactionDetailPage, ProductReorderPage,
 │   │   │                         # SaleProcessList, DiscountPaymentsPage, crm/*, tasks/TasksPage,
+│   │   │                         # TechnicianOperationsPage, FinancialPlanningReportPage, CargoOverviewPage,
 │   │   │                         # technicalTasks/{TechnicalTasksPage,TechnicalTaskDetailPage,PaymentsPage}
 │   │   ├── styles/               # style.css, productStock.css, technicalTasks.css, payments.css
 │   │   ├── App.tsx               # App lifecycle, routes & blocker initialization
@@ -544,10 +545,32 @@ During Render/Docker container boot, `python server.py` executes a four-phase in
 2. **Sequential `task_number`, Call Logs & Immutable Lifecycle Logs (`z6d7e8f9a0b1`):**
    - `technical_tasks.task_number` (`INTEGER`, indexed) assigns sequential human-readable ticket numbers (`#1`, `#2`, ...) resolved interchangeably with UUIDs via `TechnicalTaskRepository.resolve_task()`.
    - `technical_task_logs` records an immutable lifecycle audit trail (`Create Technical Task`, `Approve Technical Task`, `Complete Technical Task`, `Cancel Technical Task`, `Reopen Technical Task`, `Record Task Payment`, `Update Technical Task`) surfaced alongside technician `Telecall` / `Physical Visit` call logs on `/technical-task/detail/:id`.
-3. **Doc-Compliant State Machine & Viewport-Centered Fixed Modals:**
+3. **Doc-Compliant 5-Tab State Machine & Viewport-Centered Fixed Modals:**
+   - Technical Tasks (`/technical-task/list`) exposes the 5 clean service-lifecycle tabs (`All`, `Pending`, `Approved`, `Completed`, `Cancel`), removing the redundant `Payment Pending` tab while routing unpaid chargeable collections exclusively to `/payments` (legacy `Payment Pending` rows normalize automatically to `Completed`).
    - `Pending` ➔ **`Approved`** (mandatory `task_allotted_to`, approver commercial overrides, Onsite-only `scheduled_visit_date`, separate `approver_remarks`).
-   - `Approved` ➔ **`Completed`** (*Free* tasks go directly to `Completed` with `technician_remarks`; *Chargeable* tasks branch on payment collection: `No` ➔ `Payment Pending`, `Yes` ➔ `Completed` + `Paid` via `Company Acc` or `Self collect`) OR **`Cancel`** (strictly mandatory `cancel_remarks`).
+   - `Approved` ➔ **`Completed`** (*Free* tasks go directly to `Completed` with `technician_remarks`; *Chargeable* tasks branch on payment collection: `No (Pending in Payments)` ➔ `status="Completed"`, `payment_status="Pending"` tracked in `/payments`, `Yes` ➔ `status="Completed"`, `payment_status="Paid"` via `Company Acc` or `Self collect`) OR **`Cancel`** (strictly mandatory `cancel_remarks`).
    - `.tech-modal-overlay` and `.tech-modal-card` in `technicalTasks.css` are unscoped fixed overlays (`position: fixed; inset: 0; z-index: 2000`) so workflow modals always open centered inside `<main className="page">` with inline `status-modal-error` validation banners.
-4. **Payments Stage Tabs, Cancelled-Task Exclusion & `Self collect` Wallet Auto-Sync:**
+4. **Payments Stage Tabs, Cancelled-Task Exclusion & `Self collect` Wallet Auto-Sync / Reversal:**
    - `/payments` (`PaymentsPage.tsx`) exposes `All (<all_count>)`, `Pending (<pending_count>)`, and `Completed (<completed_count>)` tabs with slate `TOTAL PAYMENT` (`#0f172a`), emerald `PAID` (`#16a34a`), and crimson red **`DUE`** (`#dc2626`) KPI cards, strictly excluding `Cancel` / `Cancelled` tasks via NULL-safe `func.coalesce` SQL predicates.
-   - Whenever a payment is recorded with `payment_mode == "Self collect"` (during task completion or `/payments` `Record Payment`), `TechnicalTaskService._sync_self_collect_wallet()` atomically inserts an idempotent `VERIFIED` `COLLECTION` `TechnicianWalletTransaction` (`TXN-TECH-YYYY-NNNN-XXXX`) linked by `technical_task_id` for immediate field-cash reconciliation in `/technician-operations`.
+   - Whenever a payment is recorded with `payment_mode == "Self collect"` (during task completion or `/payments` `Record Payment`), `TechnicalTaskService._sync_self_collect_wallet()` atomically inserts an idempotent `VERIFIED` `COLLECTION` `TechnicianWalletTransaction` (`TXN-TECH-YYYY-NNNN-XXXX`) linked by `technical_task_id` for immediate field-cash reconciliation in `/technician-operations`; cancelling or deleting the task invokes `_reverse_self_collect_wallet()` to remove stale wallet balances.
+
+---
+
+## 20. Technician Ops & Wallet — Physical Stock Conservation, Sales Order Bridge & Machine Warranty Architecture (`z7e8f9a0b1c2`)
+
+1. **Physical Warehouse Stock Conservation Invariant (`technician_operations/*`, `sales/service.py`):**
+   - **Outward Gatepass Issuance (`POST /gatepasses`):** Validates physical warehouse availability and deducts `quantity_issued` via `StockService.apply_stock_delta(..., delta=-qty)` (`409 Conflict` on shortage), stamping `warehouse_name` and `stock_deducted=True`.
+   - **Return Reconciliation (`POST /gatepasses/{id}/return`):** Enforces `quantity_returned + quantity_consumed <= quantity_issued` (`400 Bad Request`). Restores positive deltas of `RETURNED_GOOD` units back to the dispatch warehouse (`stock_returned_qty`), quarantines `RETURNED_DEFECTIVE` units without inflating saleable stock, and flags `so_required=True` whenever non-warranty spare parts are consumed.
+   - **Sales Order Pre-Fill Bridge & Zero Double-Deduction (`/sales/process/add?gatepass_id=<uuid>`, `POST /sales/orders`):** `SaleProcessForm.tsx` loads `GET /gatepasses/{id}/draft-so` (Warehouse, Company, Addresses, Remarks, and consumed spare parts with `HSN`, `GST %`, `Qty`, `Rate`) and submits `technician_gatepass_id`. In `SaleService`, `_get_gatepass_held_credits` credits gatepass-held stock during physical availability checks, `_release_gatepass_stock_for_order` releases the gatepass hold immediately before `_take_stock` deducts once for the Sales Order (`stock_billed_released_qty`), and `_link_gatepass_to_order` marks the gatepass `CLOSED`. Cancelling or soft-deleting the linked Sales Order invokes `_rehold_and_unlink_gatepass_for_order` to re-hold stock and reopen `so_required=True` (`PARTIALLY_RETURNED`).
+2. **Automatic Sales Order Machine Serial -> `MachineWarranty` Sync:**
+   - `SaleService._sync_machine_warranties()` automatically registers/updates `MachineWarranty` policies whenever a `SaleOrder` is created or updated with `SaleOrderItem.serial_numbers`, while `/technician-operations/warranty/validate` and `/technical-tasks/lookup/serial/{serial}` fall back to historical `SaleOrderItem.serial_numbers`.
+3. **Enterprise Vector SVG Icon System, Printable Vouchers & RBAC (`TechnicianOperationsPage.tsx`):**
+   - All KPI ribbon cards (`Truck`, `AlertTriangle`, `Banknote`, `ShieldCheck`), module tabs (`Package`, `Wallet`, `ShieldCheck`), row badges, and modals render crisp `24x24` stroke `<svg aria-hidden="true">` icons (zero OS emojis), paired with 1-click printable Gatepass Voucher Slips (`printGatepassSlip`), multipart Wallet receipt uploads (`View Receipt`), collision-safe `MAX` suffix document numbering, and `technicaltask.view` read-only vs write/SO RBAC gating.
+
+---
+
+## 21. Reports Module Shells (`Financial Planning Report` & `Cargo Overview`)
+
+1. **Sidebar Registration & Unique Vector Iconography (`nav.ts`, `App.tsx`, `permissionLabels.ts`):**
+   - Registered **`Financial Planning Report`** (`key: "reports-financial-planning"`, `/reports/financial-planning`, alias `/financial-planning-report`, `barChart` icon) and **`Cargo Overview`** (`key: "reports-cargo-overview"`, `/reports/cargo-overview`, alias `/cargo-overview`, `anchor` icon) under the **`REPORTS`** sidebar section gated by `permission: "report.view"`, preserving global top-level icon uniqueness (`NavIconsUniqueness.test.tsx`).
+   - Mounted clean `<AppShell>` blank card canvas shells (`FinancialPlanningReportPage.tsx` and `CargoOverviewPage.tsx`) ready for future financial planning and cargo analytics widgets.

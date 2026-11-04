@@ -188,11 +188,11 @@ Inhyma_ERP/
 │   │   ├── suppliers/         # Supplier directory, tokenized public quote portal
 │   │   ├── tasks/             # Workforce tasks, Jira board & recurring_worker.py
 │   │   ├── technical_tasks/   # Field service tickets, sequential task_number, call/task logs & payments
-│   │   ├── technician_operations/ # Field technician trip operations & wallet ledger (Self collect auto-sync)
+│   │   ├── technician_operations/ # Spare parts gatepass stock conservation, wallet ledger & machine warranty
 │   │   ├── trash/             # Universal Recycle Bin recovery service
 │   │   ├── users/             # User accounts, HR profiles, reporting managers & ERP_Main sync
 │   │   └── main.py            # Composition root, lifespan lifecycle, middleware wiring
-│   ├── alembic/               # Database schema version migrations (single head z6d7e8f9a0b1)
+│   ├── alembic/               # Database schema version migrations (single head z7e8f9a0b1c2)
 │   ├── scripts/               # Idempotent seed.py (306 permissions, 2 system roles), seed_technical_task_permissions.py & utilities
 │   ├── tests/                 # SQLite-isolated pytest suite (conftest.py live-DB guard)
 │   └── requirements.txt       # Python dependencies
@@ -200,7 +200,7 @@ Inhyma_ERP/
     ├── src/
     │   ├── components/        # AppShell, MasterPage, SearchableDropdown, ImportWizard, UI, icons
     │   ├── lib/               # API client, Auth Context, Navigation registry (nav.ts), WebSockets
-    │   ├── pages/             # Inquiries, Planning, Suppliers, Buyers, Users, Rbac, Profile
+    │   ├── pages/             # Inquiries, Planning, Suppliers, Buyers, Users, Rbac, Profile, TechnicianOperationsPage, FinancialPlanningReportPage, CargoOverviewPage
     │   │   ├── masters/       # Products, Brands, Categories, Currencies, Cities, Countries
     │   │   ├── org/           # Positions, Organization Chart (dynamic org hierarchy)
     │   │   └── technicalTasks/# TechnicalTasksPage, TechnicalTaskDetailPage, PaymentsPage, TechnicalCallLogsPage, TechnicalTaskMonthlySummary
@@ -944,9 +944,9 @@ A user may be assigned any number of Roles simultaneously (`POST /users/{id}/rol
   5. **Direct Existing SO Link (`POST /gatepasses/{id}/link-so`):** Verifies the `SaleOrder` exists in `sale_orders` (`deleted_at IS NULL`, `status != 'cancelled'`), releases the gatepass stock hold when `order.stock_applied` is already `True`, and closes reconciliation.
 - **Automatic Sales Order Machine Serial -> Warranty Registry Sync:**
   - `SaleService._sync_machine_warranties()` automatically registers/updates `MachineWarranty` rows (defaulting to `12` months from `order_date`) whenever a `SaleOrder` is created or updated with `SaleOrderItem.serial_numbers`. Both `GET /technician-operations/warranty/validate` and `GET /technical-tasks/serial-lookup/{serial}` also fall back directly to `SaleOrderItem.serial_numbers` for historical orders.
-- **Collision-Safe Document Numbering, Printable Slip & Wallet Vouchers:**
+- **Collision-Safe Document Numbering, Printable Slip, Enterprise Vector Icons & Wallet Vouchers:**
   - `_generate_gatepass_number` (`GP-TECH-YYYY-NNNN`) and `_generate_wallet_txn_number` (`WTX-YYYY-NNNN`) compute `MAX` numeric suffix across all rows (including soft-deleted) instead of `COUNT(id)+1`.
-  - `TechnicianOperationsPage.tsx` provides 1-click printable Gatepass Voucher Slips (`printGatepassSlip`) and multipart receipt/voucher uploads (`apiPostMultipart` -> `/technical-tasks/upload-screenshot`) rendered as clickable `📎 View Receipt` links in the Wallet Ledger.
+  - `TechnicianOperationsPage.tsx` renders crisp `24x24` Lucide-style stroke `<svg aria-hidden="true">` icons across all KPI cards (`Truck`, `AlertTriangle`, `Banknote`, `ShieldCheck`), module tabs (`Package`, `Wallet`, `ShieldCheck`), table badges, and modals (zero OS cartoon emojis), alongside 1-click printable Gatepass Voucher Slips (`printGatepassSlip`) and multipart receipt/voucher uploads (`apiPostMultipart` -> `/technical-tasks/upload-screenshot`) rendered as clickable `View Receipt` links in the Wallet Ledger.
 
 ### 8.20. HRMS: Leave Management Foundation & Master Data Architecture (Phase 1)
 - **Files:**
@@ -1641,16 +1641,16 @@ A user may be assigned any number of Roles simultaneously (`POST /users/{id}/rol
 | **Sales: Proforma** | `GET` | `/api/v1/sales/proforma-invoices/{id}/pdf` | Generate/stream official branded Proforma Invoice PDF | `sale.pi.view` |
 | **Sales: Proforma** | `GET` | `/api/v1/sales/proforma-invoices/export` | Export proforma invoices to Excel / CSV | `sale.pi.view` |
 | **Sales: Orders**   | `GET` | `/api/v1/sales/orders` | Paginated list of confirmed & pending Sales Orders with status stages and filters | `saleorder.view` |
-| **Sales: Orders**   | `POST`| `/api/v1/sales/orders` | Create Sales Order defaulting to `pending` status with line items & commercial terms | `saleorder.create` |
+| **Sales: Orders**   | `POST`| `/api/v1/sales/orders` | Create Sales Order defaulting to `pending` status with line items, optional `technician_gatepass_id` stock-hold handoff & `MachineWarranty` serial sync | `saleorder.create` |
 | **Sales: Orders**   | `GET` | `/api/v1/sales/orders/{id}` | Inspect detailed Sales Order record with line items, tax, and address breakdown | `saleorder.view` |
-| **Sales: Orders**   | `PATCH`| `/api/v1/sales/orders/{id}` | Update Sales Order details, line items, and commercial fields | `saleorder.update` |
-| **Sales: Orders**   | `PATCH`| `/api/v1/sales/orders/{id}/status` | Advance Sales Order stage (`pending` -> `sales_confirmed` -> `admin_approved` -> `acc_confirmed` -> `gatepass_created` -> `dispatched` -> `lr`) with PO & Tally Bill metadata | Authenticated (Workflow RBAC) |
+| **Sales: Orders**   | `PATCH`| `/api/v1/sales/orders/{id}` | Update Sales Order details, line items, commercial fields & synced `MachineWarranty` serials | `saleorder.update` |
+| **Sales: Orders**   | `PATCH`| `/api/v1/sales/orders/{id}/status` | Advance Sales Order stage (`pending` -> `sales_confirmed` -> `admin_approved` -> `acc_confirmed` -> `gatepass_created` -> `dispatched` -> `lr` or `cancelled`, re-holding linked Technician Gatepass on cancel) with PO & Tally Bill metadata | Authenticated (Workflow RBAC) |
 | **Sales: Orders**   | `POST`| `/api/v1/sales/upload-po` | Upload client Purchase Order (PO) document (`inhyma-sales-docs` / `sales_po`) | Authenticated |
 | **Sales: Orders**   | `POST`| `/api/v1/sales/upload-tally-bill` | Upload Tally Bill invoice document (`inhyma-sales-docs` / `sales_tally_bills`) | Authenticated |
 | **Sales: Orders**   | `POST`| `/api/v1/sales/upload-lr` | Upload Lorry Receipt (LR) document (`inhyma-sales-docs` / `sales_lr`) | Authenticated |
 | **Sales: Orders**   | `POST`| `/api/v1/sales/upload-dispatch-media` | Upload multiple dispatch images/videos (`inhyma-sales-docs` / `sales_dispatch_media`) | Authenticated |
 | **Sales: Orders**   | `POST`| `/api/v1/sales/orders/{id}/status-with-po` | Atomic multipart status transition with optional PO document upload | Authenticated (Workflow RBAC) |
-| **Sales: Orders**   | `DELETE`| `/api/v1/sales/orders/{id}` | Soft-delete Sales Order and atomically revert deducted stock back to inventory | `saleorder.delete` |
+| **Sales: Orders**   | `DELETE`| `/api/v1/sales/orders/{id}` | Soft-delete Sales Order, revert deducted stock, and re-hold/reopen any linked Technician Gatepass | `saleorder.delete` |
 | **Sales: Orders**   | `POST`| `/api/v1/sales/orders/{id}/restore` | Restore soft-deleted Sales Order (Admin only) | `saleorder.manage` |
 | **Sales: Orders**   | `GET` | `/api/v1/sales/metrics` | Grouped sales order KPI metrics by status tabs (all, pending, confirmed, dispatched, etc.) | `saleorder.view` |
 | **Sales: Orders**   | `GET` | `/api/v1/sales/next-gatepass-no` | Generate next sequential gate pass reference number | `saleorder.view` |
