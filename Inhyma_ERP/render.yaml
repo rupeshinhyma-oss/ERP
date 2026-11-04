@@ -13,6 +13,8 @@ services:
     envVars:
       - key: PYTHONUNBUFFERED
         value: "1"
+      - key: WEBSOCKETS_MAX_LINE_LENGTH
+        value: "65536"
       - key: ENVIRONMENT
         value: production
       - key: DEBUG

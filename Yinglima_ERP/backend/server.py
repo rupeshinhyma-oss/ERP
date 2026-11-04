@@ -31,6 +31,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+os.environ.setdefault("PYTHONUNBUFFERED", "1")
+os.environ.setdefault("WEBSOCKETS_MAX_LINE_LENGTH", "65536")
 BACKEND_DIR = Path(__file__).resolve().parent
 
 

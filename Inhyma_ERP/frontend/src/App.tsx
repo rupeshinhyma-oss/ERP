@@ -103,7 +103,6 @@ import { LeadSourcesPage } from "@/pages/masters/LeadSources";
 import { AdjustmentPurposesPage } from "@/pages/masters/AdjustmentPurposes";
 import { CallTypesPage } from "@/pages/masters/CallTypes";
 import { NetworkStatusNotifier } from "@/components/NetworkStatusNotifier";
-import { LiveConnectionIndicator } from "@/components/LiveConnectionIndicator";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { LiveConnectionLifecycle } from "@/lib/live/liveConnectionLifecycle";
 import { ProductGalleryPage } from "@/pages/ProductGallery";
@@ -169,7 +168,6 @@ export function App() {
     <>
       <NetworkStatusNotifier />
       <LiveConnectionLifecycle />
-      <LiveConnectionIndicator />
       {/*
         Keyed by pathname: if a page crashes and the user navigates away
         (rather than clicking "Try Again"), this mounts a fresh boundary

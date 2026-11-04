@@ -122,7 +122,7 @@ function prefetchAllPages(): void {
 
 
 import { NetworkStatusNotifier } from "@/components/NetworkStatusNotifier";
-import { LiveConnectionIndicator } from "@/components/LiveConnectionIndicator";
+// LiveConnectionIndicator removed per UI specification
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { LiveConnectionLifecycle } from "@/lib/live/liveConnectionLifecycle";
 import { initGlobalPasteSanitizer } from "@/lib/pasteSanitizer";
@@ -178,7 +178,7 @@ export function App() {
     <>
       <NetworkStatusNotifier />
       <LiveConnectionLifecycle />
-      <LiveConnectionIndicator />
+      {/* LiveConnectionIndicator removed */}
       {/*
         Keyed by pathname: if a page crashes and the user navigates away
         (rather than clicking "Try Again"), this mounts a fresh boundary

@@ -14,9 +14,12 @@ composition root of the application is easy to find and reason about.
 from __future__ import annotations
 
 import asyncio
+import os
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from pathlib import Path
+
+os.environ.setdefault("WEBSOCKETS_MAX_LINE_LENGTH", "65536")
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware

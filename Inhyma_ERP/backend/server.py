@@ -32,6 +32,7 @@ import sys
 from pathlib import Path
 
 os.environ.setdefault("PYTHONUNBUFFERED", "1")
+os.environ.setdefault("WEBSOCKETS_MAX_LINE_LENGTH", "65536")
 
 for _stream in (sys.stdout, sys.stderr):
     if hasattr(_stream, "reconfigure"):

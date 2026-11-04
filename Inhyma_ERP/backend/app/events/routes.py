@@ -40,6 +40,7 @@ Server -> client:
 
 from __future__ import annotations
 
+import asyncio
 import json
 
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
@@ -90,10 +91,39 @@ def _authorize_channel(channel: str, current_user: CurrentUser) -> str | None:
     return None
 
 
+async def _authenticate_live_socket(
+    websocket: WebSocket, token: str | None
+) -> tuple[CurrentUser | None, bool]:
+    """Verify ?token=... or a first-frame {"action": "auth", "token": ...} handshake."""
+    if token:
+        try:
+            return await verify_websocket_token(websocket, token), False
+        except UnauthorizedException:
+            await websocket.accept()
+            await websocket.close(code=4401, reason="Invalid or expired token.")
+            return None, True
+
+    await websocket.accept()
+    try:
+        raw_auth = await asyncio.wait_for(websocket.receive_text(), timeout=10.0)
+        if len(raw_auth.encode("utf-8", errors="ignore")) > 65536:
+            raise UnauthorizedException("Auth frame too large.")
+        parsed = json.loads(raw_auth)
+        if not isinstance(parsed, dict) or parsed.get("action") != "auth" or not isinstance(parsed.get("token"), str):
+            raise UnauthorizedException("Missing auth token.")
+        return await verify_websocket_token(websocket, parsed["token"]), True
+    except Exception:
+        try:
+            await websocket.close(code=4401, reason="Invalid or expired token.")
+        except Exception:
+            pass
+        return None, True
+
+
 @router.websocket("/live")
 async def live_events(
     websocket: WebSocket,
-    token: str = Query(..., description="Access token (same one used for Authorization: Bearer)."),
+    token: str | None = Query(default=None, description="Access token (or sent via initial auth frame)."),
 ) -> None:
     """
     General-purpose live-event WebSocket. See the module docstring above
@@ -106,14 +136,16 @@ async def live_events(
     authentication mechanism... do not create a second unrelated
     authentication system."
     """
-    try:
-        current_user = await verify_websocket_token(websocket, token)
-    except UnauthorizedException:
-        await websocket.accept()
-        await websocket.close(code=4401, reason="Invalid or expired token.")
+    current_user, already_accepted = await _authenticate_live_socket(websocket, token)
+    if current_user is None:
         return
 
-    await connection_manager.connect(websocket, current_user.id, getattr(current_user, "session_id", ""))
+    await connection_manager.connect(
+        websocket,
+        current_user.id,
+        getattr(current_user, "session_id", ""),
+        already_accepted=already_accepted,
+    )
 
     try:
         while True:
@@ -156,6 +188,9 @@ async def _handle_client_message(websocket: WebSocket, raw: str, current_user: C
 
     action = message.get("action")
     channel = message.get("channel")
+
+    if action == "auth":
+        return
 
     if action == "ping":
         await connection_manager.send_to_websocket(

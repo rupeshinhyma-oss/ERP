@@ -14,6 +14,8 @@ composition root of the application is easy to find and reason about.
 from __future__ import annotations
 
 import asyncio
+import os
+os.environ.setdefault("WEBSOCKETS_MAX_LINE_LENGTH", "65536")
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from pathlib import Path

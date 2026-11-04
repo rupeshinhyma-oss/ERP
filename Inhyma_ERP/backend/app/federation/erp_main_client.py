@@ -282,6 +282,7 @@ async def push_profile_to_erp_main(email: str | None, display_name: str | None) 
 
 # --- Per-session (one login = one session id) -------------------------------------------------------------------
 _SESSION_STATE_CACHE: dict[str, tuple[float, str]] = {}
+_SESSION_STATE_LOCKS: dict[tuple[int, str], Any] = {}
 _SESSION_STATE_TTL_SECONDS = 45.0           # a session known to be active is not re-checked for this long
 _SESSION_STATE_UNREACHABLE_TTL_SECONDS = 15.0
 
@@ -356,6 +357,7 @@ async def central_session_state(session_id: str) -> str:
     Cached; and fail-OPEN ("unknown") when ERP_Main is unreachable, not configured, or does not know the session,
     so an ERP_Main outage never logs everybody out.
     """
+    import asyncio as _asyncio
     import time as _time
 
     sid = (session_id or "").strip()
@@ -365,17 +367,32 @@ async def central_session_state(session_id: str) -> str:
     hit = _SESSION_STATE_CACHE.get(sid)
     if hit is not None and hit[0] > now:
         return hit[1]
-    state, ttl = "unknown", _SESSION_STATE_UNREACHABLE_TTL_SECONDS
-    try:
-        data = await verify_ecosystem_session(sid, budget_seconds=4.0, allow_stale=False)
-        if data.get("active") is True:
-            state, ttl = "active", _SESSION_STATE_TTL_SECONDS
-        elif data.get("revoked") is True:
-            state, ttl = "revoked", _SESSION_STATE_TTL_SECONDS
-    except EcosystemSessionError:
-        pass
-    if len(_SESSION_STATE_CACHE) > 5000:
-        for k in [k for k, (exp, _) in _SESSION_STATE_CACHE.items() if exp <= now][:2500] or list(_SESSION_STATE_CACHE)[:2500]:
-            _SESSION_STATE_CACHE.pop(k, None)
-    _SESSION_STATE_CACHE[sid] = (now + ttl, state)
-    return state
+
+    lock_key = (id(_asyncio.get_running_loop()), sid)
+    lock = _SESSION_STATE_LOCKS.get(lock_key)
+    if lock is None:
+        if len(_SESSION_STATE_LOCKS) > 5000:
+            _SESSION_STATE_LOCKS.clear()
+        lock = _asyncio.Lock()
+        _SESSION_STATE_LOCKS[lock_key] = lock
+
+    async with lock:
+        now = _time.monotonic()
+        hit = _SESSION_STATE_CACHE.get(sid)
+        if hit is not None and hit[0] > now:
+            return hit[1]
+        state, ttl = "unknown", _SESSION_STATE_UNREACHABLE_TTL_SECONDS
+        try:
+            data = await verify_ecosystem_session(sid, budget_seconds=4.0, allow_stale=False)
+            if data.get("active") is True:
+                state, ttl = "active", _SESSION_STATE_TTL_SECONDS
+            elif data.get("revoked") is True:
+                state, ttl = "revoked", _SESSION_STATE_TTL_SECONDS
+        except EcosystemSessionError:
+            pass
+        now = _time.monotonic()
+        if len(_SESSION_STATE_CACHE) > 5000:
+            for k in [k for k, (exp, _) in _SESSION_STATE_CACHE.items() if exp <= now][:2500] or list(_SESSION_STATE_CACHE)[:2500]:
+                _SESSION_STATE_CACHE.pop(k, None)
+        _SESSION_STATE_CACHE[sid] = (now + ttl, state)
+        return state

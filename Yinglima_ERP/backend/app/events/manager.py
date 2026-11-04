@@ -76,7 +76,7 @@ class ConnectionManager:
 
     # --- connection lifecycle ------------------------------------------------
 
-    async def connect(self, websocket: WebSocket, user_id: uuid.UUID, session_id: str = "") -> None:
+    async def connect(self, websocket: WebSocket, user_id: uuid.UUID, session_id: str = "", *, already_accepted: bool = False) -> None:
         """
         Accept a new WebSocket connection and register it (with no channel
         subscriptions yet -- see :meth:`subscribe`).
@@ -88,7 +88,8 @@ class ConnectionManager:
         user" (Phase 1 brief section 12) are simply two ordinary entries
         rather than a special case to detect/reject.
         """
-        await websocket.accept()
+        if not already_accepted:
+            await websocket.accept()
         self._connections[websocket] = _Connection(websocket=websocket, user_id=user_id, session_id=session_id or "")
         logger.info("WebSocket connected.", extra={"user_id": str(user_id)})
 

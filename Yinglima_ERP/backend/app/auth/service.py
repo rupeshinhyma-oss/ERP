@@ -234,7 +234,8 @@ class AuthService:
         """Issue a fresh access + refresh token pair (both bound to ONE session id) and persist the session row."""
         sid = session_id or new_local_session_id()
         permissions = await self.get_user_effective_permissions(user.id)
-        access = create_access_token(user.id, permissions=list(permissions), session_id=sid)
+        compact_perms = ["*"] if ("*" in permissions or isinstance(permissions, AdminPermissionSet)) else []
+        access = create_access_token(user.id, permissions=compact_perms, session_id=sid)
         refresh = create_refresh_token(user.id, session_id=sid)
 
         await self.session_repository.create(

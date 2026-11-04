@@ -64,9 +64,11 @@ function computeBackoffDelay(attempt: number): number {
  * from the exact logic `Planning.tsx`'s existing WebSocket effect already
  * uses, so both connections build their URL identically.
  */
+const MAX_QUERY_TOKEN_LENGTH = 4000;
 function buildWebSocketUrl(path: string, token: string): string {
   const absoluteApiBase = new URL(`${API_BASE}${path}`, window.location.href).toString();
   const wsBase = absoluteApiBase.replace(/^https:/, "wss:").replace(/^http:/, "ws:");
+  if (token.length > MAX_QUERY_TOKEN_LENGTH) return wsBase;
   return `${wsBase}?token=${encodeURIComponent(token)}`;
 }
 
@@ -186,6 +188,9 @@ export class LiveClient {
     this.socket = socket;
 
     socket.onopen = () => {
+      if (token.length > MAX_QUERY_TOKEN_LENGTH && socket.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify({ action: "auth", token }));
+      }
       this.reconnectAttempt = 0;
       this.confirmedChannels.clear();
       this.startHeartbeat();
