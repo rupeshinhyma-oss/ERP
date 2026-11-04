@@ -299,7 +299,17 @@ export function FinancialPlanningReportPage({
     if (isPropControlled) return;
     const controller = new AbortController();
     void fetchReport(controller.signal);
-    return () => controller.abort();
+
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        void fetchReport();
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      controller.abort();
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
   }, [isPropControlled, fetchReport]);
 
   // Stage Tabs: Pending | Cleared
@@ -990,46 +1000,6 @@ export function FinancialPlanningReportPage({
           </div>
 
           <div className="page-header-actions" style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-            {!isPropControlled && (
-              <button
-                type="button"
-                className="btn"
-                data-testid="fp-btn-refresh"
-                aria-label="Refresh"
-                title="Refresh live records from Import Purchase, Local Purchase & Sales Process"
-                disabled={loading}
-                onClick={() => void fetchReport()}
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  height: "35px",
-                  background: "#ffffff",
-                  color: "#334155",
-                  border: "1px solid #cbd5e1",
-                  borderRadius: "6px",
-                  padding: "8px 12px",
-                  cursor: loading ? "not-allowed" : "pointer",
-                }}
-              >
-                <svg
-                  width="14"
-                  height="14"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2.1"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  aria-hidden="true"
-                >
-                  <polyline points="23 4 23 10 17 10" />
-                  <polyline points="1 20 1 14 7 14" />
-                  <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
-                </svg>
-              </button>
-            )}
-
             <button
               type="button"
               className="btn btn-filter-toggle"

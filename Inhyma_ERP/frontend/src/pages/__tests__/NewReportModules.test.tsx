@@ -85,8 +85,8 @@ describe("Financial Planning Report & Cargo Overview Modules", () => {
     expect(screen.getByTestId("app-shell").getAttribute("data-active-key")).toBe("reports-financial-planning");
     expect(screen.getByRole("heading", { name: "Financial Planning Report" })).toBeTruthy();
 
-    // Header actions: Refresh + Filter toggle + Export button
-    expect(screen.getByTestId("fp-btn-refresh")).toBeTruthy();
+    // Header actions: Filter toggle + Export button only (no manual Refresh button)
+    expect(screen.queryByTestId("fp-btn-refresh")).toBeNull();
     expect(screen.getByTestId("fp-btn-toggle-filter")).toBeTruthy();
     expect(screen.getByTestId("fp-btn-export")).toBeTruthy();
 
