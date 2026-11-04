@@ -128,10 +128,16 @@ function computeHeaderWidth(label: string): number {
   return Math.max(CELL_MIN_WIDTH, Math.min(CELL_MAX_WIDTH, estimated));
 }
 
-/** A column's effective width: its manually-resized width_px if set, otherwise computed from its header label. */
-function effectiveColumnWidth(column: { name: string; width_px?: number | null }): number {
+/** A column's effective width: its manually-resized width_px if set, otherwise computed from its header label (and stuffing date / description if present). */
+function effectiveColumnWidth(column: { name: string; width_px?: number | null; description?: string | null }): number {
   if (column.width_px != null) return Math.max(CELL_MIN_WIDTH, Math.min(CELL_MAX_WIDTH, column.width_px));
-  return computeHeaderWidth(column.name);
+  const baseWidth = computeHeaderWidth(column.name);
+  if (column.description && column.description.trim()) {
+    const descLen = column.description.trim().length;
+    const descWidth = Math.min(135, Math.ceil(descLen * 6.8) + 22);
+    return Math.max(baseWidth, descWidth);
+  }
+  return baseWidth;
 }
 
 /**
@@ -308,32 +314,46 @@ function statusLabel(
 }
 
 /**
- * Floating description popover — appears anchored below a column header when the
- * user clicks the ✎ description button. Pressing Enter saves; Shift+Enter inserts
- * a new line; Escape closes without saving.
+ * Floating stuffing date / description popover — appears anchored below a column header when the
+ * user clicks the ✎ button or the displayed Stuffing Date badge. Pressing Enter saves; Shift+Enter
+ * inserts a new line; Escape closes without saving.
  */
 function DescriptionPopover({
   anchor,
   initialValue,
+  columnName,
+  isConsignmentColumn = false,
   onSave,
   onClose,
 }: {
   anchor: HTMLElement;
   initialValue: string;
+  columnName?: string;
+  isConsignmentColumn?: boolean;
   onSave: (text: string) => void;
   onClose: () => void;
 }) {
   const [text, setText] = useState(initialValue);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
+  // Extract YYYY-MM-DD for the native <input type="date"> if `text` contains DD/MM/YYYY or YYYY-MM-DD
+  const datePickerValue = useMemo(() => {
+    const trimmed = (text || "").trim();
+    const dmy = trimmed.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+    if (dmy) return `${dmy[3]}-${dmy[2]}-${dmy[1]}`;
+    const ymd = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (ymd) return `${ymd[1]}-${ymd[2]}-${ymd[3]}`;
+    return "";
+  }, [text]);
+
   // Snapshot position on initial mount so if anchor unmounts or mouse leaves the header, the popover remains locked in place
   const [pos] = useState(() => {
     const rect = anchor.getBoundingClientRect();
-    const left = Math.max(10, Math.min(rect.left, window.innerWidth - 290));
+    const left = Math.max(10, Math.min(rect.left, window.innerWidth - 295));
     const top =
-      rect.bottom + 230 > window.innerHeight && rect.top > 240
-        ? Math.max(10, rect.top - 220)
-        : Math.max(10, Math.min(rect.bottom + 6, window.innerHeight - 240));
+      rect.bottom + 275 > window.innerHeight && rect.top > 285
+        ? Math.max(10, rect.top - 265)
+        : Math.max(10, Math.min(rect.bottom + 6, window.innerHeight - 280));
     return { top, left };
   });
 
@@ -342,13 +362,13 @@ function DescriptionPopover({
   }, []);
 
   function commit() {
-    onSave(text);
+    onSave(text.trim());
     onClose();
   }
 
   return createPortal(
     <>
-      <div style={{ position: "fixed", inset: 0, zIndex: 9998 }} onClick={() => { onSave(text); onClose(); }} />
+      <div style={{ position: "fixed", inset: 0, zIndex: 9998 }} onClick={() => { onSave(text.trim()); onClose(); }} />
       <div
         style={{
           position: "fixed",
@@ -359,13 +379,53 @@ function DescriptionPopover({
           border: "1px solid #CBD5E1",
           borderRadius: 8,
           boxShadow: "0 10px 25px -5px rgba(0,0,0,0.2), 0 8px 10px -6px rgba(0,0,0,0.1)",
-          padding: 10,
-          width: 270,
+          padding: 12,
+          width: 275,
         }}
       >
-        <div style={{ fontSize: 11, fontWeight: 600, color: "#64748B", marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.05em" }}>
-          Description
+        <div style={{ fontSize: 11, fontWeight: 700, color: "#334155", marginBottom: 8, textTransform: "uppercase", letterSpacing: "0.05em", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <span>{isConsignmentColumn ? `Stuffing Date${columnName ? ` — ${columnName}` : ""}` : "Column Description"}</span>
         </div>
+
+        {isConsignmentColumn && (
+          <div style={{ marginBottom: 8 }}>
+            <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: "#64748B", marginBottom: 3 }}>
+              Pick Stuffing Date
+            </label>
+            <input
+              type="date"
+              value={datePickerValue}
+              onChange={(e) => {
+                const val = e.target.value;
+                if (!val) {
+                  setText("");
+                  return;
+                }
+                const [yyyy, mm, dd] = val.split("-");
+                if (yyyy && mm && dd) {
+                  setText(`${dd}/${mm}/${yyyy}`);
+                } else {
+                  setText(val);
+                }
+              }}
+              style={{
+                width: "100%",
+                border: "1px solid #CBD5E1",
+                borderRadius: 6,
+                padding: "5px 8px",
+                fontSize: 12.5,
+                color: "#0F172A",
+                background: "#F8FAFC",
+                boxSizing: "border-box",
+                outline: "none",
+              }}
+            />
+          </div>
+        )}
+
+        <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: "#64748B", marginBottom: 3 }}>
+          {isConsignmentColumn ? "Or Type Date / Stuffing Note" : "Note"}
+        </label>
         <textarea
           ref={textareaRef}
           value={text}
@@ -379,8 +439,8 @@ function DescriptionPopover({
               commit();
             }
           }}
-          placeholder="Add a note for this column…"
-          rows={4}
+          placeholder={isConsignmentColumn ? "e.g. 25/10/2026 or Stuffing Date…" : "Add a note for this column…"}
+          rows={isConsignmentColumn ? 2 : 4}
           style={{
             width: "100%",
             border: "1px solid #E2E8F0",
@@ -393,21 +453,37 @@ function DescriptionPopover({
             boxSizing: "border-box",
           }}
         />
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: 6, marginTop: 8 }}>
-          <button
-            type="button"
-            onClick={onClose}
-            style={{ fontSize: 12, padding: "4px 10px", border: "1px solid #E2E8F0", borderRadius: 5, background: "#fff", cursor: "pointer", color: "#64748B" }}
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            onClick={commit}
-            style={{ fontSize: 12, padding: "4px 10px", border: "none", borderRadius: 5, background: "#2563EB", color: "#fff", cursor: "pointer", fontWeight: 600 }}
-          >
-            Save
-          </button>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 6, marginTop: 8 }}>
+          <div>
+            {text.trim() !== "" && (
+              <button
+                type="button"
+                onClick={() => {
+                  onSave("");
+                  onClose();
+                }}
+                style={{ fontSize: 11.5, padding: "4px 8px", border: "1px solid #FECACA", borderRadius: 5, background: "#FEF2F2", cursor: "pointer", color: "#DC2626", fontWeight: 600 }}
+              >
+                Clear
+              </button>
+            )}
+          </div>
+          <div style={{ display: "flex", gap: 6 }}>
+            <button
+              type="button"
+              onClick={onClose}
+              style={{ fontSize: 12, padding: "4px 10px", border: "1px solid #E2E8F0", borderRadius: 5, background: "#fff", cursor: "pointer", color: "#64748B" }}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={commit}
+              style={{ fontSize: 12, padding: "4px 10px", border: "none", borderRadius: 5, background: "#2563EB", color: "#fff", cursor: "pointer", fontWeight: 600 }}
+            >
+              Save
+            </button>
+          </div>
         </div>
         <div style={{ fontSize: 11, color: "#94A3B8", marginTop: 4, textAlign: "right" }}>Enter to save · Shift+Enter for new line</div>
       </div>
@@ -4586,6 +4662,7 @@ export function PlanningPage() {
                       <ColumnHeader
                         key={col.id}
                         column={col}
+                        mumGroupLabel={grid?.sheet?.mum_group_label}
                         canManage={canManageColumns}
                         onRename={(name) => handleRenameColumn(col.id, name)}
                         onDelete={() => handleDeleteColumn(col.id)}
@@ -5132,6 +5209,7 @@ export function PlanningPage() {
 /** One admin-defined column header: click name to rename (if permitted), × to delete. */
 function ColumnHeader({
   column,
+  mumGroupLabel,
   canManage,
   onRename,
   onDelete,
@@ -5148,6 +5226,7 @@ function ColumnHeader({
   onSort,
 }: {
   column: PlanningColumn;
+  mumGroupLabel?: string;
   canManage: boolean;
   onRename: (name: string) => void;
   onDelete: () => void;
@@ -5169,7 +5248,9 @@ function ColumnHeader({
   const [draft, setDraft] = useState(column.name);
   const [descAnchor, setDescAnchor] = useState<HTMLElement | null>(null);
   const [resizing, setResizing] = useState(false);
-  const hasDescription = !!column.description;
+  const hasDescription = Boolean(column.description && column.description.trim());
+  const isMumCol = isPureMumColumn(column.name, mumGroupLabel);
+  const canEditDescription = isMumCol || Boolean(column.enable_description);
   const colWidth = width ?? CELL_MIN_WIDTH;
 
   function commit() {
@@ -5376,11 +5457,11 @@ function ColumnHeader({
                 </svg>
               </button>
 
-              {isPureMumColumn(column.name) && (
+              {canEditDescription && (
                 <button
                   type="button"
                   onClick={(e) => setDescAnchor(descAnchor ? null : e.currentTarget)}
-                  title={hasDescription ? `Description: ${column.description}` : "Add a note about this column"}
+                  title={hasDescription ? `Stuffing Date / Note: ${column.description} (Click to edit)` : "Set Stuffing Date / Note for this column"}
                   style={{
                     border: "none",
                     background: "transparent",
@@ -5419,6 +5500,36 @@ function ColumnHeader({
                   ×
                 </button>
               )}
+
+              {hasDescription && (
+                <div
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (canEditDescription) {
+                      setDescAnchor(descAnchor ? null : e.currentTarget);
+                    }
+                  }}
+                  title={`Stuffing Date / Note: ${column.description} (Click to edit)`}
+                  style={{
+                    marginTop: 2,
+                    padding: "1.5px 6px",
+                    borderRadius: 4,
+                    background: "#EFF6FF",
+                    border: "1px solid #BFDBFE",
+                    color: "#1D4ED8",
+                    fontSize: 10.5,
+                    fontWeight: 700,
+                    lineHeight: 1.25,
+                    whiteSpace: "normal",
+                    wordBreak: "break-word",
+                    textAlign: "center",
+                    cursor: canEditDescription ? "pointer" : "default",
+                    maxWidth: "100%",
+                  }}
+                >
+                  {formatDaysMonthYear(column.description)}
+                </div>
+              )}
             </div>
           </>
         )}
@@ -5427,6 +5538,8 @@ function ColumnHeader({
         <DescriptionPopover
           anchor={descAnchor}
           initialValue={column.description ?? ""}
+          columnName={column.name}
+          isConsignmentColumn={isMumCol}
           onSave={(text) => onSaveDescription(text || null)}
           onClose={() => setDescAnchor(null)}
         />

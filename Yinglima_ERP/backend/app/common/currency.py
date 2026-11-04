@@ -39,7 +39,7 @@ DEFAULT_RATES: dict[str, float] = {
 # In-memory cache to avoid querying DB on every single product price row
 _cached_rates: dict[str, float] = dict(DEFAULT_RATES)
 _last_cache_time: float = 0
-CACHE_TTL_SECONDS = 300  # 5 minutes
+CACHE_TTL_SECONDS = 3600  # 1 hour
 
 
 async def fetch_live_rates() -> dict[str, float] | None:
@@ -159,9 +159,10 @@ async def get_active_rates(force_refresh: bool = False) -> dict[str, float]:
 
             if "CNY" in loaded:
                 _cached_rates = loaded
-                _last_cache_time = now
-                return _cached_rates
+            _last_cache_time = now
+            return _cached_rates
     except Exception as exc:
+        _last_cache_time = now
         logger.warning(f"Error reading currency_rates from database: {exc}. Using memory cache.")
 
     return _cached_rates

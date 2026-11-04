@@ -38,6 +38,7 @@ from app.masters.states.routes import router as states_router
 from app.masters.buyer_types.routes import router as buyer_types_router
 from app.masters.supplier_types.routes import router as supplier_types_router
 from app.masters.uom.routes import router as uom_router
+from app.masters.warehouses.routes import router as warehouses_router
 from app.organizations.dependencies import get_organization_service
 from app.organizations.routes import router as organizations_router
 from app.organizations.service import OrganizationService
@@ -100,6 +101,7 @@ api_router.include_router(product_prices_router)
 api_router.include_router(company_list_router)
 api_router.include_router(supplier_types_router)
 api_router.include_router(buyer_types_router)
+api_router.include_router(warehouses_router)
 
 # Phase 8: Supplier Management.
 api_router.include_router(suppliers_router)
@@ -125,6 +127,10 @@ api_router.include_router(sales_router)
 # Stock Movement: Inward & Outward Register, Live Stock Balance
 from app.stock.routes import router as stock_router
 api_router.include_router(stock_router)
+
+# Finance: Financial Report & Payment Planner (Local Purchase + Sales Process + Agent Freight)
+from app.finance.routes import router as finance_router
+api_router.include_router(finance_router)
 
 
 # Notifications & Alert Rules

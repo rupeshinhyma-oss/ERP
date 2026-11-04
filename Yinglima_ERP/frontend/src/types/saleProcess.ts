@@ -4,6 +4,7 @@
 
 export type SaleOrderStatus =
   | 'pending'
+  | 'confirmed'
   | 'sales_confirmed'
   | 'admin_approved'
   | 'dispatched'
@@ -40,6 +41,7 @@ export interface SaleOrderItem {
   total_cbm?: number;
   total_supplier_amount_rmb?: number;
   is_spare?: boolean;
+  was_spare?: boolean;
 
   created_at?: string;
   updated_at?: string;
@@ -84,6 +86,8 @@ export interface SaleOrder {
   transporter_name?: string | null;
   port_of_loading?: string | null;
   port_of_discharge?: string | null;
+  etd_origin_date?: string | null;
+  eta_port_date?: string | null;
   remarks?: string | null;
 
   stock_movement_id?: string | null;
@@ -104,8 +108,9 @@ export interface MetricItem {
 export interface SaleSummaryMetrics {
   all: MetricItem;
   pending: MetricItem;
-  sales_confirmed: MetricItem;
-  admin_approved: MetricItem;
+  confirmed?: MetricItem;
+  sales_confirmed?: MetricItem;
+  admin_approved?: MetricItem;
   dispatched: MetricItem;
   lr: MetricItem;
   cancelled: MetricItem;
@@ -150,6 +155,7 @@ export interface ExtractedConsignmentItem {
   freight_unit_usd?: number;
   cfr_price_usd?: number;
   is_spare?: boolean;
+  was_spare?: boolean;
 }
 
 export interface PlanningConsignmentItemsResponse {
@@ -186,6 +192,7 @@ export interface ProductCostingInfo {
   total_cbm: number;
   total_supplier_amount_rmb: number;
   is_spare?: boolean;
+  was_spare?: boolean;
 }
 
 export interface SaleOrderFormData {
@@ -217,6 +224,8 @@ export interface SaleOrderFormData {
   transporter_name?: string | null;
   port_of_loading?: string | null;
   port_of_discharge?: string | null;
+  etd_origin_date?: string | null;
+  eta_port_date?: string | null;
   remarks?: string | null;
 
   items: Array<{

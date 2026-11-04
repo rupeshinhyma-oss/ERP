@@ -92,7 +92,22 @@ class StockMovementRepository:
         query = query.offset(offset).limit(limit)
 
         result = await self.session.execute(query)
-        return list(result.scalars().all())
+        movements = list(result.scalars().all())
+        for mv in movements:
+            for it in mv.items or []:
+                if not it.product_id:
+                    from app.masters.products.models import Product
+                    conds = []
+                    if it.product_code and it.product_code.strip():
+                        conds.append(Product.product_code.ilike(it.product_code.strip()))
+                    if it.product_name and it.product_name.strip():
+                        conds.append(func.lower(Product.product_name_tally) == it.product_name.strip().lower())
+                    if conds:
+                        p_res = await self.session.execute(
+                            select(Product.id).where(Product.deleted_at.is_(None), or_(*conds)).limit(1)
+                        )
+                        it.product_id = p_res.scalar_one_or_none()
+        return movements
 
     async def count_movements(
         self,
@@ -206,6 +221,12 @@ class StockMovementRepository:
                         else_=0.0,
                     )
                 ).label("total_outward_qty"),
+                func.sum(
+                    case(
+                        (StockMovement.movement_type == "inward", StockMovementItem.damaged_quantity),
+                        else_=0.0,
+                    )
+                ).label("total_damaged_qty"),
                 func.max(StockMovement.movement_date).label("last_movement_date"),
             )
             .join(StockMovement, StockMovementItem.movement_id == StockMovement.id)
@@ -238,12 +259,27 @@ class StockMovementRepository:
         for row in rows:
             inward = float(row.total_inward_qty or 0.0)
             outward = float(row.total_outward_qty or 0.0)
+            damaged = float(row.total_damaged_qty or 0.0)
+            resolved_pid = row.product_id
+            if not resolved_pid:
+                from app.masters.products.models import Product
+                conds = []
+                if row.product_code and row.product_code.strip():
+                    conds.append(Product.product_code.ilike(row.product_code.strip()))
+                if row.product_name and row.product_name.strip():
+                    conds.append(func.lower(Product.product_name_tally) == row.product_name.strip().lower())
+                if conds:
+                    p_res = await self.session.execute(
+                        select(Product.id).where(Product.deleted_at.is_(None), or_(*conds)).limit(1)
+                    )
+                    resolved_pid = p_res.scalar_one_or_none()
             balances.append(
                 {
-                    "product_id": row.product_id,
+                    "product_id": resolved_pid,
                     "product_name": row.product_name,
                     "product_code": row.product_code,
                     "total_inward_qty": inward,
+                    "total_damaged_qty": damaged,
                     "total_outward_qty": outward,
                     "current_stock_qty": inward - outward,
                     "last_movement_date": row.last_movement_date,

@@ -44,6 +44,28 @@ export function SaleProcessOutwardModal({
 
   // Items state
   const [items, setItems] = useState<OutwardItemRow[]>([]);
+  const [warehouseOptions, setWarehouseOptions] = useState<{ id: string; name: string }[]>([
+    { id: "default-1", name: "Main Godown" },
+    { id: "default-2", name: "Factory Staging Yard" },
+    { id: "default-3", name: "Transit Bay" },
+    { id: "default-4", name: "Customs Bonded Area" },
+  ]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    apiGet<{ id: string; name: string }[]>("/masters/warehouses/all")
+      .then((res) => {
+        if (Array.isArray(res.data) && res.data.length > 0) {
+          setWarehouseOptions(res.data);
+          setWarehouseLocation((prev) =>
+            res.data!.some((w) => w.name === prev) ? prev : res.data![0].name
+          );
+        }
+      })
+      .catch(() => {
+        // Keep fallback options
+      });
+  }, [isOpen]);
 
   useEffect(() => {
     if (!isOpen || !orderId) {
@@ -298,23 +320,29 @@ export function SaleProcessOutwardModal({
 
                 <div>
                   <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#334155", marginBottom: "4px" }}>
-                    Warehouse Location *
+                    Destination Warehouse *
                   </label>
-                  <input
-                    type="text"
+                  <select
                     required
                     value={warehouseLocation}
                     onChange={(e) => setWarehouseLocation(e.target.value)}
-                    placeholder="e.g. Main Godown, Bay 1"
                     style={{
                       width: "100%",
                       padding: "8px 10px",
                       borderRadius: "6px",
                       border: "1px solid #cbd5e1",
+                      background: "#ffffff",
                       fontSize: "13px",
+                      fontWeight: 600,
                       boxSizing: "border-box",
                     }}
-                  />
+                  >
+                    {warehouseOptions.map((wh) => (
+                      <option key={wh.id} value={wh.name}>
+                        {wh.name}
+                      </option>
+                    ))}
+                  </select>
                 </div>
 
                 <div>

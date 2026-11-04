@@ -244,3 +244,29 @@ When auto-loading a consignment column (`extract_consignment_items`) or adding a
 3. **0ms Pre-Fill in Outward Dispatch Modal (`SaleProcessOutwardModal.tsx`):**
    - Reads cached order line items immediately from `getSaleOrderDetailCache(orderId)` so the Outward Dispatch modal opens at 0ms without a blank loading spinner.
 
+
+---
+
+## 13. Status Workflow Simplification & Logistics Dates (Release 2026-10-30)
+
+1. **Status Workflow:**
+   - **Pending:** Default status for every new Sale Process order.
+   - **Confirmed:** Replaces `Sales Confirmed`. Migration `e6f7a8b9c0d1` converts old `sales_confirmed` / `admin_approved` rows to `confirmed`.
+   - **Admin Approved removed** from tabs, KPI cards, and status options.
+   - **No status dropdown inside the form** (`SaleProcessForm.tsx`). Status changes happen from the list page 3-dot menu (`⋮`): `✅ Confirm Order`, `↩️ Revert to Pending`, and `📤 Outward / Dispatch Stock` (sets `Dispatched`).
+2. **Logistics Dates:**
+   - `ETD Origin Date` (`etd_origin_date`) and `ETA Port Date` (`eta_port_date`) added to the model, schemas, form (Logistics & Shipping Details card), and the list `Logistics Info` column.
+3. **3-Dot Menu Actions by Status:**
+
+| Status | Menu actions |
+| :--- | :--- |
+| Pending | ✅ Confirm Order, ❌ Cancel Order, ✏️ Edit, 🗑️ Delete |
+| Confirmed | ↩️ Revert to Pending, 📤 Dispatch (Outward Stock), ❌ Cancel Order, ✏️ Edit, 🗑️ Delete |
+| Dispatched | 🚚 Mark LR Received (optional LR No) |
+| LR | View only |
+| Cancelled | 🗑️ Delete (final — cannot be reopened or edited) |
+
+4. **Cancel Rules:** Cancelling a Pending or Confirmed order only changes the status (no stock change, because no stock has left the warehouse). Optional reason is appended to remarks. Dispatched / LR orders cannot be cancelled. Backend enforces all transitions in `SaleService.update_status`.
+
+5. **Item Table Toolbar (2026-10-30):** The `Costing & Supplier Columns` toggle, `Rate ¥` / `Apply Rate` quick-fill, and `+ Add Spare from Master` buttons were removed. Costing columns are always visible; products (including spares) are added through the `Search & add product from master` box.
+6. **Per-Order Spare-to-Product Toggle (`⇄ Make Product` / `↩ Make Spare`):** Spare line items in `SaleProcessForm.tsx` show a `⇄ Make Product` button next to the `Spare Part` badge. Clicking it converts that line item to a standalone product (`is_spare = false`) strictly for the current Sale Process order and its Commercial Invoice / Packing List (`get_trade_document_details`), without modifying the Product Master catalog.

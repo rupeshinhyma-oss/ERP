@@ -75,6 +75,14 @@ export const NAV_SECTIONS: NavSection[] = [
     ],
   },
   {
+    label: "FINANCE",
+    items: [
+      { key: "finance-report", label: "Financial Report", path: "/finance/report", icon: "coins" },
+      { key: "consignment-overview", label: "Consignment Overview", path: "/finance/consignment-overview", icon: "fileText" },
+      { key: "vat-return", label: "VAT Return", path: "/finance/vat-return", icon: "coins" },
+    ],
+  },
+  {
     label: "USER MANAGEMENT",
     items: [
       { key: "users", label: "Users", path: "/users", icon: "user", permission: "user.view" },
@@ -102,6 +110,7 @@ export const NAV_SECTIONS: NavSection[] = [
           { key: "masters-supplier-types", label: "Supplier Types", path: "/masters/supplier-types", permission: "suppliertype.view" },
           { key: "masters-buyer-types", label: "Buyer Types", path: "/masters/buyer-types", permission: "buyertype.view" },
           { key: "masters-company-list", label: "Organization List", path: "/masters/company-list", permission: "organizationlist.view" },
+          { key: "masters-warehouses", label: "Warehouses", path: "/masters/warehouses", permission: "product.view" },
         ],
       },
       { key: "notification-settings", label: "Notification Rules", path: "/notification-settings", icon: "bell", permission: "notification_settings.view" },
@@ -142,6 +151,7 @@ export const PAGE_TITLES: Record<string, string> = {
   "masters-brands": "Brands",
   "masters-supplier-types": "Supplier Types",
   "masters-buyer-types": "Buyer Types",
+  "masters-warehouses": "Warehouses",
 
   "masters-categories": "Categories",
   "masters-subcategories": "Sub Categories",
@@ -149,6 +159,10 @@ export const PAGE_TITLES: Record<string, string> = {
   "product-prices": "Product Prices",
   "local-purchases": "Local Purchase",
   "sale-process": "Sale Process",
+  "finance-report": "Finance Planning Report",
+  "/finance/report": "Finance Planning Report",
+  "consignment-overview": "Consignment Overview",
+  "/finance/consignment-overview": "Consignment Overview",
   "/sale/process": "Sale Process",
   "/sale/process/new": "New Sale Process Order",
   suppliers: "Suppliers",

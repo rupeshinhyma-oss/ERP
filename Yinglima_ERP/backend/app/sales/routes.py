@@ -264,7 +264,7 @@ async def update_order_status(
             created_by_name=user_name,
         )
     else:
-        order = await service.update_status(id, payload.status, payload.remarks)
+        order = await service.update_status(id, payload.status, payload.remarks, payload.lr_no)
     loaded = await service.repo.get_by_id(order.id)
     if not loaded:
         raise NotFoundException("Order could not be reloaded.")

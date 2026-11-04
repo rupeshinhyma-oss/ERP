@@ -641,6 +641,7 @@ class PlanningService:
         if mum_group_label == old_label:
             return sheet  # nothing to do -- avoid a no-op change-log entry
 
+        await self._cleanup_dispatched_consignment_columns(sheet)
         columns = await self.column_repository.list_for_sheet(sheet_id)
         for column in columns:
             new_name = _relabel_mum_word(column.name, old_label=old_label, new_label=mum_group_label)
@@ -961,6 +962,28 @@ class PlanningService:
             if remarks_match and int(remarks_match.group(1)) > max_mum:
                 max_mum = int(remarks_match.group(1))
 
+        # Also check SaleOrders on this sheet with status in ('dispatched', 'lr')
+        # so that a consignment group deleted after dispatch/LR is never re-created with the same number.
+        try:
+            from sqlalchemy import func as sa_func, select as sa_select
+            from app.sales.models import SaleOrder
+            stmt_orders = sa_select(SaleOrder.consignment_code).where(
+                SaleOrder.planning_sheet_id == sheet_id,
+                SaleOrder.deleted_at.is_(None),
+                sa_func.lower(SaleOrder.status).in_(("dispatched", "lr")),
+                SaleOrder.consignment_code.isnot(None),
+            )
+            res_orders = await self.column_repository.session.execute(stmt_orders)
+            for (code_val,) in res_orders.all():
+                if not code_val:
+                    continue
+                for lbl in (mum_label, "Mum"):
+                    num_from_order = mum_num_from_column_name(str(code_val), label=lbl)
+                    if num_from_order is not None and num_from_order > max_mum:
+                        max_mum = num_from_order
+        except Exception:
+            pass
+
         next_mum_num = max_mum + 1 if max_mum > 0 else 1
 
         new_columns_to_add: list[PlanningColumn] = []
@@ -1207,6 +1230,121 @@ class PlanningService:
         )
 
     # --- Grid read (rows + columns + cells for one sheet) -------------------------
+
+    async def _cleanup_dispatched_consignment_columns(self, sheet: PlanningSheet) -> None:
+        """
+        Automatically soft-delete any consignment column group (<Label> N, <Label>N Remarks,
+        NO. OF PKG <LABEL>N, TOTAL WEIGHT <LABEL>N, TOTAL CBM <LABEL>N) on ``sheet`` that belongs
+        to a SaleOrder already in ``dispatched`` or ``lr`` status (unless another active
+        ``pending``/``confirmed`` SaleOrder still references that consignment).
+        """
+        try:
+            from datetime import datetime, timezone
+            from sqlalchemy import func as sa_func, or_ as sa_or, select as sa_select
+            from app.sales.models import SaleOrder
+
+            columns = await self.column_repository.list_for_sheet(sheet.id)
+            if not columns:
+                return
+
+            col_ids = [c.id for c in columns]
+            stmt = sa_select(SaleOrder).where(
+                SaleOrder.deleted_at.is_(None),
+                sa_or(
+                    SaleOrder.planning_sheet_id == sheet.id,
+                    SaleOrder.planning_column_id.in_(col_ids),
+                ),
+            )
+            res = await self.column_repository.session.execute(stmt)
+            sheet_orders = list(res.scalars().all())
+            if not sheet_orders:
+                return
+
+            mum_label = sheet.mum_group_label or "Mum"
+            active_group_nums: set[int] = set()
+            active_col_ids: set[uuid.UUID] = set()
+            dispatched_group_nums: set[int] = set()
+            dispatched_col_ids: set[uuid.UUID] = set()
+
+            col_by_id = {c.id: c for c in columns}
+            col_by_lower_name = {c.name.strip().lower(): c for c in columns}
+
+            for ord_obj in sheet_orders:
+                st = (ord_obj.status or "").strip().lower()
+                matched_col = col_by_id.get(ord_obj.planning_column_id) if ord_obj.planning_column_id else None
+                if matched_col is None and ord_obj.consignment_code:
+                    matched_col = col_by_lower_name.get(ord_obj.consignment_code.strip().lower())
+
+                grp_num = None
+                for candidate_name in (
+                    matched_col.name if matched_col else None,
+                    ord_obj.consignment_code,
+                ):
+                    if not candidate_name:
+                        continue
+                    for lbl in (mum_label, "Mum"):
+                        grp_num = mum_num_from_column_name(candidate_name, label=lbl)
+                        if grp_num is not None:
+                            break
+                    if grp_num is not None:
+                        break
+
+                if st in ("dispatched", "lr"):
+                    if matched_col is not None:
+                        dispatched_col_ids.add(matched_col.id)
+                    if grp_num is not None:
+                        dispatched_group_nums.add(grp_num)
+                elif st in ("pending", "confirmed", "sales_confirmed", "admin_approved"):
+                    if matched_col is not None:
+                        active_col_ids.add(matched_col.id)
+                    if grp_num is not None:
+                        active_group_nums.add(grp_num)
+
+            target_group_nums = dispatched_group_nums - active_group_nums
+            target_col_ids = dispatched_col_ids - active_col_ids
+            if not target_group_nums and not target_col_ids:
+                return
+
+            cols_to_delete: list[PlanningColumn] = []
+            for c in columns:
+                should_del = c.id in target_col_ids
+                if not should_del and target_group_nums:
+                    for lbl in (mum_label, "Mum"):
+                        m_num = mum_num_from_column_name(c.name, label=lbl)
+                        if m_num in target_group_nums:
+                            should_del = True
+                            break
+                        d_info = _mum_derived_kind_and_group(c.name, label=lbl)
+                        if d_info is not None and d_info[1] in target_group_nums:
+                            should_del = True
+                            break
+                        rmk_match = re.match(
+                            rf"^{re.escape(lbl)}[\s\-]*0*(\d+)\s*remarks?$",
+                            c.name.strip(),
+                            re.IGNORECASE,
+                        )
+                        if rmk_match and int(rmk_match.group(1)) in target_group_nums:
+                            should_del = True
+                            break
+                if should_del:
+                    cols_to_delete.append(c)
+
+            if not cols_to_delete:
+                return
+
+            now = datetime.now(timezone.utc)
+            deleted_ids = {c.id for c in cols_to_delete}
+            for c in cols_to_delete:
+                c.deleted_at = now
+
+            remaining = [c for c in columns if c.id not in deleted_ids]
+            for idx, c in enumerate(remaining):
+                if c.position != idx:
+                    c.position = idx
+
+            await self.column_repository.session.flush()
+        except Exception:
+            pass
 
     async def get_grid(
         self,
@@ -3699,7 +3837,11 @@ class PlanningService:
         """
         column = await self._get_column_or_raise(sheet_id, column_id)
         mum_label = await self._get_mum_group_label(sheet_id)
-        if not _is_pure_mum_column(column.name, label=mum_label):
+        if not (
+            _is_pure_mum_column(column.name, label=mum_label)
+            or _is_pure_mum_column(column.name, label="Mum")
+            or bool(column.enable_description)
+        ):
             raise BadRequestException(f"Column descriptions are only allowed on {mum_label} N columns.")
         old_description = column.description
 

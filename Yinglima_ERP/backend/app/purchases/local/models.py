@@ -73,7 +73,7 @@ class LocalPurchase(Base, UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin):
     total_quantity: Mapped[float] = mapped_column(Numeric(12, 2), default=0.0, nullable=False)
 
     remarks: Mapped[str | None] = mapped_column(Text, nullable=True)
-    status: Mapped[str] = mapped_column(String(30), default="Confirmed", nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(30), default="Pending", nullable=False, index=True)
     stock_movement_id: Mapped[uuid.UUID | None] = mapped_column(
         GUID(), ForeignKey("stock_movements.id", ondelete="SET NULL"), nullable=True, index=True
     )

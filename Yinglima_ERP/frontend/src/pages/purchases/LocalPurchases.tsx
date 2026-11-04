@@ -10,15 +10,16 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
 import { AppShell } from "@/components/AppShell";
-import { apiDelete, apiGet, downloadExport, errorMessage } from "@/lib/api";
+import { apiDelete, apiGet, apiPatch, downloadExport, errorMessage } from "@/lib/api";
 import { useLookup } from "@/lib/lookups";
 import { useToast } from "@/lib/toast";
 import { useConfirm } from "@/lib/confirm";
-import type { LocalPurchaseSummary } from "@/types/localPurchase";
+import type { LocalPurchaseDetail, LocalPurchaseSummary } from "@/types/localPurchase";
 import {
   getLocalPurchasesListCache,
   setLocalPurchasesListCache,
   removeLocalPurchaseFromCache,
+  updateLocalPurchaseInCache,
 } from "@/lib/localPurchaseCache";
 import { LocalPurchaseDetailModal } from "./LocalPurchaseDetailModal";
 import { LocalPurchaseInwardModal } from "./LocalPurchaseInwardModal";
@@ -155,6 +156,26 @@ export function LocalPurchasesPage() {
     document.addEventListener("click", handleDocClick);
     return () => document.removeEventListener("click", handleDocClick);
   }, []);
+
+  // Update Status (Pending <-> Confirmed) from 3-dot action menu
+  const handleStatusUpdate = async (p: LocalPurchaseSummary, nextStatus: "Pending" | "Confirmed") => {
+    setOpenActionId(null);
+    try {
+      const res = await apiPatch<LocalPurchaseDetail>(`/purchases/local/${p.id}`, {
+        status: nextStatus,
+      });
+      if (res.data) {
+        updateLocalPurchaseInCache(res.data);
+      }
+      setPurchases((prev) =>
+        prev.map((item) => (item.id === p.id ? { ...item, status: nextStatus } : item))
+      );
+      toast(`Purchase "${p.invoice_no}" marked as ${nextStatus}.`, "success");
+      fetchPurchases();
+    } catch (err) {
+      toast(errorMessage(err), "error");
+    }
+  };
 
   // Delete Purchase
   const handleDelete = async (id: string, invoiceNo: string) => {
@@ -961,30 +982,30 @@ export function LocalPurchasesPage() {
                                 </div>
                               )}
                             </div>
-                          ) : (
+                          ) : (p.status || "Pending") === "Confirmed" ? (
                             <div>
                               <span
                                 style={{
                                   display: "inline-flex",
                                   alignItems: "center",
                                   gap: "4px",
-                                  background: "#fef3c7",
-                                  color: "#b45309",
-                                  border: "1px solid #fde68a",
+                                  background: "#eff6ff",
+                                  color: "#1d4ed8",
+                                  border: "1px solid #bfdbfe",
                                   padding: "3px 8px",
                                   borderRadius: "12px",
                                   fontSize: "11.5px",
                                   fontWeight: 700,
                                 }}
                               >
-                                ● {p.status || "Confirmed"}
+                                ● Confirmed
                               </span>
                               {hasPermission("local_purchase.inward") && (
                                 <div style={{ marginTop: "4px" }}>
                                   <button
                                     type="button"
                                     onClick={() => setInwardPurchaseId(p.id)}
-                                    title="Inward this purchase into warehouse stock"
+                                    title="Inward this confirmed purchase into warehouse stock"
                                     style={{
                                       background: "#f0fdf4",
                                       border: "1px solid #86efac",
@@ -1005,6 +1026,25 @@ export function LocalPurchasesPage() {
                                   </button>
                                 </div>
                               )}
+                            </div>
+                          ) : (
+                            <div>
+                              <span
+                                style={{
+                                  display: "inline-flex",
+                                  alignItems: "center",
+                                  gap: "4px",
+                                  background: "#fef3c7",
+                                  color: "#b45309",
+                                  border: "1px solid #fde68a",
+                                  padding: "3px 8px",
+                                  borderRadius: "12px",
+                                  fontSize: "11.5px",
+                                  fontWeight: 700,
+                                }}
+                              >
+                                ● {p.status || "Pending"}
+                              </span>
                             </div>
                           )}
                         </td>
@@ -1047,7 +1087,7 @@ export function LocalPurchasesPage() {
                                   boxShadow: "0 8px 20px rgba(0,0,0,0.15)",
                                   border: "1px solid #cbd5e1",
                                   zIndex: 100,
-                                  minWidth: "125px",
+                                  minWidth: "185px",
                                   overflow: "hidden",
                                   textAlign: "left",
                                 }}
@@ -1078,33 +1118,97 @@ export function LocalPurchasesPage() {
                                   👁️ View Details
                                 </button>
                                 {!isAlreadyInwarded ? (
-                                  hasPermission("local_purchase.inward") && (
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        setOpenActionId(null);
-                                        setInwardPurchaseId(p.id);
-                                      }}
+                                  <>
+                                    <div
                                       style={{
-                                        width: "100%",
-                                        textAlign: "left",
-                                        padding: "8px 12px",
-                                        fontSize: "12.5px",
-                                        color: "#166534",
-                                        fontWeight: 700,
-                                        background: "#f0fdf4",
-                                        border: "none",
-                                        cursor: "pointer",
-                                        display: "flex",
-                                        alignItems: "center",
-                                        gap: "6px",
+                                        padding: "4px 12px 2px",
+                                        fontSize: "10px",
+                                        fontWeight: 800,
+                                        color: "#64748b",
+                                        textTransform: "uppercase",
+                                        letterSpacing: "0.5px",
+                                        borderTop: "1px solid #f1f5f9",
+                                        background: "#f8fafc",
                                       }}
-                                      onMouseEnter={(e) => (e.currentTarget.style.background = "#dcfce7")}
-                                      onMouseLeave={(e) => (e.currentTarget.style.background = "#f0fdf4")}
                                     >
-                                      📦 Inward to Warehouse
-                                    </button>
-                                  )
+                                      Status Update
+                                    </div>
+                                    {(p.status || "Pending") !== "Confirmed" && hasPermission("local_purchase.update") && (
+                                      <button
+                                        type="button"
+                                        onClick={() => handleStatusUpdate(p, "Confirmed")}
+                                        style={{
+                                          width: "100%",
+                                          textAlign: "left",
+                                          padding: "8px 12px",
+                                          fontSize: "12.5px",
+                                          color: "#1d4ed8",
+                                          fontWeight: 700,
+                                          background: "#eff6ff",
+                                          border: "none",
+                                          cursor: "pointer",
+                                          display: "flex",
+                                          alignItems: "center",
+                                          gap: "6px",
+                                        }}
+                                        onMouseEnter={(e) => (e.currentTarget.style.background = "#dbeafe")}
+                                        onMouseLeave={(e) => (e.currentTarget.style.background = "#eff6ff")}
+                                      >
+                                        ✅ Mark as Confirmed
+                                      </button>
+                                    )}
+                                    {(p.status || "Pending") === "Confirmed" && hasPermission("local_purchase.update") && (
+                                      <button
+                                        type="button"
+                                        onClick={() => handleStatusUpdate(p, "Pending")}
+                                        style={{
+                                          width: "100%",
+                                          textAlign: "left",
+                                          padding: "8px 12px",
+                                          fontSize: "12.5px",
+                                          color: "#b45309",
+                                          fontWeight: 600,
+                                          background: "none",
+                                          border: "none",
+                                          cursor: "pointer",
+                                          display: "flex",
+                                          alignItems: "center",
+                                          gap: "6px",
+                                        }}
+                                        onMouseEnter={(e) => (e.currentTarget.style.background = "#fef3c7")}
+                                        onMouseLeave={(e) => (e.currentTarget.style.background = "none")}
+                                      >
+                                        ⏳ Mark as Pending
+                                      </button>
+                                    )}
+                                    {hasPermission("local_purchase.inward") && (
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setOpenActionId(null);
+                                          setInwardPurchaseId(p.id);
+                                        }}
+                                        style={{
+                                          width: "100%",
+                                          textAlign: "left",
+                                          padding: "8px 12px",
+                                          fontSize: "12.5px",
+                                          color: "#166534",
+                                          fontWeight: 700,
+                                          background: "#f0fdf4",
+                                          border: "none",
+                                          cursor: "pointer",
+                                          display: "flex",
+                                          alignItems: "center",
+                                          gap: "6px",
+                                        }}
+                                        onMouseEnter={(e) => (e.currentTarget.style.background = "#dcfce7")}
+                                        onMouseLeave={(e) => (e.currentTarget.style.background = "#f0fdf4")}
+                                      >
+                                        📦 Mark as Inward (Stock In)
+                                      </button>
+                                    )}
+                                  </>
                                 ) : (
                                   <div
                                     style={{
@@ -1113,6 +1217,7 @@ export function LocalPurchasesPage() {
                                       color: "#059669",
                                       fontWeight: 600,
                                       background: "#f0fdf4",
+                                      borderTop: "1px solid #e2e8f0",
                                       borderBottom: "1px solid #e2e8f0",
                                     }}
                                   >

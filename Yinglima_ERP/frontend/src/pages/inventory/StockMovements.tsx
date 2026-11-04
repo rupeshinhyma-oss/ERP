@@ -5,16 +5,15 @@
  * - Real-time KPI summary (Total Inward, Total Outward, Net Inventory).
  * - Inward Register (Receipts from Local Purchase or direct).
  * - Outward Register (Dispatches for Sale Orders or direct).
- * - Live Current Stock Balance ledger with 1-click Kardex transaction history.
+ * - Live Current Stock Balance ledger with 1-click Kardex transaction history
+ *   and clickable Product Hyperlinks for full Purchase & Sales Trade History.
  */
 
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
-import { Can } from "@/components/ui";
-import { apiDelete, apiGet, apiPost, errorMessage } from "@/lib/api";
+import { apiGet, errorMessage } from "@/lib/api";
 import { useToast } from "@/lib/toast";
-import { useConfirm } from "@/lib/confirm";
 import type {
   StockBalanceItem,
   StockMovement,
@@ -22,6 +21,7 @@ import type {
 } from "@/types/stockMovement";
 import { StockMovementDetailModal } from "./StockMovementDetailModal";
 import { ProductKardexModal } from "./ProductKardexModal";
+import { ProductTradeHistoryDrawer, prefetchProductTradeHistory } from "@/components/ProductTradeHistoryDrawer";
 
 type ActiveTab = "inward" | "outward" | "balances";
 
@@ -30,7 +30,6 @@ const stockBalancesCache = new Map<string, StockBalanceItem[]>();
 
 export function StockMovementsPage() {
   const showToast = useToast();
-  const confirm = useConfirm();
 
   const [activeTab, setActiveTab] = useState<ActiveTab>("inward");
   const [metrics, setMetrics] = useState<StockSummaryMetrics | null>(null);
@@ -65,6 +64,13 @@ export function StockMovementsPage() {
     code?: string | null;
     id?: string | null;
     stock: number;
+  } | null>(null);
+
+  // Product Trade History Drawer (Purchase + Sales History)
+  const [historyProduct, setHistoryProduct] = useState<{
+    id: string;
+    name: string;
+    code?: string | null;
   } | null>(null);
 
   // Fetch KPI Metrics
@@ -153,50 +159,6 @@ export function StockMovementsPage() {
     }
   }, [activeTab, loadMovements, loadBalances]);
 
-  // Cancel Movement Handler
-  const handleCancelMovement = async (m: StockMovement) => {
-    const confirmed = await confirm({
-      title: "Cancel Stock Movement",
-      message: `Are you sure you want to cancel movement ${m.movement_no}? This will reverse the stock effect.`,
-      itemName: m.movement_no,
-      confirmLabel: "Cancel Movement",
-      variant: "warning",
-    });
-    if (!confirmed) return;
-
-    try {
-      await apiPost(`/stock/movements/${m.id}/cancel?reason=User+Requested`);
-      showToast(`Movement ${m.movement_no} cancelled`, "success");
-      loadMovements();
-      loadMetrics();
-      loadBalances();
-    } catch (err) {
-      showToast(errorMessage(err) || "Failed to cancel movement", "error");
-    }
-  };
-
-  // Delete Movement Handler
-  const handleDeleteMovement = async (m: StockMovement) => {
-    const confirmed = await confirm({
-      title: "Permanently Delete Movement",
-      message: `Are you sure you want to permanently delete movement ${m.movement_no}? This will remove it from the register and restore stock balances.`,
-      itemName: m.movement_no,
-      confirmLabel: "Permanently Delete",
-      variant: "danger",
-    });
-    if (!confirmed) return;
-
-    try {
-      await apiDelete(`/stock/movements/${m.id}`);
-      showToast(`Movement ${m.movement_no} deleted successfully`, "success");
-      loadMovements();
-      loadMetrics();
-      loadBalances();
-    } catch (err) {
-      showToast(errorMessage(err) || "Failed to delete movement", "error");
-    }
-  };
-
   return (
     <AppShell activeKey="stock-movement">
       <main className="page" style={{ width: "100%", padding: "16px 24px" }}>
@@ -206,6 +168,25 @@ export function StockMovementsPage() {
             <h1 className="page-title">Stock Movement</h1>
           </div>
           <div className="page-header-actions" style={{ display: "flex", gap: "10px", alignItems: "center", flexWrap: "wrap" }}>
+            <Link
+              to="/masters/warehouses"
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "6px",
+                padding: "7px 14px",
+                borderRadius: "6px",
+                fontSize: "12.5px",
+                fontWeight: 600,
+                color: "#334155",
+                background: "#f8fafc",
+                border: "1px solid #cbd5e1",
+                textDecoration: "none",
+              }}
+              title="Manage Warehouse Master locations"
+            >
+              <span>🏭</span> Warehouse Master
+            </Link>
             {activeTab === "inward" ? (
               <Link
                 to="/purchase/local"
@@ -339,7 +320,11 @@ export function StockMovementsPage() {
                 justifyContent: "center",
               }}
             >
-              📥
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
+                <polyline points="3.27 6.96 12 12.01 20.73 6.96" />
+                <line x1="12" y1="22.08" x2="12" y2="12" />
+              </svg>
             </div>
           </div>
 
@@ -381,7 +366,12 @@ export function StockMovementsPage() {
                 justifyContent: "center",
               }}
             >
-              📤
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="1" y="3" width="15" height="13" rx="2" />
+                <polygon points="16 8 20 8 23 11 23 16 16 16 16 8" />
+                <circle cx="5.5" cy="18.5" r="2.5" />
+                <circle cx="18.5" cy="18.5" r="2.5" />
+              </svg>
             </div>
           </div>
 
@@ -582,7 +572,12 @@ export function StockMovementsPage() {
                 color: activeTab === "inward" ? "#ffffff" : "#475569",
               }}
             >
-              <span>📥</span> Inward Register {activeTab === "inward" && totalMovements > 0 ? `(${totalMovements})` : ""}
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
+                <polyline points="3.27 6.96 12 12.01 20.73 6.96" />
+                <line x1="12" y1="22.08" x2="12" y2="12" />
+              </svg>
+              Inward Register {activeTab === "inward" && totalMovements > 0 ? `(${totalMovements})` : ""}
             </button>
 
             <button
@@ -602,7 +597,13 @@ export function StockMovementsPage() {
                 color: activeTab === "outward" ? "#ffffff" : "#475569",
               }}
             >
-              <span>📤</span> Outward Register {activeTab === "outward" && totalMovements > 0 ? `(${totalMovements})` : ""}
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="1" y="3" width="15" height="13" rx="2" />
+                <polygon points="16 8 20 8 23 11 23 16 16 16 16 8" />
+                <circle cx="5.5" cy="18.5" r="2.5" />
+                <circle cx="18.5" cy="18.5" r="2.5" />
+              </svg>
+              Outward Register {activeTab === "outward" && totalMovements > 0 ? `(${totalMovements})` : ""}
             </button>
 
             <button
@@ -689,6 +690,7 @@ export function StockMovementsPage() {
                     <th style={{ padding: "12px 16px" }}>Product Name</th>
                     <th style={{ padding: "12px 16px" }}>SKU Code</th>
                     <th style={{ padding: "12px 16px", textAlign: "right" }}>Total Inward (+)</th>
+                    <th style={{ padding: "12px 16px", textAlign: "right" }}>Damaged Qty</th>
                     <th style={{ padding: "12px 16px", textAlign: "right" }}>Total Outward (-)</th>
                     <th style={{ padding: "12px 16px", textAlign: "right" }}>Current In-Stock</th>
                     <th style={{ padding: "12px 16px" }}>Status</th>
@@ -699,86 +701,183 @@ export function StockMovementsPage() {
                 <tbody>
                   {loadingBalances ? (
                     <tr>
-                      <td colSpan={8} style={{ padding: "40px", textAlign: "center", color: "#64748b" }}>
+                      <td colSpan={9} style={{ padding: "40px", textAlign: "center", color: "#64748b" }}>
                         Loading inventory ledger balances...
                       </td>
                     </tr>
                   ) : balances.length === 0 ? (
                     <tr>
-                      <td colSpan={8} style={{ padding: "40px", textAlign: "center", color: "#64748b" }}>
+                      <td colSpan={9} style={{ padding: "40px", textAlign: "center", color: "#64748b" }}>
                         No stock records found.
                       </td>
                     </tr>
                   ) : (
-                    balances.map((b, idx) => (
-                      <tr key={idx} style={{ borderBottom: "1px solid #f1f5f9" }}>
-                        <td style={{ padding: "12px 16px", fontWeight: 600, color: "#0f172a" }}>
-                          {b.product_name}
-                        </td>
-                        <td style={{ padding: "12px 16px", color: "#64748b" }}>{b.product_code || "—"}</td>
-                        <td style={{ padding: "12px 16px", textAlign: "right", color: "#16a34a", fontWeight: 600 }}>
-                          +{b.total_inward_qty.toLocaleString()}
-                        </td>
-                        <td style={{ padding: "12px 16px", textAlign: "right", color: "#2563eb", fontWeight: 600 }}>
-                          -{b.total_outward_qty.toLocaleString()}
-                        </td>
-                        <td
-                          style={{
-                            padding: "12px 16px",
-                            textAlign: "right",
-                            fontWeight: 800,
-                            fontSize: "14px",
-                            color: b.current_stock_qty > 0 ? "#16a34a" : b.current_stock_qty === 0 ? "#64748b" : "#dc2626",
-                          }}
-                        >
-                          {b.current_stock_qty.toLocaleString()}
-                        </td>
-                        <td style={{ padding: "12px 16px" }}>
-                          <span
+                    balances.map((b, idx) => {
+                      const damagedQty = Number(b.total_damaged_qty || 0);
+                      return (
+                        <tr key={idx} style={{ borderBottom: "1px solid #f1f5f9" }}>
+                          <td style={{ padding: "12px 16px", fontWeight: 600, color: "#0f172a" }}>
+                            {b.product_id ? (
+                              <div
+                                style={{ display: "inline-flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}
+                                onMouseEnter={() => prefetchProductTradeHistory(b.product_id)}
+                              >
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setHistoryProduct({
+                                      id: b.product_id!,
+                                      name: b.product_name,
+                                      code: b.product_code,
+                                    })
+                                  }
+                                  style={{
+                                    background: "none",
+                                    border: "none",
+                                    padding: 0,
+                                    margin: 0,
+                                    fontWeight: 700,
+                                    fontSize: "13px",
+                                    color: "#2563eb",
+                                    textDecoration: "underline",
+                                    cursor: "pointer",
+                                    textAlign: "left",
+                                  }}
+                                  title="Click to view complete Purchase & Sales History"
+                                >
+                                  {b.product_name}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setHistoryProduct({
+                                      id: b.product_id!,
+                                      name: b.product_name,
+                                      code: b.product_code,
+                                    })
+                                  }
+                                  style={{
+                                    fontSize: "11px",
+                                    fontWeight: 700,
+                                    padding: "2px 7px",
+                                    borderRadius: "4px",
+                                    border: "1px solid #bfdbfe",
+                                    background: "#eff6ff",
+                                    color: "#1d4ed8",
+                                    cursor: "pointer",
+                                  }}
+                                  title="View Purchase & Sales History"
+                                >
+                                  📜 History
+                                </button>
+                              </div>
+                            ) : (
+                              b.product_name
+                            )}
+                          </td>
+                          <td style={{ padding: "12px 16px", color: "#64748b" }}>{b.product_code || "—"}</td>
+                          <td style={{ padding: "12px 16px", textAlign: "right", color: "#16a34a", fontWeight: 600 }}>
+                            +{b.total_inward_qty.toLocaleString()}
+                          </td>
+                          <td
                             style={{
-                              fontSize: "11px",
-                              fontWeight: 700,
-                              padding: "3px 8px",
-                              borderRadius: "4px",
-                              backgroundColor:
-                                b.current_stock_qty > 0 ? "#dcfce7" : b.current_stock_qty === 0 ? "#f1f5f9" : "#fee2e2",
-                              color:
-                                b.current_stock_qty > 0 ? "#15803d" : b.current_stock_qty === 0 ? "#64748b" : "#b91c1c",
+                              padding: "12px 16px",
+                              textAlign: "right",
+                              fontWeight: damagedQty > 0 ? 700 : 500,
+                              color: damagedQty > 0 ? "#dc2626" : "#94a3b8",
                             }}
                           >
-                            {b.current_stock_qty > 0 ? "IN STOCK" : b.current_stock_qty === 0 ? "ZERO" : "DEFICIT"}
-                          </span>
-                        </td>
-                        <td style={{ padding: "12px 16px", color: "#64748b" }}>
-                          {b.last_movement_date || "—"}
-                        </td>
-                        <td style={{ padding: "12px 16px", textAlign: "center" }}>
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setKardexProduct({
-                                name: b.product_name,
-                                code: b.product_code,
-                                id: b.product_id,
-                                stock: b.current_stock_qty,
-                              })
-                            }
+                            {damagedQty > 0 ? `${damagedQty.toLocaleString()}` : "0"}
+                          </td>
+                          <td style={{ padding: "12px 16px", textAlign: "right", color: "#2563eb", fontWeight: 600 }}>
+                            -{b.total_outward_qty.toLocaleString()}
+                          </td>
+                          <td
                             style={{
-                              padding: "4px 10px",
-                              borderRadius: "6px",
-                              border: "1px solid #cbd5e1",
-                              background: "#f8fafc",
-                              fontSize: "12px",
-                              fontWeight: 600,
-                              color: "#0f172a",
-                              cursor: "pointer",
+                              padding: "12px 16px",
+                              textAlign: "right",
+                              fontWeight: 800,
+                              fontSize: "14px",
+                              color: b.current_stock_qty > 0 ? "#16a34a" : b.current_stock_qty === 0 ? "#64748b" : "#dc2626",
                             }}
                           >
-                            📊 View Kardex
-                          </button>
-                        </td>
-                      </tr>
-                    ))
+                            {b.current_stock_qty.toLocaleString()}
+                          </td>
+                          <td style={{ padding: "12px 16px" }}>
+                            <span
+                              style={{
+                                fontSize: "11px",
+                                fontWeight: 700,
+                                padding: "3px 8px",
+                                borderRadius: "4px",
+                                backgroundColor:
+                                  b.current_stock_qty > 0 ? "#dcfce7" : b.current_stock_qty === 0 ? "#f1f5f9" : "#fee2e2",
+                                color:
+                                  b.current_stock_qty > 0 ? "#15803d" : b.current_stock_qty === 0 ? "#64748b" : "#b91c1c",
+                              }}
+                            >
+                              {b.current_stock_qty > 0 ? "IN STOCK" : b.current_stock_qty === 0 ? "ZERO" : "DEFICIT"}
+                            </span>
+                          </td>
+                          <td style={{ padding: "12px 16px", color: "#64748b" }}>
+                            {b.last_movement_date || "—"}
+                          </td>
+                          <td style={{ padding: "12px 16px", textAlign: "center" }}>
+                            <div style={{ display: "inline-flex", gap: "6px", alignItems: "center", justifyContent: "center" }}>
+                              {b.product_id && (
+                                <button
+                                  type="button"
+                                  onMouseEnter={() => prefetchProductTradeHistory(b.product_id)}
+                                  onClick={() =>
+                                    setHistoryProduct({
+                                      id: b.product_id!,
+                                      name: b.product_name,
+                                      code: b.product_code,
+                                    })
+                                  }
+                                  style={{
+                                    padding: "4px 10px",
+                                    borderRadius: "6px",
+                                    border: "1px solid #bfdbfe",
+                                    background: "#eff6ff",
+                                    fontSize: "12px",
+                                    fontWeight: 600,
+                                    color: "#1d4ed8",
+                                    cursor: "pointer",
+                                  }}
+                                  title="View Purchase & Sales History"
+                                >
+                                  📜 Trade History
+                                </button>
+                              )}
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setKardexProduct({
+                                    name: b.product_name,
+                                    code: b.product_code,
+                                    id: b.product_id,
+                                    stock: b.current_stock_qty,
+                                  })
+                                }
+                                style={{
+                                  padding: "4px 10px",
+                                  borderRadius: "6px",
+                                  border: "1px solid #cbd5e1",
+                                  background: "#f8fafc",
+                                  fontSize: "12px",
+                                  fontWeight: 600,
+                                  color: "#0f172a",
+                                  cursor: "pointer",
+                                }}
+                              >
+                                📊 View Kardex
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
                   )}
                 </tbody>
               </table>
@@ -789,7 +888,7 @@ export function StockMovementsPage() {
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "13px" }}>
                 <thead>
                   <tr style={{ backgroundColor: "#f8fafc", textAlign: "left", color: "#475569" }}>
-                    <th style={{ padding: "12px 16px" }}>Movement No</th>
+                    <th style={{ padding: "12px 16px" }}>Invoice No</th>
                     <th style={{ padding: "12px 16px" }}>Date</th>
                     <th style={{ padding: "12px 16px" }}>
                       {activeTab === "inward" ? "Supplier / Vendor" : "Buyer / Customer"}
@@ -799,144 +898,105 @@ export function StockMovementsPage() {
                     <th style={{ padding: "12px 16px", textAlign: "right" }}>Items</th>
                     <th style={{ padding: "12px 16px", textAlign: "right" }}>Total Qty</th>
                     <th style={{ padding: "12px 16px" }}>Status</th>
-                    <th style={{ padding: "12px 16px", textAlign: "center" }}>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {loadingMovements ? (
                     <tr>
-                      <td colSpan={9} style={{ padding: "40px", textAlign: "center", color: "#64748b" }}>
+                      <td colSpan={8} style={{ padding: "40px", textAlign: "center", color: "#64748b" }}>
                         Loading {activeTab} movements...
                       </td>
                     </tr>
                   ) : movements.length === 0 ? (
                     <tr>
-                      <td colSpan={9} style={{ padding: "40px", textAlign: "center", color: "#64748b" }}>
+                      <td colSpan={8} style={{ padding: "40px", textAlign: "center", color: "#64748b" }}>
                         {activeTab === "inward"
                           ? "No inward movements found. Inward receipts are automatically generated when receiving stock in Local Purchases (/purchase/local)."
                           : "No outward movements found. Outward dispatches are automatically generated when dispatching orders in Sales Process (/sale/process)."}
                       </td>
                     </tr>
                   ) : (
-                    movements.map((m) => (
-                      <tr key={m.id} style={{ borderBottom: "1px solid #f1f5f9" }}>
-                        <td style={{ padding: "12px 16px", fontWeight: 700, color: "#0f172a" }}>
-                          {m.movement_no}
-                          <div style={{ fontSize: "11px", fontWeight: 400, color: "#64748b" }}>
-                            {m.source_type === "local_purchase"
-                              ? `PO: ${m.purchase_invoice_no || "Linked"}`
-                              : m.source_type === "sale_process"
-                              ? `SO: ${m.sale_order_no || "Linked"}`
-                              : "Direct"}
-                          </div>
-                        </td>
-                        <td style={{ padding: "12px 16px", color: "#475569" }}>{m.movement_date}</td>
-                        <td style={{ padding: "12px 16px", fontWeight: 500, color: "#1e293b" }}>
-                          {(activeTab === "inward" ? m.supplier_name : m.buyer_name) || "—"}
-                        </td>
-                        <td style={{ padding: "12px 16px", color: "#64748b" }}>
-                          {m.reference_no || "—"}
-                        </td>
-                        <td style={{ padding: "12px 16px", color: "#64748b" }}>
-                          {m.vehicle_no && <div>🚗 {m.vehicle_no}</div>}
-                          {m.container_no && <div>📦 {m.container_no}</div>}
-                          {!m.vehicle_no && !m.container_no && (m.transporter_name || "—")}
-                        </td>
-                        <td style={{ padding: "12px 16px", textAlign: "right", color: "#64748b" }}>
-                          {m.total_items_count}
-                        </td>
-                        <td
-                          style={{
-                            padding: "12px 16px",
-                            textAlign: "right",
-                            fontWeight: 700,
-                            color: activeTab === "inward" ? "#16a34a" : "#2563eb",
-                          }}
-                        >
-                          {m.total_quantity.toLocaleString()}
-                        </td>
-                        <td style={{ padding: "12px 16px" }}>
-                          <span
-                            style={{
-                              fontSize: "11px",
-                              fontWeight: 700,
-                              padding: "2px 8px",
-                              borderRadius: "4px",
-                              backgroundColor:
-                                m.status === "confirmed"
-                                  ? "#dcfce7"
-                                  : m.status === "cancelled"
-                                  ? "#fee2e2"
-                                  : "#f1f5f9",
-                              color:
-                                m.status === "confirmed"
-                                  ? "#15803d"
-                                  : m.status === "cancelled"
-                                  ? "#b91c1c"
-                                  : "#475569",
-                              textTransform: "uppercase",
-                            }}
-                          >
-                            {m.status}
-                          </span>
-                        </td>
-                        <td style={{ padding: "12px 16px", textAlign: "center" }}>
-                          <div style={{ display: "flex", justifyContent: "center", gap: "8px" }}>
+                    movements.map((m) => {
+                      const invoiceDisplayNo =
+                        (activeTab === "inward"
+                          ? m.purchase_invoice_no || m.reference_no
+                          : m.sale_order_no || m.reference_no) || m.movement_no;
+                      return (
+                        <tr key={m.id} style={{ borderBottom: "1px solid #f1f5f9" }}>
+                          <td style={{ padding: "12px 16px", fontWeight: 700, color: "#0f172a" }}>
                             <button
                               type="button"
                               onClick={() => setSelectedMovement(m)}
                               style={{
-                                padding: "4px 8px",
-                                borderRadius: "4px",
-                                border: "1px solid #cbd5e1",
-                                background: "#ffffff",
-                                fontSize: "12px",
+                                background: "none",
+                                border: "none",
+                                padding: 0,
+                                margin: 0,
+                                fontWeight: 700,
+                                fontSize: "13px",
+                                color: "#2563eb",
+                                textDecoration: "underline",
                                 cursor: "pointer",
+                                textAlign: "left",
+                              }}
+                              title="Click to view movement items & details"
+                            >
+                              {invoiceDisplayNo}
+                            </button>
+                          </td>
+                          <td style={{ padding: "12px 16px", color: "#475569" }}>{m.movement_date}</td>
+                          <td style={{ padding: "12px 16px", fontWeight: 500, color: "#1e293b" }}>
+                            {(activeTab === "inward" ? m.supplier_name : m.buyer_name) || "—"}
+                          </td>
+                          <td style={{ padding: "12px 16px", color: "#64748b" }}>
+                            {m.reference_no || "—"}
+                          </td>
+                          <td style={{ padding: "12px 16px", color: "#64748b" }}>
+                            {m.vehicle_no && <div>🚗 {m.vehicle_no}</div>}
+                            {m.container_no && <div>📦 {m.container_no}</div>}
+                            {!m.vehicle_no && !m.container_no && (m.transporter_name || "—")}
+                          </td>
+                          <td style={{ padding: "12px 16px", textAlign: "right", color: "#64748b" }}>
+                            {m.total_items_count}
+                          </td>
+                          <td
+                            style={{
+                              padding: "12px 16px",
+                              textAlign: "right",
+                              fontWeight: 700,
+                              color: activeTab === "inward" ? "#16a34a" : "#2563eb",
+                            }}
+                          >
+                            {m.total_quantity.toLocaleString()}
+                          </td>
+                          <td style={{ padding: "12px 16px" }}>
+                            <span
+                              style={{
+                                fontSize: "11px",
+                                fontWeight: 700,
+                                padding: "2px 8px",
+                                borderRadius: "4px",
+                                backgroundColor:
+                                  m.status === "confirmed"
+                                    ? "#dcfce7"
+                                    : m.status === "cancelled"
+                                    ? "#fee2e2"
+                                    : "#f1f5f9",
+                                color:
+                                  m.status === "confirmed"
+                                    ? "#15803d"
+                                    : m.status === "cancelled"
+                                    ? "#b91c1c"
+                                    : "#475569",
+                                textTransform: "uppercase",
                               }}
                             >
-                              View
-                            </button>
-                            <Can permission="stock_movement.cancel">
-                              {m.status === "confirmed" && (
-                                <button
-                                  type="button"
-                                  onClick={() => handleCancelMovement(m)}
-                                  style={{
-                                    padding: "4px 8px",
-                                    borderRadius: "4px",
-                                    border: "1px solid #fecaca",
-                                    background: "#fef2f2",
-                                    color: "#dc2626",
-                                    fontSize: "12px",
-                                    cursor: "pointer",
-                                  }}
-                                >
-                                  Cancel
-                                </button>
-                              )}
-                            </Can>
-                            <Can permission="stock_movement.delete">
-                              <button
-                                type="button"
-                                onClick={() => handleDeleteMovement(m)}
-                                style={{
-                                  padding: "4px 8px",
-                                  borderRadius: "4px",
-                                  border: "1px solid #fee2e2",
-                                  background: "#fff1f2",
-                                  color: "#e11d48",
-                                  fontSize: "12px",
-                                  cursor: "pointer",
-                                }}
-                                title="Delete movement entry"
-                              >
-                                Delete
-                              </button>
-                            </Can>
-                          </div>
-                        </td>
-                      </tr>
-                    ))
+                              {m.status}
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })
                   )}
                 </tbody>
               </table>
@@ -945,12 +1005,11 @@ export function StockMovementsPage() {
         </div>
       </div>
 
-
-
       {/* Detail Modal */}
       <StockMovementDetailModal
         movement={selectedMovement}
         onClose={() => setSelectedMovement(null)}
+        onViewProductHistory={(product) => setHistoryProduct(product)}
       />
 
       {/* Product Kardex Modal */}
@@ -964,6 +1023,15 @@ export function StockMovementsPage() {
           onClose={() => setKardexProduct(null)}
         />
       )}
+
+      {/* Product Trade History Drawer (Purchase History + Sales History) */}
+      <ProductTradeHistoryDrawer
+        productId={historyProduct?.id ?? null}
+        productName={historyProduct?.name}
+        productCode={historyProduct?.code}
+        open={Boolean(historyProduct)}
+        onClose={() => setHistoryProduct(null)}
+      />
       </main>
     </AppShell>
   );

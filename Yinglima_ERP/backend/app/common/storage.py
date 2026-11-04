@@ -2,7 +2,7 @@
 Storage utility module for Supabase Storage with graceful local disk fallback.
 
 Handles:
-1. Direct file upload to Supabase Storage buckets (e.g. product-images, supplier-media, quotations).
+1. Direct file upload to Supabase Storage buckets (e.g. product-images, supplier-media, quotations, purchase-bills).
 2. Auto-creation of public buckets when using SUPABASE_SERVICE_KEY.
 3. Automatic MIME-type inference and filename sanitization.
 4. Transparent fallback to local filesystem (uploads/<subfolder>/) when Supabase credentials
@@ -136,6 +136,41 @@ def guess_content_type(filename: str, default: str = "application/octet-stream")
     return extension_map.get(ext, default)
 
 
+_LAST_SUPABASE_ERROR: str = ""
+
+
+def get_last_supabase_error() -> str:
+    return _LAST_SUPABASE_ERROR
+
+
+def _get_auth_header_variants(auth_key: str | None) -> list[dict[str, str]]:
+    """
+    Return header variants to try against Supabase Storage REST API:
+    1. If `sb_secret_...` / `sb_publishable_...`: first try `{"apikey": key}` (without
+       `Authorization: Bearer sb_...` so Supabase's Kong gateway converts `apikey` into a
+       service_role/anon JWT rather than rejecting a 1-part non-JWT), then try with Bearer.
+    2. Also try `SUPABASE_ANON_KEY` if distinct from `auth_key`.
+    3. If legacy `eyJ...` JWT: try `{"apikey": key, "Authorization": f"Bearer {key}"}`.
+    """
+    variants: list[dict[str, str]] = []
+    keys_to_try: list[str] = []
+    for k in (auth_key, settings.SUPABASE_SERVICE_KEY, settings.SUPABASE_ANON_KEY):
+        if k and k.strip() and k.strip() not in ("your-supabase-service-key", "your-supabase-anon-key"):
+            clean_k = k.strip()
+            if clean_k not in keys_to_try:
+                keys_to_try.append(clean_k)
+
+    for k in keys_to_try:
+        if k.startswith("sb_"):
+            variants.append({"apikey": k})
+            variants.append({"apikey": k, "Authorization": f"Bearer {k}"})
+        else:
+            variants.append({"apikey": k, "Authorization": f"Bearer {k}"})
+            variants.append({"apikey": k})
+    variants.append({})
+    return variants
+
+
 async def ensure_bucket_exists(bucket: str) -> bool:
     """Ensure the specified bucket exists in Supabase Storage with appropriate privacy setting."""
     if bucket in _VERIFIED_BUCKETS:
@@ -147,47 +182,31 @@ async def ensure_bucket_exists(bucket: str) -> bool:
 
     base_url = settings.supabase_base_url
     bucket_url = f"{base_url}/storage/v1/bucket"
-
-    headers = {
-        "apikey": auth_key,
-        "Authorization": f"Bearer {auth_key}",
-    }
+    is_pub = is_bucket_public(bucket)
 
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
-            # Check if bucket exists
-            get_resp = await client.get(
-                f"{bucket_url}/{bucket}",
-                headers=headers,
-            )
-            if get_resp.status_code == 200:
-                _VERIFIED_BUCKETS.add(bucket)
-                return True
+            for base_headers in _get_auth_header_variants(auth_key):
+                if not base_headers:
+                    continue
+                get_resp = await client.get(f"{bucket_url}/{bucket}", headers=base_headers)
+                if get_resp.status_code == 200:
+                    _VERIFIED_BUCKETS.add(bucket)
+                    return True
 
-            # If not found or service key has permission, create the bucket
-            is_pub = is_bucket_public(bucket)
-            post_resp = await client.post(
-                bucket_url,
-                headers={
-                    **headers,
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "id": bucket,
-                    "name": bucket,
-                    "public": is_pub,
-                    "file_size_limit": MAX_FILE_SIZE,
-                },
-            )
-            if post_resp.status_code in (200, 201, 409):
-                _VERIFIED_BUCKETS.add(bucket)
-                return True
-            logger.warning(
-                "Supabase bucket creation failed for %s: %s (HTTP %d)",
-                bucket,
-                post_resp.text[:300],
-                post_resp.status_code,
-            )
+                post_resp = await client.post(
+                    bucket_url,
+                    headers={**base_headers, "Content-Type": "application/json"},
+                    json={
+                        "id": bucket,
+                        "name": bucket,
+                        "public": is_pub,
+                        "file_size_limit": MAX_FILE_SIZE,
+                    },
+                )
+                if post_resp.status_code in (200, 201, 409):
+                    _VERIFIED_BUCKETS.add(bucket)
+                    return True
     except Exception as exc:
         logger.debug("Failed to verify/create Supabase bucket '%s': %s", bucket, exc)
 
@@ -202,29 +221,29 @@ async def create_signed_url(bucket: str, filename: str, expires_in: int = 3600) 
     if not auth_key:
         return None
 
+    clean_filename = sanitize_filename(filename)
     base_url = settings.supabase_base_url
-    sign_url = f"{base_url}/storage/v1/object/sign/{bucket}/{filename}"
-    headers = {
-        "apikey": auth_key,
-        "Authorization": f"Bearer {auth_key}",
-        "Content-Type": "application/json",
-    }
+    sign_url = f"{base_url}/storage/v1/object/sign/{bucket}/{clean_filename}"
+
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.post(
-                sign_url,
-                headers=headers,
-                json={"expiresIn": expires_in},
-            )
-            if resp.status_code in (200, 201):
-                data = resp.json()
-                signed_path = data.get("signedURL")
-                if signed_path:
-                    if signed_path.startswith("http://") or signed_path.startswith("https://"):
-                        return signed_path
-                    return f"{base_url}/storage/v1{signed_path}"
+            for base_headers in _get_auth_header_variants(auth_key):
+                if not base_headers:
+                    continue
+                resp = await client.post(
+                    sign_url,
+                    headers={**base_headers, "Content-Type": "application/json"},
+                    json={"expiresIn": expires_in},
+                )
+                if resp.status_code in (200, 201):
+                    data = resp.json()
+                    signed_path = data.get("signedURL")
+                    if signed_path:
+                        if signed_path.startswith("http://") or signed_path.startswith("https://"):
+                            return signed_path
+                        return f"{base_url}/storage/v1{signed_path}"
     except Exception as exc:
-        logger.debug("Failed to create signed URL for %s/%s: %s", bucket, filename, exc)
+        logger.debug("Failed to create signed URL for %s/%s: %s", bucket, clean_filename, exc)
 
     return None
 
@@ -242,58 +261,56 @@ async def upload_to_supabase(
     on success, or None if upload failed or Supabase is not configured.
     """
     auth_key = settings.supabase_auth_key
-    if not auth_key:
-        return None
-
+    clean_filename = sanitize_filename(filename)
     if not content_type:
-        content_type = guess_content_type(filename)
+        content_type = guess_content_type(clean_filename)
 
     base_url = settings.supabase_base_url
-    upload_url = f"{base_url}/storage/v1/object/{bucket}/{filename}"
+    upload_url = f"{base_url}/storage/v1/object/{bucket}/{clean_filename}"
 
-    headers = {
-        "apikey": auth_key,
-        "Authorization": f"Bearer {auth_key}",
-        "Content-Type": content_type,
-        "x-upsert": "true",
-    }
+    await ensure_bucket_exists(bucket)
+
+    last_status = 0
+    last_text = ""
+    global _LAST_SUPABASE_ERROR
+    _LAST_SUPABASE_ERROR = ""
 
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
-            resp = await client.post(
-                upload_url,
-                content=content,
-                headers=headers,
-            )
+            for base_headers in _get_auth_header_variants(auth_key):
+                headers = {
+                    **base_headers,
+                    "Content-Type": content_type,
+                    "x-upsert": "true",
+                }
+                resp = await client.post(
+                    upload_url,
+                    content=content,
+                    headers=headers,
+                )
+                if resp.status_code in (200, 201):
+                    if is_bucket_public(bucket):
+                        return f"{base_url}/storage/v1/object/public/{bucket}/{clean_filename}"
+                    signed_url = await create_signed_url(bucket, clean_filename, expires_in=7 * 86400)
+                    return signed_url or f"{base_url}/storage/v1/object/authenticated/{bucket}/{clean_filename}"
 
-            # If bucket didn't exist, try creating it and retrying once
-            if resp.status_code in (400, 404) and "not found" in resp.text.lower():
-                created = await ensure_bucket_exists(bucket)
-                if created:
-                    resp = await client.post(
-                        upload_url,
-                        content=content,
-                        headers=headers,
-                    )
+                last_status = resp.status_code
+                last_text = resp.text[:300]
 
-            if resp.status_code in (200, 201):
-                if is_bucket_public(bucket):
-                    return f"{base_url}/storage/v1/object/public/{bucket}/{filename}"
-                signed_url = await create_signed_url(bucket, filename, expires_in=7 * 86400)
-                return signed_url or f"{base_url}/storage/v1/object/authenticated/{bucket}/{filename}"
-
+            _LAST_SUPABASE_ERROR = f"HTTP {last_status}: {last_text}"
             logger.warning(
                 "Supabase storage rejected upload to %s/%s: HTTP %d: %s",
                 bucket,
-                filename,
-                resp.status_code,
-                resp.text[:300],
+                clean_filename,
+                last_status,
+                last_text,
             )
     except Exception as exc:
+        _LAST_SUPABASE_ERROR = str(exc)
         logger.warning(
             "Supabase Storage upload error for %s/%s: %s",
             bucket,
-            filename,
+            clean_filename,
             exc,
         )
 

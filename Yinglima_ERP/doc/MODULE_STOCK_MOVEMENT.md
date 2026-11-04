@@ -186,3 +186,18 @@ In physical manufacturing, machinery assembly, and trade distribution, negative 
 
 ## UI Standardization (Release 2026-10-29)
 - Added top `Stock Movement` page header, top-right `.btn-header-filter` funnel toggle button, collapsible **Filter Options** card (`Search`, `Date From`, `Date To`, `Reset Filters`), and inline quick search bar on the register tabs row.
+
+## Warehouse Master, Action Restrictions, Product Trade History Hyperlinks & Damage Tracking (Release 2026-10-31)
+- **Warehouse Master (`/masters/warehouses` & `/api/v1/masters/warehouses`)**:
+  - Created a dedicated **Warehouse Master** table (`warehouses`) with default seeded locations (`Main Godown`, `Factory Staging Yard`, `Transit Bay`, `Customs Bonded Area`) and full CRUD + CSV/Excel Import/Export.
+  - Updated **Destination Warehouse** dropdowns in `LocalPurchaseInwardModal.tsx` and `SaleProcessOutwardModal.tsx` to load active warehouse locations dynamically from `GET /api/v1/masters/warehouses/all`.
+  - Added a quick `🏭 Warehouse Master` link in the Stock Movement page header and under `SETTINGS -> Masters -> Warehouses`.
+- **Action Restrictions & Clickable Invoice No Hyperlink**:
+  - Removed the `INW-YYYY-XXXX` / `OUT-YYYY-XXXX` backend movement number and the `Actions` (`View` / `Cancel` / `Delete`) column from Inward and Outward rows in `StockMovements.tsx`.
+  - Displayed only the **Invoice No** (`LP-YLM/...` for Inward, `SO-YLM/...` for Outward) as a clickable blue hyperlink that directly opens `StockMovementDetailModal`.
+- **Product Hyperlink & Complete Product History (Purchase + Sales History)**:
+  - Made product names clickable hyperlinks (plus a `📜 History` / `📜 Trade History` button) in both the **Current Stock Ledger** tab (`StockMovements.tsx`) and the **Movement Items** table inside `StockMovementDetailModal.tsx`.
+  - Clicking a product opens `ProductTradeHistoryDrawer`, displaying complete **Purchase History** and **Sales History** alongside margin and volume KPIs.
+- **Damaged Quantity Tracking (Option A)**:
+  - Inward damage deduction remains active (`accepted_quantity = quantity - damaged_quantity` so only good units enter sellable `Current In-Stock`).
+  - Added `total_damaged_qty` to `GET /api/v1/stock/balances` and displayed a dedicated **Damaged Qty** column in the **Current Stock Ledger** table.

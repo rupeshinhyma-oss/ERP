@@ -135,6 +135,7 @@ class StockBalanceItem(BaseModel):
     product_name: str
     product_code: str | None = None
     total_inward_qty: float = 0.0
+    total_damaged_qty: float = 0.0
     total_outward_qty: float = 0.0
     current_stock_qty: float = 0.0
     last_movement_date: date | None = None

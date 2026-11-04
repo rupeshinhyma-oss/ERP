@@ -88,7 +88,11 @@ class SaleRepository:
         if currency:
             conditions.append(SaleOrder.currency == currency)
         if status and status.strip().lower() != "all":
-            conditions.append(SaleOrder.status == status.strip().lower())
+            st_clean = status.strip().lower()
+            if st_clean in ("confirmed", "sales_confirmed"):
+                conditions.append(SaleOrder.status.in_(["confirmed", "sales_confirmed"]))
+            else:
+                conditions.append(SaleOrder.status == st_clean)
         if consignment_code:
             conditions.append(SaleOrder.consignment_code.ilike(f"%{consignment_code.strip()}%"))
         if date_from:
@@ -190,8 +194,11 @@ class SaleRepository:
 
             if st == "pending":
                 metrics.pending = MetricItem(count=cnt, amount=amt)
-            elif st == "sales_confirmed":
-                metrics.sales_confirmed = MetricItem(count=cnt, amount=amt)
+            elif st in ("confirmed", "sales_confirmed"):
+                curr_c = metrics.confirmed.count + cnt
+                curr_a = round(metrics.confirmed.amount + amt, 2)
+                metrics.confirmed = MetricItem(count=curr_c, amount=curr_a)
+                metrics.sales_confirmed = MetricItem(count=curr_c, amount=curr_a)
             elif st == "admin_approved":
                 metrics.admin_approved = MetricItem(count=cnt, amount=amt)
             elif st == "dispatched":

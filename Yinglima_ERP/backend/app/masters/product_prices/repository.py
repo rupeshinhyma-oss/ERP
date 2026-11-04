@@ -554,152 +554,160 @@ class ProductPriceRepository:
             rate = float(rates.get(c, 1.0))
             return amount / rate if rate > 0 else amount
 
-        # 1. Product metadata
-        prod_query = text("""
-            SELECT p.id, p.product_code, p.product_name, p.product_name_tally, u.code AS uom_code
-            FROM products p
-            LEFT JOIN units_of_measurement u ON u.id = p.uom_id
-            WHERE p.id = :product_id AND p.deleted_at IS NULL;
+        import json
+
+        # 1-3. Single-roundtrip CTE query combining Product metadata + all 5 purchase/sales history sources
+        combined_query = text("""
+            WITH prod AS (
+                SELECT p.id, p.product_code, p.product_name, p.product_name_tally, u.code AS uom_code
+                FROM products p
+                LEFT JOIN units_of_measurement u ON u.id = p.uom_id
+                WHERE p.id = :product_id AND p.deleted_at IS NULL
+            ),
+            inv AS (
+                SELECT
+                    'invoice' AS record_type,
+                    CAST(lpi.id AS text) AS item_id,
+                    CAST(lp.id AS text) AS doc_id,
+                    lp.invoice_no AS doc_number,
+                    CAST(lp.invoice_date AS text) AS record_date,
+                    CAST(lp.supplier_id AS text) AS supplier_id,
+                    lp.supplier_name,
+                    CAST(lpi.quantity AS float) AS quantity,
+                    CAST(lpi.unit_rate AS float) AS unit_rate,
+                    CAST(lpi.unit_landing_rate AS float) AS unit_landing_rate,
+                    lp.currency,
+                    CAST(lpi.item_total AS float) AS total_amount,
+                    lp.status,
+                    lp.remarks
+                FROM local_purchase_items lpi
+                JOIN local_purchases lp ON lp.id = lpi.purchase_id
+                JOIN prod ON (lpi.product_id = prod.id OR (lpi.product_id IS NULL AND lpi.product_code = prod.product_code))
+                WHERE lp.deleted_at IS NULL
+                ORDER BY lp.invoice_date DESC, lpi.created_at DESC
+            ),
+            quo AS (
+                SELECT
+                    'quote' AS record_type,
+                    CAST(q.id AS text) AS item_id,
+                    CAST(q.id AS text) AS doc_id,
+                    q.quote_number AS doc_number,
+                    CAST(CAST(q.created_at AS date) AS text) AS record_date,
+                    CAST(q.supplier_id AS text) AS supplier_id,
+                    s.company_name AS supplier_name,
+                    CAST(q.quantity AS float) AS quantity,
+                    CAST(q.unit_price AS float) AS unit_rate,
+                    CAST(NULL AS float) AS unit_landing_rate,
+                    q.currency,
+                    CAST(q.total_cost AS float) AS total_amount,
+                    CAST(q.status AS text) AS status,
+                    q.remarks
+                FROM quotations q
+                JOIN inquiry_items ii ON ii.id = q.inquiry_item_id AND ii.deleted_at IS NULL
+                JOIN suppliers s ON s.id = q.supplier_id AND s.deleted_at IS NULL
+                WHERE ii.product_id = :product_id AND q.deleted_at IS NULL
+                ORDER BY q.created_at DESC
+            ),
+            cat AS (
+                SELECT
+                    'catalog' AS record_type,
+                    CAST(spl.id AS text) AS item_id,
+                    CAST(spl.id AS text) AS doc_id,
+                    'CATALOG-QUOTE' AS doc_number,
+                    CAST(CAST(spl.updated_at AS date) AS text) AS record_date,
+                    CAST(spl.supplier_id AS text) AS supplier_id,
+                    s.company_name AS supplier_name,
+                    CAST(spl.moq AS float) AS quantity,
+                    CAST(spl.unit_price AS float) AS unit_rate,
+                    CAST(NULL AS float) AS unit_landing_rate,
+                    spl.currency,
+                    CAST(NULL AS float) AS total_amount,
+                    'active' AS status,
+                    spl.notes AS remarks
+                FROM supplier_product_links spl
+                JOIN suppliers s ON s.id = spl.supplier_id AND s.deleted_at IS NULL
+                WHERE spl.product_id = :product_id AND spl.unit_price IS NOT NULL
+                ORDER BY spl.updated_at DESC
+            ),
+            so AS (
+                SELECT
+                    'order' AS record_type,
+                    CAST(soi.id AS text) AS item_id,
+                    CAST(so.id AS text) AS doc_id,
+                    so.order_no AS doc_number,
+                    so.consignment_code,
+                    CAST(so.order_date AS text) AS record_date,
+                    CAST(so.buyer_id AS text) AS buyer_id,
+                    so.buyer_name,
+                    CAST(soi.quantity AS float) AS quantity,
+                    CAST(soi.unit_rate AS float) AS unit_rate,
+                    so.currency,
+                    CAST(soi.item_total AS float) AS item_total,
+                    so.status,
+                    soi.remarks
+                FROM sales_order_items soi
+                JOIN sales_orders so ON so.id = soi.order_id
+                JOIN prod ON (soi.product_id = prod.id OR (soi.product_id IS NULL AND soi.product_code = prod.product_code))
+                WHERE so.deleted_at IS NULL
+                ORDER BY so.order_date DESC, soi.created_at DESC
+            ),
+            inq AS (
+                SELECT
+                    'inquiry' AS record_type,
+                    CAST(ii.id AS text) AS item_id,
+                    CAST(i.id AS text) AS doc_id,
+                    COALESCE(cc.code, 'INQUIRY') AS doc_number,
+                    cc.code AS consignment_code,
+                    CAST(CAST(ii.proposed_at AS date) AS text) AS record_date,
+                    CAST(i.buyer_id AS text) AS buyer_id,
+                    b.company_name AS buyer_name,
+                    CAST(ii.quantity AS float) AS quantity,
+                    0.0 AS unit_rate,
+                    'CNY' AS currency,
+                    0.0 AS item_total,
+                    CAST(ii.status AS text) AS status,
+                    ii.product_specs_remarks AS remarks
+                FROM inquiry_items ii
+                JOIN inquiries i ON i.id = ii.inquiry_id AND i.deleted_at IS NULL
+                LEFT JOIN consignment_codes cc ON cc.id = i.consignment_code_id AND cc.deleted_at IS NULL
+                JOIN buyers b ON b.id = i.buyer_id AND b.deleted_at IS NULL
+                WHERE ii.product_id = :product_id AND ii.deleted_at IS NULL
+                ORDER BY ii.proposed_at DESC
+            )
+            SELECT
+                prod.id,
+                prod.product_code,
+                prod.product_name,
+                prod.product_name_tally,
+                prod.uom_code,
+                COALESCE((SELECT json_agg(row_to_json(inv)) FROM inv), '[]'::json) AS invoices_json,
+                COALESCE((SELECT json_agg(row_to_json(quo)) FROM quo), '[]'::json) AS quotes_json,
+                COALESCE((SELECT json_agg(row_to_json(cat)) FROM cat), '[]'::json) AS catalogs_json,
+                COALESCE((SELECT json_agg(row_to_json(so)) FROM so), '[]'::json) AS sales_orders_json,
+                COALESCE((SELECT json_agg(row_to_json(inq)) FROM inq), '[]'::json) AS inquiries_json
+            FROM prod;
         """)
-        prod_res = await self.session.execute(prod_query, {"product_id": str(product_id)})
+        prod_res = await self.session.execute(combined_query, {"product_id": str(product_id)})
         prod_row = prod_res.fetchone()
         if not prod_row:
             raise NotFoundException("Product not found")
 
         prod_m = prod_row._mapping
 
-        # 2. Purchase history
-        # 2a. Vendor Invoices (local_purchases)
-        lp_query = text("""
-            SELECT
-                'invoice' AS record_type,
-                CAST(lpi.id AS text) AS item_id,
-                CAST(lp.id AS text) AS doc_id,
-                lp.invoice_no AS doc_number,
-                CAST(lp.invoice_date AS text) AS record_date,
-                CAST(lp.supplier_id AS text) AS supplier_id,
-                lp.supplier_name,
-                CAST(lpi.quantity AS float) AS quantity,
-                CAST(lpi.unit_rate AS float) AS unit_rate,
-                CAST(lpi.unit_landing_rate AS float) AS unit_landing_rate,
-                lp.currency,
-                CAST(lpi.item_total AS float) AS total_amount,
-                lp.status,
-                lp.remarks
-            FROM local_purchase_items lpi
-            JOIN local_purchases lp ON lp.id = lpi.purchase_id
-            WHERE lpi.product_id = :product_id AND lp.deleted_at IS NULL
-            ORDER BY lp.invoice_date DESC, lpi.created_at DESC;
-        """)
-        lp_res = await self.session.execute(lp_query, {"product_id": str(product_id)})
-        invoices = [dict(r._mapping) for r in lp_res.fetchall()]
+        def _parse_json_list(val: Any) -> list[dict[str, Any]]:
+            if not val:
+                return []
+            if isinstance(val, str):
+                return json.loads(val)
+            return [dict(item) for item in val]
 
-        # 2b. Supplier Quotations
-        quote_query = text("""
-            SELECT
-                'quote' AS record_type,
-                CAST(q.id AS text) AS item_id,
-                CAST(q.id AS text) AS doc_id,
-                q.quote_number AS doc_number,
-                CAST(CAST(q.created_at AS date) AS text) AS record_date,
-                CAST(q.supplier_id AS text) AS supplier_id,
-                s.company_name AS supplier_name,
-                CAST(q.quantity AS float) AS quantity,
-                CAST(q.unit_price AS float) AS unit_rate,
-                NULL AS unit_landing_rate,
-                q.currency,
-                CAST(q.total_cost AS float) AS total_amount,
-                CAST(q.status AS text) AS status,
-                q.remarks
-            FROM quotations q
-            JOIN inquiry_items ii ON ii.id = q.inquiry_item_id AND ii.deleted_at IS NULL
-            JOIN suppliers s ON s.id = q.supplier_id AND s.deleted_at IS NULL
-            WHERE ii.product_id = :product_id AND q.deleted_at IS NULL
-            ORDER BY q.created_at DESC;
-        """)
-        quote_res = await self.session.execute(quote_query, {"product_id": str(product_id)})
-        quotes = [dict(r._mapping) for r in quote_res.fetchall()]
-
-        # 2c. Active Catalog Quotes (supplier_product_links)
-        catalog_query = text("""
-            SELECT
-                'catalog' AS record_type,
-                CAST(spl.id AS text) AS item_id,
-                CAST(spl.id AS text) AS doc_id,
-                'CATALOG-QUOTE' AS doc_number,
-                CAST(CAST(spl.updated_at AS date) AS text) AS record_date,
-                CAST(spl.supplier_id AS text) AS supplier_id,
-                s.company_name AS supplier_name,
-                CAST(spl.moq AS float) AS quantity,
-                CAST(spl.unit_price AS float) AS unit_rate,
-                NULL AS unit_landing_rate,
-                spl.currency,
-                NULL AS total_amount,
-                'active' AS status,
-                spl.notes AS remarks
-            FROM supplier_product_links spl
-            JOIN suppliers s ON s.id = spl.supplier_id AND s.deleted_at IS NULL
-            WHERE spl.product_id = :product_id AND spl.unit_price IS NOT NULL
-            ORDER BY spl.updated_at DESC;
-        """)
-        cat_res = await self.session.execute(catalog_query, {"product_id": str(product_id)})
-        catalogs = [dict(r._mapping) for r in cat_res.fetchall()]
-
+        invoices = _parse_json_list(prod_m["invoices_json"])
+        quotes = _parse_json_list(prod_m["quotes_json"])
+        catalogs = _parse_json_list(prod_m["catalogs_json"])
         purchases = invoices + quotes + catalogs
 
-        # 3. Sales history
-        # 3a. Commercial Sales Orders
-        so_query = text("""
-            SELECT
-                'order' AS record_type,
-                CAST(soi.id AS text) AS item_id,
-                CAST(so.id AS text) AS doc_id,
-                so.order_no AS doc_number,
-                so.consignment_code,
-                CAST(so.order_date AS text) AS record_date,
-                CAST(so.buyer_id AS text) AS buyer_id,
-                so.buyer_name,
-                CAST(soi.quantity AS float) AS quantity,
-                CAST(soi.unit_rate AS float) AS unit_rate,
-                so.currency,
-                CAST(soi.item_total AS float) AS item_total,
-                so.status,
-                soi.remarks
-            FROM sales_order_items soi
-            JOIN sales_orders so ON so.id = soi.order_id
-            WHERE soi.product_id = :product_id AND so.deleted_at IS NULL
-            ORDER BY so.order_date DESC, soi.created_at DESC;
-        """)
-        so_res = await self.session.execute(so_query, {"product_id": str(product_id)})
-        sales_orders = [dict(r._mapping) for r in so_res.fetchall()]
-
-        # 3b. Buyer Inquiries
-        inq_query = text("""
-            SELECT
-                'inquiry' AS record_type,
-                CAST(ii.id AS text) AS item_id,
-                CAST(i.id AS text) AS doc_id,
-                COALESCE(cc.code, 'INQUIRY') AS doc_number,
-                cc.code AS consignment_code,
-                CAST(CAST(ii.proposed_at AS date) AS text) AS record_date,
-                CAST(i.buyer_id AS text) AS buyer_id,
-                b.company_name AS buyer_name,
-                CAST(ii.quantity AS float) AS quantity,
-                0.0 AS unit_rate,
-                'CNY' AS currency,
-                0.0 AS item_total,
-                CAST(ii.status AS text) AS status,
-                ii.product_specs_remarks AS remarks
-            FROM inquiry_items ii
-            JOIN inquiries i ON i.id = ii.inquiry_id AND i.deleted_at IS NULL
-            LEFT JOIN consignment_codes cc ON cc.id = i.consignment_code_id AND cc.deleted_at IS NULL
-            JOIN buyers b ON b.id = i.buyer_id AND b.deleted_at IS NULL
-            WHERE ii.product_id = :product_id AND ii.deleted_at IS NULL
-            ORDER BY ii.proposed_at DESC;
-        """)
-        inq_res = await self.session.execute(inq_query, {"product_id": str(product_id)})
-        inquiries = [dict(r._mapping) for r in inq_res.fetchall()]
-
+        sales_orders = _parse_json_list(prod_m["sales_orders_json"])
+        inquiries = _parse_json_list(prod_m["inquiries_json"])
         sales = sales_orders + inquiries
 
         # 4. Metrics & KPI computation

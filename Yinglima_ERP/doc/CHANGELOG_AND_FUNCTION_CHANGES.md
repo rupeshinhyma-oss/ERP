@@ -3,6 +3,77 @@
 **System:** Yinglima_ERP (China Procurement)  
 **Scope:** Functional updates, schema changes, UI hardening, and bug fixes.
 
+### 13. China Export VAT Return Module (`/finance/vat-return`) (`VatReturn.tsx`, `finance/models.py`, `finance/schemas.py`, `finance/service.py`, `finance/routes.py`, `alembic/versions/a1b2c3d4e5f6_create_finance_tables.py`, `nav.ts`, `App.tsx`)
+- **Live Sales Process Integration & Exact China VAT Rebate Engine:** Added `VatReturnRecord` (`vat_return_records` table) and `VatReturnReceipt` (`vat_return_receipts` table). Automatically pulls all Confirmed/Dispatched/LR **Sales Process** orders (`SaleOrder` + `SaleOrderItem`), inherits `purchase_vat_percent` and `refund_vat_percent` (`13%`, `9%`, `0% No VAT`) from `Product` / `HsnCode`, links Supplier Contract No. & Date from confirmed `LocalPurchase` records, and computes item-level and shipment-level rebates via `VAT To Be Returned (¥) = (Total RMB Incl. VAT / (1 + Purchase VAT %)) * Refund VAT %`.
+- **Two-Table Interactive UI (`VatReturn.tsx`):**
+  - **Table 1 (VAT Return Summary Ledger):** Displays `EXP NO.`, `Invoice Date`, `Total RMB Incl. VAT`, `Total VAT Return (¥)`, `VAT Received (¥)`, `Balance VAT (¥)`, `STATUS` (`RECEIVED`, `PARTIAL RECEIVED`, `PENDING`, `NO VAT`), `VAT Receiving Date`, `Partial Amount`, `1st Filing Date`, and `Remarks`, with 4 clickable KPI summary cards (with active blue border sync) and Financial Year tabs (`All Years`, `FY 2026-2027`, `FY 2025-2026`, `FY 2024-2025`, `FY 2023-2024`).
+  - **Table 2 (Product & Supplier VAT Breakdown Modal):** Clicking any `EXP No.` opens the item-level breakdown modal (`YL-EXP...`) with inline editing for Rebate % (`13%`, `9%`, `6%`, `0%`), Contract No., RMB Price with VAT, Quantity, and Remarks.
+- **Excel / CSV Import & 2-Sheet Workbook Export (`Imp / Exp ▾`):** Added `/finance/vat-returns/sample-csv`, `/finance/vat-returns/import` (supporting both the manager's multi-section `RETURNED VAT LIST Yinglima` workbook and standard CSV/Excel files with zero duplicate rows), and `/finance/vat-returns/export` (generating a styled 2-sheet `.xlsx` workbook: `VAT Return Summary` + `Product VAT Breakdown`).
+
+### 12. Unified Consignment Overview Module (`/finance/consignment-overview`), Financial Report 6-KPI Active Border Sync & All-Confirmed Stages Rule (`ConsignmentOverview.tsx`, `FinancialReport.tsx`, `finance/models.py`, `finance/schemas.py`, `finance/service.py`, `finance/routes.py`, `nav.ts`, `App.tsx`)
+- **All Post-Confirmation Stages Included in Financial Report & Consignment Overview (`EXCLUDED_STATUSES`):** Updated `FinanceService` so every Local Purchase (`Confirmed`, `Inwarded`) and Sales Process order (`Confirmed`, `Dispatched`, `LR`) remains in the Financial Report and Consignment Overview once confirmed; only `Pending`, `Draft`, and `Cancelled` entries are excluded.
+- **0ms Optimistic Mutations & 6-KPI Card Active Border Sync in Financial Report (`FinancialReport.tsx`):** Added `cachedFinanceReport`, `recomputeFinanceReportKpis`, and `mutationSeqRef` so recording/deleting payments and editing schedule/BL/agent bills update the UI in 0ms without blanking the table. Added `handleKpiSelect` so clicking any of the 6 KPI cards (`LOCAL PURCHASE — ALL`, `PAID`, `BALANCE`, `SALES PROCESS — ALL`, `RECEIVED`, `BALANCE`) atomically updates both section and stage and moves the active blue border (`1.5px solid #3b82f6`) to the selected card. Removed the redundant subtitle line under `Finance Planning Report`.
+- **Unified Consignment Overview Module (`/finance/consignment-overview`):** Added `ConsignmentOverviewMeta` (`consignment_overviews` table), backend endpoints (`/finance/consignment-overview`, `/checklist`, `/documents`), and `ConsignmentOverviewPage` under the `FINANCE` sidebar section combining:
+  1. **Finance Planning Table** (`Supplier`, `Customer`, and `Cargo Forwarder` financial lines with bill links and status badges)
+  2. **Consignment Gallery** (16 editable China/Global export document slots uploaded to Supabase Storage with auto-linking from Local Purchase Fapiao/Bills, Sales Process docs, and Finance payment slips)
+  3. **Cargo Status Checklist** (12 clickable `Yes`/`No` shipment checklist cards + editable `Cargo Remark`, `ETD Origin`, `ETA Port`, and `Forwarder Name` with 0ms optimistic updates)
+  4. **Product Summary Table** (aggregated product items, quantities, suppliers, and batch/consignment codes).
+
+### 11. Local Purchase Bill PDF Upload & Edit Persistence in Supabase Storage (LocalPurchaseForm.tsx, purchases/local/routes.py, purchases/local/service.py, common/storage.py)
+- **Supabase Bucket & RLS Policy Guarantee (ensure_supabase_purchase_bills_bucket):** Automatically provisions the purchase-bills public bucket (storage.buckets) and llow_public_purchase_bills_all RLS policy on storage.objects in Supabase PostgreSQL before uploading invoice documents.
+- **Opaque Key & Filename Sanitization (common/storage.py):** Added _get_auth_header_variants to support sb_secret_... and JWT keys, and sanitized uploaded filenames via sanitize_filename to prevent InvalidKey errors on filenames with spaces or parentheses.
+- **Immediate Upload & Persistent PDF Display (LocalPurchaseForm.tsx):** Selecting a file in Bill Document File immediately uploads it to Supabase Storage (POST /purchases/local/upload-bill), persists ill_file_url on the purchase record and in-memory cache (updateLocalPurchaseInCache), and displays a prominent 📄 View / Download Bill button and attached filename when reopening Edit.
+
+### 9. Shipment Planning: Consignment Column Auto-Deletion on Dispatch/LR & Stuffing Date Header Display (Planning.tsx, planning/service.py, sales/service.py)
+- **Consignment Column Lifecycle (`Dispatched` / `LR` Only):** When a Sale Order is marked `Dispatched` (via Outward Stock Dispatch) or `LR` (`Mark LR Received`), its linked consignment column group (`<Label> N`, `<Label>N Remarks`, `NO. OF PKG <LABEL>N`, `TOTAL WEIGHT <LABEL>N`, `TOTAL CBM <LABEL>N`) is automatically soft-deleted from Shipment Planning and broadcast via WebSockets. Orders in `Pending`, `Confirmed`, or `Cancelled` status retain their consignment columns.
+- **Stuffing Date Picker & Column Header Display:** Enhanced `DescriptionPopover` on consignment columns (`MUM 48`, `MUM 49`, etc.) with a `Pick Stuffing Date` calendar input, custom date/note field, and `Clear` button, and rendered the saved Stuffing Date directly inside the column header below the column name in `Planning.tsx`.
+
+### 8. Stock Movement: Warehouse Master, Action Restrictions, Product History Hyperlink & Damage Tracking (StockMovements.tsx, StockMovementDetailModal.tsx, Warehouses.tsx, LocalPurchaseInwardModal.tsx, SaleProcessOutwardModal.tsx, stock/repository.py)
+- **Warehouse Master (`/masters/warehouses`):** Created `warehouses` table (`alembic/versions/f7a8b9c0d1e2_create_warehouses_table.py`), backend CRUD/import/export routes (`/api/v1/masters/warehouses`), and frontend `WarehousesPage` (`/masters/warehouses`). Seeded default warehouses (`Main Godown`, `Factory Staging Yard`, `Transit Bay`, `Customs Bonded Area`) and wired `Destination Warehouse *` dropdowns in `LocalPurchaseInwardModal.tsx` and `SaleProcessOutwardModal.tsx` to load dynamically from `/masters/warehouses/all`.
+- **Action Restrictions & Clickable Invoice No Hyperlink:** Removed the auto-generated `INW-...` / `OUT-...` movement number and the `Actions` (`View` / `Cancel` / `Delete`) column from Stock Movement register rows in `StockMovements.tsx`. The first column (`Invoice No`) now shows only the Invoice / Order No as a clickable blue hyperlink that directly opens `StockMovementDetailModal`.
+- **Product Hyperlink & Complete Product History (Purchase + Sales):** Added clickable product hyperlinks and `📜 History` / `📜 Trade History` buttons in `StockMovements.tsx` (`Current Stock Ledger`) and `StockMovementDetailModal.tsx` (`Movement Items`) that open `ProductTradeHistoryDrawer` showing both Purchase History and Sales History. Optimized `ProductPriceRepository.get_product_trade_history` into a single CTE SQL roundtrip and added client-side caching + background prefetching (`prefetchProductTradeHistory`) in `ProductTradeHistoryDrawer.tsx` for instant opening.
+- **Damaged Quantity Ledger Column (Option A):** Added `total_damaged_qty` aggregation in `StockMovementRepository.get_stock_balances` and a `Damaged Qty` column in the `Current Stock Ledger` table while keeping sellable `Current In-Stock` strictly equal to good accepted units (`inward accepted - outward`).
+
+## [Release 2026-10-30] — Sale Process Status Workflow Simplification & Logistics Dates (ETD/ETA)
+
+### 1. Status Workflow Streamlining (SaleProcessList.tsx, SaleProcessForm.tsx, models.py, schemas.py, repository.py, service.py)
+- **Status Renaming:** Renamed `sales_confirmed` to `confirmed` across UI badges, tabs, and schemas (legacy value still accepted).
+- **Removed Admin Approved Stage:** Removed the `ADMIN APPROVED` tab, metric card, and status option.
+- **Removed Status Selector From Inside Order Form:** New orders always start as `Pending`; the status dropdown was removed from `SaleProcessForm.tsx`.
+- **Status Control via 3-Dot Action Menu:** Added `✅ Confirm Order` (`Pending` -> `Confirmed`) and `↩️ Revert to Pending` in the row action menu on `/sale/process`.
+
+### 2. New Logistics Date Fields (ETD Origin Date & ETA Port Date)
+- **Schema & Model:** Added `etd_origin_date` and `eta_port_date` (`Date | null`) to the `SaleOrder` model, Pydantic schemas, and frontend types.
+- **UI Form:** Added `ETD Origin Date` and `ETA Port Date` inputs in the Logistics & Shipping Details card of `SaleProcessForm.tsx`.
+- **Listing Display:** `SaleProcessList.tsx` shows ETD and ETA under the `Logistics Info` column.
+
+### 3. Database Migration (`alembic/versions/e6f7a8b9c0d1_sales_etd_eta_and_confirmed_status.py`)
+- Adds `etd_origin_date` and `eta_port_date` columns to `sales_orders` (fixes the empty Sale Process list caused by the missing columns).
+- Migrates existing `sales_confirmed` and `admin_approved` orders to `confirmed` so they stay visible under the CONFIRMED tab.
+
+### 4. Status Actions: Dispatch, LR Received & Cancel (SaleProcessList.tsx, service.py, schemas.py, routes.py)
+- **Dispatch only from Confirmed:** `📤 Dispatch (Outward Stock)` (renamed from `Outward / Dispatch Stock`) now appears only for Confirmed orders. Backend `dispatch_order` rejects Pending orders.
+- **Mark LR Received:** New `🚚 Mark LR Received` option in the 3-dot menu for Dispatched orders. Popup with optional `LR No` and remarks; sets status to `lr` and saves `lr_no`.
+- **Cancel Order:** New `❌ Cancel Order` option for Pending and Confirmed orders. Popup with optional reason, saved in remarks as `[date] Cancelled: reason`. No stock change. Cancelled is final (cannot be reopened, edited, or dispatched). Dispatched / LR orders cannot be cancelled.
+- **Status transition rules (backend):** pending -> confirmed / cancelled; confirmed -> pending / cancelled / dispatched (via dispatch only); dispatched -> lr. Any other change returns a clear error.
+- **Edit / Delete guard:** `Edit Order` hidden for Dispatched, LR, and Cancelled orders (backend also blocks edits). `Delete` hidden for Dispatched and LR orders. The edit form can no longer change status.
+
+### 5. Item Table Toolbar Clean-up (SaleProcessForm.tsx)
+- Removed 4 controls above the Planned Line Items table: `📊 Costing & Supplier Columns (Active)` toggle, `Rate ¥` input, `Apply Rate` button, and `⚙️ + Add Spare from Master` button.
+- Costing & supplier columns are now always shown (`costingViewMode` fixed to `true`). The `🔍 Search & add product from master...` box remains for adding items (spare parts are still auto-detected from their category).
+
+### 6. Per-Order Spare-to-Product Conversion Button (SaleProcessForm.tsx, schemas.py, service.py)
+- Added `⇄ Make Product` button (and `↩ Make Spare` revert button) on spare line item rows in `SaleProcessForm.tsx`.
+- Clicking `⇄ Make Product` flips `is_spare` to `false` on that Sale Process line item only, rendering it as a standalone product on the order and CI/PL documents while keeping the Product Master record unchanged as a Spare.
+- Updated `SaleService.create_order`, `SaleService.update_order`, and `SaleService.get_trade_document_details` to respect the explicit per-order `SaleOrderItem.is_spare` flag instead of overriding it back to `True` from the Product Master category.
+
+### 7. Local Purchase Status Workflow via 3-Dot Menu, VAT % Toggle, Dual Item Totals & Product Purchase History Link (LocalPurchaseForm.tsx, LocalPurchases.tsx, models.py, schemas.py, service.py)
+- **Status Control Moved to List 3-Dot (`⋮`) Menu:** Removed the `Status` field and inline `Warehouse Inward Stock Receipt` card from inside `LocalPurchaseForm.tsx`. New Local Purchases default to `Pending`, and statuses (`Pending`, `Confirmed`, `Inwarded`) are updated from the 3-dot (`⋮`) action menu on `/purchase/local` (`✅ Mark as Confirmed`, `⏳ Mark as Pending`, `📦 Mark as Inward (Stock In)`).
+- **VAT % Show/Hide Toggle & Dual Item Total Columns:** Added a `🙈 Hide VAT % Column` / `👁️ Show VAT % Column` toggle in the `PRODUCT ITEM` header bar of `LocalPurchaseForm.tsx`, and split `Item Total` into **Item Total (Without VAT)** and **Item Total (With VAT)** across rows and `<tfoot>` totals.
+- **Product Purchase History Hyperlink:** Made each product name in `LocalPurchaseForm.tsx` a clickable hyperlink (`+ 📜 History` badge) opening `ProductTradeHistoryDrawer` to inspect historical purchase count, suppliers, dates, and unit/landed rates.
+
+---
+
 ## [Release 2026-10-29] — 0ms Instant Product Line-Item Rendering, Stock Movement / Users Filter UI, Standardized Imp/Exp SVG Badges & Cross-ERP Isolation
 
 ### 0A. Standardized Imp / Exp (SAMPLE FILE, IMPORT, EXPORT) SVG Icon Badges (ImportWizard.tsx, style.css, ProductPrices.tsx, LocalPurchases.tsx)
@@ -1870,3 +1941,25 @@
 - **Inbound IMAP Poller & AI Extractor:** Bidirectional mailbox poller inspecting `INBOX` and `[Gmail]/Sent Mail`. First supplier reply triggers GPT extraction; subsequent replies bypass AI for zero wasted API costs.
 - **Master Shipment Planning Sheets:** Dynamic spreadsheet grid with automated CBM optimization for 20GP, 40GP, 40HQ, and 45HQ shipping containers.
 - **Supabase Media Storage:** Cloud persistent storage for supplier visit photos and quotation attachments.
+
+
+---
+
+## 2026-11-02 — Financial Report & Payment Planner Module (`/finance/report`)
+
+### 1. Backend (`backend/app/finance/`)
+- **New ORM Models (`backend/app/finance/models.py`) & Migration (`a1b2c3d4e5f6_create_finance_tables.py`)**:
+  - `FinanceRecordMeta` (`finance_record_meta`): Stores financial planning schedule metadata for confirmed Local Purchases (`source_type='local_purchase'`) and confirmed Sale Orders (`source_type='sale_order'`), including `payment_terms`, `expected_dispatch_date`, `due_date`, `delivery_status`, `attachment_url`, `remarks`, `tt_received_date`, `expected_stuffing_date`, `bl_details`, `bl_status`, `bill_status`, `agent_name`, `agent_local_charge`, `agent_freight_charge`, `agent_inv_amount`, and `agent_payment_date`.
+  - `FinancePayment` (`finance_payments`): Stores individual advance/partial/full payment installments with `payment_date`, `amount`, `currency`, `payment_mode`, `bank_charges`, `reference_no`, `remarks`, and soft-delete support (`deleted_at`).
+- **Service & Routes (`backend/app/finance/service.py`, `backend/app/finance/routes.py`)**:
+  - Automatically surfaces all **Confirmed** Local Purchase entries and **Confirmed** Sale Process entries (excluding `Pending`, `Draft`, and `Cancelled`).
+  - Calculates `total_amount`, `paid_amount`, `balance_amount`, and classifies each entry into **`pending`** (`balance_amount > 0`) or **`cleared`** (`balance_amount <= 0`).
+  - Automatically pulls `expected_stuffing_date` from linked Shipment Planning columns (`PlanningColumn.description`) when available.
+  - Provides `GET /api/v1/finance/report`, `POST /api/v1/finance/{source_type}/{source_id}/payments`, `GET /api/v1/finance/{source_type}/{source_id}/payments`, `DELETE /api/v1/finance/payments/{payment_id}`, `PATCH /api/v1/finance/{source_type}/{source_id}/meta`, and `GET /api/v1/finance/export` (4-sheet Excel Planner export).
+
+### 2. Frontend (`frontend/src/pages/finance/FinancialReport.tsx`)
+- Added **Finance Planning Report** page (`/finance/report`) under the `FINANCE` sidebar section:
+  - Top 6 KPI Summary Cards (`Local Purchase: All / Paid / Balance in ¥ & $ Eqv.` and `Sales Process: All / Received / Balance in $ & ¥ Eqv.`).
+  - Two Main Section Switcher Tabs (`Local Purchase (Supplier Payments)` vs `Sales Process (Export & Agent Schedule)`).
+  - Stage Sub-Tabs (`Pending`, `Cleared`, `All`) inside each section.
+  - 3-Dot (`⋮`) Action Menu on every row (`Add Payment` with `30% / 50% / 70% / 100%` quick-fill buttons, `Payment History` with delete/recalculate, `Edit Schedule / Terms / BL & Agent Bill`, and `View Source Order/Invoice`).

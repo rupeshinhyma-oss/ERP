@@ -82,6 +82,27 @@ function formatPrice(val: number | null | undefined, curr = "CNY"): string {
   return `${curr} ${Number(val).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
+const tradeHistoryCache = new Map<string, TradeHistoryData>();
+const inFlightRequests = new Map<string, Promise<TradeHistoryData>>();
+
+export function prefetchProductTradeHistory(productId?: string | null): Promise<TradeHistoryData | null> {
+  if (!productId) return Promise.resolve(null);
+  const existing = inFlightRequests.get(productId);
+  if (existing) return existing;
+
+  const req = apiGet<TradeHistoryData>(`/inventory/product-prices/${productId}/history`)
+    .then((res) => {
+      tradeHistoryCache.set(productId, res.data);
+      return res.data;
+    })
+    .finally(() => {
+      inFlightRequests.delete(productId);
+    });
+
+  inFlightRequests.set(productId, req);
+  return req.catch(() => null);
+}
+
 export function ProductTradeHistoryDrawer({
   productId,
   productName,
@@ -90,7 +111,9 @@ export function ProductTradeHistoryDrawer({
   onClose,
 }: ProductTradeHistoryDrawerProps) {
   const [activeTab, setActiveTab] = useState<"purchases" | "sales">("purchases");
-  const [data, setData] = useState<TradeHistoryData | null>(null);
+  const [data, setData] = useState<TradeHistoryData | null>(() =>
+    productId ? tradeHistoryCache.get(productId) || null : null
+  );
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
@@ -98,23 +121,44 @@ export function ProductTradeHistoryDrawer({
 
   useEffect(() => {
     if (!open || !productId) {
-      setData(null);
       setError(null);
       return;
     }
 
     let isMounted = true;
-    setLoading(true);
+    const cached = tradeHistoryCache.get(productId);
+    if (cached) {
+      setData(cached);
+      setLoading(false);
+    } else {
+      setData(null);
+      setLoading(true);
+    }
     setError(null);
 
-    apiGet<TradeHistoryData>(`/inventory/product-prices/${productId}/history`)
-      .then((res) => {
+    const existingReq = inFlightRequests.get(productId);
+    const fetchPromise =
+      existingReq ||
+      apiGet<TradeHistoryData>(`/inventory/product-prices/${productId}/history`).then((r) => {
+        tradeHistoryCache.set(productId, r.data);
+        return r.data;
+      });
+
+    if (!existingReq) {
+      inFlightRequests.set(productId, fetchPromise);
+      fetchPromise.finally(() => inFlightRequests.delete(productId)).catch(() => {});
+    }
+
+    fetchPromise
+      .then((freshData) => {
         if (!isMounted) return;
-        setData(res.data);
+        setData(freshData);
       })
       .catch((err) => {
         if (!isMounted) return;
-        setError(err.message || "Failed to load product trade history");
+        if (!cached) {
+          setError(err.message || "Failed to load product trade history");
+        }
       })
       .finally(() => {
         if (isMounted) setLoading(false);

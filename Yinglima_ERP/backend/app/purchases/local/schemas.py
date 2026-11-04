@@ -84,7 +84,7 @@ class LocalPurchaseBase(BaseModel):
     offloading_expense: float = Field(default=0.0, ge=0)
     other_expense: float = Field(default=0.0, ge=0)
     remarks: str | None = None
-    status: str = Field(default="Confirmed", max_length=30)
+    status: str = Field(default="Pending", max_length=30)
 
 
 class LocalPurchaseCreate(LocalPurchaseBase):
