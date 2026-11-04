@@ -3,7 +3,7 @@
 **System:** Yinglima_ERP (China Procurement)  
 **Scope:** Functional updates, schema changes, UI hardening, and bug fixes.
 
-### 13. China Export VAT Return Module (`/finance/vat-return`) (`VatReturn.tsx`, `finance/models.py`, `finance/schemas.py`, `finance/service.py`, `finance/routes.py`, `alembic/versions/a1b2c3d4e5f6_create_finance_tables.py`, `nav.ts`, `App.tsx`)
+### 13. China Export VAT Return Module (`/finance/vat-return`) (`VatReturn.tsx`, `finance/models.py`, `finance/schemas.py`, `finance/service.py`, `finance/routes.py`, `alembic/versions/f8a9b0c1d2e3_create_finance_tables.py`, `nav.ts`, `App.tsx`)
 - **Live Sales Process Integration & Exact China VAT Rebate Engine:** Added `VatReturnRecord` (`vat_return_records` table) and `VatReturnReceipt` (`vat_return_receipts` table). Automatically pulls all Confirmed/Dispatched/LR **Sales Process** orders (`SaleOrder` + `SaleOrderItem`), inherits `purchase_vat_percent` and `refund_vat_percent` (`13%`, `9%`, `0% No VAT`) from `Product` / `HsnCode`, links Supplier Contract No. & Date from confirmed `LocalPurchase` records, and computes item-level and shipment-level rebates via `VAT To Be Returned (¥) = (Total RMB Incl. VAT / (1 + Purchase VAT %)) * Refund VAT %`.
 - **Two-Table Interactive UI (`VatReturn.tsx`):**
   - **Table 1 (VAT Return Summary Ledger):** Displays `EXP NO.`, `Invoice Date`, `Total RMB Incl. VAT`, `Total VAT Return (¥)`, `VAT Received (¥)`, `Balance VAT (¥)`, `STATUS` (`RECEIVED`, `PARTIAL RECEIVED`, `PENDING`, `NO VAT`), `VAT Receiving Date`, `Partial Amount`, `1st Filing Date`, and `Remarks`, with 4 clickable KPI summary cards (with active blue border sync) and Financial Year tabs (`All Years`, `FY 2026-2027`, `FY 2025-2026`, `FY 2024-2025`, `FY 2023-2024`).
@@ -1948,7 +1948,7 @@
 ## 2026-11-02 — Financial Report & Payment Planner Module (`/finance/report`)
 
 ### 1. Backend (`backend/app/finance/`)
-- **New ORM Models (`backend/app/finance/models.py`) & Migration (`a1b2c3d4e5f6_create_finance_tables.py`)**:
+- **New ORM Models (`backend/app/finance/models.py`) & Migration (`f8a9b0c1d2e3_create_finance_tables.py`)**:
   - `FinanceRecordMeta` (`finance_record_meta`): Stores financial planning schedule metadata for confirmed Local Purchases (`source_type='local_purchase'`) and confirmed Sale Orders (`source_type='sale_order'`), including `payment_terms`, `expected_dispatch_date`, `due_date`, `delivery_status`, `attachment_url`, `remarks`, `tt_received_date`, `expected_stuffing_date`, `bl_details`, `bl_status`, `bill_status`, `agent_name`, `agent_local_charge`, `agent_freight_charge`, `agent_inv_amount`, and `agent_payment_date`.
   - `FinancePayment` (`finance_payments`): Stores individual advance/partial/full payment installments with `payment_date`, `amount`, `currency`, `payment_mode`, `bank_charges`, `reference_no`, `remarks`, and soft-delete support (`deleted_at`).
 - **Service & Routes (`backend/app/finance/service.py`, `backend/app/finance/routes.py`)**:

@@ -80,6 +80,12 @@ async def reconcile_alembic_version(verbose: bool = True) -> bool:
                 needs_repair = True
                 invalid_versions.append(v)
 
+        if not needs_repair and "a1b2c3d4e5f6" in version_rows:
+            has_modern = (await conn.execute(text("SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name IN ('finance_record_meta', 'planning_sheets'));"))).scalar()
+            if has_modern:
+                needs_repair = True
+                invalid_versions.append("a1b2c3d4e5f6")
+
         if not needs_repair:
             if verbose:
                 print(f"[reconcile_alembic_version] Current database revision(s) {version_rows} are valid.")
