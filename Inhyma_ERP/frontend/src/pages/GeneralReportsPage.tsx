@@ -580,7 +580,7 @@ export function GeneralReportsPage() {
                   {summaryData ? summaryData.open_now.toLocaleString() : "—"}
                 </div>
                 <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 2 }}>
-                  Pending, Approved & Payment Pending
+                  Pending & Approved
                 </div>
               </div>
 

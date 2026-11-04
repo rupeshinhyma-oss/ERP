@@ -241,4 +241,55 @@ describe("SaleProcessFormPage (/sale-order/addedit & /sales/process/add)", () =>
       expect(screen.getByRole("heading", { name: "Add Sales Order (Duplicate)" })).toBeTruthy();
     });
   });
+
+  it("pre-fills warehouse, company, consumed spare parts, and linked gatepass banner when ?gatepass_id is provided", async () => {
+    const { apiGet } = await import("@/lib/api");
+    (apiGet as any).mockImplementation((url: string) => {
+      if (typeof url === "string" && url.includes("/technician-operations/gatepasses/gp-1/draft-so")) {
+        return Promise.resolve({
+          data: {
+            gatepass_id: "gp-1",
+            gatepass_number: "GP-TECH-2026-0001",
+            customer_name: "Apex Packaging Ltd",
+            warehouse_name: "Main Warehouse",
+            city: "Ahmedabad",
+            state: "Gujarat",
+            billing_address: "Plot 12, GIDC, Ahmedabad",
+            shipping_address: "Plot 12, GIDC, Ahmedabad",
+            machine_model: "SuperSealer 5000",
+            machine_serial_number: "SN-APEX-99",
+            items_to_bill: [
+              {
+                gatepass_item_id: "gpi-1",
+                product_id: "sp-1",
+                product_code: "SP-HEAT-01",
+                product_name: "Heating Element 500W",
+                hsn_code: "85168000",
+                gst_percent: 18,
+                uom: "NOS",
+                quantity: 2,
+                unit_rate: 1500,
+                line_total: 3000,
+              },
+            ],
+            estimated_subtotal: 3000,
+            message: "Draft Sales Order generated from Gatepass GP-TECH-2026-0001.",
+          },
+        });
+      }
+      return Promise.resolve({ data: { items: [] } });
+    });
+
+    render(
+      <MemoryRouter initialEntries={["/sales/process/add?gatepass_id=gp-1"]}>
+        <SaleProcessFormPage />
+      </MemoryRouter>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText(/GP-TECH-2026-0001/)).toBeTruthy();
+      expect((screen.getByRole("textbox", { name: "Warehouse" }) as HTMLInputElement).value).toBe("Main Warehouse");
+      expect(screen.getByDisplayValue("Heating Element 500W")).toBeTruthy();
+    });
+  });
 });

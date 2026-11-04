@@ -101,17 +101,16 @@ function formatTaskLogTimestamp(iso?: string | null): string {
 }
 
 function renderStatusPill(statusRaw?: string | null) {
-  const status = (statusRaw || "Pending").trim();
-  const lower = status.toLowerCase();
+  const raw = (statusRaw || "Pending").trim();
+  const lower = raw.toLowerCase();
+  const isCompleted = lower === "completed" || lower === "payment pending" || lower === "payment_pending";
+  const status = isCompleted ? "Completed" : raw;
   let bg = "#fef3c7";
   let fg = "#92400e";
   if (lower === "approved") {
     bg = "#dcfce7";
     fg = "#166534";
-  } else if (lower === "payment pending" || lower === "payment_pending") {
-    bg = "#ffedd5";
-    fg = "#9a3412";
-  } else if (lower === "completed") {
+  } else if (isCompleted) {
     bg = "#d1fae5";
     fg = "#065f46";
   } else if (lower === "cancel" || lower === "cancelled") {

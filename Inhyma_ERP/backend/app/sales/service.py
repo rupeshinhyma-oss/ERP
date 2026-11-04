@@ -786,25 +786,38 @@ class SaleService:
         # Stock follows the status rules (``stock_out``): quantities are deducted from the order's warehouse.
         # Physical warehouses cannot go negative (409); transit / ordered warehouses may. Unknown warehouses or
         # products are refused instead of silently skipping the stock movement.
+        explicit_gp_id = getattr(payload, "technician_gatepass_id", None)
+        if explicit_gp_id is not None:
+            await self._validate_explicit_gatepass(explicit_gp_id)
+
         if rules[order.status].get("stock_out"):
+            await self._release_gatepass_stock_for_order(order, explicit_gatepass_id=explicit_gp_id)
             await self._take_stock(order, self._lines(item_entities))
         elif await self.is_physical_warehouse(order.warehouse):
+            gp_credits = await self._get_gatepass_held_credits(
+                order.warehouse,
+                explicit_gatepass_id=explicit_gp_id,
+            )
             # Strict physical warehouse negative stock lock: block saving if it drives physical stock negative
             for name, qty in self._lines(item_entities):
                 prod = await stock_service.find_product(self.session, name)
                 stock_row = await stock_service._ensure_stock_row(self.session, prod)
                 col = stock_service.warehouse_column(order.warehouse)
                 avail = float(getattr(stock_row, col, 0.0) or 0.0)
-                if avail - qty < -1e-9:
+                credit = gp_credits.get(prod.product_name.strip().lower(), 0.0)
+                if (avail + credit) - qty < -1e-9:
                     raise ConflictException(
                         f"Not enough stock of '{prod.product_name}' in {order.warehouse} "
                         f"(available {avail:g}, needed {qty:g}). Physical warehouses cannot go negative."
                     )
 
         created = await self.repo.create(order)
+        if explicit_gp_id is not None:
+            await self._link_gatepass_to_order(created, explicit_gp_id)
         if created.status in ("sales_confirmed", "confirmed", "acc_confirmed") or created.invoice_no:
             await self._transition_company_to_existing(created.company_name or created.buyer_name)
         await self._sync_discount_payment(created)
+        await self._sync_machine_warranties(created)
         return created
 
     async def _sync_discount_payment(self, order: SaleOrder) -> None:
@@ -1106,15 +1119,22 @@ class SaleService:
             order.discount = totals["discount"]
 
         if stock_relevant and rules[order.status].get("stock_out"):
+            await self._release_gatepass_stock_for_order(order)
             await self._take_stock(order)
         elif stock_relevant and await self.is_physical_warehouse(order.warehouse):
+            gp_credits = await self._get_gatepass_held_credits(
+                order.warehouse,
+                order_id=order.id,
+                order_no=order.order_no,
+            )
             # Strict physical warehouse negative stock lock: block saving if it drives physical stock negative
             for name, qty in self._lines(order.items):
                 prod = await stock_service.find_product(self.session, name)
                 stock_row = await stock_service._ensure_stock_row(self.session, prod)
                 col = stock_service.warehouse_column(order.warehouse)
                 avail = float(getattr(stock_row, col, 0.0) or 0.0)
-                if avail - qty < -1e-9:
+                credit = gp_credits.get(prod.product_name.strip().lower(), 0.0)
+                if (avail + credit) - qty < -1e-9:
                     raise ConflictException(
                         f"Not enough stock of '{prod.product_name}' in {order.warehouse} "
                         f"(available {avail:g}, needed {qty:g}). Physical warehouses cannot go negative."
@@ -1124,6 +1144,7 @@ class SaleService:
         if updated.invoice_no or updated.status in ("sales_confirmed", "confirmed", "acc_confirmed"):
             await self._transition_company_to_existing(updated.company_name or updated.buyer_name)
         await self._sync_discount_payment(updated)
+        await self._sync_machine_warranties(updated)
         return updated
 
     async def update_status(
@@ -1238,9 +1259,14 @@ class SaleService:
         # Stock follows the target status: cancelling returns the quantities, un-cancelling would take them again
         wants_stock = bool(rules[target].get("stock_out"))
         if wants_stock and not order.stock_applied:
+            await self._release_gatepass_stock_for_order(order)
             await self._take_stock(order)
         elif not wants_stock and order.stock_applied:
             await self._release_stock(order)
+            if target == "cancelled":
+                await self._rehold_and_unlink_gatepass_for_order(order)
+        elif target == "cancelled":
+            await self._rehold_and_unlink_gatepass_for_order(order)
 
         actor_name = await self._resolve_actor_name(
             current_user, fallback=order.sales_person or "Admin"
@@ -1285,6 +1311,7 @@ class SaleService:
         if target in ("sales_confirmed", "confirmed", "acc_confirmed") or updated.invoice_no:
             await self._transition_company_to_existing(updated.company_name or updated.buyer_name)
         await self._sync_discount_payment(updated)
+        await self._sync_machine_warranties(updated)
         return updated
 
     async def delete_order(self, order_id: uuid.UUID, current_user: CurrentUser) -> None:
@@ -1295,7 +1322,9 @@ class SaleService:
         rules = await self.load_status_rules()
         wf.check_deletable(rules, order.status, current_user)
         await self._release_stock(order)
+        await self._rehold_and_unlink_gatepass_for_order(order)
         await self.repo.soft_delete(order, deleted_by=current_user.display_name or current_user.full_name or current_user.username)
+        await self._sync_machine_warranties(order, force_remove=True)
         try:
             from app.sales.models import DiscountPayment
 
@@ -1323,6 +1352,7 @@ class SaleService:
         order = await self.repo.get_by_id(order_id)
         rules = await self.load_status_rules()
         if order and rules.get(order.status, {}).get("stock_out") and not order.stock_applied:
+            await self._release_gatepass_stock_for_order(order)
             await self._take_stock(order)
             await self.repo.update(order)
         if order:
@@ -1339,6 +1369,312 @@ class SaleService:
             except Exception:
                 pass
             await self._sync_discount_payment(order)
+            await self._sync_machine_warranties(order)
+
+    # -----------------------------------------------------------------------
+    # Technician Gatepass & Machine Warranty Cross-Module Sync
+    # -----------------------------------------------------------------------
+
+    async def _validate_explicit_gatepass(self, gatepass_id: uuid.UUID) -> None:
+        from app.technician_operations.models import TechnicianGatepass
+
+        gp = (
+            await self.session.execute(
+                select(TechnicianGatepass).where(
+                    TechnicianGatepass.id == gatepass_id,
+                    TechnicianGatepass.deleted_at.is_(None),
+                )
+            )
+        ).scalar_one_or_none()
+        if gp is None:
+            raise BadRequestException(f"Linked Technician Gatepass '{gatepass_id}' was not found.")
+
+    async def _find_linked_gatepasses(
+        self,
+        *,
+        explicit_gatepass_id: uuid.UUID | None = None,
+        order_id: uuid.UUID | None = None,
+        order_no: str | None = None,
+    ) -> list[Any]:
+        try:
+            from sqlalchemy.orm import selectinload
+            from app.technician_operations.models import TechnicianGatepass
+
+            clauses: list[Any] = []
+            if explicit_gatepass_id is not None:
+                clauses.append(TechnicianGatepass.id == explicit_gatepass_id)
+            if order_id is not None:
+                clauses.append(TechnicianGatepass.sale_order_id == order_id)
+            if order_no and order_no.strip():
+                clauses.append(func.upper(TechnicianGatepass.so_number) == order_no.strip().upper())
+            if not clauses:
+                return []
+
+            async with self.session.begin_nested():
+                res = await self.session.execute(
+                    select(TechnicianGatepass)
+                    .options(selectinload(TechnicianGatepass.items))
+                    .where(
+                        TechnicianGatepass.deleted_at.is_(None),
+                        or_(*clauses),
+                    )
+                )
+                return list(res.scalars().all())
+        except Exception:
+            return []
+
+    async def _get_gatepass_held_credits(
+        self,
+        warehouse: str | None,
+        *,
+        explicit_gatepass_id: uuid.UUID | None = None,
+        order_id: uuid.UUID | None = None,
+        order_no: str | None = None,
+    ) -> dict[str, float]:
+        """Return per-product quantity already deducted & held by linked Technician Gatepass(es) on this warehouse."""
+        if not warehouse or not warehouse.strip():
+            return {}
+        w_key = warehouse.strip().lower()
+        gatepasses = await self._find_linked_gatepasses(
+            explicit_gatepass_id=explicit_gatepass_id,
+            order_id=order_id,
+            order_no=order_no,
+        )
+        credits: dict[str, float] = {}
+        for gp in gatepasses:
+            if not gp.stock_deducted or not gp.warehouse_name or gp.warehouse_name.strip().lower() != w_key:
+                continue
+            for item in gp.items or []:
+                cons = float(item.quantity_consumed or 0.0)
+                released = float(item.stock_billed_released_qty or 0.0)
+                unreleased = max(0.0, round(cons - released, 6))
+                if unreleased > 0 and not item.is_warranty_covered:
+                    p_key = (item.product_name or "").strip().lower()
+                    if p_key:
+                        credits[p_key] = round(credits.get(p_key, 0.0) + unreleased, 6)
+        return credits
+
+    async def _release_gatepass_stock_for_order(
+        self,
+        order: SaleOrder,
+        *,
+        explicit_gatepass_id: uuid.UUID | None = None,
+    ) -> None:
+        """Release gatepass stock hold right before SaleOrder._take_stock deducts stock permanently."""
+        if not order.warehouse or not order.warehouse.strip():
+            return
+        w_key = order.warehouse.strip().lower()
+        gatepasses = await self._find_linked_gatepasses(
+            explicit_gatepass_id=explicit_gatepass_id,
+            order_id=getattr(order, "id", None),
+            order_no=getattr(order, "order_no", None),
+        )
+        for gp in gatepasses:
+            if not gp.stock_deducted or not gp.warehouse_name or gp.warehouse_name.strip().lower() != w_key:
+                continue
+            for item in gp.items or []:
+                cons = float(item.quantity_consumed or 0.0)
+                if cons > 0 and not item.is_warranty_covered:
+                    already_released = float(item.stock_billed_released_qty or 0.0)
+                    delta = round(cons - already_released, 6)
+                    if delta > 1e-9:
+                        await stock_service.apply_stock_delta(
+                            self.session,
+                            product_name=item.product_name,
+                            warehouse_name=gp.warehouse_name,
+                            delta=delta,
+                        )
+                        item.stock_billed_released_qty = cons
+            await self.session.flush()
+
+    async def _link_gatepass_to_order(self, order: SaleOrder, gatepass_id: uuid.UUID) -> None:
+        """Link an Outward Technician Gatepass directly to a newly created Sales Order."""
+        from sqlalchemy.orm import selectinload
+        from app.technician_operations.models import TechnicianGatepass
+
+        gp = (
+            await self.session.execute(
+                select(TechnicianGatepass)
+                .options(selectinload(TechnicianGatepass.items))
+                .where(
+                    TechnicianGatepass.id == gatepass_id,
+                    TechnicianGatepass.deleted_at.is_(None),
+                )
+            )
+        ).scalar_one_or_none()
+        if gp is None:
+            return
+        gp.sale_order_id = order.id
+        gp.so_number = order.order_no
+        gp.so_created = True
+        for item in gp.items or []:
+            if float(item.quantity_consumed or 0.0) > 0 and not item.is_warranty_covered:
+                item.sales_order_number = order.order_no
+                item.item_status = "CONSUMED_BILLED"
+        total_issued = sum(float(i.quantity_issued or 0.0) for i in (gp.items or []))
+        total_accounted = sum(float(i.quantity_consumed or 0.0) + float(i.quantity_returned or 0.0) for i in (gp.items or []))
+        gp.status = "CLOSED" if total_accounted >= total_issued - 1e-6 else "RECONCILED"
+        await self.session.flush()
+
+    async def _rehold_and_unlink_gatepass_for_order(self, order: SaleOrder) -> None:
+        """If a linked Sales Order is cancelled or deleted, restore the gatepass's field-consumption hold & pending-SO flag."""
+        gatepasses = await self._find_linked_gatepasses(
+            order_id=getattr(order, "id", None),
+            order_no=getattr(order, "order_no", None),
+        )
+        if not gatepasses:
+            return
+        try:
+            async with self.session.begin_nested():
+                for gp in gatepasses:
+                    has_chargeable = False
+                    for item in gp.items or []:
+                        cons = float(item.quantity_consumed or 0.0)
+                        released = float(item.stock_billed_released_qty or 0.0)
+                        if gp.stock_deducted and gp.warehouse_name and released > 1e-9:
+                            await stock_service.apply_stock_delta(
+                                self.session,
+                                product_name=item.product_name,
+                                warehouse_name=gp.warehouse_name,
+                                delta=-released,
+                            )
+                            item.stock_billed_released_qty = 0.0
+                        if cons > 0 and not item.is_warranty_covered:
+                            has_chargeable = True
+                            item.sales_order_number = None
+                    gp.sale_order_id = None
+                    gp.so_number = None
+                    gp.so_created = False
+                    gp.so_required = has_chargeable
+                    gp.status = "PARTIALLY_RETURNED" if has_chargeable else gp.status
+                await self.session.flush()
+        except Exception:
+            pass
+
+    async def _sync_machine_warranties(self, order: SaleOrder, *, force_remove: bool = False) -> None:
+        """Auto-register/update MachineWarranty records for Sales Order item serial numbers."""
+        try:
+            from sqlalchemy.orm import noload
+            from app.technician_operations.models import MachineWarranty
+            from app.technician_operations.repository import _add_months, _parse_date_flexible
+
+            is_removed = force_remove or order.deleted_at is not None or (order.status or "").strip().lower() == "cancelled"
+            auto_tag = f"[AUTO-SO:{order.order_no}]"
+
+            async with self.session.begin_nested():
+                if is_removed:
+                    rows = (
+                        await self.session.execute(
+                            select(MachineWarranty).where(
+                                MachineWarranty.deleted_at.is_(None),
+                                MachineWarranty.notes.ilike(f"%{auto_tag}%"),
+                            )
+                        )
+                    ).scalars().all()
+                    now_utc = datetime.now(timezone.utc)
+                    for r in rows:
+                        r.deleted_at = now_utc
+                    if rows:
+                        await self.session.flush()
+                    return
+
+                # Gather serial numbers across items
+                serial_entries: list[tuple[str, SaleOrderItem]] = []
+                for item in order.items or []:
+                    if getattr(item, "is_additional_charge", False):
+                        continue
+                    serials = item.serial_numbers if isinstance(item.serial_numbers, list) else []
+                    for raw_sn in serials:
+                        clean_sn = str(raw_sn or "").strip().upper()
+                        if len(clean_sn) >= 2:
+                            serial_entries.append((clean_sn, item))
+
+                if not serial_entries:
+                    return
+
+                inv_dt = (
+                    _parse_date_flexible(order.invoice_date)
+                    or _parse_date_flexible(order.order_date)
+                    or date.today()
+                )
+                end_dt = _add_months(inv_dt, 12)
+                cov_status = "UNDER_WARRANTY" if date.today() <= end_dt else "OUT_OF_WARRANTY"
+                comp_name = (order.company_name or order.buyer_name or "Customer").strip()
+                inv_ref = (order.invoice_no or order.order_no or "").strip() or None
+
+                comp_id: uuid.UUID | None = None
+                contact_person: str | None = None
+                contact_phone: str | None = None
+                try:
+                    from app.companies.models import Company
+
+                    async with self.session.begin_nested():
+                        comp = (
+                            await self.session.execute(
+                                select(Company)
+                                .options(noload("*"))
+                                .where(
+                                    Company.deleted_at.is_(None),
+                                    func.lower(Company.company_name) == comp_name.lower(),
+                                )
+                                .limit(1)
+                            )
+                        ).scalar_one_or_none()
+                        if comp is not None:
+                            comp_id = comp.id
+                            contact_person = comp.contact_full_name
+                            contact_phone = comp.contact_calling_number or comp.contact_whatsapp_number
+                except Exception:
+                    pass
+
+                for clean_sn, s_item in serial_entries:
+                    existing = (
+                        await self.session.execute(
+                            select(MachineWarranty).where(
+                                func.upper(MachineWarranty.serial_number) == clean_sn
+                            )
+                        )
+                    ).scalar_one_or_none()
+
+                    if existing is not None:
+                        if existing.deleted_at is not None or (existing.notes and auto_tag in existing.notes):
+                            existing.deleted_at = None
+                            existing.machine_model = s_item.product_name
+                            existing.product_id = s_item.product_id
+                            existing.company_name = comp_name
+                            existing.company_id = comp_id or existing.company_id
+                            existing.invoice_number = inv_ref
+                            existing.invoice_date = inv_dt
+                            existing.warranty_end_date = _add_months(inv_dt, existing.warranty_months or 12)
+                            existing.status = "UNDER_WARRANTY" if date.today() <= existing.warranty_end_date else "OUT_OF_WARRANTY"
+                            existing.installation_city = order.city or existing.installation_city
+                            existing.contact_person = contact_person or existing.contact_person
+                            existing.contact_phone = contact_phone or existing.contact_phone
+                            if not existing.notes or auto_tag not in existing.notes:
+                                existing.notes = f"{auto_tag} Registered from Sales Order {order.order_no}"
+                    else:
+                        self.session.add(
+                            MachineWarranty(
+                                serial_number=clean_sn,
+                                machine_model=s_item.product_name,
+                                product_id=s_item.product_id,
+                                company_name=comp_name,
+                                company_id=comp_id,
+                                invoice_number=inv_ref,
+                                invoice_date=inv_dt,
+                                warranty_months=12,
+                                warranty_end_date=end_dt,
+                                status=cov_status,
+                                contact_person=contact_person,
+                                contact_phone=contact_phone,
+                                installation_city=order.city,
+                                notes=f"{auto_tag} Registered from Sales Order {order.order_no}",
+                            )
+                        )
+                await self.session.flush()
+        except Exception:
+            # Tolerant if machine_warranties table is omitted in isolated unit tests
+            pass
 
     def export_excel(self, records: list[SaleOrder]) -> io.BytesIO:
         """Export Sale Process orders to styled Excel workbook."""

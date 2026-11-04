@@ -330,6 +330,7 @@ class SaleOrderCreate(BaseModel):
     eway_bill: str | None = None
     eway_bill_url: str | None = None
     eway_bill_name: str | None = None
+    technician_gatepass_id: uuid.UUID | None = None
 
     items: list[SaleOrderItemCreate] = Field(..., min_length=1)
 
@@ -375,6 +376,7 @@ class SaleOrderUpdate(BaseModel):
     eway_bill: str | None = None
     eway_bill_url: str | None = None
     eway_bill_name: str | None = None
+    technician_gatepass_id: uuid.UUID | None = None
     gatepass: str | None = None
     gatepass_no: str | None = None
     gatepass_date: str | None = None
@@ -422,6 +424,7 @@ class SaleOrderStatusUpdate(BaseModel):
     eway_bill: str | None = None
     eway_bill_url: str | None = None
     eway_bill_name: str | None = None
+    technician_gatepass_id: uuid.UUID | None = None
     third_party_invoice: str | None = None
     gatepass: str | None = None
     gatepass_no: str | None = None
@@ -477,6 +480,7 @@ class SaleOrderResponse(BaseModel):
     eway_bill: str | None = None
     eway_bill_url: str | None = None
     eway_bill_name: str | None = None
+    technician_gatepass_id: uuid.UUID | None = None
     gatepass: str | None = None
     gatepass_no: str | None = None
     gatepass_date: str | None = None

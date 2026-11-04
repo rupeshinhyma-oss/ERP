@@ -110,7 +110,9 @@ describe("TechnicalTasksPage", () => {
       expect(screen.getByText(/^All\s*\(\s*1\s*\)$/)).toBeTruthy();
       expect(screen.getByText(/^Pending\s*\(\s*0\s*\)$/)).toBeTruthy();
       expect(screen.getByText(/^Approved\s*\(\s*1\s*\)$/)).toBeTruthy();
-      expect(screen.getByText(/^Payment Pending\s*\(\s*0\s*\)$/)).toBeTruthy();
+      expect(screen.getByText(/^Completed\s*\(\s*0\s*\)$/)).toBeTruthy();
+      expect(screen.getByText(/^Cancel\s*\(\s*0\s*\)$/)).toBeTruthy();
+      expect(screen.queryByText(/Payment Pending/i)).toBeNull();
     });
   });
 
@@ -554,7 +556,7 @@ describe("TechnicalTasksPage", () => {
     });
     const statusSpy = vi
       .spyOn(technicalTasksApi, "updateTechnicalTaskStatus")
-      .mockResolvedValue({ ...approved, status: "Payment Pending" } as any);
+      .mockResolvedValue({ ...approved, status: "Completed", payment_status: "Pending" } as any);
 
     const { unmount } = render(<MemoryRouter><TechnicalTasksPage /></MemoryRouter>);
     await openMenuFor("SHREE KHODIYAR ENTERPRISE");
@@ -566,19 +568,19 @@ describe("TechnicalTasksPage", () => {
     expect(completedBtn).toBeTruthy();
     expect(cancelBtn).toBeTruthy();
 
-    // Chargeable task -> Completed opens payment collection modal; choosing 'No' moves to Payment Pending
+    // Chargeable task -> Completed opens payment collection modal; choosing 'No' marks work Completed with payment_status Pending (tracked in /payments)
     fireEvent.click(completedBtn);
     await waitFor(() => {
       expect(screen.getByText(/Complete Technical Task/i)).toBeTruthy();
       expect(screen.getByText(/Did you collect payment/i)).toBeTruthy();
     });
-    fireEvent.click(screen.getByLabelText(/No \(Move to Payment Pending\)/i));
+    fireEvent.click(screen.getByLabelText(/No \(Pending in Payments\)/i));
     fireEvent.click(screen.getByTestId("btn-save-status"));
 
     await waitFor(() => {
       expect(statusSpy).toHaveBeenCalledWith(
         "task-1",
-        "Payment Pending",
+        "Completed",
         "",
         expect.objectContaining({
           payment_status: "Pending",
@@ -736,14 +738,15 @@ describe("TechnicalTasksPage", () => {
     }
   });
 
-  it("offers 'Payment Collected' (not Reopen) for Payment Pending tasks", async () => {
+  it("shows only Call Logs and admin Delete (no Payment Collected or Reopen) for Completed unpaid tasks", async () => {
     vi.spyOn(technicalTasksApi, "fetchTechnicalTasks").mockResolvedValue({
-      data: [{ ...sampleTasks[0], status: "Payment Pending", payment_status: "Pending" }] as any,
+      data: [{ ...sampleTasks[0], status: "Completed", payment_status: "Pending" }] as any,
       meta: { total: 1, page: 1, page_size: 50, total_pages: 1 } as any,
     });
     render(<MemoryRouter><TechnicalTasksPage /></MemoryRouter>);
     await openMenuFor("SHREE KHODIYAR ENTERPRISE");
-    expect(screen.getByText("Payment Collected")).toBeTruthy();
+    expect(screen.getByText("Call Logs")).toBeTruthy();
+    expect(screen.queryByText("Payment Collected")).toBeNull();
     expect(screen.queryByText("Reopen / Reassign")).toBeNull();
   });
 

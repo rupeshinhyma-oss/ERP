@@ -201,7 +201,6 @@ class TechnicalTaskCountsResponse(BaseModel):
     all: int
     pending: int
     approved: int
-    payment_pending: int = 0
     completed: int
     cancel: int
 

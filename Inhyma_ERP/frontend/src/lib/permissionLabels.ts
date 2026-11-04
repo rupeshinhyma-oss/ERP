@@ -39,6 +39,7 @@ export const MODULE_NAMES: Record<string, string> = {
   hrms: "HRMS & Workforce",
   task: "Tasks & Work Management",
   technicaltask: "Technical Tasks",
+  report: "Reports & Analytics",
 };
 
 const ACTION_LABELS: Record<string, string> = {

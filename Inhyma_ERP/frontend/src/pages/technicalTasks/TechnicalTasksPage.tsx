@@ -646,15 +646,10 @@ function TechnicalTasksPageContent() {
   const baseStatusOptions = optionValues(optionGroups, "technical_task.status");
   const STATUS_OPTIONS = useMemo(() => {
     const list = baseStatusOptions.length > 0 ? [...baseStatusOptions] : ["Pending", "Approved", "Completed", "Cancel"];
-    if (!list.some((s) => s.toLowerCase() === "payment pending")) {
-      const compIdx = list.findIndex((s) => s.toLowerCase() === "completed");
-      if (compIdx !== -1) {
-        list.splice(compIdx, 0, "Payment Pending");
-      } else {
-        list.push("Payment Pending");
-      }
-    }
-    return list;
+    return list.filter((s) => {
+      const lower = s.trim().toLowerCase();
+      return lower !== "payment pending" && lower !== "payment_pending";
+    });
   }, [baseStatusOptions]);
 
   // Feedback and Error Handling States
@@ -1209,9 +1204,7 @@ function TechnicalTasksPageContent() {
     setStatusModalError(null);
     setStatusModalTask(task);
     setNewStatusValue("Completed");
-    setStatusPaymentCollected(
-      task.payment_status?.toLowerCase() === "paid" || task.status.toLowerCase() === "payment pending"
-    );
+    setStatusPaymentCollected(task.payment_status?.toLowerCase() === "paid");
     setStatusPaymentMode(task.payment_mode || "Company Acc");
     setStatusScreenshotUrl(task.payment_screenshot || "");
     setStatusScreenshotFile(null);
@@ -1448,7 +1441,7 @@ function TechnicalTasksPageContent() {
         (statusModalTask.service_type === "Chargeable" || (statusModalTask.service_charge ?? 0) > 0)
       ) {
         if (!statusPaymentCollected) {
-          targetStatus = "Payment Pending";
+          targetStatus = "Completed";
           targetPaymentStatus = "Pending";
         } else {
           targetPaymentStatus = "Paid";
@@ -1658,18 +1651,18 @@ function TechnicalTasksPageContent() {
   };
 
   const renderStatusBadge = (task: TechnicalTask) => {
-    const s = task.status.toLowerCase();
+    const raw = task.status.toLowerCase();
+    const isCompleted = raw === "completed" || raw === "payment_pending" || raw === "payment pending";
     let badgeClass = "badge-tech";
-    if (s === "pending") badgeClass += " badge-status-pending";
-    else if (s === "approved") badgeClass += " badge-status-approved";
-    else if (s === "payment_pending" || s === "payment pending") badgeClass += " badge-status-payment-pending";
-    else if (s === "completed") badgeClass += " badge-status-completed";
-    else if (s === "cancel") badgeClass += " badge-status-cancel";
+    if (raw === "pending") badgeClass += " badge-status-pending";
+    else if (raw === "approved") badgeClass += " badge-status-approved";
+    else if (isCompleted) badgeClass += " badge-status-completed";
+    else if (raw === "cancel" || raw === "cancelled") badgeClass += " badge-status-cancel";
 
     return (
       <div className="status-wrapper">
-        <span className={badgeClass}>{task.status}</span>
-        {s === "completed" && task.completed_date && (
+        <span className={badgeClass}>{isCompleted ? "Completed" : task.status}</span>
+        {isCompleted && task.completed_date && (
           <span className="status-date">{task.completed_date}</span>
         )}
       </div>
@@ -2187,7 +2180,6 @@ function TechnicalTasksPageContent() {
               { key: "all", label: `All (${counts.all})` },
               { key: "pending", label: `Pending (${counts.pending})` },
               { key: "approved", label: `Approved (${counts.approved})` },
-              { key: "payment_pending", label: `Payment Pending (${counts.payment_pending ?? 0})` },
               { key: "completed", label: `Completed (${counts.completed})` },
               { key: "cancel", label: `Cancel (${counts.cancel})` },
             ].map((tab) => {
@@ -3011,7 +3003,7 @@ function TechnicalTasksPageContent() {
                                           </>
                                         )}
 
-                                        {/* Stage 3: Cancel -> Reopen / Reassign (admin or approver); Payment Pending -> mark payment collected */}
+                                        {/* Stage 3: Cancel -> Reopen / Reassign (admin or approver) */}
                                         {(task.status.toLowerCase() === "cancel" || task.status.toLowerCase() === "cancelled") && canReopenTask(task) && (
                                           <button
                                             type="button"
@@ -3035,31 +3027,6 @@ function TechnicalTasksPageContent() {
                                           >
                                             <span>🔄</span>
                                             <span>Reopen / Reassign</span>
-                                          </button>
-                                        )}
-                                        {task.status.toLowerCase() === "payment pending" && canUpdate && (
-                                          <button
-                                            type="button"
-                                            onClick={() => {
-                                              openCompleteModal(task);
-                                              setOpenActionMenuId(null);
-                                            }}
-                                            style={{
-                                              padding: "8px 12px",
-                                              background: "none",
-                                              border: "none",
-                                              textAlign: "left",
-                                              fontSize: "13px",
-                                              cursor: "pointer",
-                                              display: "flex",
-                                              alignItems: "center",
-                                              gap: "6px",
-                                              color: "#16a34a",
-                                              fontWeight: 600,
-                                            }}
-                                          >
-                                            <span>💰</span>
-                                            <span>Payment Collected</span>
                                           </button>
                                         )}
 
@@ -4794,7 +4761,7 @@ function TechnicalTasksPageContent() {
                               checked={statusPaymentCollected === false}
                               onChange={() => setStatusPaymentCollected(false)}
                             />
-                            No (Move to Payment Pending)
+                            No (Pending in Payments)
                           </label>
                         </div>
 

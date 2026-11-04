@@ -4,7 +4,7 @@
 > **Location:** Root Workspace (`/MODULES_AND_FEATURES_TEST_MANUAL.md`)  
 > **Purpose:** Exhaustive reference catalog detailing every single module, page layout, table column, action button, modal window, drawer, form tab, and form field across the entire ERP. Designed for developers, QA testers, and autonomous AI agents to execute manual and automated regression tests before and after code changes.  
 > **Strict Policy:** When developing or modifying features, no existing module, form, or field listed in this document may be removed, broken, or regressed.  
-> **Last Updated:** November 3, 2026
+> **Last Updated:** November 4, 2026
 
 ---
 
@@ -86,6 +86,9 @@
 74. [PLATFORM ECOSYSTEM: `.env`-Driven Cross-ERP Switching & Strict Local/Hosted Environment Isolation](#74-platform-ecosystem-env-driven-cross-erp-switching--strict-localhosted-environment-isolation)
 75. [PLATFORM GOVERNANCE: Pytest Live-Database Isolation & Synthetic User Prevention](#75-platform-governance-pytest-live-database-isolation--synthetic-user-prevention)
 76. [PLATFORM GOVERNANCE: System-Wide Active-Only Cross-Module Extraction & Inactive Isolation](#76-platform-governance-system-wide-active-only-cross-module-extraction--inactive-isolation)
+77. [IDENTITY & UX GOVERNANCE: Display Name Primary Across All Modules & Removal of Username from UI](#77-identity--ux-governance-display-name-primary-across-all-modules--removal-of-username-from-ui)
+78. [TASK: Technician Ops & Wallet — Spare Parts Gatepass Stock Conservation, Sales Process Bridge, Wallet Voucher Ledger & Machine Warranty Registry](#78-task-technician-ops--wallet--spare-parts-gatepass-stock-conservation-sales-process-bridge-wallet-voucher-ledger--machine-warranty-registry)
+79. [REPORTS: Financial Planning Report & Cargo Overview Module Shells](#79-reports-financial-planning-report--cargo-overview-module-shells)
 
 ---
 
@@ -131,6 +134,8 @@
 | **REPORTS** | Stock Transaction Detail | `/stock-transaction/list/:id` | `reports-stock-transactions` | `activity` | `product.view` |
 | **REPORTS** | Deleted Orders | `/reports/deleted-orders` | `reports-deleted-orders` | `fileX` | `saleorder.view` |
 | **REPORTS** | General Reports | `/reports/general` | `reports-general` | `pieChart` | Authenticated |
+| **REPORTS** | Financial Planning Report | `/reports/financial-planning` (`/financial-planning-report` redirect) | `reports-financial-planning` | `barChart` | `report.view` |
+| **REPORTS** | Cargo Overview | `/reports/cargo-overview` (`/cargo-overview` redirect) | `reports-cargo-overview` | `anchor` | `report.view` |
 | **TASK** | Tasks | `/tasks` | `tasks` | `task` | `task.view` |
 | **TASK** | Technical Tasks | `/technical-task/list` (`/technical-tasks` redirect) | `technical-tasks` | `wrench` | `technicaltask.view` |
 | **TASK** | Technical Task Call & Task Logs | `/technical-task/detail/:id` | `technical-tasks` | `wrench` | `technicaltask.view` |
@@ -1835,15 +1840,14 @@ Checklist to execute:
    - `All (N)` — Total technical service tasks across all stages.
    - `Pending (N)` — Newly created customer service tickets awaiting approval & technician allotment.
    - `Approved (N)` — Approved tickets allotted to a field service technician.
-   - `Payment Pending (N)` — Completed chargeable tickets awaiting customer/technician payment collection.
-   - `Completed (N)` — Resolved service tickets (free tasks completed, or chargeable tasks fully paid).
+   - `Completed (N)` — Resolved service tickets (both free tasks and chargeable tasks; unpaid chargeable collections are tracked in `/payments`).
    - `Cancel (N)` — Cancelled service tickets with mandatory cancellation remarks.
 5. **Filter Toolbar & Sub-Toolbar:**
    - **Sub-Toolbar:** `Items/Page` selector (`10`, `20`, `50`, `100`, default `50`) and single unified `Search...` input (`data-testid="filter-serial-number"`) querying Company Name, Machine Model, Serial Number, Task Description, Contact Person, Phone, or City, with 1-click serial badge deep-filtering on table rows.
    - **Collapsible Filter Card (3-column grid with `Reset` and `Search` buttons):**
      - `Task Create Date Range` (`Created from` — `Created to` date inputs)
      - `Task Type` (`All`, `Telecall`, `Onsite Visit - Client Location`, `Onsite Visit - Third-Party Location`, `In-House`)
-     - `Current Status` (`All`, `Pending`, `Approved`, `Payment Pending`, `Completed`, `Cancel`)
+     - `Current Status` (`All`, `Pending`, `Approved`, `Completed`, `Cancel`)
      - `City` (`TypableCombobox` populated from `/masters/cities` with `/masters/cities/lookup` fallback)
      - `Call Type` (`All`, populated from `/masters/call-types` with `/masters/call-types/lookup` fallback)
      - `Service Type` (`All`, `Free`, `Chargeable`)
@@ -1868,12 +1872,12 @@ Checklist to execute:
    - `TASK APPROVED BY` — Approver `display_name` and approval date (`—` when pending).
    - `TASK ALLOTTED TO` — Assigned technician name (`—` until allotted).
    - `PAYMENT` — Payment status, collected amount, mode (`Company Acc` / `Self collect`), or `—` for free tasks.
-   - `STATUS` (*Sortable*) — Current workflow status pill (`Pending`, `Approved`, `Payment Pending`, `Completed`, `Cancel`).
+   - `STATUS` (*Sortable*) — Current workflow status pill (`Pending`, `Approved`, `Completed`, `Cancel`).
    - `ACTION` — Three-dot (`⋮`) action menu containing `📞 Call Logs` (top item — `View Details` is omitted since `COMPANY` and `DESC. OF TASK` open the quick preview drawer) plus stage/permission-gated workflow actions:
      - **`✅ Approved` (`Pending` rows):** Opens the centered fixed-overlay **Approve & Allot Task** modal (`data-testid="status-task-modal"`) requiring `Allot Technician *` (`Task Allotted To`), optional approver overrides (`Task Type`, `Service Type`, `Amount (₹) *`, `Payment Terms *`), conditional `Scheduled / Visit Date` (visible exclusively when `Task Type` is `Onsite Visit - Client Location` or `Onsite Visit - Third-Party Location`), and `Approver Remarks` (`approver_remarks`).
-     - **`✔️ Completed` (`Approved` rows):** Opens the centered fixed-overlay **Complete Technical Task** modal — for `Free` tasks displays `Remarks` (`technician_remarks`) only and moves straight to `Completed`; for `Chargeable` tasks prompts `"Did you collect payment of ₹...?"` (`Yes` / `No`), moving unpaid tasks to `Payment Pending` and paid tasks (`Company Acc` or `Self collect`, optional `Payment Screenshot / Receipt`, `Amount Collected *`) to `Completed` + `Paid`.
+     - **`✔️ Completed` (`Approved` rows):** Opens the centered fixed-overlay **Complete Technical Task** modal — for `Free` tasks displays `Remarks` (`technician_remarks`) only and moves straight to `Completed`; for `Chargeable` tasks prompts `"Did you collect payment of ₹...?"` (`Yes` / `No`), marking unpaid tasks `Completed` with `payment_status = "Pending"` (tracked in `/payments`) and paid tasks (`Company Acc` or `Self collect`, optional `Payment Screenshot / Receipt`, `Amount Collected *`) `Completed` + `Paid`.
      - **`❌ Cancel` (`Approved` rows):** Opens the centered fixed-overlay **Cancel Technical Task** modal (`data-testid="cancel-task-modal"`) requiring strictly mandatory `Cancellation Remarks *` (`cancel_remarks`).
-     - Plus stage-specific `✏️ Edit`, `💰 Payment Collected` (`Payment Pending` rows), `🔄 Reopen / Reassign` (`Cancel` rows), and `🗑️ Delete`.
+     - Plus stage-specific `✏️ Edit`, `🔄 Reopen / Reassign` (`Cancel` rows), and `🗑️ Delete`.
 7. **Add / Edit Technical Task Slide-Over Drawer:**
    - `Company Name *` (`ClientNameAutocomplete` auto-populating City & Contact Person options from `companies`).
    - `Task Type *` (`Telecall`, `Onsite Visit - Client Location`, `Onsite Visit - Third-Party Location`, `In-House`) + conditional `Third-Party` site name, city, contact name & phone when `Onsite Visit - Third-Party Location` is chosen.
@@ -1903,7 +1907,7 @@ Checklist to execute:
 ### Test Cases
 - [ ] Verify navigating to `/technical-tasks` automatically redirects to `/technical-task/list`.
 - [ ] Verify status tabs render with dynamic badge counts matching database records.
-- [ ] Verify switching between status tabs (`All`, `Pending`, `Approved`, `Payment Pending`, `Completed`, `Cancel`) filters tickets accurately.
+- [ ] Verify switching between status tabs (`All`, `Pending`, `Approved`, `Completed`, `Cancel`) filters tickets accurately.
 - [ ] Verify clicking `+ ADD NEW` opens the creation drawer with all customer, machine, and technician fields.
 - [ ] Verify technician dropdown populates with active technicians from the Technicians master.
 - [ ] Verify status transitions update ticket state and log the action in the audit trail.
@@ -1915,7 +1919,7 @@ Checklist to execute:
 - [ ] **RBAC Sidebar & Route Guard (`technicaltask.view`):** Assign a user to a department without `technicaltask.view` (or `technicaltask.manage`). Verify `Technical Tasks` is hidden in the `TASK` sidebar section, direct navigation to `/technical-task/list` redirects to `/403`, and `GET /api/v1/technical-tasks` returns `403 Forbidden`.
 - [ ] **RBAC Granular Action Gating (`technicaltask.*`):** Grant `technicaltask.view` only and verify `+ ADD NEW`, `+ ADD NEW CALL LOG`, `Imp / Exp ▾`, `Bulk Actions ▾`, row `Approved` / `Edit` / `Completed` / `Cancel` / `Delete` are hidden while read-only `Detail` and `/technical-task/detail/:id` (`Call Log Summary` & `Task Log Summary`) remain accessible; then grant `create`, `update`, `approve`, `export`, `bulk_action`, and `delete` individually and verify each corresponding UI button and API endpoint unlocks accurately.
 - [ ] **Call Logs Detail Page & Add Call Log Drawer (`/technical-task/detail/:id`):** Click `⋮` ➔ `Call Logs` on any row in `/technical-task/list`. Verify it navigates to `/technical-task/detail/<number>`, dynamically renders `Task Details` (`Nature Of Complain / Description`, `Task Type`, `Machine & Model`, `Priority`, `Created By`, `Created At`, `Assign To`) and `Company Details`, switches cleanly between `Call Log Summary` and `Task Log Summary` (showing `Create Technical Task` + status transitions), and clicking `+ ADD NEW CALL LOG` opens the right-side `Add Call Log` drawer (`Telecall` / `Physical Visit` + `Remarks` + `Submit`) and appends the new entry immediately.
-- [ ] **Doc-Compliant `Approved` / `Completed` / `Cancel` Centered Modals (`/technical-task/list`):** Click `⋮` ➔ `Approved` on a `Pending` row and verify `Approve & Allot Task` immediately opens centered over the viewport (`position: fixed`), populates active technicians (including via `/masters/technicians/lookup` for non-master viewers), displays an inline red validation banner if saved without `Allot Technician *`, allows overriding `Task Type` / `Service Type` / `Amount *` / `Payment Terms *`, and shows `Scheduled / Visit Date` only for Onsite / Client / Third-Party visits; click `⋮` ➔ `Completed` on a `Chargeable` `Approved` row and verify `No` moves the task to `Payment Pending` while `Yes` captures `Company Acc` / `Self collect` + `Amount Collected` and moves it to `Completed` + `Paid`; click `⋮` ➔ `Cancel` and verify blank remarks are blocked with `"Cancellation remarks are strictly mandatory."`.
+- [ ] **Doc-Compliant `Approved` / `Completed` / `Cancel` Centered Modals (`/technical-task/list`):** Click `⋮` ➔ `Approved` on a `Pending` row and verify `Approve & Allot Task` immediately opens centered over the viewport (`position: fixed`), populates active technicians (including via `/masters/technicians/lookup` for non-master viewers), displays an inline red validation banner if saved without `Allot Technician *`, allows overriding `Task Type` / `Service Type` / `Amount *` / `Payment Terms *`, and shows `Scheduled / Visit Date` only for Onsite / Client / Third-Party visits; click `⋮` ➔ `Completed` on a `Chargeable` `Approved` row and verify `No (Pending in Payments)` marks the task `Completed` with `payment_status = "Pending"` (tracked in `/payments`) while `Yes` captures `Company Acc` / `Self collect` + `Amount Collected` and moves it to `Completed` + `Paid`; click `⋮` ➔ `Cancel` and verify blank remarks are blocked with `"Cancellation remarks are strictly mandatory."`.
 - [ ] **Payments Stage Tabs, Cancelled Exclusion & `Self collect` Wallet Sync (`/payments` & `/technician-operations`):** Open `/payments` and verify `All (N)`, `Pending (N)`, and `Completed (N)` tabs render with `Chargeable` spelling and `"—"` for unassigned fields; cancel a chargeable task and verify its amount is excluded from `TOTAL PAYMENT`, `DUE`, and `/payments` tabs; record a `Self collect` payment and verify a `VERIFIED` `COLLECTION` transaction automatically appears in Technician Wallet (`/technician-operations`).
 
 ---
@@ -2796,7 +2800,7 @@ Positioned directly underneath the collapsible filter card and powered by `GET /
   - **Payment Mode** (*Required*): Dropdown supporting `Company Acc`, `Self collect`, `UPI / QR`, `Cheque`, `Cash`, and `Bank Transfer`.
   - **Payment Date** (*Required*), **Reference / UTR No**, **Receipt Screenshot / Document Upload** (`POST /api/v1/technical-tasks/upload-screenshot`), and **Remarks**.
 - **Atomic Submission & Wallet Handover:**
-  - Submits to `POST /api/v1/technical-tasks/{id}/record-payment`, updating `collected_amount` and `payment_status` (`Paid` when balance reaches `0`, transitioning `Payment Pending` tasks to `Completed`), and recording `Payment Collected` / `Record Task Payment` audit logs.
+  - Submits to `POST /api/v1/technical-tasks/{id}/record-payment`, updating `collected_amount` and `payment_status` (`Paid` when balance reaches `0`), and recording `Payment Collected` / `Record Task Payment` audit logs.
   - When `Payment Mode` is **`Self collect`**, `TechnicalTaskService._sync_self_collect_wallet()` automatically inserts an idempotent `VERIFIED` `COLLECTION` transaction (`TXN-TECH-YYYY-NNNN-XXXX`) in `technician_wallet_transactions` linked via `technical_task_id` so the technician's cash-on-hand balance in `/technician-operations` updates immediately.
 
 ### 5. Zero-Synthetic Data Policy Compliance
@@ -3674,4 +3678,65 @@ Positioned directly underneath the collapsible filter card and powered by `GET /
 - [ ] **TC-DSP-03 (Salesperson, Assignee & HRMS Display Name Priority):** Verify `GET /api/v1/companies/sales-persons`, `GET /api/v1/tasks/assignees`, `SearchableUserSelect`, `CommentComposer`, Proforma Invoices, Sales Orders, Companies, CRM, Technical Tasks, and HRMS pages/exports always display `display_name` first.
 
 ---
-*End of Master Features & Testing Specification Manual. Maintained for Inhyma Solutions Enterprise ERP. Last updated: November 3, 2026 (Sections 2, 16, 39 & 55: Technical Tasks Granular RBAC Permissions [306 Total Permissions], Doc-Compliant Approved/Completed/Cancel Viewport-Centered Modals & Authenticated Master Lookup Fallbacks, Call Logs & Task Log Summary Detail Page [z6d7e8f9a0b1], `/payments` All/Pending/Completed Stage Tabs, Red `DUE` KPI [#dc2626], Cancelled-Task Exclusion & Automatic `Self collect` Technician Wallet Sync, Section 77 & Sections 3, 15, 24: Display Name Primary Identity Across All Modules & Removal of Username from UI, Sections 9, 48, 56 & 61-76 & Global Updates: DB-Backed Product Specification Documents with Saved Links & Auto-Linked CRM Quotation PDFs, Engine-Level Pytest Supabase Guard, Automatic Colleague QA File Sweeper & Synthetic Artifact DB Purge, Import Purchase Expected Arrival Date Editable Default [ETA Port Date + 5 Days], System-Wide Active-Only Cross-Module Extraction & Inactive Isolation, `.env`-Driven Cross-ERP Switching & Strict Local/Hosted Environment Isolation, Local & Import Purchase Multi-Line CSV/Excel Bulk Import, Standardized Golden-Amber Export & Vector SVG Imp/Exp Controls, Suppliers Sidebar Active Highlight & Goods Expected Report Removal, HRMS Integrity Remediation & Payroll Approval Persistence, Dynamic Organization Company Logo, Product Master Category Rewiring & Floating Duplicate Overlay, Platform Migration Idempotency, Sales Process Workflow & 13-Field Filter Grid, Feed & Broadcast Open Access & 1-to-1 Employee Messaging, Sale Status Update Side Drawer & Chronological Timeline, Discount Payments Multi-Installment Ledger, Product Re-Order Branch-Scoped Matrix & FIFO Stock Breakup, and Product Stock Transactions Master List & Per-Product Stock Transaction Ledger).*
+
+## 78. TASK: Technician Ops & Wallet — Spare Parts Gatepass Stock Conservation, Sales Process Bridge, Wallet Voucher Ledger & Machine Warranty Registry
+
+- **Module Name:** Technician Spare Parts Gatepass & Returns, Technician Wallet & Field Collections, and Machine Warranty Registry & Validator
+- **Routes Affected:** `/technician-operations` (`?tab=gatepasses|wallets|warranty`), `/sales/process/add?gatepass_id=<uuid>`, `/technical-task/list`, `/payments`
+- **Files:**
+  - Backend: `backend/app/technician_operations/{models,schemas,repository,service,routes}.py`, `backend/app/sales/{schemas,service}.py`, `backend/app/technical_tasks/service.py`, `backend/alembic/versions/z7e8f9a0b1c2_upgrade_technician_ops_stock_and_so.py`
+  - Frontend: `frontend/src/pages/TechnicianOperationsPage.tsx`, `frontend/src/pages/sales/SaleProcessForm.tsx`, `frontend/src/lib/nav.ts`
+  - Automated Test Suites: `backend/tests/test_technician_operations.py`, `frontend/src/pages/__tests__/TechnicianOperationsPage.test.tsx`, `frontend/src/pages/__tests__/SaleProcessFormPage.test.tsx`
+
+### Feature Overview & UI Specifications
+1. **Navigation, Enterprise Vector Icons & RBAC Gating (`nav.ts`, `TechnicianOperationsPage.tsx` & `useAuth`):**
+   - Sidebar item `Technician Ops & Wallet` under `TASK` requires `technicaltask.view`.
+   - All KPI ribbon cards (`Active Gatepasses` truck, `Pending Sales Orders` alert-triangle, `Cash in Hand` banknote, `Active Machine Warranties` shield-check), header action buttons, navigation tabs (`Package`, `Wallet`, `ShieldCheck`), table badges, and modals/drawers render crisp `24x24` Lucide-style stroke `<svg aria-hidden="true">` icons (zero cartoon emojis).
+   - Read-only users (`technicaltask.view` without create/update/manage permissions) see a `Read-Only Access` lock badge and all mutation buttons (`Issue Outward Gatepass`, `Return`, `Record Wallet Transaction`, `Collect`, `Handover`, `Expense`, `Register Machine Warranty`) are hidden; Sales users with `saleorder.create | saleorder.update` retain access to `Create SO`, `Draft SO`, and `Link SO`.
+2. **Tab 1 — Spare Parts Gatepass & Returns (`?tab=gatepasses`):**
+   - **KPI Ribbon:** `Active Gatepasses` (`#eff6ff` / `#dbeafe`), `Pending Sales Orders` (`#fef3c7` / `#fde68a`), `Cash in Hand (Technicians)` (`#dcfce7` / `#bbf7d0`), `Active Machine Warranties` (`#ede9fe` / `#ddd6fe`).
+   - **Filter & Count Bar:** Instant search (`Gatepass / Technician / Customer / Serial`), Status selector (`All Statuses`, `ISSUED`, `PARTIALLY_RETURNED`, `RECONCILED`, `CLOSED`), and accurate pagination counter (`Showing X of Y gatepasses` backed by `meta.pagination.total` & `total_records`).
+   - **Table Columns & Row Actions:** `Gatepass #` (with `<Warehouse>` vector badge & `Ret: <RGP-#>`), `Technician` (with phone icon), `Customer & Serial` (with `Machine Model` and `[Warranty FOC]` / `[Chargeable]` pill), `Issue Date`, `Parts Issued`, `Returned / Consumed`, `SO & Reconciliation Status`, and `Actions` (`Return`, `Draft SO`, `Create SO`, `Link SO`, `Print Gatepass Slip` printer icon button, `Details` drawer).
+   - **Issue Outward Gatepass Modal (`maxWidth: 900px`):**
+     - `Dispatch Warehouse *` `<select>` populated from active physical warehouses (defaults to primary warehouse).
+     - `Link Open Technical Task` `<select>` (optional auto-fill of Technician + Mobile, Customer Company, Machine Model, Serial Number, Purpose, and automatic serial warranty check).
+     - Master-backed `<datalist>` inputs for `Technician Name *`, `Customer Company`, `Machine Model`, and `Machine Serial Number` (+ `Check` warranty button).
+     - `Spare Parts to Issue` repeater: Master Catalog `<select>` grouping `Compatible with <Selected Machine>` (`ProductMachineSpare` + `applicable_machine_ids`) above general spare parts/products, live warehouse availability pill (`Avail: X UOM` with green check / red alert icon when `Qty > Avail`), editable `Part Name *`, `Part Code`, `Qty *`, and `Unit Rate (₹)`. Deducts physical warehouse stock on creation (`409 Conflict` on shortage).
+   - **Record Parts Return Modal (`maxWidth: 880px`):**
+     - Reconciles `Returned` vs `Consumed` per line item with `Warranty FOC?` checkbox and `Status` (`Returned Good`, `Returned Defective`, `Consumed Billed`, `Consumed FOC Warranty`).
+     - Inline red `role="alert"` banner + disabled submit if `Returned + Consumed > Issued` or negative.
+     - `Returned Good` restores physical warehouse stock idempotently; `Returned Defective` quarantines defective units without restoring saleable stock.
+   - **Sales Process Pre-Fill Bridge & Stock Conservation (`/sales/process/add?gatepass_id=<uuid>`):**
+     - Clicking `Create SO` (row action, Draft SO drawer, or Link SO modal) opens `SaleProcessForm.tsx` pre-filled with Warehouse, Company, Billing/Shipping Addresses, Remarks, and consumed non-warranty spare parts (`HSN`, `GST %`, `Qty`, `Rate`), displaying a linked-gatepass banner and submitting `technician_gatepass_id`.
+     - Creating or linking a real non-cancelled `SaleOrder` releases the gatepass stock hold atomically so the Sales Order deducts stock once (zero double-deduction, zero false out-of-stock `409`), marks the gatepass `CLOSED`, and reverses back to `PARTIALLY_RETURNED` (`so_required=True`) if the linked Sales Order is cancelled or deleted.
+3. **Tab 2 — Technician Wallets & Field Collections (`?tab=wallets`):**
+   - Live Technician Wallet Cards (`Collections`, `Handover Dep.`, `Field Expenses`, `Net Wallet Balance`, quick `Collect` / `Handover` / `Expense` triggers).
+   - `Wallet Transaction History Ledger` displaying `Task Sync` wrench badge on auto-synced `Self collect` technical-task payments (automatically reversed if the task is cancelled or deleted) and clickable `View Receipt` paperclip links for uploaded vouchers (`apiPostMultipart` -> `/technical-tasks/upload-screenshot`).
+4. **Tab 3 — Machine Warranty Registry & Validator (`?tab=warranty`):**
+   - `Live Machine Serial Warranty Validator` (`list="tech-ops-serial-datalist"`) validating coverage across both registered `MachineWarranty` policies and `SaleOrderItem.serial_numbers` (which also auto-sync into `MachineWarranty` upon Sales Order creation/update).
+   - `Register Machine Warranty Policy` modal with Master `<datalist>`s for Serial, Machine Model, Customer Company (auto-filling contact & city), and Installation City.
+
+### QA Verification Test Cases
+- [ ] **TC-TECHOPS-01 (Physical Warehouse Stock Conservation End-to-End):** Seed or pick a spare part with `10` units in `Main Warehouse`. Issue an Outward Gatepass for `4` units -> verify `Main Warehouse` stock becomes `6`. Record Return of `1` `Returned Good`, `1` `Returned Defective`, and `2` `Consumed Billed` -> verify `Main Warehouse` stock becomes `7` (`+1` good return only) and status shows `SO Required (2 consumed)`. Click `Create SO`, submit the pre-filled Sales Order for `2` units -> verify `Main Warehouse` stock stays `7` (no double deduction) and Gatepass transitions to `SO: <OrderNo> / Billed & Reconciled (CLOSED)`.
+- [ ] **TC-TECHOPS-02 (Insufficient Warehouse Stock & Invalid Return Guards):** Attempt to issue a Gatepass for `999` units of a stocked catalog part -> verify inline stock warning blocks submission (and direct API POST returns `409 Conflict`). Open `Return` on an issued Gatepass (`Issued = 3`) and enter `Returned = 2`, `Consumed = 2` -> verify red inline alert blocks submit (`400 Bad Request` on API).
+- [ ] **TC-TECHOPS-03 (Verified Sales Order Link & Linked SO Cancellation Reversal):** Attempt `Link SO` with a non-existent or cancelled SO number -> verify `400 Bad Request`. Link a valid confirmed SO -> verify Gatepass closes. Cancel that Sales Order in `/sales/process` -> verify warehouse stock returns to `7` (still holding the `2` consumed units on the gatepass) and Gatepass reopens `SO Required`.
+- [ ] **TC-TECHOPS-04 (Sales Order Serial -> Machine Warranty & Technical Task Lookup Sync):** Create a Sales Order for a machine with Serial Number `SN-SYNC-2026`. Verify `SN-SYNC-2026` immediately resolves as `UNDER WARRANTY` in both `/technician-operations?tab=warranty` (`Verify Serial`) and Technical Task `Product by Serial No.` lookup (`/technical-tasks/serial-lookup/SN-SYNC-2026`).
+- [ ] **TC-TECHOPS-05 (`Self collect` Wallet Sync, Cancellation Reversal & Receipt Upload):** Complete a Chargeable Technical Task with `Self collect` (`₹2,500`) -> verify `+ ₹2,500` `Task Sync` appears in Technician Wallet. Cancel or delete that Technical Task -> verify the synced wallet entry is reversed/removed. Record a manual `FIELD_EXPENSE` or `HANDOVER_DEPOSIT` with a receipt image upload -> verify `View Receipt` opens the uploaded file.
+- [ ] **TC-TECHOPS-06 (Printable Gatepass Voucher, Vector SVG Icons & Read-Only RBAC):** Verify KPI ribbon cards, primary header CTA, and module tabs render crisp SVG stroke icons with zero OS emojis. Click the printer icon (`Print Gatepass Slip`) on any Gatepass row or inside `Details` -> verify formatted Outward/Return Material Reconciliation Voucher opens with Technician, Store Keeper, and Authorized Signatory signature blocks. Sign in with `technicaltask.view`-only user -> verify `Read-Only Access` badge and absence of all write buttons (`403 Forbidden` on direct POST).
+
+---
+
+## 79. REPORTS: Financial Planning Report & Cargo Overview Module Shells
+
+- **Routes:**
+  - `/reports/financial-planning` (alias `/financial-planning-report`) — `FinancialPlanningReportPage.tsx` (`activeKey="reports-financial-planning"`, icon `barChart`, permission `report.view`).
+  - `/reports/cargo-overview` (alias `/cargo-overview`) — `CargoOverviewPage.tsx` (`activeKey="reports-cargo-overview"`, icon `anchor`, permission `report.view`).
+- **UI Layout:**
+  - Placed under the **`REPORTS`** sidebar section with unique vector SVG icons (`barChart` and `anchor`).
+  - Renders `<AppShell>` with page heading (`Financial Planning Report` / `Cargo Overview`) and a clean blank card canvas (`data-testid="financial-planning-blank-canvas"` / `data-testid="cargo-overview-blank-canvas"`).
+- **Test Cases:**
+  - [ ] Verify `Financial Planning Report` and `Cargo Overview` appear under `REPORTS` in the sidebar for users with `report.view` (or Admin) and navigate cleanly to `/reports/financial-planning` and `/reports/cargo-overview`.
+  - [ ] Verify both pages render clean blank card shells with zero console/runtime errors and unique navigation icons.
+
+---
+*End of Master Features & Testing Specification Manual. Maintained for Inhyma Solutions Enterprise ERP. Last updated: November 4, 2026 (Section 79: Financial Planning Report & Cargo Overview Blank Module Shells under REPORTS; Section 39: Removal of redundant `Payment Pending` tab from Technical Tasks with unpaid chargeable collections tracked in `/payments`; Section 78: Technician Ops & Wallet End-to-End ERP Upgrade).*

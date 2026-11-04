@@ -77,7 +77,7 @@ describe("TechnicalTaskDetailPage & Call Logs Navigation", () => {
 
     vi.spyOn(technicalTasksApi, "fetchTechnicalTasks").mockResolvedValue({
       data: [sampleTask],
-      meta: { pagination: { page: 1, page_size: 50, total_records: 1, total_pages: 1 } },
+      meta: { pagination: { current_page: 1, page_size: 50, total_records: 1, total_pages: 1 } },
     });
     vi.spyOn(technicalTasksApi, "fetchTechnicalTaskCounts").mockResolvedValue({
       all: 1,

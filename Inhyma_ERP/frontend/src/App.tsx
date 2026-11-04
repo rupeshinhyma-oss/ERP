@@ -58,6 +58,8 @@ import { TechnicalTasksPage } from "@/pages/technicalTasks/TechnicalTasksPage";
 import { TechnicalTaskDetailPage } from "@/pages/technicalTasks/TechnicalTaskDetailPage";
 import { PaymentsPage } from "@/pages/PaymentsPage";
 import { GeneralReportsPage } from "@/pages/GeneralReportsPage";
+import { FinancialPlanningReportPage } from "@/pages/FinancialPlanningReportPage";
+import { CargoOverviewPage } from "@/pages/CargoOverviewPage";
 import { TechnicalTaskTypesPage } from "@/pages/masters/TechnicalTaskTypes";
 import { TechnicianOperationsPage } from "@/pages/TechnicianOperationsPage";
 import { AttendancePage } from "@/pages/hrms/AttendancePage";
@@ -337,6 +339,10 @@ export function App() {
           <Route path="/deleted-orders" element={<Navigate to="/reports/deleted-orders" replace />} />
 
           <Route path="/reports/general" element={<GeneralReportsPage />} />
+          <Route path="/reports/financial-planning" element={<FinancialPlanningReportPage />} />
+          <Route path="/financial-planning-report" element={<Navigate to="/reports/financial-planning" replace />} />
+          <Route path="/reports/cargo-overview" element={<CargoOverviewPage />} />
+          <Route path="/cargo-overview" element={<Navigate to="/reports/cargo-overview" replace />} />
 
           <Route path="/planning" element={<Navigate to="/dashboard" replace />} />
           <Route path="/tasks/my" element={<Navigate to="/tasks?tab=my" replace />} />

@@ -1,10 +1,10 @@
 """Technician Operations business service.
 
 Coordinates:
-- Technician Spare Parts Gatepasses & Returns
+- Technician Spare Parts Gatepasses, Physical Warehouse Stock Sync & Returns
 - Sales Order reconciliation for consumed parts
 - Field Payment Collections & Technician Wallet Ledger
-- Machine Warranty lifecycle & serial validation
+- Machine Warranty lifecycle & serial validation (Registry + Sales Order fallback)
 """
 
 from __future__ import annotations
@@ -13,11 +13,14 @@ import uuid
 from datetime import date
 from typing import Any
 
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import noload
 
 from app.auth.service import CurrentUser
-from app.core.exceptions import BadRequestException, NotFoundException
-from app.technician_operations.models import MachineWarranty, TechnicianGatepass, TechnicianWalletTransaction
+from app.core.exceptions import NotFoundException
+from app.masters.products.models import Product
+from app.masters.taxes.models import Tax
 from app.technician_operations.repository import TechnicianOperationsRepository
 from app.technician_operations.schemas import (
     DraftSOGenerationResponse,
@@ -26,6 +29,7 @@ from app.technician_operations.schemas import (
     GatepassRead,
     GatepassReturnPayload,
     TechnicianOperationsMetrics,
+    TechnicianOpsLookupsResponse,
     TechnicianWalletSummary,
     WalletTransactionCreate,
     WalletTransactionRead,
@@ -33,6 +37,16 @@ from app.technician_operations.schemas import (
     WarrantyRegisterPayload,
     WarrantyValidationResult,
 )
+
+
+def _actor_name(current_user: CurrentUser | None) -> str | None:
+    if current_user is None:
+        return None
+    return (
+        getattr(current_user, "display_name", None)
+        or getattr(current_user, "full_name", None)
+        or getattr(current_user, "username", None)
+    )
 
 
 class TechnicianOperationsService:
@@ -43,6 +57,14 @@ class TechnicianOperationsService:
         self.repo = TechnicianOperationsRepository(session)
 
     # -----------------------------------------------------------------------
+    # Master Lookups
+    # -----------------------------------------------------------------------
+
+    async def get_lookups(self) -> TechnicianOpsLookupsResponse:
+        """Fetch master-driven lookups for Technician Operations forms."""
+        return await self.repo.get_lookups()
+
+    # -----------------------------------------------------------------------
     # Machine Warranty
     # -----------------------------------------------------------------------
 
@@ -50,7 +72,6 @@ class TechnicianOperationsService:
         """Register a new machine warranty."""
         record = await self.repo.register_warranty(payload)
         await self.session.commit()
-        # Fetch fresh read model with remaining days
         reads, _ = await self.repo.list_warranties(search=record.serial_number, page=1, page_size=1)
         if reads:
             return reads[0]
@@ -108,13 +129,9 @@ class TechnicianOperationsService:
         current_user: CurrentUser | None = None,
     ) -> GatepassRead:
         """Create an Outward Spare Parts Gatepass for technician field visit."""
-        actor_name = (
-            getattr(current_user, "display_name", None)
-            or getattr(current_user, "full_name", None)
-            or getattr(current_user, "username", None)
-        )
-        if actor_name:
-            payload.issued_by_name = actor_name
+        actor = _actor_name(current_user)
+        if actor:
+            payload.issued_by_name = actor
 
         gatepass = await self.repo.create_gatepass(payload)
         await self.session.commit()
@@ -155,8 +172,8 @@ class TechnicianOperationsService:
     ) -> GatepassRead:
         """
         Record return of parts to warehouse.
-        Reconciles issued vs returned vs consumed.
-        If consumed parts exist and are chargeable, triggers `so_required = True`.
+        Reconciles issued vs returned vs consumed, restores good returns to physical stock,
+        and flags `so_required = True` when chargeable consumed parts exist.
         """
         res = await self.repo.record_parts_return(gatepass_id, payload)
         await self.session.commit()
@@ -167,35 +184,115 @@ class TechnicianOperationsService:
         gatepass_id: uuid.UUID,
         payload: GatepassLinkSOPayload,
     ) -> GatepassRead:
-        """Link Sales Order created by salesperson for consumed parts."""
+        """Verify and link Sales Order created by salesperson for consumed parts."""
         res = await self.repo.link_sales_order(gatepass_id, payload)
         await self.session.commit()
         return res
 
     async def get_draft_so_payload(self, gatepass_id: uuid.UUID) -> DraftSOGenerationResponse:
         """
-        Generate draft Sales Order payload from gatepass for salesperson billing.
-        Filters items consumed during service call that are out of warranty.
+        Generate enriched draft Sales Order payload from gatepass for salesperson billing.
+        Filters items consumed during service call that are out of warranty and enriches
+        company address/city/state and product HSN/GST metadata.
         """
         gp = await self.repo.get_gatepass_by_id(gatepass_id)
         if gp is None:
             raise NotFoundException(f"Gatepass '{gatepass_id}' not found")
 
+        company_id: uuid.UUID | None = None
+        city_name: str | None = None
+        state_name: str | None = None
+        billing_address: str | None = None
+        shipping_address: str | None = None
+
+        if gp.customer_name and gp.customer_name.strip():
+            try:
+                from app.companies.models import Company
+                from app.masters.cities.models import City
+                from app.masters.states.models import State
+
+                async with self.session.begin_nested():
+                    comp = (
+                        await self.session.execute(
+                            select(Company)
+                            .options(noload("*"))
+                            .where(
+                                Company.deleted_at.is_(None),
+                                func.lower(Company.company_name) == gp.customer_name.strip().lower(),
+                            )
+                            .limit(1)
+                        )
+                    ).scalar_one_or_none()
+                    if comp is not None:
+                        company_id = comp.id
+                        billing_address = comp.address
+                        shipping_address = comp.address
+                        if comp.city_id:
+                            ct = await self.session.get(City, comp.city_id)
+                            if ct:
+                                city_name = ct.name
+                                if ct.state_id:
+                                    st = await self.session.get(State, ct.state_id)
+                                    if st:
+                                        state_name = st.name
+                        if not state_name and comp.state_id:
+                            st = await self.session.get(State, comp.state_id)
+                            if st:
+                                state_name = st.name
+                        if not city_name and comp.town:
+                            city_name = comp.town
+            except Exception:
+                pass
+
         items_to_bill: list[dict[str, Any]] = []
         subtotal = 0.0
 
         for item in gp.items:
-            if item.quantity_consumed > 0 and not item.is_warranty_covered:
+            cons_qty = float(item.quantity_consumed or 0.0)
+            if cons_qty > 0 and not item.is_warranty_covered:
                 rate = float(item.unit_rate or 0.0)
-                line_total = round(item.quantity_consumed * rate, 2)
+                hsn_code: str | None = None
+                gst_percent: float = 18.0
+
+                try:
+                    async with self.session.begin_nested():
+                        prod: Product | None = None
+                        if item.product_id is not None:
+                            prod = await self.session.get(Product, item.product_id)
+                        if prod is None:
+                            prod = (
+                                await self.session.execute(
+                                    select(Product)
+                                    .options(noload("*"))
+                                    .where(
+                                        Product.deleted_at.is_(None),
+                                        func.lower(Product.product_name) == item.product_name.strip().lower(),
+                                    )
+                                    .limit(1)
+                                )
+                            ).scalar_one_or_none()
+                        if prod is not None:
+                            if rate <= 0:
+                                rate = float(prod.standard_price or prod.standard_cost or 0.0)
+                            if prod.hsn_id is not None:
+                                tx = await self.session.get(Tax, prod.hsn_id)
+                                if tx is not None:
+                                    hsn_code = tx.hsn_number
+                                    gst_percent = float(tx.gst_percent or 18.0)
+                except Exception:
+                    pass
+
+                line_total = round(cons_qty * rate, 2)
                 subtotal += line_total
                 items_to_bill.append({
                     "gatepass_item_id": str(item.id),
                     "product_id": str(item.product_id) if item.product_id else None,
                     "product_code": item.product_code,
                     "product_name": item.product_name,
+                    "hsn_code": hsn_code or "8422.90.90",
+                    "gst_percent": gst_percent,
                     "uom": item.uom,
-                    "quantity": item.quantity_consumed,
+                    "quantity": cons_qty,
                     "unit_rate": rate,
                     "line_total": line_total,
                     "remarks": f"Consumed on service call ({gp.gatepass_number})",
@@ -206,12 +303,22 @@ class TechnicianOperationsService:
         elif gp.so_created:
             msg = f"Sales Order '{gp.so_number}' has already been linked to this gatepass."
         else:
-            msg = f"Ready to bill: {len(items_to_bill)} item(s) consumed. Please generate a Sales Order."
+            msg = f"Ready to bill: {len(items_to_bill)} item(s) consumed. Create a Sales Order to close reconciliation."
 
         return DraftSOGenerationResponse(
+            gatepass_id=gp.id,
             customer_name=gp.customer_name or "Direct Customer",
+            company_id=company_id,
+            warehouse_name=gp.warehouse_name,
+            city=city_name,
+            state=state_name,
+            billing_address=billing_address,
+            shipping_address=shipping_address,
+            machine_model=gp.machine_model,
             machine_serial_number=gp.machine_serial_number,
             gatepass_number=gp.gatepass_number,
+            so_created=gp.so_created,
+            so_number=gp.so_number,
             items_to_bill=items_to_bill,
             estimated_subtotal=round(subtotal, 2),
             message=msg,
@@ -224,9 +331,13 @@ class TechnicianOperationsService:
     async def record_wallet_transaction(
         self,
         payload: WalletTransactionCreate,
+        current_user: CurrentUser | None = None,
     ) -> WalletTransactionRead:
         """Record money collected on field visit, cash handover, or field expense."""
-        txn = await self.repo.record_wallet_transaction(payload)
+        txn = await self.repo.record_wallet_transaction(
+            payload,
+            verified_by=_actor_name(current_user),
+        )
         await self.session.commit()
         return WalletTransactionRead.model_validate(txn)
 

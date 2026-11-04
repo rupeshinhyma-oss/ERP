@@ -1,0 +1,38 @@
+/**
+ * Financial Planning Report Page.
+ *
+ * Route: /reports/financial-planning
+ * Sidebar Section: REPORTS (permission: report.view)
+ * Intentionally blank module shell ready for Financial Planning specifications.
+ */
+
+import { AppShell } from "@/components/AppShell";
+import { Breadcrumb } from "@/components/Breadcrumb";
+
+export function FinancialPlanningReportPage() {
+  return (
+    <AppShell activeKey="reports-financial-planning">
+      <main className="page" style={{ padding: "20px 24px" }}>
+        <Breadcrumb trail={["Reports", "Financial Planning Report"]} />
+
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", margin: "0 0 16px" }}>
+          <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700, color: "#0f172a" }}>
+            Financial Planning Report
+          </h1>
+        </div>
+
+        <div
+          className="card"
+          data-testid="financial-planning-blank-canvas"
+          style={{
+            background: "#ffffff",
+            border: "1px solid #e2e8f0",
+            borderRadius: 10,
+            minHeight: "calc(100vh - 180px)",
+          }}
+        />
+      </main>
+    </AppShell>
+  );
+}
+

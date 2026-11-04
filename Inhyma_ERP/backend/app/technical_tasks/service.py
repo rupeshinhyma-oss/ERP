@@ -5,9 +5,9 @@ Business rules are enforced HERE (not only in the browser) so every client -- we
 imports -- gets identical, accurate behaviour:
 
 * conditional required fields (third-party city, chargeable amount + payment terms, contact number)
-* the status machine (Pending -> Approved -> Completed / Payment Pending, Cancel, Reopen)
+* the status machine (Pending -> Approved -> Completed, Cancel, Reopen)
 * the three separate remarks (creator / approver / technician) -- completion never overwrites the approver's note
-* payment rules (Free tasks never go to Payment Pending; chargeable tasks need a payment answer on completion)
+* payment rules (Chargeable tasks track payment_status Pending/Paid for the dedicated Payments module)
 * concurrency: status changes lock the row; edits honour the optimistic ``version``
 """
 
@@ -31,13 +31,12 @@ from app.technical_tasks.schemas import (
 
 logger = logging.getLogger(__name__)
 
-PENDING, APPROVED, PAYMENT_PENDING, COMPLETED, CANCEL = "Pending", "Approved", "Payment Pending", "Completed", "Cancel"
+PENDING, APPROVED, COMPLETED, CANCEL = "Pending", "Approved", "Completed", "Cancel"
 
 # current status -> statuses it may move to (same-status is allowed for Pending/Approved: edit / re-allot).
 _TRANSITIONS: dict[str, set[str]] = {
     PENDING: {PENDING, APPROVED, CANCEL},
-    APPROVED: {APPROVED, PENDING, COMPLETED, PAYMENT_PENDING, CANCEL},
-    PAYMENT_PENDING: {COMPLETED, CANCEL},
+    APPROVED: {APPROVED, PENDING, COMPLETED, CANCEL},
     COMPLETED: set(),
     CANCEL: {APPROVED, PENDING},
 }
@@ -58,12 +57,20 @@ _APPROVER_OVERRIDES = ("task_type", "service_type", "service_charge", "payment_t
 
 
 def canonical_status(raw: str | None) -> str:
-    """Map any stored/requested spelling to Pending / Approved / Payment Pending / Completed / Cancel."""
+    """Map any requested spelling to Pending / Approved / Completed / Cancel."""
     key = (raw or "").strip().lower().replace("_", " ")
     return {
-        "pending": PENDING, "approved": APPROVED, "payment pending": PAYMENT_PENDING,
+        "pending": PENDING, "approved": APPROVED,
         "completed": COMPLETED, "cancel": CANCEL, "cancelled": CANCEL,
     }.get(key, (raw or "").strip().capitalize())
+
+
+def stored_status(raw: str | None) -> str:
+    """Normalise stored status on existing rows (legacy 'Payment Pending' normalises to 'Completed')."""
+    key = (raw or "").strip().lower().replace("_", " ")
+    if key == "payment pending":
+        return COMPLETED
+    return canonical_status(raw)
 
 
 def _is_chargeable(service_type: str | None) -> bool:
@@ -181,12 +188,12 @@ class TechnicalTaskService:
         updates = payload.model_dump(exclude_unset=True)
         expected_version = updates.pop("version", None)
 
-        if canonical_status(task.status) in (COMPLETED, CANCEL, PAYMENT_PENDING):
+        if stored_status(task.status) in (COMPLETED, CANCEL):
             raise BadRequestException(
-                f"A {canonical_status(task.status)} task cannot be edited. Reopen it first if changes are needed."
+                f"A {stored_status(task.status)} task cannot be edited. Reopen it first if changes are needed."
             )
         # Workflow doc: at Approved stage "Edit" is admin level (admin, or the approver of this task).
-        if canonical_status(task.status) == APPROVED and not (
+        if stored_status(task.status) == APPROVED and not (
             privileged or (user_name and user_name == task.task_approved_by)
         ):
             raise ForbiddenException("Only an admin or the approver can edit an approved task.")
@@ -223,7 +230,7 @@ class TechnicalTaskService:
         if not task:
             raise NotFoundException(f"Technical task {task_id} not found.")
 
-        current = canonical_status(task.status)
+        current = stored_status(task.status)
         target = canonical_status(payload.status)
         if target not in _TRANSITIONS.get(current, set()) and not (current == target and target in (PENDING, APPROVED)):
             raise BadRequestException(f"A {current} task cannot be moved to {target}.")
@@ -284,16 +291,17 @@ class TechnicalTaskService:
             logs.append(("Cancellation", f"Task cancelled. Reason: {reason}"))
 
         was_paid = (task.payment_status or "").strip().lower() == "paid"
-        if target in (COMPLETED, PAYMENT_PENDING):
+        if target == COMPLETED:
             updates.update(self._completion_updates(task, current, target, payload, remarks))
             target = updates["status"]
             if remarks:
                 logs.append(("Completion", remarks))  # technician remark shows in the call-log history
-            if target == PAYMENT_PENDING:
-                logs.append(("Payment Pending", "Work completed; payment not yet collected."))
-            elif _is_chargeable(task.service_type) and updates.get("payment_status") == "Paid":
-                amt = updates.get("collected_amount")
-                logs.append(("Payment Collected", f"Collected {amt} via {updates.get('payment_mode') or '-'}."))
+            if _is_chargeable(task.service_type):
+                if updates.get("payment_status") == "Paid":
+                    amt = updates.get("collected_amount")
+                    logs.append(("Payment Collected", f"Collected {amt} via {updates.get('payment_mode') or '-'}."))
+                else:
+                    logs.append(("Payment Pending", "Work completed; payment pending in Payments module."))
 
         for log_type, log_remarks in logs:
             await self.repository.create_call_log(
@@ -315,15 +323,15 @@ class TechnicalTaskService:
                 notes=remarks or f"Self-collected on task completion ({result.company_name})",
                 actor=actor,
             )
-        final_status = canonical_status(result.status)
+        final_status = stored_status(result.status)
+        if final_status == CANCEL:
+            await self._reverse_self_collect_wallet(result.id)
         if reopening:
             task_log_title = "Reopen Technical Task"
         elif final_status == APPROVED:
             task_log_title = "Approve Technical Task" if current != APPROVED else "Update Technical Task"
         elif final_status == COMPLETED:
             task_log_title = "Complete Technical Task"
-        elif final_status == PAYMENT_PENDING:
-            task_log_title = "Task Payment Pending"
         elif final_status == CANCEL:
             task_log_title = "Cancel Technical Task"
         else:
@@ -364,7 +372,7 @@ class TechnicalTaskService:
         target_charge = task.service_charge or Decimal(0)
         if target_charge > 0 and new_collected >= target_charge:
             updates["payment_status"] = "Paid"
-            if canonical_status(task.status) == PAYMENT_PENDING:
+            if (task.status or "").strip().lower().replace("_", " ") == "payment pending":
                 updates["status"] = COMPLETED
                 if not task.completed_date:
                     updates["completed_date"] = payment_date or date.today()
@@ -399,7 +407,7 @@ class TechnicalTaskService:
             task_id=result.id,
             updated_by=user_name or "Accounts",
             title="Record Task Payment",
-            status=canonical_status(result.status),
+            status=stored_status(result.status),
         )
         invalidate_counts_cache()
         return result
@@ -418,17 +426,50 @@ class TechnicalTaskService:
         """Auto-post Self collect task payments into Technician Wallet Ledger (COLLECTION)."""
         try:
             from sqlalchemy import func, select
+            from app.masters.technicians.models import Technician
             from app.technician_operations.models import TechnicianWalletTransaction
 
-            tech_name = (task.task_allotted_to or actor or "Technician").strip()
+            raw_tech = (task.task_allotted_to or actor or "Technician").strip()
             async with self.repository.session.begin_nested():
+                tech_id: uuid.UUID | None = None
+                tech_name = raw_tech
+                try:
+                    async with self.repository.session.begin_nested():
+                        tech_row = (
+                            await self.repository.session.execute(
+                                select(Technician)
+                                .where(
+                                    Technician.deleted_at.is_(None),
+                                    func.lower(Technician.name) == raw_tech.lower(),
+                                )
+                                .limit(1)
+                            )
+                        ).scalar_one_or_none()
+                        if tech_row is not None:
+                            tech_id = tech_row.id
+                            tech_name = tech_row.name
+                except Exception:
+                    pass
+
                 year = payment_date.year
-                count_res = await self.repository.session.execute(select(func.count(TechnicianWalletTransaction.id)))
-                next_seq = (count_res.scalar() or 0) + 1
-                txn_num = f"TXN-TECH-{year}-{next_seq:04d}-{uuid.uuid4().hex[:4].upper()}"
+                prefix = f"TXN-TECH-{year}-"
+                codes = (
+                    await self.repository.session.execute(
+                        select(TechnicianWalletTransaction.transaction_number).where(
+                            TechnicianWalletTransaction.transaction_number.like(f"{prefix}%")
+                        )
+                    )
+                ).scalars().all()
+                max_seq = 0
+                for c in codes:
+                    if c:
+                        tail = c[len(prefix):].split("-")[0]
+                        if tail.isdigit():
+                            max_seq = max(max_seq, int(tail))
+                txn_num = f"{prefix}{max_seq + 1:04d}-{uuid.uuid4().hex[:4].upper()}"
                 txn = TechnicianWalletTransaction(
                     transaction_number=txn_num,
-                    technician_id=None,
+                    technician_id=tech_id,
                     technician_name=tech_name,
                     technical_task_id=task.id,
                     customer_name=task.company_name,
@@ -448,31 +489,51 @@ class TechnicalTaskService:
         except Exception as exc:
             logger.warning("Could not auto-sync Self collect wallet entry for task %s: %s", task.id, exc)
 
+    async def _reverse_self_collect_wallet(self, task_id: uuid.UUID) -> None:
+        """Soft-delete any Self collect wallet COLLECTION entries when a task is cancelled or deleted."""
+        try:
+            from sqlalchemy import select
+            from app.technician_operations.models import TechnicianWalletTransaction
+
+            async with self.repository.session.begin_nested():
+                rows = (
+                    await self.repository.session.execute(
+                        select(TechnicianWalletTransaction).where(
+                            TechnicianWalletTransaction.technical_task_id == task_id,
+                            TechnicianWalletTransaction.transaction_type == "COLLECTION",
+                            TechnicianWalletTransaction.deleted_at.is_(None),
+                        )
+                    )
+                ).scalars().all()
+                now_utc = datetime.now(timezone.utc)
+                for row in rows:
+                    row.deleted_at = now_utc
+                if rows:
+                    await self.repository.session.flush()
+        except Exception as exc:
+            logger.warning("Could not reverse Self collect wallet entries for task %s: %s", task_id, exc)
+
     def _completion_updates(
         self, task: TechnicalTask, current: str, target: str, payload: TechnicalTaskStatusUpdate, remarks: str
     ) -> dict[str, Any]:
         """Server-side completion / payment rules. Returns the column updates (including the final status)."""
-        if current not in (APPROVED, PAYMENT_PENDING):
+        if current != APPROVED:
             raise BadRequestException("Only an Approved task can be completed.")
-        updates: dict[str, Any] = {}
+        updates: dict[str, Any] = {"status": COMPLETED}
         if not task.completed_date:
             updates["completed_date"] = payload.completed_date or date.today()
         if remarks:
             updates["technician_remarks"] = remarks  # never overwrites the approver's remarks
 
         if not _is_chargeable(task.service_type):
-            if target == PAYMENT_PENDING:
-                raise BadRequestException("A Free task has no payment, so it cannot be set to Payment Pending.")
-            updates.update(status=COMPLETED, payment_status=None, payment_mode=None, payment_screenshot=None, collected_amount=None)
+            updates.update(payment_status=None, payment_mode=None, payment_screenshot=None, collected_amount=None)
             return updates
 
         collected = payload.payment_collected
         if collected is None:
             collected = (payload.payment_status or "").strip().lower() == "paid"
-        if target == PAYMENT_PENDING:
-            collected = False
         if not collected:
-            updates.update(status=PAYMENT_PENDING, payment_status="Pending")
+            updates.update(payment_status="Pending")
             return updates
 
         mode = (payload.payment_mode or task.payment_mode or "").strip()
@@ -482,7 +543,7 @@ class TechnicalTaskService:
         if amount is None or Decimal(str(amount)) <= 0:
             raise BadRequestException("Collected amount is required when payment is collected.")
         updates.update(
-            status=COMPLETED, payment_status="Paid", payment_mode=mode, collected_amount=amount,
+            payment_status="Paid", payment_mode=mode, collected_amount=amount,
             payment_screenshot=payload.payment_screenshot or task.payment_screenshot,
         )
         return updates
@@ -523,13 +584,54 @@ class TechnicalTaskService:
             async with self.repository.session.begin_nested():
                 warranty = (await self.repository.session.execute(stmt)).scalars().first()
             if warranty:
+                is_cov = warranty.is_currently_covered()
                 info = {
                     "machine_model": warranty.machine_model, "company_name": warranty.company_name,
                     "city": warranty.installation_city, "contact_person": warranty.contact_person,
-                    "contact_phone": warranty.contact_phone, "warranty_status": warranty.status,
+                    "contact_phone": warranty.contact_phone,
+                    "warranty_status": warranty.status if is_cov else ("VOIDED" if warranty.status == "VOIDED" else "OUT_OF_WARRANTY"),
                     "warranty_end_date": warranty.warranty_end_date, "invoice_number": warranty.invoice_number,
                     "invoice_date": warranty.invoice_date,
                 }
+            else:
+                from app.sales.models import SaleOrder, SaleOrderItem
+                from app.technician_operations.repository import _add_months, _parse_date_flexible
+
+                async with self.repository.session.begin_nested():
+                    so_rows = (
+                        await self.repository.session.execute(
+                            select(SaleOrderItem, SaleOrder)
+                            .join(SaleOrder, SaleOrderItem.order_id == SaleOrder.id)
+                            .where(
+                                SaleOrder.deleted_at.is_(None),
+                                func.lower(SaleOrder.status) != "cancelled",
+                                SaleOrderItem.serial_numbers.is_not(None),
+                            )
+                            .order_by(SaleOrder.created_at.desc())
+                        )
+                    ).all()
+                    for s_item, s_order in so_rows:
+                        s_list = s_item.serial_numbers if isinstance(s_item.serial_numbers, list) else []
+                        if any(str(sn or "").strip().upper() == clean_sn.upper() for sn in s_list):
+                            inv_dt = (
+                                _parse_date_flexible(s_order.invoice_date)
+                                or _parse_date_flexible(s_order.order_date)
+                                or date.today()
+                            )
+                            end_dt = _add_months(inv_dt, 12)
+                            is_cov = date.today() <= end_dt
+                            info = {
+                                "machine_model": s_item.product_name,
+                                "company_name": s_order.company_name or s_order.buyer_name,
+                                "city": s_order.city,
+                                "contact_person": None,
+                                "contact_phone": None,
+                                "warranty_status": "UNDER_WARRANTY" if is_cov else "OUT_OF_WARRANTY",
+                                "warranty_end_date": end_dt,
+                                "invoice_number": s_order.invoice_no or s_order.order_no,
+                                "invoice_date": inv_dt,
+                            }
+                            break
         except Exception:
             logger.exception("Warranty lookup failed for serial %s; continuing with task history only", clean_sn)
 
@@ -566,11 +668,15 @@ class TechnicalTaskService:
         task = await self.get_by_id(task_id)
         if canonical_status(task.status) != PENDING and not privileged:
             raise ForbiddenException("Only an admin can delete a task that is no longer Pending.")
+        await self._reverse_self_collect_wallet(task.id)
         await self.repository.delete(task)
         invalidate_counts_cache()
 
     async def bulk_delete(self, ids: list[uuid.UUID], privileged: bool = True) -> int:
         deleted = await self.repository.bulk_soft_delete(ids, only_pending=not privileged)
+        if deleted > 0:
+            for tid in ids:
+                await self._reverse_self_collect_wallet(tid)
         invalidate_counts_cache()
         return deleted
 
@@ -615,6 +721,6 @@ class TechnicalTaskService:
         """Open vs Closed month-wise: tasks raised and completed per month, plus the current open/closed split."""
         series = await self.repository.monthly_summary(months, **scope)
         counts = await self.repository.get_counts(**scope)
-        open_now = counts["pending"] + counts["approved"] + counts["payment_pending"]
+        open_now = counts["pending"] + counts["approved"]
         closed_now = counts["completed"] + counts["cancel"]
         return {"months": series, "open_now": open_now, "closed_now": closed_now}

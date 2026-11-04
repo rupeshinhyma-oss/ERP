@@ -9,6 +9,10 @@ from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, Numeric, St
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database.base import GUID, Base, SoftDeleteMixin, TimestampMixin, UUIDPrimaryKeyMixin, VersionMixin
+import app.masters.products.models  # noqa: F401
+import app.masters.technicians.models  # noqa: F401
+import app.sales.models  # noqa: F401
+import app.technical_tasks.models  # noqa: F401
 
 
 class MachineWarranty(Base, UUIDPrimaryKeyMixin, TimestampMixin, VersionMixin, SoftDeleteMixin):
@@ -62,7 +66,9 @@ class TechnicianGatepass(Base, UUIDPrimaryKeyMixin, TimestampMixin, VersionMixin
     technical_task_id: Mapped[uuid.UUID | None] = mapped_column(
         GUID(), ForeignKey("technical_tasks.id", ondelete="SET NULL"), nullable=True, index=True
     )
+    warehouse_name: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
     customer_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    machine_model: Mapped[str | None] = mapped_column(String(255), nullable=True)
     machine_serial_number: Mapped[str | None] = mapped_column(String(100), nullable=True)
     is_warranty_service: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
@@ -73,10 +79,14 @@ class TechnicianGatepass(Base, UUIDPrimaryKeyMixin, TimestampMixin, VersionMixin
     # Status: ISSUED, PARTIALLY_RETURNED, RECONCILED, CLOSED, CANCELLED
     status: Mapped[str] = mapped_column(String(50), default="ISSUED", nullable=False, index=True)
 
-    # Reconciliation controls
+    # Reconciliation & inventory stock controls
     so_required: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    sale_order_id: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(), ForeignKey("sales_orders.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     so_number: Mapped[str | None] = mapped_column(String(100), nullable=True)
     so_created: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    stock_deducted: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     return_gatepass_number: Mapped[str | None] = mapped_column(String(100), nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
@@ -107,6 +117,8 @@ class TechnicianGatepassItem(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     quantity_issued: Mapped[float] = mapped_column(Numeric(12, 3), default=1.0, nullable=False)
     quantity_consumed: Mapped[float] = mapped_column(Numeric(12, 3), default=0.0, nullable=False)
     quantity_returned: Mapped[float] = mapped_column(Numeric(12, 3), default=0.0, nullable=False)
+    stock_returned_qty: Mapped[float] = mapped_column(Numeric(12, 3), default=0.0, nullable=False)
+    stock_billed_released_qty: Mapped[float] = mapped_column(Numeric(12, 3), default=0.0, nullable=False)
     unit_rate: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True)
 
     is_warranty_covered: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)

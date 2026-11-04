@@ -90,7 +90,9 @@ class GatepassCreate(BaseModel):
     technician_name: str = Field(..., min_length=2, max_length=150)
     technician_mobile: str | None = None
     technical_task_id: uuid.UUID | None = None
+    warehouse_name: str | None = Field(default=None, max_length=100)
     customer_name: str | None = None
+    machine_model: str | None = Field(default=None, max_length=255)
     machine_serial_number: str | None = None
     purpose: str = Field(default="Field Service Call", max_length=150)
     issue_date: date = Field(default_factory=date.today)
@@ -121,6 +123,7 @@ class GatepassReturnPayload(BaseModel):
 class GatepassLinkSOPayload(BaseModel):
     """Link a Sales Order created by salesperson for consumed parts."""
 
+    sale_order_id: uuid.UUID | None = None
     sales_order_number: str = Field(..., min_length=2, max_length=100)
     notes: str | None = None
 
@@ -139,6 +142,8 @@ class GatepassItemRead(BaseModel):
     quantity_issued: float
     quantity_consumed: float
     quantity_returned: float
+    stock_returned_qty: float = 0.0
+    stock_billed_released_qty: float = 0.0
     unit_rate: float | None = None
     is_warranty_covered: bool = False
     sales_order_number: str | None = None
@@ -157,7 +162,9 @@ class GatepassRead(BaseModel):
     technician_name: str
     technician_mobile: str | None = None
     technical_task_id: uuid.UUID | None = None
+    warehouse_name: str | None = None
     customer_name: str | None = None
+    machine_model: str | None = None
     machine_serial_number: str | None = None
     is_warranty_service: bool
     issue_date: date
@@ -165,8 +172,10 @@ class GatepassRead(BaseModel):
     purpose: str
     status: str
     so_required: bool
+    sale_order_id: uuid.UUID | None = None
     so_number: str | None = None
     so_created: bool
+    stock_deducted: bool = False
     return_gatepass_number: str | None = None
     notes: str | None = None
     created_at: datetime
@@ -182,9 +191,19 @@ class GatepassRead(BaseModel):
 class DraftSOGenerationResponse(BaseModel):
     """Pre-formatted draft Sales Order payload for salesperson to bill consumed parts."""
 
+    gatepass_id: uuid.UUID | None = None
     customer_name: str
+    company_id: uuid.UUID | None = None
+    warehouse_name: str | None = None
+    city: str | None = None
+    state: str | None = None
+    billing_address: str | None = None
+    shipping_address: str | None = None
+    machine_model: str | None = None
     machine_serial_number: str | None = None
     gatepass_number: str
+    so_created: bool = False
+    so_number: str | None = None
     items_to_bill: list[dict]
     estimated_subtotal: float
     message: str
@@ -256,3 +275,17 @@ class TechnicianOperationsMetrics(BaseModel):
     pending_sales_orders: int = 0
     total_wallet_cash_held: float = 0.0
     total_warranties_active: int = 0
+
+
+class TechnicianOpsLookupsResponse(BaseModel):
+    """Master-driven lookup collections for Technician Operations forms."""
+
+    technicians: list[dict] = Field(default_factory=list)
+    companies: list[dict] = Field(default_factory=list)
+    warehouses: list[dict] = Field(default_factory=list)
+    machines: list[dict] = Field(default_factory=list)
+    spare_parts: list[dict] = Field(default_factory=list)
+    cities: list[dict] = Field(default_factory=list)
+    technical_tasks: list[dict] = Field(default_factory=list)
+    sale_orders: list[dict] = Field(default_factory=list)
+    serial_registry: list[dict] = Field(default_factory=list)

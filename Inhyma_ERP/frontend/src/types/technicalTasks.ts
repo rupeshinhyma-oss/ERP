@@ -64,7 +64,6 @@ export interface TechnicalTaskCounts {
   all: number;
   pending: number;
   approved: number;
-  payment_pending?: number;
   completed: number;
   cancel: number;
 }

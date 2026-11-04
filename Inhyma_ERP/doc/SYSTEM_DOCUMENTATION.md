@@ -1,7 +1,7 @@
 # Enterprise ERP System — Unified Architecture, Feature & Technical Manual
 
 > **System Version:** 1.0.0 (Production)  
-> **Last Updated:** November 3, 2026  
+> **Last Updated:** November 4, 2026  
 > **Architectural Pattern:** Modular Async Monolith (FastAPI) + React 18 SPA (Vite) + Real-Time WebSocket Event Bus  
 > **Target Audience:** Systems Architects, Software Engineers, DevOps, and Autonomous AI Coding Assistants.  
 > **Scope:** Complete end-to-end technical reference containing all system features, data models, API endpoints, background workers, frontend architecture, and developer integration guidelines.
@@ -40,6 +40,7 @@
    - 8.18. [Contact: Companies & Multi-Contact Directory](#818-contact-companies--multi-contact-directory)
    - 8.19. [Task: Technical Tasks & Field Service Dispatch](#819-task-technical-tasks--field-service-dispatch)
      - 8.19.1. [Technical Tasks: Payments Module & Technician Collections](#8191-technical-tasks-payments-module-payments--technician-collections)
+     - 8.19.2. [Technician Ops & Wallet: Spare Parts Gatepass, Stock Conservation, Wallet Ledger & Machine Warranty](#8192-technician-ops--wallet-spare-parts-gatepass-stock-conservation-wallet-ledger--machine-warranty)
    - 8.20. [HRMS: Leave Management Foundation & Master Data Architecture (Phase 1)](#820-hrms-leave-management-foundation--master-data-architecture-phase-1)
    - 8.21. [Purchase: Local Purchase Management & Costing Engine](#821-purchase-local-purchase-management--costing-engine)
    - 8.22. [Purchase: Import Purchase Consignments & Customs Landing Matrix](#822-purchase-import-purchase-consignments--customs-landing-matrix)
@@ -50,6 +51,7 @@
    - 8.27. [Workforce: Recurring Tasks Scheduling Engine & Automated Worker](#827-workforce-recurring-tasks-scheduling-engine--automated-spawning-worker)
    - 8.28. [Product Sync Adapter & Dynamic Relational Provisioning Engine](#828-product-sync-adapter--dynamic-relational-provisioning-engine-yinglima---inhyma)
    - 8.29. [Communication: Internal Feed & Broadcast Announcements Engine](#829-communication-internal-feed--broadcast-announcements-engine)
+   - 8.30. [Reports: Financial Planning Report & Cargo Overview Module Shells](#830-reports-financial-planning-report--cargo-overview-module-shells)
 
 9. [Real-Time WebSocket & Event Synchronization](#9-real-time-websocket--event-synchronization)
 10. [Multi-Tier Caching Engine](#10-multi-tier-caching-engine)
@@ -843,18 +845,18 @@ A user may be assigned any number of Roles simultaneously (`POST /users/{id}/rol
 - **Files:** `backend/app/technical_tasks/routes.py`, `backend/app/technical_tasks/service.py`, `backend/app/technical_tasks/repository.py`, `backend/app/technical_tasks/schemas.py`, `backend/app/technical_tasks/models.py`, `backend/alembic/versions/z6d7e8f9a0b1_add_technical_task_logs_and_number.py`, `backend/app/events/channels.py`, `backend/scripts/seed.py`, `backend/scripts/seed_technical_task_permissions.py`, `frontend/src/pages/technicalTasks/TechnicalTasksPage.tsx`, `frontend/src/pages/technicalTasks/TechnicalTaskDetailPage.tsx`, `frontend/src/lib/technicalTasksApi.ts`, `frontend/src/lib/nav.ts`, `frontend/src/lib/permissionLabels.ts`.
 - **RBAC Permissions (`module="technicaltask"`, `page="technical-tasks"`, labeled `"Technical Tasks"` in `/rbac`):**
   - `technicaltask.view` (*View*), `technicaltask.create` (*Create*), `technicaltask.update` (*Edit*), `technicaltask.approve` (*Approve*), `technicaltask.delete` (*Delete*), `technicaltask.export` (*Export*), `technicaltask.bulk_action` (*Bulk Actions*), and `technicaltask.manage` (*Manage All*).
-  - Enforced across sidebar & route guard (`nav.ts` `permission: "technicaltask.view"` on both `technical-tasks` and `payments`), WebSocket channels (`module:technical_tasks` & `module:technical-tasks`), all `/api/v1/technical-tasks` endpoints (`require_any_permission`), and granular UI controls in `TechnicalTasksPage.tsx`, `TechnicalTaskDetailPage.tsx`, and `PaymentsPage.tsx` (`+ ADD NEW`, `+ ADD NEW CALL LOG`, `Imp / Exp`, `Bulk Actions`, row `Approved` / `Completed` / `Cancel`, `Edit`, `Payment Collected`, `Reopen / Reassign`, `Record Payment`, `Delete`).
+  - Enforced across sidebar & route guard (`nav.ts` `permission: "technicaltask.view"` on both `technical-tasks` and `payments`), WebSocket channels (`module:technical_tasks` & `module:technical-tasks`), all `/api/v1/technical-tasks` endpoints (`require_any_permission`), and granular UI controls in `TechnicalTasksPage.tsx`, `TechnicalTaskDetailPage.tsx`, and `PaymentsPage.tsx` (`+ ADD NEW`, `+ ADD NEW CALL LOG`, `Imp / Exp`, `Bulk Actions`, row `Approved` / `Completed` / `Cancel`, `Edit`, `Reopen / Reassign`, `Record Payment`, `Delete`).
 - **Doc-Compliant Status & Payment Workflow (`Phase 2: Technical task module.docx` & `General New points inhyma.docx`):**
   - **`Approved` (`Pending` row action):** Opens the **Approve & Allot Task** modal requiring `Task Allotted To` (technician dropdown), optional approver overrides (`Task Type`, `Service Type`, `Amount`, `Payment Terms`), conditional `Scheduled / Visit Date` (shown exclusively when `Task Type` is `Onsite Visit - Client Location` or `Onsite Visit - Third-Party Location`), and `Approver Remarks` (stored separately in `approver_remarks`).
   - **`Completed` (`Approved` row action):** Opens the **Complete Technical Task** modal:
-    - *Free tasks:* Shows only `Remarks` (stored in `technician_remarks`, never overwriting `approver_remarks`) and transitions directly to `Completed` (never `Payment Pending`).
-    - *Chargeable tasks:* Prompts `"Did you collect payment of ₹...?"` (`Yes` / `No`). Selecting `No` moves the task to `Payment Pending` stage & status; selecting `Yes` captures `Payment Collection Mode` (`Company Acc` or `Self collect`), optional `Payment Screenshot / Receipt`, `Amount Collected`, and `Remarks`, transitioning the task to `Completed` + `Paid`.
+    - *Free tasks:* Shows only `Remarks` (stored in `technician_remarks`, never overwriting `approver_remarks`) and transitions directly to `Completed`.
+    - *Chargeable tasks:* Prompts `"Did you collect payment of ₹...?"` (`Yes` / `No`). Selecting `No (Pending in Payments)` marks the service work `Completed` with `payment_status = "Pending"` so pending collection is tracked exclusively in the dedicated `/payments` module (`PaymentsPage.tsx`); selecting `Yes` captures `Payment Collection Mode` (`Company Acc` or `Self collect`), optional `Payment Screenshot / Receipt`, `Amount Collected`, and `Remarks`, transitioning the task to `Completed` + `Paid`.
   - **`Cancel` (`Approved` row action):** Opens the **Cancel Technical Task** modal enforcing strictly mandatory `Cancellation Remarks` (`cancel_remarks`) both client-side and server-side (`TechnicalTaskStatusUpdate` & `TechnicalTaskService.update_status`).
   - **Centered Fixed-Overlay Modals & Authenticated Lookup Fallbacks:** `.tech-modal-overlay` / `.tech-modal-card` in `frontend/src/styles/technicalTasks.css` render as fixed centered dialogs (`z-index: 2000`) inside `<main className="page">` with inline `status-modal-error` validation banners; `TechnicalTasksPage.tsx` automatically falls back to authenticated `/masters/cities/lookup`, `/masters/technicians/lookup`, and `/masters/call-types/lookup` (`get_current_user`) whenever a user holds `technicaltask.*` permissions without master-table `.view` permissions.
   - **Canonical Option Fallbacks:** `TASK_TYPE_OPTIONS` (`Telecall`, `Onsite Visit - Client Location`, `Onsite Visit - Third-Party Location`, `In-House`) and `SERVICE_TYPE_OPTIONS` (`Free`, `Chargeable`) automatically fall back to canonical specification values whenever `system_options` returns empty.
 - **Endpoints:**
   - `GET /api/v1/technical-tasks`: Paginated list of service tasks with tab status, task type, service type, call type, technician, city, third-party city, priority, and payment stage (`payment_collected=all|pending|completed`) filters (`technicaltask.view | technicaltask.manage`).
-  - `GET /api/v1/technical-tasks/counts`: Summary status counts across tabs (`All`, `Pending`, `Approved`, `Payment Pending`, `Completed`, `Cancel`) (`technicaltask.view | technicaltask.manage`).
+  - `GET /api/v1/technical-tasks/counts`: Summary status counts across tabs (`All`, `Pending`, `Approved`, `Completed`, `Cancel`) (`technicaltask.view | technicaltask.manage`).
   - `GET /api/v1/technical-tasks/lookup/serial/{serial_number}`: Lookup machine model, warranty status, customer details, and historical ticket count by machine serial number (`technicaltask.view | technicaltask.create | technicaltask.manage`).
   - `GET /api/v1/technical-tasks/call-log-report` & `GET /api/v1/technical-tasks/monthly-summary`: Service call-log analytics and monthly summaries (`technicaltask.view | technicaltask.manage | report.view`).
   - `POST /api/v1/technical-tasks`: Create new field service ticket or maintenance request with sequential `task_number` and initial `Create Technical Task` log (`technicaltask.create | technicaltask.manage`).
@@ -877,7 +879,7 @@ A user may be assigned any number of Roles simultaneously (`POST /users/{id}/rol
   - **`Add Call Log` Right-Side Slide-Over Drawer:** Triggered via top-right **`+ ADD NEW CALL LOG`** button; captures `Task Type` (`Telecall` or `Physical Visit`) and `Remarks` with sticky full-width `Submit` button.
 - **Features:**
   - Field service engineering dispatch tracking sequential `task_number`, machine serial numbers, models, third-party site contacts, warranty status, and dual `All Products` vs `Product by Serial No.` selection modes.
-  - Status Tab Workflow: `All` $\rightarrow$ `Pending` $\rightarrow$ `Approved` $\rightarrow$ `Payment Pending` $\rightarrow$ `Completed` (or `Cancel`).
+  - Status Tab Workflow: `All` $\rightarrow$ `Pending` $\rightarrow$ `Approved` $\rightarrow$ `Completed` (or `Cancel`), with unpaid chargeable collections tracked separately in `/payments`.
   - Task Types: `Telecall`, `Onsite Visit - Client Location`, `Onsite Visit - Third-Party Location`, and `In-House`.
   - Service Types & Priority: `Free` vs `Chargeable` (with `Amount (₹)` & `Payment Terms`) and Priority grades `A` / `B`, alongside dynamic `Call Types` Master (`Installation`, `Repair`, `Demo`, `Trial`, etc.).
   - Technician Allotment: Active technician assignment linked to the Technicians Master (`/masters/technicians` & `/masters/technicians/lookup`) with conditional scheduled visit dates for onsite visits.
@@ -889,10 +891,11 @@ A user may be assigned any number of Roles simultaneously (`POST /users/{id}/rol
   - Automated Tests: `backend/tests/test_technical_tasks.py` (`test_payment_summary_and_recording`).
 - **Endpoints:**
   - `GET /api/v1/technical-tasks/payment-summary`: Aggregates real-time financial KPI totals (`total_payment`, `paid`, `due`, `all_count`, `pending_count`, `completed_count`) across active (non-cancelled) `Chargeable` tasks using NULL-safe SQL `coalesce` predicates (`Cancelled` / `Cancel` tasks are strictly excluded so cancelled service orders never inflate `TOTAL PAYMENT`, `DUE`, or `Pending` counts).
-  - `POST /api/v1/technical-tasks/{task_id}/record-payment`: Atomically updates `collected_amount`, `payment_mode`, `payment_status` (`Paid` if balance cleared, `Pending` if balance remains), transitions `Payment Pending` tasks to `Completed` once fully paid, appends call/task audit log entries (`Payment Collected` / `Record Task Payment`), and auto-syncs `Self collect` payments into Technician Wallet.
+  - `POST /api/v1/technical-tasks/{task_id}/record-payment`: Atomically updates `collected_amount`, `payment_mode`, `payment_status` (`Paid` if balance cleared, `Pending` if balance remains), normalises any legacy `Payment Pending` status to `Completed` once paid, appends call/task audit log entries (`Payment Collected` / `Record Task Payment`), and auto-syncs `Self collect` payments into Technician Wallet.
   - `POST /api/v1/technical-tasks/upload-screenshot`: Uploads payment receipt image/document attachment to storage.
-- **Automatic `Self collect` -> Technician Wallet Ledger Sync (`TechnicianWalletTransaction`):**
-  - Whenever a payment is recorded with `payment_mode == "Self collect"` (either on task completion via `PATCH /{id}/status` OR via `POST /{id}/record-payment`), `TechnicalTaskService._sync_self_collect_wallet()` automatically inserts a `VERIFIED` `COLLECTION` ledger entry (`TXN-TECH-YYYY-NNNN-XXXX`) in `technician_wallet_transactions` linked via `technical_task_id`, `technician_name`, `customer_name`, `amount`, and `receipt_url` so `/technician-operations` Wallet Ledger & Summaries reflect technician cash collections immediately.
+- **Automatic `Self collect` -> Technician Wallet Ledger Sync & Cancellation Reversal (`TechnicianWalletTransaction`):**
+  - Whenever a payment is recorded with `payment_mode == "Self collect"` (either on task completion via `PATCH /{id}/status` OR via `POST /{id}/record-payment`), `TechnicalTaskService._sync_self_collect_wallet()` automatically inserts a `VERIFIED` `COLLECTION` ledger entry (`TXN-TECH-YYYY-NNNN-XXXX`) in `technician_wallet_transactions` linked via `technical_task_id`, `technician_id`, `technician_name`, `customer_name`, `amount`, and `receipt_url` so `/technician-operations` Wallet Ledger & Summaries reflect technician cash collections immediately.
+  - Whenever a technical task is cancelled (`status="Cancel"` / `"Cancelled"`), soft-deleted (`DELETE /{id}`), or bulk-deleted (`POST /bulk-delete`), `TechnicalTaskService._reverse_self_collect_wallet()` automatically soft-deletes any linked `TechnicianWalletTransaction` entries so cancelled/deleted service tasks never leave stale cash-in-hand balances.
 - **Top Financial KPI Metric Cards:**
   - **`TOTAL PAYMENT`**: Aggregated sum of service charges across all active (non-cancelled) chargeable technical tasks in high-contrast slate font (`#0f172a`).
   - **`PAID`**: Aggregated total amount collected from clients/technicians displayed in emerald green (`#16a34a`).
@@ -920,6 +923,30 @@ A user may be assigned any number of Roles simultaneously (`POST /users/{id}/rol
 - **Navigation Architecture:**
   - Dedicated item in the **`TASK`** navigation block in `nav.ts` with custom `₹` currency icon (`IconIndianRupee`).
   - Deprecated and removed legacy `Gatepass` navigation link from the `TASK` section to maintain clean, streamlined operational workflows.
+
+#### 8.19.2. Technician Ops & Wallet: Spare Parts Gatepass, Stock Conservation, Wallet Ledger & Machine Warranty
+- **Files:**
+  - Backend: `backend/app/technician_operations/{models,schemas,repository,service,routes}.py`, `backend/app/sales/{schemas,service}.py`, `backend/app/technical_tasks/service.py`, `backend/alembic/versions/z7e8f9a0b1c2_upgrade_technician_ops_stock_and_so.py`.
+  - Frontend: `frontend/src/pages/TechnicianOperationsPage.tsx`, `frontend/src/pages/sales/SaleProcessForm.tsx`, `frontend/src/lib/nav.ts`.
+  - Automated Tests: `backend/tests/test_technician_operations.py` (10 integration & workflow tests), `frontend/src/pages/__tests__/TechnicianOperationsPage.test.tsx`, `frontend/src/pages/__tests__/SaleProcessFormPage.test.tsx`.
+- **RBAC Enforcement:**
+  - Sidebar & Route (`nav.ts` `technician-operations`): `permission: "technicaltask.view"`.
+  - Backend Read Endpoints (`GET /lookups`, `/metrics`, `/warranty`, `/warranty/validate`, `/gatepasses`, `/wallet/summaries`, `/wallet/transactions`): `technicaltask.view | technicaltask.manage | technician.view | saleorder.view`.
+  - Backend Mutation Endpoints (`POST /warranty`, `POST /gatepasses`, `POST /gatepasses/{id}/return`, `POST /wallet/transactions`): `technicaltask.create | technicaltask.update | technicaltask.manage | technician.create | technician.update`.
+  - Sales Order Bridge Endpoints (`GET /gatepasses/{id}/draft-so`, `POST /gatepasses/{id}/link-so`): also grant `saleorder.create | saleorder.update | saleorder.view`.
+- **Master-Driven Lookups (`GET /api/v1/technician-operations/lookups`):**
+  - Aggregates active `Technicians`, `Companies`, physical `Warehouses` (`is_physical(name) == True`), `Machines` (`Finished Goods` / `Machine`), `Spare Parts` (with `compatible_machine_ids` resolved from `ProductMachineSpare` + `Product.applicable_machine_ids`, `hsn_code`, `gst_percent`, and live `stock_by_warehouse` per physical warehouse), `Cities`, open `Technical Tasks`, non-cancelled `Sale Orders`, and unified `Serial Registry` (`MachineWarranty` + `SaleOrderItem.serial_numbers`).
+- **Physical Warehouse Stock Conservation & Sales Order Bridge (`z7e8f9a0b1c2`):**
+  1. **Outward Gatepass Issuance (`POST /gatepasses`):** Validates and deducts `quantity_issued` from the selected physical warehouse via `stock_service.apply_stock_delta(..., delta=-qty)` (`409 Conflict` if insufficient stock), recording `warehouse_name` and `stock_deducted=True`.
+  2. **Partial / Full Return Reconciliation (`POST /gatepasses/{id}/return`):** Enforces `quantity_returned + quantity_consumed <= quantity_issued` (`400 Bad Request` on violation). Restores the positive delta of `RETURNED_GOOD` units back to the physical warehouse (`stock_returned_qty`), while `RETURNED_DEFECTIVE` units are quarantined for inspection without restoring saleable stock. If `quantity_consumed > 0` on non-warranty items, marks `so_required=True` and prevents premature closure until a real Sales Order is linked.
+  3. **Pre-Filled Sales Order Creation (`/sales/process/add?gatepass_id=<uuid>` & `POST /sales/orders`):** `SaleProcessForm.tsx` fetches `GET /gatepasses/{id}/draft-so` to pre-populate Warehouse, Company, Billing/Shipping Addresses, Remarks, and consumed spare-part line items (`HSN`, `GST %`, `Qty`, `Rate`), submitting `technician_gatepass_id` to `SaleService.create_order`.
+  4. **Zero Double-Deduction & Cancellation Reversal (`SaleService`):** `_get_gatepass_held_credits` credits units already held by the linked gatepass during physical stock availability validation (preventing false `409` errors when the technician holds the last warehouse unit), `_release_gatepass_stock_for_order` restores the gatepass hold immediately before `_take_stock` deducts for the Sales Order (`stock_billed_released_qty`), and `_link_gatepass_to_order` marks the gatepass `CLOSED` (`so_created=True`, `sale_order_id`, `so_number`). If the linked Sales Order is later cancelled or soft-deleted, `_rehold_and_unlink_gatepass_for_order` re-applies the gatepass hold and reopens `so_required=True` (`PARTIALLY_RETURNED`).
+  5. **Direct Existing SO Link (`POST /gatepasses/{id}/link-so`):** Verifies the `SaleOrder` exists in `sale_orders` (`deleted_at IS NULL`, `status != 'cancelled'`), releases the gatepass stock hold when `order.stock_applied` is already `True`, and closes reconciliation.
+- **Automatic Sales Order Machine Serial -> Warranty Registry Sync:**
+  - `SaleService._sync_machine_warranties()` automatically registers/updates `MachineWarranty` rows (defaulting to `12` months from `order_date`) whenever a `SaleOrder` is created or updated with `SaleOrderItem.serial_numbers`. Both `GET /technician-operations/warranty/validate` and `GET /technical-tasks/serial-lookup/{serial}` also fall back directly to `SaleOrderItem.serial_numbers` for historical orders.
+- **Collision-Safe Document Numbering, Printable Slip & Wallet Vouchers:**
+  - `_generate_gatepass_number` (`GP-TECH-YYYY-NNNN`) and `_generate_wallet_txn_number` (`WTX-YYYY-NNNN`) compute `MAX` numeric suffix across all rows (including soft-deleted) instead of `COUNT(id)+1`.
+  - `TechnicianOperationsPage.tsx` provides 1-click printable Gatepass Voucher Slips (`printGatepassSlip`) and multipart receipt/voucher uploads (`apiPostMultipart` -> `/technical-tasks/upload-screenshot`) rendered as clickable `📎 View Receipt` links in the Wallet Ledger.
 
 ### 8.20. HRMS: Leave Management Foundation & Master Data Architecture (Phase 1)
 - **Files:**
@@ -1282,6 +1309,13 @@ A user may be assigned any number of Roles simultaneously (`POST /users/{id}/rol
   - **Feed Composer (`FeedComposer.tsx`):** WYSIWYG post composer with announcement priority toggles, department multi-select dropdown, and validation.
   - **Feed Timeline & Post Cards (`FeedPostCard.tsx`):** Render author avatars, department badges, pinned visual ribbons, emoji reaction picker popover, reaction counters, and expandable comment threads.
   - **Interaction Privacy & RBAC:** Enforces granular view and interaction permissions so confidential and department-specific broadcasts are isolated strictly to authorized personnel.
+
+### 8.30. Reports: Financial Planning Report & Cargo Overview Module Shells
+- **Files:** `frontend/src/pages/FinancialPlanningReportPage.tsx`, `frontend/src/pages/CargoOverviewPage.tsx`, `frontend/src/lib/nav.ts`, `frontend/src/lib/permissionLabels.ts`, `frontend/src/App.tsx`.
+- **Navigation & RBAC (`REPORTS` Section):**
+  - **Financial Planning Report:** Sidebar key `reports-financial-planning`, route `/reports/financial-planning` (alias `/financial-planning-report`), unique icon `barChart` (`IconBarChart`), permission `report.view`.
+  - **Cargo Overview:** Sidebar key `reports-cargo-overview`, route `/reports/cargo-overview` (alias `/cargo-overview`), unique icon `anchor` (`IconAnchor`), permission `report.view`.
+- **Architecture:** Clean blank module shells wrapped in `<AppShell>` and `<Breadcrumb>` ready for upcoming domain specifications.
 
 ---
 
@@ -1664,6 +1698,17 @@ A user may be assigned any number of Roles simultaneously (`POST /users/{id}/rol
 | **Feed**            | `DELETE`| `/api/v1/feed/comments/{comment_id}` | Soft-delete comment | Authenticated |
 | **Feed**            | `POST`| `/api/v1/feed/posts/{id}/reactions` | Toggle emoji reaction on post | Authenticated |
 | **Feed**            | `POST`| `/api/v1/feed/posts/{id}/mark-read` | Record user read receipt for broadcast compliance | Authenticated |
+| **Technician Ops**  | `GET` | `/api/v1/technician-operations/lookups` | Master-driven lookups (Technicians, Companies, Physical Warehouses, Machines, Machine-Mapped Spare Parts + live warehouse stock, Cities, Open Technical Tasks, Sale Orders, Serial Registry) | `technicaltask.view \| technician.view \| saleorder.view` |
+| **Technician Ops**  | `GET` | `/api/v1/technician-operations/metrics` | Live KPI counters (active gatepasses, pending SO reconciliations, technician cash in hand, active warranties) | `technicaltask.view \| technician.view \| saleorder.view` |
+| **Technician Ops**  | `GET/POST`| `/api/v1/technician-operations/gatepasses` | List / issue Outward Spare Parts Gatepasses with physical warehouse stock deduction & serial warranty detection | `technicaltask.view` / `technicaltask.create \| technicaltask.update` |
+| **Technician Ops**  | `GET` | `/api/v1/technician-operations/gatepasses/{id}` | Retrieve detailed gatepass voucher and item reconciliation lines | `technicaltask.view \| saleorder.view` |
+| **Technician Ops**  | `POST`| `/api/v1/technician-operations/gatepasses/{id}/return` | Reconcile returned vs consumed parts (`returned + consumed <= issued`) and restore `RETURNED_GOOD` warehouse stock | `technicaltask.create \| technicaltask.update \| technician.update` |
+| **Technician Ops**  | `GET` | `/api/v1/technician-operations/gatepasses/{id}/draft-so` | Generate pre-filled Draft Sales Order payload (company, warehouse, addresses, HSN/GST spare part lines) | `technicaltask.view \| saleorder.create \| saleorder.update` |
+| **Technician Ops**  | `POST`| `/api/v1/technician-operations/gatepasses/{id}/link-so` | Verify real non-cancelled `SaleOrder`, release gatepass stock hold without double deduction, and close gatepass | `technicaltask.update \| saleorder.create \| saleorder.update` |
+| **Technician Ops**  | `GET` | `/api/v1/technician-operations/wallet/summaries` | Live per-technician cash-in-hand summaries (`Collections - Handover Deposits - Field Expenses`) | `technicaltask.view \| technician.view` |
+| **Technician Ops**  | `GET/POST`| `/api/v1/technician-operations/wallet/transactions` | List / record Technician Wallet collections, deposits, and field expenses with receipt attachment URLs | `technicaltask.view` / `technicaltask.create \| technicaltask.update` |
+| **Technician Ops**  | `GET/POST`| `/api/v1/technician-operations/warranty` | List / register Machine Warranties with automatic expiry computation | `technicaltask.view` / `technicaltask.create \| technicaltask.update` |
+| **Technician Ops**  | `GET` | `/api/v1/technician-operations/warranty/validate` | Live machine serial warranty validator with `SaleOrderItem.serial_numbers` fallback | `technicaltask.view \| saleorder.view` |
 
 ---
 

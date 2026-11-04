@@ -46,7 +46,7 @@ export const NAV_SECTIONS: NavSection[] = [
       { key: "tasks", label: "Tasks", path: "/tasks", icon: "task", permission: "task.view" },
       { key: "technical-tasks", label: "Technical Tasks", path: "/technical-task/list", icon: "wrench", permission: "technicaltask.view" },
       { key: "payments", label: "Payments", path: "/payments", icon: "currency", permission: "technicaltask.view" },
-      { key: "technician-operations", label: "Technician Ops & Wallet", path: "/technician-operations", icon: "truck" },
+      { key: "technician-operations", label: "Technician Ops & Wallet", path: "/technician-operations", icon: "truck", permission: "technicaltask.view" },
     ],
   },
   {
@@ -101,6 +101,8 @@ export const NAV_SECTIONS: NavSection[] = [
       { key: "reports-stock-transactions", label: "Stock Transactions", path: "/reports/stock-transactions", icon: "refresh", permission: "report.view" },
       { key: "reports-deleted-orders", label: "Deleted Orders", path: "/reports/deleted-orders", icon: "fileX", permission: "report.view" },
       { key: "reports-general", label: "General Reports", path: "/reports/general", icon: "pieChart", permission: "report.view" },
+      { key: "reports-financial-planning", label: "Financial Planning Report", path: "/reports/financial-planning", icon: "barChart", permission: "report.view" },
+      { key: "reports-cargo-overview", label: "Cargo Overview", path: "/reports/cargo-overview", icon: "anchor", permission: "report.view" },
     ],
   },
   {
@@ -188,6 +190,8 @@ export const PAGE_TITLES: Record<string, string> = {
   "reports-stock-transactions": "Stock Transactions",
   "reports-deleted-orders": "Deleted Orders",
   "reports-general": "General Reports",
+  "reports-financial-planning": "Financial Planning Report",
+  "reports-cargo-overview": "Cargo Overview",
   planning: "Shipment Planning",
   crm: "Customer Relationship Management",
   "crm-pipelines": "Pipeline Setup",

@@ -27,15 +27,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.common.base_repository import BaseRepository
 from app.technical_tasks.models import TechnicalTask, TechnicalTaskCallLog, TechnicalTaskLog
 
-# Tab key -> every stored spelling of that status (older rows used a few variants).
+# Tab key -> every stored spelling of that status (legacy Payment Pending rows normalize into Completed).
 TAB_STATUSES: dict[str, tuple[str, ...]] = {
     "pending": ("Pending",),
     "approved": ("Approved",),
-    "payment_pending": ("Payment Pending", "payment_pending"),
-    "completed": ("Completed",),
+    "completed": ("Completed", "Payment Pending", "payment_pending"),
     "cancel": ("Cancel", "Cancelled"),
 }
-_TAB_ALIASES = {"cancelled": "cancel", "payment pending": "payment_pending"}
+_TAB_ALIASES = {"cancelled": "cancel", "payment pending": "completed", "payment_pending": "completed"}
 
 # Totals above this are reported as "COUNT_CAP+" (an exact count of millions of rows is never needed by the UI).
 COUNT_CAP = 10_000

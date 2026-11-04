@@ -340,21 +340,29 @@ async def test_chargeable_payment_flow(test_db: AsyncSession, test_client: Async
     t = await _create(test_client, service_type="Chargeable", service_charge="5000", payment_terms="On completion")
     tid = t["id"]
     await _approve(test_client, tid, tech="Mangal Pandey")
-    # Not collected -> Payment Pending (even if the client asked for Completed)
+    # Not collected -> service work is Completed on Technical Tasks, while payment_status='Pending' tracks in /payments
     r = await test_client.patch(
         f"/api/v1/technical-tasks/{tid}/status", json={"status": "Completed", "payment_collected": False}
     )
-    assert r.json()["data"]["status"] == "Payment Pending"
+    assert r.status_code == 200
+    assert r.json()["data"]["status"] == "Completed"
     assert r.json()["data"]["payment_status"] == "Pending"
-    pp = (await test_client.get("/api/v1/technical-tasks/counts")).json()["data"]["payment_pending"]
-    assert pp >= 1
-    # Collected needs a payment mode
+    counts_data = (await test_client.get("/api/v1/technical-tasks/counts")).json()["data"]
+    assert "payment_pending" not in counts_data
+    assert counts_data["completed"] >= 1
+    pend_payments = (await test_client.get("/api/v1/technical-tasks?payment_collected=pending")).json()["data"]
+    assert any(row["id"] == tid for row in pend_payments)
+
+    # Direct on-site collection during completion requires payment_mode and syncs Self collect to Technician Wallet
+    t2 = await _create(test_client, service_type="Chargeable", service_charge="5000", payment_terms="On completion")
+    tid2 = t2["id"]
+    await _approve(test_client, tid2, tech="Mangal Pandey")
     r = await test_client.patch(
-        f"/api/v1/technical-tasks/{tid}/status", json={"status": "Completed", "payment_collected": True}
+        f"/api/v1/technical-tasks/{tid2}/status", json={"status": "Completed", "payment_collected": True}
     )
     assert r.status_code == 400
     r = await test_client.patch(
-        f"/api/v1/technical-tasks/{tid}/status",
+        f"/api/v1/technical-tasks/{tid2}/status",
         json={"status": "Completed", "payment_collected": True, "payment_mode": "Self collect", "collected_amount": "4800"},
     )
     d = r.json()["data"]
@@ -364,7 +372,7 @@ async def test_chargeable_payment_flow(test_db: AsyncSession, test_client: Async
     # Self collect payment automatically syncs a VERIFIED COLLECTION entry into Technician Wallet
     wallet_rows = (
         await test_db.execute(
-            select(TechnicianWalletTransaction).where(TechnicianWalletTransaction.technical_task_id == uuid.UUID(tid))
+            select(TechnicianWalletTransaction).where(TechnicianWalletTransaction.technical_task_id == uuid.UUID(tid2))
         )
     ).scalars().all()
     assert len(wallet_rows) == 1
@@ -418,7 +426,7 @@ async def test_filters_ordering_and_sort_direction(test_client: AsyncClient):
     assert (await test_client.get("/api/v1/technical-tasks?payment_collected=pending")).json()["meta"]["total"] == 1
 
 
-async def test_isolation_scope_hides_other_users_and_payment_pending(test_db: AsyncSession):
+async def test_isolation_scope_hides_other_users(test_db: AsyncSession):
     repo = TechnicalTaskRepository(test_db)
     svc = TechnicalTaskService(repo)
     mine, other = uuid.uuid4(), uuid.uuid4()
@@ -432,7 +440,7 @@ async def test_isolation_scope_hides_other_users_and_payment_pending(test_db: As
     assert counts["all"] == 1
     _, total_all = await repo.list_tasks()
     assert total_all == 2
-    assert (await repo.get_counts(exclude_tabs=("payment_pending",)))["all"] == 2
+    assert (await repo.get_counts(exclude_tabs=("cancel",)))["all"] == 2
 
 
 async def test_bulk_delete_is_single_statement_and_idempotent(test_client: AsyncClient):

@@ -42,14 +42,13 @@ from app.technical_tasks.schemas import (
     TechnicalTaskStatusUpdate,
     TechnicalTaskUpdate,
 )
-from app.technical_tasks.service import TechnicalTaskService, canonical_status
+from app.technical_tasks.service import TechnicalTaskService, canonical_status, stored_status
 
 router = APIRouter(prefix="/technical-tasks", tags=["Technical Tasks"])
 
-# Data-isolation switches. Nothing is restricted unless one of these permissions is granted to the user's role, so
+# Data-isolation switch. Nothing is restricted unless this permission is granted to the user's role, so
 # rolling this out can never lock existing users out. Admins / wildcard users are never restricted.
 SCOPE_OWN_PERMISSION = "technical_task.scope.own"            # sees only tasks they created
-HIDE_PAYMENT_PENDING_PERMISSION = "technical_task.hide_payment_pending"  # cannot see Payment Pending tasks
 
 
 def _is_privileged(user: CurrentUser | None) -> bool:
@@ -75,8 +74,6 @@ def _scope_for(user: CurrentUser | None) -> dict[str, Any]:
         scope["creator_names"] = tuple(
             sorted({n for n in (user.display_name, user.full_name, user.username) if n})
         )
-    if HIDE_PAYMENT_PENDING_PERMISSION in user.permissions:
-        scope["exclude_tabs"] = ("payment_pending",)
     return scope
 
 
@@ -85,7 +82,9 @@ def get_service(db: AsyncSession = Depends(get_db_session)) -> TechnicalTaskServ
 
 
 def _to_dict(task: TechnicalTask) -> dict[str, Any]:
-    return TechnicalTaskRead.model_validate(task).model_dump(mode="json")
+    data = TechnicalTaskRead.model_validate(task).model_dump(mode="json")
+    data["status"] = stored_status(data.get("status"))
+    return data
 
 
 def _log_to_dict(log: TechnicalTaskCallLog) -> dict[str, Any]:

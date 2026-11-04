@@ -128,8 +128,10 @@ export interface FormLineItem {
   id: string;
   is_additional_charge: boolean;
   charge_type?: string;
+  product_id?: string;
   product_name: string;
   product_code?: string;
+  uom?: string;
   hsn: string;
   quantity: number | string;
   unit_price: number | string;
@@ -191,9 +193,11 @@ export function SaleProcessFormPage() {
   const { id } = useParams<{ id: string }>();
   const [searchParams] = useSearchParams();
   const duplicateId = searchParams.get("duplicate_id");
+  const gatepassId = searchParams.get("gatepass_id");
   const isEdit = Boolean(id);
   const targetLoadId = id || duplicateId;
   const { profile } = useAuth();
+  const [linkedGatepassNumber, setLinkedGatepassNumber] = useState<string | null>(null);
 
   // Dynamic lookup options from database (100% dynamic, no hardcoded constants)
   const { options: optionGroups } = useOptions(["common.yes_no", "delivery.type", "delivery.charge"]);
@@ -452,6 +456,104 @@ export function SaleProcessFormPage() {
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
+
+  // Pre-fill from Technician Outward Gatepass when ?gatepass_id=... is supplied
+  useEffect(() => {
+    if (isEdit || targetLoadId || !gatepassId) return;
+    let mounted = true;
+
+    async function loadFromTechnicianGatepass() {
+      try {
+        const res = await apiGet<any>(`/technician-operations/gatepasses/${gatepassId}/draft-so`);
+        const draft = res?.data;
+        if (!mounted || !draft) return;
+
+        setLinkedGatepassNumber(draft.gatepass_number || null);
+        if (draft.warehouse_name) {
+          setWarehouse(draft.warehouse_name);
+        }
+        setTransportName((prev) => prev || "Self Pickup");
+
+        const cName = (draft.customer_name && draft.customer_name !== "Direct Customer")
+          ? String(draft.customer_name).trim()
+          : "";
+        if (cName) {
+          setCompanyName(cName);
+          if (draft.city) setCity(draft.city);
+          if (draft.state) setState(draft.state);
+          if (draft.billing_address) setBillingAddress(draft.billing_address);
+          if (draft.shipping_address) setShippingAddress(draft.shipping_address);
+
+          void apiGet<any[]>(`/companies/lookup?q=${encodeURIComponent(cName)}`)
+            .then((cRes) => {
+              if (!mounted) return;
+              const match = (cRes?.data || []).find(
+                (c: any) => c.company_name?.toLowerCase() === cName.toLowerCase()
+              ) || (cRes?.data || [])[0];
+              if (match) {
+                setSelectedCompany(match);
+                const cCity = match.city_name || match.city || draft.city || "";
+                const cState = match.state_name || match.state || draft.state || "";
+                if (cCity) setCity(cCity);
+                if (cState) setState(cState);
+                const addrParts = Array.from(new Set([match.address, match.area, cCity].filter(Boolean)));
+                const formatted = addrParts.join(", ") + (match.pincode ? ` - ${match.pincode}` : "");
+                if (formatted.trim()) {
+                  setBillingAddress((prev) => prev || formatted);
+                  setShippingAddress((prev) => prev || formatted);
+                }
+              }
+            })
+            .catch(() => {});
+        }
+
+        const snNote = draft.machine_serial_number ? ` | Machine S/N: ${draft.machine_serial_number}` : "";
+        const gpNote = `Consumed spare parts reconciliation for Technician Gatepass ${draft.gatepass_number}${snNote}`;
+        setRemarks(gpNote);
+        setBookingRemarks(gpNote);
+        setAdditionalChargesEnabled(false);
+
+        if (Array.isArray(draft.items_to_bill) && draft.items_to_bill.length > 0) {
+          const gpItems: FormLineItem[] = draft.items_to_bill.map((it: any, idx: number) => {
+            const qty = Number(it.quantity) || 1;
+            const rate = Number(it.unit_rate) || 0;
+            const gst = it.gst_percent !== undefined ? Number(it.gst_percent) : 18;
+            const taxable = Math.max(0, rate * qty);
+            const gstAmt = (taxable * gst) / 100;
+            return {
+              id: `gp-item-${idx}-${Date.now()}`,
+              is_additional_charge: false,
+              product_id: it.product_id || undefined,
+              product_code: it.product_code || undefined,
+              product_name: it.product_name || "",
+              hsn: it.hsn_code || "8422.90.90",
+              uom: it.uom || "NOS",
+              quantity: qty,
+              unit_price: rate,
+              unit_discount: 0,
+              taxable_amount: taxable,
+              gst_percent: gst,
+              gst_amount: gstAmt,
+              total: taxable + gstAmt,
+            };
+          });
+          setLineItems((prev) => {
+            const charges = prev.filter((p) => p.is_additional_charge);
+            return [...gpItems, ...charges];
+          });
+        }
+      } catch (err: any) {
+        if (mounted) {
+          toastHook(apiErrorText(err) || "Failed to load Technician Gatepass draft items", "error");
+        }
+      }
+    }
+
+    void loadFromTechnicianGatepass();
+    return () => {
+      mounted = false;
+    };
+  }, [isEdit, targetLoadId, gatepassId, toastHook]);
 
   // Load existing order if in Edit or Duplicate mode
   useEffect(() => {
@@ -1069,6 +1171,7 @@ export function SaleProcessFormPage() {
       terms_and_conditions: termsAndConditions.trim() || undefined,
       remarks: remarks.trim() || undefined,
       booking_remarks: bookingRemarks.trim() || undefined,
+      technician_gatepass_id: !isEdit && gatepassId ? gatepassId : undefined,
       additional_charges_enabled: additionalChargesEnabled,
       total_basic: totals.totalBasic,
       total_discount: totals.totalDiscount,
@@ -1105,11 +1208,21 @@ export function SaleProcessFormPage() {
       if (isEdit && id) {
         await apiPatch(`/sales/orders/${id}`, payload);
         toastHook(`Sales Order ${orderNo || id} updated successfully`, "success");
+        navigate("/sales/process");
       } else {
-        await apiPost("/sales/orders", payload);
-        toastHook("Sales Order created successfully", "success");
+        const createdRes = await apiPost<any>("/sales/orders", payload);
+        const createdNo = createdRes?.data?.order_no;
+        if (gatepassId) {
+          toastHook(
+            `Sales Order ${createdNo || ""} created and linked to Gatepass ${linkedGatepassNumber || ""}`.trim(),
+            "success"
+          );
+          navigate("/technician-operations?tab=gatepasses");
+        } else {
+          toastHook("Sales Order created successfully", "success");
+          navigate("/sales/process");
+        }
       }
-      navigate("/sales/process");
     } catch (err: any) {
       const errorMsg =
         err?.response?.data?.detail?.message ||
@@ -1145,6 +1258,29 @@ export function SaleProcessFormPage() {
             ]}
           />
         </div>
+
+        {linkedGatepassNumber && !isEdit && (
+          <div
+            style={{
+              marginBottom: "14px",
+              padding: "10px 14px",
+              borderRadius: "8px",
+              background: "#eff6ff",
+              border: "1px solid #bfdbfe",
+              color: "#1e40af",
+              fontSize: "13px",
+              fontWeight: 500,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: "12px",
+            }}
+          >
+            <span>
+              Linked to Technician Outward Gatepass <strong>#{linkedGatepassNumber}</strong> — submitting this Sales Order will automatically link &amp; close gatepass reconciliation without double-deducting warehouse stock.
+            </span>
+          </div>
+        )}
 
         {/* Page Header */}
         <div
