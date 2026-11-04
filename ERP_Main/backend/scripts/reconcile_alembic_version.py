@@ -29,17 +29,18 @@ async def reconcile_alembic_version(verbose: bool = True) -> bool:
     Returns True if repaired or already valid, False on fatal error.
     """
     try:
-        from app.database.engine import get_engine
+        from app.database.engine import dispose_engine, get_engine
         engine = get_engine()
     except Exception as exc:
         if verbose:
-            print(f"[reconcile_alembic_version] Could not initialize database engine: {exc}")
+            print(f"[reconcile_alembic_version] Could not initialize database engine: {exc}", flush=True)
         return False
 
     alembic_ini_path = BACKEND_DIR / "alembic.ini"
     if not alembic_ini_path.is_file():
         if verbose:
-            print(f"[reconcile_alembic_version] alembic.ini not found at {alembic_ini_path}")
+            print(f"[reconcile_alembic_version] alembic.ini not found at {alembic_ini_path}", flush=True)
+        await dispose_engine()
         return False
 
     config = Config(str(alembic_ini_path))
@@ -49,56 +50,61 @@ async def reconcile_alembic_version(verbose: bool = True) -> bool:
     head_revs = script_dir.get_heads()
     if not head_revs:
         if verbose:
-            print("[reconcile_alembic_version] No heads found in alembic script directory.")
+            print("[reconcile_alembic_version] No heads found in alembic script directory.", flush=True)
+        await dispose_engine()
         return False
     primary_head = head_revs[0]
 
-    async with engine.connect() as conn:
-        # 1. Check if alembic_version table exists
-        check_table_sql = text(
-            "SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'alembic_version');"
-        )
-        table_exists = (await conn.execute(check_table_sql)).scalar()
-        if not table_exists:
-            if verbose:
-                print("[reconcile_alembic_version] alembic_version table does not exist yet (clean DB).")
+    try:
+        async with engine.connect() as conn:
+            # 1. Check if alembic_version table exists
+            check_table_sql = text(
+                "SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'alembic_version');"
+            )
+            table_exists = (await conn.execute(check_table_sql)).scalar()
+            if not table_exists:
+                if verbose:
+                    print("[reconcile_alembic_version] alembic_version table does not exist yet (clean DB).", flush=True)
+                return True
+
+            # 2. Get current version_num(s)
+            version_rows = (await conn.execute(text("SELECT version_num FROM alembic_version;"))).scalars().all()
+            if not version_rows:
+                if verbose:
+                    print("[reconcile_alembic_version] alembic_version table is empty.", flush=True)
+                return True
+
+            needs_repair = False
+            invalid_versions = []
+            for v in version_rows:
+                try:
+                    script_dir.get_revision(v)
+                except CommandError:
+                    needs_repair = True
+                    invalid_versions.append(v)
+
+            if not needs_repair:
+                if verbose:
+                    print(f"[reconcile_alembic_version] Current database revision(s) {version_rows} are valid.", flush=True)
+                return True
+
+            print(
+                f"\n[reconcile_alembic_version] WARNING: Detected invalid/orphaned revision(s) in alembic_version: {invalid_versions}",
+                flush=True,
+            )
+            print("[reconcile_alembic_version] Executing Runbook RB-03 auto-recovery...", flush=True)
+
+            target_rev = primary_head
+            print(f"[reconcile_alembic_version] Re-aligning pointer to head: {target_rev!r}", flush=True)
+
+            # 3. Repair alembic_version table
+            await conn.execute(text("DELETE FROM alembic_version;"))
+            await conn.execute(text(f"INSERT INTO alembic_version (version_num) VALUES ('{target_rev}');"))
+            await conn.commit()
+            print(f"[reconcile_alembic_version] SUCCESS: Updated alembic_version to {target_rev!r}.\n", flush=True)
             return True
-
-        # 2. Get current version_num(s)
-        version_rows = (await conn.execute(text("SELECT version_num FROM alembic_version;"))).scalars().all()
-        if not version_rows:
-            if verbose:
-                print("[reconcile_alembic_version] alembic_version table is empty.")
-            return True
-
-        needs_repair = False
-        invalid_versions = []
-        for v in version_rows:
-            try:
-                script_dir.get_revision(v)
-            except CommandError:
-                needs_repair = True
-                invalid_versions.append(v)
-
-        if not needs_repair:
-            if verbose:
-                print(f"[reconcile_alembic_version] Current database revision(s) {version_rows} are valid.")
-            return True
-
-        print(
-            f"\n[reconcile_alembic_version] WARNING: Detected invalid/orphaned revision(s) in alembic_version: {invalid_versions}"
-        )
-        print(f"[reconcile_alembic_version] Executing Runbook RB-03 auto-recovery...")
-
-        target_rev = primary_head
-        print(f"[reconcile_alembic_version] Re-aligning pointer to head: {target_rev!r}")
-
-        # 3. Repair alembic_version table
-        await conn.execute(text("DELETE FROM alembic_version;"))
-        await conn.execute(text(f"INSERT INTO alembic_version (version_num) VALUES ('{target_rev}');"))
-        await conn.commit()
-        print(f"[reconcile_alembic_version] SUCCESS: Updated alembic_version to {target_rev!r}.\n")
-        return True
+    finally:
+        await dispose_engine()
 
 
 def run_sync() -> None:

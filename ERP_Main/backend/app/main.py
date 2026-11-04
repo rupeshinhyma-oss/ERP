@@ -18,6 +18,8 @@ sits in the request path of any existing ERP's business APIs.
 
 from __future__ import annotations
 
+import logging
+import sys
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
@@ -32,7 +34,14 @@ from app.core.middleware import RequestIdMiddleware, SecurityHeadersMiddleware
 from app.database.base import Base
 from app.database.engine import dispose_engine, get_engine
 
+if hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(line_buffering=True)
+    except Exception:
+        pass
+
 install_dns_resilience()
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
@@ -65,20 +74,18 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             worker = get_reconciliation_worker()
             await worker.start()
         except Exception as exc:
-            import logging
-            logging.getLogger(__name__).error("Failed to start background reconciliation worker: %s", exc)
+            logger.error("Failed to start background reconciliation worker: %s", exc)
 
+    logger.info("ERP_Main startup complete; ready to accept traffic.")
     yield
 
     if worker is not None and worker.is_running:
         try:
             await worker.stop()
         except Exception as exc:
-            import logging
-            logging.getLogger(__name__).error("Error stopping background reconciliation worker: %s", exc)
+            logger.error("Error stopping background reconciliation worker: %s", exc)
 
     await dispose_engine()
-
 
 
 def create_application() -> FastAPI:
@@ -102,11 +109,19 @@ def create_application() -> FastAPI:
         # 3 Step 53) -- this control plane's frontend only ever needs
         # these methods/headers; Authorization carries platform-admin
         # and ERP-service bearer tokens.
-        allow_methods=["GET", "POST", "PATCH", "DELETE"],
+        allow_methods=["GET", "HEAD", "OPTIONS", "POST", "PATCH", "DELETE"],
         allow_headers=["Authorization", "Content-Type", "X-Request-ID"],
     )
 
     register_exception_handlers(app)
+
+    @app.api_route("/", methods=["GET", "HEAD"], include_in_schema=False)
+    async def root_probe() -> dict:
+        return {"status": "ok", "service": "erp_main"}
+
+    @app.api_route("/health", methods=["GET", "HEAD"], include_in_schema=False)
+    async def root_health_probe() -> dict:
+        return {"status": "ok", "service": "erp_main"}
 
     app.include_router(api_router, prefix=settings.API_V1_PREFIX)
 

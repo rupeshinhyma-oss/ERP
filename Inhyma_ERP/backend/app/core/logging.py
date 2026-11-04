@@ -82,6 +82,12 @@ def configure_logging() -> None:
     # default handlers) so we have exactly one, well-defined output format.
     root_logger.handlers.clear()
 
+    if hasattr(sys.stdout, "reconfigure"):
+        try:
+            sys.stdout.reconfigure(line_buffering=True)
+        except Exception:
+            pass
+
     handler = logging.StreamHandler(stream=sys.stdout)
     handler.addFilter(RequestIdLogFilter())
 

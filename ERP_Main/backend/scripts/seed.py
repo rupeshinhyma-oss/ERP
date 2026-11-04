@@ -45,197 +45,204 @@ BOOTSTRAP_DISPLAY_NAME = settings.BOOTSTRAP_ADMIN_NAME
 async def seed_bootstrap_accounts() -> None:
     """Idempotently seed the bootstrap PlatformAdmin and GlobalUser accounts."""
     session_factory = get_sessionmaker()
-    async with session_factory() as db:
-        audit = GlobalAuditService(repository=GlobalAuditRepository(db))
+    try:
+        async with session_factory() as db:
+            audit = GlobalAuditService(repository=GlobalAuditRepository(db))
 
-        # ------------------------------------------------------------------
-        # FIRST-INSTALL GUARD.  This script runs on EVERY start/deploy.  Bootstrap accounts are created once, on a
-        # fresh database only.  After that it must never reset a password, re-activate a suspended account, re-create
-        # a deleted membership or re-assign a role -- whatever is in the database is the truth.
-        # One-off recovery (e.g. locked out): start once with BOOTSTRAP_FORCE_RESET=true.
-        # ------------------------------------------------------------------
-        from sqlalchemy import func as _func
+            # ------------------------------------------------------------------
+            # FIRST-INSTALL GUARD.  This script runs on EVERY start/deploy.  Bootstrap accounts are created once, on a
+            # fresh database only.  After that it must never reset a password, re-activate a suspended account, re-create
+            # a deleted membership or re-assign a role -- whatever is in the database is the truth.
+            # One-off recovery (e.g. locked out): start once with BOOTSTRAP_FORCE_RESET=true.
+            # ------------------------------------------------------------------
+            from sqlalchemy import func as _func
 
-        _existing_admins = await db.scalar(select(_func.count()).select_from(PlatformAdmin))
-        _force = os.environ.get("BOOTSTRAP_FORCE_RESET", "").strip().lower() in {"1", "true", "yes"}
-        if _existing_admins and not _force:
-            print(
-                "Bootstrap accounts already exist -- leaving passwords, status, memberships and role assignments "
-                "exactly as they are in the database. (BOOTSTRAP_FORCE_RESET=true forces a one-off reset.)"
-            )
-            await dispose_engine()
-            return
+            _existing_admins = await db.scalar(select(_func.count()).select_from(PlatformAdmin))
+            _force = os.environ.get("BOOTSTRAP_FORCE_RESET", "").strip().lower() in {"1", "true", "yes"}
+            if _existing_admins and not _force:
+                print(
+                    "Bootstrap accounts already exist -- leaving passwords, status, memberships and role assignments "
+                    "exactly as they are in the database. (BOOTSTRAP_FORCE_RESET=true forces a one-off reset.)",
+                    flush=True,
+                )
+                return
 
-        # ------------------------------------------------------------------
-        # 1. Platform Super Admin (Control Plane Admin)
-        # ------------------------------------------------------------------
-        admin_stmt = select(PlatformAdmin).where(PlatformAdmin.email == BOOTSTRAP_EMAIL)
-        existing_admin = await db.scalar(admin_stmt)
-        if existing_admin is None:
-            admin = PlatformAdmin(
-                email=BOOTSTRAP_EMAIL,
-                display_name=BOOTSTRAP_DISPLAY_NAME,
-                password_hash=hash_admin_password(BOOTSTRAP_PASSWORD),
-                role=PlatformAdminRole.SUPER_ADMIN,
-                is_active=True,
-            )
-            db.add(admin)
-            await db.flush()
-            await audit.record(
-                event_type=AuditEventType.PLATFORM_ADMIN_CREATED,
-                actor_type=AuditActorType.SYSTEM,
-                actor_label="scripts.seed",
-                target_type="platform_admin",
-                target_id=admin.id,
-                details={"role": admin.role.value, "bootstrap": True},
-            )
-            print(f"Created bootstrap Platform Admin: {BOOTSTRAP_EMAIL} (role: {admin.role.value})")
-        else:
-            existing_admin.password_hash = hash_admin_password(BOOTSTRAP_PASSWORD)
-            existing_admin.role = PlatformAdminRole.SUPER_ADMIN
-            existing_admin.is_active = True
-            await db.flush()
-            print(f"Updated bootstrap Platform Admin: {BOOTSTRAP_EMAIL} (role: SUPER_ADMIN)")
-
-        # ------------------------------------------------------------------
-        # 2. Global User (End-User Identity for SSO & Memberships)
-        # ------------------------------------------------------------------
-        user_stmt = select(GlobalUser).where(GlobalUser.primary_email == BOOTSTRAP_EMAIL)
-        existing_user = await db.scalar(user_stmt)
-        if existing_user is None:
-            user = GlobalUser(
-                primary_email=BOOTSTRAP_EMAIL,
-                display_name=BOOTSTRAP_DISPLAY_NAME,
-                status=GlobalUserStatus.ACTIVE,
-            )
-            db.add(user)
-            await db.flush()
-
-            # Global credential
-            cred = GlobalUserCredential(
-                global_user_id=user.id,
-                password_hash=hash_global_password(BOOTSTRAP_PASSWORD),
-                must_change_password=False,
-            )
-            db.add(cred)
-            await db.flush()
-            print(f"Created bootstrap Global User: {BOOTSTRAP_EMAIL}")
-            existing_user = user
-        else:
-            cred_stmt = select(GlobalUserCredential).where(GlobalUserCredential.global_user_id == existing_user.id)
-            existing_cred = await db.scalar(cred_stmt)
-            if existing_cred:
-                existing_cred.password_hash = hash_global_password(BOOTSTRAP_PASSWORD)
-                existing_cred.must_change_password = False
+            # ------------------------------------------------------------------
+            # 1. Platform Super Admin (Control Plane Admin)
+            # ------------------------------------------------------------------
+            admin_stmt = select(PlatformAdmin).where(PlatformAdmin.email == BOOTSTRAP_EMAIL)
+            existing_admin = await db.scalar(admin_stmt)
+            if existing_admin is None:
+                admin = PlatformAdmin(
+                    email=BOOTSTRAP_EMAIL,
+                    display_name=BOOTSTRAP_DISPLAY_NAME,
+                    password_hash=hash_admin_password(BOOTSTRAP_PASSWORD),
+                    role=PlatformAdminRole.SUPER_ADMIN,
+                    is_active=True,
+                )
+                db.add(admin)
+                await db.flush()
+                await audit.record(
+                    event_type=AuditEventType.PLATFORM_ADMIN_CREATED,
+                    actor_type=AuditActorType.SYSTEM,
+                    actor_label="scripts.seed",
+                    target_type="platform_admin",
+                    target_id=admin.id,
+                    details={"role": admin.role.value, "bootstrap": True},
+                )
+                print(f"Created bootstrap Platform Admin: {BOOTSTRAP_EMAIL} (role: {admin.role.value})", flush=True)
             else:
+                existing_admin.password_hash = hash_admin_password(BOOTSTRAP_PASSWORD)
+                existing_admin.role = PlatformAdminRole.SUPER_ADMIN
+                existing_admin.is_active = True
+                await db.flush()
+                print(f"Updated bootstrap Platform Admin: {BOOTSTRAP_EMAIL} (role: SUPER_ADMIN)", flush=True)
+
+            # ------------------------------------------------------------------
+            # 2. Global User (End-User Identity for SSO & Memberships)
+            # ------------------------------------------------------------------
+            user_stmt = select(GlobalUser).where(GlobalUser.primary_email == BOOTSTRAP_EMAIL)
+            existing_user = await db.scalar(user_stmt)
+            if existing_user is None:
+                user = GlobalUser(
+                    primary_email=BOOTSTRAP_EMAIL,
+                    display_name=BOOTSTRAP_DISPLAY_NAME,
+                    status=GlobalUserStatus.ACTIVE,
+                )
+                db.add(user)
+                await db.flush()
+
+                # Global credential
                 cred = GlobalUserCredential(
-                    global_user_id=existing_user.id,
+                    global_user_id=user.id,
                     password_hash=hash_global_password(BOOTSTRAP_PASSWORD),
                     must_change_password=False,
                 )
                 db.add(cred)
-            existing_user.status = GlobalUserStatus.ACTIVE
-            await db.flush()
-            print(f"Updated bootstrap Global User: {BOOTSTRAP_EMAIL} credentials")
-
-        # ------------------------------------------------------------------
-        # 3. Memberships for Yinglima and Inhyma
-        # ------------------------------------------------------------------
-        instances_stmt = select(ErpInstance)
-        instances = (await db.scalars(instances_stmt)).all()
-        now = datetime.now(timezone.utc)
-
-        for instance in instances:
-            # The database enforces ONE membership per (global_user, erp_instance).
-            # Look that pair up first: an existing link may carry a different
-            # local_user_id (e.g. after real provisioning/SSO), and inserting a
-            # second row for the same pair violates uq_erp_memberships_user_erp.
-            membership_by_pair = await db.scalar(
-                select(ErpMembership).where(
-                    ErpMembership.global_user_id == existing_user.id,
-                    ErpMembership.erp_instance_id == instance.id,
-                )
-            )
-            if membership_by_pair is not None:
-                if membership_by_pair.status != ErpMembershipStatus.ACTIVE:
-                    membership_by_pair.status = ErpMembershipStatus.ACTIVE
-                    print(f"Updated membership: re-activated {instance.key} for {BOOTSTRAP_EMAIL}")
-                else:
-                    print(f"Membership for {instance.key} already exists (skipped).")
-                continue
-
-            membership_by_local = await db.scalar(
-                select(ErpMembership).where(
-                    ErpMembership.erp_instance_id == instance.id,
-                    ErpMembership.local_user_id == "1",
-                )
-            )
-            if membership_by_local is not None:
-                if membership_by_local.global_user_id != existing_user.id:
-                    membership_by_local.global_user_id = existing_user.id
-                    membership_by_local.status = ErpMembershipStatus.ACTIVE
-                    print(f"Updated membership: re-linked {instance.key} (local_user_id='1') -> {BOOTSTRAP_EMAIL}")
-                else:
-                    print(f"Membership for {instance.key} already exists (skipped).")
+                await db.flush()
+                print(f"Created bootstrap Global User: {BOOTSTRAP_EMAIL}", flush=True)
+                existing_user = user
             else:
-                membership = ErpMembership(
-                    global_user_id=existing_user.id,
-                    erp_instance_id=instance.id,
-                    local_user_id="1",  # Local super_admin id in Yinglima/Inhyma
-                    status=ErpMembershipStatus.ACTIVE,
-                    linked_at=now,
-                    verified_at=now,
-                )
-                db.add(membership)
-                print(f"Linked membership: {BOOTSTRAP_EMAIL} -> {instance.key} (local_user_id='1')")
+                cred_stmt = select(GlobalUserCredential).where(GlobalUserCredential.global_user_id == existing_user.id)
+                existing_cred = await db.scalar(cred_stmt)
+                if existing_cred:
+                    existing_cred.password_hash = hash_global_password(BOOTSTRAP_PASSWORD)
+                    existing_cred.must_change_password = False
+                else:
+                    cred = GlobalUserCredential(
+                        global_user_id=existing_user.id,
+                        password_hash=hash_global_password(BOOTSTRAP_PASSWORD),
+                        must_change_password=False,
+                    )
+                    db.add(cred)
+                existing_user.status = GlobalUserStatus.ACTIVE
+                await db.flush()
+                print(f"Updated bootstrap Global User: {BOOTSTRAP_EMAIL} credentials", flush=True)
 
-        # ------------------------------------------------------------------
-        # 4. Global Role Assignment (PLATFORM_SUPER_ADMIN)
-        # ------------------------------------------------------------------
-        role_stmt = select(PlatformRole).where(PlatformRole.role_key == "PLATFORM_SUPER_ADMIN")
-        super_admin_role = await db.scalar(role_stmt)
-        if super_admin_role is not None:
-            assignment_stmt = select(PlatformRoleAssignment).where(
-                PlatformRoleAssignment.global_user_id == existing_user.id,
-                PlatformRoleAssignment.role_id == super_admin_role.id,
-                PlatformRoleAssignment.scope == AuthorizationScope.GLOBAL,
-            )
-            existing_assignment = await db.scalar(assignment_stmt)
-            if existing_assignment is None:
-                assignment = PlatformRoleAssignment(
-                    global_user_id=existing_user.id,
-                    role_id=super_admin_role.id,
-                    scope=AuthorizationScope.GLOBAL,
-                    erp_instance_id=None,
-                    is_active=True,
-                    assigned_by=uuid.UUID(int=0),
-                )
-                db.add(assignment)
-                print(f"Assigned PLATFORM_SUPER_ADMIN role to {BOOTSTRAP_EMAIL}")
-            else:
-                print(f"PLATFORM_SUPER_ADMIN assignment already exists (skipped).")
+            # ------------------------------------------------------------------
+            # 3. Memberships for Yinglima and Inhyma
+            # ------------------------------------------------------------------
+            instances_stmt = select(ErpInstance)
+            instances = (await db.scalars(instances_stmt)).all()
+            now = datetime.now(timezone.utc)
 
-        await db.commit()
-    await dispose_engine()
+            for instance in instances:
+                membership_by_pair = await db.scalar(
+                    select(ErpMembership).where(
+                        ErpMembership.global_user_id == existing_user.id,
+                        ErpMembership.erp_instance_id == instance.id,
+                    )
+                )
+                if membership_by_pair is not None:
+                    if membership_by_pair.status != ErpMembershipStatus.ACTIVE:
+                        membership_by_pair.status = ErpMembershipStatus.ACTIVE
+                        print(f"Updated membership: re-activated {instance.key} for {BOOTSTRAP_EMAIL}", flush=True)
+                    else:
+                        print(f"Membership for {instance.key} already exists (skipped).", flush=True)
+                    continue
+
+                membership_by_local = await db.scalar(
+                    select(ErpMembership).where(
+                        ErpMembership.erp_instance_id == instance.id,
+                        ErpMembership.local_user_id == "1",
+                    )
+                )
+                if membership_by_local is not None:
+                    if membership_by_local.global_user_id != existing_user.id:
+                        membership_by_local.global_user_id = existing_user.id
+                        membership_by_local.status = ErpMembershipStatus.ACTIVE
+                        print(
+                            f"Updated membership: re-linked {instance.key} (local_user_id='1') -> {BOOTSTRAP_EMAIL}",
+                            flush=True,
+                        )
+                    else:
+                        print(f"Membership for {instance.key} already exists (skipped).", flush=True)
+                else:
+                    membership = ErpMembership(
+                        global_user_id=existing_user.id,
+                        erp_instance_id=instance.id,
+                        local_user_id="1",  # Local super_admin id in Yinglima/Inhyma
+                        status=ErpMembershipStatus.ACTIVE,
+                        linked_at=now,
+                        verified_at=now,
+                    )
+                    db.add(membership)
+                    print(f"Linked membership: {BOOTSTRAP_EMAIL} -> {instance.key} (local_user_id='1')", flush=True)
+
+            # ------------------------------------------------------------------
+            # 4. Global Role Assignment (PLATFORM_SUPER_ADMIN)
+            # ------------------------------------------------------------------
+            role_stmt = select(PlatformRole).where(PlatformRole.role_key == "PLATFORM_SUPER_ADMIN")
+            super_admin_role = await db.scalar(role_stmt)
+            if super_admin_role is not None:
+                assignment_stmt = select(PlatformRoleAssignment).where(
+                    PlatformRoleAssignment.global_user_id == existing_user.id,
+                    PlatformRoleAssignment.role_id == super_admin_role.id,
+                    PlatformRoleAssignment.scope == AuthorizationScope.GLOBAL,
+                )
+                existing_assignment = await db.scalar(assignment_stmt)
+                if existing_assignment is None:
+                    assignment = PlatformRoleAssignment(
+                        global_user_id=existing_user.id,
+                        role_id=super_admin_role.id,
+                        scope=AuthorizationScope.GLOBAL,
+                        erp_instance_id=None,
+                        is_active=True,
+                        assigned_by=uuid.UUID(int=0),
+                    )
+                    db.add(assignment)
+                    print(f"Assigned PLATFORM_SUPER_ADMIN role to {BOOTSTRAP_EMAIL}", flush=True)
+                else:
+                    print("PLATFORM_SUPER_ADMIN assignment already exists (skipped).", flush=True)
+
+            await db.commit()
+    finally:
+        await dispose_engine()
 
 
 async def main() -> None:
     """Execute all seed steps in sequence."""
-    print("\n[scripts.seed] 1. Seeding ERP Registry...")
-    await seed_registry.seed()
+    try:
+        print("\n[scripts.seed] 1. Seeding ERP Registry...", flush=True)
+        await seed_registry.seed()
 
-    print("\n[scripts.seed] 2. Seeding Platform Authorization Catalog & Roles...")
-    await seed_platform_authz.seed()
+        print("\n[scripts.seed] 2. Seeding Platform Authorization Catalog & Roles...", flush=True)
+        await seed_platform_authz.seed()
 
-    print("\n[scripts.seed] 3. Seeding Bootstrap Accounts & Memberships...")
-    await seed_bootstrap_accounts()
+        print("\n[scripts.seed] 3. Seeding Bootstrap Accounts & Memberships...", flush=True)
+        await seed_bootstrap_accounts()
 
-    print("\n" + "=" * 70)
-    print("ERP_Main Bootstrap Complete!")
-    print(f"  Platform Admin:    {BOOTSTRAP_EMAIL}")
-    print(f"  Global User:       {BOOTSTRAP_EMAIL}")
-    print("  Initial Password:  (BOOTSTRAP_ADMIN_PASSWORD from the environment; applied on first install only)")
-    print("=" * 70 + "\n")
+        print("\n" + "=" * 70, flush=True)
+        print("ERP_Main Bootstrap Complete!", flush=True)
+        print(f"  Platform Admin:    {BOOTSTRAP_EMAIL}", flush=True)
+        print(f"  Global User:       {BOOTSTRAP_EMAIL}", flush=True)
+        print(
+            "  Initial Password:  (BOOTSTRAP_ADMIN_PASSWORD from the environment; applied on first install only)",
+            flush=True,
+        )
+        print("=" * 70 + "\n", flush=True)
+    finally:
+        await dispose_engine()
 
 
 if __name__ == "__main__":

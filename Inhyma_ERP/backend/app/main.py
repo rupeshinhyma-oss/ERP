@@ -268,8 +268,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     from app.durable_events.service import bootstrap_default_consumers
     from app.durable_events.worker import get_durable_event_worker
 
-    async with _get_sessionmaker_p3()() as _p3_session:
-        await bootstrap_default_consumers(_p3_session)
+    async def _bootstrap_consumers() -> None:
+        async with _get_sessionmaker_p3()() as _p3_session:
+            await bootstrap_default_consumers(_p3_session)
+
+    try:
+        await asyncio.wait_for(_bootstrap_consumers(), timeout=5.0)
+    except Exception as e:
+        logger.warning(f"Startup durable-events consumer bootstrap notice: {e}")
 
     durable_events_worker = get_durable_event_worker()
     await durable_events_worker.start()
@@ -282,9 +288,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     from app.integration.jobs import enqueue_poll
     from app.queue.service import QueueService
 
-    async with _get_sessionmaker()() as _startup_session:
-        await enqueue_poll(QueueService(_startup_session))
-        await _startup_session.commit()
+    async def _seed_integration_poll() -> None:
+        async with _get_sessionmaker()() as _startup_session:
+            await enqueue_poll(QueueService(_startup_session))
+            await _startup_session.commit()
+
+    try:
+        await asyncio.wait_for(_seed_integration_poll(), timeout=5.0)
+    except Exception as e:
+        logger.warning(f"Startup integration inbox poll seed notice: {e}")
 
     # Start the background cache cleanup worker (Phase 5).
     cleanup_worker = get_cleanup_worker()
@@ -316,6 +328,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     from app.tasks.recurring_worker import recurring_task_worker
     await recurring_task_worker.start()
 
+    logger.info("Application startup complete; ready to accept traffic.")
     yield
 
     logger.info("Application shutting down.")
@@ -386,6 +399,10 @@ def create_application() -> FastAPI:
     )
 
     register_exception_handlers(app)
+
+    @app.api_route("/health", methods=["GET", "HEAD"], include_in_schema=False)
+    async def root_health_probe() -> dict:
+        return {"status": "ok", "service": settings.ERP_KEY}
 
     app.include_router(api_router, prefix=settings.API_V1_PREFIX)
 
@@ -475,6 +492,14 @@ def create_application() -> FastAPI:
     return app
 
 
+def _register_api_root_probe(app: FastAPI) -> None:
+    """Expose a lightweight GET/HEAD root probe when running as an API-only service (e.g. Render)."""
+
+    @app.api_route("/", methods=["GET", "HEAD"], include_in_schema=False)
+    async def api_root_probe() -> dict:
+        return {"status": "ok", "service": settings.ERP_KEY}
+
+
 def _mount_frontend(app: FastAPI) -> None:
     """
     Serve the built React app from the same origin as the API, if configured.
@@ -488,11 +513,12 @@ def _mount_frontend(app: FastAPI) -> None:
         browser asks the server for that exact path, the server has no such
         route, and the SPA never gets a chance to load and take over routing.
 
-    Silently does nothing if `FRONTEND_DIST_DIR` is unset or the directory
-    doesn't exist, so a misconfigured path fails at first request (a clear
-    404) rather than at import time.
+    When `FRONTEND_DIST_DIR` is unset or the built bundle is absent (e.g.
+    split-service Render deployment), registers a lightweight `GET`/`HEAD` `/`
+    probe so platform port/readiness scanners receive `200 OK`.
     """
     if not settings.FRONTEND_DIST_DIR:
+        _register_api_root_probe(app)
         return
 
     dist_dir = Path(settings.FRONTEND_DIST_DIR)
@@ -505,12 +531,13 @@ def _mount_frontend(app: FastAPI) -> None:
             "the API will run without serving the SPA.",
             extra={"frontend_dist_dir": str(dist_dir)},
         )
+        _register_api_root_probe(app)
         return
 
     if assets_dir.is_dir():
         app.mount("/assets", StaticFiles(directory=assets_dir), name="frontend-assets")
 
-    @app.get("/{full_path:path}", include_in_schema=False)
+    @app.api_route("/{full_path:path}", methods=["GET", "HEAD"], include_in_schema=False)
     async def serve_spa(request: Request, full_path: str) -> FileResponse:
         """
         Serve a specific static file if one exists at this path (favicon,

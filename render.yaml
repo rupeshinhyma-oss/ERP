@@ -8,11 +8,13 @@ services:
     rootDir: ERP_Main/backend
     plan: starter
     buildCommand: pip install -r requirements.txt
-    startCommand: python server.py --no-reload --workers 2
+    startCommand: python server.py --no-reload --workers 1
     healthCheckPath: /api/v1/health/live
     envVars:
       - key: PYTHON_VERSION
         value: 3.12.0
+      - key: PYTHONUNBUFFERED
+        value: "1"
       - key: ENVIRONMENT
         value: production
       - key: DEBUG
@@ -178,11 +180,13 @@ services:
     rootDir: Inhyma_ERP/backend
     plan: starter
     buildCommand: pip install -r requirements.txt
-    startCommand: python server.py --no-reload --workers 2
+    startCommand: python server.py --no-reload --workers 1
     healthCheckPath: /api/v1/health/live
     envVars:
       - key: PYTHON_VERSION
         value: 3.12.0
+      - key: PYTHONUNBUFFERED
+        value: "1"
       - key: ENVIRONMENT
         value: production
       - key: DEBUG
