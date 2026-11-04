@@ -3726,17 +3726,46 @@ Positioned directly underneath the collapsible filter card and powered by `GET /
 
 ---
 
-## 79. REPORTS: Financial Planning Report & Cargo Overview Module Shells
+## 79. REPORTS: Financial Planning Report (Live 3-Module Confirmed-Stage Wiring) & Cargo Overview Modules
 
 - **Routes:**
-  - `/reports/financial-planning` (alias `/financial-planning-report`) — `FinancialPlanningReportPage.tsx` (`activeKey="reports-financial-planning"`, icon `barChart`, permission `report.view`).
+  - `/reports/financial-planning` (aliases `/financial-planning-report`, `/financial-planning-report/list`, `/finance-planning-report/list`) — `FinancialPlanningReportPage.tsx` (`activeKey="reports-financial-planning"`, icon `barChart`, permission `report.view`).
   - `/reports/cargo-overview` (alias `/cargo-overview`) — `CargoOverviewPage.tsx` (`activeKey="reports-cargo-overview"`, icon `anchor`, permission `report.view`).
-- **UI Layout:**
-  - Placed under the **`REPORTS`** sidebar section with unique vector SVG icons (`barChart` and `anchor`).
-  - Renders `<AppShell>` with page heading (`Financial Planning Report` / `Cargo Overview`) and a clean blank card canvas (`data-testid="financial-planning-blank-canvas"` / `data-testid="cargo-overview-blank-canvas"`).
+- **Backend Endpoints & Database Schema (`backend/app/financial_planning/*`, Migration `z8f9a0b1c2d3`):**
+  - `GET /api/v1/financial-planning` — Aggregates live confirmed records across:
+    1. **Import Purchase (`import_purchases`):** Included when `deleted_at IS NULL` and `status` is `confirmed`, `received`, or `closed` (`pending` and `cancelled` excluded). Emits Overseas `Supplier` row (`USD` `$` when USD invoice total > 0, else `INR` `₹`) + paired `Total Taxes (INR)` row (`INR` `₹` when `(total_import_duty || sum(item_total_duty)) + stamp_duty > 0`).
+    2. **Local Purchase (`local_purchases`):** Included when `deleted_at IS NULL` and `status` is `confirmed` (`pending` and `cancelled` excluded). Emits domestic `Supplier` row (`INR` `₹`).
+    3. **Sales Process (`sales_orders`):** Included when `deleted_at IS NULL` and normalized `status` has reached **`Acc. Confirmed`** (`acc_confirmed`, `account_confirmed`, `gatepass_created`, `dispatched`, `lr`, `lr_mandatory` — strictly excluding `pending`, `sales_confirmed`, `admin_approved`, and `cancelled`). Emits `Customer` row (`INR` `₹` default or `USD` `$`).
+  - `POST /api/v1/financial-planning/upload` — Multipart invoice/tax challan/payment receipt upload.
+  - `PATCH /api/v1/financial-planning/entries/{entry_key}/terms` — Persists `payment_terms`, `due_date`, `remarks`, and optional payment terms attachment in `financial_planning_entries`.
+  - `POST /api/v1/financial-planning/entries/{entry_key}/record-payment` — Persists partial/full settlement (`amount <= balance_amount`, `400 Bad Request` on overpayment), appends `payments_history`, and transitions `Pending` -> `Cleared` when `balance_amount == 0`.
+  - `PATCH /api/v1/financial-planning/entries/{entry_key}/attachment` — Persists uploaded invoice or payment attachment URL.
+- **Financial Planning Report UI Specifications (`FinancialPlanningReportPage.tsx`):**
+  1. **Header & Actions:** `Financial Planning Report` title, live `Refresh` button (`fp-btn-refresh`), `#556987` Filter toggle button (`fp-btn-toggle-filter`), and golden-amber `#f59e0b` `Export` CSV button (`fp-btn-export`).
+  2. **Collapsible Filter Panel (above KPI cards, collapsed by default):** `Due Date Range` (`DateRangePicker`), `Source Module` (`All Modules`, `Import Purchase (Confirmed)`, `Local Purchase (Confirmed)`, `Sales Process (Acc. Confirmed)`), `Party Type` (`All`, `Supplier`, `Taxes`, `Customer (Sales)`), `Currency` (`All`, `Rupees (₹ / INR)`, `US Dollar ($ / USD)`), `Payment Terms` (`All` + master `payment_terms` options), and `Reset` / `Search` buttons.
+  3. **6 Top KPI Cards (Default Currency Rupees `₹` instead of `UGX` + USD `$`):**
+     - Rupees (`₹` default): `ALL` (`₹ 0.00 (0)`), `PAID` (`₹ 0.00` green), `BALANCE` (`₹ 0.00` red).
+     - USD (`$`): `ALL` (`$ 0.00 (0)`), `PAID` (`$ 0.00` green), `BALANCE` (`$ 0.00` red).
+  4. **Tabs & Toolbar:** `Pending (<count>)` and `Cleared (<count>)` tabs, `50` `items/page` selector (`10`, `25`, `50`, `100`), and instant `Search...` input.
+  5. **10-Column Sortable Table:**
+     - `Party Name` (sortable; renders `Supplier` amber badge, `Taxes` red badge with `#f1f5f9` row tint, or `Customer` sky badge + `Source Module • Stage` pill; normalizes `(UGX)` -> `(INR)`)
+     - `Invoice / Cons. No.` (sortable)
+     - `Invoice Attachment` (authenticated blue download icon when attached, or green `+ Add` upload button)
+     - `Payment Terms` (sortable; term text + blue payment attachment download icon + green pencil edit button)
+     - `Total Amount` (sortable; `₹` by default or `$`)
+     - `Paid Amount` (sortable; emerald green)
+     - `Balance Amount` (sortable; crimson red)
+     - `Due Date` (sortable; `DD-MM-YYYY`)
+     - `Status` (`Pending` amber pill / `Cleared` blue pill)
+     - `Action` (`⋮` trigger button opening a `document.body` portal menu [`data-testid="fp-action-menu"`, `position: fixed`, `flex-direction: column`, `210px` width, automatic upward viewport flip] with vector icons: `View Details` [structured right-side offcanvas drawer with padded `.drawer-content-scroll` summary cards, 3-column financial KPI strip, metadata/attachment links, payment history ledger, and sticky `.drawer-footer-fixed` quick actions `Close` / `Update Terms` / `Record Payment`], `Update Payment Terms`, `Record Payment` [when `Pending`], and `Attach Invoice` — all form drawers structured with scrollable body + sticky `.form-actions` footer)
+- **Cargo Overview UI Layout (`CargoOverviewPage.tsx`):**
+  - Clean blank card shell (`data-testid="cargo-overview-blank-canvas"`) ready for Cargo Overview specifications.
 - **Test Cases:**
-  - [ ] Verify `Financial Planning Report` and `Cargo Overview` appear under `REPORTS` in the sidebar for users with `report.view` (or Admin) and navigate cleanly to `/reports/financial-planning` and `/reports/cargo-overview`.
-  - [ ] Verify both pages render clean blank card shells with zero console/runtime errors and unique navigation icons.
+  - [ ] **TC-FP-01 (Rupees Default UI & Empty State):** Verify `Financial Planning Report` (`/reports/financial-planning`) displays Refresh, Filter & Export buttons, 6 KPI cards with Rupees (`₹`) as the default currency (zero `UGX`), `Pending` & `Cleared` tabs, `50 items/page` selector, `Search...` input, all 10 exact table columns, and `"No Data Available In Table"` empty state when unpopulated.
+  - [ ] **TC-FP-02 (Import Purchase & Local Purchase Confirmed Stage Wiring):** Create an Import Purchase and a Local Purchase in `Pending` status -> verify neither appears in `/reports/financial-planning`. Confirm both purchases -> verify Import Purchase immediately emits both its `Supplier` (`$`) row and `Total Taxes (INR)` (`₹`) row, and Local Purchase immediately emits its `Supplier` (`₹`) row.
+  - [ ] **TC-FP-03 (Sales Process `Acc. Confirmed` Stage Wiring):** Create a Sales Order and move it through `Pending` -> `Sales Confirmed` -> `Admin Approved` -> verify it does NOT appear in `/reports/financial-planning`. Transition it to `Acc. Confirmed` -> verify it immediately appears as a `Customer` (`Sales Process • Acc. Confirmed`) row with Tally Bill/PO attachment, `Payment Terms`, and `INR` (`₹`) total, and remains visible through `Gatepass Created`, `Dispatched`, and `LR`.
+  - [ ] **TC-FP-04 (Persistent Terms, Attachment & Payment Settlement):** Edit `Payment Terms` & `Due Date`, upload a tax challan via `+ Add`, and record full payment via `Record Payment` -> reload `/reports/financial-planning` and verify the row persists under `Cleared` with updated `PAID` / `BALANCE` KPIs.
+  - [ ] **TC-FP-05 (Cargo Overview Shell):** Verify `Cargo Overview` (`/reports/cargo-overview`) renders its blank card shell with unique navigation icon (`anchor`).
 
 ---
-*End of Master Features & Testing Specification Manual. Maintained for Inhyma Solutions Enterprise ERP. Last updated: November 4, 2026 (Section 79: Financial Planning Report & Cargo Overview Blank Module Shells under REPORTS; Section 39: Removal of redundant `Payment Pending` tab from Technical Tasks with unpaid chargeable collections tracked in `/payments`; Section 78: Technician Ops & Wallet End-to-End ERP Upgrade).*
+*End of Master Features & Testing Specification Manual. Maintained for Inhyma Solutions Enterprise ERP. Last updated: November 4, 2026 (Section 79: Financial Planning Report Full-Stack Live Wiring across Confirmed Import Purchase, Confirmed Local Purchase & `Acc. Confirmed` Sales Process [Migration `z8f9a0b1c2d3`] + Cargo Overview Shell; Section 39: Removal of redundant `Payment Pending` tab from Technical Tasks; Section 78: Technician Ops & Wallet End-to-End ERP Upgrade).*

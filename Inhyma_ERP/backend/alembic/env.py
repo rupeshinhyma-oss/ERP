@@ -76,6 +76,7 @@ import app.planning.models  # noqa: F401,E402
 import app.inventory.models  # noqa: F401,E402
 import app.hrms.models  # noqa: F401,E402
 import app.crm.models  # noqa: F401,E402
+import app.financial_planning.models  # noqa: F401,E402
 
 # This is the Alembic Config object, providing access to the values within
 # the .ini file in use.

@@ -430,6 +430,19 @@ Machine-to-machine internal service endpoints invoked by `ERP_Main` over authent
 | `POST` | `/api/v1/technician-operations/warranty` | Register or update a Machine Warranty Policy (`serial_number`, `machine_model`, `customer_name`, `warranty_months`, `start_date`, `end_date`) | `technicaltask.create \| technicaltask.update \| technicaltask.manage \| technician.create \| technician.update` |
 | `GET` | `/api/v1/technician-operations/warranty/validate` | Live serial coverage check (`?serial_number=...`) across both `MachineWarranty` policies and historical `SaleOrderItem.serial_numbers` | `technicaltask.view \| technicaltask.manage \| technician.view \| saleorder.view` |
 
+---
+
+## 22. Financial Planning Report — Live 3-Module Aggregation & Settlement Overlay (`/financial-planning`)
+
+| Method | Endpoint URI | Description | Permission Gate |
+| :--- | :--- | :--- | :--- |
+| `GET` | `/api/v1/financial-planning` | Aggregates live entries, dual-currency KPIs (`INR` `₹` default + `USD` `$`), and active `payment_terms_options` across confirmed `ImportPurchase` (`confirmed`, `received`, `closed` -> Supplier + `Total Taxes (INR)` rows), confirmed `LocalPurchase` (`confirmed` -> Supplier row), and `Acc. Confirmed` `SaleOrder` (`acc_confirmed` and downstream active stages -> Customer row), merged with `financial_planning_entries` overlays | `report.view \| purchase.view \| saleorder.view \| saleorder.accounts \| saleorder.approve` |
+| `POST` | `/api/v1/financial-planning/upload` | Multipart upload for invoice, customs/BOE challan, or payment receipt (`financial-planning` bucket / `uploads/private/financial_planning`) | `report.view \| purchase.update \| saleorder.accounts \| saleorder.update` |
+| `PATCH` | `/api/v1/financial-planning/entries/{entry_key}/terms` | Upsert `payment_terms`, `due_date`, `remarks`, and optional `payment_attachment_url` on `financial_planning_entries` (`entry_key = {source_module}:{uuid}:{role}`) | `report.view \| purchase.update \| saleorder.accounts \| saleorder.update` |
+| `POST` | `/api/v1/financial-planning/entries/{entry_key}/record-payment` | Record partial or full settlement (`amount > 0` and `<= balance_amount`), append immutable entry to `payments_history`, and transition `Pending` -> `Cleared` when balance reaches `0` | `report.view \| purchase.update \| saleorder.accounts \| saleorder.update` |
+| `PATCH` | `/api/v1/financial-planning/entries/{entry_key}/attachment` | Attach or replace `invoice` or `payment` document URL on a Financial Planning entry | `report.view \| purchase.update \| saleorder.accounts \| saleorder.update` |
+
+
 
 
 

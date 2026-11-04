@@ -569,8 +569,13 @@ During Render/Docker container boot, `python server.py` executes a four-phase in
 
 ---
 
-## 21. Reports Module Shells (`Financial Planning Report` & `Cargo Overview`)
+## 21. Financial Planning Report (Live 3-Module Stage Aggregation + Persistent Overlay `z8f9a0b1c2d3`) & Cargo Overview
 
 1. **Sidebar Registration & Unique Vector Iconography (`nav.ts`, `App.tsx`, `permissionLabels.ts`):**
-   - Registered **`Financial Planning Report`** (`key: "reports-financial-planning"`, `/reports/financial-planning`, alias `/financial-planning-report`, `barChart` icon) and **`Cargo Overview`** (`key: "reports-cargo-overview"`, `/reports/cargo-overview`, alias `/cargo-overview`, `anchor` icon) under the **`REPORTS`** sidebar section gated by `permission: "report.view"`, preserving global top-level icon uniqueness (`NavIconsUniqueness.test.tsx`).
-   - Mounted clean `<AppShell>` blank card canvas shells (`FinancialPlanningReportPage.tsx` and `CargoOverviewPage.tsx`) ready for future financial planning and cargo analytics widgets.
+   - Registered **`Financial Planning Report`** (`key: "reports-financial-planning"`, `/reports/financial-planning`, aliases `/financial-planning-report`, `/financial-planning-report/list`, `/finance-planning-report/list`, `barChart` icon) and **`Cargo Overview`** (`key: "reports-cargo-overview"`, `/reports/cargo-overview`, alias `/cargo-overview`, `anchor` icon) under the **`REPORTS`** sidebar section gated by `permission: "report.view"`, preserving global top-level icon uniqueness (`NavIconsUniqueness.test.tsx`).
+2. **Live Source-Stage Projection + Persistent Overlay Pattern (`app/financial_planning/*`, Migration `z8f9a0b1c2d3`):**
+   - Instead of duplicating transactional headers via brittle write-hooks, `FinancialPlanningService.list_report()` queries the three authoritative source tables live and merges persistent Finance mutations from `financial_planning_entries` by deterministic `entry_key`:
+     - **Import Purchase (`import_purchases`):** `deleted_at IS NULL` and `lower(status) IN ('confirmed', 'received', 'closed')` -> emits `import_purchase:{id}:supplier` (`USD` `$` or `INR` `₹`) and paired `import_purchase:{id}:taxes` (`Total Taxes (INR)`, `INR` `₹`) when duty/stamp tax `> 0`.
+     - **Local Purchase (`local_purchases`):** `deleted_at IS NULL` and `lower(status) IN ('confirmed', 'received', 'closed')` -> emits `local_purchase:{id}:supplier` (`INR` `₹`).
+     - **Sales Process (`sales_orders`):** `deleted_at IS NULL` and normalized `status` in `{'acc_confirmed', 'account_confirmed', 'gatepass_created', 'dispatched', 'lr', 'lr_mandatory', 'completed', 'delivered'}` -> emits `sales_process:{id}:client` (`Customer`, `INR` `₹` default or `USD` `$`).
+   - Guarantees instant visibility whenever any order reaches its confirmed / `Acc. Confirmed` stage, automatic exclusion if cancelled or soft-deleted, **Indian Rupees (`₹` / `INR`)** default currency across all 6 KPI cards and 10 table columns (zero `UGX`), and durable PostgreSQL persistence for payment terms, due dates, attachments, and multi-installment `payments_history` settlements.

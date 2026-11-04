@@ -341,6 +341,8 @@ export function App() {
           <Route path="/reports/general" element={<GeneralReportsPage />} />
           <Route path="/reports/financial-planning" element={<FinancialPlanningReportPage />} />
           <Route path="/financial-planning-report" element={<Navigate to="/reports/financial-planning" replace />} />
+          <Route path="/financial-planning-report/list" element={<Navigate to="/reports/financial-planning" replace />} />
+          <Route path="/finance-planning-report/list" element={<Navigate to="/reports/financial-planning" replace />} />
           <Route path="/reports/cargo-overview" element={<CargoOverviewPage />} />
           <Route path="/cargo-overview" element={<Navigate to="/reports/cargo-overview" replace />} />
 

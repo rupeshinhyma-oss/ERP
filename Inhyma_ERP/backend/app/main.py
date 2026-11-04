@@ -150,6 +150,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         from app.feed.models import FeedConversation, FeedConversationParticipant, FeedDirectMessage
         from app.masters.products.models import ProductSpecificationDocument
         from app.technical_tasks.models import TechnicalTaskLog
+        from app.financial_planning.models import FinancialPlanningEntry
 
         required_column_ddls = [
             ("organizations", "logo_data", "ALTER TABLE organizations ADD COLUMN IF NOT EXISTS logo_data TEXT;"),
@@ -210,6 +211,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             FeedDirectMessage.__table__,
             ProductSpecificationDocument.__table__,
             TechnicalTaskLog.__table__,
+            FinancialPlanningEntry.__table__,
         ]
 
         # Read-only metadata check first so we NEVER acquire ACCESS EXCLUSIVE locks on `users` / `organizations`
@@ -395,6 +397,7 @@ def create_application() -> FastAPI:
     (uploads_dir / "private" / "quotations").mkdir(parents=True, exist_ok=True)
     (uploads_dir / "private" / "sales_po").mkdir(parents=True, exist_ok=True)
     (uploads_dir / "private" / "sales_tally_bills").mkdir(parents=True, exist_ok=True)
+    (uploads_dir / "private" / "financial_planning").mkdir(parents=True, exist_ok=True)
 
     @app.get("/uploads/quotations/{filename}", summary="Download quotation attachment (authenticated)")
     async def download_quotation_attachment(
