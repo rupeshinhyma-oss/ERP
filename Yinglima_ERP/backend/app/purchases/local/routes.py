@@ -181,13 +181,20 @@ async def upload_bill(
 ) -> dict:
     file_bytes = await file.read()
     filename = file.filename or "uploaded_bill.pdf"
-    from app.common.storage import guess_content_type, upload_to_supabase
-    safe_name = f"{uuid.uuid4().hex[:12]}_{filename}"
-    url = await upload_to_supabase(
-        bucket="purchase-bills",
-        filename=safe_name,
+    from app.common.storage import (
+        guess_content_type,
+        sanitize_filename,
+        save_uploaded_file,
+    )
+
+    await service.ensure_supabase_purchase_bills_bucket()
+    clean_name = sanitize_filename(filename)
+    url, _ = await save_uploaded_file(
         content=file_bytes,
-        content_type=guess_content_type(filename),
+        original_filename=clean_name,
+        bucket="purchase-bills",
+        local_subfolder="purchase_bills",
+        content_type=guess_content_type(clean_name),
     )
     return build_success_response(
         data={"bill_file_url": url},

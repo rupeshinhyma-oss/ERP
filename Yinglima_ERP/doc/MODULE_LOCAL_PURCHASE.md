@@ -32,6 +32,17 @@ The **Local Purchase** module allows China operations to record domestic procure
 
 ## 3. What Was Changed / Updated
 
+### Release 2026-10-31: Status Workflow via 3-Dot Action Menu, VAT % Column Toggle, Dual Item Total Columns & Product Purchase History Hyperlink
+1. **Removed Status Field from Inside Local Purchase Form (`LocalPurchaseForm.tsx`, `models.py`, `schemas.py`, `service.py`):**
+   - Removed the `Status` dropdown field (`Confirmed` / `Inwarded`) and the inline `Warehouse Inward Stock Receipt` card from inside `LocalPurchaseForm.tsx`.
+   - New Local Purchase records default to `"Pending"` upon creation; editing an existing record preserves its current status.
+   - Status updates (`Pending`, `Confirmed`, `Inwarded`) are controlled from the main table list (`LocalPurchases.tsx`) via the 3-dot (`⋮`) action menu (`✅ Mark as Confirmed`, `⏳ Mark as Pending`, `📦 Mark as Inward (Stock In)`).
+2. **VAT % Column Show/Hide Toggle & Dual Item Total Columns (`LocalPurchaseForm.tsx`):**
+   - Added a `🙈 Hide VAT % Column` / `👁️ Show VAT % Column` toggle button in the `PRODUCT ITEM` table header bar.
+   - Split `Item Total` into two distinct columns: **Item Total (Without VAT)** (`item.item_total`) and **Item Total (With VAT)** (`item.gross_total`), with corresponding Grand Total summaries in `<tfoot>`.
+3. **Product Purchase History Hyperlink (`LocalPurchaseForm.tsx`):**
+   - Made each registered product name in the `PRODUCT ITEM` table a clickable hyperlink accompanied by a `📜 History` badge that opens `ProductTradeHistoryDrawer`, showing how many times the product was purchased in Local Purchase and at what prices/suppliers/dates.
+
 ### Release 2026-10-27: Top Filter Options Card Standardization & Permanent Reset Filters Button
 1. **Permanent `Reset Filters` Button & Unified Card Header:**
    - Standardized the expandable filter box in `LocalPurchases.tsx` to match the Suppliers and Buyers reference standard:
@@ -233,3 +244,9 @@ When touching this module, always verify the following:
 7. **0ms Instant Product Line-Item Rendering in Detail & Inward Modals (Release 2026-10-29):**
    - `LocalPurchaseRepository.list_with_filters` loads full `LocalPurchase.items` in the same `selectinload(LocalPurchase.items)` batch query (0 extra DB queries) and returns `items` plus expense breakdown fields (`packing_forwarding`, `transport_expense`, `offloading_expense`, `other_expense`) in `LocalPurchaseSummaryResponse`.
    - `setLocalPurchasesListCache` seeds `detailCache` with full `items`, allowing `LocalPurchaseDetailModal.tsx`, `LocalPurchaseInwardModal.tsx`, and `LocalPurchaseForm.tsx` to display all product line items in **0ms** upon click without showing `0 items` or waiting 1–2 seconds.
+
+
+5. **Supabase Storage Bill Upload & Edit Persistence (`LocalPurchaseForm.tsx`, `purchases/local/routes.py`, `purchases/local/service.py`, `common/storage.py`)**:
+   - **Supabase Storage Bucket & Policy Provisioning (`ensure_supabase_purchase_bills_bucket`)**: Guarantees that the `'purchase-bills'` bucket (`public = true`) and the `allow_public_purchase_bills_all` RLS policy on `storage.objects` exist in Supabase PostgreSQL before uploading any bill document.
+   - **Opaque Secret Key & Filename Sanitization (`common/storage.py`)**: Supports both `sb_secret_...` opaque Supabase keys and `eyJ...` JWT keys via `_get_auth_header_variants`, and sanitizes filenames (`sanitize_filename`) so spaces or special characters in PDF filenames never fail with `HTTP 400 InvalidKey`.
+   - **Immediate Upload & Edit Persistence (`LocalPurchaseForm.tsx`)**: Selecting a file in **Bill Document File (`Choose File`)** immediately uploads it to `POST /api/v1/purchases/local/upload-bill` (Supabase Storage `purchase-bills` bucket), displays a green `📄 View / Download Bill` button + filename indicator (`✓ Attached in Supabase Storage: <filename>`), and in Edit mode immediately persists `bill_file_url` to the purchase record and cache so reopening Edit always shows the saved Invoice PDF.

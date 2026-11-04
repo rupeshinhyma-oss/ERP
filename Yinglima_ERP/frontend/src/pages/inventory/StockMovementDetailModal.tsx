@@ -4,20 +4,41 @@
  * Full read-only view of a confirmed or cancelled Inward/Outward transaction.
  */
 
+import { useEffect } from "react";
+import { prefetchProductTradeHistory } from "@/components/ProductTradeHistoryDrawer";
 import type { StockMovement } from "@/types/stockMovement";
 
 interface StockMovementDetailModalProps {
   movement: StockMovement | null;
   onClose: () => void;
+  onViewProductHistory?: (product: {
+    id: string;
+    name: string;
+    code?: string | null;
+  }) => void;
 }
 
 export function StockMovementDetailModal({
   movement,
   onClose,
+  onViewProductHistory,
 }: StockMovementDetailModalProps) {
+  useEffect(() => {
+    if (!movement?.items) return;
+    for (const it of movement.items) {
+      if (it.product_id) {
+        prefetchProductTradeHistory(it.product_id);
+      }
+    }
+  }, [movement]);
+
   if (!movement) return null;
 
   const isInward = movement.movement_type === "inward";
+  const invoiceDisplayNo =
+    (isInward
+      ? movement.purchase_invoice_no || movement.reference_no
+      : movement.sale_order_no || movement.reference_no) || movement.movement_no;
 
   return (
     <div
@@ -63,7 +84,6 @@ export function StockMovementDetailModal({
           <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
             <span
               style={{
-                fontSize: "22px",
                 backgroundColor: isInward ? "#16a34a" : "#2563eb",
                 color: "#fff",
                 width: "42px",
@@ -72,14 +92,30 @@ export function StockMovementDetailModal({
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
+                boxShadow: isInward
+                  ? "0 4px 10px rgba(22, 163, 74, 0.25)"
+                  : "0 4px 10px rgba(37, 99, 235, 0.25)",
               }}
             >
-              {isInward ? "📥" : "📤"}
+              {isInward ? (
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
+                  <polyline points="3.27 6.96 12 12.01 20.73 6.96" />
+                  <line x1="12" y1="22.08" x2="12" y2="12" />
+                </svg>
+              ) : (
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="1" y="3" width="15" height="13" rx="2" />
+                  <polygon points="16 8 20 8 23 11 23 16 16 16 16 8" />
+                  <circle cx="5.5" cy="18.5" r="2.5" />
+                  <circle cx="18.5" cy="18.5" r="2.5" />
+                </svg>
+              )}
             </span>
             <div>
               <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
                 <h2 style={{ fontSize: "18px", fontWeight: 700, margin: 0, color: "#0f172a" }}>
-                  {movement.movement_no}
+                  {invoiceDisplayNo}
                 </h2>
                 <span
                   style={{
@@ -211,67 +247,123 @@ export function StockMovementDetailModal({
                   }}
                 >
                   <tr style={{ textAlign: "left", color: "#475569" }}>
-                  <th style={{ padding: "10px 12px" }}>Product</th>
-                  <th style={{ padding: "10px 12px" }}>Code</th>
-                  <th style={{ padding: "10px 12px", textAlign: "right" }}>Expected</th>
-                  <th style={{ padding: "10px 12px", textAlign: "right" }}>
-                    {isInward ? "Received" : "Dispatched"}
-                  </th>
-                  {isInward && (
-                    <th style={{ padding: "10px 12px", textAlign: "right" }}>Damaged</th>
-                  )}
-                  <th style={{ padding: "10px 12px", textAlign: "right" }}>Net Accepted</th>
-                  <th style={{ padding: "10px 12px" }}>Package</th>
-                </tr>
-              </thead>
-              <tbody>
-                {movement.items?.map((it, idx) => (
-                  <tr key={idx} style={{ borderBottom: "1px solid #f1f5f9" }}>
-                    <td style={{ padding: "10px 12px", fontWeight: 500, color: "#0f172a" }}>
-                      {it.product_name}
-                    </td>
-                    <td style={{ padding: "10px 12px", color: "#64748b" }}>
-                      {it.product_code || "—"}
-                    </td>
-                    <td style={{ padding: "10px 12px", textAlign: "right", color: "#64748b" }}>
-                      {it.expected_quantity.toLocaleString()}
-                    </td>
-                    <td style={{ padding: "10px 12px", textAlign: "right", fontWeight: 600 }}>
-                      {it.quantity.toLocaleString()}
-                    </td>
+                    <th style={{ padding: "10px 12px" }}>Product</th>
+                    <th style={{ padding: "10px 12px" }}>Code</th>
+                    <th style={{ padding: "10px 12px", textAlign: "right" }}>Expected</th>
+                    <th style={{ padding: "10px 12px", textAlign: "right" }}>
+                      {isInward ? "Received" : "Dispatched"}
+                    </th>
                     {isInward && (
+                      <th style={{ padding: "10px 12px", textAlign: "right" }}>Damaged</th>
+                    )}
+                    <th style={{ padding: "10px 12px", textAlign: "right" }}>Net Accepted</th>
+                    <th style={{ padding: "10px 12px" }}>Package</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {movement.items?.map((it, idx) => (
+                    <tr key={idx} style={{ borderBottom: "1px solid #f1f5f9" }}>
+                      <td style={{ padding: "10px 12px", fontWeight: 500, color: "#0f172a" }}>
+                        {it.product_id && onViewProductHistory ? (
+                          <div
+                            style={{ display: "inline-flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}
+                            onMouseEnter={() => prefetchProductTradeHistory(it.product_id)}
+                          >
+                            <button
+                              type="button"
+                              onClick={() =>
+                                onViewProductHistory({
+                                  id: it.product_id!,
+                                  name: it.product_name,
+                                  code: it.product_code,
+                                })
+                              }
+                              style={{
+                                background: "none",
+                                border: "none",
+                                padding: 0,
+                                margin: 0,
+                                fontWeight: 700,
+                                fontSize: "13px",
+                                color: "#2563eb",
+                                textDecoration: "underline",
+                                cursor: "pointer",
+                                textAlign: "left",
+                              }}
+                              title="Click to view complete Purchase & Sales History"
+                            >
+                              {it.product_name}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                onViewProductHistory({
+                                  id: it.product_id!,
+                                  name: it.product_name,
+                                  code: it.product_code,
+                                })
+                              }
+                              style={{
+                                fontSize: "10.5px",
+                                fontWeight: 700,
+                                padding: "2px 6px",
+                                borderRadius: "4px",
+                                border: "1px solid #bfdbfe",
+                                background: "#eff6ff",
+                                color: "#1d4ed8",
+                                cursor: "pointer",
+                              }}
+                              title="View Purchase & Sales History"
+                            >
+                              📜 History
+                            </button>
+                          </div>
+                        ) : (
+                          it.product_name
+                        )}
+                      </td>
+                      <td style={{ padding: "10px 12px", color: "#64748b" }}>
+                        {it.product_code || "—"}
+                      </td>
+                      <td style={{ padding: "10px 12px", textAlign: "right", color: "#64748b" }}>
+                        {it.expected_quantity.toLocaleString()}
+                      </td>
+                      <td style={{ padding: "10px 12px", textAlign: "right", fontWeight: 600 }}>
+                        {it.quantity.toLocaleString()}
+                      </td>
+                      {isInward && (
+                        <td
+                          style={{
+                            padding: "10px 12px",
+                            textAlign: "right",
+                            color: it.damaged_quantity > 0 ? "#dc2626" : "#64748b",
+                          }}
+                        >
+                          {it.damaged_quantity.toLocaleString()}
+                        </td>
+                      )}
                       <td
                         style={{
                           padding: "10px 12px",
                           textAlign: "right",
-                          color: it.damaged_quantity > 0 ? "#dc2626" : "#64748b",
+                          fontWeight: 700,
+                          color: isInward ? "#16a34a" : "#2563eb",
                         }}
                       >
-                        {it.damaged_quantity.toLocaleString()}
+                        {it.accepted_quantity.toLocaleString()}
                       </td>
-                    )}
-                    <td
-                      style={{
-                        padding: "10px 12px",
-                        textAlign: "right",
-                        fontWeight: 700,
-                        color: isInward ? "#16a34a" : "#2563eb",
-                      }}
-                    >
-                      {it.accepted_quantity.toLocaleString()}
-                    </td>
-                    <td style={{ padding: "10px 12px", color: "#64748b" }}>
-                      {it.package_details || "—"}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                      <td style={{ padding: "10px 12px", color: "#64748b" }}>
+                        {it.package_details || "—"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
 
-          <div
-            style={{
-              padding: "12px 16px",
+            <div
+              style={{
+                padding: "12px 16px",
                 backgroundColor: "#f8fafc",
                 borderTop: "1px solid #e2e8f0",
                 display: "flex",

@@ -54,7 +54,7 @@ class SaleOrder(Base, UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin):
     delivery_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     currency: Mapped[str] = mapped_column(String(10), default="RMB", nullable=False)
 
-    # Lifecycle status: pending | sales_confirmed | admin_approved | dispatched | lr | cancelled
+    # Lifecycle status: pending | confirmed (legacy: sales_confirmed) | dispatched | lr | cancelled
     status: Mapped[str] = mapped_column(String(30), default="pending", nullable=False, index=True)
 
     # Financial rollups
@@ -70,6 +70,8 @@ class SaleOrder(Base, UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin):
     transporter_name: Mapped[str | None] = mapped_column(String(150), nullable=True)
     port_of_loading: Mapped[str | None] = mapped_column(String(100), nullable=True)
     port_of_discharge: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    etd_origin_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    eta_port_date: Mapped[date | None] = mapped_column(Date, nullable=True)
 
     # Costing, Freight & Currency Engine (Commercial Invoice Calculation)
     ocean_freight_usd: Mapped[float] = mapped_column(Numeric(15, 2), default=0.0, nullable=False)

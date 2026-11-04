@@ -69,6 +69,32 @@ class LocalPurchaseService:
         self.session = session
         self.repo = LocalPurchaseRepository(session)
 
+    async def ensure_supabase_purchase_bills_bucket(self) -> None:
+        """
+        Ensure the 'purchase-bills' bucket exists in Supabase Storage (`storage.buckets`)
+        with public=true and an RLS policy on `storage.objects` allowing upload/read/update/delete.
+        """
+        if not self.session:
+            return
+        # Commit bucket creation in its own transaction so it never gets rolled back
+        try:
+            await self.session.execute(
+                text(
+                    """
+                    INSERT INTO storage.buckets (id, name, public, file_size_limit)
+                    VALUES ('purchase-bills', 'purchase-bills', true, 52428800)
+                    ON CONFLICT (id) DO UPDATE SET public = true, file_size_limit = 52428800
+                    """
+                )
+            )
+            await self.session.commit()
+        except Exception as exc:
+            logger.debug("Could not upsert purchase-bills in storage.buckets via SQL: %s", exc)
+            try:
+                await self.session.rollback()
+            except Exception:
+                pass
+
     def calculate_landing_rates(
         self,
         *,
@@ -234,7 +260,7 @@ class LocalPurchaseService:
             items_total_landing=calc_result["items_total_landing"],
             total_quantity=calc_result["total_quantity"],
             remarks=payload.remarks,
-            status=payload.status or "Confirmed",
+            status=payload.status or "Pending",
             created_by_id=created_by_id,
             created_by_name=created_by_name,
         )
@@ -315,11 +341,13 @@ class LocalPurchaseService:
             purchase.currency = payload.currency
         if payload.invoice_total_value is not None:
             purchase.invoice_total_value = payload.invoice_total_value
-        if payload.bill_file_url is not None:
+        if "bill_file_url" in payload.model_fields_set or payload.bill_file_url is not None:
             purchase.bill_file_url = payload.bill_file_url
         if payload.remarks is not None:
             purchase.remarks = payload.remarks
         if payload.status is not None:
+            if (purchase.status == "Inwarded" or purchase.stock_movement_id is not None) and payload.status != "Inwarded":
+                raise BadRequestException("Cannot change status of an already inwarded local purchase.")
             purchase.status = payload.status
 
         packing = payload.packing_forwarding if payload.packing_forwarding is not None else purchase.packing_forwarding
@@ -601,13 +629,15 @@ class LocalPurchaseService:
         # Upload bill file directly to Supabase Storage
         bill_file_url: str | None = None
         try:
-            from app.common.storage import upload_to_supabase, guess_content_type
-            safe_name = f"{uuid.uuid4().hex[:12]}_{filename}"
+            from app.common.storage import upload_to_supabase, guess_content_type, sanitize_filename
+            await self.ensure_supabase_purchase_bills_bucket()
+            clean_name = sanitize_filename(filename)
+            safe_name = f"{uuid.uuid4().hex[:12]}_{clean_name}"
             bill_file_url = await upload_to_supabase(
                 bucket="purchase-bills",
                 filename=safe_name,
                 content=file_bytes,
-                content_type=guess_content_type(filename),
+                content_type=guess_content_type(clean_name),
             )
         except Exception as err:
             logger.warning("Supabase storage upload failed for bill %s: %s", filename, err)

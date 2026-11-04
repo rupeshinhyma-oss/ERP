@@ -40,7 +40,7 @@ class SaleOrderItemCreate(BaseModel):
     cbm_per_unit: float = 0.0
     total_cbm: float = 0.0
     total_supplier_amount_rmb: float = 0.0
-    is_spare: bool = False
+    is_spare: bool | None = None
 
 
 class SaleOrderItemResponse(BaseModel):
@@ -70,7 +70,7 @@ class SaleOrderItemResponse(BaseModel):
     cbm_per_unit: float = 0.0
     total_cbm: float = 0.0
     total_supplier_amount_rmb: float = 0.0
-    is_spare: bool = False
+    is_spare: bool | None = None
 
     created_at: datetime
     updated_at: datetime
@@ -105,6 +105,8 @@ class SaleOrderCreate(BaseModel):
     transporter_name: str | None = None
     port_of_loading: str | None = None
     port_of_discharge: str | None = None
+    etd_origin_date: date | None = None
+    eta_port_date: date | None = None
 
     # Costing, Freight & Currency Engine
     ocean_freight_usd: float = 0.0
@@ -139,6 +141,8 @@ class SaleOrderUpdate(BaseModel):
     transporter_name: str | None = None
     port_of_loading: str | None = None
     port_of_discharge: str | None = None
+    etd_origin_date: date | None = None
+    eta_port_date: date | None = None
 
     # Costing, Freight & Currency Engine
     ocean_freight_usd: float | None = None
@@ -155,6 +159,7 @@ class SaleOrderUpdate(BaseModel):
 class SaleOrderStatusUpdate(BaseModel):
     status: str = Field(..., min_length=1, max_length=30)
     remarks: str | None = None
+    lr_no: str | None = Field(default=None, max_length=100)
 
 
 # ---------------------------------------------------------------------------
@@ -192,6 +197,8 @@ class SaleOrderResponse(BaseModel):
     transporter_name: str | None = None
     port_of_loading: str | None = None
     port_of_discharge: str | None = None
+    etd_origin_date: date | None = None
+    eta_port_date: date | None = None
 
     # Costing, Freight & Currency Engine
     ocean_freight_usd: float = 0.0
@@ -253,8 +260,9 @@ class MetricItem(BaseModel):
 class SaleSummaryMetrics(BaseModel):
     all: MetricItem = Field(default_factory=MetricItem)
     pending: MetricItem = Field(default_factory=MetricItem)
-    sales_confirmed: MetricItem = Field(default_factory=MetricItem)
-    admin_approved: MetricItem = Field(default_factory=MetricItem)
+    confirmed: MetricItem = Field(default_factory=MetricItem)
+    sales_confirmed: MetricItem = Field(default_factory=MetricItem)  # backwards compatibility alias
+    admin_approved: MetricItem = Field(default_factory=MetricItem)   # backwards compatibility alias
     dispatched: MetricItem = Field(default_factory=MetricItem)
     lr: MetricItem = Field(default_factory=MetricItem)
     cancelled: MetricItem = Field(default_factory=MetricItem)
@@ -303,7 +311,7 @@ class ExtractedConsignmentItem(BaseModel):
     cbm_per_unit: float = 0.0
     total_cbm: float = 0.0
     total_supplier_amount_rmb: float = 0.0
-    is_spare: bool = False
+    is_spare: bool | None = None
 
 
 class PlanningConsignmentItemsResponse(BaseModel):

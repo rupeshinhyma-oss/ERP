@@ -105,6 +105,7 @@ export interface StockBalanceItem {
   product_name: string;
   product_code?: string | null;
   total_inward_qty: number;
+  total_damaged_qty?: number;
   total_outward_qty: number;
   current_stock_qty: number;
   last_movement_date?: string | null;

@@ -187,3 +187,19 @@ When changing a cell's status tag (e.g. from Blue to Red Requirement), rapid dou
    - Frontend `groupedEntries` filters out any consecutive changes on the same column with matching status/value occurring within a 5-second interval.
    - Historical duplicate records in PostgreSQL have been purged.
 
+---
+
+## 11. Consignment Column Lifecycle & Stuffing Date Header Badge (Release 2026-10-31)
+
+### 1. Consignment Column Deletion on `Dispatched` or `LR` Only (`backend/app/sales/service.py`, `backend/app/planning/service.py`)
+- **Lifecycle Rule:**
+  - When a Sale Order is in **`Pending`**, **`Confirmed`**, or **`Cancelled`** status, its linked consignment column group (`<Label> N`, `<Label>N Remarks`, `NO. OF PKG <LABEL>N`, `TOTAL WEIGHT <LABEL>N`, `TOTAL CBM <LABEL>N`) remains intact in the Shipment Planning grid.
+  - When a Sale Order transitions to **`Dispatched`** (via `Dispatch (Outward Stock)`) or **`LR`** (`Mark LR Received`), `SaleService._delete_planning_consignment_column_if_present` automatically soft-deletes the entire consignment column group on the sheet, re-sequences remaining column positions, and broadcasts `column_deleted` over WebSockets (`ws_manager`).
+  - `PlanningService._cleanup_dispatched_consignment_columns` also reconciles on `get_grid` so any consignment column linked to an already-`dispatched` or `lr` order (with no active `pending`/`confirmed` order on that column) is cleaned up automatically.
+  - `PlanningService.create_next_mum_group` checks `dispatched`/`lr` `SaleOrder` consignment numbers alongside active columns so `+ Next Mum` never re-creates an already-dispatched consignment number.
+
+### 2. Stuffing Date Picker & Visible Badge in Consignment Column Header (`frontend/src/pages/Planning.tsx`)
+- **Stuffing Date Picker (`DescriptionPopover`):**
+  - Clicking the `✎` icon (or the displayed Stuffing Date badge) on any consignment column header (e.g., `MUM 48`, `MUM 49`, `MUM 50`) opens the **Stuffing Date** popover with a native calendar date picker (`Pick Stuffing Date`), a text/note input (`Or Type Date / Stuffing Note`), and a one-click `Clear` button.
+- **Visible Header Badge (`ColumnHeader`):**
+  - Whenever a Stuffing Date or note is saved on a consignment column (`column.description`), it is visibly displayed directly inside the column header below the column title (e.g., `MUM 49` with a blue date badge `25/10/2026` underneath).

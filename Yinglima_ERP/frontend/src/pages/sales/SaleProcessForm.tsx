@@ -87,6 +87,8 @@ export function SaleProcessFormPage() {
   const [transporterName, setTransporterName] = useState("");
   const [portOfLoading, setPortOfLoading] = useState("");
   const [portOfDischarge, setPortOfDischarge] = useState("");
+  const [etdOriginDate, setEtdOriginDate] = useState("");
+  const [etaPortDate, setEtaPortDate] = useState("");
   const [remarks, setRemarks] = useState("");
 
   // Shipping & CI Costing Parameters (from official Yinglima export spreadsheet)
@@ -95,7 +97,8 @@ export function SaleProcessFormPage() {
   const [usdExchangeRate, setUsdExchangeRate] = useState<number>(6.70);
   const [profitPercent, setProfitPercent] = useState<number>(3.00);
   const [totalContainerCbm, setTotalContainerCbm] = useState<number>(0.0);
-  const [costingViewMode, setCostingViewMode] = useState<boolean>(true);
+  // Costing & supplier columns are always visible (toggle button removed 2026-10-30)
+  const costingViewMode = true;
 
   // Items
   const [items, setItems] = useState<SaleOrderItem[]>([]);
@@ -119,9 +122,9 @@ export function SaleProcessFormPage() {
   const searchRef = useRef<HTMLDivElement | null>(null);
 
   // Dedicated Spares Picker Modal
-  const [showSpareModal, setShowSpareModal] = useState(false);
-  const [spareSearch, setSpareSearch] = useState("");
-  const [spareSearchResults, setSpareSearchResults] = useState<
+  const [showSpareModal] = useState(false);
+  const [spareSearch] = useState("");
+  const [, setSpareSearchResults] = useState<
     Array<{
       id: string;
       product_name: string;
@@ -133,10 +136,10 @@ export function SaleProcessFormPage() {
       uom?: string;
     }>
   >([]);
-  const [spareSearchLoading, setSpareSearchLoading] = useState(false);
+  const [, setSpareSearchLoading] = useState(false);
 
   // Quick fill rate tool
-  const [quickRate, setQuickRate] = useState<string>("");
+
 
   // Submitting
   const [submitting, setSubmitting] = useState(false);
@@ -215,6 +218,8 @@ export function SaleProcessFormPage() {
     setTransporterName(o.transporter_name || "");
     setPortOfLoading(o.port_of_loading || "");
     setPortOfDischarge(o.port_of_discharge || "");
+    setEtdOriginDate(o.etd_origin_date ? String(o.etd_origin_date).slice(0, 10) : "");
+    setEtaPortDate(o.eta_port_date ? String(o.eta_port_date).slice(0, 10) : "");
     setRemarks(o.remarks || "");
     setOceanFreightUsd(Number(o.ocean_freight_usd) || 0.0);
     setLocalChargesCocUsd(Number(o.local_charges_coc_usd) || 0.0);
@@ -223,7 +228,7 @@ export function SaleProcessFormPage() {
     setTotalContainerCbm(Number(o.total_container_cbm) || 0.0);
 
     if (o.items && o.items.length > 0) {
-      setItems(o.items.map((it) => ({ ...it, uom: it.uom || "NOS" })));
+      setItems(o.items.map((it) => ({ ...it, uom: it.uom || "NOS", was_spare: Boolean(it.is_spare) })));
     }
   };
 
@@ -639,6 +644,7 @@ export function SaleProcessFormPage() {
             total_cbm: Number(it.total_cbm) || 0.0,
             total_supplier_amount_rmb: Number(it.total_supplier_amount_rmb) || (rmbWithVat * qty),
             is_spare: Boolean(it.is_spare),
+            was_spare: Boolean(it.is_spare),
           };
         });
 
@@ -821,6 +827,7 @@ export function SaleProcessFormPage() {
       total_cbm: totalCbm,
       total_supplier_amount_rmb: totalSupplierRmb,
       is_spare: isSpareFinal,
+      was_spare: isSpareFinal,
     };
 
     setItems((prev) => [...prev, newItem]);
@@ -994,29 +1001,24 @@ export function SaleProcessFormPage() {
     setItems((prev) => prev.filter((_, i) => i !== index));
   };
 
-  // Apply quick fill rates
-  const applyQuickRate = () => {
-    const r = parseFloat(quickRate);
-    if (isNaN(r) || r < 0) {
-      toast("Please enter a valid rate.", "warning");
-      return;
-    }
-    setItems((prev) =>
-      prev.map((item) => {
-        const qty = Number(item.quantity) || 0;
-        const taxPct = Number(item.tax_percent) || 0;
-        const basic = qty * r;
-        const taxAmt = (basic * taxPct) / 100.0;
-        return {
-          ...item,
-          unit_rate: r,
-          tax_amount: Math.round(taxAmt * 100) / 100,
-          item_total: Math.round((basic + taxAmt) * 100) / 100,
-        };
-      })
+  // Convert a Spare Part line item to a standalone Product (or revert back) for this Sale Order only
+  const toggleItemSpareStatus = (index: number, nextIsSpare: boolean) => {
+    const targetName = items[index]?.product_name || "Item";
+    setItems((prev) => {
+      const next = [...prev];
+      next[index] = {
+        ...next[index],
+        is_spare: nextIsSpare,
+        was_spare: true,
+      };
+      return next;
+    });
+    toast(
+      nextIsSpare
+        ? `"${targetName}" reverted to Spare Part for this sale order.`
+        : `"${targetName}" converted to Product for this sale order (remains Spare in Product Master).`,
+      "success"
     );
-    toast(`Applied rate ¥ ${r.toFixed(2)} to all line items.`, "success");
-    setQuickRate("");
   };
 
   // Financial totals
@@ -1130,6 +1132,8 @@ export function SaleProcessFormPage() {
         transporter_name: transporterName || null,
         port_of_loading: portOfLoading || null,
         port_of_discharge: portOfDischarge || null,
+        etd_origin_date: etdOriginDate || null,
+        eta_port_date: etaPortDate || null,
         remarks: remarks || null,
         ocean_freight_usd: oceanFreightUsd,
         local_charges_coc_usd: localChargesCocUsd,
@@ -1337,7 +1341,7 @@ export function SaleProcessFormPage() {
                   <span style={{ fontSize: "11px", color: "#64748b" }}>
                     {(orgLookup.items?.length || 0) + (buyerLookup.items?.length || 0)} available
                   </span>
-                </div>
+        </div>
 
                 {/* Trigger button */}
                 <button
@@ -1385,7 +1389,7 @@ export function SaleProcessFormPage() {
                       </span>
                     )}
                     <span style={{ fontSize: "10px", color: "#64748b" }}>{entityOpen ? "▲" : "▼"}</span>
-                  </div>
+          </div>
                 </button>
 
                 {/* Dropdown panel */}
@@ -1423,7 +1427,7 @@ export function SaleProcessFormPage() {
                           background: "#ffffff",
                         }}
                       />
-                    </div>
+            </div>
 
                     {/* Options list */}
                     <div style={{ maxHeight: "250px", overflowY: "auto" }}>
@@ -1435,7 +1439,7 @@ export function SaleProcessFormPage() {
                         onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
                       >
                         -- Select Entity (Organization or Buyer) --
-                      </div>
+              </div>
 
                       {/* Internal Organizations Group */}
                       {filteredOrgs.length > 0 && (
@@ -1463,7 +1467,7 @@ export function SaleProcessFormPage() {
                             <span style={{ background: "#DBEAFE", color: "#1E40AF", borderRadius: "10px", padding: "1px 6px", fontSize: "10px", fontWeight: 700 }}>
                               {filteredOrgs.length}
                             </span>
-                          </div>
+                  </div>
                           {filteredOrgs.map((org) => {
                             const isSelected = selectedEntityType === "org" && selectedEntityId === org.id;
                             return (
@@ -1490,10 +1494,10 @@ export function SaleProcessFormPage() {
                               >
                                 <span>{org.name}</span>
                                 {isSelected && <span style={{ fontSize: "11px", color: "#1d4ed8" }}>✔</span>}
-                              </div>
+                      </div>
                             );
                           })}
-                        </div>
+                </div>
                       )}
 
                       {/* Buyers Group */}
@@ -1522,7 +1526,7 @@ export function SaleProcessFormPage() {
                             <span style={{ background: "#BAE6FD", color: "#0369A1", borderRadius: "10px", padding: "1px 6px", fontSize: "10px", fontWeight: 700 }}>
                               {filteredBuyers.length}
                             </span>
-                          </div>
+                  </div>
                           {filteredBuyers.map((b) => {
                             const bName = b.company_name || b.name || "";
                             const isSelected = selectedEntityType === "buyer" && selectedEntityId === b.id;
@@ -1550,21 +1554,21 @@ export function SaleProcessFormPage() {
                               >
                                 <span>{bName}</span>
                                 {isSelected && <span style={{ fontSize: "11px", color: "#0369a1" }}>✔</span>}
-                              </div>
+                      </div>
                             );
                           })}
-                        </div>
+                </div>
                       )}
 
                       {filteredOrgs.length === 0 && filteredBuyers.length === 0 && (
                         <div style={{ padding: "12px", textAlign: "center", color: "#94a3b8", fontSize: "12px" }}>
                           No entities match "{entitySearch}"
-                        </div>
+                </div>
                       )}
-                    </div>
-                  </div>
+            </div>
+          </div>
                 )}
-              </div>
+      </div>
 
               {/* 2. Planning Sheet / Branch Combobox */}
               <div ref={sheetDropdownRef} style={{ position: "relative", minWidth: 0 }}>
@@ -1581,7 +1585,7 @@ export function SaleProcessFormPage() {
                       {availableSheets.length} sheet{availableSheets.length === 1 ? "" : "s"}
                     </span>
                   )}
-                </div>
+        </div>
 
                 {/* Trigger button */}
                 <button
@@ -1638,7 +1642,7 @@ export function SaleProcessFormPage() {
                       </span>
                     )}
                     <span style={{ fontSize: "10px", color: "#64748b" }}>{sheetOpen ? "▲" : "▼"}</span>
-                  </div>
+          </div>
                 </button>
 
                 {/* Dropdown panel */}
@@ -1677,7 +1681,7 @@ export function SaleProcessFormPage() {
                             background: "#ffffff",
                           }}
                         />
-                      </div>
+              </div>
                     )}
 
                     {/* Options list */}
@@ -1689,7 +1693,7 @@ export function SaleProcessFormPage() {
                         onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
                       >
                         -- All Sheets / Clear Selection --
-                      </div>
+              </div>
 
                       {filteredSheets.map((s) => {
                         const isSelected = selectedSheetId === s.id;
@@ -1734,20 +1738,20 @@ export function SaleProcessFormPage() {
                                 </span>
                               )}
                               {isSelected && <span style={{ fontSize: "11px", color: "#065f46" }}>✔</span>}
-                            </div>
-                          </div>
+                    </div>
+                  </div>
                         );
                       })}
 
                       {filteredSheets.length === 0 && (
                         <div style={{ padding: "12px", textAlign: "center", color: "#94a3b8", fontSize: "12px" }}>
                           No sheets found {selectedEntityId ? `under ${buyerName}` : ""}
-                        </div>
+                </div>
                       )}
-                    </div>
-                  </div>
+            </div>
+          </div>
                 )}
-              </div>
+      </div>
 
               {/* 3. Planning Consignment Column Combobox */}
               <div ref={consignmentDropdownRef} style={{ position: "relative", minWidth: 0 }}>
@@ -1764,7 +1768,7 @@ export function SaleProcessFormPage() {
                   ) : (
                     <span style={{ fontSize: "11px", color: "#64748b" }}>{filteredConsignments.length} available</span>
                   )}
-                </div>
+        </div>
 
                 <div style={{ display: "flex", gap: "8px", alignItems: "center", width: "100%", minWidth: 0 }}>
                   {/* Combobox Trigger Button */}
@@ -1837,7 +1841,7 @@ export function SaleProcessFormPage() {
                           </span>
                         )}
                         <span style={{ fontSize: "10px", color: "#64748b" }}>{consignmentOpen ? "▲" : "▼"}</span>
-                      </div>
+              </div>
                     </button>
 
                     {/* Dropdown Panel */}
@@ -1876,7 +1880,7 @@ export function SaleProcessFormPage() {
                               background: "#ffffff",
                             }}
                           />
-                        </div>
+                </div>
 
                         {/* Options List */}
                         <div style={{ maxHeight: "250px", overflowY: "auto" }}>
@@ -1885,7 +1889,7 @@ export function SaleProcessFormPage() {
                               {selectedSheetName
                                 ? `No consignment columns found in sheet "${selectedSheetName}"`
                                 : `No consignments match "${consignmentSearch}"`}
-                            </div>
+                    </div>
                           ) : (
                             filteredConsignments.map((c) => {
                               const isSelected = c.column_id === selectedColumnId;
@@ -1917,19 +1921,19 @@ export function SaleProcessFormPage() {
                                       <span style={{ fontSize: "11px", color: "#64748b" }}>
                                         ({c.sheet_name})
                                       </span>
-                                    </div>
-                                  </div>
+                            </div>
+                          </div>
                                   <div style={{ fontSize: "11.5px", color: "#64748b", fontWeight: 500 }}>
                                     {c.item_count} items • {c.total_quantity.toLocaleString()} pcs
-                                  </div>
-                                </div>
+                          </div>
+                        </div>
                               );
                             })
                           )}
-                        </div>
-                      </div>
+                </div>
+              </div>
                     )}
-                  </div>
+          </div>
 
                   <button
                     type="button"
@@ -1966,8 +1970,8 @@ export function SaleProcessFormPage() {
                       </>
                     )}
                   </button>
-                </div>
-              </div>
+        </div>
+      </div>
             </div>
 
             {/* Row 2: Order Metadata */}
@@ -1998,7 +2002,7 @@ export function SaleProcessFormPage() {
                   }}
                   required
                 />
-              </div>
+      </div>
 
               {/* Delivery Target Date */}
               <div>
@@ -2018,7 +2022,7 @@ export function SaleProcessFormPage() {
                     boxSizing: "border-box",
                   }}
                 />
-              </div>
+      </div>
 
               {/* Currency */}
               <div>
@@ -2039,32 +2043,7 @@ export function SaleProcessFormPage() {
                   <option value="RMB">RMB (¥ - Chinese Yuan)</option>
                   <option value="USD">USD ($ - US Dollar)</option>
                 </select>
-              </div>
-
-              {/* Workflow Status */}
-              <div>
-                <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#334155", marginBottom: "4px" }}>
-                  Order Status
-                </label>
-                <select
-                  value={status}
-                  onChange={(e) => setStatus(e.target.value)}
-                  style={{
-                    width: "100%",
-                    padding: "8px 10px",
-                    borderRadius: "6px",
-                    border: "1px solid #cbd5e1",
-                    fontSize: "13px",
-                  }}
-                >
-                  <option value="pending">Pending</option>
-                  <option value="sales_confirmed">Sales Confirmed</option>
-                  <option value="admin_approved">Admin Approved</option>
-                  <option value="dispatched">Dispatched</option>
-                  <option value="lr">LR Received</option>
-                  <option value="cancelled">Cancelled</option>
-                </select>
-              </div>
+      </div>
             </div>
           </div>
 
@@ -2121,7 +2100,7 @@ export function SaleProcessFormPage() {
                     boxSizing: "border-box",
                   }}
                 />
-              </div>
+      </div>
 
               <div>
                 <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#334155", marginBottom: "4px" }}>
@@ -2141,7 +2120,7 @@ export function SaleProcessFormPage() {
                     boxSizing: "border-box",
                   }}
                 />
-              </div>
+      </div>
 
               <div>
                 <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#334155", marginBottom: "4px" }}>
@@ -2161,7 +2140,7 @@ export function SaleProcessFormPage() {
                     boxSizing: "border-box",
                   }}
                 />
-              </div>
+      </div>
 
               <div>
                 <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#334155", marginBottom: "4px" }}>
@@ -2181,7 +2160,7 @@ export function SaleProcessFormPage() {
                     boxSizing: "border-box",
                   }}
                 />
-              </div>
+      </div>
 
               <div>
                 <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#334155", marginBottom: "4px" }}>
@@ -2201,7 +2180,7 @@ export function SaleProcessFormPage() {
                     boxSizing: "border-box",
                   }}
                 />
-              </div>
+      </div>
 
               <div>
                 <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#334155", marginBottom: "4px" }}>
@@ -2221,7 +2200,45 @@ export function SaleProcessFormPage() {
                     boxSizing: "border-box",
                   }}
                 />
-              </div>
+      </div>
+
+              <div>
+                <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#334155", marginBottom: "4px" }}>
+                  ETD Origin Date
+                </label>
+                <input
+                  type="date"
+                  value={etdOriginDate}
+                  onChange={(e) => setEtdOriginDate(e.target.value)}
+                  style={{
+                    width: "100%",
+                    padding: "8px 10px",
+                    borderRadius: "6px",
+                    border: "1px solid #cbd5e1",
+                    fontSize: "13px",
+                    boxSizing: "border-box",
+                  }}
+                />
+      </div>
+
+              <div>
+                <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#334155", marginBottom: "4px" }}>
+                  ETA Port Date
+                </label>
+                <input
+                  type="date"
+                  value={etaPortDate}
+                  onChange={(e) => setEtaPortDate(e.target.value)}
+                  style={{
+                    width: "100%",
+                    padding: "8px 10px",
+                    borderRadius: "6px",
+                    border: "1px solid #cbd5e1",
+                    fontSize: "13px",
+                    boxSizing: "border-box",
+                  }}
+                />
+      </div>
             </div>
 
             {/* Export Shipping & CI Costing Parameters */}
@@ -2249,11 +2266,11 @@ export function SaleProcessFormPage() {
                   <span style={{ fontSize: "13px", fontWeight: 700, color: "#166534" }}>
                     Export Costing & Container Freight Parameters (Yinglima Official Spreadsheet Engine)
                   </span>
-                </div>
+        </div>
                 <div style={{ fontSize: "11.5px", color: "#15803d", fontWeight: 600 }}>
                   Supplier & RMB Factory Price sourced directly from Confirmed Local Purchase
-                </div>
-              </div>
+        </div>
+      </div>
 
               <div
                 style={{
@@ -2289,7 +2306,7 @@ export function SaleProcessFormPage() {
                       boxSizing: "border-box",
                     }}
                   />
-                </div>
+        </div>
 
                 <div>
                   <label style={{ display: "block", fontSize: "11px", fontWeight: 700, color: "#166534", marginBottom: "4px" }}>
@@ -2318,7 +2335,7 @@ export function SaleProcessFormPage() {
                       boxSizing: "border-box",
                     }}
                   />
-                </div>
+        </div>
 
                 <div>
                   <label style={{ display: "block", fontSize: "11px", fontWeight: 700, color: "#166534", marginBottom: "4px" }}>
@@ -2347,7 +2364,7 @@ export function SaleProcessFormPage() {
                       boxSizing: "border-box",
                     }}
                   />
-                </div>
+        </div>
 
                 <div>
                   <label style={{ display: "block", fontSize: "11px", fontWeight: 700, color: "#166534", marginBottom: "4px" }}>
@@ -2376,7 +2393,7 @@ export function SaleProcessFormPage() {
                       boxSizing: "border-box",
                     }}
                   />
-                </div>
+        </div>
 
                 <div>
                   <label style={{ display: "block", fontSize: "11px", fontWeight: 700, color: "#166534", marginBottom: "4px" }}>
@@ -2405,8 +2422,8 @@ export function SaleProcessFormPage() {
                       boxSizing: "border-box",
                     }}
                   />
-                </div>
-              </div>
+        </div>
+      </div>
 
               {/* Derived rate banner */}
               <div
@@ -2430,7 +2447,7 @@ export function SaleProcessFormPage() {
                   <strong style={{ color: "#15803d" }}>
                     ${totalContainerCbm > 0 ? ((oceanFreightUsd + localChargesCocUsd) / totalContainerCbm).toFixed(2) : "0.00"} / m³
                   </strong>
-                </div>
+        </div>
                 <button
                   type="button"
                   onClick={() => {
@@ -2463,7 +2480,7 @@ export function SaleProcessFormPage() {
                 >
                   ⚡ Recalculate CFR Rates
                 </button>
-              </div>
+      </div>
             </div>
           </div>
 
@@ -2503,7 +2520,7 @@ export function SaleProcessFormPage() {
                         <div style={{ marginTop: "4px", fontSize: "11px", color: "#c2410c", background: "#fff7ed", border: "1px solid #fed7aa", padding: "2px 8px", borderRadius: "4px", display: "inline-flex", alignItems: "center", gap: "4px" }}>
                           <span>⚙️</span>
                           <span><strong>{spareCount} Spare Part(s) selected:</strong> highlighted in light orange; will consolidate into 1 line on CI/PL, with full itemized breakdown on Sheet 2 (Spares).</span>
-                        </div>
+                </div>
                       )}
                     </>
                   );
@@ -2531,97 +2548,11 @@ export function SaleProcessFormPage() {
                       </strong>
                     </>
                   )}
-                </div>
-              </div>
+        </div>
+      </div>
 
               {/* View Mode Toggle, Quick Fill & Product Search */}
               <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
-                {/* Costing Engine Toggle */}
-                <button
-                  type="button"
-                  onClick={() => setCostingViewMode(!costingViewMode)}
-                  style={{
-                    padding: "6px 12px",
-                    borderRadius: "6px",
-                    border: "1px solid #cbd5e1",
-                    background: costingViewMode ? "#0284c7" : "#ffffff",
-                    color: costingViewMode ? "#ffffff" : "#334155",
-                    fontSize: "12px",
-                    fontWeight: 700,
-                    cursor: "pointer",
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: "5px",
-                    boxShadow: costingViewMode ? "0 1px 3px rgba(2,132,199,0.3)" : "none",
-                  }}
-                  title="Toggle between standard sales order view and full 16-column CI costing engine view"
-                >
-                  <span>📊</span>
-                  <span>{costingViewMode ? "Costing & Supplier Columns (Active)" : "Show Costing & Supplier"}</span>
-                </button>
-                {/* Bulk Rate Fill */}
-                <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    placeholder={`Rate ${currencySymbol}`}
-                    value={quickRate}
-                    onChange={(e) => setQuickRate(e.target.value)}
-                    style={{
-                      width: "80px",
-                      padding: "6px 8px",
-                      borderRadius: "4px",
-                      border: "1px solid #cbd5e1",
-                      fontSize: "12px",
-                    }}
-                  />
-                  <button
-                    type="button"
-                    onClick={applyQuickRate}
-                    style={{
-                      padding: "6px 10px",
-                      borderRadius: "4px",
-                      background: "#f1f5f9",
-                      border: "1px solid #cbd5e1",
-                      color: "#334155",
-                      fontSize: "12px",
-                      fontWeight: 600,
-                      cursor: "pointer",
-                    }}
-                    title="Fill this rate into all line items"
-                  >
-                    Apply Rate
-                  </button>
-                </div>
-
-                {/* Dedicated Add Spare from Master Button */}
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSpareSearch("");
-                    setShowSpareModal(true);
-                  }}
-                  style={{
-                    padding: "6px 12px",
-                    borderRadius: "6px",
-                    border: "1px solid #d97706",
-                    background: "linear-gradient(135deg, #f59e0b, #d97706)",
-                    color: "#ffffff",
-                    fontSize: "12px",
-                    fontWeight: 700,
-                    cursor: "pointer",
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: "5px",
-                    boxShadow: "0 1px 3px rgba(217,119,6,0.3)",
-                  }}
-                  title="Search and add spare parts from Product Master (auto-rolls up on CI & PL)"
-                >
-                  <span>⚙️</span>
-                  <span>+ Add Spare from Master</span>
-                </button>
-
                 {/* Product Search & Add */}
                 <div ref={searchRef} style={{ position: "relative" }}>
                   <input
@@ -2659,7 +2590,7 @@ export function SaleProcessFormPage() {
                       {/* Header */}
                       <div style={{ padding: "6px 12px", background: "#f8fafc", borderBottom: "1px solid #e2e8f0", fontSize: "11px", color: "#64748b", fontWeight: 600 }}>
                         {searchLoading ? "Searching product master..." : `${productSearchResults.length} product(s) found — click to add`}
-                      </div>
+              </div>
 
                       {searchLoading ? (
                         <div style={{ padding: "14px", fontSize: "12px", color: "#64748b", textAlign: "center" }}>⏳ Searching...</div>
@@ -2686,16 +2617,16 @@ export function SaleProcessFormPage() {
                               <div style={{ fontWeight: 600, color: "#0f172a" }}>{p.product_name}</div>
                               <div style={{ fontSize: "11px", color: "#64748b", marginTop: "2px" }}>
                                 Code: {p.product_code || "—"} &nbsp;|&nbsp; HSN: {p.hsn_code || "—"}
-                              </div>
-                            </div>
+                      </div>
+                    </div>
                             <span style={{ fontSize: "11px", background: "#0284c7", color: "#fff", padding: "2px 8px", borderRadius: "99px", flexShrink: 0 }}>+ Add</span>
-                          </div>
+                  </div>
                         ))
                       )}
-                    </div>
+            </div>
                   )}
-                </div>
-              </div>
+        </div>
+      </div>
             </div>
 
             {/* Items Table */}
@@ -2765,7 +2696,7 @@ export function SaleProcessFormPage() {
                         <div style={{ fontWeight: 600, color: "#475569" }}>No items loaded yet</div>
                         <div style={{ fontSize: "11px", marginTop: "4px" }}>
                           Select a Consignment Column above and click <strong>Auto-Load Items</strong>, or search for products to add.
-                        </div>
+                </div>
                       </td>
                     </tr>
                   ) : (
@@ -2832,7 +2763,55 @@ export function SaleProcessFormPage() {
                                 Spare Part
                               </span>
                             )}
-                          </div>
+                            {isSpare && (
+                              <button
+                                type="button"
+                                onClick={() => toggleItemSpareStatus(idx, false)}
+                                title="Convert this spare item into a regular Product line for this sale order only (Product Master remains unchanged)"
+                                style={{
+                                  flexShrink: 0,
+                                  padding: "2px 8px",
+                                  borderRadius: "4px",
+                                  fontSize: "10.5px",
+                                  fontWeight: 700,
+                                  border: "1px solid #3b82f6",
+                                  background: "#eff6ff",
+                                  color: "#1d4ed8",
+                                  cursor: "pointer",
+                                  letterSpacing: "0.2px",
+                                  whiteSpace: "nowrap",
+                                }}
+                              >
+                                ⇄ Make Product
+                              </button>
+                            )}
+                            {!isSpare && item.was_spare && (
+                              <button
+                                type="button"
+                                onClick={() => toggleItemSpareStatus(idx, true)}
+                                title="Revert back to Spare Part for this sale order"
+                                style={{
+                                  flexShrink: 0,
+                                  padding: "2px 8px",
+                                  borderRadius: "4px",
+                                  fontSize: "10.5px",
+                                  fontWeight: 700,
+                                  border: "1px solid #fdba74",
+                                  background: "#fff7ed",
+                                  color: "#c2410c",
+                                  cursor: "pointer",
+                                  letterSpacing: "0.2px",
+                                  whiteSpace: "nowrap",
+                                }}
+                              >
+                                ↩ Make Spare
+                              </button>
+                            )}
+                            {false && (
+                              <span>
+                              </span>
+                            )}
+                  </div>
                           {item.product_code && (
                             <div style={{ fontSize: "10px", color: isSpare ? "#ea580c" : "#94a3b8", marginTop: "2px" }}>{item.product_code}</div>
                           )}
@@ -3007,7 +2986,7 @@ export function SaleProcessFormPage() {
                                     ✓ Local Purchase
                                   </span>
                                 ) : null}
-                              </div>
+                      </div>
                             </td>
                             {/* 15. Total CBM (editable) */}
                             <td style={{ padding: "6px 6px" }}>
@@ -3245,20 +3224,20 @@ export function SaleProcessFormPage() {
               <div>
                 <div style={{ fontSize: "12px", fontWeight: 700, color: "#1e40af", textTransform: "uppercase", marginBottom: "10px" }}>
                   Invoice Valuation Summary
-                </div>
+        </div>
                 <div style={{ display: "flex", justifyContent: "space-between", fontSize: "13px", color: "#334155", marginBottom: "6px" }}>
                   <span>Basic Line Value:</span>
                   <span>{currencySymbol} {totals.basic.toFixed(2)}</span>
-                </div>
+        </div>
                 <div style={{ display: "flex", justifyContent: "space-between", fontSize: "13px", color: "#334155", marginBottom: "6px" }}>
                   <span>Total Tax / VAT:</span>
                   <span>{currencySymbol} {totals.tax.toFixed(2)}</span>
-                </div>
+        </div>
                 <div style={{ display: "flex", justifyContent: "space-between", fontSize: "13px", color: "#334155", marginBottom: "6px" }}>
                   <span>Total Quantity:</span>
                   <span>{totals.qty.toLocaleString()} pcs</span>
-                </div>
-              </div>
+        </div>
+      </div>
 
               <div
                 style={{
@@ -3276,7 +3255,7 @@ export function SaleProcessFormPage() {
                 <span style={{ fontSize: "20px", fontWeight: 800, color: "#1e3a8a" }}>
                   {currencySymbol} {totals.grand.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </span>
-              </div>
+      </div>
             </div>
           </div>
 
@@ -3324,225 +3303,6 @@ export function SaleProcessFormPage() {
           </div>
         </form>
 
-        {/* Modal: Add Spare Part from Product Master */}
-        {showSpareModal && (
-          <div
-            style={{
-              position: "fixed",
-              inset: 0,
-              background: "rgba(15, 23, 42, 0.6)",
-              backdropFilter: "blur(3px)",
-              zIndex: 1000,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              padding: "20px",
-            }}
-            onClick={() => setShowSpareModal(false)}
-          >
-            <div
-              style={{
-                background: "#ffffff",
-                borderRadius: "12px",
-                width: "680px",
-                maxWidth: "95vw",
-                maxHeight: "85vh",
-                display: "flex",
-                flexDirection: "column",
-                boxShadow: "0 20px 25px -5px rgba(0,0,0,0.2), 0 10px 10px -5px rgba(0,0,0,0.1)",
-                overflow: "hidden",
-              }}
-              onClick={(e) => e.stopPropagation()}
-            >
-              {/* Modal Header */}
-              <div
-                style={{
-                  padding: "16px 20px",
-                  background: "linear-gradient(135deg, #f8fafc, #f1f5f9)",
-                  borderBottom: "1px solid #e2e8f0",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                }}
-              >
-                <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                  <div
-                    style={{
-                      width: "36px",
-                      height: "36px",
-                      borderRadius: "8px",
-                      background: "#fef3c7",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      fontSize: "18px",
-                    }}
-                  >
-                    ⚙️
-                  </div>
-                  <div>
-                    <h3 style={{ margin: 0, fontSize: "16px", fontWeight: 700, color: "#0f172a" }}>
-                      Add Spare Part from Product Master
-                    </h3>
-                    <p style={{ margin: "2px 0 0", fontSize: "12px", color: "#64748b" }}>
-                      Select spare parts registered in master catalog. Spares automatically roll up on CI & PL.
-                    </p>
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setShowSpareModal(false)}
-                  style={{
-                    background: "none",
-                    border: "none",
-                    fontSize: "20px",
-                    color: "#94a3b8",
-                    cursor: "pointer",
-                    padding: "4px",
-                  }}
-                >
-                  ✕
-                </button>
-              </div>
-
-              {/* Modal Search Bar */}
-              <div style={{ padding: "14px 20px", borderBottom: "1px solid #f1f5f9", background: "#ffffff" }}>
-                <input
-                  type="text"
-                  autoFocus
-                  placeholder="Type to search spare parts (e.g., roller, heater, blade, seal, sensor, cutter)..."
-                  value={spareSearch}
-                  onChange={(e) => setSpareSearch(e.target.value)}
-                  style={{
-                    width: "100%",
-                    padding: "9px 14px",
-                    borderRadius: "6px",
-                    border: "1.5px solid #d97706",
-                    fontSize: "13px",
-                    outline: "none",
-                    boxSizing: "border-box",
-                  }}
-                />
-              </div>
-
-              {/* Modal Results List */}
-              <div style={{ flex: 1, overflowY: "auto", padding: "10px 20px" }}>
-                {spareSearchLoading ? (
-                  <div style={{ padding: "40px", textAlign: "center", color: "#64748b" }}>
-                    ⏳ Searching Product Master for spares...
-                  </div>
-                ) : spareSearchResults.length === 0 ? (
-                  <div style={{ padding: "40px", textAlign: "center", color: "#94a3b8" }}>
-                    <div style={{ fontSize: "28px", marginBottom: "8px" }}>🔍</div>
-                    <div style={{ fontWeight: 600, color: "#475569" }}>No spare products found</div>
-                    <div style={{ fontSize: "12px", marginTop: "4px" }}>
-                      {spareSearch.trim() ? `No product matching "${spareSearch}" in master catalog.` : "Type a keyword above to find spares in Product Master."}
-                    </div>
-                  </div>
-                ) : (
-                  <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-                    {spareSearchResults.map((p) => (
-                        <div
-                          key={p.id}
-                          style={{
-                            padding: "10px 14px",
-                            borderRadius: "8px",
-                            border: "1.5px solid #fed7aa",
-                            background: "#fffaf5",
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "space-between",
-                            gap: "12px",
-                          }}
-                        >
-                          <div style={{ flex: 1 }}>
-                            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                              <span style={{ fontWeight: 700, fontSize: "13px", color: "#0f172a" }}>
-                                {p.product_name}
-                              </span>
-                              <span
-                                style={{
-                                  fontSize: "10.5px",
-                                  fontWeight: 700,
-                                  background: "#ffedd5",
-                                  color: "#c2410c",
-                                  padding: "1px 6px",
-                                  borderRadius: "4px",
-                                  border: "1px solid #fdba74",
-                                }}
-                              >
-                                Spare Part
-                              </span>
-                            </div>
-                            <div style={{ fontSize: "11px", color: "#64748b", marginTop: "3px" }}>
-                              Code: <strong>{p.product_code || "—"}</strong> &nbsp;|&nbsp; HS Code: <strong>{p.hsn_code || "8422.90.90"}</strong> &nbsp;|&nbsp; UOM: <strong>{p.uom || "PCS"}</strong>
-                            </div>
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              handleAddProduct(p, { isSpare: true });
-                              setShowSpareModal(false);
-                            }}
-                            style={{
-                              padding: "6px 14px",
-                              borderRadius: "6px",
-                              border: "none",
-                              background: "linear-gradient(135deg, #f97316, #ea580c)",
-                              color: "#ffffff",
-                              fontSize: "12px",
-                              fontWeight: 700,
-                              cursor: "pointer",
-                              display: "flex",
-                              alignItems: "center",
-                              gap: "4px",
-                              boxShadow: "0 1px 3px rgba(234,88,12,0.3)",
-                              flexShrink: 0,
-                            }}
-                          >
-                            <span>+ Add Spare</span>
-                          </button>
-                        </div>
-                      ))}
-                  </div>
-                )}
-              </div>
-
-              {/* Modal Footer */}
-              <div
-                style={{
-                  padding: "12px 20px",
-                  background: "#f8fafc",
-                  borderTop: "1px solid #e2e8f0",
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  fontSize: "11px",
-                  color: "#64748b",
-                }}
-              >
-                <span>
-                  Showing {spareSearchResults.length} master products. Items added here will be saved with <strong>is_spare=true</strong>.
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setShowSpareModal(false)}
-                  style={{
-                    padding: "6px 14px",
-                    borderRadius: "6px",
-                    border: "1px solid #cbd5e1",
-                    background: "#ffffff",
-                    color: "#475569",
-                    fontWeight: 600,
-                    cursor: "pointer",
-                  }}
-                >
-                  Close
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
       </div>
     </AppShell>
   );

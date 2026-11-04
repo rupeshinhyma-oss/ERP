@@ -19,6 +19,7 @@ import { apiGet, apiPatch, apiPost, apiPostMultipart, errorMessage } from "@/lib
 import { useLookup } from "@/lib/lookups";
 import { useToast } from "@/lib/toast";
 import { SearchableDropdown } from "@/components/SearchableDropdown";
+import { ProductTradeHistoryDrawer } from "@/components/ProductTradeHistoryDrawer";
 import type {
   ConsignmentProductItem,
   LocalPurchaseDetail,
@@ -86,15 +87,17 @@ export function LocalPurchaseFormPage() {
 
   // Remarks & Status (Confirmed / Inwarded)
   const [remarks, setRemarks] = useState("");
-  const [status, setStatus] = useState<"Confirmed" | "Inwarded">("Confirmed");
-  const [existingSlipNumber, setExistingSlipNumber] = useState<string | null>(null);
+  const [status, setStatus] = useState<string>("Pending");
+  const [showVatColumn, setShowVatColumn] = useState(true);
+  const [historyProduct, setHistoryProduct] = useState<{ id: string; name: string; code?: string | null } | null>(null);
+
 
   // Inward details (visible and configurable when status === "Inwarded")
-  const [inwardWarehouse, setInwardWarehouse] = useState("Main Godown");
-  const [inwardDate, setInwardDate] = useState(() => new Date().toISOString().slice(0, 10));
-  const [inwardTransporter, setInwardTransporter] = useState("");
-  const [inwardVehicleNo, setInwardVehicleNo] = useState("");
-  const [inwardRemarks, setInwardRemarks] = useState("");
+
+
+
+
+
 
   // Validation state (Product Master visual styling)
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -115,7 +118,45 @@ export function LocalPurchaseFormPage() {
   // Bill file attachment
   const [billFile, setBillFile] = useState<File | null>(null);
   const [billFileUrl, setBillFileUrl] = useState<string | null>(null);
+  const [billUploading, setBillUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  const handleBillFileSelect = async (selectedFile: File) => {
+    setBillFile(selectedFile);
+    setBillUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append("file", selectedFile);
+      const uploadRes = await apiPostMultipart<{ bill_file_url?: string; url?: string }>(
+        "/purchases/local/upload-bill",
+        formData
+      );
+      const uploadedUrl = uploadRes.data?.bill_file_url || uploadRes.data?.url;
+      if (uploadedUrl) {
+        setBillFileUrl(uploadedUrl);
+        setBillFile(null);
+        if (isEdit && id) {
+          try {
+            const patchRes = await apiPatch<LocalPurchaseDetail>(`/purchases/local/${id}`, {
+              bill_file_url: uploadedUrl,
+            } as any);
+            if (patchRes.data) {
+              updateLocalPurchaseInCache(patchRes.data);
+            }
+          } catch (patchErr) {
+            console.warn("Could not auto-persist bill_file_url on select:", patchErr);
+          }
+        }
+        toast("Invoice PDF uploaded to Supabase Storage!", "success");
+      } else {
+        toast("Upload completed, will attach on save.", "info");
+      }
+    } catch (err) {
+      toast(`Failed to upload bill to Supabase Storage: ${errorMessage(err)}`, "error");
+    } finally {
+      setBillUploading(false);
+    }
+  };
 
   // Product Search state
   const [productSearch, setProductSearch] = useState("");
@@ -227,8 +268,8 @@ export function LocalPurchaseFormPage() {
     setOffloadingExpense((data as any).offloading_expense || "");
     setOtherExpense((data as any).other_expense || "");
     setRemarks(data.remarks || "");
-    setExistingSlipNumber((data as any).stock_movement_number || null);
-    setStatus(((data.status === "Inwarded" || (data as any).stock_movement_number) ? "Inwarded" : "Confirmed") as "Confirmed" | "Inwarded");
+
+    setStatus((data as any).stock_movement_number ? "Inwarded" : (data.status || "Pending"));
     setBillFileUrl(data.bill_file_url || null);
     if (data.items && data.items.length > 0) {
       setItems(data.items);
@@ -1322,18 +1363,19 @@ export function LocalPurchaseFormPage() {
     try {
       let finalBillUrl = billFileUrl;
       if (billFile) {
-        try {
-          const formData = new FormData();
-          formData.append("file", billFile);
-          const uploadRes = await apiPostMultipart<{ bill_file_url?: string; url?: string }>("/purchases/local/upload-bill", formData);
-          const uploadedUrl = uploadRes.data?.bill_file_url || uploadRes.data?.url;
-          if (uploadedUrl) {
-            finalBillUrl = uploadedUrl;
-            setBillFileUrl(finalBillUrl);
-          }
-        } catch (uploadErr) {
-          console.warn("Bill file upload warning:", uploadErr);
+        const formData = new FormData();
+        formData.append("file", billFile);
+        const uploadRes = await apiPostMultipart<{ bill_file_url?: string; url?: string }>(
+          "/purchases/local/upload-bill",
+          formData
+        );
+        const uploadedUrl = uploadRes.data?.bill_file_url || uploadRes.data?.url;
+        if (!uploadedUrl) {
+          throw new Error("Failed to upload bill document to Supabase Storage.");
         }
+        finalBillUrl = uploadedUrl;
+        setBillFileUrl(finalBillUrl);
+        setBillFile(null);
       }
 
       const payload: LocalPurchasePayload = {
@@ -1370,20 +1412,21 @@ export function LocalPurchaseFormPage() {
         })),
       };
 
-      let savedPurchaseId: string = id || "";
+      const _savedPurchaseId: string = id || "";
+      void _savedPurchaseId;
       let savedDetail: LocalPurchaseDetail | null = null;
       if (isEdit && id) {
         const patchRes = await apiPatch<LocalPurchaseDetail>(`/purchases/local/${id}`, payload);
-        savedPurchaseId = id;
+
         savedDetail = patchRes.data || null;
       } else {
         const createRes = await apiPost<LocalPurchaseDetail>("/purchases/local", payload);
-        savedPurchaseId = createRes.data?.id || "";
+
         savedDetail = createRes.data || null;
       }
 
       // If status is Inwarded, automatically execute warehouse stock inward
-      if (status === "Inwarded" && savedPurchaseId) {
+      /* Status & warehouse inward moved to 3-dot action menu on list page
         try {
           const inwardPayload = {
             movement_date: inwardDate || invoiceDate,
@@ -1428,6 +1471,8 @@ export function LocalPurchaseFormPage() {
         toast(isEdit ? "Local purchase updated successfully!" : "Local purchase created successfully!", "success");
       }
 
+      */
+      toast(isEdit ? "Local purchase updated successfully!" : "Local purchase created successfully!", "success");
       // CRITICAL: Immediately update in-memory cache so navigating back to list
       // and clicking the blue link shows the freshly updated data at 0ms!
       if (savedDetail) {
@@ -1448,7 +1493,14 @@ export function LocalPurchaseFormPage() {
         <main className="page" style={{ textAlign: "center", padding: "80px 20px", color: "#64748b" }}>
           <div style={{ fontSize: "24px", marginBottom: "12px" }}>⏳</div>
           <div style={{ fontSize: "15px", fontWeight: 600 }}>Loading purchase details...</div>
-        </main>
+          <ProductTradeHistoryDrawer
+          productId={historyProduct?.id || null}
+          productName={historyProduct?.name}
+          productCode={historyProduct?.code}
+          open={Boolean(historyProduct?.id)}
+          onClose={() => setHistoryProduct(null)}
+        />
+      </main>
       </AppShell>
     );
   }
@@ -1835,7 +1887,7 @@ export function LocalPurchaseFormPage() {
             <div
               style={{
                 display: "grid",
-                gridTemplateColumns: "minmax(120px, 0.8fr) minmax(150px, 1fr) minmax(180px, 1.2fr) minmax(220px, 1.5fr)",
+                gridTemplateColumns: "minmax(130px, 0.8fr) minmax(200px, 1.2fr) minmax(240px, 1.5fr)",
                 gap: "16px",
                 paddingTop: "14px",
                 borderTop: "1px dashed #e2e8f0",
@@ -1871,7 +1923,8 @@ export function LocalPurchaseFormPage() {
                 </span>
               </div>
 
-              {/* 2. Status (Confirmed / Inwarded) */}
+              {/* Status field moved to list 3-dot action menu
+              <div>
               <div>
                 <label style={{ fontSize: "12.5px", fontWeight: 700, color: "#334155", marginBottom: "6px", display: "block" }}>
                   Status <span style={{ color: "#ef4444" }}>*</span>
@@ -1900,6 +1953,8 @@ export function LocalPurchaseFormPage() {
                 </span>
               </div>
 
+              </div>
+              */}
               {/* 2. Invoice Total Value with VAT */}
               <div>
                 <label style={{ fontSize: "12.5px", fontWeight: 700, color: "#0f172a", marginBottom: "6px", display: "block" }}>
@@ -1962,24 +2017,25 @@ export function LocalPurchaseFormPage() {
                 <label style={{ fontSize: "12.5px", fontWeight: 700, color: "#334155", marginBottom: "6px", display: "block" }}>
                   Bill Document File <span style={{ fontWeight: 400, color: "#64748b" }}>(PDF, Image, Excel - Optional)</span>
                 </label>
-                <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
-                  <div style={{ position: "relative", flex: 1 }}>
+                <div style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
+                  <div style={{ position: "relative", flex: 1, minWidth: "180px" }}>
                     <input
                       ref={fileInputRef}
                       type="file"
                       accept=".pdf,.xlsx,.xls,.csv,.png,.jpg,.jpeg,.webp"
+                      disabled={billUploading}
                       onChange={(e) => {
                         if (e.target.files && e.target.files[0]) {
-                          setBillFile(e.target.files[0]);
+                          void handleBillFileSelect(e.target.files[0]);
                         }
                       }}
                       style={{
                         width: "100%",
                         padding: "6px 10px",
                         fontSize: "12px",
-                        border: "1.5px solid #94a3b8",
+                        border: billFileUrl ? "1.5px solid #10b981" : "1.5px solid #94a3b8",
                         borderRadius: "6px",
-                        background: "#f8fafc",
+                        background: billFileUrl ? "#f0fdf4" : "#f8fafc",
                         boxSizing: "border-box",
                       }}
                     />
@@ -2002,49 +2058,95 @@ export function LocalPurchaseFormPage() {
                           fontWeight: 700,
                           padding: "2px 4px",
                         }}
-                        title="Clear file"
+                        title="Clear selected file"
                       >
                         ✕
                       </button>
                     )}
                   </div>
 
-                  {billFileUrl && (
-                    <a
-                      href={billFileUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                      download
+                  {billUploading && (
+                    <span
                       style={{
-                        background: "#ecfdf5",
-                        color: "#059669",
-                        border: "1.5px solid #a7f3d0",
-                        padding: "7px 12px",
-                        borderRadius: "6px",
-                        fontWeight: 700,
                         fontSize: "12px",
-                        cursor: "pointer",
-                        display: "inline-flex",
-                        alignItems: "center",
-                        gap: "5px",
+                        fontWeight: 600,
+                        color: "#0284c7",
+                        background: "#e0f2fe",
+                        padding: "6px 10px",
+                        borderRadius: "6px",
                         whiteSpace: "nowrap",
-                        textDecoration: "none",
-                        boxSizing: "border-box",
                       }}
-                      title="Download bill document stored in Supabase"
                     >
-                      📥 Bill
-                    </a>
+                      ⏳ Uploading to Supabase...
+                    </span>
+                  )}
+
+                  {billFileUrl && !billUploading && (
+                    <div style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>
+                      <a
+                        href={billFileUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        style={{
+                          background: "#ecfdf5",
+                          color: "#059669",
+                          border: "1.5px solid #6ee7b7",
+                          padding: "7px 12px",
+                          borderRadius: "6px",
+                          fontWeight: 700,
+                          fontSize: "12px",
+                          cursor: "pointer",
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: "5px",
+                          whiteSpace: "nowrap",
+                          textDecoration: "none",
+                          boxSizing: "border-box",
+                        }}
+                        title="Open / Download Invoice PDF from Supabase Storage"
+                      >
+                        📄 View / Download Bill
+                      </a>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setBillFileUrl(null);
+                          setBillFile(null);
+                          if (fileInputRef.current) fileInputRef.current.value = "";
+                        }}
+                        style={{
+                          background: "#fef2f2",
+                          color: "#dc2626",
+                          border: "1px solid #fecaca",
+                          borderRadius: "6px",
+                          padding: "6px 8px",
+                          fontSize: "11px",
+                          fontWeight: 700,
+                          cursor: "pointer",
+                        }}
+                        title="Remove attached bill"
+                      >
+                        ✕
+                      </button>
+                    </div>
                   )}
                 </div>
-                <span style={{ fontSize: "11px", color: "#64748b", marginTop: "4px", display: "block" }}>
-                  Optional bill attachment linked upon saving
-                </span>
+                {billFileUrl ? (
+                  <span style={{ fontSize: "11px", color: "#059669", fontWeight: 600, marginTop: "4px", display: "block" }}>
+                    ✓ Attached in Supabase Storage:{" "}
+                    {decodeURIComponent(billFileUrl.split("/").pop() || "invoice.pdf").replace(/^[a-f0-9]{12}_/i, "")}
+                  </span>
+                ) : (
+                  <span style={{ fontSize: "11px", color: "#64748b", marginTop: "4px", display: "block" }}>
+                    Optional bill attachment stored in Supabase Storage
+                  </span>
+                )}
               </div>
             </div>
           </div>
 
-          {/* INWARD STOCK DETAILS CARD (Shown when Status is Inwarded) */}
+          {/* INWARD STOCK DETAILS CARD (Moved to 3-dot menu on list page)
+          {status === "Inwarded" && (
           {status === "Inwarded" && (
             <div
               className="card"
@@ -2250,6 +2352,7 @@ export function LocalPurchaseFormPage() {
             </div>
           )}
 
+          */}
           {/* CARD 2: Value-Based (VB) Landing Expense Engine */}
           <div
             className="card"
@@ -2594,6 +2697,28 @@ export function LocalPurchaseFormPage() {
                 <span style={{ fontSize: "12px", color: "#64748b" }}>
                   • Amounts in {currency} ({currencySymbol})
                 </span>
+                <button
+                  type="button"
+                  onClick={() => setShowVatColumn((prev) => !prev)}
+                  style={{
+                    padding: "3px 10px",
+                    fontSize: "11.5px",
+                    fontWeight: 700,
+                    color: showVatColumn ? "#1e40af" : "#475569",
+                    background: showVatColumn ? "#eff6ff" : "#ffffff",
+                    border: showVatColumn ? "1px solid #93c5fd" : "1px solid #cbd5e1",
+                    borderRadius: "6px",
+                    cursor: "pointer",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "4px",
+                  }}
+                  title={showVatColumn ? "Hide VAT % column" : "Show VAT % column"}
+                >
+                  {showVatColumn ? "🙈 Hide VAT % Column" : "👁️ Show VAT % Column"}
+                </button>
+                <span>
+                </span>
                 {planningLoading && (
                   <span style={{ fontSize: "12px", color: "#0284c7", fontWeight: 600, display: "inline-flex", alignItems: "center", gap: "4px" }}>
                     ⏳ Syncing Shipment Planning...
@@ -2783,8 +2908,9 @@ export function LocalPurchaseFormPage() {
                     <th style={{ width: "115px", minWidth: "105px", textAlign: "center" }}>HSN Code</th>
                     <th style={{ width: "125px", minWidth: "115px", textAlign: "center" }}>Qty</th>
                     <th style={{ width: "125px", minWidth: "115px", textAlign: "right" }}>Unit Rate</th>
-                    <th style={{ width: "85px", minWidth: "80px", textAlign: "right" }}>VAT %</th>
-                    <th style={{ width: "120px", minWidth: "115px", textAlign: "right" }}>Item Total</th>
+                    {showVatColumn && <th style={{ width: "85px", minWidth: "80px", textAlign: "right" }}>VAT %</th>}
+                    <th style={{ width: "135px", minWidth: "125px", textAlign: "right" }}>Item Total (Without VAT)</th>
+                    <th style={{ width: "135px", minWidth: "125px", textAlign: "right" }}>Item Total (With VAT)</th>
                     <th style={{ width: "110px", minWidth: "100px", textAlign: "right", background: "#eff6ff" }}>Expense Per Unit</th>
                     <th style={{ width: "135px", minWidth: "125px", textAlign: "right", background: "#eff6ff" }}>Unit Landing Rate (VB)</th>
                     <th style={{ width: "140px", minWidth: "130px", textAlign: "right", background: "#eff6ff" }}>Total Landing Rate (VB)</th>
@@ -2794,7 +2920,7 @@ export function LocalPurchaseFormPage() {
                 <tbody>
                   {calculations.calculatedItems.length === 0 ? (
                     <tr>
-                      <td colSpan={11} style={{ padding: "35px 20px", textAlign: "center", color: "#64748b" }}>
+                      <td colSpan={showVatColumn ? 12 : 11} style={{ padding: "35px 20px", textAlign: "center", color: "#64748b" }}>
                         <div style={{ fontSize: "14px", fontWeight: 600, color: "#475569", marginBottom: "4px" }}>
                           No items in this purchase
                         </div>
@@ -2823,7 +2949,56 @@ export function LocalPurchaseFormPage() {
                         <td>
                           {item.product_id ? (
                             <div>
-                              <div style={{ fontWeight: 700, color: "#0f172a", fontSize: "13px" }}>
+                              <div style={{ display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap" }}>
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setHistoryProduct({
+                                      id: item.product_id!,
+                                      name: item.product_name,
+                                      code: item.product_code,
+                                    })
+                                  }
+                                  style={{
+                                    background: "none",
+                                    border: "none",
+                                    padding: 0,
+                                    fontWeight: 700,
+                                    color: "#2563eb",
+                                    fontSize: "13px",
+                                    cursor: "pointer",
+                                    textAlign: "left",
+                                    textDecoration: "underline",
+                                  }}
+                                  title="Click to view Local Purchase history & past purchase prices for this product"
+                                >
+                                  {item.product_name}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setHistoryProduct({
+                                      id: item.product_id!,
+                                      name: item.product_name,
+                                      code: item.product_code,
+                                    })
+                                  }
+                                  style={{
+                                    padding: "1px 6px",
+                                    fontSize: "10.5px",
+                                    fontWeight: 700,
+                                    background: "#eff6ff",
+                                    color: "#1d4ed8",
+                                    borderRadius: "4px",
+                                    border: "1px solid #bfdbfe",
+                                    cursor: "pointer",
+                                  }}
+                                  title="View purchase count & historical rates"
+                                >
+                                  📜 History
+                                </button>
+                              </div>
+                              <div style={{ display: "none" }}>
                                 {item.product_name}
                               </div>
                               <div style={{ display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap", marginTop: "2px" }}>
@@ -3041,6 +3216,7 @@ export function LocalPurchaseFormPage() {
                         </td>
 
                         {/* VAT % */}
+                        {showVatColumn && (
                         <td>
                           <input
                             type="number"
@@ -3061,11 +3237,16 @@ export function LocalPurchaseFormPage() {
                           />
                         </td>
 
-                        {/* Basic Total */}
+                        )}
+                        {/* Item Total (Without VAT) & Item Total (With VAT) */}
                         <td style={{ textAlign: "right", fontWeight: 700, color: "#0f172a" }}>
                           {currencySymbol} {item.item_total.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                          <div style={{ fontSize: "10.5px", color: "#64748b" }}>
-                            + VAT: {currencySymbol}{item.vat_amount.toFixed(2)}
+                        </td>
+                        <td style={{ textAlign: "right", fontWeight: 700, color: "#0f172a" }}>
+                          {currencySymbol} {item.gross_total.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          <div style={{ display: "none" }}>
+
+
                           </div>
                         </td>
 
@@ -3117,9 +3298,12 @@ export function LocalPurchaseFormPage() {
                       <td style={{ textAlign: "center", fontSize: "13.5px", fontWeight: 800, color: "#0f172a" }}>
                         {Number(calculations.totalQuantity).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
                       </td>
-                      <td colSpan={2}></td>
+                      <td colSpan={showVatColumn ? 2 : 1}></td>
                       <td style={{ textAlign: "right", color: "#0f172a", fontSize: "13.5px" }}>
                         {currencySymbol} {calculations.itemsTotalBasic.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </td>
+                      <td style={{ textAlign: "right", color: "#0f172a", fontSize: "13.5px" }}>
+                        {currencySymbol} {calculations.itemsTotalGross.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </td>
                       <td style={{ textAlign: "right", color: "#475569", background: "#e0edff" }}>
                         {currencySymbol} {calculations.totalExpenses.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
@@ -3714,6 +3898,13 @@ export function LocalPurchaseFormPage() {
             </div>
           </div>
         )}
+        <ProductTradeHistoryDrawer
+          productId={historyProduct?.id || null}
+          productName={historyProduct?.name}
+          productCode={historyProduct?.code}
+          open={Boolean(historyProduct?.id)}
+          onClose={() => setHistoryProduct(null)}
+        />
       </main>
     </AppShell>
   );

@@ -46,6 +46,28 @@ export function LocalPurchaseInwardModal({
 
   // Items state
   const [items, setItems] = useState<InwardItemRow[]>([]);
+  const [warehouseOptions, setWarehouseOptions] = useState<{ id: string; name: string }[]>([
+    { id: "default-1", name: "Main Godown" },
+    { id: "default-2", name: "Factory Staging Yard" },
+    { id: "default-3", name: "Transit Bay" },
+    { id: "default-4", name: "Customs Bonded Area" },
+  ]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    apiGet<{ id: string; name: string }[]>("/masters/warehouses/all")
+      .then((res) => {
+        if (Array.isArray(res.data) && res.data.length > 0) {
+          setWarehouseOptions(res.data);
+          setWarehouseLocation((prev) =>
+            res.data!.some((w) => w.name === prev) ? prev : res.data![0].name
+          );
+        }
+      })
+      .catch(() => {
+        // Keep fallback options
+      });
+  }, [isOpen]);
 
   useEffect(() => {
     if (!isOpen || !purchaseId) {
@@ -317,10 +339,14 @@ export function LocalPurchaseInwardModal({
                         fontWeight: 600,
                       }}
                     >
-                      <option value="Main Godown">Main Godown (Default)</option>
-                      <option value="Factory Staging Yard">Factory Staging Yard</option>
-                      <option value="Transit Bay">Transit Bay</option>
-                      <option value="Customs Bonded Area">Customs Bonded Area</option>
+                      {warehouseOptions.map((wh) => (
+                        <option key={wh.id} value={wh.name}>
+                          {wh.name}
+                        </option>
+                      ))}
+
+
+
                     </select>
                   </div>
 

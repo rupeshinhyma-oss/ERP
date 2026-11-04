@@ -1406,6 +1406,10 @@ Manage complete vendor team directory:
 - [ ] **Movement Deletion:** In Inward or Outward register, click `Delete` on a movement &rarr; confirm prompt *"Are you sure you want to permanently delete movement ...?"* &rarr; verify movement is removed from register, deleted via `DELETE /api/v1/stock/movements/{id}`, and stock balances update in 0ms.
 
 - [ ] **Inward Cancellation & Deletion Safeguard:** Attempt to cancel or delete an inward movement whose items have already been dispatched &rarr; verify operation is rejected with `BadRequestException` to prevent driving stock into deficit.
+- [ ] **Dynamic Warehouse Master Dropdown (`/masters/warehouses`):** Navigate to `/masters/warehouses` &rarr; create a new active warehouse &rarr; open Inward Modal in Local Purchase or Outward Modal in Sale Process &rarr; verify `Destination Warehouse *` dropdown dynamically lists the active warehouses from Warehouse Master.
+- [ ] **Stock Movement Invoice No Hyperlink & Action Restrictions:** In `/inventory/stock-movements` Inward and Outward registers, verify the first column (`Invoice No`) shows only the Invoice / Order number as a clickable blue hyperlink that opens `StockMovementDetailModal`, and the `Actions` (`View`, `Edit`, `Cancel`, `Delete`) column is removed.
+- [ ] **Product Hyperlink & Complete Trade History (Purchase + Sales History):** In `Current Stock Ledger` or inside `StockMovementDetailModal`, click any product name hyperlink or `📜 History` button &rarr; verify `ProductTradeHistoryDrawer` opens showing both `🛒 Purchase History` and `🏷️ Sales History` tabs.
+- [ ] **Damaged Qty Column in Current Stock Ledger (Option A):** In `Current Stock Ledger`, verify the `Damaged Qty` column displays total inward damaged units while `Current In-Stock` reflects only net accepted good units.
 
 
 
@@ -4766,6 +4770,79 @@ A standardized suite of 8 production-grade Excel (`.xlsx`) files is maintained d
 | **TC-INSTANT-ITEMS-01** | 0ms Product Line Items in Sale Process & Local Purchase Modals | Open `/sale/process` or `/purchase/local` and click any order/invoice row to open its detail modal. | Product line items render immediately in 0ms on first frame without flashing `0 line items` or `"No line items recorded."` for 1–2 seconds. |
 | **TC-SM-USERS-UI-01** | Stock Movement & Users Top-Right Funnel Filter Toggle | Open `/inventory/stock-movements` and `/users`. Verify page header title, top-right funnel filter button, inline quick search, and collapsible `Filter Options` card with `Reset Filters`. | Both pages match the global ERP header and collapsible filter card standard. |
 | **TC-IMP-EXP-SVG-01** | Standardized `Imp / Exp` SVG Icon Badges | Open any Master page (`Products`, `Categories`, `Sub-Categories`, `Brands`, etc.), `Suppliers`, `Buyers`, `Inquiries`, `Product Prices`, or `Local Purchase` and click `Imp / Exp` or `Export`. | Dropdown displays rotating SVG chevron and clean SVG icon badges (`SAMPLE FILE` slate document, `IMPORT` blue upload tray, `EXPORT` green download tray) matching `Inhyma_ERP`. |
+| **TC-SALE-STATUS-01** | Sale Process Status Workflow (Confirmed & 3-Dot Action Menu) | Open /sale/process. Verify tabs: ALL, PENDING, CONFIRMED, DISPATCHED, LR, CANCELLED (Admin Approved is removed). On a Pending order row, click ⋮ -> ✅ Confirm Order. | Order status updates to Confirmed. CONFIRMED tab count increases; order is eligible for Outward Stock Dispatch. |
+| **TC-SALE-DATES-01** | ETD Origin Date & ETA Port Date in Sale Process | Open /sale/process/new. Scroll to Shipping & Logistics Details. Enter ETD Origin Date and ETA Port Date. Save order. | Order saves successfully; dates are persisted and displayed under the Logistics Info column on /sale/process. |
+| **TC-SALE-DISPATCH-01** | Dispatch only from Confirmed | Open `/sale/process`. Open ⋮ on a Pending order, then on a Confirmed order. | Pending menu has no Dispatch option. Confirmed menu shows `📤 Dispatch (Outward Stock)`; completing it sets status to DISPATCHED and creates the outward stock slip. |
+| **TC-SALE-LR-01** | Mark LR Received (optional LR No) | On a Dispatched order click ⋮ -> `🚚 Mark LR Received`. Leave LR No empty (or enter one) and save. | Status changes to LR; LR No (if entered) shows under Logistics Info. Works with an empty LR No. |
+| **TC-SALE-CANCEL-01** | Cancel Pending / Confirmed order | On a Pending or Confirmed order click ⋮ -> `❌ Cancel Order`, enter a reason, confirm. | Order moves to CANCELLED tab, reason saved in remarks, no stock change. Menu no longer shows Edit, Dispatch, or Reopen. |
+| **TC-SALE-CANCEL-02** | Cancel blocked after dispatch | Open ⋮ on a Dispatched or LR order. | No Cancel, Edit, or Delete option is shown; backend also rejects a cancel request with a clear message. |
+| **TC-SALE-TOOLBAR-01** | Item table toolbar clean-up | Open `/sale/process/new` or edit an order and scroll to Planned Line Items. | Only the `Search & add product from master` box is shown. No `Costing & Supplier Columns`, `Rate ¥`, `Apply Rate`, or `+ Add Spare from Master` controls. Costing columns are always visible. |
+| **TC-SALE-SPARE-TOGGLE-01** | Convert Spare Part to Product per Sale Order (Option A) | Load a consignment or add a Spare Part item in `/sale/process/new`. Click `⇄ Make Product` next to the `Spare Part` badge, then save the order. | Row converts to a standalone Product (`is_spare = false`) in that Sale Order and on CI/PL documents (`↩ Make Spare` can revert it while editing), while the Product Master record remains a Spare Part for future orders. |
+| **TC-LP-STATUS-01** | Local Purchase Status Control via 3-Dot Action Menu | Open `/purchase/local/new` and verify no Status field is inside the form; save a new purchase (defaults to `Pending`). On `/purchase/local`, open `⋮` on the row and click `✅ Mark as Confirmed`, then `📦 Mark as Inward (Stock In)`. | Purchase transitions cleanly from `Pending` -> `Confirmed` -> `Inwarded` via the 3-dot (`⋮`) action menu on the list table. |
+| **TC-LP-VAT-TOTALS-01** | Local Purchase VAT % Toggle & Dual Item Total Columns | In `/purchase/local/new`, inspect the `PRODUCT ITEM` table and click `🙈 Hide VAT % Column` / `👁️ Show VAT % Column`. | `VAT %` column toggles visibility cleanly, and both `Item Total (Without VAT)` and `Item Total (With VAT)` columns display accurate row and Grand Total amounts. |
+| **TC-LP-HISTORY-LINK-01** | Local Purchase Product History Hyperlink | In `/purchase/local/new` or edit mode, click a product name link or `📜 History` badge in the `PRODUCT ITEM` table. | `ProductTradeHistoryDrawer` opens showing historical Local Purchase invoices, purchase count, supplier names, dates, and unit/landed rates for that product. |
+| **TC-PLAN-DISPATCH-DEL-01** | Delete Consignment Column Group on Dispatch or LR Only | Create/confirm a Sale Order linked to a consignment column (e.g. `Mum 48`). Verify `Mum 48` remains in `/planning` when `Pending`, `Confirmed`, or `Cancelled`. Dispatch the order (`Dispatched`) or mark `LR`. | The `Mum 48` consignment column group (`Mum 48`, `Mum48 Remarks`, `NO. OF PKG MUM48`, `TOTAL WEIGHT MUM48`, `TOTAL CBM MUM48`) is automatically removed from `/planning` only on `Dispatched` or `LR`. |
+| **TC-PLAN-STUFFING-DATE-01** | Stuffing Date Display Below Consignment Column Header | Open `/planning`. On a consignment column header (e.g. `MUM 49`), click `✎`, pick or type a Stuffing Date (e.g. `25/10/2026`), and click `Save`. | The Stuffing Date `25/10/2026` is visibly displayed in a badge directly below `MUM 49` inside the column header cell; clicking the badge re-opens the popover to edit or clear it. |
 
 ---
 *End of Master Features & Testing Specification Manual. Maintained for Yinglima Enterprise ERP. Last updated: October 2026 (Sections 42-43: Multi-ERP Ecosystem SSO Bridge, Canonical ERP Keys, Dynamic Registry Routing, Central Session Resilience, Master Runner Process Supervision, and Scoped Reload).*
+
+
+---
+
+## Financial Report & Payment Planner (`/finance/report`) — Test Cases
+1. **Confirm-Only Entry Rule**:
+   - Create a Local Purchase or Sale Process order in `Pending` status -> verify it does **not** appear in `/finance/report`.
+   - Change its status to `Confirmed` -> verify it automatically appears in `/finance/report` under the **Pending** tab of its section (`Local Purchase` or `Sales Process`).
+2. **Recording Partial & Full Payments (`⋮ -> Add Payment`)**:
+   - Click `⋮ -> Add Payment` on a `Pending` row, click `30% of Total`, enter a payment date & mode (`RMB A/C` or `USD Transaction A/C`), and save -> verify `Paid Amount` (green) increases, `Balance Amount` (red) decreases, and the entry remains in `Pending`.
+   - Click `⋮ -> Add Payment` again, click `100% Full Balance`, and save -> verify `Balance Amount` becomes `0.00` and the entry automatically moves from the **Pending** tab to the **Cleared** tab.
+3. **Payment History & Deletion (`⋮ -> Payment History`)**:
+   - Open `Payment History`, delete a recorded payment installment -> verify the balance is recalculated and the entry returns to `Pending` if balance > 0.
+4. **Editing Schedule, BL & Forwarder/Agent Freight Bill (`⋮ -> Edit BL & Agent Bill`)**:
+   - Update `Payment Terms`, `Due Date`, `BL Details`, `BL Status` (`Telex`), `Agent Name` (`Agnes`), `Local Charge (RMB)`, `Freight Charge (RMB)`, and `Bill Status` (`Paid` / `Pending`) -> verify the row and KPI summary update immediately.
+5. **Multi-Sheet Excel Planner Export (`Export`)**:
+   - Click `Export` in the top-right header -> verify a 4-sheet `.xlsx` workbook (`Financial Summary`, `Local Purchase (Suppliers)`, `Sales & Agent Schedule`, `Payment Transactions`) downloads cleanly.
+6. **6-KPI Card Active Border & Stage Filter Sync (`handleKpiSelect`)**:
+   - Click each of the 6 KPI summary cards (`LOCAL PURCHASE — ALL`, `LOCAL PURCHASE — PAID`, `LOCAL PURCHASE — BALANCE`, `SALES PROCESS — ALL`, `SALES PROCESS — RECEIVED`, `SALES PROCESS — BALANCE`) -> verify the blue active border (`1.5px solid #3b82f6`) moves to the exact KPI card clicked and the table below switches to the matching section and stage (`All`, `Cleared`, `Pending`).
+
+
+### Test Case LP-BILL-01: Local Purchase Bill PDF Upload & Edit Persistence in Supabase Storage
+1. Navigate to **PURCHASE -> Local Purchase** (`/purchase/local`) and click **Edit** on an existing Local Purchase (e.g., `INH-20261`) that does not yet have a bill attached.
+2. In **Procurement & Invoice Essentials -> Bill Document File**, click **Choose File** and select an invoice PDF.
+3. Verify that:
+   - The file immediately uploads to Supabase Storage (`purchase-bills` bucket) and displays a toast `"Invoice PDF uploaded to Supabase Storage!"`.
+   - A green **`📄 View / Download Bill`** button and **`✓ Attached in Supabase Storage: <filename>.pdf`** indicator appear next to the file input.
+4. Click **Save Changes** to return to the Local Purchase list, then click **Edit** on the same Local Purchase again.
+5. Verify that **`📄 View / Download Bill`** and the attached PDF filename remain visible and clicking **`📄 View / Download Bill`** opens the PDF from Supabase Storage (`https://.../storage/v1/object/public/purchase-bills/...`).
+
+
+### Test Case CONS-OVW-01: Unified Consignment Overview Module (`/finance/consignment-overview`)
+1. Navigate to **FINANCE -> Consignment Overview** (`/finance/consignment-overview`) in the left sidebar.
+2. Verify the **Consignment Overview List View** displays all confirmed consignments (e.g., `Mum 51`, `Mum 48`, `GJ15`, `Mum 1`) with branch tabs (`All`, `Inhyma Mumbai (INM)`, etc.), stage filter buttons (`All`, `Pending`, `Cleared`), `Gallery Docs` counter (`📄 X / 16 Docs`), `Cargo Checklist` counter (`✓ X / 12 Yes`), and `Finance Status` badge.
+3. Click any consignment code (e.g., **`Mum 51`**) or click **`Open Overview`**.
+4. Verify the **Consignment Overview Detail View** displays all 4 unified sections on one page:
+   - **Finance Planning**: Shows linked `Supplier`, `Customer`, and `Cargo Forwarder` rows with amounts, payment terms, `⬇ View Bill` links, and `Pending` / `Cleared` badges.
+   - **Consignment Gallery (Editable)**: Shows all 16 China/Global export document cards. Click **`Choose File`** on any slot (e.g., `Proforma Invoice (PI)` or `Final Bill of Lading (BL)`) -> verify the file uploads to Supabase Storage, displays the `☁⬇` view/download button and `🗑` delete button, and increments the uploaded counter.
+   - **Cargo Status — Shipment Checklist Details (Editable)**: Click any of the 12 checklist cards (e.g., `Draft Approved BL Received`, `Listed with Forwarder / Booking Confirmed`) -> verify the badge flips from red **`No`** to green **`Yes`** in **0ms** and persists across page reloads. Enter a `Cargo Remark` or `ETD Origin` / `ETA Destination Port` date -> verify it saves cleanly.
+   - **Product Summary**: Verify all product line items, quantities, suppliers/source documents, and consignment/batch codes are listed at the bottom.
+
+
+
+### Test Case VAT-RET-01: China Export VAT Return Module (`/finance/vat-return`)
+1. Navigate to **FINANCE -> VAT Return** (`/finance/vat-return`) in the left sidebar.
+2. **Live Sales Process Sync & Formula Verification**:
+   - Verify all Confirmed / Dispatched / LR **Sales Process** orders (`EXP` orders) appear automatically in the summary ledger with `Total RMB Incl. VAT` and `Total VAT Return (¥)` calculated as `(Total RMB Incl. VAT / 1.13) * 0.13` (or the product's configured refund VAT %).
+3. **Interactive KPI Cards & Financial Year Tabs**:
+   - Click each of the 4 KPI cards (`TOTAL VAT RETURN — ALL`, `VAT AMOUNT RECEIVED`, `PARTIAL VAT RECEIVED`, `BALANCE VAT TO BE RECEIVED`) -> verify the active blue border (`1.5px solid #3b82f6`) moves to the clicked card and filters the table to the matching stage (`All`, `Received`, `Partial Received`, `Pending`).
+   - Click the Financial Year pills (`All Years`, `FY 2026-2027`, `FY 2025-2026`, `FY 2024-2025`, `FY 2023-2024`) -> verify the table and KPI totals filter immediately.
+4. **Per-Shipment Product & Supplier Breakdown Modal (Table 2)**:
+   - Click any **`EXP No.`** link in the first column -> verify the **Product & Supplier VAT Breakdown** modal opens showing `ORDER NO.` (`YL-EXP...`), `Contract Date`, `Contract No.`, `Supplier`, `Product`, `Qty`, `RMB Price w/ VAT`, `Total RMB Incl. VAT`, `USD Price`, `Rebate %` (`13%`, `9%`, `6%`, `0%`), and `VAT To Be Returned (¥)`.
+   - Change an item's `Rebate %` from `13%` to `9%` or `0% (No VAT)` and click **Save Breakdown & Sync VAT Total** -> verify the item's `VAT To Be Returned (¥)` and the shipment's `Total VAT Return (¥)` update immediately.
+5. **Recording Full & Partial VAT Receipts (`⋮ -> Record VAT Receipt`)**:
+   - Click `⋮ -> Record VAT Receipt (Full / Partial)` on a `PENDING` shipment, enter a partial RMB amount, and save -> verify status becomes `PARTIAL RECEIVED` (amber), `VAT Received (¥)` and `Partial Amount` update, and `Balance VAT (¥)` decreases.
+   - Record the remaining balance (or delete the receipt via `⋮ -> Receipt History`) -> verify status transitions to `RECEIVED` (green) or reverts to `PENDING` (red).
+6. **Excel / CSV Import & 2-Sheet Export (`Imp / Exp ▾`)**:
+   - Click **`Imp / Exp ▾ -> Sample File (.csv)`** -> verify `vat_return_sample.csv` downloads.
+   - Click **`Imp / Exp ▾ -> Import Excel / CSV`** and select the `RETURNED VAT LIST Yinglima` `.xlsx` file (or a CSV file) -> verify both Table 1 summary rows (`EXP2023 - 01` ... `EXP2026 - 97`) and Table 2 product breakdown rows (`YL-EXP...`) import cleanly without duplicates.
+   - Click **`Imp / Exp ▾ -> Export 2-Sheet Excel (.xlsx)`** -> verify a 2-sheet workbook (`VAT Return Summary` + `Product VAT Breakdown`) downloads cleanly.

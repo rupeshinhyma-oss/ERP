@@ -11,7 +11,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
 import { Can } from "@/components/ui";
-import { apiDelete, apiGet, downloadExport, errorMessage } from "@/lib/api";
+import { apiDelete, apiGet, apiPatch, downloadExport, errorMessage } from "@/lib/api";
 import { useLookup } from "@/lib/lookups";
 import { useToast } from "@/lib/toast";
 import { useConfirm } from "@/lib/confirm";
@@ -80,6 +80,7 @@ export function SaleProcessListPage() {
   const [metrics, setMetrics] = useState<SaleSummaryMetrics>(() => initialMetricsCache || {
     all: { count: 0, amount: 0 },
     pending: { count: 0, amount: 0 },
+    confirmed: { count: 0, amount: 0 },
     sales_confirmed: { count: 0, amount: 0 },
     admin_approved: { count: 0, amount: 0 },
     dispatched: { count: 0, amount: 0 },
@@ -93,6 +94,10 @@ export function SaleProcessListPage() {
   const [actionMenuPos, setActionMenuPos] = useState<{ top: number; right: number } | null>(null);
   const [viewOrderId, setViewOrderId] = useState<string | null>(null);
   const [dispatchOrderId, setDispatchOrderId] = useState<string | null>(null);
+  const [statusModal, setStatusModal] = useState<{ type: "lr" | "cancel"; order: SaleOrder } | null>(null);
+  const [statusModalLrNo, setStatusModalLrNo] = useState("");
+  const [statusModalRemarks, setStatusModalRemarks] = useState("");
+  const [statusModalSaving, setStatusModalSaving] = useState(false);
   const [exporting, setExporting] = useState(false);
 
   // Sync deep link query params (from notifications or external links)
@@ -114,12 +119,16 @@ export function SaleProcessListPage() {
       setOpenActionId(null);
       setActionMenuPos(null);
     };
+
+
     window.addEventListener("click", closeMenu);
     window.addEventListener("scroll", closeMenu, true);
     return () => {
       window.removeEventListener("click", closeMenu);
       window.removeEventListener("scroll", closeMenu, true);
     };
+
+
   }, [openActionId]);
 
   // Lookups
@@ -219,6 +228,8 @@ export function SaleProcessListPage() {
     }
   };
 
+
+
   // Export handler
   const handleExport = async () => {
     setExporting(true);
@@ -245,6 +256,57 @@ export function SaleProcessListPage() {
     }
   };
 
+
+
+  const handleUpdateStatus = async (
+    orderId: string,
+    newStatus: string,
+    extra?: { remarks?: string | null; lr_no?: string | null }
+  ): Promise<boolean> => {
+    const labels: Record<string, string> = {
+      confirmed: "Confirmed",
+      pending: "Pending",
+      cancelled: "Cancelled",
+      lr: "LR Received",
+    };
+    try {
+      await apiPatch(`/sales/orders/${orderId}/status`, { status: newStatus, ...(extra || {}) });
+      toast(`Order status changed to ${labels[newStatus] || newStatus.toUpperCase()}.`, "success");
+      fetchOrders();
+      fetchMetrics();
+      return true;
+    } catch (err) {
+      toast(errorMessage(err), "error");
+      return false;
+    } finally {
+      setOpenActionId(null);
+      setActionMenuPos(null);
+    }
+  };
+
+  const openStatusModal = (type: "lr" | "cancel", order: SaleOrder) => {
+    setOpenActionId(null);
+    setActionMenuPos(null);
+    setStatusModalLrNo(type === "lr" ? order.lr_no || "" : "");
+    setStatusModalRemarks("");
+    setStatusModal({ type, order });
+  };
+
+  const submitStatusModal = async () => {
+    if (!statusModal) return;
+    setStatusModalSaving(true);
+    const ok = await handleUpdateStatus(
+      statusModal.order.id,
+      statusModal.type === "lr" ? "lr" : "cancelled",
+      {
+        remarks: statusModalRemarks.trim() || null,
+        lr_no: statusModal.type === "lr" ? statusModalLrNo.trim() || null : null,
+      }
+    );
+    setStatusModalSaving(false);
+    if (ok) setStatusModal(null);
+  };
+
   const getStatusBadge = (status: string) => {
     const s = (status || "").toLowerCase();
     let bg = "#f1f5f9";
@@ -256,7 +318,7 @@ export function SaleProcessListPage() {
       bg = "#fef3c7";
       color = "#b45309";
       border = "#fde68a";
-    } else if (s === "sales_confirmed") {
+    } else if (s === "confirmed" || s === "sales_confirmed") {
       bg = "#e0f2fe";
       color = "#0369a1";
       border = "#bae6fd";
@@ -299,6 +361,8 @@ export function SaleProcessListPage() {
     );
   };
 
+
+
   const activeFiltersCount = useMemo(() => {
     let cnt = 0;
     if (selectedBuyerId) cnt++;
@@ -313,8 +377,8 @@ export function SaleProcessListPage() {
   const tabs = [
     { key: "all", label: "ALL", metric: metrics.all },
     { key: "pending", label: "PENDING", metric: metrics.pending },
-    { key: "sales_confirmed", label: "SALES CONFIRMED", metric: metrics.sales_confirmed },
-    { key: "admin_approved", label: "ADMIN APPROVED", metric: metrics.admin_approved },
+    { key: "confirmed", label: "CONFIRMED", metric: metrics.confirmed || metrics.sales_confirmed },
+
     { key: "dispatched", label: "DISPATCHED", metric: metrics.dispatched },
     { key: "lr", label: "LR", metric: metrics.lr },
     { key: "cancelled", label: "CANCELLED", metric: metrics.cancelled },
@@ -1125,7 +1189,7 @@ export function SaleProcessListPage() {
                               Outward: {order.stock_movement_number}
                             </a>
                           </div>
-                        ) : (order.status === "admin_approved" || order.status === "sales_confirmed") ? (
+                        ) : (order.status === "confirmed" || order.status === "sales_confirmed" || order.status === "admin_approved") ? (
                           <Can permission="sale_process.update">
                             <div style={{ marginTop: "4px" }}>
                               <button
@@ -1151,7 +1215,7 @@ export function SaleProcessListPage() {
                                 onMouseEnter={(e) => (e.currentTarget.style.background = "#f3e8ff")}
                                 onMouseLeave={(e) => (e.currentTarget.style.background = "#faf5ff")}
                               >
-                                📤 Outward / Dispatch Stock
+                                📤 Dispatch (Outward Stock)
                               </button>
                             </div>
                           </Can>
@@ -1165,6 +1229,15 @@ export function SaleProcessListPage() {
                         ) : order.lr_no ? (
                           <div>LR: <strong>{order.lr_no}</strong></div>
                         ) : (
+                          null
+                        )}
+                        {order.etd_origin_date ? (
+                          <div style={{ fontSize: "11px", color: "#0284c7" }}>ETD: <strong>{order.etd_origin_date}</strong></div>
+                        ) : null}
+                        {order.eta_port_date ? (
+                          <div style={{ fontSize: "11px", color: "#059669" }}>ETA: <strong>{order.eta_port_date}</strong></div>
+                        ) : null}
+                        {!order.container_no && !order.bl_no && !order.lr_no && !order.etd_origin_date && !order.eta_port_date && (
                           <span style={{ color: "#94a3b8" }}>—</span>
                         )}
                       </td>
@@ -1186,7 +1259,7 @@ export function SaleProcessListPage() {
                               setActionMenuPos(null);
                             } else {
                               const rect = e.currentTarget.getBoundingClientRect();
-                              const menuHeight = 120;
+                              const menuHeight = 240;
                               const spaceBelow = window.innerHeight - rect.bottom;
                               const showAbove = spaceBelow < menuHeight;
                               setActionMenuPos({
@@ -1265,7 +1338,63 @@ export function SaleProcessListPage() {
                   <span>👁️</span> <span>View Details</span>
                 </button>
 
-                {activeOrder.status !== "dispatched" && activeOrder.status !== "lr" && activeOrder.status !== "cancelled" ? (
+                {activeOrder.status === "pending" && (
+                  <Can permission="sale_process.update">
+                    <button
+                      type="button"
+                      onClick={() => handleUpdateStatus(activeOrder.id, "confirmed")}
+                      style={{
+                        width: "100%",
+                        padding: "9px 12px",
+                        border: "none",
+                        background: "#f0fdf4",
+                        textAlign: "left",
+                        fontSize: "13px",
+                        fontWeight: 600,
+                        cursor: "pointer",
+                        color: "#16a34a",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "8px",
+                        borderTop: "1px solid #f1f5f9",
+                      }}
+                      onMouseEnter={(e) => (e.currentTarget.style.background = "#dcfce7")}
+                      onMouseLeave={(e) => (e.currentTarget.style.background = "#f0fdf4")}
+                    >
+                      <span>✅</span> <span>Confirm Order</span>
+                    </button>
+                  </Can>
+                )}
+
+                {(activeOrder.status === "confirmed" || activeOrder.status === "sales_confirmed") && (
+                  <Can permission="sale_process.update">
+                    <button
+                      type="button"
+                      onClick={() => handleUpdateStatus(activeOrder.id, "pending")}
+                      style={{
+                        width: "100%",
+                        padding: "9px 12px",
+                        border: "none",
+                        background: "#fffbeb",
+                        textAlign: "left",
+                        fontSize: "13px",
+                        fontWeight: 600,
+                        cursor: "pointer",
+                        color: "#b45309",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "8px",
+                        borderTop: "1px solid #f1f5f9",
+                      }}
+                      onMouseEnter={(e) => (e.currentTarget.style.background = "#fef3c7")}
+                      onMouseLeave={(e) => (e.currentTarget.style.background = "#fffbeb")}
+                    >
+                      <span>↩️</span> <span>Revert to Pending</span>
+                    </button>
+                  </Can>
+                )}
+
+                {(activeOrder.status === "confirmed" || activeOrder.status === "sales_confirmed" || activeOrder.status === "admin_approved") ? (
                   <Can permission="sale_process.update">
                     <button
                       type="button"
@@ -1293,7 +1422,7 @@ export function SaleProcessListPage() {
                       onMouseEnter={(e) => (e.currentTarget.style.background = "#f3e8ff")}
                       onMouseLeave={(e) => (e.currentTarget.style.background = "#faf5ff")}
                     >
-                      <span>📤</span> <span>Outward / Dispatch Stock</span>
+                      <span>📤</span> <span>Dispatch (Outward Stock)</span>
                     </button>
                   </Can>
                 ) : activeOrder.stock_movement_number ? (
@@ -1311,6 +1440,63 @@ export function SaleProcessListPage() {
                   </div>
                 ) : null}
 
+                {activeOrder.status === "dispatched" && (
+                  <Can permission="sale_process.update">
+                    <button
+                      type="button"
+                      onClick={() => openStatusModal("lr", activeOrder)}
+                      style={{
+                        width: "100%",
+                        padding: "9px 12px",
+                        border: "none",
+                        background: "#eef2ff",
+                        textAlign: "left",
+                        fontSize: "13px",
+                        fontWeight: 600,
+                        cursor: "pointer",
+                        color: "#4338ca",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "8px",
+                        borderTop: "1px solid #f1f5f9",
+                      }}
+                      onMouseEnter={(e) => (e.currentTarget.style.background = "#e0e7ff")}
+                      onMouseLeave={(e) => (e.currentTarget.style.background = "#eef2ff")}
+                    >
+                      <span>🚚</span> <span>Mark LR Received</span>
+                    </button>
+                  </Can>
+                )}
+
+                {(activeOrder.status === "pending" || activeOrder.status === "confirmed" || activeOrder.status === "sales_confirmed") && (
+                  <Can permission="sale_process.update">
+                    <button
+                      type="button"
+                      onClick={() => openStatusModal("cancel", activeOrder)}
+                      style={{
+                        width: "100%",
+                        padding: "9px 12px",
+                        border: "none",
+                        background: "none",
+                        textAlign: "left",
+                        fontSize: "13px",
+                        fontWeight: 600,
+                        cursor: "pointer",
+                        color: "#be123c",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "8px",
+                        borderTop: "1px solid #f1f5f9",
+                      }}
+                      onMouseEnter={(e) => (e.currentTarget.style.background = "#ffe4e6")}
+                      onMouseLeave={(e) => (e.currentTarget.style.background = "none")}
+                    >
+                      <span>❌</span> <span>Cancel Order</span>
+                    </button>
+                  </Can>
+                )}
+
+                {!["dispatched", "lr", "cancelled"].includes(activeOrder.status) && (
                 <Can permission="sale_process.update">
                   <button
                     type="button"
@@ -1340,7 +1526,9 @@ export function SaleProcessListPage() {
                     <span>✏️</span> <span>Edit Order</span>
                   </button>
                 </Can>
+                )}
 
+                {!["dispatched", "lr"].includes(activeOrder.status) && (
                 <Can permission="sale_process.delete">
                   <button
                     type="button"
@@ -1371,9 +1559,158 @@ export function SaleProcessListPage() {
                     <span>🗑️</span> <span>Delete</span>
                   </button>
                 </Can>
+                )}
               </div>
             );
           })()}
+
+          {/* LR Received / Cancel Order Modal */}
+          {statusModal && (
+            <div
+              onClick={() => !statusModalSaving && setStatusModal(null)}
+              style={{
+                position: "fixed",
+                inset: 0,
+                background: "rgba(15,23,42,0.45)",
+                zIndex: 100000,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                padding: "16px",
+              }}
+            >
+              <div
+                onClick={(e) => e.stopPropagation()}
+                style={{
+                  background: "#ffffff",
+                  borderRadius: "10px",
+                  width: "100%",
+                  maxWidth: "440px",
+                  boxShadow: "0 20px 40px rgba(0,0,0,0.2)",
+                  overflow: "hidden",
+                }}
+              >
+                <div
+                  style={{
+                    padding: "14px 18px",
+                    borderBottom: "1px solid #e2e8f0",
+                    fontSize: "15px",
+                    fontWeight: 700,
+                    color: statusModal.type === "lr" ? "#4338ca" : "#be123c",
+                  }}
+                >
+                  {statusModal.type === "lr" ? "🚚 Mark LR Received" : "❌ Cancel Sale Order"}
+                  <div style={{ fontSize: "12px", fontWeight: 500, color: "#64748b", marginTop: "2px" }}>
+                    {statusModal.order.order_no} • {statusModal.order.buyer_name}
+                  </div>
+                </div>
+                <div style={{ padding: "16px 18px", display: "flex", flexDirection: "column", gap: "12px" }}>
+                  {statusModal.type === "cancel" && (
+                    <div
+                      style={{
+                        fontSize: "12.5px",
+                        color: "#9f1239",
+                        background: "#fff1f2",
+                        border: "1px solid #fecdd3",
+                        borderRadius: "6px",
+                        padding: "8px 10px",
+                      }}
+                    >
+                      This order will move to the CANCELLED tab. No stock will change. A cancelled order cannot be edited, dispatched, or reopened.
+                    </div>
+                  )}
+                  {statusModal.type === "lr" && (
+                    <div>
+                      <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#334155", marginBottom: "4px" }}>
+                        LR No (optional)
+                      </label>
+                      <input
+                        type="text"
+                        autoFocus
+                        value={statusModalLrNo}
+                        onChange={(e) => setStatusModalLrNo(e.target.value)}
+                        placeholder="e.g. LR-456789"
+                        style={{
+                          width: "100%",
+                          padding: "8px 10px",
+                          borderRadius: "6px",
+                          border: "1px solid #cbd5e1",
+                          fontSize: "13px",
+                          boxSizing: "border-box",
+                        }}
+                      />
+                    </div>
+                  )}
+                  <div>
+                    <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#334155", marginBottom: "4px" }}>
+                      {statusModal.type === "lr" ? "Remarks (optional)" : "Reason (optional)"}
+                    </label>
+                    <textarea
+                      rows={2}
+                      autoFocus={statusModal.type === "cancel"}
+                      value={statusModalRemarks}
+                      onChange={(e) => setStatusModalRemarks(e.target.value)}
+                      placeholder={statusModal.type === "lr" ? "Any note about LR" : "e.g. Buyer changed quantity"}
+                      style={{
+                        width: "100%",
+                        padding: "8px 10px",
+                        borderRadius: "6px",
+                        border: "1px solid #cbd5e1",
+                        fontSize: "13px",
+                        boxSizing: "border-box",
+                        resize: "vertical",
+                      }}
+                    />
+                  </div>
+                </div>
+                <div
+                  style={{
+                    padding: "12px 18px",
+                    borderTop: "1px solid #e2e8f0",
+                    display: "flex",
+                    justifyContent: "flex-end",
+                    gap: "8px",
+                    background: "#f8fafc",
+                  }}
+                >
+                  <button
+                    type="button"
+                    disabled={statusModalSaving}
+                    onClick={() => setStatusModal(null)}
+                    style={{
+                      padding: "8px 14px",
+                      borderRadius: "6px",
+                      border: "1px solid #cbd5e1",
+                      background: "#ffffff",
+                      color: "#475569",
+                      fontSize: "13px",
+                      fontWeight: 600,
+                      cursor: "pointer",
+                    }}
+                  >
+                    {statusModal.type === "cancel" ? "Keep Order" : "Close"}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={statusModalSaving}
+                    onClick={submitStatusModal}
+                    style={{
+                      padding: "8px 16px",
+                      borderRadius: "6px",
+                      border: "none",
+                      background: statusModal.type === "lr" ? "#4338ca" : "#be123c",
+                      color: "#ffffff",
+                      fontSize: "13px",
+                      fontWeight: 600,
+                      cursor: statusModalSaving ? "wait" : "pointer",
+                    }}
+                  >
+                    {statusModalSaving ? "Saving..." : statusModal.type === "lr" ? "Mark LR Received" : "Cancel Order"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Pagination */}
           <div

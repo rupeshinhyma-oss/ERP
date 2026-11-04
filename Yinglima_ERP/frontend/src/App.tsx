@@ -49,6 +49,7 @@ const pageLoaders = {
   Brands: () => import("@/pages/masters/Brands").then((m) => ({ default: m.BrandsPage })),
   SupplierTypes: () => import("@/pages/masters/SupplierTypes").then((m) => ({ default: m.SupplierTypesPage })),
   BuyerTypes: () => import("@/pages/masters/BuyerTypes").then((m) => ({ default: m.BuyerTypesPage })),
+  Warehouses: () => import("@/pages/masters/Warehouses").then((m) => ({ default: m.WarehousesPage })),
   Categories: () => import("@/pages/masters/Categories").then((m) => ({ default: m.CategoriesPage })),
   SubCategories: () => import("@/pages/masters/SubCategories").then((m) => ({ default: m.SubCategoriesPage })),
   Products: () => import("@/pages/masters/Products").then((m) => ({ default: m.ProductsPage })),
@@ -59,6 +60,9 @@ const pageLoaders = {
   LocalPurchaseForm: () => import("@/pages/purchases/LocalPurchaseForm").then((m) => ({ default: m.LocalPurchaseFormPage })),
   SaleProcessList: () => import("@/pages/sales/SaleProcessList").then((m) => ({ default: m.SaleProcessListPage })),
   SaleProcessForm: () => import("@/pages/sales/SaleProcessForm").then((m) => ({ default: m.SaleProcessFormPage })),
+  FinancialReport: () => import("@/pages/finance/FinancialReport").then((m) => ({ default: m.FinancialReportPage })),
+  ConsignmentOverview: () => import("@/pages/finance/ConsignmentOverview").then((m) => ({ default: m.ConsignmentOverviewPage })),
+  VatReturn: () => import("@/pages/finance/VatReturn").then((m) => ({ default: m.VatReturnPage })),
   Trash: () => import("@/pages/Trash").then((m) => ({ default: m.TrashPage })),
   PublicSupplierQuote: () => import("@/pages/PublicSupplierQuotePage"),
   NotificationSettings: () => import("@/pages/NotificationSettings").then((m) => ({ default: m.NotificationSettings })),
@@ -86,6 +90,7 @@ const HsnPage = lazy(pageLoaders.Hsn);
 const BrandsPage = lazy(pageLoaders.Brands);
 const SupplierTypesPage = lazy(pageLoaders.SupplierTypes);
 const BuyerTypesPage = lazy(pageLoaders.BuyerTypes);
+const WarehousesPage = lazy(pageLoaders.Warehouses);
 const CategoriesPage = lazy(pageLoaders.Categories);
 const SubCategoriesPage = lazy(pageLoaders.SubCategories);
 const ProductsPage = lazy(pageLoaders.Products);
@@ -96,6 +101,9 @@ const LocalPurchasesPage = lazy(pageLoaders.LocalPurchases);
 const LocalPurchaseFormPage = lazy(pageLoaders.LocalPurchaseForm);
 const SaleProcessListPage = lazy(pageLoaders.SaleProcessList);
 const SaleProcessFormPage = lazy(pageLoaders.SaleProcessForm);
+const FinancialReportPage = lazy(pageLoaders.FinancialReport);
+const ConsignmentOverviewPage = lazy(pageLoaders.ConsignmentOverview);
+const VatReturnPage = lazy(pageLoaders.VatReturn);
 const TrashPage = lazy(pageLoaders.Trash);
 const PublicSupplierQuotePage = lazy(pageLoaders.PublicSupplierQuote);
 
@@ -222,6 +230,16 @@ export function App() {
             <Route path="/sales/orders" element={<Navigate to="/sale/process" replace />} />
             <Route path="/sales" element={<Navigate to="/sale/process" replace />} />
 
+            {/* Finance */}
+            <Route path="/finance/report" element={<FinancialReportPage />} />
+            <Route path="/finance/consignment-overview" element={<ConsignmentOverviewPage />} />
+            <Route path="/finance/vat-return" element={<VatReturnPage />} />
+            <Route path="/vat-return" element={<Navigate to="/finance/vat-return" replace />} />
+            <Route path="/consignment-overview" element={<Navigate to="/finance/consignment-overview" replace />} />
+            <Route path="/finance" element={<Navigate to="/finance/report" replace />} />
+            <Route path="/finance-planning-report" element={<Navigate to="/finance/report" replace />} />
+            <Route path="/finance-planning-report/list" element={<Navigate to="/finance/report" replace />} />
+
             <Route path="/masters/company-list" element={<CompanyListPage />} />
             <Route path="/masters/countries" element={<CountriesPage />} />
             <Route path="/masters/states" element={<StatesPage />} />
@@ -232,6 +250,7 @@ export function App() {
             <Route path="/masters/brands" element={<BrandsPage />} />
             <Route path="/masters/supplier-types" element={<SupplierTypesPage />} />
             <Route path="/masters/buyer-types" element={<BuyerTypesPage />} />
+            <Route path="/masters/warehouses" element={<WarehousesPage />} />
             <Route path="/masters/categories" element={<CategoriesPage />} />
             <Route path="/masters/subcategories" element={<SubCategoriesPage />} />
             <Route path="/masters/products" element={<ProductsPage />} />

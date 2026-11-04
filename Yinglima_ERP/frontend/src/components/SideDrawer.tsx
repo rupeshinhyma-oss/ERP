@@ -45,6 +45,7 @@ export function SideDrawer({
   return (
     <div
       className={`side-drawer-backdrop ${open ? "open" : ""}`}
+      style={{ zIndex: 10050 }}
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
