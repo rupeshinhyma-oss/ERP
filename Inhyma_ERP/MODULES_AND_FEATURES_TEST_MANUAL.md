@@ -2793,8 +2793,10 @@ Positioned directly underneath the collapsible filter card and powered by `GET /
   - `Checkbox`, `Company Name`, `Task Type`, `City`, `Priority`, `Machine & Model`, `Contact Person`, `Task Date & Task By`, `Task Approved By`, `Task Allotted To`, `Total Amount` (green `Chargeable` pill + `₹` charge), `Paid/Due` (`Paid: ₹...` in blue + `Due: ₹...` in red), `Task Status`, and `Action` (`⋮` menu with `View Payment Details` and `Record Payment`).
   - Dynamic `"—"` fallbacks when optional fields (`Task Approved By`, `Task Allotted To`, `Machine & Model`, `Task Type`, `Priority`) are unassigned — zero hardcoded mock strings (`"ABC"`, `"Inhyma Admin"` removed).
 
-### 4. Record Payment Modal & Automatic `Self collect` Technician Wallet Sync
-- **Trigger:** Clicking `Record Payment` in the row `Action` (`⋮`) menu on an unpaid/partially paid ticket.
+### 4. Payment Details, Record Payment, Add New Payment & Delete Modals (`.payment-modal-body` & `.payment-modal-footer`)
+- **Modal Layout Standard (`payments.css`):** All `/payments` centered dialogs (`Payment Details`, `Record Payment`, `Add New Payment`, `Confirm Delete`) use a structured `.payment-modal-body` (`padding: 20px 24px`, `gap: 18px`) paired with a bordered `#f8fafc` footer bar (`.modal-footer.payment-modal-footer`, `padding: 14px 24px`) so summary cards, 2-column detail grids (`.payment-detail-grid`), and action buttons (`Close`, `Record Payment`, `Cancel`, `Save Payment`) maintain clean inner margins without colliding with modal borders.
+- **Payment Details Modal:** Triggered by clicking a `Company Name` link or `View Details` in the row `Action` (`⋮`) menu; displays the inset 3-stat `.payment-summary-box` (`Total Amount`, `Collected`, `Balance Due`), 2-column `.payment-detail-grid` (`Company`, `City`, `Machine & Model`, `Task Type`, `Contact Person`, `Task Date`, `Approved By`, `Allotted To`, `Payment Status`, `Payment Mode`, `Task Status`), receipt preview if uploaded, and footer `Close` / `Record Payment` buttons.
+- **Record Payment Trigger:** Clicking `Record Payment` in the row `Action` (`⋮`) menu or inside the `Payment Details` modal footer.
 - **Fields:**
   - **Amount to Collect (₹)** (*Required*): Pre-filled with remaining due balance; supports partial or full payment entry.
   - **Payment Mode** (*Required*): Dropdown supporting `Company Acc`, `Self collect`, `UPI / QR`, `Cheque`, `Cash`, and `Bank Transfer`.

@@ -916,11 +916,11 @@ A user may be assigned any number of Roles simultaneously (`POST /users/{id}/rol
   - `Paid/Due`: Multi-line breakdown showing collected payment in blue (`Paid: ₹...`) and remaining balance in red (`Due: ₹...`).
   - Unassigned fields (`task_approved_by`, `task_allotted_to`, `machine_model`, `task_type`, `priority`) render clean `"—"` dashes with zero hardcoded mock names (`"ABC"`, `"Inhyma Admin"` removed).
   - Granular `useAuth()` RBAC gating (`technicaltask.create` for `+ ADD NEW`, `technicaltask.update` for `Record Payment`, `technicaltask.delete` for `DELETE`, `technicaltask.view` for sidebar/route access).
-- **Interactive Modals:**
-  - **Record / Collect Payment Modal:** Real-time balance due calculator. Captures Amount to Collect (validated against positive values), Payment Mode (*Company Acc*, *Self collect*, *UPI / QR*, *Cheque*, *Cash*, *Bank Transfer*), Date, Reference/UTR No, Receipt Screenshot/Document upload, and collection remarks. Submitting records payment and automatically logs a call history audit record.
-  - **Add Payment Modal:** Typeahead client linking via `ClientNameAutocomplete` to quickly initiate chargeable service tasks.
-  - **Payment Details Modal:** Full ticket overview including machine model, problem reported, technician assigned, approver, billing breakdown, and receipt document preview.
-  - **Bulk Delete Modal:** Multi-row soft-delete with confirmation modal.
+- **Interactive Modals (`.payment-modal-container` / `.payment-modal-form` -> `.payment-modal-body` + `.modal-footer.payment-modal-footer`):**
+  - **Record / Collect Payment Modal:** Real-time balance due calculator inside a padded `.payment-modal-body` (`20px 24px`) with an inset `.payment-summary-box`. Captures Amount to Collect (validated against positive values), Payment Mode (*Company Acc*, *Self collect*, *UPI / QR*, *Cheque*, *Cash*, *Bank Transfer*), Date, Reference/UTR No, Receipt Screenshot/Document upload, and collection remarks, with a `#f8fafc` bordered `.payment-modal-footer` bar (`14px 24px`). Submitting records payment and automatically logs a call history audit record.
+  - **Add Payment Modal:** Typeahead client linking via `ClientNameAutocomplete` inside `.payment-modal-body` to quickly initiate chargeable service tasks.
+  - **Payment Details Modal:** Full ticket overview inside `.payment-modal-container` -> `.payment-modal-body` (`20px 24px`) featuring an inset 3-column `.payment-summary-box` (`Total Amount`, `Collected`, `Balance Due`), a 2-column `.payment-detail-grid` (`Company`, `City`, `Machine & Model`, `Task Type`, `Contact Person`, `Task Date`, `Approved By`, `Allotted To`, `Payment Status`, `Payment Mode`, `Task Status`), optional receipt image preview, and a `#f8fafc` `.payment-modal-footer` (`Close` and RBAC-gated `Record Payment` action buttons).
+  - **Bulk Delete Modal:** Multi-row soft-delete confirmation dialog (`maxWidth: 460px`) with `.payment-modal-body` and `.payment-modal-footer`.
 - **Strict Zero-Synthetic-Data Enforcement:**
   - Absolute ban on automated mock/QA data generation scripts (18 test/seeding scripts purged across Inhyma and ERP_Dashboard).
   - Authentic accounts protected: `User A`, `User B`, `User C`, `User D`, and `Admin`.

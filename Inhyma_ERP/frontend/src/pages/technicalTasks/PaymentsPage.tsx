@@ -551,8 +551,8 @@ export function PaymentsPage() {
                   style={{
                     height: "36px",
                     padding: "0 16px",
-                    background: selectedIds.size > 0 ? "#dc2626" : "#cbd5e1",
-                    color: "#ffffff",
+                    background: selectedIds.size > 0 ? "#dc2626" : "#e2e8f0",
+                    color: selectedIds.size > 0 ? "#ffffff" : "#64748b",
                     fontWeight: 600,
                     fontSize: "13px",
                     border: "none",
@@ -1143,108 +1143,110 @@ export function PaymentsPage() {
               onClose={() => setRecordPaymentTask(null)}
             >
               <form onSubmit={handleSavePayment} className="payment-modal-form">
-                <div className="payment-summary-box">
-                  <div>
-                    <div className="payment-summary-stat-label">Total Amount</div>
-                    <div className="payment-summary-stat-val" style={{ color: "#0f172a" }}>
-                      ₹{formatNumber(recordPaymentTask.service_charge || 0)}
+                <div className="payment-modal-body">
+                  <div className="payment-summary-box">
+                    <div>
+                      <div className="payment-summary-stat-label">Total Amount</div>
+                      <div className="payment-summary-stat-val" style={{ color: "#0f172a" }}>
+                        ₹{formatNumber(recordPaymentTask.service_charge || 0)}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="payment-summary-stat-label">Already Paid</div>
+                      <div className="payment-summary-stat-val" style={{ color: "#16a34a" }}>
+                        ₹{formatNumber(recordPaymentTask.collected_amount || 0)}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="payment-summary-stat-label">Balance Due</div>
+                      <div className="payment-summary-stat-val" style={{ color: "#dc2626" }}>
+                        ₹{formatNumber(Math.max(0, Number(recordPaymentTask.service_charge || 0) - Number(recordPaymentTask.collected_amount || 0)))}
+                      </div>
                     </div>
                   </div>
-                  <div>
-                    <div className="payment-summary-stat-label">Already Paid</div>
-                    <div className="payment-summary-stat-val" style={{ color: "#16a34a" }}>
-                      ₹{formatNumber(recordPaymentTask.collected_amount || 0)}
-                    </div>
-                  </div>
-                  <div>
-                    <div className="payment-summary-stat-label">Balance Due</div>
-                    <div className="payment-summary-stat-val" style={{ color: "#dc2626" }}>
-                      ₹{formatNumber(Math.max(0, Number(recordPaymentTask.service_charge || 0) - Number(recordPaymentTask.collected_amount || 0)))}
-                    </div>
-                  </div>
-                </div>
 
-                <div className="payment-form-grid">
-                  <div className="payment-form-group">
-                    <label>Amount to Collect (₹) *</label>
-                    <input
-                      type="number"
-                      step="any"
-                      required
-                      placeholder="Enter amount"
-                      value={collectAmount}
-                      onChange={(e) => setCollectAmount(e.target.value)}
-                    />
-                  </div>
-
-                  <div className="payment-form-group">
-                    <label>Payment Mode *</label>
-                    <select
-                      value={paymentMode}
-                      onChange={(e) => setPaymentMode(e.target.value)}
-                    >
-                      <option value="Company Acc">Company Acc</option>
-                      <option value="Self collect">Self collect</option>
-                      <option value="UPI / QR">UPI / QR</option>
-                      <option value="Cheque">Cheque</option>
-                      <option value="Cash">Cash</option>
-                      <option value="Bank Transfer (NEFT/RTGS)">Bank Transfer</option>
-                    </select>
-                  </div>
-
-                  <div className="payment-form-group">
-                    <label>Payment Date</label>
-                    <input
-                      type="date"
-                      value={paymentDate}
-                      onChange={(e) => setPaymentDate(e.target.value)}
-                    />
-                  </div>
-
-                  <div className="payment-form-group">
-                    <label>Reference / UTR / Cheque No</label>
-                    <input
-                      type="text"
-                      placeholder="e.g. UTR12345678"
-                      value={referenceNo}
-                      onChange={(e) => setReferenceNo(e.target.value)}
-                    />
-                  </div>
-
-                  <div className="payment-form-group full-width">
-                    <label>Payment Screenshot / Receipt</label>
-                    <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                  <div className="payment-form-grid">
+                    <div className="payment-form-group">
+                      <label>Amount to Collect (₹) *</label>
                       <input
-                        type="file"
-                        accept="image/*,.pdf"
-                        onChange={handleScreenshotUpload}
-                        disabled={uploadingScreenshot}
+                        type="number"
+                        step="any"
+                        required
+                        placeholder="Enter amount"
+                        value={collectAmount}
+                        onChange={(e) => setCollectAmount(e.target.value)}
                       />
-                      {uploadingScreenshot && <span style={{ fontSize: "12px", color: "#007bff" }}>Uploading...</span>}
-                      {paymentScreenshotUrl && (
-                        <a
-                          href={paymentScreenshotUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                          style={{ fontSize: "12px", color: "#007bff", textDecoration: "underline" }}
-                        >
-                          View Uploaded
-                        </a>
-                      )}
                     </div>
-                  </div>
 
-                  <div className="payment-form-group full-width">
-                    <label>Remarks / Notes</label>
-                    <textarea
-                      placeholder="Enter payment remarks or collection notes..."
-                      value={paymentRemarks}
-                      onChange={(e) => setPaymentRemarks(e.target.value)}
-                    />
+                    <div className="payment-form-group">
+                      <label>Payment Mode *</label>
+                      <select
+                        value={paymentMode}
+                        onChange={(e) => setPaymentMode(e.target.value)}
+                      >
+                        <option value="Company Acc">Company Acc</option>
+                        <option value="Self collect">Self collect</option>
+                        <option value="UPI / QR">UPI / QR</option>
+                        <option value="Cheque">Cheque</option>
+                        <option value="Cash">Cash</option>
+                        <option value="Bank Transfer (NEFT/RTGS)">Bank Transfer</option>
+                      </select>
+                    </div>
+
+                    <div className="payment-form-group">
+                      <label>Payment Date</label>
+                      <input
+                        type="date"
+                        value={paymentDate}
+                        onChange={(e) => setPaymentDate(e.target.value)}
+                      />
+                    </div>
+
+                    <div className="payment-form-group">
+                      <label>Reference / UTR / Cheque No</label>
+                      <input
+                        type="text"
+                        placeholder="e.g. UTR12345678"
+                        value={referenceNo}
+                        onChange={(e) => setReferenceNo(e.target.value)}
+                      />
+                    </div>
+
+                    <div className="payment-form-group full-width">
+                      <label>Payment Screenshot / Receipt</label>
+                      <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                        <input
+                          type="file"
+                          accept="image/*,.pdf"
+                          onChange={handleScreenshotUpload}
+                          disabled={uploadingScreenshot}
+                        />
+                        {uploadingScreenshot && <span style={{ fontSize: "12px", color: "#007bff" }}>Uploading...</span>}
+                        {paymentScreenshotUrl && (
+                          <a
+                            href={paymentScreenshotUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            style={{ fontSize: "12px", color: "#007bff", textDecoration: "underline" }}
+                          >
+                            View Uploaded
+                          </a>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="payment-form-group full-width">
+                      <label>Remarks / Notes</label>
+                      <textarea
+                        placeholder="Enter payment remarks or collection notes..."
+                        value={paymentRemarks}
+                        onChange={(e) => setPaymentRemarks(e.target.value)}
+                      />
+                    </div>
                   </div>
                 </div>
 
-                <div className="payment-modal-footer">
+                <div className="modal-footer payment-modal-footer">
                   <button
                     type="button"
                     className="btn-secondary"
@@ -1274,147 +1276,149 @@ export function PaymentsPage() {
               onClose={() => setAddNewOpen(false)}
             >
               <form onSubmit={handleCreateNewPayment} className="payment-modal-form">
-                <div className="payment-form-grid">
-                  <div className="payment-form-group full-width">
-                    <label>Company Name *</label>
-                    <ClientNameAutocomplete
-                      value={newCompanyName}
-                      onChange={setNewCompanyName}
-                      onSelectCompany={(item: CompanyAutocompleteItem) => {
-                        setNewCompanyName(item.company_name);
-                        setNewCompanyId(item.id || null);
-                        if (item.city_name) setNewCity(item.city_name);
-                        if (item.contact_full_name) setNewContactPerson(item.contact_full_name);
-                        if (item.contact_calling_number) setNewContactPhone(item.contact_calling_number);
-                      }}
-                      placeholder="Search or enter company..."
-                      required
-                    />
-                  </div>
+                <div className="payment-modal-body">
+                  <div className="payment-form-grid">
+                    <div className="payment-form-group full-width">
+                      <label>Company Name *</label>
+                      <ClientNameAutocomplete
+                        value={newCompanyName}
+                        onChange={setNewCompanyName}
+                        onSelectCompany={(item: CompanyAutocompleteItem) => {
+                          setNewCompanyName(item.company_name);
+                          setNewCompanyId(item.id || null);
+                          if (item.city_name) setNewCity(item.city_name);
+                          if (item.contact_full_name) setNewContactPerson(item.contact_full_name);
+                          if (item.contact_calling_number) setNewContactPhone(item.contact_calling_number);
+                        }}
+                        placeholder="Search or enter company..."
+                        required
+                      />
+                    </div>
 
-                  <div className="payment-form-group">
-                    <label>City *</label>
-                    <input
-                      type="text"
-                      required
-                      placeholder="City"
-                      value={newCity}
-                      onChange={(e) => setNewCity(e.target.value)}
-                    />
-                  </div>
+                    <div className="payment-form-group">
+                      <label>City *</label>
+                      <input
+                        type="text"
+                        required
+                        placeholder="City"
+                        value={newCity}
+                        onChange={(e) => setNewCity(e.target.value)}
+                      />
+                    </div>
 
-                  <div className="payment-form-group">
-                    <label>Task Type</label>
-                    <select
-                      value={newTaskType}
-                      onChange={(e) => setNewTaskType(e.target.value)}
-                    >
-                      <option value="In-House">In-House</option>
-                      <option value="Telecall">Telecall</option>
-                      <option value="Onsite Visit - Client Location">Onsite Visit - Client Location</option>
-                      <option value="Onsite Visit - Third-Party Location">Onsite Visit - Third-Party Location</option>
-                    </select>
-                  </div>
+                    <div className="payment-form-group">
+                      <label>Task Type</label>
+                      <select
+                        value={newTaskType}
+                        onChange={(e) => setNewTaskType(e.target.value)}
+                      >
+                        <option value="In-House">In-House</option>
+                        <option value="Telecall">Telecall</option>
+                        <option value="Onsite Visit - Client Location">Onsite Visit - Client Location</option>
+                        <option value="Onsite Visit - Third-Party Location">Onsite Visit - Third-Party Location</option>
+                      </select>
+                    </div>
 
-                  <div className="payment-form-group full-width">
-                    <label>Machine & Model *</label>
-                    <input
-                      type="text"
-                      required
-                      placeholder="e.g. GF5000F Granular Filler FFS"
-                      value={newMachineModel}
-                      onChange={(e) => setNewMachineModel(e.target.value)}
-                    />
-                  </div>
+                    <div className="payment-form-group full-width">
+                      <label>Machine & Model *</label>
+                      <input
+                        type="text"
+                        required
+                        placeholder="e.g. GF5000F Granular Filler FFS"
+                        value={newMachineModel}
+                        onChange={(e) => setNewMachineModel(e.target.value)}
+                      />
+                    </div>
 
-                  <div className="payment-form-group">
-                    <label>Contact Person</label>
-                    <input
-                      type="text"
-                      placeholder="Contact name"
-                      value={newContactPerson}
-                      onChange={(e) => setNewContactPerson(e.target.value)}
-                    />
-                  </div>
+                    <div className="payment-form-group">
+                      <label>Contact Person</label>
+                      <input
+                        type="text"
+                        placeholder="Contact name"
+                        value={newContactPerson}
+                        onChange={(e) => setNewContactPerson(e.target.value)}
+                      />
+                    </div>
 
-                  <div className="payment-form-group">
-                    <label>Contact Phone *</label>
-                    <input
-                      type="text"
-                      required
-                      placeholder="Phone number"
-                      value={newContactPhone}
-                      onChange={(e) => setNewContactPhone(e.target.value)}
-                    />
-                  </div>
+                    <div className="payment-form-group">
+                      <label>Contact Phone *</label>
+                      <input
+                        type="text"
+                        required
+                        placeholder="Phone number"
+                        value={newContactPhone}
+                        onChange={(e) => setNewContactPhone(e.target.value)}
+                      />
+                    </div>
 
-                  <div className="payment-form-group">
-                    <label>Total Chargeable Amount (₹) *</label>
-                    <input
-                      type="number"
-                      step="any"
-                      required
-                      value={newServiceCharge}
-                      onChange={(e) => setNewServiceCharge(e.target.value)}
-                    />
-                  </div>
+                    <div className="payment-form-group">
+                      <label>Total Chargeable Amount (₹) *</label>
+                      <input
+                        type="number"
+                        step="any"
+                        required
+                        value={newServiceCharge}
+                        onChange={(e) => setNewServiceCharge(e.target.value)}
+                      />
+                    </div>
 
-                  <div className="payment-form-group">
-                    <label>Collected Amount (₹)</label>
-                    <input
-                      type="number"
-                      step="any"
-                      placeholder="Amount collected now"
-                      value={newCollectedAmount}
-                      onChange={(e) => setNewCollectedAmount(e.target.value)}
-                    />
-                  </div>
+                    <div className="payment-form-group">
+                      <label>Collected Amount (₹)</label>
+                      <input
+                        type="number"
+                        step="any"
+                        placeholder="Amount collected now"
+                        value={newCollectedAmount}
+                        onChange={(e) => setNewCollectedAmount(e.target.value)}
+                      />
+                    </div>
 
-                  <div className="payment-form-group">
-                    <label>Payment Mode</label>
-                    <select
-                      value={newPaymentMode}
-                      onChange={(e) => setNewPaymentMode(e.target.value)}
-                    >
-                      <option value="Company Acc">Company Acc</option>
-                      <option value="Self collect">Self collect</option>
-                      <option value="UPI / QR">UPI / QR</option>
-                      <option value="Cheque">Cheque</option>
-                      <option value="Cash">Cash</option>
-                      <option value="Bank Transfer">Bank Transfer</option>
-                    </select>
-                  </div>
+                    <div className="payment-form-group">
+                      <label>Payment Mode</label>
+                      <select
+                        value={newPaymentMode}
+                        onChange={(e) => setNewPaymentMode(e.target.value)}
+                      >
+                        <option value="Company Acc">Company Acc</option>
+                        <option value="Self collect">Self collect</option>
+                        <option value="UPI / QR">UPI / QR</option>
+                        <option value="Cheque">Cheque</option>
+                        <option value="Cash">Cash</option>
+                        <option value="Bank Transfer">Bank Transfer</option>
+                      </select>
+                    </div>
 
-                  <div className="payment-form-group">
-                    <label>Payment Date</label>
-                    <input
-                      type="date"
-                      value={newPaymentDate}
-                      onChange={(e) => setNewPaymentDate(e.target.value)}
-                    />
-                  </div>
+                    <div className="payment-form-group">
+                      <label>Payment Date</label>
+                      <input
+                        type="date"
+                        value={newPaymentDate}
+                        onChange={(e) => setNewPaymentDate(e.target.value)}
+                      />
+                    </div>
 
-                  <div className="payment-form-group full-width">
-                    <label>Reference No</label>
-                    <input
-                      type="text"
-                      placeholder="Transaction / Reference ID"
-                      value={newRefNo}
-                      onChange={(e) => setNewRefNo(e.target.value)}
-                    />
-                  </div>
+                    <div className="payment-form-group full-width">
+                      <label>Reference No</label>
+                      <input
+                        type="text"
+                        placeholder="Transaction / Reference ID"
+                        value={newRefNo}
+                        onChange={(e) => setNewRefNo(e.target.value)}
+                      />
+                    </div>
 
-                  <div className="payment-form-group full-width">
-                    <label>Remarks</label>
-                    <textarea
-                      placeholder="Additional remarks..."
-                      value={newRemarks}
-                      onChange={(e) => setNewRemarks(e.target.value)}
-                    />
+                    <div className="payment-form-group full-width">
+                      <label>Remarks</label>
+                      <textarea
+                        placeholder="Additional remarks..."
+                        value={newRemarks}
+                        onChange={(e) => setNewRemarks(e.target.value)}
+                      />
+                    </div>
                   </div>
                 </div>
 
-                <div className="payment-modal-footer">
+                <div className="modal-footer payment-modal-footer">
                   <button
                     type="button"
                     className="btn-secondary"
@@ -1443,56 +1447,58 @@ export function PaymentsPage() {
               title={`Payment Details — ${detailTask.company_name}`}
               onClose={() => setDetailTask(null)}
             >
-              <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-                <div className="payment-summary-box">
-                  <div>
-                    <div className="payment-summary-stat-label">Total Amount</div>
-                    <div className="payment-summary-stat-val">₹{formatNumber(detailTask.service_charge || 0)}</div>
-                  </div>
-                  <div>
-                    <div className="payment-summary-stat-label">Collected</div>
-                    <div className="payment-summary-stat-val" style={{ color: "#16a34a" }}>
-                      ₹{formatNumber(detailTask.collected_amount || 0)}
+              <div className="payment-modal-container">
+                <div className="payment-modal-body">
+                  <div className="payment-summary-box">
+                    <div>
+                      <div className="payment-summary-stat-label">Total Amount</div>
+                      <div className="payment-summary-stat-val">₹{formatNumber(detailTask.service_charge || 0)}</div>
+                    </div>
+                    <div>
+                      <div className="payment-summary-stat-label">Collected</div>
+                      <div className="payment-summary-stat-val" style={{ color: "#16a34a" }}>
+                        ₹{formatNumber(detailTask.collected_amount || 0)}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="payment-summary-stat-label">Balance Due</div>
+                      <div className="payment-summary-stat-val" style={{ color: "#dc2626" }}>
+                        ₹{formatNumber(Math.max(0, Number(detailTask.service_charge || 0) - Number(detailTask.collected_amount || 0)))}
+                      </div>
                     </div>
                   </div>
-                  <div>
-                    <div className="payment-summary-stat-label">Balance Due</div>
-                    <div className="payment-summary-stat-val" style={{ color: "#dc2626" }}>
-                      ₹{formatNumber(Math.max(0, Number(detailTask.service_charge || 0) - Number(detailTask.collected_amount || 0)))}
-                    </div>
+
+                  <div className="payment-detail-grid">
+                    <div className="payment-detail-item"><strong>Company:</strong> {detailTask.company_name}</div>
+                    <div className="payment-detail-item"><strong>City:</strong> {detailTask.city || "-"}</div>
+                    <div className="payment-detail-item"><strong>Machine & Model:</strong> {detailTask.machine_model || "-"}</div>
+                    <div className="payment-detail-item"><strong>Task Type:</strong> {detailTask.task_type || "-"}</div>
+                    <div className="payment-detail-item"><strong>Contact Person:</strong> {detailTask.contact_person_name || "-"} ({detailTask.contact_phone || "-"})</div>
+                    <div className="payment-detail-item"><strong>Task Date:</strong> {detailTask.task_created_date || "-"}</div>
+                    <div className="payment-detail-item"><strong>Approved By:</strong> {detailTask.task_approved_by || "-"}</div>
+                    <div className="payment-detail-item"><strong>Allotted To:</strong> {detailTask.task_allotted_to || "-"}</div>
+                    <div className="payment-detail-item"><strong>Payment Status:</strong> {detailTask.payment_status || "Pending"}</div>
+                    <div className="payment-detail-item"><strong>Payment Mode:</strong> {detailTask.payment_mode || "-"}</div>
+                    <div className="payment-detail-item"><strong>Task Status:</strong> {detailTask.status}</div>
                   </div>
+
+                  {detailTask.payment_screenshot && (
+                    <div>
+                      <strong style={{ fontSize: "12px" }}>Payment Screenshot / Receipt:</strong>
+                      <div style={{ marginTop: 6 }}>
+                        <a href={detailTask.payment_screenshot} target="_blank" rel="noreferrer">
+                          <img
+                            src={detailTask.payment_screenshot}
+                            alt="Payment Screenshot"
+                            style={{ maxWidth: "100%", maxHeight: 200, borderRadius: 4, border: "1px solid #e2e8f0" }}
+                          />
+                        </a>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px 20px", fontSize: "13px" }}>
-                  <div><strong>Company:</strong> {detailTask.company_name}</div>
-                  <div><strong>City:</strong> {detailTask.city || "-"}</div>
-                  <div><strong>Machine & Model:</strong> {detailTask.machine_model || "-"}</div>
-                  <div><strong>Task Type:</strong> {detailTask.task_type || "-"}</div>
-                  <div><strong>Contact Person:</strong> {detailTask.contact_person_name || "-"} ({detailTask.contact_phone || "-"})</div>
-                  <div><strong>Task Date:</strong> {detailTask.task_created_date || "-"}</div>
-                  <div><strong>Approved By:</strong> {detailTask.task_approved_by || "-"}</div>
-                  <div><strong>Allotted To:</strong> {detailTask.task_allotted_to || "-"}</div>
-                  <div><strong>Payment Status:</strong> {detailTask.payment_status || "Pending"}</div>
-                  <div><strong>Payment Mode:</strong> {detailTask.payment_mode || "-"}</div>
-                  <div><strong>Task Status:</strong> {detailTask.status}</div>
-                </div>
-
-                {detailTask.payment_screenshot && (
-                  <div>
-                    <strong style={{ fontSize: "12px" }}>Payment Screenshot / Receipt:</strong>
-                    <div style={{ marginTop: 6 }}>
-                      <a href={detailTask.payment_screenshot} target="_blank" rel="noreferrer">
-                        <img
-                          src={detailTask.payment_screenshot}
-                          alt="Payment Screenshot"
-                          style={{ maxWidth: "100%", maxHeight: 200, borderRadius: 4, border: "1px solid #e2e8f0" }}
-                        />
-                      </a>
-                    </div>
-                  </div>
-                )}
-
-                <div className="payment-modal-footer">
+                <div className="modal-footer payment-modal-footer">
                   <button
                     type="button"
                     className="btn-secondary"
@@ -1525,12 +1531,15 @@ export function PaymentsPage() {
               variant="center"
               title="Confirm Delete"
               onClose={() => setDeleteConfirmOpen(false)}
+              cardStyle={{ maxWidth: "460px" }}
             >
-              <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-                <p style={{ margin: 0, fontSize: "14px", color: "#334155" }}>
-                  Are you sure you want to delete the <strong>{selectedIds.size}</strong> selected payment record(s)?
-                </p>
-                <div className="payment-modal-footer">
+              <div className="payment-modal-container">
+                <div className="payment-modal-body">
+                  <p style={{ margin: 0, fontSize: "14px", color: "#334155", lineHeight: 1.5 }}>
+                    Are you sure you want to delete the <strong>{selectedIds.size}</strong> selected payment record(s)?
+                  </p>
+                </div>
+                <div className="modal-footer payment-modal-footer">
                   <button
                     type="button"
                     className="btn-secondary"
