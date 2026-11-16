@@ -2800,7 +2800,12 @@ Positioned directly underneath the collapsible filter card and powered by `GET /
 - **Fields:**
   - **Amount to Collect (₹)** (*Required*): Pre-filled with remaining due balance; supports partial or full payment entry.
   - **Payment Mode** (*Required*): Dropdown supporting `Company Acc`, `Self collect`, `UPI / QR`, `Cheque`, `Cash`, and `Bank Transfer`.
-  - **Payment Date** (*Required*), **Reference / UTR No**, **Receipt Screenshot / Document Upload** (`POST /api/v1/technical-tasks/upload-screenshot`), and **Remarks**.
+  - **Payment Date** (*Required*), **Reference / UTR No**, and **Remarks**.
+  - **Payment Screenshot / Receipt Dropzone (`.payment-upload-dropzone` & `.payment-receipt-card`):**
+    - High-polish dashed drag-and-drop container (`1.5px dashed #cbd5e1`, hover blue `#007bff`, background `#f8fafc`) with vector upload icon, primary action "Choose file", drag-and-drop hint, and format support indicator ("Supports PNG, JPG, JPEG, WEBP or PDF (max 10MB)").
+    - Validates file format and 10MB file size limit client-side before asynchronous upload via `POST /api/v1/technical-tasks/upload-screenshot`.
+    - Features active spinning loader (`.payment-spin`) and "Uploading receipt..." indicator during network transfer.
+    - Renders `.payment-receipt-card` upon upload completion: image thumbnail preview (or red `PDF` badge for document files), receipt filename, green checkmark "Receipt attached", `View` (opens attachment in new tab), `Change` (triggers file replacement), and `Remove` (clears receipt attachment and resets hidden file input).
 - **Atomic Submission & Wallet Handover:**
   - Submits to `POST /api/v1/technical-tasks/{id}/record-payment`, updating `collected_amount` and `payment_status` (`Paid` when balance reaches `0`), and recording `Payment Collected` / `Record Task Payment` audit logs.
   - When `Payment Mode` is **`Self collect`**, `TechnicalTaskService._sync_self_collect_wallet()` automatically inserts an idempotent `VERIFIED` `COLLECTION` transaction (`TXN-TECH-YYYY-NNNN-XXXX`) in `technician_wallet_transactions` linked via `technical_task_id` so the technician's cash-on-hand balance in `/technician-operations` updates immediately.
@@ -2815,6 +2820,7 @@ Positioned directly underneath the collapsible filter card and powered by `GET /
 - [ ] Verify cancelling a `Chargeable` technical task immediately excludes its charge from `TOTAL PAYMENT`, `DUE`, and all `/payments` stage tabs.
 - [ ] Verify recording a payment with `Payment Mode = Self collect` moves fully paid records to `Completed` and automatically logs a `VERIFIED` `COLLECTION` entry in Technician Wallet (`/technician-operations`).
 - [ ] Verify users with `technicaltask.view` only can view `/payments` KPIs and rows, while `+ ADD NEW`, `Record Payment`, and `DELETE` remain hidden unless `create` / `update` / `delete` (or `manage`) are granted.
+- [ ] Verify clicking `Record Payment` renders the modern `.payment-upload-dropzone` with drag-and-drop support, uploading an image or PDF displays the `.payment-receipt-card` with thumbnail/badge, filename, View, Change, and Remove buttons, and removing resets the upload state cleanly.
 
 ---
 
