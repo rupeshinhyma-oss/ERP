@@ -270,3 +270,5 @@ When auto-loading a consignment column (`extract_consignment_items`) or adding a
 
 5. **Item Table Toolbar (2026-10-30):** The `Costing & Supplier Columns` toggle, `Rate ¥` / `Apply Rate` quick-fill, and `+ Add Spare from Master` buttons were removed. Costing columns are always visible; products (including spares) are added through the `Search & add product from master` box.
 6. **Per-Order Spare-to-Product Toggle (`⇄ Make Product` / `↩ Make Spare`):** Spare line items in `SaleProcessForm.tsx` show a `⇄ Make Product` button next to the `Spare Part` badge. Clicking it converts that line item to a standalone product (`is_spare = false`) strictly for the current Sale Process order and its Commercial Invoice / Packing List (`get_trade_document_details`), without modifying the Product Master catalog.
+
+7. **300ms Debounced List Search (`SaleProcessList.tsx`):** Typing in the Sale Process search box debounces API calls (`GET /api/v1/sales/orders`) by 300ms, while clearing (`×`), `Reset Filters`, and URL `?search=` deep-links update immediately.

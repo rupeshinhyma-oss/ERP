@@ -108,3 +108,5 @@ All endpoints are mounted under `/api/v1/finance/vat-returns`:
 - `vat_return.export`: Export 2-sheet VAT Return Summary & Product Breakdown Excel workbook.
 
 
+
+- **Split-Screen / Narrow-Viewport Table Scroll (`VatReturn.tsx`)**: Table 1 uses `overflowX: "auto"` and `minWidth: 1080` so columns never overlap when viewing side-by-side windows, while remaining full-width with no scrollbar on desktop.

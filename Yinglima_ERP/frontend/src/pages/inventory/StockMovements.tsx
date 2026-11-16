@@ -47,9 +47,18 @@ export function StockMovementsPage() {
 
   // Filters state
   const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [filterOpen, setFilterOpen] = useState(false);
+
+  useEffect(() => {
+    if (search === debouncedSearch) return;
+    const timer = window.setTimeout(() => {
+      setDebouncedSearch(search);
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [search, debouncedSearch]);
 
   const activeFiltersCount =
     (dateFrom ? 1 : 0) +
@@ -86,7 +95,7 @@ export function StockMovementsPage() {
   // Fetch Inward/Outward movements
   const loadMovements = useCallback(async () => {
     if (activeTab === "balances") return;
-    const cacheKey = `${activeTab}:${search}:${dateFrom}:${dateTo}`;
+    const cacheKey = `${activeTab}:${debouncedSearch}:${dateFrom}:${dateTo}`;
     const cached = stockMovementsCache.get(cacheKey) || stockMovementsCache.get(activeTab);
     if (cached) {
       setMovements(cached.items);
@@ -99,7 +108,7 @@ export function StockMovementsPage() {
         movement_type: activeTab,
         limit: "50",
       });
-      if (search.trim()) queryParams.set("search", search.trim());
+      if (debouncedSearch.trim()) queryParams.set("search", debouncedSearch.trim());
       if (dateFrom) queryParams.set("date_from", dateFrom);
       if (dateTo) queryParams.set("date_to", dateTo);
 
@@ -117,12 +126,12 @@ export function StockMovementsPage() {
     } finally {
       setLoadingMovements(false);
     }
-  }, [activeTab, search, dateFrom, dateTo, showToast]);
+  }, [activeTab, debouncedSearch, dateFrom, dateTo, showToast]);
 
   // Fetch Live Stock Balances
   const loadBalances = useCallback(async () => {
     if (activeTab !== "balances") return;
-    const cacheKey = `balances:${search}`;
+    const cacheKey = `balances:${debouncedSearch}`;
     const cached = stockBalancesCache.get(cacheKey) || stockBalancesCache.get("balances");
     if (cached) {
       setBalances(cached);
@@ -131,7 +140,7 @@ export function StockMovementsPage() {
     }
     try {
       const queryParams = new URLSearchParams({ limit: "100" });
-      if (search.trim()) queryParams.set("search", search.trim());
+      if (debouncedSearch.trim()) queryParams.set("search", debouncedSearch.trim());
 
       const res = await apiGet<{ items: StockBalanceItem[] }>(
         `/stock/balances?${queryParams.toString()}`
@@ -145,7 +154,7 @@ export function StockMovementsPage() {
     } finally {
       setLoadingBalances(false);
     }
-  }, [activeTab, search, showToast]);
+  }, [activeTab, debouncedSearch, showToast]);
 
   useEffect(() => {
     loadMetrics();
@@ -472,6 +481,7 @@ export function StockMovementsPage() {
                 type="button"
                 onClick={() => {
                   setSearch("");
+                  setDebouncedSearch("");
                   setDateFrom("");
                   setDateTo("");
                 }}
@@ -650,7 +660,10 @@ export function StockMovementsPage() {
             {search && (
               <button
                 type="button"
-                onClick={() => setSearch("")}
+                onClick={() => {
+                  setSearch("");
+                  setDebouncedSearch("");
+                }}
                 title="Clear search"
                 style={{
                   position: "absolute",

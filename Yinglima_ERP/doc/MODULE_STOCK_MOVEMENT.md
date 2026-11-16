@@ -201,3 +201,5 @@ In physical manufacturing, machinery assembly, and trade distribution, negative 
 - **Damaged Quantity Tracking (Option A)**:
   - Inward damage deduction remains active (`accepted_quantity = quantity - damaged_quantity` so only good units enter sellable `Current In-Stock`).
   - Added `total_damaged_qty` to `GET /api/v1/stock/balances` and displayed a dedicated **Damaged Qty** column in the **Current Stock Ledger** table.
+- **300ms Debounced Search (`StockMovements.tsx`)**:
+  - Typing in the Stock Movement / Current Stock Ledger search box debounces API requests (`GET /api/v1/stock/movements` and `GET /api/v1/stock/balances`) by 300ms, while Clear (`×`) and `Reset` update immediately.

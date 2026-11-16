@@ -37,6 +37,7 @@ export function SaleProcessListPage() {
 
   // Filters state
   const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [activeTab, setActiveTab] = useState<string>("all");
   const [filterOpen, setFilterOpen] = useState(false);
   const [selectedBuyerId, setSelectedBuyerId] = useState("");
@@ -45,11 +46,19 @@ export function SaleProcessListPage() {
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
 
+  useEffect(() => {
+    if (search === debouncedSearch) return;
+    const timer = window.setTimeout(() => {
+      setDebouncedSearch(search);
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [search, debouncedSearch]);
+
   const listCacheKey = useMemo(() => {
     return JSON.stringify({
       page,
       pageSize,
-      search: search.trim(),
+      search: debouncedSearch.trim(),
       activeTab,
       selectedBuyerId,
       selectedConsignment,
@@ -57,7 +66,7 @@ export function SaleProcessListPage() {
       dateFrom,
       dateTo,
     });
-  }, [page, pageSize, search, activeTab, selectedBuyerId, selectedConsignment, selectedCurrency, dateFrom, dateTo]);
+  }, [page, pageSize, debouncedSearch, activeTab, selectedBuyerId, selectedConsignment, selectedCurrency, dateFrom, dateTo]);
 
   const metricsCacheKey = useMemo(() => {
     return JSON.stringify({
@@ -106,6 +115,7 @@ export function SaleProcessListPage() {
     const id = searchParams.get("id");
     if (s) {
       setSearch(s);
+      setDebouncedSearch(s);
     }
     if (id) {
       setViewOrderId(id);
@@ -167,7 +177,7 @@ export function SaleProcessListPage() {
         page: String(page),
         page_size: String(pageSize),
       });
-      if (search.trim()) params.set("search", search.trim());
+      if (debouncedSearch.trim()) params.set("search", debouncedSearch.trim());
       if (activeTab && activeTab !== "all") params.set("status", activeTab);
       if (selectedBuyerId) params.set("buyer_id", selectedBuyerId);
       if (selectedConsignment) params.set("consignment_code", selectedConsignment);
@@ -195,7 +205,7 @@ export function SaleProcessListPage() {
     } finally {
       setLoading(false);
     }
-  }, [listCacheKey, page, pageSize, search, activeTab, selectedBuyerId, selectedConsignment, selectedCurrency, dateFrom, dateTo, toast]);
+  }, [listCacheKey, page, pageSize, debouncedSearch, activeTab, selectedBuyerId, selectedConsignment, selectedCurrency, dateFrom, dateTo, toast]);
 
   useEffect(() => {
     fetchOrders();
@@ -640,6 +650,7 @@ export function SaleProcessListPage() {
                   setDateFrom("");
                   setDateTo("");
                   setSearch("");
+                  setDebouncedSearch("");
                   setPage(1);
                 }}
               >
@@ -873,6 +884,7 @@ export function SaleProcessListPage() {
                   type="button"
                   onClick={() => {
                     setSearch("");
+                    setDebouncedSearch("");
                     setPage(1);
                   }}
                   title="Clear search"

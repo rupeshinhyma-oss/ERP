@@ -1847,6 +1847,22 @@ td .cell-secondary {
     width: 72px;
   }
 
+  .app-shell:not(.mobile-sidebar-open) .sidebar-brand {
+    padding: 0 8px !important;
+    justify-content: center !important;
+  }
+
+  .app-shell:not(.mobile-sidebar-open) .sidebar-brand-logo {
+    display: none !important;
+  }
+
+  .app-shell:not(.mobile-sidebar-open) .sidebar-toggle-btn {
+    background: #e2e8f0 !important;
+    border: 1px solid #cbd5e0 !important;
+    padding: 6px 12px !important;
+    width: 100% !important;
+  }
+
   .sidebar-brand span.brand-text,
   .nav-group-label,
   .nav-item span.nav-label,
@@ -1860,6 +1876,26 @@ td .cell-secondary {
 
   .sidebar-user {
     justify-content: center;
+  }
+
+  .app-shell.mobile-sidebar-open .sidebar {
+    width: 240px;
+    z-index: 1000;
+    box-shadow: 4px 0 24px rgba(15, 23, 42, 0.18);
+  }
+
+  .app-shell.mobile-sidebar-open .nav-group-label {
+    display: block;
+  }
+
+  .app-shell.mobile-sidebar-open .nav-item span.nav-label,
+  .app-shell.mobile-sidebar-open .sidebar-user .user-meta {
+    display: inline;
+  }
+
+  .app-shell.mobile-sidebar-open .nav-item,
+  .app-shell.mobile-sidebar-open .sidebar-user {
+    justify-content: flex-start;
   }
 
   .main-column {

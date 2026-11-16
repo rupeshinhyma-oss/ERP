@@ -1240,10 +1240,11 @@ export function VatReturnPage() {
           </div>
 
           {/* Table 1: VAT Return Summary Ledger */}
-          <div style={{ width: "100%", overflowX: "hidden", paddingBottom: openMenuKey ? 185 : 0 }}>
+          <div style={{ width: "100%", overflowX: "auto", paddingBottom: openMenuKey ? 185 : 0 }}>
             <table
               style={{
                 width: "100%",
+                minWidth: 1080,
                 tableLayout: "fixed",
                 borderCollapse: "collapse",
                 fontSize: 12,

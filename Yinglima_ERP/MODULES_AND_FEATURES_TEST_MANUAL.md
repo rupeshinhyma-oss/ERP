@@ -4861,3 +4861,13 @@ A standardized suite of 8 production-grade Excel (`.xlsx`) files is maintained d
 
 5. **Financial Report Interactive Product Popover (`Items & Qty` Column)**:
    - Open `/finance/report?section=local_purchase&stage=pending` and hover or click the **`📍 +N`** badge (for multi-item rows) or **`👁️`** button (for single long-named product rows) in the **ITEMS & QTY** column -> verify the floating popover card opens showing the complete product names and quantities.
+
+
+### Test Case PERF-SEARCH-01: 300ms Debounced Search in Sale Process (`/sale/process`) & Stock Movement (`/inventory/stock-movements`)
+1. Open **SALE -> Sale Process** (`/sale/process`) and type a multi-character query (e.g., `SO-YLM`) into the search box -> verify only 1 `GET /api/v1/sales/orders` request is sent after a 300ms pause (not one per keystroke), and clicking **`×`** or **Reset Filters** clears and reloads immediately.
+2. Open **INVENTORY -> Stock Movement** (`/inventory/stock-movements`) and type into the search box on both **Inward / Outward** and **Current Stock Ledger** tabs -> verify only 1 `GET /api/v1/stock/movements` or `GET /api/v1/stock/balances` request is sent after a 300ms pause, and clicking **`×`** or **Reset** clears immediately.
+
+### Test Case UI-RESP-01: Split-Screen VAT Return Table & Sidebar `≡` Toggle (`<= 900px`)
+1. Resize the browser to half-screen (`<= 900px` wide) and open **FINANCE -> VAT Return** (`/finance/vat-return`).
+2. Verify all numeric columns (`TOTAL RMB INCL. VAT`, `TOTAL VAT RETURN`, `VAT RECEIVED`, `BALANCE VAT`, `STATUS`) remain readable with zero overlapping text and scroll smoothly horizontally.
+3. Verify the **`≡`** three-line sidebar toggle button is clearly visible in the top-left `72px` sidebar header, and clicking **`≡`** expands the full `240px` sidebar menu overlay cleanly.

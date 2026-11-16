@@ -748,12 +748,17 @@ function Sidebar({
         }}
       >
         {!collapsed && (
-          <Link to="/dashboard" style={{ display: "inline-flex", alignItems: "center", textDecoration: "none", cursor: "pointer" }}>
+          <Link
+            to="/dashboard"
+            className="sidebar-brand-logo"
+            style={{ display: "inline-flex", alignItems: "center", textDecoration: "none", cursor: "pointer" }}
+          >
             <img src="/logo.png" alt="IHM Logo" style={{ height: "38px", width: "auto", objectFit: "contain" }} />
           </Link>
         )}
         <button
           type="button"
+          className="sidebar-toggle-btn"
           style={{
             background: collapsed ? "#e2e8f0" : "none",
             border: collapsed ? "1px solid #cbd5e0" : "none",
@@ -1224,14 +1229,38 @@ export function AppShell({ activeKey, children, pageClassName }: AppShellProps) 
   const [sidebarCollapsed, setSidebarCollapsed] = useState(
     () => localStorage.getItem("erp_sidebar_collapsed") === "true"
   );
+  const [isNarrowViewport, setIsNarrowViewport] = useState(
+    () => typeof window !== "undefined" && window.matchMedia("(max-width: 900px)").matches
+  );
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 900px)");
+    const onChange = (e: MediaQueryListEvent) => {
+      setIsNarrowViewport(e.matches);
+      if (!e.matches) setMobileMenuOpen(false);
+    };
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, []);
+
+  useEffect(() => {
+    setMobileMenuOpen(false);
+  }, [location.pathname]);
+
+  const effectiveCollapsed = isNarrowViewport ? !mobileMenuOpen : sidebarCollapsed;
 
   const toggleSidebar = useCallback(() => {
+    if (isNarrowViewport) {
+      setMobileMenuOpen((prev) => !prev);
+      return;
+    }
     setSidebarCollapsed((prev) => {
       const next = !prev;
       localStorage.setItem("erp_sidebar_collapsed", String(next));
       return next;
     });
-  }, []);
+  }, [isNarrowViewport]);
 
   const loggedIn = Auth.isLoggedIn();
 
@@ -1392,9 +1421,11 @@ export function AppShell({ activeKey, children, pageClassName }: AppShellProps) 
 
   return (
     <div
-      className={`app-shell ${sidebarCollapsed ? "sidebar-collapsed" : ""} ${pageClassName || ""}`.trim()}
+      className={`app-shell ${effectiveCollapsed ? "sidebar-collapsed" : ""} ${
+        isNarrowViewport && mobileMenuOpen ? "mobile-sidebar-open" : ""
+      } ${pageClassName || ""}`.trim()}
     >
-      <Sidebar activeKey={activeKey} brandName={brandName} collapsed={sidebarCollapsed} onToggleSidebar={toggleSidebar} />
+      <Sidebar activeKey={activeKey} brandName={brandName} collapsed={effectiveCollapsed} onToggleSidebar={toggleSidebar} />
       <div className="main-column">
         <Topbar />
         {children}

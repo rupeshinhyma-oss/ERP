@@ -3,6 +3,13 @@
 **System:** Yinglima_ERP (China Procurement)  
 **Scope:** Functional updates, schema changes, UI hardening, and bug fixes.
 
+### 17. Responsive Split-Screen Fixes for VAT Return Table & Sidebar Toggle (`VatReturn.tsx`, `AppShell.tsx`, `style.css`)
+- **VAT Return Table Horizontal Scroll (`VatReturn.tsx`):** Updated Table 1 container from `overflowX: "hidden"` to `overflowX: "auto"` with `minWidth: 1080` on the `<table>` so currency columns and status badges never overlap on narrow/split-screen viewports.
+- **Narrow-Viewport Sidebar `≡` Toggle (`AppShell.tsx`, `style.css`):** At `<= 900px` (`isNarrowViewport`), the sidebar now defaults to collapsed (`72px`) with the `≡` toggle button centered cleanly (instead of being pushed off-screen by the logo), and clicking `≡` opens the full `240px` sidebar overlay (`mobile-sidebar-open`).
+
+### 16. 300ms Search Debounce for Sale Process & Stock Movements (`SaleProcessList.tsx`, `StockMovements.tsx`)
+- **Debounced Server Search (`debouncedSearch`):** Added a 300ms debounce timer on search inputs in `SaleProcessList.tsx` (`GET /sales/orders`) and `StockMovements.tsx` (`GET /stock/movements`, `GET /stock/balances`) so typing a search term no longer fires an API request on every keystroke. Clear (`×`), `Reset Filters`, and URL `?search=` deep-links update `debouncedSearch` immediately with zero delay.
+
 ### 15. Consignment Overview Dirty-Check Guard for Shipment Schedule & Cargo Remark (`ConsignmentOverview.tsx`)
 - **No-Op Blur/Save Guard (`handleSaveCargoMeta`):** Added value comparison between current draft fields (`etdDraft`, `etaDraft`, `forwarderDraft`, `remarksDraft`) and saved `activeConsignment` values (`etd_origin_date`, `eta_port_date`, `forwarder_name`, `cargo_remarks`). Focusing and blurring `ETD Origin (China)`, `ETA Destination Port`, `Forwarder / Agent Name`, or `Cargo Remark` without making an actual change no longer sends a `PATCH` request or displays the green `"Cargo status & shipment schedule saved."` toast.
 
