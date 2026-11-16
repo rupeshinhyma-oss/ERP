@@ -249,7 +249,7 @@ describe("PaymentsPage", () => {
       file_url: "https://example.com/receipt-123.png",
       file_name: "receipt-123.png",
     });
-    const recordSpy = vi.spyOn(technicalTasksApi, "recordTechnicalTaskPayment").mockResolvedValue({} as any);
+    vi.spyOn(technicalTasksApi, "recordTechnicalTaskPayment").mockResolvedValue({} as any);
 
     render(
       <MemoryRouter>
