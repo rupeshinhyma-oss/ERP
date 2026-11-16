@@ -231,6 +231,25 @@ export function ConsignmentOverviewPage() {
 
   const handleSaveCargoMeta = async () => {
     if (!activeConsignment) return;
+    const nextRemarks = remarksDraft.trim() || null;
+    const nextEtd = etdDraft || null;
+    const nextEta = etaDraft || null;
+    const nextForwarder = forwarderDraft.trim() || null;
+
+    const prevRemarks = activeConsignment.cargo_remarks?.trim() || null;
+    const prevEtd = activeConsignment.etd_origin_date || null;
+    const prevEta = activeConsignment.eta_port_date || null;
+    const prevForwarder = activeConsignment.forwarder_name?.trim() || null;
+
+    if (
+      nextRemarks === prevRemarks &&
+      nextEtd === prevEtd &&
+      nextEta === prevEta &&
+      nextForwarder === prevForwarder
+    ) {
+      return;
+    }
+
     const consignmentKey = activeConsignment.consignment_key;
     mutationSeqRef.current += 1;
     setSavingCargoMeta(true);
@@ -242,10 +261,10 @@ export function ConsignmentOverviewPage() {
         if (item.consignment_key !== consignmentKey) return item;
         return {
           ...item,
-          cargo_remarks: remarksDraft.trim() || null,
-          etd_origin_date: etdDraft || null,
-          eta_port_date: etaDraft || null,
-          forwarder_name: forwarderDraft.trim() || null,
+          cargo_remarks: nextRemarks,
+          etd_origin_date: nextEtd,
+          eta_port_date: nextEta,
+          forwarder_name: nextForwarder,
         };
       }),
     }));
@@ -254,10 +273,10 @@ export function ConsignmentOverviewPage() {
       await apiPatch(
         `/finance/consignment-overview/checklist?key=${encodeURIComponent(consignmentKey)}`,
         {
-          cargo_remarks: remarksDraft.trim() || null,
-          etd_origin_date: etdDraft || null,
-          eta_port_date: etaDraft || null,
-          forwarder_name: forwarderDraft.trim() || null,
+          cargo_remarks: nextRemarks,
+          etd_origin_date: nextEtd,
+          eta_port_date: nextEta,
+          forwarder_name: nextForwarder,
         }
       );
       toast("Cargo status & shipment schedule saved.", "success");

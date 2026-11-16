@@ -3,6 +3,9 @@
 **System:** Yinglima_ERP (China Procurement)  
 **Scope:** Functional updates, schema changes, UI hardening, and bug fixes.
 
+### 15. Consignment Overview Dirty-Check Guard for Shipment Schedule & Cargo Remark (`ConsignmentOverview.tsx`)
+- **No-Op Blur/Save Guard (`handleSaveCargoMeta`):** Added value comparison between current draft fields (`etdDraft`, `etaDraft`, `forwarderDraft`, `remarksDraft`) and saved `activeConsignment` values (`etd_origin_date`, `eta_port_date`, `forwarder_name`, `cargo_remarks`). Focusing and blurring `ETD Origin (China)`, `ETA Destination Port`, `Forwarder / Agent Name`, or `Cargo Remark` without making an actual change no longer sends a `PATCH` request or displays the green `"Cargo status & shipment schedule saved."` toast.
+
 ### 14. End-to-End RBAC & Granular Section-Level Permissions for Financial Report, Consignment Overview, VAT Return & Warehouses (`seed.py`, `main.py`, `finance/routes.py`, `warehouses/routes.py`, `purchases/local/routes.py`, `nav.ts`, `permissionLabels.ts`, `PermissionMatrixEditor.tsx`, `ConsignmentOverview.tsx`, `FinancialReport.tsx`, `VatReturn.tsx`, `Warehouses.tsx`)
 - **4 New Module Permission Sets (`seed.py` & `permissionLabels.ts`):**
   1. **Consignment Overview (`consignment_overview.*` — 8 Section-Level Permissions):** `consignment_overview.view` (List & Header only), `consignment_overview.finance.view` (Section 1: Finance Planning), `consignment_overview.gallery.view` (Section 2: View Consignment Docs), `consignment_overview.gallery.upload` (Upload Consignment Docs), `consignment_overview.gallery.delete` (Delete Consignment Docs), `consignment_overview.cargo_status.view` (Section 3: View Cargo Status Checklist), `consignment_overview.cargo_status.edit` (Toggle Checklist Yes/No & Edit ETD/ETA/Forwarder/Remarks), and `consignment_overview.product_summary.view` (Section 4: Product Summary).
