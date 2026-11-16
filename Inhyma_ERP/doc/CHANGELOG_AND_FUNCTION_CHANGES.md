@@ -3,6 +3,15 @@
 **System:** Inhyma_ERP (India Distribution)  
 **Scope:** Functional updates, schema migrations, UI hardening, and bug fixes.
 
+## [Release 2026-11-16] — Payments Module Modern Receipt Upload Dropzone & Card Preview Enhancements (`PaymentsPage.tsx`, `payments.css`)
+
+### 1. Payment Screenshot / Receipt Custom Drag-and-Drop Dropzone & Card Preview (`PaymentsPage.tsx`, `payments.css`)
+- **CSS Isolation (`payments.css`):** Scoped `.payment-form-group input:not([type="file"])` and hidden native file inputs to eliminate the cramped 36px text-input border around the browser's default file picker.
+- **Drag-and-Drop Upload Dropzone (`.payment-upload-dropzone`):** Built a high-polish dashed upload container with an upload icon, highlighted `"Choose file"` trigger, drag-and-drop event handling (`onDragOver`, `onDragLeave`, `onDrop`), format and 10MB limit validation (JPG, PNG, WEBP, PDF), and an active spinning loader with `"Uploading receipt..."` state.
+- **Uploaded Receipt Preview Card (`.payment-receipt-card`):** Displays image thumbnails or a red `PDF` document badge, receipt filename, green checkmark `"Receipt attached"`, and quick actions: **View** (opens attachment in a new tab), **Change** (opens file selector to replace), and **Remove** (clears attachment and resets input ref).
+- **Payment Details Modal PDF Support:** Updated receipt preview in the Details modal to gracefully display PDF document cards with a `"View PDF"` link rather than attempting to render PDFs inside `<img>` tags.
+- **Automated Verification:** Added unit and integration tests in `PaymentsPage.test.tsx` verifying dropzone rendering, file upload, preview card, and removal workflows (all 23 tests pass, `tsc --noEmit` clean).
+
 ## [Release 2026-11-04] — Technician Ops & Wallet End-to-End Stock/SO Upgrade & Enterprise Vector Icons, Removal of Redundant Technical Tasks `Payment Pending` Tab, and New `Financial Planning Report` & `Cargo Overview` Modules
 
 ### 1. Technician Ops & Wallet Full-Stack Stock Conservation, Sales Order Pre-Fill Bridge & Machine Warranty Sync (`z7e8f9a0b1c2`, `technician_operations/*`, `sales/*`, `TechnicianOperationsPage.tsx`, `SaleProcessForm.tsx`)

@@ -125,9 +125,12 @@ export function PaymentsPage() {
   const [paymentDate, setPaymentDate] = useState<string>(() => new Date().toISOString().slice(0, 10));
   const [referenceNo, setReferenceNo] = useState<string>("");
   const [paymentScreenshotUrl, setPaymentScreenshotUrl] = useState<string>("");
+  const [paymentScreenshotName, setPaymentScreenshotName] = useState<string>("");
   const [paymentRemarks, setPaymentRemarks] = useState<string>("");
   const [savingPayment, setSavingPayment] = useState(false);
   const [uploadingScreenshot, setUploadingScreenshot] = useState(false);
+  const [isDraggingScreenshot, setIsDraggingScreenshot] = useState(false);
+  const fileInputRef = React.useRef<HTMLInputElement | null>(null);
 
   // Add New Payment Task Form State
   const [newCompanyName, setNewCompanyName] = useState("");
@@ -251,24 +254,73 @@ export function PaymentsPage() {
     setPaymentMode(task.payment_mode || "Company Acc");
     setPaymentDate(new Date().toISOString().slice(0, 10));
     setReferenceNo("");
-    setPaymentScreenshotUrl(task.payment_screenshot || "");
+    if (task.payment_screenshot) {
+      setPaymentScreenshotUrl(task.payment_screenshot);
+      const urlFileName = task.payment_screenshot.split("/").pop()?.split("?")[0] || "Payment Receipt";
+      setPaymentScreenshotName(decodeURIComponent(urlFileName));
+    } else {
+      setPaymentScreenshotUrl("");
+      setPaymentScreenshotName("");
+    }
     setPaymentRemarks("");
     setOpenActionMenuId(null);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  };
+
+  // Process Screenshot File Upload
+  const processScreenshotUpload = async (file: File) => {
+    const isImage = file.type.startsWith("image/") || /\.(png|jpe?g|webp|gif)$/i.test(file.name);
+    const isPdf = file.type === "application/pdf" || /\.pdf$/i.test(file.name);
+    if (!isImage && !isPdf) {
+      setBanner({ type: "error", message: "Please upload an image (JPG, PNG, WEBP) or PDF file." });
+      return;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      setBanner({ type: "error", message: "File size exceeds 10MB limit." });
+      return;
+    }
+
+    setUploadingScreenshot(true);
+    setPaymentScreenshotName(file.name);
+    try {
+      const res = await uploadPaymentScreenshot(file);
+      setPaymentScreenshotUrl(res.file_url);
+      if (res.file_name) {
+        setPaymentScreenshotName(res.file_name);
+      }
+      setBanner({ type: "success", message: "Screenshot uploaded successfully." });
+    } catch (err) {
+      setBanner({ type: "error", message: errorMessage(err) });
+    } finally {
+      setUploadingScreenshot(false);
+    }
   };
 
   // Handle Screenshot File Upload
   const handleScreenshotUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    setUploadingScreenshot(true);
-    try {
-      const res = await uploadPaymentScreenshot(file);
-      setPaymentScreenshotUrl(res.file_url);
-      setBanner({ type: "success", message: "Screenshot uploaded successfully." });
-    } catch (err) {
-      setBanner({ type: "error", message: errorMessage(err) });
-    } finally {
-      setUploadingScreenshot(false);
+    await processScreenshotUpload(file);
+  };
+
+  const handleDropScreenshot = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDraggingScreenshot(false);
+    const file = e.dataTransfer.files?.[0];
+    if (file) {
+      processScreenshotUpload(file);
+    }
+  };
+
+  const handleRemoveScreenshot = (e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    setPaymentScreenshotUrl("");
+    setPaymentScreenshotName("");
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
     }
   };
 
@@ -1214,25 +1266,131 @@ export function PaymentsPage() {
 
                     <div className="payment-form-group full-width">
                       <label>Payment Screenshot / Receipt</label>
-                      <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-                        <input
-                          type="file"
-                          accept="image/*,.pdf"
-                          onChange={handleScreenshotUpload}
-                          disabled={uploadingScreenshot}
-                        />
-                        {uploadingScreenshot && <span style={{ fontSize: "12px", color: "#007bff" }}>Uploading...</span>}
-                        {paymentScreenshotUrl && (
-                          <a
-                            href={paymentScreenshotUrl}
-                            target="_blank"
-                            rel="noreferrer"
-                            style={{ fontSize: "12px", color: "#007bff", textDecoration: "underline" }}
-                          >
-                            View Uploaded
-                          </a>
-                        )}
-                      </div>
+                      <input
+                        ref={fileInputRef}
+                        type="file"
+                        accept="image/*,.pdf"
+                        style={{ display: "none" }}
+                        onChange={handleScreenshotUpload}
+                        disabled={uploadingScreenshot}
+                        data-testid="payment-screenshot-input"
+                      />
+
+                      {paymentScreenshotUrl ? (
+                        <div className="payment-receipt-card">
+                          <div className="payment-receipt-left">
+                            {/\.pdf($|\?)/i.test(paymentScreenshotUrl) ? (
+                              <div className="payment-receipt-badge" title="PDF Document">
+                                PDF
+                              </div>
+                            ) : (
+                              <img
+                                src={paymentScreenshotUrl}
+                                alt="Receipt Thumbnail"
+                                className="payment-receipt-thumb"
+                                onError={(e) => {
+                                  (e.target as HTMLElement).style.display = "none";
+                                }}
+                              />
+                            )}
+                            <div className="payment-receipt-info">
+                              <span className="payment-receipt-name" title={paymentScreenshotName || "Payment Receipt"}>
+                                {paymentScreenshotName || "Payment Receipt"}
+                              </span>
+                              <span className="payment-receipt-status">
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                                  <polyline points="20 6 9 17 4 12" />
+                                </svg>
+                                Receipt attached
+                              </span>
+                            </div>
+                          </div>
+
+                          <div className="payment-receipt-actions">
+                            <a
+                              href={paymentScreenshotUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="payment-receipt-btn"
+                              title="View receipt in a new tab"
+                            >
+                              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                                <circle cx="12" cy="12" r="3" />
+                              </svg>
+                              View
+                            </a>
+                            <button
+                              type="button"
+                              className="payment-receipt-btn"
+                              onClick={() => fileInputRef.current?.click()}
+                              disabled={uploadingScreenshot}
+                              title="Upload a different receipt"
+                            >
+                              Change
+                            </button>
+                            <button
+                              type="button"
+                              className="payment-receipt-btn danger"
+                              onClick={handleRemoveScreenshot}
+                              title="Remove receipt"
+                            >
+                              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                <polyline points="3 6 5 6 21 6" />
+                                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                              </svg>
+                              Remove
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div
+                          className={`payment-upload-dropzone ${isDraggingScreenshot ? "dragging" : ""} ${
+                            uploadingScreenshot ? "uploading" : ""
+                          }`}
+                          onClick={() => !uploadingScreenshot && fileInputRef.current?.click()}
+                          onDragOver={(e) => {
+                            e.preventDefault();
+                            setIsDraggingScreenshot(true);
+                          }}
+                          onDragLeave={() => setIsDraggingScreenshot(false)}
+                          onDrop={handleDropScreenshot}
+                          role="button"
+                          tabIndex={0}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" || e.key === " ") {
+                              e.preventDefault();
+                              fileInputRef.current?.click();
+                            }
+                          }}
+                        >
+                          <div className="payment-upload-icon-box">
+                            {uploadingScreenshot ? (
+                              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="payment-spin">
+                                <circle cx="12" cy="12" r="10" strokeDasharray="32" strokeDashoffset="12" />
+                              </svg>
+                            ) : (
+                              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                                <polyline points="17 8 12 3 7 8" />
+                                <line x1="12" y1="3" x2="12" y2="15" />
+                              </svg>
+                            )}
+                          </div>
+                          <div className="payment-upload-text-wrap">
+                            <span className="payment-upload-title">
+                              {uploadingScreenshot ? (
+                                "Uploading receipt..."
+                              ) : (
+                                <>
+                                  <span className="payment-upload-highlight">Choose file</span> or drag & drop receipt here
+                                </>
+                              )}
+                            </span>
+                            <span className="payment-upload-hint">Supports PNG, JPG, JPEG, WEBP or PDF (max 10MB)</span>
+                          </div>
+                        </div>
+                      )}
                     </div>
 
                     <div className="payment-form-group full-width">
@@ -1483,16 +1641,40 @@ export function PaymentsPage() {
                   </div>
 
                   {detailTask.payment_screenshot && (
-                    <div>
-                      <strong style={{ fontSize: "12px" }}>Payment Screenshot / Receipt:</strong>
+                    <div style={{ marginTop: 12 }}>
+                      <strong style={{ fontSize: "12px", color: "#334155" }}>Payment Screenshot / Receipt:</strong>
                       <div style={{ marginTop: 6 }}>
-                        <a href={detailTask.payment_screenshot} target="_blank" rel="noreferrer">
-                          <img
-                            src={detailTask.payment_screenshot}
-                            alt="Payment Screenshot"
-                            style={{ maxWidth: "100%", maxHeight: 200, borderRadius: 4, border: "1px solid #e2e8f0" }}
-                          />
-                        </a>
+                        {/\.pdf($|\?)/i.test(detailTask.payment_screenshot) ? (
+                          <div className="payment-receipt-card" style={{ maxWidth: 360 }}>
+                            <div className="payment-receipt-left">
+                              <div className="payment-receipt-badge" title="PDF Document">
+                                PDF
+                              </div>
+                              <div className="payment-receipt-info">
+                                <span className="payment-receipt-name">Payment Receipt (PDF)</span>
+                                <span className="payment-receipt-status">Ready to view</span>
+                              </div>
+                            </div>
+                            <div className="payment-receipt-actions">
+                              <a
+                                href={detailTask.payment_screenshot}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="payment-receipt-btn"
+                              >
+                                View PDF
+                              </a>
+                            </div>
+                          </div>
+                        ) : (
+                          <a href={detailTask.payment_screenshot} target="_blank" rel="noreferrer" style={{ display: "inline-block" }}>
+                            <img
+                              src={detailTask.payment_screenshot}
+                              alt="Payment Screenshot"
+                              style={{ maxWidth: "100%", maxHeight: 200, borderRadius: 6, border: "1px solid #e2e8f0", objectFit: "contain", background: "#f8fafc" }}
+                            />
+                          </a>
+                        )}
                       </div>
                     </div>
                   )}

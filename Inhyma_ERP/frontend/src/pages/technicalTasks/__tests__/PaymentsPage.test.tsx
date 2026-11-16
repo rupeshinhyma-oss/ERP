@@ -243,4 +243,66 @@ describe("PaymentsPage", () => {
     expect(screen.getByRole("button", { name: "Close" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Record Payment" })).toBeTruthy();
   });
+
+  it("opens Record Payment modal with custom file upload dropzone, supports uploading and removing receipt", async () => {
+    const uploadSpy = vi.spyOn(technicalTasksApi, "uploadPaymentScreenshot").mockResolvedValue({
+      file_url: "https://example.com/receipt-123.png",
+      file_name: "receipt-123.png",
+    });
+    vi.spyOn(technicalTasksApi, "recordTechnicalTaskPayment").mockResolvedValue({} as any);
+
+    render(
+      <MemoryRouter>
+        <PaymentsPage />
+      </MemoryRouter>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("SUN PHARMA LTD")).toBeTruthy();
+    });
+
+    // Open Action menu and click Record Payment
+    const actionBtn = screen.getByRole("button", { name: "⋮" });
+    fireEvent.click(actionBtn);
+
+    const recordOption = screen.getByRole("button", { name: /Record Payment/i });
+    fireEvent.click(recordOption);
+
+    // Modal opens
+    await waitFor(() => {
+      expect(screen.getByText("Record Payment — SUN PHARMA LTD")).toBeTruthy();
+    });
+
+    // Verify custom upload dropzone is rendered
+    expect(screen.getByText(/Choose file/i)).toBeTruthy();
+    expect(screen.getByText(/or drag & drop receipt here/i)).toBeTruthy();
+    expect(screen.getByText(/Supports PNG, JPG, JPEG, WEBP or PDF \(max 10MB\)/i)).toBeTruthy();
+
+    // Verify hidden file input is present
+    const fileInput = screen.getByTestId("payment-screenshot-input") as HTMLInputElement;
+    expect(fileInput).toBeTruthy();
+    expect(fileInput.style.display).toBe("none");
+
+    // Upload a receipt file
+    const file = new File(["dummy content"], "receipt-123.png", { type: "image/png" });
+    fireEvent.change(fileInput, { target: { files: [file] } });
+
+    await waitFor(() => {
+      expect(uploadSpy).toHaveBeenCalledWith(file);
+      expect(screen.getByText("receipt-123.png")).toBeTruthy();
+      expect(screen.getByText(/Receipt attached/i)).toBeTruthy();
+      expect(screen.getByRole("button", { name: /Remove/i })).toBeTruthy();
+      expect(screen.getByRole("button", { name: /Change/i })).toBeTruthy();
+      expect(screen.getByRole("link", { name: /View/i })).toBeTruthy();
+    });
+
+    // Test removing the screenshot
+    const removeBtn = screen.getByRole("button", { name: /Remove/i });
+    fireEvent.click(removeBtn);
+
+    await waitFor(() => {
+      expect(screen.queryByText("receipt-123.png")).toBeNull();
+      expect(screen.getByText(/Choose file/i)).toBeTruthy();
+    });
+  });
 });
