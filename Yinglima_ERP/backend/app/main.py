@@ -116,20 +116,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         from app.database.engine import get_sessionmaker
 
         async with get_sessionmaker()() as _bootstrap_session:
-            _admin_repo = UserRepository(_bootstrap_session)
-            _existing_admin = await _admin_repo.get_by_username(
-                settings.BOOTSTRAP_ADMIN_USERNAME
-            ) or await _admin_repo.get_by_email(settings.BOOTSTRAP_ADMIN_EMAIL)
+            from scripts.seed import seed_with_session as _run_bootstrap_seed
 
-            if _existing_admin is None:
-                logger.warning(
-                    "No bootstrap admin account found -- running the one-time seed automatically "
-                    "so login is not blocked. This never runs again once the account exists.",
-                )
-                from scripts.seed import seed_with_session as _run_bootstrap_seed
-
-                await _run_bootstrap_seed(_bootstrap_session)
-                await _bootstrap_session.commit()
+            await _run_bootstrap_seed(_bootstrap_session)
+            await _bootstrap_session.commit()
     except Exception:
         # Fail-open on purpose: if this check itself can't run for any
         # reason (e.g. a migration hasn't created the users table yet on

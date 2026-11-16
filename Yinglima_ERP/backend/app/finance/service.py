@@ -283,6 +283,13 @@ class FinanceService:
 
             active_items = [it for it in (lp.items or []) if getattr(it, "deleted_at", None) is None]
             item_names = [it.product_name for it in active_items if it.product_name]
+            items_list: list[str] = []
+            for it in active_items:
+                if not it.product_name:
+                    continue
+                q_val = _to_float(it.quantity)
+                q_str = f"{int(q_val)}" if q_val == int(q_val) else f"{q_val:g}"
+                items_list.append(f"{it.product_name} — Qty: {q_str}" if q_val > 0 else it.product_name)
             items_summary = ", ".join(item_names[:3])
             if len(item_names) > 3:
                 items_summary += f" (+{len(item_names) - 3} more)"
@@ -313,6 +320,7 @@ class FinanceService:
                 source_status=lp.status or "Confirmed",
                 currency=lp.currency or "RMB",
                 items_summary=items_summary,
+                items_list=items_list,
                 items_count=len(active_items),
                 total_quantity=_to_float(lp.total_quantity),
                 invoice_total_value=inv_val,
@@ -359,6 +367,13 @@ class FinanceService:
 
             active_items = [it for it in (so.items or []) if getattr(it, "deleted_at", None) is None]
             item_names = [it.product_name for it in active_items if it.product_name]
+            items_list: list[str] = []
+            for it in active_items:
+                if not it.product_name:
+                    continue
+                q_val = _to_float(it.quantity)
+                q_str = f"{int(q_val)}" if q_val == int(q_val) else f"{q_val:g}"
+                items_list.append(f"{it.product_name} — Qty: {q_str}" if q_val > 0 else it.product_name)
             items_summary = ", ".join(item_names[:3])
             if len(item_names) > 3:
                 items_summary += f" (+{len(item_names) - 3} more)"
@@ -402,6 +417,7 @@ class FinanceService:
                 source_status=so.status or "confirmed",
                 currency=so.currency or "USD",
                 items_summary=items_summary,
+                items_list=items_list,
                 items_count=len(active_items),
                 total_quantity=_to_float(so.total_quantity),
                 expected_stuffing_date=expected_stuffing,

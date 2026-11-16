@@ -64,7 +64,7 @@ async def list_local_purchases(
     date_from: date | None = Query(default=None),
     date_to: date | None = Query(default=None),
     service: LocalPurchaseService = Depends(get_service),
-    current_user: CurrentUser = Depends(require_permission('local_purchase.create')),
+    current_user: CurrentUser = Depends(require_permission('local_purchase.view')),
 ) -> dict:
     offset = (page - 1) * page_size
     records, total = await service.repo.list_with_filters(

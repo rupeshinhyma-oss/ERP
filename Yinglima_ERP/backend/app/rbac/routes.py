@@ -44,6 +44,7 @@ from app.rbac.schemas import (
 )
 from app.cache.dependency import get_cache_manager
 from app.cache.manager import CacheManager
+from app.rbac.models import Role
 from app.rbac.service import RBACService
 
 router = APIRouter(prefix="/rbac", tags=["Roles & Permissions"])
@@ -71,7 +72,7 @@ async def list_permissions(
     cache_manager: CacheManager = Depends(get_cache_manager),
 ) -> dict:
     """List every permission in the system."""
-    cache_key = "rbac::all_permissions"
+    cache_key = "rbac::all_permissions::v2"
     cached = await cache_manager.get(cache_key)
     if cached is not None:
         return build_success_response(data=cached, request_id=request.state.request_id)

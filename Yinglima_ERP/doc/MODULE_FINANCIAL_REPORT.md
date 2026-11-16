@@ -43,6 +43,8 @@ The **Financial Report & Payment Planner** module (`/finance/report`) provides a
   - `📜 Payment History`: View all installments and delete erroneous entries.
   - `✏️ Edit Schedule / Terms / BL & Agent Bill`: Modal to edit payment terms, due date, expected dispatch/stuffing date, BL status, and forwarder freight bill amounts.
   - `👁️ View Local Purchase / View Sale Order`: Opens the source document directly.
+- **Interactive Product & Quantity Popover (`Items & Qty` Column)**:
+  - Uses `ItemPopoverCell` (with `📍 +N` badge button) when multiple products are present and `TextPopoverCell` (with `👁️` button) when a single product has a long name, opening a floating portal card on hover or click with the complete list of product names and quantities (`items_list`).
 
 
 
@@ -74,3 +76,22 @@ The **Financial Report & Payment Planner** module (`/finance/report`) provides a
      - Clicking any checklist card toggles `Yes` (green) / `No` (red) in **0ms** and persists via `PATCH /api/v1/finance/consignment-overview/checklist`.
   5. **Product Summary Table**: Lists all products, supplier/source document numbers, quantities, UOM, and batch/consignment numbers for the consignment.
 
+
+---
+
+## 9. Granular RBAC Permissions (`finance_report.*` & `consignment_overview.*`)
+- **Financial Report (`finance_report`)**:
+  - `finance_report.view`: View Financial Report, KPIs, Pending/Cleared tabs, and payment history.
+  - `finance_report.create`: Record supplier or buyer payment installments (`+ Add Payment`).
+  - `finance_report.update`: Edit payment terms, due date, bill attachment, and agent freight bill schedule.
+  - `finance_report.delete`: Delete recorded payment installments.
+  - `finance_report.export`: Export multi-sheet Financial Planner Excel workbook.
+- **Consignment Overview (`consignment_overview` — Section-Level Access Control)**:
+  - `consignment_overview.view`: View the Consignment Overview list & header strip only (does not automatically expose internal sections).
+  - `consignment_overview.finance.view`: View Section 1 (`Finance Planning` table + `Finance Status` badge).
+  - `consignment_overview.gallery.view`: View Section 2 (`Consignment Gallery` 16 document slots + download files).
+  - `consignment_overview.gallery.upload`: Upload documents into `Consignment Gallery` slots (`Choose File`).
+  - `consignment_overview.gallery.delete`: Delete manually uploaded documents (`🗑`) from `Consignment Gallery` slots.
+  - `consignment_overview.cargo_status.view`: View Section 3 (`Cargo Status — Shipment Checklist Details` + `Cargo Checklist` badge).
+  - `consignment_overview.cargo_status.edit`: Toggle `Yes`/`No` checklist items and edit `ETD Origin`, `ETA Port`, `Forwarder`, and `Cargo Remark`.
+  - `consignment_overview.product_summary.view`: View Section 4 (`Product Summary` table).

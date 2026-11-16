@@ -82,6 +82,7 @@ class LocalPurchaseFinanceRow(BaseModel):
 
     # Product summary (from LocalPurchaseItem rows)
     items_summary: str = ""
+    items_list: list[str] = Field(default_factory=list)
     items_count: int = 0
     total_quantity: float = 0.0
 
@@ -125,6 +126,7 @@ class SaleOrderFinanceRow(BaseModel):
 
     # Shipment & Product Info
     items_summary: str = ""
+    items_list: list[str] = Field(default_factory=list)
     items_count: int = 0
     total_quantity: float = 0.0
     expected_stuffing_date: str | None = None

@@ -1,7 +1,7 @@
-# Module Documentation: VAT Return (China Export Tax Rebate / 出口退税)
+# Module Documentation: China Export VAT Return
 
 ## 1. Overview & Purpose
-The **VAT Return (`/finance/vat-return`)** module under the **`FINANCE`** sidebar section manages Yinglima China's **Export VAT Tax Rebates (出口退税)** across all confirmed commercial export shipments (`EXP` invoices).
+The **China Export VAT Return (`/finance/vat-return`)** module under the **`FINANCE`** sidebar section manages Yinglima China's **Export VAT Tax Rebates** across all confirmed commercial export shipments (`EXP` invoices).
 
 It unifies two tightly linked views modeled directly on the manager's `RETURNED VAT LIST Yinglima` workbook:
 1. **Table 1 — Export VAT Return Summary Ledger**: Tracks every confirmed `EXP` shipment (`EXP2023 - 01` through `EXP2026 - 97+`), Invoice Date, Financial Year (`FY 2023-2024`, `FY 2024-2025`, `FY 2025-2026`, `FY 2026-2027`), Total RMB Inclusive of VAT, Total VAT Return Amount (`¥`), VAT Amount Received (`¥`), Balance VAT to be Received (`¥`), Status (`RECEIVED`, `PARTIAL RECEIVED`, `PENDING`, `NO VAT`), VAT Receiving Date(s), Partial Amount Received, 1st Tax Bureau Filing Date, and Remarks.
@@ -96,4 +96,15 @@ All endpoints are mounted under `/api/v1/finance/vat-returns`:
 - **Financial Year Pill Selector**: Instant client-side filtering across `All Years`, `FY 2026-2027`, `FY 2025-2026`, `FY 2024-2025`, and `FY 2023-2024`.
 - **`Imp / Exp ▾` Dropdown**: Provides `Sample File (.csv)`, `Import Excel / CSV`, and `Export 2-Sheet Excel (.xlsx)`.
 - **Clickable `EXP No.` Breakdown Modal**: Opens Table 2 where users can inspect or inline-edit Contract Date, Contract No., Supplier, Product, Quantity, RMB Price with VAT, USD Price, Rebate % (`13%`, `9%`, `6%`, `0%`), and Remarks with live formula recalculation.
+
+---
+
+## 6. Granular RBAC Permissions (`vat_return.*`)
+- `vat_return.view`: View China Export VAT Return ledger, KPIs, and Product & Supplier VAT Breakdown (Table 2).
+- `vat_return.create`: Create standalone manual `EXP` entries (`+ New EXP Entry`).
+- `vat_return.update`: Edit Product & Supplier VAT Breakdown (Table 2), Rebate %, Contract No., 1st filing date, status override, and remarks.
+- `vat_return.receipt`: Record and delete VAT refund receipts from the China Tax Bureau.
+- `vat_return.import`: Import VAT Return records from Excel/CSV and download sample template.
+- `vat_return.export`: Export 2-sheet VAT Return Summary & Product Breakdown Excel workbook.
+
 

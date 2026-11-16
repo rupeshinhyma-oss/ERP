@@ -10,7 +10,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
+import { ItemPopoverCell, TextPopoverCell } from "@/components/ItemPopoverCell";
 import { apiDelete, apiGet, apiPatch, apiPost, downloadExport, errorMessage } from "@/lib/api";
+import { Auth } from "@/lib/auth";
 import { useConfirm } from "@/lib/confirm";
 import { useToast } from "@/lib/toast";
 import type {
@@ -147,6 +149,12 @@ export function FinancialReportPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const toast = useToast();
   const confirm = useConfirm();
+
+  // Granular Action Permissions for Financial Report
+  const canCreatePayment = Auth.hasPermission("finance_report.create");
+  const canUpdateMeta = Auth.hasPermission("finance_report.update");
+  const canDeletePayment = Auth.hasPermission("finance_report.delete");
+  const canExportReport = Auth.hasPermission("finance_report.export");
 
   // Active Section ("local_purchase" | "sale_order") & Stage ("pending" | "cleared" | "all")
   const initialSection = (searchParams.get("section") as ActiveSection) || "local_purchase";
@@ -774,27 +782,29 @@ export function FinancialReportPage() {
               <span>▼</span> Filter
             </button>
 
-            <button
-              type="button"
-              onClick={() => void handleExportExcel()}
-              disabled={exporting}
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 6,
-                padding: "8px 16px",
-                borderRadius: 6,
-                border: "1px solid #d97706",
-                background: "#f59e0b",
-                color: "#ffffff",
-                fontSize: 13,
-                fontWeight: 600,
-                cursor: exporting ? "not-allowed" : "pointer",
-                opacity: exporting ? 0.7 : 1,
-              }}
-            >
-              <span>⬇</span> {exporting ? "Exporting..." : "Export"}
-            </button>
+            {canExportReport && (
+              <button
+                type="button"
+                onClick={() => void handleExportExcel()}
+                disabled={exporting}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 6,
+                  padding: "8px 16px",
+                  borderRadius: 6,
+                  border: "1px solid #d97706",
+                  background: "#f59e0b",
+                  color: "#ffffff",
+                  fontSize: 13,
+                  fontWeight: 600,
+                  cursor: exporting ? "not-allowed" : "pointer",
+                  opacity: exporting ? 0.7 : 1,
+                }}
+              >
+                <span>⬇</span> {exporting ? "Exporting..." : "Export"}
+              </button>
+            )}
           </div>
         </div>
 
@@ -1463,21 +1473,55 @@ export function FinancialReportPage() {
                           </td>
 
                           {/* Items & Qty */}
-                          <td style={{ ...tdStyle, maxWidth: 210 }}>
-                            <div
-                              style={{
-                                fontSize: 12,
-                                color: "#334155",
-                                whiteSpace: "nowrap",
-                                overflow: "hidden",
-                                textOverflow: "ellipsis",
-                              }}
-                              title={row.items_summary}
-                            >
-                              {row.items_summary || "—"}
+                          <td style={{ ...tdStyle, maxWidth: 230 }}>
+                            <div>
+                              {(() => {
+                                const itemsList =
+                                  row.items_list && row.items_list.length > 0
+                                    ? row.items_list
+                                    : row.items_summary
+                                    ? row.items_summary
+                                        .replace(/\s*\(\+\d+\s+more\)$/i, "")
+                                        .split(",")
+                                        .map((s) => s.trim())
+                                        .filter(Boolean)
+                                    : [];
+
+                                if (itemsList.length === 0) {
+                                  return <span style={{ color: "#94a3b8", fontSize: 12 }}>—</span>;
+                                }
+
+                                if (itemsList.length === 1) {
+                                  const cleanSingle = itemsList[0].replace(/\s*—\s*Qty:\s*[^\s]+$/i, "");
+                                  return (
+                                    <TextPopoverCell
+                                      text={cleanSingle}
+                                      maxLen={20}
+                                      title={`Product (${row.invoice_no})`}
+                                      icon="📦"
+                                      maxWidth="150px"
+                                    />
+                                  );
+                                }
+
+                                const firstClean = itemsList[0].replace(/\s*—\s*Qty:\s*[^\s]+$/i, "");
+                                const displayItems = [firstClean, ...itemsList.slice(1)];
+                                return (
+                                  <ItemPopoverCell
+                                    items={displayItems}
+                                    popoverItems={itemsList}
+                                    icon="📦"
+                                    itemIcon="📦"
+                                    title={`📍 Products (${row.invoice_no})`}
+                                    badgeIcon="📍"
+                                    maxWidth="135px"
+                                  />
+                                );
+                              })()}
                             </div>
                             <div style={{ fontSize: 11, color: "#64748b", marginTop: 2 }}>
-                              Qty: <strong>{row.total_quantity}</strong> ({row.items_count} items)
+                              Qty: <strong>{row.total_quantity}</strong> ({row.items_count}{" "}
+                              {row.items_count === 1 ? "item" : "items"})
                             </div>
                           </td>
 
@@ -1501,7 +1545,7 @@ export function FinancialReportPage() {
                               >
                                 ⬇ View Bill
                               </a>
-                            ) : (
+                            ) : canUpdateMeta ? (
                               <button
                                 type="button"
                                 onClick={() => openEditMetaModal(row)}
@@ -1518,6 +1562,8 @@ export function FinancialReportPage() {
                               >
                                 + Add
                               </button>
+                            ) : (
+                              <span style={{ color: "#94a3b8", fontSize: 12 }}>—</span>
                             )}
                           </td>
 
@@ -1526,14 +1572,16 @@ export function FinancialReportPage() {
                             <div style={{ fontWeight: 500, color: "#1e293b" }}>
                               {row.payment_terms || "—"}
                             </div>
-                            <button
-                              type="button"
-                              onClick={() => openEditMetaModal(row)}
-                              style={inlineEditBtnStyle}
-                              title="Edit Payment Terms & Schedule"
-                            >
-                              ✎
-                            </button>
+                            {canUpdateMeta && (
+                              <button
+                                type="button"
+                                onClick={() => openEditMetaModal(row)}
+                                style={inlineEditBtnStyle}
+                                title="Edit Payment Terms & Schedule"
+                              >
+                                ✎
+                              </button>
+                            )}
                           </td>
 
                           {/* Expected Dispatch */}
@@ -1636,13 +1684,15 @@ export function FinancialReportPage() {
                             </button>
                             {openMenuRowId === menuKey && (
                               <div ref={menuRef} style={dropdownMenuStyle}>
-                                <button
-                                  type="button"
-                                  onClick={() => openAddPaymentModal(row)}
-                                  style={dropdownItemStyle}
-                                >
-                                  <span>💳</span> Add Payment
-                                </button>
+                                {canCreatePayment && (
+                                  <button
+                                    type="button"
+                                    onClick={() => openAddPaymentModal(row)}
+                                    style={dropdownItemStyle}
+                                  >
+                                    <span>💳</span> Add Payment
+                                  </button>
+                                )}
                                 <button
                                   type="button"
                                   onClick={() => openHistoryModal(row)}
@@ -1650,13 +1700,15 @@ export function FinancialReportPage() {
                                 >
                                   <span>📜</span> Payment History ({row.payments_count})
                                 </button>
-                                <button
-                                  type="button"
-                                  onClick={() => openEditMetaModal(row)}
-                                  style={dropdownItemStyle}
-                                >
-                                  <span>✏️</span> Edit Schedule / Terms
-                                </button>
+                                {canUpdateMeta && (
+                                  <button
+                                    type="button"
+                                    onClick={() => openEditMetaModal(row)}
+                                    style={dropdownItemStyle}
+                                  >
+                                    <span>✏️</span> Edit Schedule / Terms
+                                  </button>
+                                )}
                                 <button
                                   type="button"
                                   onClick={() => navigate(`/purchase/local/${row.source_id}/edit`)}
@@ -1800,14 +1852,16 @@ export function FinancialReportPage() {
                             <div style={{ fontSize: 11.5, color: "#64748b", marginTop: 2 }}>
                               TT Date: {fmtDate(row.tt_received_date)}
                             </div>
-                            <button
-                              type="button"
-                              onClick={() => openEditMetaModal(row)}
-                              style={inlineEditBtnStyle}
-                              title="Edit Payment Terms & TT Date"
-                            >
-                              ✎
-                            </button>
+                            {canUpdateMeta && (
+                              <button
+                                type="button"
+                                onClick={() => openEditMetaModal(row)}
+                                style={inlineEditBtnStyle}
+                                title="Edit Payment Terms & TT Date"
+                              >
+                                ✎
+                              </button>
+                            )}
                           </td>
 
                           {/* Total Amount */}
@@ -1957,13 +2011,15 @@ export function FinancialReportPage() {
                             </button>
                             {openMenuRowId === menuKey && (
                               <div ref={menuRef} style={dropdownMenuStyle}>
-                                <button
-                                  type="button"
-                                  onClick={() => openAddPaymentModal(row)}
-                                  style={dropdownItemStyle}
-                                >
-                                  <span>💳</span> Add Payment
-                                </button>
+                                {canCreatePayment && (
+                                  <button
+                                    type="button"
+                                    onClick={() => openAddPaymentModal(row)}
+                                    style={dropdownItemStyle}
+                                  >
+                                    <span>💳</span> Add Payment
+                                  </button>
+                                )}
                                 <button
                                   type="button"
                                   onClick={() => openHistoryModal(row)}
@@ -1971,13 +2027,15 @@ export function FinancialReportPage() {
                                 >
                                   <span>📜</span> Payment History ({row.payments_count})
                                 </button>
-                                <button
-                                  type="button"
-                                  onClick={() => openEditMetaModal(row)}
-                                  style={dropdownItemStyle}
-                                >
-                                  <span>✏️</span> Edit BL &amp; Agent Bill
-                                </button>
+                                {canUpdateMeta && (
+                                  <button
+                                    type="button"
+                                    onClick={() => openEditMetaModal(row)}
+                                    style={dropdownItemStyle}
+                                  >
+                                    <span>✏️</span> Edit BL &amp; Agent Bill
+                                  </button>
+                                )}
                                 <button
                                   type="button"
                                   onClick={() => navigate(`/sale/process/${row.source_id}/edit`)}
@@ -2336,17 +2394,19 @@ export function FinancialReportPage() {
                     )}
                   </strong>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    const target = historyModalTarget;
-                    setHistoryModalTarget(null);
-                    openAddPaymentModal(target);
-                  }}
-                  style={primaryBtnStyle}
-                >
-                  + Add Payment
-                </button>
+                {canCreatePayment && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const target = historyModalTarget;
+                      setHistoryModalTarget(null);
+                      openAddPaymentModal(target);
+                    }}
+                    style={primaryBtnStyle}
+                  >
+                    + Add Payment
+                  </button>
+                )}
               </div>
 
               {historyModalTarget.payments.length === 0 ? (
@@ -2364,7 +2424,7 @@ export function FinancialReportPage() {
                         <th style={thStyle}>Mode / Account</th>
                         <th style={thStyle}>Reference / TT No.</th>
                         <th style={thStyle}>Remarks</th>
-                        <th style={{ ...thStyle, textAlign: "center" }}>Action</th>
+                        {canDeletePayment && <th style={{ ...thStyle, textAlign: "center" }}>Action</th>}
                       </tr>
                     </thead>
                     <tbody>
@@ -2380,25 +2440,27 @@ export function FinancialReportPage() {
                           <td style={tdStyle}>{p.payment_mode || "—"}</td>
                           <td style={tdStyle}>{p.reference_no || "—"}</td>
                           <td style={tdStyle}>{p.remarks || "—"}</td>
-                          <td style={{ ...tdStyle, textAlign: "center" }}>
-                            <button
-                              type="button"
-                              disabled={deletingPaymentId === p.id}
-                              onClick={() => void handleDeletePayment(p)}
-                              style={{
-                                padding: "3px 8px",
-                                borderRadius: 4,
-                                border: "1px solid #fecaca",
-                                background: "#fef2f2",
-                                color: "#dc2626",
-                                fontSize: 11.5,
-                                fontWeight: 600,
-                                cursor: "pointer",
-                              }}
-                            >
-                              Delete
-                            </button>
-                          </td>
+                          {canDeletePayment && (
+                            <td style={{ ...tdStyle, textAlign: "center" }}>
+                              <button
+                                type="button"
+                                disabled={deletingPaymentId === p.id}
+                                onClick={() => void handleDeletePayment(p)}
+                                style={{
+                                  padding: "3px 8px",
+                                  borderRadius: 4,
+                                  border: "1px solid #fecaca",
+                                  background: "#fef2f2",
+                                  color: "#dc2626",
+                                  fontSize: 11.5,
+                                  fontWeight: 600,
+                                  cursor: "pointer",
+                                }}
+                              >
+                                Delete
+                              </button>
+                            </td>
+                          )}
                         </tr>
                       ))}
                     </tbody>

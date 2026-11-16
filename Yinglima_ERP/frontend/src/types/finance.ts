@@ -36,6 +36,7 @@ export interface LocalPurchaseFinanceRow {
   currency: string;
 
   items_summary: string;
+  items_list?: string[];
   items_count: number;
   total_quantity: number;
 
@@ -76,6 +77,7 @@ export interface SaleOrderFinanceRow {
   currency: string;
 
   items_summary: string;
+  items_list?: string[];
   items_count: number;
   total_quantity: number;
   expected_stuffing_date?: string | null;

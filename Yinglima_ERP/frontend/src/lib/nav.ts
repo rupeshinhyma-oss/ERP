@@ -77,9 +77,9 @@ export const NAV_SECTIONS: NavSection[] = [
   {
     label: "FINANCE",
     items: [
-      { key: "finance-report", label: "Financial Report", path: "/finance/report", icon: "coins" },
-      { key: "consignment-overview", label: "Consignment Overview", path: "/finance/consignment-overview", icon: "fileText" },
-      { key: "vat-return", label: "VAT Return", path: "/finance/vat-return", icon: "coins" },
+      { key: "finance-report", label: "Financial Report", path: "/finance/report", icon: "coins", permission: "finance_report.view" },
+      { key: "consignment-overview", label: "Consignment Overview", path: "/finance/consignment-overview", icon: "fileText", permission: "consignment_overview.view" },
+      { key: "vat-return", label: "VAT Return", path: "/finance/vat-return", icon: "coins", permission: "vat_return.view" },
     ],
   },
   {
@@ -110,7 +110,7 @@ export const NAV_SECTIONS: NavSection[] = [
           { key: "masters-supplier-types", label: "Supplier Types", path: "/masters/supplier-types", permission: "suppliertype.view" },
           { key: "masters-buyer-types", label: "Buyer Types", path: "/masters/buyer-types", permission: "buyertype.view" },
           { key: "masters-company-list", label: "Organization List", path: "/masters/company-list", permission: "organizationlist.view" },
-          { key: "masters-warehouses", label: "Warehouses", path: "/masters/warehouses", permission: "product.view" },
+          { key: "masters-warehouses", label: "Warehouses", path: "/masters/warehouses", permission: "warehouse.view" },
         ],
       },
       { key: "notification-settings", label: "Notification Rules", path: "/notification-settings", icon: "bell", permission: "notification_settings.view" },

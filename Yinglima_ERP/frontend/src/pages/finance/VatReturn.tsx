@@ -27,6 +27,7 @@ import {
   downloadExport,
   errorMessage,
 } from "@/lib/api";
+import { Auth } from "@/lib/auth";
 import { useConfirm } from "@/lib/confirm";
 import { useToast } from "@/lib/toast";
 import type {
@@ -103,6 +104,13 @@ export function VatReturnPage() {
   const toast = useToast();
   const confirm = useConfirm();
   const [searchParams, setSearchParams] = useSearchParams();
+
+  // Granular Action Permissions for VAT Return
+  const canCreateVatReturn = Auth.hasPermission("vat_return.create");
+  const canUpdateVatReturn = Auth.hasPermission("vat_return.update");
+  const canManageVatReceipt = Auth.hasPermission("vat_return.receipt");
+  const canImportVatReturn = Auth.hasPermission("vat_return.import");
+  const canExportVatReturn = Auth.hasPermission("vat_return.export");
 
   const initialStage = (searchParams.get("stage") as VatReturnStageFilter) || "all";
   const initialFy = searchParams.get("fy") || "all";
@@ -686,7 +694,7 @@ export function VatReturnPage() {
                 letterSpacing: "-0.02em",
               }}
             >
-              China Export VAT Return (出口退税)
+              China Export VAT Return
             </h1>
           </div>
 
@@ -705,143 +713,157 @@ export function VatReturnPage() {
               1 USD = ¥ {liveKpi.rate.toFixed(2)} RMB
             </span>
 
-            <button
-              type="button"
-              onClick={() => setShowNewModal(true)}
-              style={{
-                background: "#0f172a",
-                color: "#ffffff",
-                border: "none",
-                borderRadius: 6,
-                padding: "7px 13px",
-                fontSize: 12.5,
-                fontWeight: 600,
-                cursor: "pointer",
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 6,
-              }}
-            >
-              + New EXP Entry
-            </button>
-
-            {/* Imp / Exp Dropdown */}
-            <div ref={impExpRef} style={{ position: "relative" }}>
+            {canCreateVatReturn && (
               <button
                 type="button"
-                disabled={importingFile || exportingFile}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setImpExpOpen((o) => !o);
-                }}
+                onClick={() => setShowNewModal(true)}
                 style={{
-                  background: "#f59e0b",
+                  background: "#0f172a",
                   color: "#ffffff",
                   border: "none",
                   borderRadius: 6,
                   padding: "7px 13px",
                   fontSize: 12.5,
-                  fontWeight: 700,
+                  fontWeight: 600,
                   cursor: "pointer",
                   display: "inline-flex",
                   alignItems: "center",
                   gap: 6,
                 }}
               >
-                {importingFile ? "Importing..." : exportingFile ? "Exporting..." : "Imp / Exp ▾"}
+                + New EXP Entry
               </button>
+            )}
 
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept=".xlsx,.xls,.csv"
-                style={{ display: "none" }}
-                onChange={handleImportFileChange}
-              />
-
-              {impExpOpen && (
-                <div
-                  onClick={(e) => e.stopPropagation()}
+            {/* Imp / Exp Dropdown */}
+            {(canImportVatReturn || canExportVatReturn) && (
+              <div ref={impExpRef} style={{ position: "relative" }}>
+                <button
+                  type="button"
+                  disabled={importingFile || exportingFile}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setImpExpOpen((o) => !o);
+                  }}
                   style={{
-                    position: "absolute",
-                    right: 0,
-                    top: "calc(100% + 6px)",
-                    background: "#ffffff",
-                    border: "1px solid #e2e8f0",
-                    borderRadius: 8,
-                    boxShadow: "0 10px 25px rgba(15,23,42,0.12)",
-                    minWidth: 210,
-                    zIndex: 50,
-                    padding: 6,
+                    background: "#f59e0b",
+                    color: "#ffffff",
+                    border: "none",
+                    borderRadius: 6,
+                    padding: "7px 13px",
+                    fontSize: 12.5,
+                    fontWeight: 700,
+                    cursor: "pointer",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 6,
                   }}
                 >
-                  <button
-                    type="button"
-                    onClick={handleDownloadSample}
+                  {importingFile ? "Importing..." : exportingFile ? "Exporting..." : "Imp / Exp ▾"}
+                </button>
+
+                {canImportVatReturn && (
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept=".xlsx,.xls,.csv"
+                    style={{ display: "none" }}
+                    onChange={handleImportFileChange}
+                  />
+                )}
+
+                {impExpOpen && (
+                  <div
+                    onClick={(e) => e.stopPropagation()}
                     style={{
-                      width: "100%",
-                      textAlign: "left",
-                      padding: "8px 10px",
-                      fontSize: 12.5,
-                      fontWeight: 600,
-                      color: "#1e293b",
-                      background: "transparent",
-                      border: "none",
-                      borderRadius: 6,
-                      cursor: "pointer",
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 8,
+                      position: "absolute",
+                      right: 0,
+                      top: "calc(100% + 6px)",
+                      background: "#ffffff",
+                      border: "1px solid #e2e8f0",
+                      borderRadius: 8,
+                      boxShadow: "0 10px 25px rgba(15,23,42,0.12)",
+                      minWidth: 210,
+                      zIndex: 50,
+                      padding: 6,
                     }}
                   >
-                    <span>📄</span> Sample File (.csv)
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => fileInputRef.current?.click()}
-                    style={{
-                      width: "100%",
-                      textAlign: "left",
-                      padding: "8px 10px",
-                      fontSize: 12.5,
-                      fontWeight: 600,
-                      color: "#1e293b",
-                      background: "transparent",
-                      border: "none",
-                      borderRadius: 6,
-                      cursor: "pointer",
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 8,
-                    }}
-                  >
-                    <span>📥</span> Import Excel / CSV
-                  </button>
-                  <div style={{ height: 1, background: "#f1f5f9", margin: "4px 0" }} />
-                  <button
-                    type="button"
-                    onClick={handleExportExcel}
-                    style={{
-                      width: "100%",
-                      textAlign: "left",
-                      padding: "8px 10px",
-                      fontSize: 12.5,
-                      fontWeight: 600,
-                      color: "#0f766e",
-                      background: "transparent",
-                      border: "none",
-                      borderRadius: 6,
-                      cursor: "pointer",
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 8,
-                    }}
-                  >
-                    <span>📊</span> Export 2-Sheet Excel (.xlsx)
-                  </button>
-                </div>
-              )}
-            </div>
+                    {canImportVatReturn && (
+                      <>
+                        <button
+                          type="button"
+                          onClick={handleDownloadSample}
+                          style={{
+                            width: "100%",
+                            textAlign: "left",
+                            padding: "8px 10px",
+                            fontSize: 12.5,
+                            fontWeight: 600,
+                            color: "#1e293b",
+                            background: "transparent",
+                            border: "none",
+                            borderRadius: 6,
+                            cursor: "pointer",
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 8,
+                          }}
+                        >
+                          <span>📄</span> Sample File (.csv)
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => fileInputRef.current?.click()}
+                          style={{
+                            width: "100%",
+                            textAlign: "left",
+                            padding: "8px 10px",
+                            fontSize: 12.5,
+                            fontWeight: 600,
+                            color: "#1e293b",
+                            background: "transparent",
+                            border: "none",
+                            borderRadius: 6,
+                            cursor: "pointer",
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 8,
+                          }}
+                        >
+                          <span>📥</span> Import Excel / CSV
+                        </button>
+                      </>
+                    )}
+                    {canImportVatReturn && canExportVatReturn && (
+                      <div style={{ height: 1, background: "#f1f5f9", margin: "4px 0" }} />
+                    )}
+                    {canExportVatReturn && (
+                      <button
+                        type="button"
+                        onClick={handleExportExcel}
+                        style={{
+                          width: "100%",
+                          textAlign: "left",
+                          padding: "8px 10px",
+                          fontSize: 12.5,
+                          fontWeight: 600,
+                          color: "#0f766e",
+                          background: "transparent",
+                          border: "none",
+                          borderRadius: 6,
+                          cursor: "pointer",
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 8,
+                        }}
+                      >
+                        <span>📊</span> Export 2-Sheet Excel (.xlsx)
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
 
             <button
               type="button"
@@ -1129,10 +1151,6 @@ export function VatReturnPage() {
                   </button>
                 );
               })}
-            </div>
-
-            <div style={{ fontSize: 12, color: "#64748b" }}>
-              Click any <strong>EXP No.</strong> to inspect or edit its Supplier & Product VAT Breakdown (Table 2).
             </div>
           </div>
 
@@ -1488,27 +1506,29 @@ export function VatReturnPage() {
                               textAlign: "left",
                             }}
                           >
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setOpenMenuKey(null);
-                                openReceiptModal(row);
-                              }}
-                              style={{
-                                width: "100%",
-                                textAlign: "left",
-                                padding: "8px 10px",
-                                fontSize: 12.5,
-                                fontWeight: 600,
-                                color: "#0f172a",
-                                background: "transparent",
-                                border: "none",
-                                borderRadius: 6,
-                                cursor: "pointer",
-                              }}
-                            >
-                              💳 Record VAT Receipt (Full / Partial)
-                            </button>
+                            {canManageVatReceipt && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setOpenMenuKey(null);
+                                  openReceiptModal(row);
+                                }}
+                                style={{
+                                  width: "100%",
+                                  textAlign: "left",
+                                  padding: "8px 10px",
+                                  fontSize: 12.5,
+                                  fontWeight: 600,
+                                  color: "#0f172a",
+                                  background: "transparent",
+                                  border: "none",
+                                  borderRadius: 6,
+                                  cursor: "pointer",
+                                }}
+                              >
+                                💳 Record VAT Receipt (Full / Partial)
+                              </button>
+                            )}
                             <button
                               type="button"
                               onClick={() => {
@@ -1551,28 +1571,32 @@ export function VatReturnPage() {
                             >
                               📜 Receipt History ({row.receipts_count})
                             </button>
-                            <div style={{ height: 1, background: "#f1f5f9", margin: "4px 0" }} />
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setOpenMenuKey(null);
-                                openEditMetaModal(row);
-                              }}
-                              style={{
-                                width: "100%",
-                                textAlign: "left",
-                                padding: "8px 10px",
-                                fontSize: 12.5,
-                                fontWeight: 600,
-                                color: "#475569",
-                                background: "transparent",
-                                border: "none",
-                                borderRadius: 6,
-                                cursor: "pointer",
-                              }}
-                            >
-                              ✏️ Edit Filing Date / Status / Remarks
-                            </button>
+                            {canUpdateVatReturn && (
+                              <>
+                                <div style={{ height: 1, background: "#f1f5f9", margin: "4px 0" }} />
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setOpenMenuKey(null);
+                                    openEditMetaModal(row);
+                                  }}
+                                  style={{
+                                    width: "100%",
+                                    textAlign: "left",
+                                    padding: "8px 10px",
+                                    fontSize: 12.5,
+                                    fontWeight: 600,
+                                    color: "#475569",
+                                    background: "transparent",
+                                    border: "none",
+                                    borderRadius: 6,
+                                    cursor: "pointer",
+                                  }}
+                                >
+                                  ✏️ Edit Filing Date / Status / Remarks
+                                </button>
+                              </>
+                            )}
                           </div>
                         )}
                       </td>
@@ -1733,22 +1757,24 @@ export function VatReturnPage() {
                 </div>
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                <button
-                  type="button"
-                  onClick={handleAddBreakdownLine}
-                  style={{
-                    background: "#2563eb",
-                    color: "#ffffff",
-                    border: "none",
-                    borderRadius: 6,
-                    padding: "6px 12px",
-                    fontSize: 12,
-                    fontWeight: 700,
-                    cursor: "pointer",
-                  }}
-                >
-                  + Add Product Line
-                </button>
+                {canUpdateVatReturn && (
+                  <button
+                    type="button"
+                    onClick={handleAddBreakdownLine}
+                    style={{
+                      background: "#2563eb",
+                      color: "#ffffff",
+                      border: "none",
+                      borderRadius: 6,
+                      padding: "6px 12px",
+                      fontSize: 12,
+                      fontWeight: 700,
+                      cursor: "pointer",
+                    }}
+                  >
+                    + Add Product Line
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => setBreakdownRowKey(null)}
@@ -1811,7 +1837,7 @@ export function VatReturnPage() {
                   {breakdownDraft.length === 0 ? (
                     <tr>
                       <td colSpan={13} style={{ padding: 28, textAlign: "center", color: "#64748b", whiteSpace: "normal" }}>
-                        No product breakdown lines recorded yet. Click <strong>+ Add Product Line</strong> above to add supplier/product rows.
+                        No product breakdown lines recorded yet.
                       </td>
                     </tr>
                   ) : (
@@ -1820,6 +1846,7 @@ export function VatReturnPage() {
                         <td style={{ padding: "5px 4px", whiteSpace: "normal" }}>
                           <input
                             type="text"
+                            disabled={!canUpdateVatReturn}
                             value={item.order_no || ""}
                             title={item.order_no || ""}
                             onChange={(e) => handleBreakdownFieldChange(idx, "order_no", e.target.value)}
@@ -1829,6 +1856,7 @@ export function VatReturnPage() {
                         <td style={{ padding: "5px 4px", whiteSpace: "normal" }}>
                           <input
                             type="date"
+                            disabled={!canUpdateVatReturn}
                             value={(item.contract_date || "").slice(0, 10)}
                             onChange={(e) => handleBreakdownFieldChange(idx, "contract_date", e.target.value)}
                             style={{ width: "100%", minWidth: 0, boxSizing: "border-box", padding: "4px 4px", border: "1px solid #cbd5e1", borderRadius: 4, fontSize: 11 }}
@@ -1837,6 +1865,7 @@ export function VatReturnPage() {
                         <td style={{ padding: "5px 4px", whiteSpace: "normal" }}>
                           <input
                             type="text"
+                            disabled={!canUpdateVatReturn}
                             placeholder="Contract / Fapiao"
                             value={item.contract_no || ""}
                             title={item.contract_no || ""}
@@ -1847,6 +1876,7 @@ export function VatReturnPage() {
                         <td style={{ padding: "5px 4px", whiteSpace: "normal" }}>
                           <input
                             type="text"
+                            disabled={!canUpdateVatReturn}
                             value={item.supplier_name || ""}
                             title={item.supplier_name || ""}
                             onChange={(e) => handleBreakdownFieldChange(idx, "supplier_name", e.target.value)}
@@ -1856,6 +1886,7 @@ export function VatReturnPage() {
                         <td style={{ padding: "5px 4px", whiteSpace: "normal" }}>
                           <input
                             type="text"
+                            disabled={!canUpdateVatReturn}
                             value={item.product_name || ""}
                             title={item.product_name || ""}
                             onChange={(e) => handleBreakdownFieldChange(idx, "product_name", e.target.value)}
@@ -1866,6 +1897,7 @@ export function VatReturnPage() {
                           <input
                             type="number"
                             step="any"
+                            disabled={!canUpdateVatReturn}
                             value={item.quantity}
                             onChange={(e) => handleBreakdownFieldChange(idx, "quantity", e.target.value)}
                             style={{ width: "100%", minWidth: 0, boxSizing: "border-box", padding: "4px 4px", border: "1px solid #cbd5e1", borderRadius: 4, fontSize: 11.5, textAlign: "right" }}
@@ -1875,6 +1907,7 @@ export function VatReturnPage() {
                           <input
                             type="number"
                             step="any"
+                            disabled={!canUpdateVatReturn}
                             value={item.rmb_price_with_vat}
                             onChange={(e) => handleBreakdownFieldChange(idx, "rmb_price_with_vat", e.target.value)}
                             style={{ width: "100%", minWidth: 0, boxSizing: "border-box", padding: "4px 5px", border: "1px solid #cbd5e1", borderRadius: 4, fontSize: 11.5, textAlign: "right" }}
@@ -1887,6 +1920,7 @@ export function VatReturnPage() {
                           <input
                             type="number"
                             step="any"
+                            disabled={!canUpdateVatReturn}
                             value={item.usd_price}
                             onChange={(e) => handleBreakdownFieldChange(idx, "usd_price", e.target.value)}
                             style={{ width: "100%", minWidth: 0, boxSizing: "border-box", padding: "4px 4px", border: "1px solid #cbd5e1", borderRadius: 4, fontSize: 11.5, textAlign: "right" }}
@@ -1894,6 +1928,7 @@ export function VatReturnPage() {
                         </td>
                         <td style={{ padding: "5px 4px", textAlign: "center", whiteSpace: "normal" }}>
                           <select
+                            disabled={!canUpdateVatReturn}
                             value={item.refund_vat_percent}
                             onChange={(e) => handleBreakdownFieldChange(idx, "refund_vat_percent", Number(e.target.value))}
                             style={{ width: "100%", minWidth: 0, boxSizing: "border-box", padding: "4px 4px", border: "1px solid #cbd5e1", borderRadius: 4, fontSize: 11, fontWeight: 700 }}
@@ -1910,6 +1945,7 @@ export function VatReturnPage() {
                         <td style={{ padding: "5px 4px", whiteSpace: "normal" }}>
                           <input
                             type="text"
+                            disabled={!canUpdateVatReturn}
                             placeholder="e.g. No VAT / 9%"
                             value={item.remarks || ""}
                             title={item.remarks || ""}
@@ -1918,21 +1954,23 @@ export function VatReturnPage() {
                           />
                         </td>
                         <td style={{ padding: "5px 2px", textAlign: "center", whiteSpace: "nowrap" }}>
-                          <button
-                            type="button"
-                            onClick={() => handleRemoveBreakdownLine(idx)}
-                            style={{
-                              background: "transparent",
-                              border: "none",
-                              color: "#dc2626",
-                              cursor: "pointer",
-                              fontWeight: 800,
-                              padding: "2px 4px",
-                            }}
-                            title="Remove line"
-                          >
-                            ✕
-                          </button>
+                          {canUpdateVatReturn && (
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveBreakdownLine(idx)}
+                              style={{
+                                background: "transparent",
+                                border: "none",
+                                color: "#dc2626",
+                                cursor: "pointer",
+                                fontWeight: 800,
+                                padding: "2px 4px",
+                              }}
+                              title="Remove line"
+                            >
+                              ✕
+                            </button>
+                          )}
                         </td>
                       </tr>
                     ))
@@ -1994,23 +2032,25 @@ export function VatReturnPage() {
               >
                 Close
               </button>
-              <button
-                type="button"
-                disabled={savingBreakdown}
-                onClick={handleSaveBreakdown}
-                style={{
-                  padding: "8px 18px",
-                  borderRadius: 6,
-                  border: "none",
-                  background: "#2563eb",
-                  color: "#ffffff",
-                  fontWeight: 700,
-                  fontSize: 12.5,
-                  cursor: "pointer",
-                }}
-              >
-                {savingBreakdown ? "Saving..." : "Save Breakdown & Sync VAT Total"}
-              </button>
+              {canUpdateVatReturn && (
+                <button
+                  type="button"
+                  disabled={savingBreakdown}
+                  onClick={handleSaveBreakdown}
+                  style={{
+                    padding: "8px 18px",
+                    borderRadius: 6,
+                    border: "none",
+                    background: "#2563eb",
+                    color: "#ffffff",
+                    fontWeight: 700,
+                    fontSize: 12.5,
+                    cursor: "pointer",
+                  }}
+                >
+                  {savingBreakdown ? "Saving..." : "Save Breakdown & Sync VAT Total"}
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -2273,23 +2313,25 @@ export function VatReturnPage() {
                         <td style={{ padding: 8, whiteSpace: "normal", wordBreak: "break-word" }}>{rec.reference_no || "—"}</td>
                         <td style={{ padding: 8, whiteSpace: "normal", wordBreak: "break-word" }}>{rec.remarks || "—"}</td>
                         <td style={{ padding: 8, textAlign: "center", whiteSpace: "nowrap" }}>
-                          <button
-                            type="button"
-                            disabled={deletingReceiptId === rec.id}
-                            onClick={() => handleDeleteReceipt(rec)}
-                            style={{
-                              background: "#fee2e2",
-                              color: "#b91c1c",
-                              border: "none",
-                              borderRadius: 4,
-                              padding: "4px 8px",
-                              fontSize: 11.5,
-                              fontWeight: 700,
-                              cursor: "pointer",
-                            }}
-                          >
-                            {deletingReceiptId === rec.id ? "..." : "Delete"}
-                          </button>
+                          {canManageVatReceipt && (
+                            <button
+                              type="button"
+                              disabled={deletingReceiptId === rec.id}
+                              onClick={() => handleDeleteReceipt(rec)}
+                              style={{
+                                background: "#fee2e2",
+                                color: "#b91c1c",
+                                border: "none",
+                                borderRadius: 4,
+                                padding: "4px 8px",
+                                fontSize: 11.5,
+                                fontWeight: 700,
+                                cursor: "pointer",
+                              }}
+                            >
+                              {deletingReceiptId === rec.id ? "..." : "Delete"}
+                            </button>
+                          )}
                         </td>
                       </tr>
                     ))}
@@ -2307,26 +2349,30 @@ export function VatReturnPage() {
                 justifyContent: "space-between",
               }}
             >
-              <button
-                type="button"
-                onClick={() => {
-                  const r = activeHistoryRow;
-                  setHistoryModalRowKey(null);
-                  openReceiptModal(r);
-                }}
-                style={{
-                  padding: "7px 14px",
-                  borderRadius: 6,
-                  border: "none",
-                  background: "#16a34a",
-                  color: "#ffffff",
-                  fontWeight: 700,
-                  fontSize: 12.5,
-                  cursor: "pointer",
-                }}
-              >
-                + Record Another Receipt
-              </button>
+              {canManageVatReceipt ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const r = activeHistoryRow;
+                    setHistoryModalRowKey(null);
+                    openReceiptModal(r);
+                  }}
+                  style={{
+                    padding: "7px 14px",
+                    borderRadius: 6,
+                    border: "none",
+                    background: "#16a34a",
+                    color: "#ffffff",
+                    fontWeight: 700,
+                    fontSize: 12.5,
+                    cursor: "pointer",
+                  }}
+                >
+                  + Record Another Receipt
+                </button>
+              ) : (
+                <span />
+              )}
               <button
                 type="button"
                 onClick={() => setHistoryModalRowKey(null)}

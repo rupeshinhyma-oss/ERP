@@ -23,7 +23,7 @@ from app.masters.warehouses.schemas import (
     WarehouseUpdate,
 )
 from app.masters.warehouses.service import WarehouseService
-from app.rbac.dependencies import require_any_permission
+from app.rbac.dependencies import require_any_permission, require_permission
 
 router = APIRouter(prefix="/masters/warehouses", tags=["Masters - Warehouses"])
 
@@ -62,7 +62,7 @@ async def create_warehouse(
     payload: WarehouseCreate,
     request: Request,
     service: WarehouseService = Depends(get_warehouse_service),
-    current_user: CurrentUser = Depends(require_any_permission("warehouse.create", "product.create", "stock_movement.inward")),
+    current_user: CurrentUser = Depends(require_permission("warehouse.create")),
     audit_service: AuditService = Depends(get_audit_service),
 ) -> dict:
     item = await service.create(**payload.model_dump())
@@ -84,7 +84,7 @@ async def list_warehouses(
     request: Request,
     query: ListQueryParams = Depends(get_list_query_params),
     service: WarehouseService = Depends(get_warehouse_service),
-    _current_user: CurrentUser = Depends(get_current_user),
+    _current_user: CurrentUser = Depends(require_permission("warehouse.view")),
 ) -> dict:
     items, total = await service.list_paginated(query)
     meta = PageMeta.build(page=query.page.page, page_size=query.page.page_size, total_records=total).as_meta_dict()
@@ -108,7 +108,7 @@ async def export_warehouses(
     request: Request,
     format: str = "csv",
     service: WarehouseService = Depends(get_warehouse_service),
-    current_user: CurrentUser = Depends(require_any_permission("warehouse.export", "product.export", "stock_movement.view")),
+    current_user: CurrentUser = Depends(require_permission("warehouse.export")),
     audit_service: AuditService = Depends(get_audit_service),
 ) -> Response:
     file_format = format.lower()
@@ -134,7 +134,7 @@ async def import_warehouses(
     file: UploadFile = File(...),
     update_existing: bool = Query(False, description="Update existing records matching name instead of skipping"),
     service: WarehouseService = Depends(get_warehouse_service),
-    current_user: CurrentUser = Depends(require_any_permission("warehouse.import", "product.import", "product.create")),
+    current_user: CurrentUser = Depends(require_permission("warehouse.import")),
     audit_service: AuditService = Depends(get_audit_service),
 ) -> dict:
     raw_bytes = await file.read()
@@ -156,7 +156,7 @@ async def get_warehouse(
     warehouse_id: uuid.UUID,
     request: Request,
     service: WarehouseService = Depends(get_warehouse_service),
-    _current_user: CurrentUser = Depends(get_current_user),
+    _current_user: CurrentUser = Depends(require_permission("warehouse.view")),
 ) -> dict:
     """Fetch a single warehouse by ID."""
     item = await service.get_by_id_or_raise(warehouse_id)
@@ -170,7 +170,7 @@ async def update_warehouse(
     payload: WarehouseUpdate,
     request: Request,
     service: WarehouseService = Depends(get_warehouse_service),
-    current_user: CurrentUser = Depends(require_any_permission("warehouse.update", "product.update")),
+    current_user: CurrentUser = Depends(require_permission("warehouse.update")),
     audit_service: AuditService = Depends(get_audit_service),
 ) -> dict:
     item = await service.update(warehouse_id, **payload.model_dump(exclude_unset=True))
@@ -192,7 +192,7 @@ async def activate_warehouse(
     warehouse_id: uuid.UUID,
     request: Request,
     service: WarehouseService = Depends(get_warehouse_service),
-    current_user: CurrentUser = Depends(require_any_permission("warehouse.update", "product.update")),
+    current_user: CurrentUser = Depends(require_any_permission("warehouse.update", "warehouse.bulk_action")),
     audit_service: AuditService = Depends(get_audit_service),
 ) -> dict:
     item = await service.activate(warehouse_id)
@@ -213,7 +213,7 @@ async def deactivate_warehouse(
     warehouse_id: uuid.UUID,
     request: Request,
     service: WarehouseService = Depends(get_warehouse_service),
-    current_user: CurrentUser = Depends(require_any_permission("warehouse.update", "product.update")),
+    current_user: CurrentUser = Depends(require_any_permission("warehouse.update", "warehouse.bulk_action")),
     audit_service: AuditService = Depends(get_audit_service),
 ) -> dict:
     item = await service.deactivate(warehouse_id)
@@ -234,7 +234,7 @@ async def delete_warehouse(
     warehouse_id: uuid.UUID,
     request: Request,
     service: WarehouseService = Depends(get_warehouse_service),
-    current_user: CurrentUser = Depends(require_any_permission("warehouse.delete", "product.delete")),
+    current_user: CurrentUser = Depends(require_any_permission("warehouse.delete", "warehouse.bulk_action")),
     audit_service: AuditService = Depends(get_audit_service),
 ) -> dict:
     item = await service.get_by_id_or_raise(warehouse_id)

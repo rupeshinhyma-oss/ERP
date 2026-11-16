@@ -4846,3 +4846,18 @@ A standardized suite of 8 production-grade Excel (`.xlsx`) files is maintained d
    - Click **`Imp / Exp ▾ -> Sample File (.csv)`** -> verify `vat_return_sample.csv` downloads.
    - Click **`Imp / Exp ▾ -> Import Excel / CSV`** and select the `RETURNED VAT LIST Yinglima` `.xlsx` file (or a CSV file) -> verify both Table 1 summary rows (`EXP2023 - 01` ... `EXP2026 - 97`) and Table 2 product breakdown rows (`YL-EXP...`) import cleanly without duplicates.
    - Click **`Imp / Exp ▾ -> Export 2-Sheet Excel (.xlsx)`** -> verify a 2-sheet workbook (`VAT Return Summary` + `Product VAT Breakdown`) downloads cleanly.
+
+
+### Test Case RBAC-FIN-01: Granular Permissions for Consignment Overview, Financial Report, VAT Return & Warehouses (`/rbac`)
+1. Navigate to **USER MANAGEMENT -> Departments & Permissions** (`/rbac`) and click **Create New Department** (or edit an existing department).
+2. Verify the top filter pills show **All Modules (33)** and a new **`💰 Finance & Export (3)`** tab containing:
+   - **Financial Report** (`5` permissions: `View Financial Report`, `Record Payment Installment`, `Edit Schedule & Agent Bill`, `Delete Payment Installment`, `Export Financial Planner Excel`)
+   - **Consignment Overview** (`8` granular permissions: `View Consignment List`, `View Finance Planning Section`, `View Consignment Docs (Gallery)`, `Upload Consignment Docs`, `Delete Consignment Docs`, `View Cargo Status Section`, `Edit Cargo Status & Checklist`, `View Product Summary Section`)
+   - **VAT Return** (`6` permissions: `View VAT Return Ledger`, `Create Manual EXP Entry`, `Edit Breakdown & Filing Info`, `Record & Delete VAT Receipts`, `Import VAT Return Excel/CSV`, `Export 2-Sheet VAT Excel`)
+3. Verify **Settings & Masters** now includes **Warehouses** (`7` permissions: `warehouse.view`, `create`, `update`, `delete`, `export`, `import`, `bulk_action`).
+4. **Consignment Overview Section-Level Isolation Verification**:
+   - Grant a user only `consignment_overview.view` + `consignment_overview.gallery.view` + `consignment_overview.product_summary.view` (leaving `finance.view` and `cargo_status.view` unchecked).
+   - Log in as that user and open `/finance/consignment-overview?key=SEA+2` -> verify **Consignment Gallery** and **Product Summary** are visible, while **Finance Planning** and **Cargo Status** sections are hidden, and file upload/delete controls inside **Consignment Gallery** only appear when `consignment_overview.gallery.upload` / `consignment_overview.gallery.delete` are granted.
+
+5. **Financial Report Interactive Product Popover (`Items & Qty` Column)**:
+   - Open `/finance/report?section=local_purchase&stage=pending` and hover or click the **`📍 +N`** badge (for multi-item rows) or **`👁️`** button (for single long-named product rows) in the **ITEMS & QTY** column -> verify the floating popover card opens showing the complete product names and quantities.

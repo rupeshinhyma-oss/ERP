@@ -20,7 +20,7 @@ export interface PermissionMatrixEditorProps {
   isReadOnly?: boolean;
 }
 
-type TabFilter = "all" | "core" | "inventory" | "admin" | "masters" | "overridden";
+type TabFilter = "all" | "core" | "inventory" | "finance" | "admin" | "masters" | "overridden";
 
 export const PermissionMatrixEditor: React.FC<PermissionMatrixEditorProps> = ({
   allPermissions,
@@ -171,7 +171,7 @@ export const PermissionMatrixEditor: React.FC<PermissionMatrixEditorProps> = ({
               color: activeTab === "all" ? "#ffffff" : "#64748b",
             }}
           >
-            26
+            {PERMISSION_SECTIONS.reduce((sum, sec) => sum + sec.modules.length, 0)}
           </span>
         </button>
 

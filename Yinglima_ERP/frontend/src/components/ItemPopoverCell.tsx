@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 
 export interface ItemPopoverCellProps {
   items: string[];
+  popoverItems?: string[];
   icon?: string;
   itemIcon?: string;
   title?: string;
@@ -21,6 +22,7 @@ interface PopoverCoords {
 
 export function ItemPopoverCell({
   items,
+  popoverItems,
   icon,
   itemIcon,
   title,
@@ -132,6 +134,10 @@ export function ItemPopoverCell({
   }, []);
 
   const cleanItems = (items || []).filter(Boolean);
+  const cleanPopoverItems =
+    popoverItems && popoverItems.filter(Boolean).length > 0
+      ? popoverItems.filter(Boolean)
+      : cleanItems;
 
   if (!cleanItems.length) {
     return <span style={{ color: "#94a3b8" }}>{emptyText}</span>;
@@ -154,8 +160,10 @@ export function ItemPopoverCell({
           gap: "4px",
         }}
       >
-        {icon && <span>{icon}</span>}
-        <span>{first}</span>
+        {icon && <span style={{ flexShrink: 0 }}>{icon}</span>}
+        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {first}
+        </span>
       </span>
     );
   }
@@ -187,10 +195,13 @@ export function ItemPopoverCell({
             display: "inline-flex",
             alignItems: "center",
             gap: "4px",
+            overflow: "hidden",
           }}
         >
-          {icon && <span>{icon}</span>}
-          <span>{first}</span>
+          {icon && <span style={{ flexShrink: 0 }}>{icon}</span>}
+          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {first}
+          </span>
         </span>
         <button
           type="button"
@@ -236,7 +247,7 @@ export function ItemPopoverCell({
               boxShadow: "0 16px 36px -4px rgba(0, 0, 0, 0.22), 0 8px 16px -4px rgba(0, 0, 0, 0.12)",
               padding: "10px 12px",
               minWidth: "230px",
-              maxWidth: "340px",
+              maxWidth: "360px",
               maxHeight: "250px",
               overflowY: "auto",
               zIndex: 9999999,
@@ -266,7 +277,7 @@ export function ItemPopoverCell({
               }}
             >
               <span>
-                {title || "Selected Items"} ({cleanItems.length})
+                {title || "Selected Items"} ({cleanPopoverItems.length})
               </span>
               <button
                 type="button"
@@ -289,7 +300,7 @@ export function ItemPopoverCell({
               </button>
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: "5px" }}>
-              {cleanItems.map((itemText, i) => (
+              {cleanPopoverItems.map((itemText, i) => (
                 <div
                   key={i}
                   style={{

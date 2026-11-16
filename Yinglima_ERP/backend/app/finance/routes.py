@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import get_current_user
 from app.auth.service import CurrentUser
+from app.rbac.dependencies import require_any_permission, require_permission
 from app.core.logging import get_logger
 from app.core.responses import build_success_response
 from app.database.session import get_db_session
@@ -46,7 +47,7 @@ async def get_financial_report(
     consignment_code: str | None = Query(default=None),
     date_from: date | None = Query(default=None),
     date_to: date | None = Query(default=None),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permission("finance_report.view")),
     service: FinanceService = Depends(get_service),
 ):
     report = await service.get_report(
@@ -74,7 +75,7 @@ async def add_payment(
     source_type: SourceTypeLiteral,
     source_id: uuid.UUID,
     payload: FinancePaymentCreate,
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permission("finance_report.create")),
     service: FinanceService = Depends(get_service),
 ):
     payment = await service.add_payment(
@@ -99,7 +100,7 @@ async def list_payments(
     request: Request,
     source_type: SourceTypeLiteral,
     source_id: uuid.UUID,
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permission("finance_report.view")),
     service: FinanceService = Depends(get_service),
 ):
     payments = await service.list_payments(source_type=source_type, source_id=source_id)
@@ -117,7 +118,7 @@ async def list_payments(
 async def delete_payment(
     request: Request,
     payment_id: uuid.UUID,
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permission("finance_report.delete")),
     service: FinanceService = Depends(get_service),
 ):
     await service.delete_payment(payment_id=payment_id)
@@ -137,7 +138,7 @@ async def update_finance_meta(
     source_type: SourceTypeLiteral,
     source_id: uuid.UUID,
     payload: FinanceMetaUpdate,
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permission("finance_report.update")),
     service: FinanceService = Depends(get_service),
 ):
     updated = await service.update_meta(
@@ -163,7 +164,7 @@ async def export_financial_report(
     consignment_code: str | None = Query(default=None),
     date_from: date | None = Query(default=None),
     date_to: date | None = Query(default=None),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permission("finance_report.export")),
     service: FinanceService = Depends(get_service),
 ):
     excel_bytes = await service.export_excel(
@@ -195,7 +196,7 @@ async def list_consignment_overviews(
     stage: StageLiteral = Query(default="all", description="Filter by stage: pending | cleared | all"),
     search: str | None = Query(default=None),
     branch_name: str | None = Query(default=None),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permission("consignment_overview.view")),
     service: FinanceService = Depends(get_service),
 ):
     result = await service.list_consignment_overviews(
@@ -217,7 +218,7 @@ async def list_consignment_overviews(
 async def get_consignment_overview_detail(
     request: Request,
     key: str = Query(..., description="Consignment key (e.g. 'MUM 51' or 'LP:INV-384')"),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permission("consignment_overview.view")),
     service: FinanceService = Depends(get_service),
 ):
     row = await service.get_consignment_overview(consignment_key=key)
@@ -236,7 +237,7 @@ async def update_consignment_checklist(
     request: Request,
     payload: ConsignmentChecklistUpdatePayload,
     key: str = Query(..., description="Consignment key"),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permission("consignment_overview.cargo_status.edit")),
     service: FinanceService = Depends(get_service),
 ):
     updated = await service.update_consignment_checklist(
@@ -262,7 +263,7 @@ async def upload_consignment_document(
     key: str = Query(..., description="Consignment key"),
     slot_key: str = Query(..., description="Document slot key (e.g. 'proforma_invoice', 'final_bl')"),
     file: UploadFile = File(...),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permission("consignment_overview.gallery.upload")),
     service: FinanceService = Depends(get_service),
 ):
     file_bytes = await file.read()
@@ -290,7 +291,7 @@ async def delete_consignment_document(
     request: Request,
     key: str = Query(..., description="Consignment key"),
     slot_key: str = Query(..., description="Document slot key"),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permission("consignment_overview.gallery.delete")),
     service: FinanceService = Depends(get_service),
 ):
     res = await service.delete_consignment_document(
@@ -325,7 +326,7 @@ async def list_vat_returns(
     search: str | None = Query(default=None),
     date_from: date | None = Query(default=None),
     date_to: date | None = Query(default=None),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permission("vat_return.view")),
     service: FinanceService = Depends(get_service),
 ):
     res = await service.list_vat_returns(
@@ -350,7 +351,7 @@ async def list_vat_returns(
 async def create_manual_vat_return(
     request: Request,
     payload: VatReturnManualCreatePayload,
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permission("vat_return.create")),
     service: FinanceService = Depends(get_service),
 ):
     res = await service.create_manual_vat_return(
@@ -373,7 +374,7 @@ async def update_vat_return_record(
     request: Request,
     payload: VatReturnUpdatePayload,
     key: str = Query(..., description="Record key (e.g. 'SO:<uuid>' or 'VR:<uuid>' or EXP No.)"),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permission("vat_return.update")),
     service: FinanceService = Depends(get_service),
 ):
     res = await service.update_vat_return(
@@ -398,7 +399,7 @@ async def add_vat_return_receipt(
     request: Request,
     payload: VatReturnReceiptCreate,
     key: str = Query(..., description="Record key (e.g. 'SO:<uuid>' or 'VR:<uuid>')"),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permission("vat_return.receipt")),
     service: FinanceService = Depends(get_service),
 ):
     rec = await service.add_vat_receipt(
@@ -421,7 +422,7 @@ async def add_vat_return_receipt(
 async def delete_vat_return_receipt(
     request: Request,
     receipt_id: uuid.UUID,
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permission("vat_return.receipt")),
     service: FinanceService = Depends(get_service),
 ):
     res = await service.delete_vat_receipt(receipt_id=receipt_id)
@@ -437,7 +438,7 @@ async def delete_vat_return_receipt(
     summary="Download sample CSV template for importing VAT Return records",
 )
 async def download_vat_returns_sample_csv(
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_any_permission("vat_return.view", "vat_return.import")),
     service: FinanceService = Depends(get_service),
 ):
     csv_bytes = service.generate_vat_returns_sample_csv()
@@ -455,7 +456,7 @@ async def download_vat_returns_sample_csv(
 async def import_vat_returns_file(
     request: Request,
     file: UploadFile = File(...),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permission("vat_return.import")),
     service: FinanceService = Depends(get_service),
 ):
     file_bytes = await file.read()
@@ -482,7 +483,7 @@ async def export_vat_returns_excel(
     search: str | None = Query(default=None),
     date_from: date | None = Query(default=None),
     date_to: date | None = Query(default=None),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permission("vat_return.export")),
     service: FinanceService = Depends(get_service),
 ):
     excel_bytes = await service.export_vat_returns_excel(

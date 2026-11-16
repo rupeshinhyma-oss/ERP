@@ -22,9 +22,9 @@ export function WarehousesPage() {
     <MasterPage<WarehouseItem>
       activeKey="masters-warehouses"
       apiBase="/masters/warehouses"
-      permissionPrefix="product"
-      exportPermission="product.export"
-      bulkActionPermission="product.bulk_action"
+      permissionPrefix="warehouse"
+      exportPermission="warehouse.export"
+      bulkActionPermission="warehouse.bulk_action"
       entityName="warehouse"
       heading="Warehouses"
       newButtonLabel="+ New Warehouse"

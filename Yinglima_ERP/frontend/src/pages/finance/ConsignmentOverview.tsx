@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
 import { apiDelete, apiGet, apiPatch, apiPostMultipart, errorMessage } from "@/lib/api";
+import { Auth } from "@/lib/auth";
 import { useToast } from "@/lib/toast";
 import type {
   ConsignmentDocumentSlot,
@@ -56,6 +57,18 @@ export function ConsignmentOverviewPage() {
   const toast = useToast();
   const [searchParams, setSearchParams] = useSearchParams();
   const selectedKey = searchParams.get("key");
+
+  // Granular Section & Action Permissions for Consignment Overview
+  const canViewFinanceReport = Auth.hasPermission("finance_report.view");
+  const canViewFinanceSection = Auth.hasPermission("consignment_overview.finance.view");
+  const canViewGallerySection = Auth.hasPermission("consignment_overview.gallery.view");
+  const canUploadGalleryDoc = Auth.hasPermission("consignment_overview.gallery.upload");
+  const canDeleteGalleryDoc = Auth.hasPermission("consignment_overview.gallery.delete");
+  const canViewCargoStatusSection = Auth.hasPermission("consignment_overview.cargo_status.view");
+  const canEditCargoStatus = Auth.hasPermission("consignment_overview.cargo_status.edit");
+  const canViewProductSummarySection = Auth.hasPermission(
+    "consignment_overview.product_summary.view"
+  );
 
   const [data, setData] = useState<ConsignmentOverviewListResponse | null>(cachedOverviewList);
   const [loading, setLoading] = useState<boolean>(!cachedOverviewList);
@@ -384,22 +397,24 @@ export function ConsignmentOverviewPage() {
             </div>
 
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <button
-                type="button"
-                onClick={() => navigate("/finance/report")}
-                style={{
-                  padding: "8px 14px",
-                  borderRadius: 8,
-                  border: "1px solid #cbd5e1",
-                  background: "#ffffff",
-                  color: "#1e293b",
-                  fontSize: 13,
-                  fontWeight: 600,
-                  cursor: "pointer",
-                }}
-              >
-                Open Financial Report
-              </button>
+              {canViewFinanceReport && (
+                <button
+                  type="button"
+                  onClick={() => navigate("/finance/report")}
+                  style={{
+                    padding: "8px 14px",
+                    borderRadius: 8,
+                    border: "1px solid #cbd5e1",
+                    background: "#ffffff",
+                    color: "#1e293b",
+                    fontSize: 13,
+                    fontWeight: 600,
+                    cursor: "pointer",
+                  }}
+                >
+                  Open Financial Report
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => setSearchParams({})}
@@ -487,14 +502,18 @@ export function ConsignmentOverviewPage() {
               <input
                 type="date"
                 value={etdDraft}
+                disabled={!canEditCargoStatus}
                 onChange={(e) => setEtdDraft(e.target.value)}
-                onBlur={() => void handleSaveCargoMeta()}
+                onBlur={() => {
+                  if (canEditCargoStatus) void handleSaveCargoMeta();
+                }}
                 style={{
                   fontSize: 12.5,
                   padding: "4px 8px",
                   borderRadius: 6,
                   border: "1px solid #cbd5e1",
                   color: "#0f172a",
+                  background: canEditCargoStatus ? "#ffffff" : "#f8fafc",
                   width: "100%",
                   maxWidth: 145,
                 }}
@@ -508,14 +527,18 @@ export function ConsignmentOverviewPage() {
               <input
                 type="date"
                 value={etaDraft}
+                disabled={!canEditCargoStatus}
                 onChange={(e) => setEtaDraft(e.target.value)}
-                onBlur={() => void handleSaveCargoMeta()}
+                onBlur={() => {
+                  if (canEditCargoStatus) void handleSaveCargoMeta();
+                }}
                 style={{
                   fontSize: 12.5,
                   padding: "4px 8px",
                   borderRadius: 6,
                   border: "1px solid #cbd5e1",
                   color: "#0f172a",
+                  background: canEditCargoStatus ? "#ffffff" : "#f8fafc",
                   width: "100%",
                   maxWidth: 145,
                 }}
@@ -530,14 +553,18 @@ export function ConsignmentOverviewPage() {
                 type="text"
                 placeholder="e.g. Shipping Agent"
                 value={forwarderDraft}
+                disabled={!canEditCargoStatus}
                 onChange={(e) => setForwarderDraft(e.target.value)}
-                onBlur={() => void handleSaveCargoMeta()}
+                onBlur={() => {
+                  if (canEditCargoStatus) void handleSaveCargoMeta();
+                }}
                 style={{
                   fontSize: 12.5,
                   padding: "4px 8px",
                   borderRadius: 6,
                   border: "1px solid #cbd5e1",
                   color: "#0f172a",
+                  background: canEditCargoStatus ? "#ffffff" : "#f8fafc",
                   width: "100%",
                 }}
               />
@@ -545,639 +572,700 @@ export function ConsignmentOverviewPage() {
           </div>
 
           {/* ================================================================= */}
-          {/* SECTION 1: FINANCE PLANNING                                       */}
+          {/* SECTION 1: FINANCE PLANNING (`consignment_overview.finance.view`)  */}
           {/* ================================================================= */}
-          <div
-            style={{
-              background: "#ffffff",
-              borderRadius: 12,
-              border: "1px solid #e2e8f0",
-              padding: "18px 20px",
-              marginBottom: 20,
-              boxShadow: "0 1px 3px rgba(15, 23, 42, 0.04)",
-            }}
-          >
+          {canViewFinanceSection && (
             <div
               style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                marginBottom: 14,
+                background: "#ffffff",
+                borderRadius: 12,
+                border: "1px solid #e2e8f0",
+                padding: "18px 20px",
+                marginBottom: 20,
+                boxShadow: "0 1px 3px rgba(15, 23, 42, 0.04)",
               }}
             >
-              <h2 style={{ fontSize: 18, fontWeight: 800, color: "#0f172a", margin: 0 }}>
-                Finance Planning
-              </h2>
-              <span style={{ fontSize: 12, color: "#64748b" }}>
-                {activeConsignment.finance_rows.length} Linked Financial Record(s)
-              </span>
-            </div>
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  marginBottom: 14,
+                }}
+              >
+                <h2 style={{ fontSize: 18, fontWeight: 800, color: "#0f172a", margin: 0 }}>
+                  Finance Planning
+                </h2>
+                <span style={{ fontSize: 12, color: "#64748b" }}>
+                  {activeConsignment.finance_rows.length} Linked Financial Record(s)
+                </span>
+              </div>
 
-            <div style={{ overflowX: "auto" }}>
-              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-                <thead>
-                  <tr
-                    style={{
-                      background: "#f8fafc",
-                      borderBottom: "1px solid #e2e8f0",
-                      color: "#334155",
-                      textAlign: "left",
-                    }}
-                  >
-                    <th style={{ padding: "10px 12px", fontWeight: 700 }}>Party Name</th>
-                    <th style={{ padding: "10px 12px", fontWeight: 700 }}>Invoice / Cons. No.</th>
-                    <th style={{ padding: "10px 12px", fontWeight: 700 }}>Payment Terms</th>
-                    <th style={{ padding: "10px 12px", fontWeight: 700 }}>Total Amount</th>
-                    <th style={{ padding: "10px 12px", fontWeight: 700 }}>Paid Amount</th>
-                    <th style={{ padding: "10px 12px", fontWeight: 700 }}>Balance Terms</th>
-                    <th style={{ padding: "10px 12px", fontWeight: 700 }}>Due Date</th>
-                    <th style={{ padding: "10px 12px", fontWeight: 700 }}>Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {activeConsignment.finance_rows.map((fin, idx) => {
-                    const sym = fin.currency === "USD" ? "$" : "¥";
-                    return (
-                      <tr
-                        key={fin.id}
-                        style={{
-                          background: idx % 2 === 0 ? "#f8fafc" : "#ffffff",
-                          borderBottom: "1px solid #f1f5f9",
-                        }}
-                      >
-                        <td style={{ padding: "12px" }}>
-                          <div style={{ fontWeight: 700, color: "#0f172a", marginBottom: 4 }}>
-                            {fin.party_name}
-                          </div>
-                          <span
-                            style={{
-                              display: "inline-block",
-                              padding: "2px 8px",
-                              borderRadius: 6,
-                              fontSize: 11,
-                              fontWeight: 700,
-                              ...roleBadgeStyle(fin.role),
-                            }}
-                          >
-                            {fin.role}
-                          </span>
-                        </td>
-                        <td style={{ padding: "12px", color: "#334155", fontWeight: 600 }}>
-                          {fin.doc_no}
-                        </td>
-                        <td style={{ padding: "12px", color: "#334155" }}>
-                          <div>{fin.payment_terms || "—"}</div>
-                          {fin.attachment_url && (
-                            <a
-                              href={fin.attachment_url}
-                              target="_blank"
-                              rel="noreferrer"
-                              title="Download / View Attached Invoice"
+              <div style={{ overflowX: "auto" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+                  <thead>
+                    <tr
+                      style={{
+                        background: "#f8fafc",
+                        borderBottom: "1px solid #e2e8f0",
+                        color: "#334155",
+                        textAlign: "left",
+                      }}
+                    >
+                      <th style={{ padding: "10px 12px", fontWeight: 700 }}>Party Name</th>
+                      <th style={{ padding: "10px 12px", fontWeight: 700 }}>Invoice / Cons. No.</th>
+                      <th style={{ padding: "10px 12px", fontWeight: 700 }}>Payment Terms</th>
+                      <th style={{ padding: "10px 12px", fontWeight: 700 }}>Total Amount</th>
+                      <th style={{ padding: "10px 12px", fontWeight: 700 }}>Paid Amount</th>
+                      <th style={{ padding: "10px 12px", fontWeight: 700 }}>Balance Terms</th>
+                      <th style={{ padding: "10px 12px", fontWeight: 700 }}>Due Date</th>
+                      <th style={{ padding: "10px 12px", fontWeight: 700 }}>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {activeConsignment.finance_rows.map((fin, idx) => {
+                      const sym = fin.currency === "USD" ? "$" : "¥";
+                      return (
+                        <tr
+                          key={fin.id}
+                          style={{
+                            background: idx % 2 === 0 ? "#f8fafc" : "#ffffff",
+                            borderBottom: "1px solid #f1f5f9",
+                          }}
+                        >
+                          <td style={{ padding: "12px" }}>
+                            <div style={{ fontWeight: 700, color: "#0f172a", marginBottom: 4 }}>
+                              {fin.party_name}
+                            </div>
+                            <span
                               style={{
-                                display: "inline-flex",
-                                alignItems: "center",
-                                gap: 4,
-                                marginTop: 4,
-                                color: "#2563eb",
-                                fontSize: 12,
+                                display: "inline-block",
+                                padding: "2px 8px",
+                                borderRadius: 6,
+                                fontSize: 11,
                                 fontWeight: 700,
-                                textDecoration: "none",
+                                ...roleBadgeStyle(fin.role),
                               }}
                             >
-                              ⬇ View Bill
-                            </a>
-                          )}
-                        </td>
-                        <td style={{ padding: "12px", fontWeight: 700, color: "#0f172a" }}>
-                          {fmtAmt(fin.total_amount, sym)}
-                        </td>
-                        <td style={{ padding: "12px", fontWeight: 700, color: "#15803d" }}>
-                          {fmtAmt(fin.paid_amount, sym)}
-                        </td>
-                        <td
-                          style={{
-                            padding: "12px",
-                            fontWeight: 700,
-                            color: fin.balance_amount > 0 ? "#b91c1c" : "#475569",
-                          }}
-                        >
-                          {fmtAmt(fin.balance_amount, sym)}
-                        </td>
-                        <td style={{ padding: "12px", color: "#334155" }}>
-                          {fmtDate(fin.due_date)}
-                        </td>
-                        <td style={{ padding: "12px" }}>
-                          <span
+                              {fin.role}
+                            </span>
+                          </td>
+                          <td style={{ padding: "12px", color: "#334155", fontWeight: 600 }}>
+                            {fin.doc_no}
+                          </td>
+                          <td style={{ padding: "12px", color: "#334155" }}>
+                            <div>{fin.payment_terms || "—"}</div>
+                            {fin.attachment_url && (
+                              <a
+                                href={fin.attachment_url}
+                                target="_blank"
+                                rel="noreferrer"
+                                title="Download / View Attached Invoice"
+                                style={{
+                                  display: "inline-flex",
+                                  alignItems: "center",
+                                  gap: 4,
+                                  marginTop: 4,
+                                  color: "#2563eb",
+                                  fontSize: 12,
+                                  fontWeight: 700,
+                                  textDecoration: "none",
+                                }}
+                              >
+                                ⬇ View Bill
+                              </a>
+                            )}
+                          </td>
+                          <td style={{ padding: "12px", fontWeight: 700, color: "#0f172a" }}>
+                            {fmtAmt(fin.total_amount, sym)}
+                          </td>
+                          <td style={{ padding: "12px", fontWeight: 700, color: "#15803d" }}>
+                            {fmtAmt(fin.paid_amount, sym)}
+                          </td>
+                          <td
                             style={{
-                              display: "inline-block",
-                              padding: "3px 10px",
-                              borderRadius: 6,
-                              fontSize: 11.5,
+                              padding: "12px",
                               fontWeight: 700,
-                              background: fin.stage === "cleared" ? "#dbeafe" : "#fef3c7",
-                              color: fin.stage === "cleared" ? "#1d4ed8" : "#b45309",
+                              color: fin.balance_amount > 0 ? "#b91c1c" : "#475569",
                             }}
                           >
-                            {fin.stage === "cleared" ? "Cleared" : "Pending"}
-                          </span>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+                            {fmtAmt(fin.balance_amount, sym)}
+                          </td>
+                          <td style={{ padding: "12px", color: "#334155" }}>
+                            {fmtDate(fin.due_date)}
+                          </td>
+                          <td style={{ padding: "12px" }}>
+                            <span
+                              style={{
+                                display: "inline-block",
+                                padding: "3px 10px",
+                                borderRadius: 6,
+                                fontSize: 11.5,
+                                fontWeight: 700,
+                                background: fin.stage === "cleared" ? "#dbeafe" : "#fef3c7",
+                                color: fin.stage === "cleared" ? "#1d4ed8" : "#b45309",
+                              }}
+                            >
+                              {fin.stage === "cleared" ? "Cleared" : "Pending"}
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
             </div>
-          </div>
+          )}
 
           {/* ================================================================= */}
-          {/* SECTION 2: CONSIGNMENT GALLERY (16 Editable China/Global Slots)   */}
+          {/* SECTION 2: CONSIGNMENT GALLERY (`consignment_overview.gallery.*`) */}
           {/* ================================================================= */}
-          <div
-            style={{
-              background: "#ffffff",
-              borderRadius: 12,
-              border: "1px solid #e2e8f0",
-              padding: "18px 20px",
-              marginBottom: 20,
-              boxShadow: "0 1px 3px rgba(15, 23, 42, 0.04)",
-            }}
-          >
+          {canViewGallerySection && (
             <div
               style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                marginBottom: 14,
+                background: "#ffffff",
+                borderRadius: 12,
+                border: "1px solid #e2e8f0",
+                padding: "18px 20px",
+                marginBottom: 20,
+                boxShadow: "0 1px 3px rgba(15, 23, 42, 0.04)",
               }}
             >
-              <div>
-                <h2 style={{ fontSize: 18, fontWeight: 800, color: "#0f172a", margin: 0 }}>
-                  Consignment Gallery
-                </h2>
-                <p style={{ margin: "2px 0 0", fontSize: 12, color: "#64748b" }}>
-                  Upload or download export trade documents (stored in Supabase Storage).
-                </p>
-              </div>
-              <span
+              <div
                 style={{
-                  padding: "4px 10px",
-                  borderRadius: 999,
-                  fontSize: 12,
-                  fontWeight: 700,
-                  background: "#eff6ff",
-                  color: "#1d4ed8",
-                  border: "1px solid #bfdbfe",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  marginBottom: 14,
                 }}
               >
-                {activeConsignment.docs_uploaded_count} / {activeConsignment.docs_total_count} Uploaded
-              </span>
-            </div>
-
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(auto-fill, minmax(275px, 1fr))",
-                gap: 14,
-              }}
-            >
-              {activeConsignment.documents.map((doc) => {
-                const isUploading = uploadingSlot === doc.slot_key;
-                const isDeleting = deletingSlot === doc.slot_key;
-                const hasFile = Boolean(doc.file_url);
-                return (
-                  <div
-                    key={doc.slot_key}
-                    style={{
-                      border: hasFile ? "1px solid #bfdbfe" : "1px solid #e2e8f0",
-                      borderRadius: 10,
-                      padding: "14px 16px",
-                      background: hasFile ? "#f8fbff" : "#ffffff",
-                      display: "flex",
-                      flexDirection: "column",
-                      justifyContent: "space-between",
-                      gap: 10,
-                    }}
-                  >
-                    <div
-                      style={{
-                        display: "flex",
-                        alignItems: "flex-start",
-                        justifyContent: "space-between",
-                        gap: 8,
-                      }}
-                    >
-                      <div style={{ fontSize: 13, fontWeight: 700, color: "#1e293b" }}>
-                        {doc.label}
-                      </div>
-                      {doc.is_auto_linked && (
-                        <span
-                          style={{
-                            fontSize: 10,
-                            fontWeight: 700,
-                            padding: "2px 6px",
-                            borderRadius: 4,
-                            background: "#e0f2fe",
-                            color: "#0369a1",
-                            whiteSpace: "nowrap",
-                          }}
-                        >
-                          Auto-linked
-                        </span>
-                      )}
-                    </div>
-
-                    <div
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 8,
-                        flexWrap: "wrap",
-                      }}
-                    >
-                      {/* Cloud View / Download Button when a file exists */}
-                      {hasFile && doc.file_url && (
-                        <a
-                          href={doc.file_url}
-                          target="_blank"
-                          rel="noreferrer"
-                          title={`Open ${doc.label}`}
-                          style={{
-                            display: "inline-flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                            width: 36,
-                            height: 32,
-                            borderRadius: 6,
-                            border: "1px solid #3b82f6",
-                            background: "#ffffff",
-                            color: "#2563eb",
-                            textDecoration: "none",
-                            fontSize: 15,
-                            fontWeight: 700,
-                          }}
-                        >
-                          ☁⬇
-                        </a>
-                      )}
-
-                      {/* Choose File Input Box (matches reference Consignment Details modal) */}
-                      <label
-                        style={{
-                          flex: 1,
-                          display: "inline-flex",
-                          alignItems: "center",
-                          border: "1px solid #cbd5e1",
-                          borderRadius: 6,
-                          overflow: "hidden",
-                          background: "#ffffff",
-                          cursor: isUploading ? "wait" : "pointer",
-                          fontSize: 12,
-                          minWidth: 160,
-                        }}
-                      >
-                        <span
-                          style={{
-                            padding: "6px 10px",
-                            background: "#f1f5f9",
-                            borderRight: "1px solid #cbd5e1",
-                            color: "#334155",
-                            fontWeight: 600,
-                            whiteSpace: "nowrap",
-                          }}
-                        >
-                          {isUploading ? "Uploading..." : "Choose File"}
-                        </span>
-                        <span
-                          style={{
-                            padding: "6px 10px",
-                            color: hasFile ? "#0f172a" : "#94a3b8",
-                            overflow: "hidden",
-                            textOverflow: "ellipsis",
-                            whiteSpace: "nowrap",
-                            maxWidth: 140,
-                          }}
-                          title={doc.filename || "No file uploaded."}
-                        >
-                          {doc.filename || "No file uploaded."}
-                        </span>
-                        <input
-                          type="file"
-                          accept=".pdf,.png,.jpg,.jpeg,.webp,.doc,.docx,.xls,.xlsx"
-                          disabled={isUploading}
-                          style={{ display: "none" }}
-                          onChange={(e) => {
-                            const f = e.target.files?.[0] ?? null;
-                            void handleUploadDocument(
-                              activeConsignment.consignment_key,
-                              doc.slot_key,
-                              f
-                            );
-                            e.target.value = "";
-                          }}
-                        />
-                      </label>
-
-                      {/* Delete Button if manually uploaded */}
-                      {hasFile && !doc.is_auto_linked && (
-                        <button
-                          type="button"
-                          disabled={isDeleting}
-                          onClick={() =>
-                            void handleDeleteDocument(
-                              activeConsignment.consignment_key,
-                              doc.slot_key
-                            )
-                          }
-                          title="Delete uploaded file"
-                          style={{
-                            width: 32,
-                            height: 32,
-                            borderRadius: 6,
-                            border: "1px solid #fecaca",
-                            background: "#fff1f2",
-                            color: "#dc2626",
-                            cursor: "pointer",
-                            display: "inline-flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                            fontSize: 13,
-                          }}
-                        >
-                          🗑
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* ================================================================= */}
-          {/* SECTION 3: CARGO STATUS (12 Editable Yes/No Shipment Checklists)  */}
-          {/* ================================================================= */}
-          <div
-            style={{
-              background: "#ffffff",
-              borderRadius: 12,
-              border: "1px solid #e2e8f0",
-              padding: "18px 20px",
-              marginBottom: 20,
-              boxShadow: "0 1px 3px rgba(15, 23, 42, 0.04)",
-            }}
-          >
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                marginBottom: 14,
-              }}
-            >
-              <div>
-                <h2 style={{ fontSize: 18, fontWeight: 800, color: "#0f172a", margin: 0 }}>
-                  Cargo Status — Shipment Checklist Details
-                </h2>
-                <p style={{ margin: "2px 0 0", fontSize: 12, color: "#64748b" }}>
-                  Click any checklist card to toggle between Yes (Completed) and No (Pending).
-                </p>
-              </div>
-              <span
-                style={{
-                  padding: "4px 10px",
-                  borderRadius: 999,
-                  fontSize: 12,
-                  fontWeight: 700,
-                  background:
-                    activeConsignment.checklist_yes_count ===
-                    activeConsignment.checklist_total_count
-                      ? "#dcfce7"
-                      : "#fef3c7",
-                  color:
-                    activeConsignment.checklist_yes_count ===
-                    activeConsignment.checklist_total_count
-                      ? "#15803d"
-                      : "#b45309",
-                }}
-              >
-                {activeConsignment.checklist_yes_count} / {activeConsignment.checklist_total_count} Completed
-              </span>
-            </div>
-
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(auto-fill, minmax(290px, 1fr))",
-                gap: 12,
-                marginBottom: 16,
-              }}
-            >
-              {activeConsignment.checklist.map((item) => (
-                <div
-                  key={item.key}
-                  onClick={() =>
-                    void handleToggleChecklistItem(
-                      activeConsignment.consignment_key,
-                      item.key,
-                      item.value
-                    )
-                  }
+                <div>
+                  <h2 style={{ fontSize: 18, fontWeight: 800, color: "#0f172a", margin: 0 }}>
+                    Consignment Gallery
+                  </h2>
+                  <p style={{ margin: "2px 0 0", fontSize: 12, color: "#64748b" }}>
+                    Upload or download export trade documents (stored in Supabase Storage).
+                  </p>
+                </div>
+                <span
                   style={{
-                    border: item.value ? "1px solid #bbf7d0" : "1px solid #e2e8f0",
-                    borderRadius: 10,
-                    padding: "14px 16px",
-                    background: item.value ? "#f0fdf4" : "#ffffff",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    gap: 12,
-                    cursor: "pointer",
-                    userSelect: "none",
-                    transition: "all 0.12s ease",
+                    padding: "4px 10px",
+                    borderRadius: 999,
+                    fontSize: 12,
+                    fontWeight: 700,
+                    background: "#eff6ff",
+                    color: "#1d4ed8",
+                    border: "1px solid #bfdbfe",
                   }}
                 >
-                  <span
-                    style={{
-                      fontSize: 13,
-                      fontWeight: 600,
-                      color: "#1e293b",
-                    }}
-                  >
-                    {item.label}
-                  </span>
-                  <span
-                    style={{
-                      padding: "3px 10px",
-                      borderRadius: 6,
-                      fontSize: 12,
-                      fontWeight: 800,
-                      background: item.value ? "#16a34a" : "#fee2e2",
-                      color: item.value ? "#ffffff" : "#dc2626",
-                      minWidth: 38,
-                      textAlign: "center",
-                    }}
-                  >
-                    {item.value ? "Yes" : "No"}
-                  </span>
-                </div>
-              ))}
-            </div>
+                  {activeConsignment.docs_uploaded_count} / {activeConsignment.docs_total_count} Uploaded
+                </span>
+              </div>
 
-            {/* Editable Cargo Remark Bar */}
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fill, minmax(275px, 1fr))",
+                  gap: 14,
+                }}
+              >
+                {activeConsignment.documents.map((doc) => {
+                  const isUploading = uploadingSlot === doc.slot_key;
+                  const isDeleting = deletingSlot === doc.slot_key;
+                  const hasFile = Boolean(doc.file_url);
+                  return (
+                    <div
+                      key={doc.slot_key}
+                      style={{
+                        border: hasFile ? "1px solid #bfdbfe" : "1px solid #e2e8f0",
+                        borderRadius: 10,
+                        padding: "14px 16px",
+                        background: hasFile ? "#f8fbff" : "#ffffff",
+                        display: "flex",
+                        flexDirection: "column",
+                        justifyContent: "space-between",
+                        gap: 10,
+                      }}
+                    >
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "flex-start",
+                          justifyContent: "space-between",
+                          gap: 8,
+                        }}
+                      >
+                        <div style={{ fontSize: 13, fontWeight: 700, color: "#1e293b" }}>
+                          {doc.label}
+                        </div>
+                        {doc.is_auto_linked && (
+                          <span
+                            style={{
+                              fontSize: 10,
+                              fontWeight: 700,
+                              padding: "2px 6px",
+                              borderRadius: 4,
+                              background: "#e0f2fe",
+                              color: "#0369a1",
+                              whiteSpace: "nowrap",
+                            }}
+                          >
+                            Auto-linked
+                          </span>
+                        )}
+                      </div>
+
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 8,
+                          flexWrap: "wrap",
+                        }}
+                      >
+                        {/* Cloud View / Download Button when a file exists */}
+                        {hasFile && doc.file_url && (
+                          <a
+                            href={doc.file_url}
+                            target="_blank"
+                            rel="noreferrer"
+                            title={`Open ${doc.label}`}
+                            style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              width: 36,
+                              height: 32,
+                              borderRadius: 6,
+                              border: "1px solid #3b82f6",
+                              background: "#ffffff",
+                              color: "#2563eb",
+                              textDecoration: "none",
+                              fontSize: 15,
+                              fontWeight: 700,
+                            }}
+                          >
+                            ☁⬇
+                          </a>
+                        )}
+
+                        {/* Choose File Input Box (requires `consignment_overview.gallery.upload`) */}
+                        {canUploadGalleryDoc ? (
+                          <label
+                            style={{
+                              flex: 1,
+                              display: "inline-flex",
+                              alignItems: "center",
+                              border: "1px solid #cbd5e1",
+                              borderRadius: 6,
+                              overflow: "hidden",
+                              background: "#ffffff",
+                              cursor: isUploading ? "wait" : "pointer",
+                              fontSize: 12,
+                              minWidth: 160,
+                            }}
+                          >
+                            <span
+                              style={{
+                                padding: "6px 10px",
+                                background: "#f1f5f9",
+                                borderRight: "1px solid #cbd5e1",
+                                color: "#334155",
+                                fontWeight: 600,
+                                whiteSpace: "nowrap",
+                              }}
+                            >
+                              {isUploading ? "Uploading..." : "Choose File"}
+                            </span>
+                            <span
+                              style={{
+                                padding: "6px 10px",
+                                color: hasFile ? "#0f172a" : "#94a3b8",
+                                overflow: "hidden",
+                                textOverflow: "ellipsis",
+                                whiteSpace: "nowrap",
+                                maxWidth: 140,
+                              }}
+                              title={doc.filename || "No file uploaded."}
+                            >
+                              {doc.filename || "No file uploaded."}
+                            </span>
+                            <input
+                              type="file"
+                              accept=".pdf,.png,.jpg,.jpeg,.webp,.doc,.docx,.xls,.xlsx"
+                              disabled={isUploading}
+                              style={{ display: "none" }}
+                              onChange={(e) => {
+                                const f = e.target.files?.[0] ?? null;
+                                void handleUploadDocument(
+                                  activeConsignment.consignment_key,
+                                  doc.slot_key,
+                                  f
+                                );
+                                e.target.value = "";
+                              }}
+                            />
+                          </label>
+                        ) : (
+                          <span
+                            style={{
+                              flex: 1,
+                              padding: "6px 10px",
+                              border: "1px solid #e2e8f0",
+                              borderRadius: 6,
+                              background: "#f8fafc",
+                              color: hasFile ? "#0f172a" : "#94a3b8",
+                              fontSize: 12,
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                              whiteSpace: "nowrap",
+                            }}
+                            title={doc.filename || "No file uploaded."}
+                          >
+                            {doc.filename || "No file uploaded."}
+                          </span>
+                        )}
+
+                        {/* Delete Button if manually uploaded (`consignment_overview.gallery.delete`) */}
+                        {canDeleteGalleryDoc && hasFile && !doc.is_auto_linked && (
+                          <button
+                            type="button"
+                            disabled={isDeleting}
+                            onClick={() =>
+                              void handleDeleteDocument(
+                                activeConsignment.consignment_key,
+                                doc.slot_key
+                              )
+                            }
+                            title="Delete uploaded file"
+                            style={{
+                              width: 32,
+                              height: 32,
+                              borderRadius: 6,
+                              border: "1px solid #fecaca",
+                              background: "#fff1f2",
+                              color: "#dc2626",
+                              cursor: "pointer",
+                              display: "inline-flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              fontSize: 13,
+                            }}
+                          >
+                            🗑
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* ================================================================= */}
+          {/* SECTION 3: CARGO STATUS (`consignment_overview.cargo_status.*`)   */}
+          {/* ================================================================= */}
+          {canViewCargoStatusSection && (
             <div
               style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 10,
-                flexWrap: "wrap",
-                paddingTop: 10,
-                borderTop: "1px solid #f1f5f9",
+                background: "#ffffff",
+                borderRadius: 12,
+                border: "1px solid #e2e8f0",
+                padding: "18px 20px",
+                marginBottom: 20,
+                boxShadow: "0 1px 3px rgba(15, 23, 42, 0.04)",
               }}
             >
-              <label
+              <div
                 style={{
-                  fontSize: 12.5,
-                  fontWeight: 700,
-                  color: "#334155",
-                  minWidth: 110,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  marginBottom: 14,
                 }}
               >
-                Cargo Remark:
-              </label>
-              <input
-                type="text"
-                placeholder="Add shipment / customs / container / BL remark..."
-                value={remarksDraft}
-                onChange={(e) => setRemarksDraft(e.target.value)}
-                onBlur={() => void handleSaveCargoMeta()}
+                <div>
+                  <h2 style={{ fontSize: 18, fontWeight: 800, color: "#0f172a", margin: 0 }}>
+                    Cargo Status — Shipment Checklist Details
+                  </h2>
+                  <p style={{ margin: "2px 0 0", fontSize: 12, color: "#64748b" }}>
+                    {canEditCargoStatus
+                      ? "Click any checklist card to toggle between Yes (Completed) and No (Pending)."
+                      : "Read-only view of shipment checklist milestones."}
+                  </p>
+                </div>
+                <span
+                  style={{
+                    padding: "4px 10px",
+                    borderRadius: 999,
+                    fontSize: 12,
+                    fontWeight: 700,
+                    background:
+                      activeConsignment.checklist_yes_count ===
+                      activeConsignment.checklist_total_count
+                        ? "#dcfce7"
+                        : "#fef3c7",
+                    color:
+                      activeConsignment.checklist_yes_count ===
+                      activeConsignment.checklist_total_count
+                        ? "#15803d"
+                        : "#b45309",
+                  }}
+                >
+                  {activeConsignment.checklist_yes_count} / {activeConsignment.checklist_total_count} Completed
+                </span>
+              </div>
+
+              <div
                 style={{
-                  flex: 1,
-                  minWidth: 240,
-                  padding: "8px 12px",
-                  borderRadius: 8,
-                  border: "1px solid #cbd5e1",
-                  fontSize: 13,
-                }}
-              />
-              <button
-                type="button"
-                disabled={savingCargoMeta}
-                onClick={() => void handleSaveCargoMeta()}
-                style={{
-                  padding: "8px 16px",
-                  borderRadius: 8,
-                  border: "none",
-                  background: "#2563eb",
-                  color: "#ffffff",
-                  fontSize: 12.5,
-                  fontWeight: 700,
-                  cursor: "pointer",
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fill, minmax(290px, 1fr))",
+                  gap: 12,
+                  marginBottom: 16,
                 }}
               >
-                {savingCargoMeta ? "Saving..." : "Save Cargo Info"}
-              </button>
-            </div>
-          </div>
-
-          {/* ================================================================= */}
-          {/* SECTION 4: PRODUCT SUMMARY                                        */}
-          {/* ================================================================= */}
-          <div
-            style={{
-              background: "#ffffff",
-              borderRadius: 12,
-              border: "1px solid #e2e8f0",
-              padding: "18px 20px",
-              boxShadow: "0 1px 3px rgba(15, 23, 42, 0.04)",
-            }}
-          >
-            <h2
-              style={{
-                fontSize: 18,
-                fontWeight: 800,
-                color: "#0f172a",
-                margin: "0 0 14px",
-              }}
-            >
-              Product Summary
-            </h2>
-
-            <div style={{ overflowX: "auto" }}>
-              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-                <thead>
-                  <tr
+                {activeConsignment.checklist.map((item) => (
+                  <div
+                    key={item.key}
+                    onClick={() => {
+                      if (canEditCargoStatus) {
+                        void handleToggleChecklistItem(
+                          activeConsignment.consignment_key,
+                          item.key,
+                          item.value
+                        );
+                      }
+                    }}
                     style={{
-                      background: "#f8fafc",
-                      borderBottom: "1px solid #e2e8f0",
-                      color: "#334155",
-                      textAlign: "left",
+                      border: item.value ? "1px solid #bbf7d0" : "1px solid #e2e8f0",
+                      borderRadius: 10,
+                      padding: "14px 16px",
+                      background: item.value ? "#f0fdf4" : "#ffffff",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      gap: 12,
+                      cursor: canEditCargoStatus ? "pointer" : "default",
+                      userSelect: "none",
+                      transition: "all 0.12s ease",
                     }}
                   >
-                    <th style={{ padding: "10px 12px", fontWeight: 700, width: 80 }}>Sr No.</th>
-                    <th style={{ padding: "10px 12px", fontWeight: 700 }}>Product Name</th>
-                    <th style={{ padding: "10px 12px", fontWeight: 700 }}>Supplier / Document</th>
-                    <th style={{ padding: "10px 12px", fontWeight: 700 }}>Quantity</th>
-                    <th style={{ padding: "10px 12px", fontWeight: 700 }}>Batch / Consignment No.</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {activeConsignment.products.length === 0 ? (
-                    <tr>
-                      <td
-                        colSpan={5}
-                        style={{
-                          padding: "20px",
-                          textAlign: "center",
-                          color: "#64748b",
-                        }}
-                      >
-                        No product line items found for this consignment.
-                      </td>
+                    <span
+                      style={{
+                        fontSize: 13,
+                        fontWeight: 600,
+                        color: "#1e293b",
+                      }}
+                    >
+                      {item.label}
+                    </span>
+                    <span
+                      style={{
+                        padding: "3px 10px",
+                        borderRadius: 6,
+                        fontSize: 12,
+                        fontWeight: 800,
+                        background: item.value ? "#16a34a" : "#fee2e2",
+                        color: item.value ? "#ffffff" : "#dc2626",
+                        minWidth: 38,
+                        textAlign: "center",
+                      }}
+                    >
+                      {item.value ? "Yes" : "No"}
+                    </span>
+                  </div>
+                ))}
+              </div>
+
+              {/* Editable Cargo Remark Bar */}
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 10,
+                  flexWrap: "wrap",
+                  paddingTop: 10,
+                  borderTop: "1px solid #f1f5f9",
+                }}
+              >
+                <label
+                  style={{
+                    fontSize: 12.5,
+                    fontWeight: 700,
+                    color: "#334155",
+                    minWidth: 110,
+                  }}
+                >
+                  Cargo Remark:
+                </label>
+                <input
+                  type="text"
+                  placeholder="Add shipment / customs / container / BL remark..."
+                  value={remarksDraft}
+                  disabled={!canEditCargoStatus}
+                  onChange={(e) => setRemarksDraft(e.target.value)}
+                  onBlur={() => {
+                    if (canEditCargoStatus) void handleSaveCargoMeta();
+                  }}
+                  style={{
+                    flex: 1,
+                    minWidth: 240,
+                    padding: "8px 12px",
+                    borderRadius: 8,
+                    border: "1px solid #cbd5e1",
+                    background: canEditCargoStatus ? "#ffffff" : "#f8fafc",
+                    fontSize: 13,
+                  }}
+                />
+                {canEditCargoStatus && (
+                  <button
+                    type="button"
+                    disabled={savingCargoMeta}
+                    onClick={() => void handleSaveCargoMeta()}
+                    style={{
+                      padding: "8px 16px",
+                      borderRadius: 8,
+                      border: "none",
+                      background: "#2563eb",
+                      color: "#ffffff",
+                      fontSize: 12.5,
+                      fontWeight: 700,
+                      cursor: "pointer",
+                    }}
+                  >
+                    {savingCargoMeta ? "Saving..." : "Save Cargo Info"}
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* ================================================================= */}
+          {/* SECTION 4: PRODUCT SUMMARY (`consignment_overview.product_summary.view`) */}
+          {/* ================================================================= */}
+          {canViewProductSummarySection && (
+            <div
+              style={{
+                background: "#ffffff",
+                borderRadius: 12,
+                border: "1px solid #e2e8f0",
+                padding: "18px 20px",
+                boxShadow: "0 1px 3px rgba(15, 23, 42, 0.04)",
+              }}
+            >
+              <h2
+                style={{
+                  fontSize: 18,
+                  fontWeight: 800,
+                  color: "#0f172a",
+                  margin: "0 0 14px",
+                }}
+              >
+                Product Summary
+              </h2>
+
+              <div style={{ overflowX: "auto" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+                  <thead>
+                    <tr
+                      style={{
+                        background: "#f8fafc",
+                        borderBottom: "1px solid #e2e8f0",
+                        color: "#334155",
+                        textAlign: "left",
+                      }}
+                    >
+                      <th style={{ padding: "10px 12px", fontWeight: 700, width: 80 }}>Sr No.</th>
+                      <th style={{ padding: "10px 12px", fontWeight: 700 }}>Product Name</th>
+                      <th style={{ padding: "10px 12px", fontWeight: 700 }}>Supplier / Document</th>
+                      <th style={{ padding: "10px 12px", fontWeight: 700 }}>Quantity</th>
+                      <th style={{ padding: "10px 12px", fontWeight: 700 }}>Batch / Consignment No.</th>
                     </tr>
-                  ) : (
-                    activeConsignment.products.map((prod, idx) => (
-                      <tr
-                        key={`${prod.sr_no}-${prod.product_name}`}
-                        style={{
-                          background: idx % 2 === 0 ? "#f1f5f9" : "#ffffff",
-                          borderBottom: "1px solid #e2e8f0",
-                        }}
-                      >
-                        <td style={{ padding: "12px", fontWeight: 600, color: "#334155" }}>
-                          {prod.sr_no}
-                        </td>
-                        <td style={{ padding: "12px", fontWeight: 700, color: "#0f172a" }}>
-                          {prod.product_name}
-                          {prod.product_code && (
-                            <div style={{ fontSize: 11, color: "#64748b", fontWeight: 500 }}>
-                              Code: {prod.product_code}
-                            </div>
-                          )}
-                        </td>
-                        <td style={{ padding: "12px", color: "#475569" }}>
-                          <div>{prod.supplier_name || "—"}</div>
-                          {prod.source_doc_no && (
-                            <div style={{ fontSize: 11, color: "#64748b" }}>
-                              {prod.source_doc_no}
-                            </div>
-                          )}
-                        </td>
-                        <td style={{ padding: "12px" }}>
-                          <div style={{ fontWeight: 700, color: "#0f172a" }}>
-                            {prod.quantity.toLocaleString("en-US")}
-                          </div>
-                          <div style={{ fontSize: 11, color: "#64748b" }}>{prod.uom}</div>
-                        </td>
-                        <td style={{ padding: "12px", fontWeight: 600, color: "#334155" }}>
-                          {prod.consignment_code || activeConsignment.display_title}
+                  </thead>
+                  <tbody>
+                    {activeConsignment.products.length === 0 ? (
+                      <tr>
+                        <td
+                          colSpan={5}
+                          style={{
+                            padding: "20px",
+                            textAlign: "center",
+                            color: "#64748b",
+                          }}
+                        >
+                          No product line items found for this consignment.
                         </td>
                       </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
+                    ) : (
+                      activeConsignment.products.map((prod, idx) => (
+                        <tr
+                          key={`${prod.sr_no}-${prod.product_name}`}
+                          style={{
+                            background: idx % 2 === 0 ? "#f1f5f9" : "#ffffff",
+                            borderBottom: "1px solid #e2e8f0",
+                          }}
+                        >
+                          <td style={{ padding: "12px", fontWeight: 600, color: "#334155" }}>
+                            {prod.sr_no}
+                          </td>
+                          <td style={{ padding: "12px", fontWeight: 700, color: "#0f172a" }}>
+                            {prod.product_name}
+                            {prod.product_code && (
+                              <div style={{ fontSize: 11, color: "#64748b", fontWeight: 500 }}>
+                                Code: {prod.product_code}
+                              </div>
+                            )}
+                          </td>
+                          <td style={{ padding: "12px", color: "#475569" }}>
+                            <div>{prod.supplier_name || "—"}</div>
+                            {prod.source_doc_no && (
+                              <div style={{ fontSize: 11, color: "#64748b" }}>
+                                {prod.source_doc_no}
+                              </div>
+                            )}
+                          </td>
+                          <td style={{ padding: "12px" }}>
+                            <div style={{ fontWeight: 700, color: "#0f172a" }}>
+                              {prod.quantity.toLocaleString("en-US")}
+                            </div>
+                            <div style={{ fontSize: 11, color: "#64748b" }}>{prod.uom}</div>
+                          </td>
+                          <td style={{ padding: "12px", fontWeight: 600, color: "#334155" }}>
+                            {prod.consignment_code || activeConsignment.display_title}
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
             </div>
-          </div>
+          )}
+
+          {!canViewFinanceSection &&
+            !canViewGallerySection &&
+            !canViewCargoStatusSection &&
+            !canViewProductSummarySection && (
+              <div
+                style={{
+                  background: "#ffffff",
+                  borderRadius: 12,
+                  border: "1px solid #e2e8f0",
+                  padding: "32px 24px",
+                  textAlign: "center",
+                  color: "#64748b",
+                  fontSize: 14,
+                }}
+              >
+                You have access to the Consignment Overview list &amp; header metadata, but none of the
+                4 detail sections (<strong>Finance Planning</strong>, <strong>Consignment Gallery</strong>,{" "}
+                <strong>Cargo Status</strong>, <strong>Product Summary</strong>) are enabled for your role.
+                Contact an administrator in <strong>Departments &amp; Permissions</strong> to enable section
+                access.
+              </div>
+            )}
         </div>
       </AppShell>
     );
@@ -1509,61 +1597,73 @@ export function ConsignmentOverviewPage() {
                       </td>
 
                       <td style={{ padding: "12px" }}>
-                        <span
-                          onClick={() => setSearchParams({ key: row.consignment_key })}
-                          style={{
-                            display: "inline-block",
-                            padding: "3px 9px",
-                            borderRadius: 6,
-                            fontSize: 11.5,
-                            fontWeight: 700,
-                            background:
-                              row.docs_uploaded_count > 0 ? "#eff6ff" : "#f1f5f9",
-                            color:
-                              row.docs_uploaded_count > 0 ? "#1d4ed8" : "#64748b",
-                            cursor: "pointer",
-                          }}
-                        >
-                          📄 {row.docs_uploaded_count} / {row.docs_total_count} Docs
-                        </span>
+                        {canViewGallerySection ? (
+                          <span
+                            onClick={() => setSearchParams({ key: row.consignment_key })}
+                            style={{
+                              display: "inline-block",
+                              padding: "3px 9px",
+                              borderRadius: 6,
+                              fontSize: 11.5,
+                              fontWeight: 700,
+                              background:
+                                row.docs_uploaded_count > 0 ? "#eff6ff" : "#f1f5f9",
+                              color:
+                                row.docs_uploaded_count > 0 ? "#1d4ed8" : "#64748b",
+                              cursor: "pointer",
+                            }}
+                          >
+                            📄 {row.docs_uploaded_count} / {row.docs_total_count} Docs
+                          </span>
+                        ) : (
+                          <span style={{ color: "#94a3b8", fontSize: 11.5 }}>—</span>
+                        )}
                       </td>
 
                       <td style={{ padding: "12px" }}>
-                        <span
-                          onClick={() => setSearchParams({ key: row.consignment_key })}
-                          style={{
-                            display: "inline-block",
-                            padding: "3px 9px",
-                            borderRadius: 6,
-                            fontSize: 11.5,
-                            fontWeight: 700,
-                            background:
-                              row.checklist_yes_count > 0 ? "#dcfce7" : "#fee2e2",
-                            color:
-                              row.checklist_yes_count > 0 ? "#15803d" : "#dc2626",
-                            cursor: "pointer",
-                          }}
-                        >
-                          ✓ {row.checklist_yes_count} / {row.checklist_total_count} Yes
-                        </span>
+                        {canViewCargoStatusSection ? (
+                          <span
+                            onClick={() => setSearchParams({ key: row.consignment_key })}
+                            style={{
+                              display: "inline-block",
+                              padding: "3px 9px",
+                              borderRadius: 6,
+                              fontSize: 11.5,
+                              fontWeight: 700,
+                              background:
+                                row.checklist_yes_count > 0 ? "#dcfce7" : "#fee2e2",
+                              color:
+                                row.checklist_yes_count > 0 ? "#15803d" : "#dc2626",
+                              cursor: "pointer",
+                            }}
+                          >
+                            ✓ {row.checklist_yes_count} / {row.checklist_total_count} Yes
+                          </span>
+                        ) : (
+                          <span style={{ color: "#94a3b8", fontSize: 11.5 }}>—</span>
+                        )}
                       </td>
 
                       <td style={{ padding: "12px" }}>
-                        <span
-                          style={{
-                            display: "inline-block",
-                            padding: "3px 10px",
-                            borderRadius: 6,
-                            fontSize: 11.5,
-                            fontWeight: 700,
-                            background:
-                              row.overall_stage === "cleared" ? "#dbeafe" : "#fef3c7",
-                            color:
-                              row.overall_stage === "cleared" ? "#1d4ed8" : "#b45309",
-                          }}
-                        >
-                          {row.overall_stage === "cleared" ? "Cleared" : "Pending"}
-                        </span>
+                        {canViewFinanceSection ? (
+                          <span
+                            style={{
+                              display: "inline-block",
+                              padding: "3px 10px",
+                              borderRadius: 6,
+                              fontSize: 11.5,
+                              fontWeight: 700,
+                              background:
+                                row.overall_stage === "cleared" ? "#dbeafe" : "#fef3c7",
+                              color:
+                                row.overall_stage === "cleared" ? "#1d4ed8" : "#b45309",
+                            }}
+                          >
+                            {row.overall_stage === "cleared" ? "Cleared" : "Pending"}
+                          </span>
+                        ) : (
+                          <span style={{ color: "#94a3b8", fontSize: 11.5 }}>—</span>
+                        )}
                       </td>
 
                       <td style={{ padding: "12px", textAlign: "center" }}>
