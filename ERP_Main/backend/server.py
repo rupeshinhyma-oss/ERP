@@ -23,6 +23,14 @@ import subprocess
 import sys
 from pathlib import Path
 
+os.environ.setdefault("PYTHONUNBUFFERED", "1")
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        try:
+            _stream.reconfigure(line_buffering=True)
+        except Exception:
+            pass
+
 BACKEND_DIR = Path(__file__).resolve().parent
 
 
@@ -51,15 +59,37 @@ def _get_alembic_command(python: str) -> list[str]:
     ]
 
 
-def _run_step(description: str, command: list[str]) -> None:
+def _run_step(
+    description: str,
+    command: list[str],
+    *,
+    timeout: int | None = None,
+    allow_timeout_continue: bool = False,
+) -> None:
     """Run one setup step, streaming its output live, and abort on failure."""
-    print(f"\n{'=' * 70}\n>>> {description}\n{'=' * 70}")
-    result = subprocess.run(command, cwd=BACKEND_DIR)
+    print(f"\n{'=' * 70}\n>>> {description}\n{'=' * 70}", flush=True)
+    try:
+        result = subprocess.run(command, cwd=BACKEND_DIR, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        if allow_timeout_continue:
+            print(
+                f"\n[server.py] WARNING: step timed out after {timeout}s ({description!r}). "
+                "Continuing startup so the HTTP port can bind promptly.",
+                flush=True,
+            )
+            return
+        print(
+            f"\n[server.py] ERROR: step timed out after {timeout}s ({description!r}). Aborting startup.",
+            flush=True,
+        )
+        sys.exit(1)
+
     if result.returncode != 0:
         print(
             f"\n[server.py] ERROR: step failed ({description!r}, exit code "
             f"{result.returncode}). Aborting startup -- fix the error above and "
-            "re-run `python server.py`."
+            "re-run `python server.py`.",
+            flush=True,
         )
         sys.exit(result.returncode)
 
@@ -72,7 +102,8 @@ def _check_env_file() -> None:
             "\n[server.py] WARNING: no .env file found at "
             f"{env_path}. If you haven't already, copy .env.example to .env "
             "and fill in your real DATABASE_URL / PLATFORM_JWT_SECRET_KEY / etc. "
-            "before continuing.\n"
+            "before continuing.\n",
+            flush=True,
         )
 
 
@@ -88,11 +119,13 @@ def _ensure_venv() -> None:
             else BACKEND_DIR / venv_name / "bin" / "python"
         )
         if candidate.is_file():
-            print(f"[server.py] Auto-switching to detected virtual environment at '{venv_name}':\n  {candidate}\n")
+            print(
+                f"[server.py] Auto-switching to detected virtual environment at '{venv_name}':\n  {candidate}\n",
+                flush=True,
+            )
             result = subprocess.run([str(candidate), str(Path(__file__).resolve()), *sys.argv[1:]], cwd=BACKEND_DIR)
             sys.exit(result.returncode)
 
-    # If no local venv in ERP_Main, check if a workspace sibling .venv exists (e.g. Yinglima_ERP/.venv)
     sibling_candidate = (
         BACKEND_DIR.parent.parent / "Yinglima_ERP" / "backend" / ".venv" / "Scripts" / "python.exe"
         if sys.platform == "win32"
@@ -100,9 +133,12 @@ def _ensure_venv() -> None:
     )
     if sibling_candidate.is_file():
         try:
-            import fastapi, uvicorn, alembic  # noqa
+            import fastapi, uvicorn, alembic  # noqa: F401
         except ImportError:
-            print(f"[server.py] Auto-switching to shared virtual environment:\n  {sibling_candidate}\n")
+            print(
+                f"[server.py] Auto-switching to shared virtual environment:\n  {sibling_candidate}\n",
+                flush=True,
+            )
             result = subprocess.run([str(sibling_candidate), str(Path(__file__).resolve()), *sys.argv[1:]], cwd=BACKEND_DIR)
             sys.exit(result.returncode)
 
@@ -133,30 +169,32 @@ def main() -> None:
 
     _check_env_file()
 
-    try:
-        from app.core.dns_resilience import install_dns_resilience
-        install_dns_resilience()
-    except Exception:
-        pass
-
     python = sys.executable
 
     if not args.skip_migrate:
         _run_step(
             "Reconciling database migration version pointer (Runbook RB-03)",
             [python, "-m", "scripts.reconcile_alembic_version"],
+            timeout=60,
+            allow_timeout_continue=True,
         )
         _run_step(
             "Applying database migrations (alembic upgrade head)",
             _get_alembic_command(python),
+            timeout=180,
         )
     else:
-        print("\n[server.py] Skipping migrations (--skip-migrate).")
+        print("\n[server.py] Skipping migrations (--skip-migrate).", flush=True)
 
     if not args.skip_seed:
-        _run_step("Seeding bootstrap data (registry, platform authz, admin)", [python, "-m", "scripts.seed"])
+        _run_step(
+            "Seeding bootstrap data (registry, platform authz, admin)",
+            [python, "-m", "scripts.seed"],
+            timeout=90,
+            allow_timeout_continue=True,
+        )
     else:
-        print("\n[server.py] Skipping seed step (--skip-seed).")
+        print("\n[server.py] Skipping seed step (--skip-seed).", flush=True)
 
     uvicorn_command = [
         python, "-m", "uvicorn", "app.main:app",
@@ -169,12 +207,20 @@ def main() -> None:
             print(
                 "\n[server.py] WARNING: --reload is on, so --workers is being "
                 "ignored (forced to 1). Pass --no-reload --workers "
-                f"{args.workers} together to run multiple workers.\n"
+                f"{args.workers} together to run multiple workers.\n",
+                flush=True,
             )
     elif args.workers > 1:
         uvicorn_command.extend(["--workers", str(args.workers)])
 
-    print(f"\n{'=' * 70}\n>>> Starting ERP_Main Control Plane API: http://{args.host}:{args.port}\n{'=' * 70}\n")
+    print(
+        f"\n{'=' * 70}\n>>> Starting ERP_Main Control Plane API: http://{args.host}:{args.port}\n{'=' * 70}\n",
+        flush=True,
+    )
+    if sys.platform != "win32":
+        os.chdir(BACKEND_DIR)
+        os.execv(python, uvicorn_command)
+
     result = subprocess.run(uvicorn_command, cwd=BACKEND_DIR)
     sys.exit(result.returncode)
 

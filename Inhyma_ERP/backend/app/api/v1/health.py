@@ -29,7 +29,8 @@ def get_health_service() -> HealthService:
     return HealthService()
 
 
-@router.get("/live", summary="Liveness probe")
+@router.api_route("", methods=["GET", "HEAD"], summary="Liveness check", include_in_schema=False)
+@router.api_route("/live", methods=["GET", "HEAD"], summary="Liveness probe")
 async def liveness(
     request: Request,
     health_service: HealthService = Depends(get_health_service),
@@ -45,7 +46,7 @@ async def liveness(
     return build_success_response(data=asdict(report), request_id=request.state.request_id)
 
 
-@router.get("/ready", summary="Readiness probe", response_model=None)
+@router.api_route("/ready", methods=["GET", "HEAD"], summary="Readiness probe", response_model=None)
 async def readiness(
     request: Request,
     health_service: HealthService = Depends(get_health_service),

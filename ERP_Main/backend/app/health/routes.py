@@ -21,8 +21,8 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/health", tags=["Health"])
 
 
-@router.get("", summary="Liveness check (legacy)")
-@router.get("/live", summary="Liveness probe")
+@router.api_route("", methods=["GET", "HEAD"], summary="Liveness check (legacy)")
+@router.api_route("/live", methods=["GET", "HEAD"], summary="Liveness probe")
 async def liveness(request: Request) -> dict:
     """
     Report whether the application process itself is alive.
@@ -32,7 +32,7 @@ async def liveness(request: Request) -> dict:
     return build_success_response({"status": "ok", "service": "erp_main"}, request_id=request_id)
 
 
-@router.get("/ready", summary="Readiness probe")
+@router.api_route("/ready", methods=["GET", "HEAD"], summary="Readiness probe")
 async def readiness(
     request: Request,
     session: AsyncSession = Depends(get_db_session),

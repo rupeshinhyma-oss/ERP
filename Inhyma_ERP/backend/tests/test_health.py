@@ -27,6 +27,15 @@ async def test_liveness_returns_success_envelope(client: AsyncClient) -> None:
     assert "request_id" in body["meta"]
 
 
+async def test_render_health_and_root_probes_support_get_and_head(client: AsyncClient) -> None:
+    """Platform port/health scanners probe '/', '/health', '/api/v1/health', and '/api/v1/health/live' with GET & HEAD."""
+    for path in ("/", "/health", "/api/v1/health", "/api/v1/health/live"):
+        get_resp = await client.get(path)
+        assert get_resp.status_code == 200, f"GET {path} returned {get_resp.status_code}"
+        head_resp = await client.head(path)
+        assert head_resp.status_code == 200, f"HEAD {path} returned {head_resp.status_code}"
+
+
 async def test_readiness_reports_database_component(client: AsyncClient) -> None:
     """Readiness should report the database component's status explicitly."""
     response = await client.get("/api/v1/health/ready")

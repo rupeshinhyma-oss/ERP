@@ -76,7 +76,7 @@ logger = get_logger(__name__)
 async def sheet_live_updates(
     websocket: WebSocket,
     sheet_id: uuid.UUID,
-    token: str = Query(..., description="Access token (same one used for Authorization: Bearer)."),
+    token: str | None = Query(default=None, description="Access token (same one used for Authorization: Bearer)."),
 ) -> None:
     """
     Push every change made to this sheet to every other open tab, live.
@@ -94,6 +94,11 @@ async def sheet_live_updates(
     what triggers a broadcast and ``app.planning.service`` for the call
     sites.
     """
+    if not token:
+        await websocket.accept()
+        await websocket.close(code=4401, reason="Invalid or expired token.")
+        return
+
     try:
         current_user = await verify_websocket_token(websocket, token)
     except UnauthorizedException:

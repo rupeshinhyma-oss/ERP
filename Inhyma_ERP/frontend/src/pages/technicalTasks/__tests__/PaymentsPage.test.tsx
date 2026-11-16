@@ -219,4 +219,28 @@ describe("PaymentsPage", () => {
       expect(screen.getByText(/No pending payments available/i)).toBeTruthy();
     });
   });
+
+  it("opens Payment Details modal with padded body, detail grid, and footer when company link is clicked", async () => {
+    const { container } = render(
+      <MemoryRouter>
+        <PaymentsPage />
+      </MemoryRouter>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("SUN PHARMA LTD")).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByText("SUN PHARMA LTD"));
+
+    await waitFor(() => {
+      expect(screen.getByText("Payment Details — SUN PHARMA LTD")).toBeTruthy();
+    });
+
+    expect(container.querySelector(".payment-modal-container .payment-modal-body")).toBeTruthy();
+    expect(container.querySelector(".payment-detail-grid")).toBeTruthy();
+    expect(container.querySelector(".modal-footer.payment-modal-footer")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Close" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Record Payment" })).toBeTruthy();
+  });
 });

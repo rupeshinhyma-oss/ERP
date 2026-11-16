@@ -205,10 +205,16 @@ async def test_declare_module_for_unknown_erp_returns_404(admin_client):
 
 @pytest.mark.asyncio
 async def test_health_endpoint(client):
-    """The basic health/liveness endpoint responds successfully."""
+    """The basic health/liveness and Render root probes respond 200 OK to both GET and HEAD."""
     resp = await client.get("/api/v1/health")
     assert resp.status_code == 200
     assert resp.json()["data"]["status"] == "ok"
+
+    for path in ("/", "/health", "/api/v1/health", "/api/v1/health/live"):
+        get_resp = await client.get(path)
+        assert get_resp.status_code == 200, f"GET {path} returned {get_resp.status_code}"
+        head_resp = await client.head(path)
+        assert head_resp.status_code == 200, f"HEAD {path} returned {head_resp.status_code}"
 
 
 # --------------------------------------------------------------------

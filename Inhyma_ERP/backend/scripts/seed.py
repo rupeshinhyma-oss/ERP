@@ -484,151 +484,136 @@ async def seed() -> None:
     configure_logging()
     session_factory = get_sessionmaker()
 
-    async with session_factory() as session:
-        permission_repo = PermissionRepository(session)
-        role_repo = RoleRepository(session)
-        user_repo = UserRepository(session)
+    try:
+        async with session_factory() as session:
+            permission_repo = PermissionRepository(session)
+            role_repo = RoleRepository(session)
+            user_repo = UserRepository(session)
 
-        # --- 1. Permissions --------------------------------------------------------
-        created_permissions: list[Permission] = []
-        for code, module, page, action, scope, description in BOOTSTRAP_PERMISSIONS:
-            existing = await permission_repo.get_by_code(code)
-            if existing is not None:
-                if existing.page != page or existing.action != action or existing.scope != scope:
-                    existing.page = page
-                    existing.action = action
-                    existing.scope = scope
-                    await session.flush()
-                created_permissions.append(existing)
-                continue
-            permission = await permission_repo.create(
-                code=code,
-                module=module,
-                page=page,
-                action=action,
-                scope=scope,
-                description=description,
-            )
-            created_permissions.append(permission)
-            logger.info("Seeded permission.", extra={"code": code})
-
-        # --- 2. System roles -----------------------------------------------------------
-        # Exactly two system roles are seeded: "super_admin" (shown to users as
-        # "Admin" -- reserved for the single bootstrap admin account) and
-        # "user" (the default role every other new account gets). Both are
-        # marked is_system=True so they can't be deleted or renamed from the
-        # Roles & Permissions screen.
-        role = await role_repo.get_by_name(SUPER_ADMIN_ROLE_NAME, include_deleted=True)
-        if role is None:
-            role = await role_repo.create(
-                name=SUPER_ADMIN_ROLE_NAME,
-                description=(
-                    "Full-access system administrator role, reserved for the single "
-                    "hardcoded bootstrap admin account. Cannot be deleted, renamed, "
-                    "or assigned to any other user."
-                ),
-                is_system=True,
-            )
-            logger.info("Seeded role.", extra={"role_name": SUPER_ADMIN_ROLE_NAME})
-            for permission in created_permissions:
-                session.add(RolePermission(role_id=role.id, permission_id=permission.id))
-            await session.flush()
-        else:
-            # (a soft-deleted role is NOT un-deleted here -- the database is the truth)
-            # Idempotent top-up: make sure any newly-added bootstrap permission
-            # (e.g. organization.manage) is granted even if this role already existed.
-            existing_codes = {link.permission.code for link in role.permission_links}
-            for permission in created_permissions:
-                if permission.code not in existing_codes:
-                    await role_repo.add_permission(role, permission)
-
-        user_role = await role_repo.get_by_name(USER_ROLE_NAME, include_deleted=True)
-        if user_role is None:
-            user_role = await role_repo.create(
-                name=USER_ROLE_NAME,
-                description=(
-                    "Default role automatically assigned to every new user account. "
-                    "Grants basic read access; additional permissions are granted "
-                    "explicitly by an administrator."
-                ),
-                is_system=True,
-            )
-            logger.info("Seeded role.", extra={"role_name": USER_ROLE_NAME})
-            for code in USER_ROLE_PERMISSION_CODES:
-                permission = await permission_repo.get_by_code(code)
-                if permission:
-                    session.add(RolePermission(role_id=user_role.id, permission_id=permission.id))
-            await session.flush()
-
-        # Idempotent top-up for Sales Manager role: ensure crm.distribution.view and crm.leads.import are granted
-        sales_mgr_role = await role_repo.get_by_name("Sales Manager", include_deleted=False)
-        if sales_mgr_role is not None:
-            for top_up_code in ("crm.distribution.view", "crm.leads.import"):
-                perm = await permission_repo.get_by_code(top_up_code)
-                if perm:
-                    existing_grant_stmt = select(RolePermission).where(
-                        RolePermission.role_id == sales_mgr_role.id,
-                        RolePermission.permission_id == perm.id,
-                    )
-                    if (await session.execute(existing_grant_stmt)).scalar_one_or_none() is None:
-                        session.add(RolePermission(role_id=sales_mgr_role.id, permission_id=perm.id))
-                        logger.info("Granted %s to Sales Manager role.", top_up_code)
-            await session.flush()
-
-        # --- 3. Bootstrap admin user ----------------------------------------------------
-        from app.rbac.models import UserRole, RoleAssignmentType, RoleAssignmentStatus
-
-        admin = await user_repo.get_by_username(settings.BOOTSTRAP_ADMIN_USERNAME)
-        if admin is None:
-            admin = await user_repo.get_by_email(settings.BOOTSTRAP_ADMIN_EMAIL)
-
-        # FIRST-INSTALL GUARD (runs on every start/deploy): create bootstrap data only on a fresh database.  Whatever is in
-        # the database afterwards is the truth -- never reset a password, un-delete, or re-create what was deleted.
-        # One-off recovery: start once with BOOTSTRAP_FORCE_RESET=true.
-        from sqlalchemy import func as _func
-        from app.users.models import User as _UserRow
-
-        _any_user = (await session.scalar(select(_func.count()).select_from(_UserRow))) or 0
-        _force = os.environ.get("BOOTSTRAP_FORCE_RESET", "").strip().lower() in {"1", "true", "yes"}
-
-        if admin is None and _any_user and not _force:
-            logger.info("Users already exist; the bootstrap admin was not re-created (it may have been deleted on purpose).")
-        elif admin is None:
-            admin = await user_repo.create(
-                username=settings.BOOTSTRAP_ADMIN_USERNAME,
-                email=settings.BOOTSTRAP_ADMIN_EMAIL,
-                password_hash=hash_password(settings.BOOTSTRAP_ADMIN_PASSWORD),
-                status=UserStatus.ACTIVE,
-                is_active=True,
-                must_change_password=False,
-                password_changed_at=datetime.now(timezone.utc),
-            )
-            session.add(
-                UserRole(
-                    user_id=admin.id,
-                    role_id=role.id,
-                    assignment_type=RoleAssignmentType.PRIMARY,
-                    is_primary=True,
-                    status=RoleAssignmentStatus.ACTIVE,
-                    assigned_at=datetime.now(timezone.utc),
+            # --- 1. Permissions (bulk-loaded in 1 query to avoid 300+ network round-trips) ---
+            existing_perms = (await session.scalars(select(Permission))).all()
+            perms_by_code: dict[str, Permission] = {p.code: p for p in existing_perms}
+            created_permissions: list[Permission] = []
+            seen_codes: set[str] = set()
+            dirty_perms = False
+            for code, module, page, action, scope, description in BOOTSTRAP_PERMISSIONS:
+                existing = perms_by_code.get(code)
+                if existing is not None:
+                    if existing.page != page or existing.action != action or existing.scope != scope:
+                        existing.page = page
+                        existing.action = action
+                        existing.scope = scope
+                        dirty_perms = True
+                    if code not in seen_codes:
+                        created_permissions.append(existing)
+                        seen_codes.add(code)
+                    continue
+                permission = await permission_repo.create(
+                    code=code,
+                    module=module,
+                    page=page,
+                    action=action,
+                    scope=scope,
+                    description=description,
                 )
-            )
-            await session.flush()
-            logger.info("Seeded bootstrap admin user.", extra={"username": settings.BOOTSTRAP_ADMIN_USERNAME})
-        elif _force:
-            admin.email = settings.BOOTSTRAP_ADMIN_EMAIL
-            admin.password_hash = hash_password(settings.BOOTSTRAP_ADMIN_PASSWORD)
-            admin.status = UserStatus.ACTIVE
-            admin.is_active = True
-            admin.must_change_password = False
-            admin.failed_login_count = 0
-            admin.locked_until = None
-            if hasattr(admin, "deleted_at") and admin.deleted_at is not None:
-                admin.deleted_at = None
+                perms_by_code[code] = permission
+                created_permissions.append(permission)
+                seen_codes.add(code)
+                logger.info("Seeded permission.", extra={"code": code})
+            if dirty_perms:
+                await session.flush()
 
-            ur_stmt = select(UserRole).where(UserRole.user_id == admin.id, UserRole.role_id == role.id)
-            existing_ur = (await session.execute(ur_stmt)).scalars().first()
-            if existing_ur is None:
+            # --- 2. System roles -----------------------------------------------------------
+            # Exactly two system roles are seeded: "super_admin" (shown to users as
+            # "Admin" -- reserved for the single bootstrap admin account) and
+            # "user" (the default role every other new account gets). Both are
+            # marked is_system=True so they can't be deleted or renamed from the
+            # Roles & Permissions screen.
+            role = await role_repo.get_by_name(SUPER_ADMIN_ROLE_NAME, include_deleted=True)
+            if role is None:
+                role = await role_repo.create(
+                    name=SUPER_ADMIN_ROLE_NAME,
+                    description=(
+                        "Full-access system administrator role, reserved for the single "
+                        "hardcoded bootstrap admin account. Cannot be deleted, renamed, "
+                        "or assigned to any other user."
+                    ),
+                    is_system=True,
+                )
+                logger.info("Seeded role.", extra={"role_name": SUPER_ADMIN_ROLE_NAME})
+                for permission in created_permissions:
+                    session.add(RolePermission(role_id=role.id, permission_id=permission.id))
+                await session.flush()
+            else:
+                # (a soft-deleted role is NOT un-deleted here -- the database is the truth)
+                # Idempotent top-up: make sure any newly-added bootstrap permission
+                # (e.g. organization.manage) is granted even if this role already existed.
+                existing_codes = {link.permission.code for link in role.permission_links}
+                for permission in created_permissions:
+                    if permission.code not in existing_codes:
+                        await role_repo.add_permission(role, permission)
+
+            user_role = await role_repo.get_by_name(USER_ROLE_NAME, include_deleted=True)
+            if user_role is None:
+                user_role = await role_repo.create(
+                    name=USER_ROLE_NAME,
+                    description=(
+                        "Default role automatically assigned to every new user account. "
+                        "Grants basic read access; additional permissions are granted "
+                        "explicitly by an administrator."
+                    ),
+                    is_system=True,
+                )
+                logger.info("Seeded role.", extra={"role_name": USER_ROLE_NAME})
+                for code in dict.fromkeys(USER_ROLE_PERMISSION_CODES):
+                    permission = perms_by_code.get(code) or await permission_repo.get_by_code(code)
+                    if permission:
+                        session.add(RolePermission(role_id=user_role.id, permission_id=permission.id))
+                await session.flush()
+
+            # Idempotent top-up for Sales Manager role: ensure crm.distribution.view and crm.leads.import are granted
+            sales_mgr_role = await role_repo.get_by_name("Sales Manager", include_deleted=False)
+            if sales_mgr_role is not None:
+                for top_up_code in ("crm.distribution.view", "crm.leads.import"):
+                    perm = perms_by_code.get(top_up_code) or await permission_repo.get_by_code(top_up_code)
+                    if perm:
+                        existing_grant_stmt = select(RolePermission).where(
+                            RolePermission.role_id == sales_mgr_role.id,
+                            RolePermission.permission_id == perm.id,
+                        )
+                        if (await session.execute(existing_grant_stmt)).scalar_one_or_none() is None:
+                            session.add(RolePermission(role_id=sales_mgr_role.id, permission_id=perm.id))
+                            logger.info("Granted %s to Sales Manager role.", top_up_code)
+                await session.flush()
+
+            # --- 3. Bootstrap admin user ----------------------------------------------------
+            from app.rbac.models import UserRole, RoleAssignmentType, RoleAssignmentStatus
+
+            admin = await user_repo.get_by_username(settings.BOOTSTRAP_ADMIN_USERNAME)
+            if admin is None:
+                admin = await user_repo.get_by_email(settings.BOOTSTRAP_ADMIN_EMAIL)
+
+            # FIRST-INSTALL GUARD (runs on every start/deploy): create bootstrap data only on a fresh database.  Whatever is in
+            # the database afterwards is the truth -- never reset a password, un-delete, or re-create what was deleted.
+            # One-off recovery: start once with BOOTSTRAP_FORCE_RESET=true.
+            from sqlalchemy import func as _func
+            from app.users.models import User as _UserRow
+
+            _any_user = (await session.scalar(select(_func.count()).select_from(_UserRow))) or 0
+            _force = os.environ.get("BOOTSTRAP_FORCE_RESET", "").strip().lower() in {"1", "true", "yes"}
+
+            if admin is None and _any_user and not _force:
+                logger.info("Users already exist; the bootstrap admin was not re-created (it may have been deleted on purpose).")
+            elif admin is None:
+                admin = await user_repo.create(
+                    username=settings.BOOTSTRAP_ADMIN_USERNAME,
+                    email=settings.BOOTSTRAP_ADMIN_EMAIL,
+                    password_hash=hash_password(settings.BOOTSTRAP_ADMIN_PASSWORD),
+                    status=UserStatus.ACTIVE,
+                    is_active=True,
+                    must_change_password=False,
+                    password_changed_at=datetime.now(timezone.utc),
+                )
                 session.add(
                     UserRole(
                         user_id=admin.id,
@@ -639,32 +624,60 @@ async def seed() -> None:
                         assigned_at=datetime.now(timezone.utc),
                     )
                 )
+                await session.flush()
+                logger.info("Seeded bootstrap admin user.", extra={"username": settings.BOOTSTRAP_ADMIN_USERNAME})
+            elif _force:
+                admin.email = settings.BOOTSTRAP_ADMIN_EMAIL
+                admin.password_hash = hash_password(settings.BOOTSTRAP_ADMIN_PASSWORD)
+                admin.status = UserStatus.ACTIVE
+                admin.is_active = True
+                admin.must_change_password = False
+                admin.failed_login_count = 0
+                admin.locked_until = None
+                if hasattr(admin, "deleted_at") and admin.deleted_at is not None:
+                    admin.deleted_at = None
+
+                ur_stmt = select(UserRole).where(UserRole.user_id == admin.id, UserRole.role_id == role.id)
+                existing_ur = (await session.execute(ur_stmt)).scalars().first()
+                if existing_ur is None:
+                    session.add(
+                        UserRole(
+                            user_id=admin.id,
+                            role_id=role.id,
+                            assignment_type=RoleAssignmentType.PRIMARY,
+                            is_primary=True,
+                            status=RoleAssignmentStatus.ACTIVE,
+                            assigned_at=datetime.now(timezone.utc),
+                        )
+                    )
+                else:
+                    existing_ur.status = RoleAssignmentStatus.ACTIVE
+                    existing_ur.assignment_type = RoleAssignmentType.PRIMARY
+                    existing_ur.is_primary = True
+                await session.flush()
+                logger.info("Updated bootstrap admin user to match standard credentials.", extra={"username": settings.BOOTSTRAP_ADMIN_USERNAME})
             else:
-                existing_ur.status = RoleAssignmentStatus.ACTIVE
-                existing_ur.assignment_type = RoleAssignmentType.PRIMARY
-                existing_ur.is_primary = True
-            await session.flush()
-            logger.info("Updated bootstrap admin user to match standard credentials.", extra={"username": settings.BOOTSTRAP_ADMIN_USERNAME})
-        else:
-            logger.info("Bootstrap admin already exists; left completely untouched.")
+                logger.info("Bootstrap admin already exists; left completely untouched.")
 
-        # Seed China provinces and major cities (fresh database only)
-        from scripts import seed_china_geo as _geo
+            # Seed China provinces and major cities (fresh database only)
+            from scripts import seed_china_geo as _geo
 
-        _country_rows = (await session.scalar(select(_func.count()).select_from(_geo.Country))) or 0
-        if _country_rows == 0 or _force:
-            await _geo.seed_china(session)
-        else:
-            logger.info("Country master data already present; geography seed skipped.")
+            _country_rows = (await session.scalar(select(_func.count()).select_from(_geo.Country))) or 0
+            if _country_rows == 0 or _force:
+                await _geo.seed_china(session)
+            else:
+                logger.info("Country master data already present; geography seed skipped.")
 
-        await session.commit()
+            await session.commit()
+    finally:
+        await dispose_engine()
 
-    await dispose_engine()
     print(
         "Seed complete.\n"
         f"  Admin username: {settings.BOOTSTRAP_ADMIN_USERNAME}\n"
         f"  Admin email: {settings.BOOTSTRAP_ADMIN_EMAIL}\n"
-        "  Admin password: (BOOTSTRAP_ADMIN_PASSWORD from the environment; applied on first install only)\n"
+        "  Admin password: (BOOTSTRAP_ADMIN_PASSWORD from the environment; applied on first install only)\n",
+        flush=True,
     )
 
 
