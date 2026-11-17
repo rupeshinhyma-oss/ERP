@@ -4871,3 +4871,8 @@ A standardized suite of 8 production-grade Excel (`.xlsx`) files is maintained d
 1. Resize the browser to half-screen (`<= 900px` wide) and open **FINANCE -> VAT Return** (`/finance/vat-return`).
 2. Verify all numeric columns (`TOTAL RMB INCL. VAT`, `TOTAL VAT RETURN`, `VAT RECEIVED`, `BALANCE VAT`, `STATUS`) remain readable with zero overlapping text and scroll smoothly horizontally.
 3. Verify the **`≡`** three-line sidebar toggle button is clearly visible in the top-left `72px` sidebar header, and clicking **`≡`** expands the full `240px` sidebar menu overlay cleanly.
+
+### Test Case INT-IMP-01: Yinglima Sale Order Confirm -> Inhyma Import Purchase Auto-Sync
+1. In **Yinglima_ERP** (`/sale/process`), create a Sale Order with Buyer **`Inhyma`** and Branch **`Inhyma Mumbai`** (or `Inhyma Ahmedabad` / `Inhyma Indore`) and click **Confirm Order**.
+2. Open **Inhyma_ERP -> PURCHASE -> Import Purchase** (`/purchase/importpurchase`) -> verify a **`pending`** Import Purchase appears automatically under **`Mumbai Ordered`** (or `Ahmedabad Ordered` / `Indore Ordered`) with today's USD→INR conversion rate, items, and CBM.
+3. In **Yinglima_ERP**, revert the confirmed order to **Pending** (or **Cancel** it) -> verify the `pending` Import Purchase in **Inhyma_ERP** is automatically cancelled/removed (while any Import Purchase already confirmed or received in Inhyma is left untouched).

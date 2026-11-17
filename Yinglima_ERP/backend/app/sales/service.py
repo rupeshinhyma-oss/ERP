@@ -965,7 +965,88 @@ class SaleService:
         updated_order = await self.repo.update(order)
         if st_val == "lr":
             await self._delete_planning_consignment_column_if_present(updated_order)
+
+        if self._is_inhyma_buyer(updated_order):
+            if st_val == "confirmed":
+                await self._sync_inhyma_import_purchase(updated_order, "import_purchase.created")
+            elif st_val in ("pending", "cancelled") and current == "confirmed":
+                await self._sync_inhyma_import_purchase(updated_order, "import_purchase.deleted")
+
         return updated_order
+
+    @staticmethod
+    def _is_inhyma_buyer(order: SaleOrder) -> bool:
+        buyer = (order.buyer_name or "").lower()
+        branch = (getattr(order, "buyer_branch_name", None) or "").lower()
+        return "inhyma" in buyer or "inhyma" in branch
+
+    async def _sync_inhyma_import_purchase(self, order: SaleOrder, event_type: str) -> None:
+        """Publish and immediately dispatch an import_purchase sync event to Inhyma_ERP."""
+        import time
+        from app.integration.repository import IntegrationOutboxRepository
+        from app.integration.service import IntegrationService
+
+        try:
+            fx_rate = float(order.usd_exchange_rate or 6.70) or 6.70
+            items_payload: list[dict[str, Any]] = []
+            total_usd = 0.0
+            total_cbm = float(order.total_container_cbm or 0.0)
+            computed_cbm = 0.0
+
+            for it in order.items or []:
+                qty = float(it.quantity or 0.0)
+                unit_usd = float(it.cfr_price_usd or 0.0) or float(it.fob_price_usd or 0.0)
+                if unit_usd <= 0 and float(it.unit_rate or 0.0) > 0:
+                    if (order.currency or "RMB").upper() == "USD":
+                        unit_usd = float(it.unit_rate or 0.0)
+                    else:
+                        unit_usd = round(float(it.unit_rate or 0.0) / fx_rate, 4)
+
+                item_cbm = float(it.total_cbm or 0.0)
+                cbm_per_unit = float(it.cbm_per_unit or 0.0)
+                if cbm_per_unit <= 0 and item_cbm > 0 and qty > 0:
+                    cbm_per_unit = item_cbm / qty
+                computed_cbm += item_cbm
+                total_usd += qty * unit_usd
+
+                items_payload.append({
+                    "product_name": it.product_name,
+                    "product_code": it.product_code,
+                    "quantity": qty,
+                    "unit_price_usd": round(unit_usd, 4),
+                    "pkg_unit_cbm": round(cbm_per_unit, 6),
+                    "pkg_qty": 1.0,
+                })
+
+            payload: dict[str, Any] = {
+                "order_no": order.order_no,
+                "consignment_code": order.consignment_code,
+                "buyer_name": order.buyer_name,
+                "branch_name": getattr(order, "buyer_branch_name", None),
+                "order_date": order.order_date.isoformat() if order.order_date else None,
+                "etd_origin_date": order.etd_origin_date.isoformat() if order.etd_origin_date else None,
+                "eta_port_date": order.eta_port_date.isoformat() if order.eta_port_date else None,
+                "total_cbm": round(total_cbm if total_cbm > 0 else computed_cbm, 4),
+                "total_amount_usd": round(total_usd, 2),
+                "remarks": order.remarks,
+                "version": int(time.time() - 1700000000),
+                "items": items_payload,
+            }
+
+            outbox_repo = IntegrationOutboxRepository(self.session)
+            int_service = IntegrationService(outbox_repo)
+            event = int_service.publish_event(
+                event_type=event_type,
+                aggregate_type="import_purchase",
+                aggregate_id=order.id,
+                payload=payload,
+                target="inhyma",
+                event_version=1,
+            )
+            await self.session.flush()
+            await int_service.dispatch_event(event.id)
+        except Exception as exc:
+            logger.warning("Inhyma import_purchase sync dispatch failed (queued in outbox): %s", exc)
 
     async def dispatch_order(
         self,

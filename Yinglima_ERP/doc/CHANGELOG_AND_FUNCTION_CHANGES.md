@@ -3,6 +3,10 @@
 **System:** Yinglima_ERP (China Procurement)  
 **Scope:** Functional updates, schema changes, UI hardening, and bug fixes.
 
+### 18. Automatic Yinglima Sale Order → Inhyma Import Purchase Sync (`Yinglima_ERP/backend/app/sales/service.py`, `Inhyma_ERP/backend/app/integration/adapters/import_purchase.py`, `Inhyma_ERP/backend/app/common/currency.py`)
+- **Yinglima Producer (`SaleService.update_status`):** Confirming a Sale Order with Buyer/Branch matching `Inhyma` emits and dispatches an `import_purchase.created` event to `Inhyma_ERP`; reverting/cancelling a confirmed order emits `import_purchase.deleted`.
+- **Inhyma Consumer (`ImportPurchaseSyncAdapter` & `GenericSyncEngine`):** Creates a `pending` `ImportPurchase` + `ImportPurchaseItem` rows in the mapped warehouse (`Mumbai Ordered` / `Ahmedabad Ordered` / `Indore Ordered`), auto-resolves Yinglima supplier & products, and applies the daily-cached free bank FX rate (`api.frankfurter.app` / `open.er-api.com`). Safely protects already-confirmed or stock-applied Inhyma records from auto-deletion.
+
 ### 17. Responsive Split-Screen Fixes for VAT Return Table & Sidebar Toggle (`VatReturn.tsx`, `AppShell.tsx`, `style.css`)
 - **VAT Return Table Horizontal Scroll (`VatReturn.tsx`):** Updated Table 1 container from `overflowX: "hidden"` to `overflowX: "auto"` with `minWidth: 1080` on the `<table>` so currency columns and status badges never overlap on narrow/split-screen viewports.
 - **Narrow-Viewport Sidebar `≡` Toggle (`AppShell.tsx`, `style.css`):** At `<= 900px` (`isNarrowViewport`), the sidebar now defaults to collapsed (`72px`) with the `≡` toggle button centered cleanly (instead of being pushed off-screen by the logo), and clicking `≡` opens the full `240px` sidebar overlay (`mobile-sidebar-open`).
