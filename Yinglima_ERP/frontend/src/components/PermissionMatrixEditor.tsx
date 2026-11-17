@@ -523,7 +523,7 @@ export const PermissionMatrixEditor: React.FC<PermissionMatrixEditorProps> = ({
                         <div
                           style={{
                             display: "grid",
-                            gridTemplateColumns: "repeat(auto-fill, minmax(170px, 1fr))",
+                            gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))",
                             gap: "8px",
                           }}
                         >
@@ -561,9 +561,9 @@ export const PermissionMatrixEditor: React.FC<PermissionMatrixEditorProps> = ({
                                 title={`${p.code}\n${p.description || ""}`}
                                 style={{
                                   display: "flex",
-                                  alignItems: "center",
+                                  alignItems: "flex-start",
                                   gap: "8px",
-                                  padding: "6px 8px",
+                                  padding: "7px 9px",
                                   borderRadius: "6px",
                                   border: `1px solid ${cardBorder}`,
                                   background: cardBg,
@@ -582,12 +582,21 @@ export const PermissionMatrixEditor: React.FC<PermissionMatrixEditorProps> = ({
                                     height: "15px",
                                     accentColor: "#0061f2",
                                     cursor: isReadOnly ? "default" : "pointer",
-                                    margin: 0,
+                                    margin: "2px 0 0 0",
+                                    flexShrink: 0,
                                   }}
                                 />
-                                <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: "1px" }}>
-                                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "4px" }}>
-                                    <span style={{ fontSize: "12px", fontWeight: 600, color: "#1e293b", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                                <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: "2px" }}>
+                                  <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "4px" }}>
+                                    <span
+                                      style={{
+                                        fontSize: "12px",
+                                        fontWeight: 600,
+                                        color: "#1e293b",
+                                        lineHeight: 1.3,
+                                        wordBreak: "break-word",
+                                      }}
+                                    >
                                       {actionIcon} {label}
                                     </span>
                                     {isExtraGrant && (

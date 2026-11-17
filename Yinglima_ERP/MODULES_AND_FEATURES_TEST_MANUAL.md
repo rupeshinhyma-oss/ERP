@@ -4876,3 +4876,5 @@ A standardized suite of 8 production-grade Excel (`.xlsx`) files is maintained d
 1. In **Yinglima_ERP** (`/sale/process`), create a Sale Order with Buyer **`Inhyma`** and Branch **`Inhyma Mumbai`** (or `Inhyma Ahmedabad` / `Inhyma Indore`) and click **Confirm Order**.
 2. Open **Inhyma_ERP -> PURCHASE -> Import Purchase** (`/purchase/importpurchase`) -> verify a **`pending`** Import Purchase appears automatically under **`Mumbai Ordered`** (or `Ahmedabad Ordered` / `Indore Ordered`) with today's USD→INR conversion rate, items, and CBM.
 3. In **Yinglima_ERP**, revert the confirmed order to **Pending** (or **Cancel** it) -> verify the `pending` Import Purchase in **Inhyma_ERP** is automatically cancelled/removed (while any Import Purchase already confirmed or received in Inhyma is left untouched).
+
+- **Full Permission Labels Verification:** Verify all permission cards in `/rbac` (especially under `💰 Finance`) display their complete label text without `...` truncation.

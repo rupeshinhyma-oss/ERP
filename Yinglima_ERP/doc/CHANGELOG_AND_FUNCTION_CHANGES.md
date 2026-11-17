@@ -3,6 +3,9 @@
 **System:** Yinglima_ERP (China Procurement)  
 **Scope:** Functional updates, schema changes, UI hardening, and bug fixes.
 
+### 19. Full Unclipped Permission Labels in RBAC Matrix (`PermissionMatrixEditor.tsx`)
+- **Removed `...` Truncation on Permission Cards:** Widened the permission card grid minimum width (`170px` → `220px`) and enabled clean multi-line wrapping (`lineHeight: 1.3`, `wordBreak: "break-word"`, top-aligned checkbox) in `PermissionMatrixEditor.tsx` so full permission names across all 33 modules (e.g., Financial Report, Consignment Overview, VAT Return) are completely readable without ellipsis cutoff.
+
 ### 18. Automatic Yinglima Sale Order → Inhyma Import Purchase Sync (`Yinglima_ERP/backend/app/sales/service.py`, `Inhyma_ERP/backend/app/integration/adapters/import_purchase.py`, `Inhyma_ERP/backend/app/common/currency.py`)
 - **Yinglima Producer (`SaleService.update_status`):** Confirming a Sale Order with Buyer/Branch matching `Inhyma` emits and dispatches an `import_purchase.created` event to `Inhyma_ERP`; reverting/cancelling a confirmed order emits `import_purchase.deleted`.
 - **Inhyma Consumer (`ImportPurchaseSyncAdapter` & `GenericSyncEngine`):** Creates a `pending` `ImportPurchase` + `ImportPurchaseItem` rows in the mapped warehouse (`Mumbai Ordered` / `Ahmedabad Ordered` / `Indore Ordered`), auto-resolves Yinglima supplier & products, and applies the daily-cached free bank FX rate (`api.frankfurter.app` / `open.er-api.com`). Safely protects already-confirmed or stock-applied Inhyma records from auto-deletion.
