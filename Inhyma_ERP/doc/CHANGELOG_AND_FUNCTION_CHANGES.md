@@ -3,6 +3,26 @@
 **System:** Inhyma_ERP (India Distribution)  
 **Scope:** Functional updates, schema migrations, UI hardening, and bug fixes.
 
+## [Release 2026-11-17] — Full-Stack `Cargo Overview` Module (`z9a0b1c2d3e4`), Standardized Filter-Above-Table & Export UI, and Cross-ERP `ImportPurchase` Sync Adapter
+
+### 1. Cargo Overview Full-Stack Architecture (`app/cargo_overview/*`, `z9a0b1c2d3e4`, `CargoOverviewPage.tsx`, `cargoOverview.ts`)
+- **Database Schema & Alembic Migration (`z9a0b1c2d3e4_create_cargo_overviews.py`):**
+  - Created `cargo_overviews` table keyed by normalized `consignment_key`, persisting shipment metadata (`display_title`, `invoice_or_order_no`, `batch_no`, `supplier_name`, `warehouse`, `ordered_date`, `etd_origin_date`, `eta_port_date`, `expected_arrival_date`, `forwarder_name`, `clearing_agent_name`, `cargo_remarks`) alongside `documents_json`, `checklist_json`, `finance_lines_json`, and `products_json`.
+- **Pluggable Data Extraction Layer & Service (`app/cargo_overview/{constants,extractor,models,schemas,service,routes}.py`, `main.py`, `router.py`):**
+  - Added `CargoDataExtractor` (`extractor.py`) to cleanly decouple upstream source-module extraction from `cargo_overviews` persistent overlays.
+  - Provisioned `/api/v1/cargo-overview` endpoints (`GET ""`, `GET /detail`, `POST ""`, `PATCH /checklist`, `POST /documents`, `DELETE /documents`, `GET /export`) and private upload directory `uploads/private/cargo_overview` (`main.py`).
+- **Granular RBAC Permissions (`backend/scripts/seed.py`, `frontend/src/lib/permissionLabels.ts`):**
+  - Registered `report.view` and 8 granular `cargo_overview.*` permissions (`cargo_overview.view`, `cargo_overview.finance.view`, `cargo_overview.gallery.view`, `cargo_overview.gallery.upload`, `cargo_overview.gallery.delete`, `cargo_overview.cargo_status.view`, `cargo_overview.cargo_status.edit`, `cargo_overview.product_summary.view`) with `report.view` fallback support.
+- **Unified List + Detail UI with Standardized Filter & Export (`CargoOverviewPage.tsx`, `App.tsx`):**
+  - **List View (`/reports/cargo-overview`):** Streamlined `.page-header` with `#556987` funnel `.btn-filter-toggle` and golden-amber `.btn-imp-exp` `Export` button (client-side UTF-8 BOM `.csv` export of active filtered rows); collapsible filter panel above the table card (`Ordered Date Range`, `ETD Origin Date Range`, `ETA Port Date Range` via `DateRangePicker`, `Warehouse`, `Finance Status`, `Forwarder Name`, `Clearing Agent`, `Reset` `.btn-filter-reset`, `Search` `.btn-filter-search`); dynamic Warehouse tabs + `All` / `Pending` / `Cleared` stage pills; `items/page` (`25`/`50`/`100`); 15-column consignment table with inline `Cargo Remark`, `Consignment Details` gallery modal, and `Shipment Checklist Details` modal.
+  - **Detail View (`/reports/cargo-overview?key=...` & `/reports/cargo-overview/detail/:key`):** Inline-editable Header Metadata Strip plus **Section 1: Finance Planning** (`INR` `₹` & `USD` `$`, zero `UGX`, colored party badges), **Section 2: Consignment Gallery** (4-column grid of 22 upload/download/delete document slots), **Section 3: Cargo Status — Shipment Checklist Details** (12 optimistic Yes/No checklist cards + `Cargo Remark`), and **Section 4: Product Summary**.
+- **Automated Verification:** Verified with `backend/tests/test_cargo_overview.py` (3/3 passing), `frontend/src/pages/__tests__/NewReportModules.test.tsx` (6/6 passing), and `tsc --noEmit` (0 errors).
+
+### 2. Yinglima -> Inhyma `ImportPurchase` Sync Adapter & Daily Exchange Rate Helper (`app/integration/adapters/import_purchase.py`, `app/common/currency.py`, `sync_engine.py`)
+- Added `ImportPurchase` entity sync adapter (`Yinglima -> Inhyma`) to automatically create, update, or cancel pending `ImportPurchase` records in `Inhyma_ERP` when a `Yinglima_ERP` `SaleOrder` for buyer Inhyma is confirmed, updated, reverted, or cancelled, supported by `fetch_daily_rates()` / `get_usd_to_inr_rate()` in `app/common/currency.py` and verified in `backend/tests/test_import_purchase_sync_adapter.py`.
+
+---
+
 ## [Release 2026-11-16] — Payments Module Modern Receipt Upload Dropzone & Card Preview Enhancements (`PaymentsPage.tsx`, `payments.css`)
 
 ### 1. Payment Screenshot / Receipt Custom Drag-and-Drop Dropzone & Card Preview (`PaymentsPage.tsx`, `payments.css`)

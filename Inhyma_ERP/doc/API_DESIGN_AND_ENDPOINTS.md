@@ -3,7 +3,7 @@
 **Service Base URL:** `http://localhost:8002/api/v1`  
 **Authentication Scheme:** Bearer JWT (HS256) & WebSocket Query Tokens  
 **Standard Response Envelope:** `{ "success": true, "data": ..., "meta": ..., "error": null }`  
-**Last Updated:** November 4, 2026
+**Last Updated:** November 17, 2026
 
 > **Universal Cross-Module Active-Only Extraction & Filtering Convention:**
 > - **Management Lists vs Cross-Module Lookups:** Unfiltered management endpoints (`GET /api/v1/masters/*`, `/companies`, `/suppliers`, `/buyers`, `/users`, `/positions`, and `/hrms/setup/*` with default `active_only=false`) return **both** `Active` and `Inactive` rows so each module's own `Active` / `Inactive` tabs and status toggles remain functional. Conversely, every cross-module picker/lookup endpoint (`/api/v1/masters/*/lookup`, `/api/v1/masters/*/dropdown`, `/companies/lookup`, `/companies/sales-persons`, `/users/all?active_only=true`, `/positions/all?active_only=true`, `/inquiries/consignment-codes`, `/inquiries/companies`, `/hrms/setup/*?active_only=true`, `/products/machine-spares/universal-view`, and `/search`) returns **`Active` records only**.
@@ -441,6 +441,20 @@ Machine-to-machine internal service endpoints invoked by `ERP_Main` over authent
 | `PATCH` | `/api/v1/financial-planning/entries/{entry_key}/terms` | Upsert `payment_terms`, `due_date`, `remarks`, and optional `payment_attachment_url` on `financial_planning_entries` (`entry_key = {source_module}:{uuid}:{role}`) | `report.view \| purchase.update \| saleorder.accounts \| saleorder.update` |
 | `POST` | `/api/v1/financial-planning/entries/{entry_key}/record-payment` | Record partial or full settlement (`amount > 0` and `<= balance_amount`), append immutable entry to `payments_history`, and transition `Pending` -> `Cleared` when balance reaches `0` | `report.view \| purchase.update \| saleorder.accounts \| saleorder.update` |
 | `PATCH` | `/api/v1/financial-planning/entries/{entry_key}/attachment` | Attach or replace `invoice` or `payment` document URL on a Financial Planning entry | `report.view \| purchase.update \| saleorder.accounts \| saleorder.update` |
+
+---
+
+## 23. Cargo Overview — Consignment Gallery, Cargo Status Checklist, Finance & Product Summary (`/cargo-overview`)
+
+| Method | Endpoint URI | Description | Permission Gate |
+| :--- | :--- | :--- | :--- |
+| `GET` | `/api/v1/cargo-overview` | List Cargo Overview consignments (`stage=all\|pending\|cleared`, `warehouse`, `search`) and active `warehouses`, merging `cargo_overviews` overlays with pluggable `CargoDataExtractor` records | `cargo_overview.view \| report.view` |
+| `GET` | `/api/v1/cargo-overview/detail` | Retrieve unified Detail View payload (`?key=...`) containing Metadata Strip, Finance Planning (`INR` `₹` / `USD` `$`), 22-slot Consignment Gallery, 12-item Cargo Status Checklist, and Product Summary | `cargo_overview.view \| report.view` |
+| `POST` | `/api/v1/cargo-overview` | Create or upsert a `CargoOverview` record (`consignment_key`, `batch_no`, `warehouse`, dates, forwarder/agent, `finance_lines`, `products`) | `cargo_overview.cargo_status.edit \| report.view` |
+| `PATCH` | `/api/v1/cargo-overview/checklist` | Update Yes/No checklist toggles, `cargo_remarks`, `etd_origin_date`, `eta_port_date`, `expected_arrival_date`, `forwarder_name`, `clearing_agent_name`, and `batch_no` (`?key=...`) | `cargo_overview.cargo_status.edit \| report.view` |
+| `POST` | `/api/v1/cargo-overview/documents` | Multipart upload to one of the 22 Consignment Gallery slots (`?key=...&slot_key=...`) via `save_uploaded_file` (`cargo-overview` Supabase bucket or `/uploads/private/cargo_overview/`) | `cargo_overview.gallery.upload \| report.view` |
+| `DELETE` | `/api/v1/cargo-overview/documents` | Delete a manually uploaded document from a Consignment Gallery slot (`?key=...&slot_key=...`) and clean up stored file | `cargo_overview.gallery.delete \| report.view` |
+| `GET` | `/api/v1/cargo-overview/export` | Export filtered Cargo Overview list summary as UTF-8 BOM `.csv` | `cargo_overview.view \| report.view` |
 
 
 

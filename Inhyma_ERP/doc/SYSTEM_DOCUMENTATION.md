@@ -1,7 +1,7 @@
 # Enterprise ERP System — Unified Architecture, Feature & Technical Manual
 
 > **System Version:** 1.0.0 (Production)  
-> **Last Updated:** November 16, 2026  
+> **Last Updated:** November 17, 2026  
 > **Architectural Pattern:** Modular Async Monolith (FastAPI) + React 18 SPA (Vite) + Real-Time WebSocket Event Bus  
 > **Target Audience:** Systems Architects, Software Engineers, DevOps, and Autonomous AI Coding Assistants.  
 > **Scope:** Complete end-to-end technical reference containing all system features, data models, API endpoints, background workers, frontend architecture, and developer integration guidelines.
@@ -172,9 +172,12 @@ Inhyma_ERP/
 │   │   ├── crm/                # CRM pipelines, Kanban leads, round-robin distribution, quotations
 │   │   ├── database/           # Async Engine (PostgreSQL + StaticPool SQLite test isolation), Session DI, Mixins
 │   │   ├── employees/          # Employee (workforce/person) records, optional User Account link
+│   │   ├── cargo_overview/     # Cargo Overview (22-slot Gallery, 12-item Checklist, Finance & Product Summary, pluggable CargoDataExtractor)
 │   │   ├── events/             # WebSocket connection manager and broadcast bus
 │   │   ├── feed/               # Internal broadcast announcements & 1-to-1 employee messaging
+│   │   ├── financial_planning/ # Live 3-module Financial Planning Report & settlement overlays
 │   │   ├── hrms/               # Attendance, Leave, Assets, Expenses, Site Visits, Payroll & RBAC
+│   │   ├── integration/        # Cross-ERP entity sync engine & ImportPurchase sync adapter (Yinglima -> Inhyma)
 │   │   ├── inventory/          # 9-warehouse Product Stock matrix, Re-Order engine, 5-source Stock Transactions ledger, Adjustments & Transfers
 │   │   ├── inquiries/          # RFQ lifecycle, AI Quote Extractor, IMAP email poller
 │   │   ├── masters/           # Brands, Categories, Subcategories, Geography, Currencies
@@ -193,7 +196,7 @@ Inhyma_ERP/
 │   │   ├── trash/             # Universal Recycle Bin recovery service
 │   │   ├── users/             # User accounts, HR profiles, reporting managers & ERP_Main sync
 │   │   └── main.py            # Composition root, lifespan lifecycle, middleware wiring
-│   ├── alembic/               # Database schema version migrations (single head z7e8f9a0b1c2)
+│   ├── alembic/               # Database schema version migrations (single head z9a0b1c2d3e4)
 │   ├── scripts/               # Idempotent seed.py (306 permissions, 2 system roles), seed_technical_task_permissions.py & utilities
 │   ├── tests/                 # SQLite-isolated pytest suite (conftest.py live-DB guard)
 │   └── requirements.txt       # Python dependencies
@@ -1746,6 +1749,13 @@ A user may be assigned any number of Roles simultaneously (`POST /users/{id}/rol
 | **Financial Planning** | `PATCH` | `/api/v1/financial-planning/entries/{entry_key}/terms` | Persist `payment_terms`, `due_date`, `remarks`, and optional payment terms attachment override | `report.view \| purchase.update \| saleorder.accounts` |
 | **Financial Planning** | `POST` | `/api/v1/financial-planning/entries/{entry_key}/record-payment` | Record partial/full payment (`amount <= balance`), append `payments_history`, and transition `Pending` -> `Cleared` | `report.view \| purchase.update \| saleorder.accounts` |
 | **Financial Planning** | `PATCH` | `/api/v1/financial-planning/entries/{entry_key}/attachment` | Attach or replace invoice or payment voucher URL on a Financial Planning entry | `report.view \| purchase.update \| saleorder.accounts` |
+| **Cargo Overview** | `GET` | `/api/v1/cargo-overview` | List Cargo Overview consignments with `stage`, `warehouse`, and `search` filters plus active warehouse tabs | `cargo_overview.view \| report.view` |
+| **Cargo Overview** | `GET` | `/api/v1/cargo-overview/detail` | Retrieve unified Detail View payload (`?key=...`) combining Finance Planning, 22-slot Gallery, 12-item Checklist, and Product Summary | `cargo_overview.view \| report.view` |
+| **Cargo Overview** | `POST` | `/api/v1/cargo-overview` | Create or upsert a Cargo Overview record in `cargo_overviews` | `cargo_overview.cargo_status.edit \| report.view` |
+| **Cargo Overview** | `PATCH` | `/api/v1/cargo-overview/checklist` | Update Yes/No checklist toggles, `cargo_remarks`, ETD/ETA/Expected Arrival, forwarder, clearing agent, and batch number (`?key=...`) | `cargo_overview.cargo_status.edit \| report.view` |
+| **Cargo Overview** | `POST` | `/api/v1/cargo-overview/documents` | Upload a document to one of the 22 Consignment Gallery slots (`?key=...&slot_key=...`, Supabase Storage / private fallback) | `cargo_overview.gallery.upload \| report.view` |
+| **Cargo Overview** | `DELETE` | `/api/v1/cargo-overview/documents` | Remove a manually uploaded document from a Consignment Gallery slot (`?key=...&slot_key=...`) | `cargo_overview.gallery.delete \| report.view` |
+| **Cargo Overview** | `GET` | `/api/v1/cargo-overview/export` | Export Cargo Overview list summary as UTF-8 BOM CSV | `cargo_overview.view \| report.view` |
 
 ---
 

@@ -88,7 +88,7 @@
 76. [PLATFORM GOVERNANCE: System-Wide Active-Only Cross-Module Extraction & Inactive Isolation](#76-platform-governance-system-wide-active-only-cross-module-extraction--inactive-isolation)
 77. [IDENTITY & UX GOVERNANCE: Display Name Primary Across All Modules & Removal of Username from UI](#77-identity--ux-governance-display-name-primary-across-all-modules--removal-of-username-from-ui)
 78. [TASK: Technician Ops & Wallet — Spare Parts Gatepass Stock Conservation, Sales Process Bridge, Wallet Voucher Ledger & Machine Warranty Registry](#78-task-technician-ops--wallet--spare-parts-gatepass-stock-conservation-sales-process-bridge-wallet-voucher-ledger--machine-warranty-registry)
-79. [REPORTS: Financial Planning Report & Cargo Overview Module Shells](#79-reports-financial-planning-report--cargo-overview-module-shells)
+79. [REPORTS: Financial Planning Report & Cargo Overview Modules](#79-reports-financial-planning-report--cargo-overview-modules)
 
 ---
 
@@ -135,7 +135,7 @@
 | **REPORTS** | Deleted Orders | `/reports/deleted-orders` | `reports-deleted-orders` | `fileX` | `saleorder.view` |
 | **REPORTS** | General Reports | `/reports/general` | `reports-general` | `pieChart` | Authenticated |
 | **REPORTS** | Financial Planning Report | `/reports/financial-planning` (`/financial-planning-report` redirect) | `reports-financial-planning` | `barChart` | `report.view` |
-| **REPORTS** | Cargo Overview | `/reports/cargo-overview` (`/cargo-overview` redirect) | `reports-cargo-overview` | `anchor` | `report.view` |
+| **REPORTS** | Cargo Overview | `/reports/cargo-overview` & `/reports/cargo-overview/detail/:key` (`/cargo-overview` redirect) | `reports-cargo-overview` | `anchor` | `report.view` / `cargo_overview.*` |
 | **TASK** | Tasks | `/tasks` | `tasks` | `task` | `task.view` |
 | **TASK** | Technical Tasks | `/technical-task/list` (`/technical-tasks` redirect) | `technical-tasks` | `wrench` | `technicaltask.view` |
 | **TASK** | Technical Task Call & Task Logs | `/technical-task/detail/:id` | `technical-tasks` | `wrench` | `technicaltask.view` |
@@ -3738,7 +3738,15 @@ Positioned directly underneath the collapsible filter card and powered by `GET /
 
 - **Routes:**
   - `/reports/financial-planning` (aliases `/financial-planning-report`, `/financial-planning-report/list`, `/finance-planning-report/list`) — `FinancialPlanningReportPage.tsx` (`activeKey="reports-financial-planning"`, icon `barChart`, permission `report.view`).
-  - `/reports/cargo-overview` (alias `/cargo-overview`) — `CargoOverviewPage.tsx` (`activeKey="reports-cargo-overview"`, icon `anchor`, permission `report.view`).
+  - `/reports/cargo-overview` & `/reports/cargo-overview/detail/:key` (aliases `/cargo-overview`, `/cargo-overview/detail/:key`) — `CargoOverviewPage.tsx` (`activeKey="reports-cargo-overview"`, icon `anchor`, permission `report.view` / granular `cargo_overview.*`).
+- **Cargo Overview Backend Endpoints & Schema (`backend/app/cargo_overview/*`, Migration `z9a0b1c2d3e4`):**
+  - `GET /api/v1/cargo-overview` — List Cargo Overview records (`stage`, `warehouse`, `search` filters + active warehouse tabs) merging `cargo_overviews` with pluggable `CargoDataExtractor`.
+  - `GET /api/v1/cargo-overview/detail?key=...` — Fetch single consignment Detail View payload.
+  - `POST /api/v1/cargo-overview` — Create or upsert a Cargo Overview record.
+  - `PATCH /api/v1/cargo-overview/checklist?key=...` — Toggle 12 Yes/No checklist items and persist `cargo_remarks`, `etd_origin_date`, `eta_port_date`, `expected_arrival_date`, `forwarder_name`, `clearing_agent_name`, and `batch_no`.
+  - `POST /api/v1/cargo-overview/documents?key=...&slot_key=...` & `DELETE /api/v1/cargo-overview/documents?key=...&slot_key=...` — Upload/delete files across 22 Consignment Gallery slots (`cargo-overview` Supabase bucket / `/uploads/private/cargo_overview/`).
+  - `GET /api/v1/cargo-overview/export` — Export Cargo Overview summary as UTF-8 BOM `.csv`.
+  - **Granular RBAC (`scripts/seed.py`, `permissionLabels.ts`):** `cargo_overview.view`, `cargo_overview.finance.view`, `cargo_overview.gallery.view`, `cargo_overview.gallery.upload`, `cargo_overview.gallery.delete`, `cargo_overview.cargo_status.view`, `cargo_overview.cargo_status.edit`, `cargo_overview.product_summary.view` (with `report.view` read fallback).
 - **Backend Endpoints & Database Schema (`backend/app/financial_planning/*`, Migration `z8f9a0b1c2d3`):**
   - `GET /api/v1/financial-planning` — Aggregates live confirmed records across:
     1. **Import Purchase (`import_purchases`):** Included when `deleted_at IS NULL` and `status` is `confirmed`, `received`, or `closed` (`pending` and `cancelled` excluded). Emits Overseas `Supplier` row (`USD` `$` when USD invoice total > 0, else `INR` `₹`) + paired `Total Taxes (INR)` row (`INR` `₹` when `(total_import_duty || sum(item_total_duty)) + stamp_duty > 0`).
@@ -3781,4 +3789,4 @@ Positioned directly underneath the collapsible filter card and powered by `GET /
 - [ ] **TC-WS-01 (Compact JWT, Zero `400 Bad Request` WebSocket Handshake & No `Reconnecting` UI Pill):** Log in as `admin` (300+ permissions) -> verify issued `access_token` is compact (< 400 bytes), `/api/v1/events/live` WebSocket upgrades cleanly with `101 Switching Protocols` (zero `connection rejected (400 Bad Request)` in Uvicorn logs, including for legacy 8.5 KB tokens via `WEBSOCKETS_MAX_LINE_LENGTH=65536` and first-frame `auth`), concurrent API calls share a single `central_session_state` check to `ERP_Main`, and no bottom-left `Reconnecting.....` badge ever appears in the UI.
 
 ---
-*End of Master Features & Testing Specification Manual. Maintained for Inhyma Solutions Enterprise ERP. Last updated: November 16, 2026 (Cargo Overview Full-Stack Architecture: List + Detail View, 22-Slot Consignment Gallery, 12-Item Cargo Status Checklist, Finance Planning & Product Summary Sections, Pluggable Data Extractor, Granular RBAC & Migration `z9a0b1c2d3e4`; Compact JWT + WebSocket `400 Bad Request` Handshake Fix; Render `GET`/`HEAD` Root & Health Probe Readiness Hardening; Section 79: Financial Planning Report Full-Stack Live Wiring).*
+*End of Master Features & Testing Specification Manual. Maintained for Inhyma Solutions Enterprise ERP. Last updated: November 17, 2026 (Cargo Overview Full-Stack Architecture: List + Detail View, 22-Slot Consignment Gallery, 12-Item Cargo Status Checklist, Finance Planning & Product Summary Sections, Standardized Filter-Above-Table Panel & UTF-8 BOM CSV Export, Pluggable Data Extractor, Granular RBAC & Migration `z9a0b1c2d3e4`; Compact JWT + WebSocket `400 Bad Request` Handshake Fix; Render `GET`/`HEAD` Root & Health Probe Readiness Hardening; Section 79: Financial Planning Report Full-Stack Live Wiring).*
