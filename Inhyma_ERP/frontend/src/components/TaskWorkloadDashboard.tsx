@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { tasksApi } from "@/lib/tasksApi";
 import type { CapacityViewResponse, WorkloadDashboardResponse } from "@/types/tasks";
+import { DetailSkeleton } from "@/components/Skeleton";
 
 interface TaskWorkloadDashboardProps {
   onSelectTask?: (taskId: string) => void;
@@ -209,7 +210,9 @@ export const TaskWorkloadDashboard: React.FC<TaskWorkloadDashboardProps> = ({ on
       </div>
 
       {loading ? (
-        <div style={{ padding: "48px 0", textAlign: "center", color: "#64748b", fontSize: "14px" }}>Loading team data...</div>
+        <div style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "10px", padding: "20px" }}>
+          <DetailSkeleton stripCount={5} rows={6} />
+        </div>
       ) : activeTab === "workload" ? (
         /* Team Workload Table */
         <div className="card" style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "10px", overflow: "hidden", boxShadow: "0 1px 3px rgba(0,0,0,0.05)" }}>

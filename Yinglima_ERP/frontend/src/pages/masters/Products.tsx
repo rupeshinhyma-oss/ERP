@@ -22,6 +22,7 @@ import { SideDrawer, DetailFieldGrid } from "@/components/SideDrawer";
 import { ProductTradeHistoryDrawer } from "@/components/ProductTradeHistoryDrawer";
 import { ItemPopoverCell } from "@/components/ItemPopoverCell";
 import { SearchableFilterDropdown } from "@/components/SearchableDropdown";
+import { DetailSkeleton, InlineTextSkeleton } from "@/components/Skeleton";
 import {
   MultiSelectField,
   SelectField,
@@ -593,7 +594,7 @@ function LazyProductImages({ productId, set }: { productId: string; set: (key: s
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [productId]);
   return (
-    <div style={{ fontSize: "12.5px", color: "var(--color-text-secondary)" }}>Loading photos…</div>
+    <InlineTextSkeleton width={110} height={14} />
   );
 }
 
@@ -1878,9 +1879,7 @@ export function ProductsPage() {
                 {p.status === "active" ? "Active" : "Inactive"}
               </span>
               {drawerLoading && (
-                <span style={{ fontSize: "11.5px", color: "#0284c7", display: "inline-flex", alignItems: "center", gap: "4px" }}>
-                  <span>⏳</span> Loading full details...
-                </span>
+                <InlineTextSkeleton width={110} height={12} />
               )}
             </div>
           ) : ""
@@ -1895,9 +1894,7 @@ export function ProductsPage() {
         }}
       >
         {drawerLoading || !p ? (
-          <div className="muted" style={{ textAlign: "center", padding: "40px" }}>
-            Loading product details...
-          </div>
+          <DetailSkeleton stripCount={4} rows={6} />
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: "16px", paddingBottom: "24px" }}>
             {/* CARD 1: Hero Identity & Photo */}

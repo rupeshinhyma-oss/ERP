@@ -18,6 +18,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
+import { TableSkeletonRows } from "@/components/Skeleton";
 import {
   apiDelete,
   apiGet,
@@ -1306,11 +1307,7 @@ export function VatReturnPage() {
               </thead>
               <tbody>
                 {loading ? (
-                  <tr>
-                    <td colSpan={12} style={{ padding: 36, textAlign: "center", color: "#64748b", whiteSpace: "normal" }}>
-                      Loading China Export VAT Return ledger...
-                    </td>
-                  </tr>
+                  <TableSkeletonRows colCount={12} rowCount={8} cellPadding="8px 7px" />
                 ) : paginatedRows.length === 0 ? (
                   <tr>
                     <td colSpan={12} style={{ padding: 36, textAlign: "center", color: "#64748b", whiteSpace: "normal" }}>

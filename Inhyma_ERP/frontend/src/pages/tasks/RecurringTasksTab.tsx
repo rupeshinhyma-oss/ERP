@@ -7,6 +7,7 @@ import type {
 import { tasksApi } from "@/lib/tasksApi";
 import { RecurringScheduleModal } from "./RecurringScheduleModal";
 import { DepartmentBadge } from "./TasksPage";
+import { TableSkeletonRows } from "@/components/Skeleton";
 
 interface RecurringTasksTabProps {
   onSelectTask: (taskId: string) => void;
@@ -391,11 +392,7 @@ export const RecurringTasksTab: React.FC<RecurringTasksTabProps> = ({
               </thead>
               <tbody>
                 {schedulesLoading ? (
-                  <tr>
-                    <td colSpan={8} style={{ padding: "30px", textAlign: "center", color: "#64748b" }}>
-                      Loading schedules...
-                    </td>
-                  </tr>
+                  <TableSkeletonRows colCount={8} rowCount={6} cellPadding="10px 14px" />
                 ) : schedules.length === 0 ? (
                   <tr>
                     <td colSpan={8} style={{ padding: "40px 20px", textAlign: "center", color: "#64748b" }}>
@@ -690,11 +687,7 @@ export const RecurringTasksTab: React.FC<RecurringTasksTabProps> = ({
               </thead>
               <tbody>
                 {instancesLoading ? (
-                  <tr>
-                    <td colSpan={7} style={{ padding: "30px", textAlign: "center", color: "#64748b" }}>
-                      Loading upcoming instances...
-                    </td>
-                  </tr>
+                  <TableSkeletonRows colCount={7} rowCount={6} cellPadding="10px 14px" />
                 ) : instances.length === 0 ? (
                   <tr>
                     <td colSpan={7} style={{ padding: "40px 20px", textAlign: "center", color: "#64748b" }}>
@@ -841,11 +834,7 @@ export const RecurringTasksTab: React.FC<RecurringTasksTabProps> = ({
               </thead>
               <tbody>
                 {instancesLoading ? (
-                  <tr>
-                    <td colSpan={6} style={{ padding: "30px", textAlign: "center", color: "#64748b" }}>
-                      Loading history...
-                    </td>
-                  </tr>
+                  <TableSkeletonRows colCount={6} rowCount={6} cellPadding="10px 14px" />
                 ) : instances.length === 0 ? (
                   <tr>
                     <td colSpan={6} style={{ padding: "40px 20px", textAlign: "center", color: "#64748b" }}>

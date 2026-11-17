@@ -11,6 +11,7 @@ import {
 import { feedApi } from "@/lib/feedApi";
 import { useToast } from "@/lib/toast";
 import { errorMessage } from "@/lib/api";
+import { InlineListSkeleton } from "@/components/Skeleton";
 
 interface FeedPostCardProps {
   post: FeedPost;
@@ -568,8 +569,8 @@ export function FeedPostCard({
       {isCommentsOpen && post.status === "PUBLISHED" && (
         <section className="feed-comments-section" data-testid={`comments-section-${post.id}`}>
           {isLoadingComments ? (
-            <div style={{ padding: "12px", textAlign: "center", color: "#64748b", fontSize: "12.5px" }}>
-              Loading comments...
+            <div style={{ padding: "8px 4px" }}>
+              <InlineListSkeleton count={3} showAvatar compact />
             </div>
           ) : (
             <div className="feed-comments-list">
@@ -723,8 +724,8 @@ export function FeedPostCard({
             </div>
             <div className="feed-modal-body">
               {isLoadingReadership ? (
-                <div style={{ textAlign: "center", padding: "20px", color: "#64748b" }}>
-                  Loading readership...
+                <div style={{ padding: "8px 4px" }}>
+                  <InlineListSkeleton count={4} showAvatar compact />
                 </div>
               ) : readershipData && Array.isArray(readershipData.readers) && readershipData.readers.length > 0 ? (
                 <div>

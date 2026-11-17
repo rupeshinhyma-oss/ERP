@@ -27,6 +27,7 @@ import { SearchableDropdown, SearchableFilterDropdown, SearchableDropdownMultiPa
 import { EmailTagInput, PhoneGroupField, SelectField, TextAreaField, TextField, WebsiteTagInput, autoTitleCase } from "@/components/fields";
 import { SideDrawer, DetailFieldGrid } from "@/components/SideDrawer";
 import { ItemPopoverCell } from "@/components/ItemPopoverCell";
+import { InlineTextSkeleton } from "@/components/Skeleton";
 import { TrashConflictModal, type TrashConflictInfo } from "@/components/TrashConflictModal";
 import { ImpExpDropdown, BulkActionsDropdown, ImportSummaryPanel, downloadSampleCsv, parseFile, WizardModal, type SheetRow } from "@/components/ImportWizard";
 import { apiDelete, apiGet, apiPatch, apiPost, downloadExport, toQueryString } from "@/lib/api";
@@ -4010,9 +4011,7 @@ export function BuyersPage() {
                 <span>•</span>
                 <span>Status: {detailBuyer.is_active ? "Active" : "Inactive"}</span>
                 {detailLoading && (
-                  <span style={{ fontSize: "11.5px", color: "#0284c7", display: "inline-flex", alignItems: "center", gap: "4px" }}>
-                    <span>⏳</span> Loading full details...
-                  </span>
+                  <InlineTextSkeleton width={110} height={12} />
                 )}
               </div>
             }

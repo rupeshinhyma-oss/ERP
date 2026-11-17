@@ -582,3 +582,24 @@ During Render/Docker container boot, `python server.py` executes a four-phase in
 3. **Cargo Overview Unified Architecture (`app/cargo_overview/*`, Migration `z9a0b1c2d3e4`, `CargoOverviewPage.tsx`):**
    - **Persistent Table + Pluggable Extractor:** `cargo_overviews` stores per-consignment document uploads (22 slots in `cargo-overview` Supabase Storage / `uploads/private/cargo_overview`), 12 Yes/No shipment checklist states, `cargo_remarks`, ETD/ETA/Expected Arrival dates, forwarder/clearing-agent metadata, and Finance/Product overlays, while `CargoDataExtractor` (`extractor.py`) provides a clean adapter boundary to merge upstream module data.
    - **Unified List & Detail UI + Granular RBAC:** Features standardized `.btn-filter-toggle` / `.btn-imp-exp` header actions, filter-above-table panel (`DateRangePicker` ranges + Warehouse + Stage + Forwarder + Clearing Agent), dynamic Warehouse tabs, List-to-Detail navigation (`Overview — <key>`), and 8 granular `cargo_overview.*` section/action permissions (`seed.py`, `permissionLabels.ts`).
+
+---
+
+## 22. Feed Remediation (`v9a0b1c2d3e4`), Canonical 1:1 Direct Messages & HRMS Attendance Regularization Self-Approval
+
+1. **Feed RBAC & Dynamic Department Privacy (`app/feed/rbac.py`, `v9a0b1c2d3e4`):**
+   - `load_explicit_feed_denies()` and `evaluate_feed_permission()` enforce `feed.view`, `feed.create`, and `feed.manage` across all 23 Feed endpoints with strict `deny:feed.*` / `block:feed.*` DB override precedence.
+   - `feed_post_recipients.is_explicit` distinguishes explicit individual recipients from historical department-snapshot rows so transferring out of a department revokes access to department-targeted posts (`is_explicit = FALSE`) while preserving explicit individual shares (`is_explicit = TRUE`).
+2. **Canonical 1:1 Direct Messaging (`feed_conversations`, `FeedDirectMessages.tsx`):**
+   - `participant_low_id` / `participant_high_id` with partial unique index `uq_feed_conversations_active_pair` ensures a single canonical 1:1 DM thread per active user pair, paired with participant-only isolation, batched notification fanout, and soft-delete notification privacy.
+3. **HRMS Attendance Regularization Self-Approval (`app/hrms/rbac.py`):**
+   - `verify_approval_authorization()` authorizes Admin/Super Admin and explicitly permitted HRMS approvers (`hrms.approve`, `hrms.manage`, `hrms:approval`, `hrms.attendance.approve`, unless explicitly denied) to self-approve/self-reject their own one-day attendance regularization (`can_self_regularize`), while continuing to block self-approval on Leave, Expenses, and Payroll.
+
+---
+
+## 23. Unified Ghost / Shimmer Loading Architecture & Peer Federation Credentials
+
+1. **Reusable Ghost Loading Primitives (`frontend/src/components/Skeleton.tsx`):**
+   - Both `Inhyma_ERP` and `Yinglima_ERP` share a modular `Skeleton.tsx` primitive suite (`TableSkeletonRows`, `CardGridSkeleton`, `DetailSkeleton`, `InlineListSkeleton`, `InlineTextSkeleton`) built atop global CSS shimmer animations (`.skeleton-line`, `.skeleton-box`, `.skeleton-circle`, `.skeleton-badge` in `styles/style.css`), covering 42 data-fetching views, modals, drawers, Kanban boards, PDF viewers, and async dropdowns while keeping empty-state `data-testid` assertions cleanly gated behind `!loading`.
+2. **Peer Inter-ERP Service Authentication (`PEER_SERVICE_CREDENTIALS`):**
+   - Configured `PEER_SERVICE_CREDENTIALS` in `Inhyma_ERP/.env` and `Inhyma_ERP/backend/.env` alongside `PEER_ERP_ENDPOINTS` to authenticate incoming cross-ERP synchronization webhooks (`Yinglima_ERP` <-> `Inhyma_ERP`).

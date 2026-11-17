@@ -20,6 +20,7 @@
 import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { AppShell } from "@/components/AppShell";
 import { Breadcrumb } from "@/components/Breadcrumb";
+import { InlineListSkeleton, TableSkeletonRows } from "@/components/Skeleton";
 import { apiGet, apiPost, apiPut, apiDelete, errorMessage } from "@/lib/api";
 import { useToast } from "@/lib/toast";
 import { auth } from "@/lib/auth";
@@ -1060,11 +1061,7 @@ export function PipelineSetupPage() {
               </thead>
               <tbody>
                 {loading ? (
-                  <tr>
-                    <td colSpan={7} style={{ padding: "40px", textAlign: "center", color: "#64748b" }}>
-                      Loading pipelines...
-                    </td>
-                  </tr>
+                  <TableSkeletonRows colCount={7} rowCount={6} cellPadding="14px 18px" />
                 ) : filteredPipelines.length === 0 ? (
                   <tr>
                     <td colSpan={7} style={{ padding: "48px 20px", textAlign: "center" }}>
@@ -2151,9 +2148,7 @@ export function PipelineSetupPage() {
             )}
 
             {stageLoading ? (
-              <div style={{ padding: "40px", textAlign: "center", color: "#64748b" }}>
-                Loading pipeline stages...
-              </div>
+              <InlineListSkeleton count={4} compact />
             ) : !activePipelineDetail?.stages || activePipelineDetail.stages.length === 0 ? (
               <div
                 style={{

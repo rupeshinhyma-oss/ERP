@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
+import { DetailSkeleton } from "@/components/Skeleton";
 import { apiGet, errorMessage, API_BASE } from "@/lib/api";
 import { Auth } from "@/lib/auth";
 import { IMPORT_PURCHASE_API, mapImportPurchase, type ImportPurchaseRecord } from "@/lib/purchaseApi";
@@ -256,17 +257,8 @@ export function ImportPurchasePdfPage() {
       {/* Main Content Area */}
       <div style={{ flex: 1, position: "relative", width: "100%", height: "calc(100vh - 54px)", overflow: "hidden" }}>
         {isLoading ? (
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "center",
-              alignItems: "center",
-              height: "100%",
-              color: "#ffffff",
-              fontSize: "15px",
-            }}
-          >
-            Loading uploaded invoice file...
+          <div style={{ padding: "24px", height: "100%", overflow: "hidden" }}>
+            <DetailSkeleton dark stripCount={4} rows={8} />
           </div>
         ) : loadError ? (
           <div

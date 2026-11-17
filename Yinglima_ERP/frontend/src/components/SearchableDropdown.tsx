@@ -20,6 +20,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchController } from "@/lib/hooks";
 import { autoTitleCase } from "@/components/fields";
+import { InlineListSkeleton, InlineTextSkeleton } from "@/components/Skeleton";
 
 export interface DropdownOption {
   value: string;
@@ -823,7 +824,7 @@ export function SearchableDropdownMulti({
                 }}
                 title="Loading name..."
               >
-                <span style={{ fontSize: "10px" }}>⏳</span> Loading...
+                <InlineTextSkeleton width={56} height={12} />
               </span>
             );
           }
@@ -1181,7 +1182,7 @@ export function SearchableDropdownMultiPanel({
             <span style={{ color: "#94a3b8" }}>{placeholder}</span>
           ) : chipsPlacement === "below" ? (
             <span style={{ color: "#0f172a", fontWeight: 500 }}>
-              {selected.length === 1 ? (isUUID(selected[0].label) ? "Loading..." : selected[0].label) : `${selected.length} Selected`}
+              {selected.length === 1 ? (isUUID(selected[0].label) ? <InlineTextSkeleton width={72} height={12} /> : selected[0].label) : `${selected.length} Selected`}
             </span>
           ) : (
             <div style={{ display: "flex", flexWrap: "nowrap", gap: "5px", overflow: "hidden", alignItems: "center" }}>
@@ -1207,8 +1208,7 @@ export function SearchableDropdownMultiPanel({
                       }}
                       title="Loading name..."
                     >
-                      <span style={{ fontSize: "10px" }}>⏳</span>
-                      <span>Loading...</span>
+                      <InlineTextSkeleton width={56} height={12} />
                     </span>
                   );
                 }
@@ -1331,7 +1331,9 @@ export function SearchableDropdownMultiPanel({
           {/* Options list with checkboxes */}
           <div style={{ overflowY: "auto", flex: 1 }}>
             {loading ? (
-              <div style={{ padding: "10px 12px", fontSize: "13px", color: "#94a3b8", textAlign: "center" }}>Loading...</div>
+              <div style={{ padding: "8px 10px" }}>
+                <InlineListSkeleton count={3} compact />
+              </div>
             ) : options.length === 0 ? (
               <div style={{ padding: "10px 12px", fontSize: "13px", color: "#94a3b8", textAlign: "center" }}>No matching results</div>
             ) : (
@@ -1683,7 +1685,7 @@ export function SearchableDropdownMultiPanel({
                         gap: "5px",
                       }}
                     >
-                      <span>⏳</span> Loading...
+                      <InlineTextSkeleton width={56} height={12} />
                     </span>
                   );
                 }
@@ -2177,8 +2179,8 @@ export function SearchableFilterDropdown({
             </div>
 
             {loading ? (
-              <div style={{ padding: "12px", textAlign: "center", color: "#94a3b8", fontSize: "13px" }}>
-                Loading...
+              <div style={{ padding: "8px 10px" }}>
+                <InlineListSkeleton count={3} compact />
               </div>
             ) : filteredOptions.length === 0 && searchTerm ? (
               <div style={{ padding: "12px", textAlign: "center", color: "#94a3b8", fontSize: "13px" }}>

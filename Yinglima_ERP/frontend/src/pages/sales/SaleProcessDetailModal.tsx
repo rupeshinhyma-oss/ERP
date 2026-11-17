@@ -8,6 +8,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { apiGet, apiPatch, errorMessage } from "@/lib/api";
+import { DetailSkeleton, InlineTextSkeleton, TableSkeletonRows } from "@/components/Skeleton";
 import { Auth } from "@/lib/auth";
 import { useToast } from "@/lib/toast";
 import type { SaleOrder, SaleOrderStatus } from "@/types/saleProcess";
@@ -786,8 +787,9 @@ export function SaleProcessDetailModal({
             </div>
             <div>
               <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                <h2 style={{ margin: 0, fontSize: "17px", fontWeight: 700, color: "#0f172a" }}>
-                  Sale Process Order: {order?.order_no || "Loading..."}
+                <h2 style={{ margin: 0, fontSize: "17px", fontWeight: 700, color: "#0f172a", display: "flex", alignItems: "center", gap: "8px" }}>
+                  <span>Sale Process Order:</span>
+                  {order?.order_no || <InlineTextSkeleton width={110} height={18} />}
                 </h2>
                 {order && getStatusBadge(order.status)}
               </div>
@@ -1047,10 +1049,7 @@ export function SaleProcessDetailModal({
       `}</style>
 
           {loading ? (
-            <div style={{ textAlign: "center", padding: "60px 0", color: "#64748b" }}>
-              <div style={{ fontSize: "24px", marginBottom: "8px" }}>⏳</div>
-              Loading order details...
-            </div>
+            <DetailSkeleton stripCount={4} rows={6} />
           ) : !order ? (
             <div style={{ textAlign: "center", padding: "60px 0", color: "#ef4444" }}>
               Sale order not found.
@@ -1451,16 +1450,12 @@ export function SaleProcessDetailModal({
                             </tr>
                           );
                         })
+                      ) : loadingItems || loading ? (
+                        <TableSkeletonRows colCount={10} rowCount={4} cellPadding="8px 10px" />
                       ) : (
                         <tr>
                           <td colSpan={10} style={{ textAlign: "center", padding: "20px", color: "#64748b" }}>
-                            {loadingItems || loading ? (
-                              <span style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>
-                                <span>⏳</span> Loading line items...
-                              </span>
-                            ) : (
-                              <span style={{ color: "#94a3b8" }}>No line items recorded.</span>
-                            )}
+                            <span style={{ color: "#94a3b8" }}>No line items recorded.</span>
                           </td>
                         </tr>
                       )}

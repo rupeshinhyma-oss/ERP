@@ -11,6 +11,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
 import { Can } from "@/components/ui";
+import { TableSkeletonRows } from "@/components/Skeleton";
 import { apiDelete, apiGet, apiPatch, downloadExport, errorMessage } from "@/lib/api";
 import { useLookup } from "@/lib/lookups";
 import { useToast } from "@/lib/toast";
@@ -1074,11 +1075,7 @@ export function SaleProcessListPage() {
               </thead>
               <tbody>
                 {loading ? (
-                  <tr>
-                    <td colSpan={10} style={{ textAlign: "center", padding: "40px", color: "#64748b" }}>
-                      Loading sale orders...
-                    </td>
-                  </tr>
+                  <TableSkeletonRows colCount={10} rowCount={8} cellPadding="10px 12px" />
                 ) : orders.length === 0 ? (
                   <tr>
                     <td colSpan={10} style={{ textAlign: "center", padding: "50px", color: "#94a3b8" }}>

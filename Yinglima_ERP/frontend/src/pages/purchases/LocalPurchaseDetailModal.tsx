@@ -11,6 +11,7 @@
 
 import { useEffect, useState } from "react";
 import { apiGet, errorMessage } from "@/lib/api";
+import { DetailSkeleton, TableSkeletonRows } from "@/components/Skeleton";
 import type { LocalPurchaseDetail, LocalPurchaseSummary } from "@/types/localPurchase";
 import {
   getLocalPurchaseDetailCache,
@@ -270,10 +271,7 @@ export function LocalPurchaseDetailModal({
           }}
         >
           {loading && !detail && (
-            <div style={{ padding: "50px 20px", textAlign: "center", color: "#64748b" }}>
-              <div style={{ fontSize: "26px", marginBottom: "8px" }}>⏳</div>
-              <div style={{ fontSize: "13.5px", fontWeight: 600 }}>Loading local purchase details...</div>
-            </div>
+            <DetailSkeleton stripCount={4} rows={5} />
           )}
 
           {error && !detail && !loading && (
@@ -657,17 +655,15 @@ export function LocalPurchaseDetailModal({
                     </thead>
                     <tbody>
                       {detail.items.length === 0 ? (
-                        <tr>
-                          <td colSpan={9} style={{ padding: "24px", textAlign: "center", color: "#64748b" }}>
-                            {loading ? (
-                              <div style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>
-                                <span>⏳</span> Loading line items...
-                              </div>
-                            ) : (
+                        loading ? (
+                          <TableSkeletonRows colCount={9} rowCount={4} cellPadding="8px 10px" />
+                        ) : (
+                          <tr>
+                            <td colSpan={9} style={{ padding: "24px", textAlign: "center", color: "#64748b" }}>
                               <span style={{ color: "#94a3b8" }}>No line items recorded for this purchase.</span>
-                            )}
-                          </td>
-                        </tr>
+                            </td>
+                          </tr>
+                        )
                       ) : (
                         detail.items.map((item, idx) => (
                           <tr

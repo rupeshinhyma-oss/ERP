@@ -364,20 +364,33 @@ Machine-to-machine internal service endpoints invoked by `ERP_Main` over authent
 
 ---
 
-## 19. Communication — Internal Feed & Broadcast Announcements (`/feed`)
+## 19. Communication — Internal Feed, Announcements & 1:1 Direct Messages (`/feed`)
 
 | Method | Endpoint URI | Description | Permission Gate |
 | :--- | :--- | :--- | :--- |
-| `GET` | `/api/v1/feed/posts` | List scoped feed posts with pagination, search, and department visibility checks | Authenticated |
-| `POST` | `/api/v1/feed/posts` | Create new feed post or broadcast with targeted departments/recipients and pin status | Authenticated |
-| `GET` | `/api/v1/feed/posts/{id}` | Detailed post record, comments, reaction aggregations, and viewer status | Authenticated |
-| `PUT` | `/api/v1/feed/posts/{id}` | Edit post content (creator or administrator only) | Authenticated |
-| `DELETE`| `/api/v1/feed/posts/{id}` | Soft-delete post | Authenticated |
-| `POST` | `/api/v1/feed/posts/{id}/pin` | Toggle post pinned status | `feed.pin` / Admin |
-| `POST` | `/api/v1/feed/posts/{id}/comments` | Post comment on feed entry | Authenticated |
-| `DELETE`| `/api/v1/feed/comments/{comment_id}` | Soft-delete comment | Authenticated |
-| `POST` | `/api/v1/feed/posts/{id}/reactions` | Toggle emoji reaction on post | Authenticated |
-| `POST` | `/api/v1/feed/posts/{id}/mark-read` | Record user read receipt for broadcast compliance | Authenticated |
+| `POST` | `/api/v1/feed/posts` | Create new feed post/announcement with department (`feed_post_departments`) or explicit recipient (`is_explicit`) targeting | `feed.create` |
+| `GET` | `/api/v1/feed/posts` | List scoped feed posts with pagination (`page`, `page_size`), search, and dynamic department + explicit-recipient privacy checks | `feed.view` |
+| `GET` | `/api/v1/feed/posts/{post_id}` | Detailed visible post record, comments, reaction aggregations, and viewer status | `feed.view` |
+| `PATCH` | `/api/v1/feed/posts/{post_id}` | Edit feed post content/targeting (author only) | `feed.create` |
+| `DELETE`| `/api/v1/feed/posts/{post_id}` | Soft-delete feed post (author or `feed.manage` on visible post) | `feed.create \| feed.manage` |
+| `GET` | `/api/v1/feed/recipients/eligible` | List eligible active workforce recipients for audience selection | `feed.create \| feed.view` |
+| `GET` | `/api/v1/feed/departments/eligible` | List eligible active departments for audience targeting | `feed.create \| feed.view` |
+| `POST` | `/api/v1/feed/posts/{post_id}/comments` | Add a comment to a visible feed post | `feed.create` |
+| `GET` | `/api/v1/feed/posts/{post_id}/comments` | List comments for a visible feed post | `feed.view` |
+| `PATCH` | `/api/v1/feed/posts/{post_id}/comments/{comment_id}` | Edit own comment on a visible feed post | `feed.create` |
+| `DELETE`| `/api/v1/feed/posts/{post_id}/comments/{comment_id}` | Soft-delete comment (author or `feed.manage` on visible post) | `feed.create \| feed.manage` |
+| `POST` | `/api/v1/feed/posts/{post_id}/reactions` | Toggle emoji reaction on a visible feed post | `feed.create` |
+| `POST` | `/api/v1/feed/posts/{post_id}/read` | Mark feed post as read for current user | `feed.view` |
+| `GET` | `/api/v1/feed/posts/{post_id}/readership` | Retrieve post readership list | `feed.view` |
+| `POST` | `/api/v1/feed/conversations` | Start or retrieve canonical 1:1 DM conversation (`participant_low_id`, `participant_high_id`) | `feed.create` |
+| `GET` | `/api/v1/feed/conversations` | List private 1:1 DM conversations for current participant | `feed.view` |
+| `GET` | `/api/v1/feed/conversations/unread-count` | Get total unread direct messages count for current user | `feed.view` |
+| `GET` | `/api/v1/feed/conversations/{conversation_id}` | Get participant-only 1:1 DM conversation details | `feed.view` |
+| `GET` | `/api/v1/feed/conversations/{conversation_id}/messages` | List messages in participant-only 1:1 DM conversation | `feed.view` |
+| `POST` | `/api/v1/feed/conversations/{conversation_id}/messages` | Send direct message in 1:1 DM conversation | `feed.create` |
+| `PATCH` | `/api/v1/feed/messages/{message_id}` | Edit own direct message | `feed.create` |
+| `DELETE`| `/api/v1/feed/messages/{message_id}` | Soft-delete own direct message | `feed.create` |
+| `POST` | `/api/v1/feed/conversations/{conversation_id}/read` | Mark 1:1 DM conversation as read | `feed.view` |
 
 ---
 

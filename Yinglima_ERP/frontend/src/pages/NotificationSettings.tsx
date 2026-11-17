@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AppShell } from "@/components/AppShell";
 import { Banner, Modal } from "@/components/ui";
+import { TableSkeletonRows } from "@/components/Skeleton";
 import { useAuth } from "@/lib/auth";
 import { apiGet, apiPut } from "@/lib/api";
 import type { NotificationRule } from "@/types/notifications";
@@ -262,11 +263,7 @@ export function NotificationSettings() {
               </thead>
             <tbody>
               {loading && rules.length === 0 ? (
-                <tr>
-                  <td colSpan={5} style={{ padding: "32px", textAlign: "center", color: "#64748b" }}>
-                    Loading notification rules...
-                  </td>
-                </tr>
+                <TableSkeletonRows colCount={5} rowCount={6} cellPadding="12px 14px" />
               ) : rules.length === 0 ? (
                 <tr>
                   <td colSpan={5} style={{ padding: "32px", textAlign: "center", color: "#64748b" }}>

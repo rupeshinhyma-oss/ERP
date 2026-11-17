@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
+import { TableSkeletonRows } from "@/components/Skeleton";
 import { apiDelete, apiGet, apiPatch, apiPostMultipart, errorMessage } from "@/lib/api";
 import { Auth } from "@/lib/auth";
 import { useToast } from "@/lib/toast";
@@ -1536,14 +1537,7 @@ export function ConsignmentOverviewPage() {
               </thead>
               <tbody>
                 {loading && pagedItems.length === 0 ? (
-                  <tr>
-                    <td
-                      colSpan={11}
-                      style={{ padding: "32px", textAlign: "center", color: "#64748b" }}
-                    >
-                      Loading Consignment Overviews...
-                    </td>
-                  </tr>
+                  <TableSkeletonRows colCount={11} rowCount={8} cellPadding="11px 12px" />
                 ) : pagedItems.length === 0 ? (
                   <tr>
                     <td

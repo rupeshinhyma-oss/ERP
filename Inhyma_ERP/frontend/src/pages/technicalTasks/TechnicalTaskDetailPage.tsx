@@ -20,6 +20,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
+import { DetailSkeleton } from "@/components/Skeleton";
 import { errorMessage } from "@/lib/api";
 import { useAuth, useBodyScrollLock } from "@/lib/hooks";
 import {
@@ -423,13 +424,10 @@ function TechnicalTaskDetailPageContent() {
               background: "#ffffff",
               borderRadius: "8px",
               border: "1px solid #e2e8f0",
-              padding: "48px 24px",
-              textAlign: "center",
-              color: "#64748b",
-              fontSize: "14px",
+              padding: "20px 24px",
             }}
           >
-            Loading technical task details...
+            <DetailSkeleton stripCount={4} rows={5} />
           </div>
         ) : error || !task ? (
           <div

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
+import { DetailSkeleton } from "@/components/Skeleton";
 import { apiGet, errorMessage, API_BASE } from "@/lib/api";
 import { Auth } from "@/lib/auth";
 import { LOCAL_PURCHASE_API, mapLocalPurchase, type PurchaseOrderRecord } from "@/lib/purchaseApi";
@@ -256,29 +257,8 @@ export function LocalPurchasePdfPage() {
       {/* Main Preview Container */}
       <div style={{ flex: 1, position: "relative", width: "100%", height: "calc(100vh - 54px)", overflow: "hidden" }}>
         {isLoading ? (
-          <div
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              alignItems: "center",
-              justifyContent: "center",
-              height: "100%",
-              color: "#f1f5f9",
-              gap: "12px",
-            }}
-          >
-            <div
-              style={{
-                width: "36px",
-                height: "36px",
-                border: "3px solid rgba(255,255,255,0.2)",
-                borderTopColor: "#3b82f6",
-                borderRadius: "50%",
-                animation: "spin 0.8s linear infinite",
-              }}
-            />
-            <div style={{ fontSize: "14px", fontWeight: 500 }}>Loading uploaded bill file...</div>
-            <style>{`@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }`}</style>
+          <div style={{ padding: "24px", height: "100%", overflow: "hidden" }}>
+            <DetailSkeleton dark stripCount={4} rows={8} />
           </div>
         ) : loadError ? (
           <div

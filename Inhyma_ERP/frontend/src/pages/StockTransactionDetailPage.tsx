@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
 import { SortHeader } from "@/components/SortHeader";
+import { TableSkeletonRows } from "@/components/Skeleton";
 import {
   InventoryApi,
   type ProductStockLedgerResponse,
@@ -666,11 +667,7 @@ export function StockTransactionDetailPage() {
               </thead>
               <tbody>
                 {loading ? (
-                  <tr>
-                    <td colSpan={7} style={{ textAlign: "center", padding: "32px 12px", color: "#64748b" }}>
-                      Loading stock transactions...
-                    </td>
-                  </tr>
+                  <TableSkeletonRows colCount={7} rowCount={8} cellPadding="10px 12px" />
                 ) : errorMsg ? (
                   <tr>
                     <td colSpan={7} style={{ textAlign: "center", padding: "32px 12px", color: "#dc2626" }}>

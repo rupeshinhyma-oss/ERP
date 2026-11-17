@@ -21,6 +21,7 @@ import { VoiceNoteRecorder } from "@/components/VoiceNoteRecorder";
 import { AttachmentList } from "@/components/AttachmentList";
 import { CommentComposer, type CommentSubmitData } from "@/components/CommentComposer";
 import { ReactionPicker } from "@/components/ReactionPicker";
+import { InlineTextSkeleton } from "@/components/Skeleton";
 
 
 function getUserDepartment(user?: { department?: string; roles?: string[] } | null): string {
@@ -1050,7 +1051,7 @@ export const TaskDrawer: React.FC<TaskDrawerProps> = ({
                   gap: "6px",
                 }}
               >
-                {task?.title || "Loading task..."}
+                {task?.title ? task.title : <InlineTextSkeleton width={220} height={22} />}
                 <span style={{ fontSize: "12px", color: "#94a3b8" }}>✏️</span>
               </h2>
             )}

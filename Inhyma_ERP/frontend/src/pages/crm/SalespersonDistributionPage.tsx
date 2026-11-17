@@ -21,6 +21,7 @@
 import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { AppShell } from "@/components/AppShell";
 import { Breadcrumb } from "@/components/Breadcrumb";
+import { TableSkeletonRows } from "@/components/Skeleton";
 import { apiGet, apiPut, apiPost, errorMessage } from "@/lib/api";
 import { useToast } from "@/lib/toast";
 import { auth } from "@/lib/auth";
@@ -857,14 +858,7 @@ export function SalespersonDistributionPage() {
               </thead>
               <tbody>
                 {loading ? (
-                  <tr>
-                    <td
-                      colSpan={canManage ? 10 : 9}
-                      style={{ padding: "3rem 1rem", textAlign: "center", color: "#64748b" }}
-                    >
-                      Loading salesperson configuration data...
-                    </td>
-                  </tr>
+                  <TableSkeletonRows colCount={canManage ? 10 : 9} rowCount={8} cellPadding="0.625rem 0.75rem" />
                 ) : filteredSalespeople.length === 0 ? (
                   <tr>
                     <td

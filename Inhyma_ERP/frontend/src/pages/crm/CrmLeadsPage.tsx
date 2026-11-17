@@ -13,6 +13,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
 import { Breadcrumb } from "@/components/Breadcrumb";
+import { CardGridSkeleton, DetailSkeleton, InlineListSkeleton, InlineTextSkeleton, TableSkeletonRows } from "@/components/Skeleton";
 import { apiGet, apiPost, apiPut, apiPatch, apiDownloadBlob, errorMessage, API_ORIGIN } from "@/lib/api";
 function resolveImageUrl(url: string | null | undefined): string {
   if (!url) return "";
@@ -2784,11 +2785,7 @@ export function CrmLeadsPage() {
                 </thead>
                 <tbody>
                   {loadingLeads ? (
-                    <tr>
-                      <td colSpan={8} style={{ padding: "3rem 1rem", textAlign: "center", color: "#64748b" }}>
-                        Loading CRM leads...
-                      </td>
-                    </tr>
+                    <TableSkeletonRows colCount={8} rowCount={8} cellPadding="0.75rem 1rem" />
                   ) : leads.length === 0 ? (
                     <tr>
                       <td colSpan={8} style={{ padding: "3rem 1rem", textAlign: "center", color: "#64748b" }}>
@@ -3318,9 +3315,9 @@ export function CrmLeadsPage() {
             {loadingKanban ? (
               <div
                 data-testid="kanban-loading-state"
-                style={{ padding: "3rem", textAlign: "center", backgroundColor: "#fff", borderRadius: "0.5rem", border: "1px solid #e2e8f0", color: "#64748b" }}
+                style={{ padding: "1.25rem", backgroundColor: "#fff", borderRadius: "0.5rem", border: "1px solid #e2e8f0" }}
               >
-                Loading pipeline stages and leads...
+                <CardGridSkeleton count={4} minWidth={240} lines={3} />
               </div>
             ) : kanbanStages.length === 0 ? (
               <div
@@ -3704,11 +3701,7 @@ export function CrmLeadsPage() {
                 </thead>
                 <tbody>
                   {loadingHistory ? (
-                    <tr>
-                      <td colSpan={8} style={{ padding: "3rem 1rem", textAlign: "center", color: "#64748b" }}>
-                        Loading assignment audit history...
-                      </td>
-                    </tr>
+                    <TableSkeletonRows colCount={8} rowCount={6} cellPadding="0.75rem 1rem" />
                   ) : historyItems.length === 0 ? (
                     <tr>
                       <td colSpan={8} style={{ padding: "3rem 1rem", textAlign: "center", color: "#64748b" }}>
@@ -4012,8 +4005,8 @@ export function CrmLeadsPage() {
               }}
             >
               {loadingTeamOversight ? (
-                <div style={{ padding: "3rem", textAlign: "center", color: "#64748b" }}>
-                  Loading team performance data...
+                <div style={{ padding: "1.5rem" }}>
+                  <DetailSkeleton stripCount={4} rows={5} />
                 </div>
               ) : !teamOversight || teamOversight.reps.length === 0 ? (
                 <div style={{ padding: "3rem 1.5rem", textAlign: "center" }}>
@@ -5191,7 +5184,7 @@ export function CrmLeadsPage() {
                       </div>
 
                       {loadingActivities ? (
-                        <div style={{ fontSize: "0.8125rem", color: "#64748b", padding: "1rem 0" }}>Loading activities...</div>
+                        <InlineListSkeleton count={3} compact />
                       ) : (
                         filteredActivities.length === 0 ? (
                           <div style={{ fontSize: "0.8125rem", color: "#94a3b8", fontStyle: "italic", padding: "1rem 0" }}>
@@ -5345,7 +5338,7 @@ export function CrmLeadsPage() {
                       </div>
 
                       {loadingPendingFollowUps ? (
-                        <div style={{ fontSize: "0.8125rem", color: "#64748b" }}>Loading follow-ups...</div>
+                        <InlineListSkeleton count={2} compact />
                       ) : pendingFollowUps.length === 0 ? (
                         <div style={{ fontSize: "0.8125rem", color: "#94a3b8", fontStyle: "italic" }}>
                           No pending follow-ups scheduled for this lead.
@@ -5546,7 +5539,7 @@ export function CrmLeadsPage() {
                           Follow-Up History
                         </h4>
                         {loadingAllFollowUps ? (
-                          <div style={{ fontSize: "0.8125rem", color: "#64748b" }}>Loading history...</div>
+                          <InlineListSkeleton count={2} compact />
                         ) : (
                           (() => {
                             const past = allFollowUps.filter((f) => f.status !== "pending");
@@ -5727,9 +5720,7 @@ export function CrmLeadsPage() {
 
                       {/* Quotations List */}
                       {loadingLeadQuotations ? (
-                        <div style={{ fontSize: "0.8125rem", color: "#64748b", padding: "1rem", textAlign: "center" }}>
-                          Loading sales quotations...
-                        </div>
+                        <InlineListSkeleton count={2} compact />
                       ) : leadQuotationsError ? (
                         <div
                           data-testid="crm-quotations-error-container"
@@ -6085,7 +6076,7 @@ export function CrmLeadsPage() {
                           Pipeline Stage Transitions ({leadStageHistory.length})
                         </h4>
                         {loadingStageHistory ? (
-                          <div style={{ fontSize: "0.8125rem", color: "#64748b" }}>Loading stage transitions...</div>
+                          <InlineListSkeleton count={2} compact />
                         ) : leadStageHistory.length === 0 ? (
                           <div style={{ fontSize: "0.8125rem", color: "#94a3b8", fontStyle: "italic" }}>
                             No pipeline stage transitions recorded for this lead.
@@ -6135,7 +6126,7 @@ export function CrmLeadsPage() {
                           Ownership Assignment History ({leadHistory.length})
                         </h4>
                         {loadingLeadHistory ? (
-                          <div style={{ fontSize: "0.8125rem", color: "#64748b" }}>Loading assignment history...</div>
+                          <InlineListSkeleton count={2} compact />
                         ) : leadHistory.length === 0 ? (
                           <div style={{ fontSize: "0.8125rem", color: "#94a3b8", fontStyle: "italic" }}>
                             No ownership assignment changes recorded for this lead.
@@ -6247,7 +6238,7 @@ export function CrmLeadsPage() {
                     Select New Stage *
                   </label>
                   {loadingPipelineStages ? (
-                    <div style={{ fontSize: "0.8125rem", color: "#64748b" }}>Loading pipeline stages...</div>
+                    <InlineTextSkeleton width={220} height={36} />
                   ) : (
                     <select
                       id="target-stage-select"
@@ -8681,9 +8672,7 @@ export function CrmLeadsPage() {
                 ) : (
                   <div>
                     {loadingQuotationVersions ? (
-                      <div style={{ fontSize: "0.8125rem", color: "#64748b", padding: "1rem", textAlign: "center" }}>
-                        Loading revision history...
-                      </div>
+                      <InlineListSkeleton count={2} compact />
                     ) : quotationVersions.length === 0 ? (
                       <div
                         style={{

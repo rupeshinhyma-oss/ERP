@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { SideDrawer } from "@/components/SideDrawer";
 import { apiGet } from "@/lib/api";
+import { DetailSkeleton } from "@/components/Skeleton";
 
 export interface PurchaseHistoryItem {
   record_type: "invoice" | "quote" | "catalog";
@@ -262,10 +263,7 @@ export function ProductTradeHistoryDrawer({
     >
       <div style={{ padding: "20px 24px", display: "flex", flexDirection: "column", gap: "20px" }}>
         {loading ? (
-          <div style={{ padding: "60px 0", textAlign: "center", color: "#64748b" }}>
-            <div style={{ fontSize: "28px", marginBottom: "12px" }}>⏳</div>
-            <div style={{ fontSize: "14px", fontWeight: 600 }}>Loading trade history...</div>
-          </div>
+          <DetailSkeleton stripCount={4} rows={5} />
         ) : error ? (
           <div
             style={{

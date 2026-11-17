@@ -15,6 +15,7 @@
 
 import React, { useEffect, useState, useRef } from "react";
 import { apiGet, apiPatch, errorMessage } from "@/lib/api";
+import { DetailSkeleton } from "@/components/Skeleton";
 import { useToast } from "@/lib/toast";
 import type { SaleOrder, SaleOrderStatus } from "@/types/saleProcess";
 import { generateSalesOrderPdf } from "@/lib/salesOrderPdf";
@@ -560,10 +561,7 @@ export function SaleProcessDetailModal({
           }}
         >
           {loading ? (
-            <div style={{ textAlign: "center", padding: "60px 0", color: "#64748b" }}>
-              <div style={{ fontSize: "24px", marginBottom: "8px" }}>⏳</div>
-              Loading sales order details...
-            </div>
+            <DetailSkeleton stripCount={3} rows={6} />
           ) : (
             <>
               {/* Centered Document Title */}

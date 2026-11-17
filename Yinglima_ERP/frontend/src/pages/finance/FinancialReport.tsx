@@ -11,6 +11,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
 import { ItemPopoverCell, TextPopoverCell } from "@/components/ItemPopoverCell";
+import { DetailSkeleton } from "@/components/Skeleton";
 import { apiDelete, apiGet, apiPatch, apiPost, downloadExport, errorMessage } from "@/lib/api";
 import { Auth } from "@/lib/auth";
 import { useConfirm } from "@/lib/confirm";
@@ -1370,8 +1371,8 @@ export function FinancialReportPage() {
 
           {/* Table Content */}
           {loading ? (
-            <div style={{ padding: "48px 20px", textAlign: "center", color: "#64748b", fontSize: 14 }}>
-              Loading Financial Report...
+            <div style={{ padding: "20px" }}>
+              <DetailSkeleton stripCount={4} rows={6} />
             </div>
           ) : activeSection === "local_purchase" ? (
             /* ============================================================
