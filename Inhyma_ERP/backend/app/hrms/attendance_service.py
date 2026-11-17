@@ -17,15 +17,18 @@ from __future__ import annotations
 
 import calendar
 import io
+import logging
 import math
 import uuid
 from datetime import date, datetime, time, timedelta, timezone
 from typing import List, Optional
 
+logger = logging.getLogger(__name__)
+
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.exceptions import BadRequestException, NotFoundException
+from app.core.exceptions import BadRequestException, ForbiddenException, NotFoundException
 from app.hrms.notifications import (
     notify_regularization_decision,
     notify_regularization_requested,
@@ -385,10 +388,10 @@ class HrmsAttendanceService:
                 HrmsLocation.deleted_at.is_(None),
                 HrmsLocation.is_active.is_(True),
             )
-            .order_by(HrmsEmployeeLocation.is_primary.desc())
+            .order_by(HrmsEmployeeLocation.is_primary.desc(), HrmsLocation.name.asc())
         )
         res = await self.db.execute(mapping_query)
-        loc = res.scalar_one_or_none()
+        loc = res.scalars().first()
         if loc:
             return loc
 
@@ -400,7 +403,7 @@ class HrmsAttendanceService:
                 HrmsLocation.is_active.is_(True),
             )
         )
-        loc = loc_res.scalar_one_or_none()
+        loc = loc_res.scalars().first()
         if loc:
             return loc
 
@@ -430,6 +433,7 @@ class HrmsAttendanceService:
         - If employee has no assigned locations in DB, falls back to default assigned office (e.g. Thane Office)
           as the primary and only permitted location.
         - all_permitted_offices includes the primary office and all additional assigned active offices.
+        - Duplicate location mappings are deduplicated deterministically.
         """
         rows = None
         try:
@@ -446,18 +450,33 @@ class HrmsAttendanceService:
             res = await self.db.execute(mapping_query)
             if hasattr(res, "all"):
                 rows = res.all()
-        except Exception:
+        except Exception as exc:
+            logger.warning("Error fetching permitted locations for user %s: %s", user_id, exc)
             rows = None
 
-        if rows and isinstance(rows, (list, tuple)) and len(rows) > 0:
+        if rows:
             primary_office = None
             permitted_offices = []
+            seen_ids = set()
             for item in rows:
-                if isinstance(item, (list, tuple)) and len(item) >= 2:
-                    loc, is_prim = item[0], item[1]
+                if hasattr(item, "__getitem__") and len(item) >= 2:
+                    loc, is_prim = item[0], bool(item[1])
+                elif hasattr(item, "HrmsLocation"):
+                    loc = getattr(item, "HrmsLocation")
+                    is_prim = bool(getattr(item, "is_primary", False))
                 else:
                     loc, is_prim = item, False
-                if loc is not None and getattr(loc, "latitude", None) is not None and getattr(loc, "longitude", None) is not None:
+
+                if (
+                    loc is not None
+                    and getattr(loc, "id", None) is not None
+                    and loc.id not in seen_ids
+                    and getattr(loc, "latitude", None) is not None
+                    and getattr(loc, "longitude", None) is not None
+                    and getattr(loc, "is_active", True)
+                    and getattr(loc, "deleted_at", None) is None
+                ):
+                    seen_ids.add(loc.id)
                     permitted_offices.append(loc)
                     if is_prim and primary_office is None:
                         primary_office = loc
@@ -1252,12 +1271,15 @@ class HrmsAttendanceService:
 
         # Block regularization on approved leave dates
         leave_res = await self.db.execute(
-            select(HrmsLeaveRequest).where(
+            select(HrmsLeaveRequest)
+            .where(
                 HrmsLeaveRequest.employee_id == user_id,
                 HrmsLeaveRequest.approval_status == "APPROVED",
                 HrmsLeaveRequest.from_date <= req_date,
                 HrmsLeaveRequest.to_date >= req_date,
             )
+            .order_by(HrmsLeaveRequest.created_at.desc(), HrmsLeaveRequest.id.desc())
+            .limit(1)
         )
         if leave_res.scalar_one_or_none():
             raise BadRequestException("Attendance cannot be regularized for approved leave days.")
@@ -1307,10 +1329,15 @@ class HrmsAttendanceService:
             await self.db.flush()
 
         # 2. Query or create persistent regularization request
-        reg_query = select(HrmsAttendanceRegularization).where(
-            HrmsAttendanceRegularization.employee_id == user_id,
-            HrmsAttendanceRegularization.attendance_date == req_date,
-            HrmsAttendanceRegularization.status == "PENDING",
+        reg_query = (
+            select(HrmsAttendanceRegularization)
+            .where(
+                HrmsAttendanceRegularization.employee_id == user_id,
+                HrmsAttendanceRegularization.attendance_date == req_date,
+                HrmsAttendanceRegularization.status == "PENDING",
+            )
+            .order_by(HrmsAttendanceRegularization.created_at.desc(), HrmsAttendanceRegularization.id.desc())
+            .limit(1)
         )
         reg_res = await self.db.execute(reg_query)
         existing_reg = reg_res.scalar_one_or_none()
@@ -1475,18 +1502,150 @@ class HrmsAttendanceService:
             )
         return output
 
+    async def _resolve_hrms_context_for_user(self, user_id: uuid.UUID):
+        """Build an authoritative HrmsUserContext from PostgreSQL RBAC tables for direct service calls."""
+        from app.hrms.rbac import HrmsUserContext
+        from app.rbac.models import Permission, Role, RoleAssignmentStatus, UserPermission, UserRole
+        from app.rbac.repository import RoleRepository
+
+        user = await self.db.get(User, user_id)
+        if not user or user.deleted_at is not None or not user.is_active:
+            raise ForbiddenException("Reviewer account is inactive or not found.")
+
+        roles_stmt = (
+            select(Role.name)
+            .join(UserRole, UserRole.role_id == Role.id)
+            .where(
+                UserRole.user_id == user.id,
+                UserRole.status == RoleAssignmentStatus.ACTIVE,
+                Role.deleted_at.is_(None),
+            )
+        )
+        roles = list((await self.db.execute(roles_stmt)).scalars().all())
+        perms = set(await RoleRepository(self.db).get_permission_codes_for_user(user.id))
+
+        # Ensure explicit user-level denies are honored even when super_admin role grants '*'
+        deny_rows = (
+            await self.db.execute(
+                select(Permission.code)
+                .join(UserPermission, UserPermission.permission_id == Permission.id)
+                .where(UserPermission.user_id == user.id, UserPermission.is_granted.is_(False))
+            )
+        ).scalars().all()
+        for code in deny_rows:
+            perms.discard(code)
+            perms.add(f"deny:{code}")
+
+        is_super_admin = bool(getattr(user, "is_super_admin", False) or "super_admin" in roles)
+        is_admin = bool(
+            is_super_admin
+            or "*" in perms
+            or "admin" in perms
+            or "super_admin" in roles
+            or "admin" in roles
+        )
+        is_hr = bool(
+            is_admin
+            or "HR" in roles
+            or any(r.upper() == "HR" or r.lower() == "human_resources" for r in roles)
+            or "hrms.manage" in perms
+        )
+
+        dept = None
+        for r in roles:
+            if r.lower() not in ("user", "super_admin", "admin", "department_manager", "employee"):
+                dept = r
+                break
+        if not dept:
+            dept = getattr(user, "department", None) or "General"
+
+        managed_ids: set[uuid.UUID] = {user.id}
+        reports_stmt = select(User.id).where(User.manager_id == user.id, User.deleted_at.is_(None))
+        for uid in (await self.db.execute(reports_stmt)).scalars().all():
+            managed_ids.add(uid)
+
+        is_manager = bool(
+            "department_manager" in roles
+            or any("manager" in r.lower() for r in roles)
+            or len(managed_ids) > 1
+        )
+        if is_manager and dept and dept.lower() != "general":
+            dept_roles_stmt = select(Role.id).where(func.lower(Role.name) == dept.lower(), Role.deleted_at.is_(None))
+            dept_role_ids = list((await self.db.execute(dept_roles_stmt)).scalars().all())
+            if dept_role_ids:
+                dept_users_stmt = select(UserRole.user_id).where(
+                    UserRole.role_id.in_(dept_role_ids),
+                    UserRole.status == RoleAssignmentStatus.ACTIVE,
+                )
+                for uid in (await self.db.execute(dept_users_stmt)).scalars().all():
+                    managed_ids.add(uid)
+
+        return HrmsUserContext(
+            user_id=user.id,
+            username=user.username or "",
+            email=user.email or "",
+            display_name=getattr(user, "full_name", None) or user.display_name or "",
+            is_super_admin=is_super_admin,
+            is_admin=is_admin,
+            is_hr=is_hr,
+            is_manager=is_manager,
+            department=dept,
+            roles=roles,
+            permissions=perms,
+            managed_employee_ids=managed_ids,
+        )
+
+    async def _enforce_regularization_reviewer_auth(
+        self,
+        reviewer_id: uuid.UUID,
+        target_employee_id: uuid.UUID,
+        action_label: str,
+        ctx=None,
+    ) -> None:
+        from app.hrms.rbac import verify_approval_authorization
+
+        if ctx is not None:
+            if ctx.user_id != reviewer_id:
+                raise ForbiddenException("Reviewer identity does not match authenticated context.")
+            resolved_ctx = ctx
+        else:
+            resolved_ctx = await self._resolve_hrms_context_for_user(reviewer_id)
+
+        await verify_approval_authorization(
+            db=self.db,
+            ctx=resolved_ctx,
+            target_employee_id=target_employee_id,
+            module_name="attendance",
+            action_label=action_label,
+        )
+
     async def approve_regularization(
         self,
         request_id: uuid.UUID,
         reviewer_id: uuid.UUID,
         payload: Optional[RegularizationApprovalAction] = None,
+        ctx=None,
     ) -> RegularizationRead:
         res = await self.db.execute(
-            select(HrmsAttendanceRegularization).where(HrmsAttendanceRegularization.id == request_id)
+            select(HrmsAttendanceRegularization)
+            .where(HrmsAttendanceRegularization.id == request_id)
+            .with_for_update()
         )
         reg_req = res.scalar_one_or_none()
         if not reg_req:
             raise NotFoundException(f"Regularization request {request_id} not found.")
+
+        if reg_req.status != "PENDING":
+            raise BadRequestException(
+                f"Regularization request is already {reg_req.status.lower()} and cannot be reviewed again."
+            )
+
+        await self._enforce_regularization_reviewer_auth(
+            reviewer_id=reviewer_id,
+            target_employee_id=reg_req.employee_id,
+            action_label="approve",
+            ctx=ctx,
+        )
 
         now_ist = datetime.now(IST)
         action = (payload.action if payload else "APPROVE") or "APPROVE"
@@ -1564,28 +1723,34 @@ class HrmsAttendanceService:
                     self.db.add(bal)
                     await self.db.flush()
 
-                new_avail = round(bal.allocated + bal.adjusted - (bal.consumed + 1.0), 2)
-                if lt and not getattr(lt, "allow_negative_balance", False) and new_avail < 0:
-                    raise BadRequestException(
-                        f"Adjust leave failed: insufficient {lt.name} balance (available: {bal.available}). Cannot deduct 1 day."
-                    )
-
-                prev_available = bal.available
-                bal.consumed = round(bal.consumed + 1.0, 2)
-                bal.available = round(bal.allocated + bal.adjusted - bal.consumed, 2)
-
-                # Create linked approved HrmsLeaveRequest
+                # Deterministically inspect only active APPROVED leave records covering this date
+                # (ignoring historical CANCELLED / REJECTED requests so MultipleResultsFound cannot occur
+                # and unrelated historical requests are never selected).
                 existing_req = (
                     await self.db.execute(
-                        select(HrmsLeaveRequest).where(
+                        select(HrmsLeaveRequest)
+                        .where(
                             HrmsLeaveRequest.employee_id == reg_req.employee_id,
+                            HrmsLeaveRequest.approval_status == "APPROVED",
                             HrmsLeaveRequest.from_date <= reg_req.attendance_date,
                             HrmsLeaveRequest.to_date >= reg_req.attendance_date,
                         )
+                        .order_by(HrmsLeaveRequest.created_at.desc(), HrmsLeaveRequest.id.desc())
+                        .limit(1)
                     )
                 ).scalar_one_or_none()
 
                 if not existing_req:
+                    new_avail = round(bal.allocated + bal.adjusted - (bal.consumed + 1.0), 2)
+                    if lt and not getattr(lt, "allow_negative_balance", False) and new_avail < 0:
+                        raise BadRequestException(
+                            f"Adjust leave failed: insufficient {lt.name} balance (available: {bal.available}). Cannot deduct 1 day."
+                        )
+
+                    prev_available = bal.available
+                    bal.consumed = round(bal.consumed + 1.0, 2)
+                    bal.available = round(bal.allocated + bal.adjusted - bal.consumed, 2)
+
                     leave_req = HrmsLeaveRequest(
                         employee_id=reg_req.employee_id,
                         leave_type_id=target_lt_id,
@@ -1602,20 +1767,20 @@ class HrmsAttendanceService:
                     )
                     self.db.add(leave_req)
 
-                audit = HrmsLeaveAdjustment(
-                    employee_id=reg_req.employee_id,
-                    leave_type_id=target_lt_id,
-                    adjustment_type="LEAVE_APPROVED",
-                    amount=-1.0,
-                    previous_balance=prev_available,
-                    new_balance=bal.available,
-                    reason=f"Attendance Regularization #{reg_req.id} adjusted against leave",
-                    remarks=manager_remarks,
-                    source="REGULARIZATION",
-                    effective_date=reg_req.attendance_date,
-                    adjusted_by=reviewer_id,
-                )
-                self.db.add(audit)
+                    audit = HrmsLeaveAdjustment(
+                        employee_id=reg_req.employee_id,
+                        leave_type_id=target_lt_id,
+                        adjustment_type="LEAVE_APPROVED",
+                        amount=-1.0,
+                        previous_balance=prev_available,
+                        new_balance=bal.available,
+                        reason=f"Attendance Regularization #{reg_req.id} adjusted against leave",
+                        remarks=manager_remarks,
+                        source="REGULARIZATION",
+                        effective_date=reg_req.attendance_date,
+                        adjusted_by=reviewer_id,
+                    )
+                    self.db.add(audit)
 
         if att_rec:
             att_rec.regularization_status = "APPROVED"
@@ -1639,13 +1804,16 @@ class HrmsAttendanceService:
             att_rec.early_exit_minutes = 0
 
         await self.db.flush()
-        await notify_regularization_decision(
-            self.db,
-            employee_id=reg_req.employee_id,
-            decision="APPROVED",
-            attendance_date=reg_req.attendance_date.isoformat(),
-            actor_id=reviewer_id,
-        )
+        try:
+            await notify_regularization_decision(
+                self.db,
+                employee_id=reg_req.employee_id,
+                decision="APPROVED",
+                attendance_date=reg_req.attendance_date.isoformat(),
+                actor_id=reviewer_id,
+            )
+        except Exception as exc:
+            logger.warning("Failed to dispatch regularization approval notification: %s", exc)
         await self.db.commit()
         await self.db.refresh(reg_req)
 
@@ -1693,13 +1861,28 @@ class HrmsAttendanceService:
         request_id: uuid.UUID,
         reviewer_id: uuid.UUID,
         payload: Optional[RegularizationRejectAction] = None,
+        ctx=None,
     ) -> RegularizationRead:
         res = await self.db.execute(
-            select(HrmsAttendanceRegularization).where(HrmsAttendanceRegularization.id == request_id)
+            select(HrmsAttendanceRegularization)
+            .where(HrmsAttendanceRegularization.id == request_id)
+            .with_for_update()
         )
         reg_req = res.scalar_one_or_none()
         if not reg_req:
             raise NotFoundException(f"Regularization request {request_id} not found.")
+
+        if reg_req.status != "PENDING":
+            raise BadRequestException(
+                f"Regularization request is already {reg_req.status.lower()} and cannot be reviewed again."
+            )
+
+        await self._enforce_regularization_reviewer_auth(
+            reviewer_id=reviewer_id,
+            target_employee_id=reg_req.employee_id,
+            action_label="reject",
+            ctx=ctx,
+        )
 
         now_ist = datetime.now(IST)
         action = (payload.action if payload else "REJECT_LOP") or "REJECT_LOP"
@@ -1738,13 +1921,16 @@ class HrmsAttendanceService:
             att_rec.regularization_note = f"Rejected ({action}): {manager_remarks}"
 
         await self.db.flush()
-        await notify_regularization_decision(
-            self.db,
-            employee_id=reg_req.employee_id,
-            decision="REJECTED",
-            attendance_date=reg_req.attendance_date.isoformat(),
-            actor_id=reviewer_id,
-        )
+        try:
+            await notify_regularization_decision(
+                self.db,
+                employee_id=reg_req.employee_id,
+                decision="REJECTED",
+                attendance_date=reg_req.attendance_date.isoformat(),
+                actor_id=reviewer_id,
+            )
+        except Exception as exc:
+            logger.warning("Failed to dispatch regularization rejection notification: %s", exc)
         await self.db.commit()
         await self.db.refresh(reg_req)
 

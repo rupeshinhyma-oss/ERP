@@ -417,7 +417,7 @@ async def approve_regularization(
         action_label="approve",
     )
 
-    record = await service.approve_regularization(request_id, ctx.user_id, payload=payload)
+    record = await service.approve_regularization(request_id, ctx.user_id, payload=payload, ctx=ctx)
     return build_success_response(
         data=record.model_dump(mode="json"),
         message="Attendance regularization request approved successfully.",
@@ -455,7 +455,7 @@ async def reject_regularization(
         action_label="reject",
     )
 
-    record = await service.reject_regularization(request_id, ctx.user_id, payload=payload)
+    record = await service.reject_regularization(request_id, ctx.user_id, payload=payload, ctx=ctx)
     return build_success_response(
         data=record.model_dump(mode="json"),
         message="Attendance regularization request rejected.",

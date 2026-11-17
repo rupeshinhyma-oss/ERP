@@ -128,12 +128,17 @@ export const Auth = {
     if (!code) return true;
     const profile = this.getProfile();
     if (!profile) return false;
+    const rawPerms = Array.isArray(profile.permissions) ? profile.permissions : [];
+
+    // Explicit deny or block check always takes precedence (including over super_admin)
+    if (rawPerms.includes(`deny:${code}`) || rawPerms.includes(`block:${code}`)) return false;
+    if (code.startsWith("feed.") && (rawPerms.includes("deny:feed.view") || rawPerms.includes("block:feed.view"))) {
+      return false;
+    }
+
     if (this.isSuperAdmin()) return true;
     if (!Array.isArray(profile.permissions)) return false;
     const perms = profile.permissions;
-
-    // Explicit deny or block check
-    if (perms.includes(`deny:${code}`) || perms.includes(`block:${code}`)) return false;
 
     if (perms.includes("*") || perms.includes(code)) return true;
 

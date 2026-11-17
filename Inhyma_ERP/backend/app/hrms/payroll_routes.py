@@ -356,11 +356,11 @@ async def calculate_monthly_payroll(
 async def get_monthly_payroll(
     payroll_month: Optional[str] = None,
     month_query: Optional[str] = Query(None, alias="payroll_month"),
-    auto_calculate: bool = Query(True),
+    auto_calculate: bool = Query(False),
     ctx: HrmsUserContext = Depends(get_hrms_user_context),
     service: HrmsPayrollService = Depends(get_payroll_service),
 ):
-    """Admin/HR/Manager: View monthly payroll review snapshot."""
+    """Admin/HR/Manager: View monthly payroll review snapshot (read-only by default)."""
     ctx.require_module_access("payroll")
     if not (ctx.is_admin or ctx.is_hr or ctx.is_manager):
         raise HTTPException(
@@ -371,14 +371,17 @@ async def get_monthly_payroll(
     raw_month = payroll_month or month_query
     month = _validate_payroll_month(raw_month)
 
+    is_auto_calc = auto_calculate if isinstance(auto_calculate, bool) else False
+    if is_auto_calc and not ctx.can_configure_salary():
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Permission denied. Salary configuration rights required to calculate monthly payroll.",
+        )
+
     payroll = await service.get_monthly_payroll(month)
-    if auto_calculate and (not payroll or payroll.status in ("DRAFT", "REVIEW", "PROCESSED")):
-        if ctx.is_admin or ctx.is_hr:
-            try:
-                await service.calculate_monthly_payroll(month, ctx.user_id)
-                payroll = await service.get_monthly_payroll(month)
-            except Exception:
-                pass
+    if is_auto_calc and not payroll:
+        await service.calculate_monthly_payroll(month, ctx.user_id)
+        payroll = await service.get_monthly_payroll(month)
 
     if not payroll:
         raise HTTPException(

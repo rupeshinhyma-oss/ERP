@@ -447,6 +447,21 @@ export function AttendancePage() {
     profile?.username === "admin"
   );
 
+  const canSelfApproveRegularization = Boolean(
+    isAdmin ||
+    hasPermission("hrms.approve") ||
+    hasPermission("hrms:approval") ||
+    hasPermission("hrms.manage") ||
+    hasPermission("hrms.attendance.approve")
+  );
+  const isDeniedSelfApprove = Boolean(
+    !isSuperAdmin &&
+    (hasPermission("deny:hrms.approve") ||
+      hasPermission("deny:hrms.attendance") ||
+      hasPermission("block:hrms.attendance"))
+  );
+  const isSelfApprovalAuthorized = canSelfApproveRegularization && !isDeniedSelfApprove;
+
   const isPrivileged = Boolean(
     isAdmin ||
     String((profile as any)?.role || "").toLowerCase() === "hr" ||
@@ -2941,7 +2956,7 @@ export function AttendancePage() {
                           >
                             Send Request
                           </button>
-                          {isViewingOtherEmployee ? (
+                          {isViewingOtherEmployee && (
                             <button
                               type="button"
                               className="hrms-sim-btn active"
@@ -2951,17 +2966,6 @@ export function AttendancePage() {
                               style={{ padding: "8px 18px", fontSize: "13px" }}
                             >
                               {regSubmitting ? "Processing..." : "Regularize Directly"}
-                            </button>
-                          ) : (
-                            <button
-                              type="button"
-                              className="hrms-cal-nav-btn"
-                              disabled={true}
-                              title="Self-approval is not permitted. Administrators cannot directly regularize their own attendance."
-                              data-testid="direct-regularize-self-blocked-btn"
-                              style={{ opacity: 0.5, cursor: "not-allowed", fontSize: "12px", padding: "8px 14px" }}
-                            >
-                              Direct Regularize (Disabled for Self)
                             </button>
                           )}
                         </>
@@ -3059,7 +3063,7 @@ export function AttendancePage() {
                                 <span className="status-badge-pending">PENDING</span>
                               </td>
                               <td>
-                                {item.employee_id === (profile as any)?.id ? (
+                                {item.employee_id === (profile as any)?.id && !isSelfApprovalAuthorized ? (
                                   <span
                                     className="status-badge-pending"
                                     style={{

@@ -432,7 +432,7 @@ async def test_punch_in_uses_authoritative_server_clock_and_ignores_client_times
 
 @pytest.mark.asyncio
 async def test_verify_approval_authorization_blocks_admin_self_approval():
-    """Verify that an Administrator cannot self-approve their own request in verify_approval_authorization."""
+    """Verify that an Administrator cannot self-approve their own request for non-attendance modules (e.g. leave)."""
     admin_id = uuid.uuid4()
 
     mock_db = AsyncMock()
@@ -446,13 +446,24 @@ async def test_verify_approval_authorization_blocks_admin_self_approval():
             db=mock_db,
             ctx=mock_ctx,
             target_employee_id=admin_id,  # Admin targeting themselves
-            module_name="attendance",
+            module_name="leave",
             action_label="approve",
         )
 
     assert exc_info.value.status_code == status.HTTP_400_BAD_REQUEST
     assert "Self-approval is not permitted" in exc_info.value.detail
-    assert "attendance" in exc_info.value.detail
+    assert "leave" in exc_info.value.detail
+
+    # Verify that for Attendance, Admin self-approval IS permitted
+    mock_ctx.permissions = {"hrms:admin"}
+    mock_ctx.can_access_module.return_value = True
+    await verify_approval_authorization(
+        db=mock_db,
+        ctx=mock_ctx,
+        target_employee_id=admin_id,
+        module_name="attendance",
+        action_label="approve",
+    )
 
 
 @pytest.mark.asyncio
@@ -532,6 +543,10 @@ async def test_verify_approval_authorization_blocks_employee_self_approval():
 async def test_punch_in_rejects_outside_geofence():
     """Verify that punch_in rejects attendance when coordinates are outside the geofence radius."""
     mock_db = AsyncMock()
+    mock_exec_result = MagicMock()
+    mock_exec_result.all.return_value = []
+    mock_exec_result.scalar_one_or_none.return_value = None
+    mock_db.execute.return_value = mock_exec_result
     service = HrmsAttendanceService(mock_db)
 
     user_id = uuid.uuid4()
@@ -556,7 +571,7 @@ async def test_punch_in_rejects_outside_geofence():
         gps_timestamp=datetime.now(timezone.utc),
     )
 
-    with pytest.raises(Exception) as exc_info:
+    with pytest.raises(BadRequestException) as exc_info:
         await service.punch_in(user_id, payload)
 
     assert "Outside geofence" in str(exc_info.value)

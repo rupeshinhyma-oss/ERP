@@ -61,8 +61,8 @@ from app.users.service import UserService
 
 
 @pytest.mark.asyncio
-async def test_payroll_batch_approval_succeeds_when_approver_has_payslip_for_authorized_admin():
-    """Authorized approver can approve a monthly payroll batch even when containing their own payslip."""
+async def test_payroll_batch_approval_rejected_when_approver_has_payslip():
+    """Reject entire monthly payroll batch approval when the approver has a payslip in that batch."""
     mock_db = AsyncMock()
     service = HrmsPayrollService(mock_db)
 
@@ -99,14 +99,42 @@ async def test_payroll_batch_approval_succeeds_when_approver_has_payslip_for_aut
 
     mock_db.execute.side_effect = [mock_pay_res, mock_items_res]
 
-    result = await service.approve_monthly_payroll("2026-03", approver_id)
+    with pytest.raises(HTTPException) as exc_info:
+        await service.approve_monthly_payroll("2026-03", approver_id)
 
-    assert result.status == "APPROVED"
-    assert result.approved_by == approver_id
-    assert result.approved_at is not None
-    assert item_other.status == "APPROVED"
-    assert item_self.status == "APPROVED"
-    mock_db.commit.assert_called_once()
+    assert exc_info.value.status_code == 400
+    assert "self-approval" in exc_info.value.detail.lower()
+    # Verify rejection occurred BEFORE mutating batch or item status
+    assert mock_payroll.status == "REVIEW"
+    assert mock_payroll.approved_by is None
+    assert item_other.status == "DRAFT"
+    assert item_self.status == "DRAFT"
+    mock_db.commit.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_payroll_batch_approval_rejected_when_already_approved():
+    """Reject duplicate approval of an already APPROVED payroll batch."""
+    mock_db = AsyncMock()
+    service = HrmsPayrollService(mock_db)
+
+    approver_id = uuid.uuid4()
+    mock_payroll = HrmsMonthlyPayroll(
+        id=uuid.uuid4(),
+        payroll_month="2026-03",
+        status="APPROVED",
+    )
+
+    mock_pay_res = MagicMock()
+    mock_pay_res.scalar_one_or_none.return_value = mock_payroll
+    mock_db.execute.return_value = mock_pay_res
+
+    with pytest.raises(HTTPException) as exc_info:
+        await service.approve_monthly_payroll("2026-03", approver_id)
+
+    assert exc_info.value.status_code == 400
+    assert "already approved" in exc_info.value.detail.lower()
+    mock_db.commit.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -720,11 +748,29 @@ async def test_attendance_regularization_adjust_leave_deducts_balance():
         manager_remarks="Deducted from CL",
     )
 
+    from app.hrms.rbac import HrmsUserContext
+
+    reviewer_ctx = HrmsUserContext(
+        user_id=reviewer_id,
+        username="admin",
+        email="admin@inhyma.com",
+        display_name="Admin",
+        is_super_admin=True,
+        is_admin=True,
+        is_hr=True,
+        is_manager=False,
+        department="Admin",
+        roles=["super_admin"],
+        permissions={"*"},
+        managed_employee_ids=set(),
+    )
+
     with patch("app.hrms.attendance_service.notify_regularization_decision", new_callable=AsyncMock):
         res = await service.approve_regularization(
             request_id=reg_id,
             reviewer_id=reviewer_id,
             payload=payload,
+            ctx=reviewer_ctx,
         )
 
     assert mock_reg.status == "APPROVED"
@@ -1070,5 +1116,222 @@ def test_october_2026_calculation_verification():
 
     net_pay = round(gross - total_deductions, 2)
     assert net_pay == 59030.77
+
+
+# ===========================================================================
+# PHASE 5 REGRESSION TESTS (G2, G3, G4.A, G5.A, G7, G8)
+# ===========================================================================
+
+
+@pytest.mark.asyncio
+async def test_phase5_g2_leave_service_locks_request_and_rejects_non_pending():
+    """G2/G6: approve_leave_request & reject_leave_request acquire FOR UPDATE and reject non-PENDING states."""
+    mock_db = AsyncMock()
+    service = HrmsLeaveService(mock_db)
+
+    emp_id = uuid.uuid4()
+    reviewer_id = uuid.uuid4()
+    req_id = uuid.uuid4()
+
+    for terminal_state in ("APPROVED", "REJECTED", "CANCELLED"):
+        captured_sql: list[str] = []
+
+        async def fake_scalar(stmt, *args, **kwargs):
+            captured_sql.append(str(stmt).upper())
+            return HrmsLeaveRequest(
+                id=req_id,
+                employee_id=emp_id,
+                leave_type_id=uuid.uuid4(),
+                from_date=date(2026, 9, 10),
+                to_date=date(2026, 9, 11),
+                number_of_days=2.0,
+                reason="Test",
+                status=terminal_state,
+                approval_status=terminal_state,
+            )
+
+        mock_db.scalar.side_effect = fake_scalar
+
+        with pytest.raises(HTTPException) as exc_appr:
+            await service.approve_leave_request(req_id, reviewer_id=reviewer_id, is_admin=True)
+        assert exc_appr.value.status_code == 400
+        assert any("FOR UPDATE" in s for s in captured_sql)
+
+        with pytest.raises(HTTPException) as exc_rej:
+            await service.reject_leave_request(req_id, reviewer_id=reviewer_id, remarks="No", is_admin=True)
+        assert exc_rej.value.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_phase5_g3_asset_subresources_reject_unrelated_employee():
+    """G3: GET /assets/{id}/assignments, /history, and /maintenance reject unrelated employees with 403."""
+    from app.hrms.asset_routes import get_asset_assignments, get_asset_history, get_asset_maintenance
+    from app.hrms.rbac import HrmsUserContext
+
+    asset_id = uuid.uuid4()
+    owner_id = uuid.uuid4()
+    unrelated_id = uuid.uuid4()
+
+    mock_service = AsyncMock()
+    mock_asset = MagicMock()
+    mock_asset.id = asset_id
+    mock_asset.assigned_to_user_id = owner_id
+    mock_asset.history = []
+    mock_service.get_asset.return_value = mock_asset
+
+    unrelated_ctx = HrmsUserContext(
+        user_id=unrelated_id,
+        username="emp_other",
+        email="other@inhyma.com",
+        display_name="Other Emp",
+        is_super_admin=False,
+        is_admin=False,
+        is_hr=False,
+        is_manager=False,
+        department="Sales",
+        roles=["user"],
+        permissions={"hrms.assets"},
+        managed_employee_ids={unrelated_id},
+    )
+
+    for endpoint_fn in (get_asset_assignments, get_asset_history, get_asset_maintenance):
+        with pytest.raises(HTTPException) as exc_info:
+            await endpoint_fn(asset_id=asset_id, service=mock_service, ctx=unrelated_ctx)
+        assert exc_info.value.status_code == 403
+
+    mock_service.list_assignments.assert_not_called()
+    mock_service.get_asset_history.assert_not_called()
+    mock_service.list_maintenance.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_phase5_g4a_payroll_get_monthly_blocks_unprivileged_auto_calculate():
+    """G4.A: GET /monthly does not auto-calculate by default and blocks ?auto_calculate=true without configure perm."""
+    from app.hrms.payroll_routes import get_monthly_payroll
+    from app.hrms.rbac import HrmsUserContext
+
+    approver_only_ctx = HrmsUserContext(
+        user_id=uuid.uuid4(),
+        username="hr_approver",
+        email="appr@inhyma.com",
+        display_name="HR Approver",
+        is_super_admin=False,
+        is_admin=False,
+        is_hr=True,
+        is_manager=False,
+        department="HR",
+        roles=["hr"],
+        permissions={"hrms.payroll", "hrms.payroll.approve", "deny:hrms.payroll.configure"},
+        managed_employee_ids=set(),
+    )
+
+    mock_service = AsyncMock()
+    mock_service.get_monthly_payroll.return_value = None
+
+    with pytest.raises(HTTPException) as exc_404:
+        await get_monthly_payroll(
+            payroll_month="2026-11",
+            auto_calculate=False,
+            ctx=approver_only_ctx,
+            service=mock_service,
+        )
+    assert exc_404.value.status_code == 404
+    mock_service.calculate_monthly_payroll.assert_not_called()
+
+    with pytest.raises(HTTPException) as exc_403:
+        await get_monthly_payroll(
+            payroll_month="2026-11",
+            auto_calculate=True,
+            ctx=approver_only_ctx,
+            service=mock_service,
+        )
+    assert exc_403.value.status_code == 403
+    mock_service.calculate_monthly_payroll.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_phase5_g7_rollover_carry_forward_respects_cap_and_undefined_policy():
+    """G7: _compute_year_rollover_carry_forward respects carry_forward_days cap and does not assume unlimited CF."""
+    mock_db = AsyncMock()
+    service = HrmsLeaveService(mock_db)
+
+    emp = User(id=uuid.uuid4(), username="emp_cf", date_of_joining=date(2024, 3, 1))
+    lt_capped = HrmsLeaveType(
+        id=uuid.uuid4(),
+        name="Earned Leave",
+        code="EL",
+        annual_balance=18.0,
+        carry_forward_allowed=True,
+        carry_forward_days=15.0,
+    )
+    prev_bal = HrmsEmployeeLeaveBalance(
+        id=uuid.uuid4(),
+        employee_id=emp.id,
+        leave_type_id=lt_capped.id,
+        year=2026,
+        allocated=18.0,
+        adjusted=4.0,
+        consumed=2.0,
+        available=20.0,
+    )
+    mock_db.scalar.side_effect = [None, prev_bal]
+    carry, audit = await service._compute_year_rollover_carry_forward(emp, lt_capped, 2027)
+    assert carry == 15.0
+    assert audit is not None and audit.source == "YEAR_ROLLOVER" and audit.amount == 15.0
+
+    lt_undef = HrmsLeaveType(
+        id=uuid.uuid4(),
+        name="Undefined CF",
+        code="UCF",
+        annual_balance=10.0,
+        carry_forward_allowed=True,
+        carry_forward_days=0.0,
+    )
+    carry_undef, audit_undef = await service._compute_year_rollover_carry_forward(emp, lt_undef, 2027)
+    assert carry_undef == 0.0
+    assert audit_undef is None
+
+
+@pytest.mark.asyncio
+async def test_phase5_g8_assign_asset_converts_integrity_error_to_conflict_409():
+    """G8: Concurrent IntegrityError during assign_asset is rolled back and converted to 409 ConflictException."""
+    from app.hrms.asset_service import HrmsAssetService
+    from app.hrms.schemas import AssetAssign
+
+    mock_db = AsyncMock()
+    service = HrmsAssetService(mock_db)
+
+    asset_id = uuid.uuid4()
+    emp_id = uuid.uuid4()
+    mock_asset = HrmsAsset(
+        id=asset_id,
+        asset_code="AST-9099",
+        asset_name="ThinkPad T14",
+        asset_category="Laptop",
+        status="AVAILABLE",
+        condition="GOOD",
+        assigned_to_user_id=None,
+    )
+    mock_emp = User(id=emp_id, username="emp1", first_name="Emp", last_name="One", is_active=True)
+
+    r_asset = MagicMock()
+    r_asset.scalar_one_or_none.return_value = mock_asset
+    r_assign = MagicMock()
+    r_assign.scalar_one_or_none.return_value = None
+    r_emp = MagicMock()
+    r_emp.scalar_one_or_none.return_value = mock_emp
+
+    mock_db.execute.side_effect = [r_asset, r_assign, r_emp]
+    mock_db.flush.side_effect = IntegrityError("INSERT INTO hrms_asset_assignments", {}, Exception("duplicate key"))
+
+    with pytest.raises(ConflictException) as exc_info:
+        await service.assign_asset(
+            asset_id,
+            AssetAssign(employee_id=emp_id, assigned_date=date(2026, 6, 1)),
+            actor_id=uuid.uuid4(),
+        )
+    assert exc_info.value.status_code == 409
+    mock_db.rollback.assert_awaited_once()
+
 
 

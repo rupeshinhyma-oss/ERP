@@ -11,6 +11,11 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.feed.models import FeedAudienceType, FeedPostStatus
 
+MAX_FEED_POST_TITLE_LENGTH = 255
+MAX_FEED_POST_CONTENT_LENGTH = 20_000
+MAX_FEED_COMMENT_LENGTH = 5_000
+MAX_DIRECT_MESSAGE_LENGTH = 5_000
+
 
 class FeedAuthorRead(BaseModel):
     """Author identity for feed presentation."""
@@ -26,15 +31,17 @@ class FeedAuthorRead(BaseModel):
 
 
 class FeedRecipientRead(BaseModel):
-    """Recipient identity for targeted post view."""
+    """Explicitly selected recipient identity for targeted post author view."""
 
     model_config = ConfigDict(from_attributes=True)
 
+    id: uuid.UUID | None = None
     recipient_id: uuid.UUID
     display_name: str | None = None
     full_name: str
     email: str | None = None
     employee_code: str | None = None
+    department_name: str | None = None
 
 
 class FeedDepartmentRead(BaseModel):
@@ -64,16 +71,22 @@ class FeedPostCreate(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    title: str | None = Field(default=None, max_length=255)
-    content: str = Field(..., min_length=1, description="Message content supporting formatted text")
+    title: str | None = Field(default=None, max_length=MAX_FEED_POST_TITLE_LENGTH)
+    content: str = Field(
+        ...,
+        min_length=1,
+        max_length=MAX_FEED_POST_CONTENT_LENGTH,
+        description="Message content supporting formatted text (max 20,000 characters)",
+    )
     audience_type: FeedAudienceType = Field(
-        default=FeedAudienceType.ALL, description="'ALL' for company-wide, 'SELECTED' for specific employees"
+        default=FeedAudienceType.ALL,
+        description="'ALL' for company-wide, 'SELECTED' for specific departments/employees",
     )
     department_ids: list[uuid.UUID] = Field(
         default_factory=list, description="Target department role IDs"
     )
     recipient_ids: list[uuid.UUID] = Field(
-        default_factory=list, description="Target recipient user IDs"
+        default_factory=list, description="Explicit target recipient user IDs"
     )
     status: FeedPostStatus = Field(
         default=FeedPostStatus.PUBLISHED, description="'DRAFT' or 'PUBLISHED'"
@@ -85,8 +98,12 @@ class FeedPostUpdate(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    title: str | None = Field(default=None, max_length=255)
-    content: str | None = Field(default=None, min_length=1)
+    title: str | None = Field(default=None, max_length=MAX_FEED_POST_TITLE_LENGTH)
+    content: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=MAX_FEED_POST_CONTENT_LENGTH,
+    )
     audience_type: FeedAudienceType | None = None
     department_ids: list[uuid.UUID] | None = None
     recipient_ids: list[uuid.UUID] | None = None
@@ -122,7 +139,7 @@ class FeedCommentCreate(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    content: str = Field(..., min_length=1, max_length=5000)
+    content: str = Field(..., min_length=1, max_length=MAX_FEED_COMMENT_LENGTH)
 
 
 class FeedCommentUpdate(BaseModel):
@@ -130,7 +147,7 @@ class FeedCommentUpdate(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    content: str = Field(..., min_length=1, max_length=5000)
+    content: str = Field(..., min_length=1, max_length=MAX_FEED_COMMENT_LENGTH)
 
 
 class FeedCommentRead(BaseModel):
@@ -150,10 +167,14 @@ class FeedCommentRead(BaseModel):
 
 
 class FeedCommentListResponse(BaseModel):
-    """List of comments for a feed post."""
+    """Paginated list of comments for a feed post."""
 
     items: list[FeedCommentRead]
     total: int
+    page: int = 1
+    page_size: int = 50
+    total_pages: int = 1
+    has_more: bool = False
 
 
 class FeedReaderRead(BaseModel):
@@ -170,7 +191,7 @@ class FeedReaderRead(BaseModel):
 
 
 class FeedReadershipResponse(BaseModel):
-    """Full readership report accessible only to post author and administrators."""
+    """Full readership report accessible strictly to the post author."""
 
     post_id: uuid.UUID
     total_readers: int
@@ -195,6 +216,8 @@ class FeedPostRead(BaseModel):
     targeted_departments: list[FeedDepartmentRead] = Field(default_factory=list)
     recipients: list[FeedRecipientRead] = Field(default_factory=list)
     is_author: bool = False
+    can_edit: bool = False
+    can_delete: bool = False
     comments_count: int = 0
     reactions_summary: FeedReactionSummary = Field(default_factory=FeedReactionSummary)
     is_read: bool = False
@@ -208,7 +231,7 @@ class FeedPostListResponse(BaseModel):
     total: int
     page: int
     page_size: int
-    pages: int
+    total_pages: int
 
 
 class EligibleRecipientRead(BaseModel):
@@ -229,6 +252,7 @@ class EligibleRecipientRead(BaseModel):
 # Direct Messaging Pydantic Schemas
 # ==============================================================================
 
+
 class ConversationCreate(BaseModel):
     """Payload to start a private conversation with an employee."""
 
@@ -242,7 +266,12 @@ class DirectMessageCreate(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    content: str = Field(..., min_length=1, max_length=5000, description="Message content")
+    content: str = Field(
+        ...,
+        min_length=1,
+        max_length=MAX_DIRECT_MESSAGE_LENGTH,
+        description="Message content (max 5,000 characters)",
+    )
 
 
 class DirectMessageUpdate(BaseModel):
@@ -250,7 +279,12 @@ class DirectMessageUpdate(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    content: str = Field(..., min_length=1, max_length=5000, description="Updated message content")
+    content: str = Field(
+        ...,
+        min_length=1,
+        max_length=MAX_DIRECT_MESSAGE_LENGTH,
+        description="Updated message content (max 5,000 characters)",
+    )
 
 
 class ConversationParticipantRead(BaseModel):
@@ -278,6 +312,8 @@ class DirectMessageRead(BaseModel):
     conversation_id: uuid.UUID
     sender_id: uuid.UUID
     sender: FeedAuthorRead
+    sender_display_name: str | None = None
+    sender_email: str | None = None
     content: str
     is_sender: bool = False
     is_edited: bool = False

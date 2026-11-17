@@ -20,9 +20,22 @@ from typing import List, Optional
 
 from fastapi import HTTPException, status
 from sqlalchemy import func, select, or_, and_, not_
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
+
+IST = timezone(timedelta(hours=5, minutes=30))
+
+
+def get_current_ist_date() -> date:
+    """Return current business date in application IST timezone (UTC+05:30)."""
+    return datetime.now(IST).date()
+
+
+def get_current_ist_year() -> int:
+    """Return current business year in application IST timezone (UTC+05:30)."""
+    return get_current_ist_date().year
 
 from app.hrms.models import (
     HrmsAttendancePolicy,
@@ -66,10 +79,13 @@ class HrmsLeaveService:
     # -----------------------------------------------------------------------
     # Bootstrap Seeds
     # -----------------------------------------------------------------------
-    async def ensure_seeds(self) -> None:
+    async def ensure_seeds(self, *, commit: bool = True) -> None:
         """
         Idempotent bootstrap for Leave Types, sample Holidays, and Default Plan.
         """
+        seeded_any = False
+        seed_year = get_current_ist_year()
+
         # 1. Leave Types (all 8 standard corporate types + Privilege Leave)
         existing_types_res = await self.db.execute(
             select(HrmsLeaveType.name)
@@ -191,6 +207,7 @@ class HrmsLeaveService:
         if to_add_types:
             self.db.add_all(to_add_types)
             await self.db.flush()
+            seeded_any = True
 
         # 2. Default Holidays
         holiday_count_res = await self.db.execute(
@@ -200,34 +217,35 @@ class HrmsLeaveService:
             sample_holidays = [
                 HrmsHoliday(
                     name="Republic Day",
-                    holiday_date=date(2026, 1, 26),
+                    holiday_date=date(seed_year, 1, 26),
                     number_of_days=1,
                     branch_applicability="All Branches",
                     is_active=True,
                 ),
                 HrmsHoliday(
                     name="Independence Day",
-                    holiday_date=date(2026, 8, 15),
+                    holiday_date=date(seed_year, 8, 15),
                     number_of_days=1,
                     branch_applicability="All Branches",
                     is_active=True,
                 ),
                 HrmsHoliday(
                     name="Mahatma Gandhi Jayanti",
-                    holiday_date=date(2026, 10, 2),
+                    holiday_date=date(seed_year, 10, 2),
                     number_of_days=1,
                     branch_applicability="All Branches",
                     is_active=True,
                 ),
                 HrmsHoliday(
                     name="Diwali",
-                    holiday_date=date(2026, 11, 8),
+                    holiday_date=date(seed_year, 11, 8),
                     number_of_days=1,
                     branch_applicability="All Branches",
                     is_active=True,
                 ),
             ]
             self.db.add_all(sample_holidays)
+            seeded_any = True
 
         # 3. Default Leave Plan
         plan_count_res = await self.db.execute(
@@ -235,9 +253,9 @@ class HrmsLeaveService:
         )
         if (plan_count_res.scalar() or 0) == 0:
             default_plan = HrmsLeavePlan(
-                name="Employee Standard Leave Plan 2026",
-                effective_from=date(2026, 1, 1),
-                effective_to=date(2026, 12, 31),
+                name=f"Employee Standard Leave Plan {seed_year}",
+                effective_from=date(seed_year, 1, 1),
+                effective_to=date(seed_year, 12, 31),
                 branch="All Branches",
                 department="All Departments",
                 is_active=True,
@@ -251,8 +269,13 @@ class HrmsLeaveService:
             )
             for lt in all_lts.all():
                 self.db.add(HrmsLeavePlanType(plan_id=default_plan.id, leave_type_id=lt.id))
+            seeded_any = True
 
-        await self.db.commit()
+        if seeded_any:
+            if commit:
+                await self.db.commit()
+            else:
+                await self.db.flush()
 
     # -----------------------------------------------------------------------
     # Helper: Resolve Employee Branch & Department
@@ -892,16 +915,151 @@ class HrmsLeaveService:
         return leave_days
 
     # -----------------------------------------------------------------------
-    # Employee Leave Balances
+    # Employee Leave Balances & Year-End Rollover
     # -----------------------------------------------------------------------
+    async def _compute_year_rollover_carry_forward(
+        self,
+        user: User,
+        lt: HrmsLeaveType,
+        target_year: int,
+    ) -> tuple[float, Optional[HrmsLeaveAdjustment]]:
+        """
+        Compute prior-year carry-forward when initializing a missing target_year balance.
+        Enforces:
+        - carry_forward_allowed must be True with a positive carry_forward_days cap.
+        - If carry_forward_allowed is True without a positive cap, logs a warning and carries 0.0
+          rather than assuming unlimited carry-forward.
+        - Employees joining in or after target_year receive 0.0 carry-forward.
+        - Idempotent against existing YEAR_ROLLOVER audit entries for (employee, leave_type, target_year).
+        """
+        carry_allowed = bool(getattr(lt, "carry_forward_allowed", False))
+        if not carry_allowed:
+            return 0.0, None
+
+        raw_cap = getattr(lt, "carry_forward_days", 0.0)
+        if raw_cap is None or float(raw_cap) <= 0.0:
+            logger.warning(
+                "Leave type %s (%s) has carry_forward_allowed=True without a positive carry_forward_days cap (%r); "
+                "defaulting rollover carry-forward to 0.0.",
+                getattr(lt, "code", None),
+                getattr(lt, "id", None),
+                raw_cap,
+            )
+            return 0.0, None
+
+        doj = getattr(user, "date_of_joining", None)
+        if isinstance(doj, date) and doj.year >= target_year:
+            return 0.0, None
+
+        rollover_date = date(target_year, 1, 1)
+        existing_rollover = await self.db.scalar(
+            select(HrmsLeaveAdjustment).where(
+                HrmsLeaveAdjustment.employee_id == user.id,
+                HrmsLeaveAdjustment.leave_type_id == lt.id,
+                HrmsLeaveAdjustment.source == "YEAR_ROLLOVER",
+                HrmsLeaveAdjustment.effective_date == rollover_date,
+            )
+        )
+        if isinstance(existing_rollover, HrmsLeaveAdjustment):
+            return round(max(0.0, float(existing_rollover.amount or 0.0)), 2), None
+
+        prev_bal = await self.db.scalar(
+            select(HrmsEmployeeLeaveBalance).where(
+                HrmsEmployeeLeaveBalance.employee_id == user.id,
+                HrmsEmployeeLeaveBalance.leave_type_id == lt.id,
+                HrmsEmployeeLeaveBalance.year == target_year - 1,
+            )
+        )
+        if not isinstance(prev_bal, HrmsEmployeeLeaveBalance):
+            return 0.0, None
+
+        prev_avail = round(
+            float(prev_bal.allocated or 0.0)
+            + float(prev_bal.adjusted or 0.0)
+            - float(prev_bal.consumed or 0.0),
+            2,
+        )
+        cap = float(raw_cap)
+        carry_days = round(min(max(0.0, prev_avail), cap), 2)
+        if carry_days <= 0.0:
+            return 0.0, None
+
+        annual_alloc = round(float(lt.annual_balance or 0.0), 2)
+        rollover_adj = HrmsLeaveAdjustment(
+            employee_id=user.id,
+            leave_type_id=lt.id,
+            adjustment_type="CARRY_FORWARD",
+            amount=carry_days,
+            previous_balance=annual_alloc,
+            new_balance=round(annual_alloc + carry_days, 2),
+            reason=f"Year-end carry-forward from {target_year - 1} (unused {prev_avail}, cap {cap})",
+            source="YEAR_ROLLOVER",
+            effective_date=rollover_date,
+        )
+        return carry_days, rollover_adj
+
+    async def _insert_initial_balance_safely(
+        self,
+        user: User,
+        lt: HrmsLeaveType,
+        target_year: int,
+    ) -> tuple[HrmsEmployeeLeaveBalance, bool]:
+        """
+        Insert initial (employee_id, leave_type_id, year) balance row with optional rollover
+        inside a SAVEPOINT so concurrent first-time initialization never raises IntegrityError 500
+        or invalidates an outer FOR UPDATE transaction.
+        """
+        carry_days, rollover_adj = await self._compute_year_rollover_carry_forward(user, lt, target_year)
+        annual_alloc = float(lt.annual_balance or 0.0)
+        new_bal = HrmsEmployeeLeaveBalance(
+            employee_id=user.id,
+            leave_type_id=lt.id,
+            year=target_year,
+            allocated=annual_alloc,
+            consumed=0.0,
+            adjusted=carry_days,
+            available=round(annual_alloc + carry_days, 2),
+        )
+
+        if type(self.db) is AsyncSession:
+            try:
+                async with self.db.begin_nested():
+                    self.db.add(new_bal)
+                    if rollover_adj is not None:
+                        self.db.add(rollover_adj)
+                    await self.db.flush()
+                return new_bal, True
+            except IntegrityError:
+                concurrent_bal = await self.db.scalar(
+                    select(HrmsEmployeeLeaveBalance).where(
+                        HrmsEmployeeLeaveBalance.employee_id == user.id,
+                        HrmsEmployeeLeaveBalance.leave_type_id == lt.id,
+                        HrmsEmployeeLeaveBalance.year == target_year,
+                    )
+                )
+                if concurrent_bal is not None:
+                    return concurrent_bal, False
+                raise
+        else:
+            self.db.add(new_bal)
+            if rollover_adj is not None:
+                self.db.add(rollover_adj)
+            await self.db.flush()
+            return new_bal, True
+
     async def get_or_create_employee_balances(
-        self, employee_id: uuid.UUID, year: int = 2026
+        self,
+        employee_id: uuid.UUID,
+        year: Optional[int] = None,
+        *,
+        commit: bool = True,
     ) -> List[EmployeeLeaveBalanceRead]:
         """
         Retrieves or initializes employee leave balances for the given year.
         Applicable leave types are derived from matching Leave Plan for branch + dept.
         """
-        await self.ensure_seeds()
+        target_year = year if year is not None else get_current_ist_year()
+        await self.ensure_seeds(commit=commit)
 
         user = await self.db.scalar(select(User).where(User.id == employee_id))
         if not user:
@@ -910,7 +1068,7 @@ class HrmsLeaveService:
         branch, department = await self.get_employee_org_context(employee_id)
 
         # Match applicable leave plans
-        today = date.today()
+        today = get_current_ist_date()
         applicable_plans = (
             await self.db.scalars(
                 select(HrmsLeavePlan).where(
@@ -953,7 +1111,7 @@ class HrmsLeaveService:
             await self.db.scalars(
                 select(HrmsEmployeeLeaveBalance).where(
                     HrmsEmployeeLeaveBalance.employee_id == employee_id,
-                    HrmsEmployeeLeaveBalance.year == year,
+                    HrmsEmployeeLeaveBalance.year == target_year,
                 )
             )
         ).all()
@@ -961,22 +1119,13 @@ class HrmsLeaveService:
 
         has_mutations = False
 
-        # Initialize any missing leave balance records
+        # Initialize any missing leave balance records (with rollover carry-forward & SAVEPOINT safety)
         for lt in target_lts:
             if lt.id not in bal_by_lt:
-                new_bal = HrmsEmployeeLeaveBalance(
-                    employee_id=employee_id,
-                    leave_type_id=lt.id,
-                    year=year,
-                    allocated=lt.annual_balance,
-                    consumed=0.0,
-                    adjusted=0.0,
-                    available=lt.annual_balance,
-                )
-                self.db.add(new_bal)
-                await self.db.flush()
-                bal_by_lt[lt.id] = new_bal
-                has_mutations = True
+                bal_row, created = await self._insert_initial_balance_safely(user, lt, target_year)
+                bal_by_lt[lt.id] = bal_row
+                if created:
+                    has_mutations = True
 
         # Map all leave types by id to resolve policy rules (including allow_negative_balance)
         lt_map = {lt.id: lt for lt in all_lts}
@@ -1021,7 +1170,10 @@ class HrmsLeaveService:
                 has_mutations = True
 
         if has_mutations:
-            await self.db.commit()
+            if commit:
+                await self.db.commit()
+            else:
+                await self.db.flush()
         emp_name = user.display_name or f"{user.first_name or ''} {user.last_name or ''}".strip() or user.username or "Employee"
 
         out: List[EmployeeLeaveBalanceRead] = []
@@ -1060,7 +1212,7 @@ class HrmsLeaveService:
     # -----------------------------------------------------------------------
     async def get_leave_adjustment_matrix(
         self,
-        year: int = 2026,
+        year: Optional[int] = None,
         search: Optional[str] = None,
         department: Optional[str] = None,
         branch: Optional[str] = None,
@@ -1071,6 +1223,7 @@ class HrmsLeaveService:
         """
         Generates employee-wise balance matrix for Leave Adjustment screen with role scoping.
         """
+        year = year if year is not None else get_current_ist_year()
         await self.ensure_seeds()
 
         # Role scoping
@@ -1157,25 +1310,17 @@ class HrmsLeaveService:
         ).all()
 
         bal_by_emp_lt = {(b.employee_id, b.leave_type_id): b for b in existing_balances}
-        to_create: List[HrmsEmployeeLeaveBalance] = []
+        created_any = False
 
         for emp in filtered_employees:
             for lt in all_lts:
                 if (emp.id, lt.id) not in bal_by_emp_lt:
-                    new_bal = HrmsEmployeeLeaveBalance(
-                        employee_id=emp.id,
-                        leave_type_id=lt.id,
-                        year=year,
-                        allocated=lt.annual_balance,
-                        consumed=0.0,
-                        adjusted=0.0,
-                        available=lt.annual_balance,
-                    )
-                    to_create.append(new_bal)
-                    bal_by_emp_lt[(emp.id, lt.id)] = new_bal
+                    bal_row, created = await self._insert_initial_balance_safely(emp, lt, year)
+                    bal_by_emp_lt[(emp.id, lt.id)] = bal_row
+                    if created:
+                        created_any = True
 
-        if to_create:
-            self.db.add_all(to_create)
+        if created_any:
             await self.db.commit()
 
         # Batch load departments for all filtered employees
@@ -1720,37 +1865,120 @@ class HrmsLeaveService:
         requests = (await self.db.scalars(query)).all()
         return [await self._to_leave_request_read(r) for r in requests]
 
+    async def _verify_leave_reviewer_authorization(
+        self,
+        reviewer_id: uuid.UUID,
+        employee_id: uuid.UUID,
+        action_label: str,
+        is_admin: Optional[bool] = None,
+    ) -> None:
+        """
+        Service-layer defense-in-depth enforcing Manager-First Approval with HR Fallback:
+        - True Admin / Super Admin has organization-wide approval authority (except self).
+        - Assigned manager / department manager can approve/reject for their team.
+        - HR fallback (hrms.approve / hrms.manage without deny) can act ONLY when the
+          assigned manager is unassigned, inactive, or unavailable (on approved leave).
+        """
+        if is_admin is True:
+            return
+
+        perm_codes = (
+            await self.db.scalars(
+                select(Permission.code)
+                .join(RolePermission, RolePermission.permission_id == Permission.id)
+                .join(UserRole, UserRole.role_id == RolePermission.role_id)
+                .where(UserRole.user_id == reviewer_id)
+            )
+        ).all()
+        perm_set = set(perm_codes)
+
+        if is_admin is None:
+            reviewer_user = await self.db.scalar(select(User).where(User.id == reviewer_id))
+            uname = (getattr(reviewer_user, "username", None) or "").lower()
+            role_names = (
+                await self.db.scalars(
+                    select(Role.name)
+                    .join(UserRole, UserRole.role_id == Role.id)
+                    .where(UserRole.user_id == reviewer_id, Role.deleted_at.is_(None))
+                )
+            ).all()
+            if (
+                bool(getattr(reviewer_user, "is_super_admin", False))
+                or uname in ("admin", "super_admin")
+                or "*" in perm_set
+                or "admin" in perm_set
+                or any(r.lower() in ("admin", "super_admin", "super admin", "hrms admin") for r in role_names)
+            ):
+                return
+
+        emp = await self.db.scalar(select(User).where(User.id == employee_id))
+        if emp and emp.manager_id == reviewer_id:
+            return
+
+        managed_ids = await self.get_managed_employee_ids(reviewer_id)
+        if employee_id in managed_ids:
+            return
+
+        has_hr_approval = (
+            any(p in perm_set for p in ("hrms.approve", "hrms:approval", "hrms.manage"))
+            and "deny:hrms.approve" not in perm_set
+            and "deny:hrms.leave" not in perm_set
+            and "block:hrms.leave" not in perm_set
+        )
+        if not has_hr_approval:
+            raise HTTPException(
+                status_code=403,
+                detail=f"You do not have permission to {action_label} this leave request.",
+            )
+
+        if isinstance(emp, User) and emp.manager_id:
+            from app.hrms.rbac import check_manager_availability
+
+            mgr_available, _ = await check_manager_availability(self.db, emp.manager_id)
+            if mgr_available:
+                raise HTTPException(
+                    status_code=403,
+                    detail=(
+                        "This request is routed to the responsible manager first. "
+                        "HR fallback can only act if the manager is unassigned or unavailable."
+                    ),
+                )
+
     async def approve_leave_request(
         self,
         request_id: uuid.UUID,
         reviewer_id: uuid.UUID,
         remarks: Optional[str] = None,
         is_admin: Optional[bool] = None,
+        can_self_approve: bool = False,
     ) -> LeaveRequestRead:
-        req = await self.db.scalar(select(HrmsLeaveRequest).where(HrmsLeaveRequest.id == request_id))
+        req = await self.db.scalar(
+            select(HrmsLeaveRequest).where(HrmsLeaveRequest.id == request_id).with_for_update()
+        )
         if not req:
             raise HTTPException(status_code=404, detail="Leave request not found.")
 
-        # Check admin or authorization
-        if is_admin is not None:
-            reviewer_is_admin = is_admin
-        else:
-            reviewer_is_admin = await self.is_user_admin(reviewer_id)
+        # Self-approval is strictly forbidden unless explicitly authorized (even for admins)
+        if req.employee_id == reviewer_id and not can_self_approve:
+            raise HTTPException(status_code=400, detail="Employees cannot approve their own leave request.")
 
-        if not reviewer_is_admin:
-            # Non-admin cannot self-approve
-            if req.employee_id == reviewer_id:
-                raise HTTPException(status_code=400, detail="Employees cannot approve their own leave request.")
-            # Verify manager authorization for this employee
-            is_authorized = await self.is_reviewer_authorized_for_employee(reviewer_id, req.employee_id)
-            if not is_authorized:
-                raise HTTPException(status_code=403, detail="You do not have permission to approve this leave request.")
+        await self._verify_leave_reviewer_authorization(
+            reviewer_id=reviewer_id,
+            employee_id=req.employee_id,
+            action_label="approve",
+            is_admin=is_admin,
+        )
 
-        if req.approval_status == "APPROVED":
-            return await self._to_leave_request_read(req)
+        if req.approval_status != "PENDING":
+            raise HTTPException(
+                status_code=400,
+                detail=f"Leave request is already {req.approval_status}.",
+            )
 
-        # Deduct balance on approval: increase consumed
-        balances = await self.get_or_create_employee_balances(req.employee_id, year=req.from_date.year)
+        # Deduct balance on approval within the same locked transaction (commit=False preserves FOR UPDATE lock)
+        balances = await self.get_or_create_employee_balances(
+            req.employee_id, year=req.from_date.year, commit=False
+        )
         bal = next((b for b in balances if b.leave_type_id == req.leave_type_id), None)
         if bal:
             raw_bal = await self.db.scalar(
@@ -1810,51 +2038,30 @@ class HrmsLeaveService:
         reviewer_id: uuid.UUID,
         remarks: Optional[str] = None,
         is_admin: Optional[bool] = None,
+        can_self_approve: bool = False,
     ) -> LeaveRequestRead:
-        req = await self.db.scalar(select(HrmsLeaveRequest).where(HrmsLeaveRequest.id == request_id))
+        req = await self.db.scalar(
+            select(HrmsLeaveRequest).where(HrmsLeaveRequest.id == request_id).with_for_update()
+        )
         if not req:
             raise HTTPException(status_code=404, detail="Leave request not found.")
 
-        if is_admin is not None:
-            reviewer_is_admin = is_admin
-        else:
-            reviewer_is_admin = await self.is_user_admin(reviewer_id)
+        # Self-rejection is strictly forbidden unless explicitly authorized (even for admins)
+        if req.employee_id == reviewer_id and not can_self_approve:
+            raise HTTPException(status_code=400, detail="Employees cannot reject their own leave request.")
 
-        if not reviewer_is_admin:
-            if req.employee_id == reviewer_id:
-                raise HTTPException(status_code=400, detail="Employees cannot reject their own leave request.")
-            is_authorized = await self.is_reviewer_authorized_for_employee(reviewer_id, req.employee_id)
-            if not is_authorized:
-                raise HTTPException(status_code=403, detail="You do not have permission to reject this leave request.")
+        await self._verify_leave_reviewer_authorization(
+            reviewer_id=reviewer_id,
+            employee_id=req.employee_id,
+            action_label="reject",
+            is_admin=is_admin,
+        )
 
-        # If previously APPROVED, reverse consumed balance
-        if req.approval_status == "APPROVED":
-            raw_bal = await self.db.scalar(
-                select(HrmsEmployeeLeaveBalance).where(
-                    HrmsEmployeeLeaveBalance.employee_id == req.employee_id,
-                    HrmsEmployeeLeaveBalance.leave_type_id == req.leave_type_id,
-                    HrmsEmployeeLeaveBalance.year == req.from_date.year,
-                )
+        if req.approval_status != "PENDING":
+            raise HTTPException(
+                status_code=400,
+                detail=f"Leave request is already {req.approval_status}.",
             )
-            if raw_bal:
-                prev_available = raw_bal.available
-                raw_bal.consumed = max(0.0, round(raw_bal.consumed - req.number_of_days, 2))
-                raw_bal.available = round(raw_bal.allocated + raw_bal.adjusted - raw_bal.consumed, 2)
-
-                reversal_audit = HrmsLeaveAdjustment(
-                    employee_id=req.employee_id,
-                    leave_type_id=req.leave_type_id,
-                    adjustment_type="LEAVE_REVERSED",
-                    amount=req.number_of_days,
-                    previous_balance=prev_available,
-                    new_balance=raw_bal.available,
-                    reason=f"Reversal of approved Leave Request #{req.id} (Rejected)",
-                    remarks=remarks,
-                    source="LEAVE_REVERSAL",
-                    effective_date=req.from_date,
-                    adjusted_by=reviewer_id,
-                )
-                self.db.add(reversal_audit)
 
         req.approval_status = "REJECTED"
         req.status = "REJECTED"
@@ -1878,7 +2085,9 @@ class HrmsLeaveService:
     async def cancel_leave_request(
         self, request_id: uuid.UUID, user_id: uuid.UUID, is_admin: bool = False
     ) -> LeaveRequestRead:
-        req = await self.db.scalar(select(HrmsLeaveRequest).where(HrmsLeaveRequest.id == request_id))
+        req = await self.db.scalar(
+            select(HrmsLeaveRequest).where(HrmsLeaveRequest.id == request_id).with_for_update()
+        )
         if not req:
             raise HTTPException(status_code=404, detail="Leave request not found.")
 
@@ -1900,7 +2109,7 @@ class HrmsLeaveService:
                     HrmsEmployeeLeaveBalance.employee_id == req.employee_id,
                     HrmsEmployeeLeaveBalance.leave_type_id == req.leave_type_id,
                     HrmsEmployeeLeaveBalance.year == req.from_date.year,
-                )
+                ).with_for_update()
             )
             if raw_bal:
                 prev_available = raw_bal.available
@@ -1930,7 +2139,10 @@ class HrmsLeaveService:
         return await self._to_leave_request_read(req)
 
     async def evaluate_attendance_based_accrual(
-        self, employee_id: Optional[uuid.UUID] = None, year: int = 2026, month: int = 10
+        self,
+        employee_id: Optional[uuid.UUID] = None,
+        year: Optional[int] = None,
+        month: Optional[int] = None,
     ) -> dict:
         """
         Evaluate configurable attendance-based leave accrual (e.g. +1 extra leave for full month present).
@@ -1938,6 +2150,10 @@ class HrmsLeaveService:
         """
         import calendar
         from app.hrms.models import HrmsAttendance
+
+        today_ist = get_current_ist_date()
+        year = year if year is not None else today_ist.year
+        month = month if month is not None else today_ist.month
 
         _, num_days = calendar.monthrange(year, month)
         start_date = date(year, month, 1)

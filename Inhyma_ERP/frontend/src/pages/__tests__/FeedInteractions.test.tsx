@@ -397,4 +397,72 @@ describe("Feed Interactions & Notifications — Frontend Tests (Phase 4)", () =>
       expect(screen.getByText("Beth Jones")).toBeDefined();
     });
   });
+
+  it("supports bounded comment pagination via Load more comments button", async () => {
+    (feedApi.listComments as any)
+      .mockResolvedValueOnce({
+        items: [
+          {
+            id: "c-page-1",
+            post_id: "post-interaction-1",
+            author_id: "author-user-id",
+            author: { id: "author-user-id", display_name: "Sarah Director", email: "sarah@example.com" },
+            content: "Page 1 comment",
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+            is_author: true,
+            can_delete: true,
+          },
+        ],
+        total: 2,
+        page: 1,
+        page_size: 1,
+        total_pages: 2,
+        has_more: true,
+      })
+      .mockResolvedValueOnce({
+        items: [
+          {
+            id: "c-page-2",
+            post_id: "post-interaction-1",
+            author_id: "author-user-id",
+            author: { id: "author-user-id", display_name: "Sarah Director", email: "sarah@example.com" },
+            content: "Page 2 comment",
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+            is_author: true,
+            can_delete: true,
+          },
+        ],
+        total: 2,
+        page: 2,
+        page_size: 1,
+        total_pages: 2,
+        has_more: false,
+      });
+
+    render(
+      <FeedPostCard
+        post={mockPost}
+        canEdit={true}
+        canDelete={true}
+        onEdit={vi.fn()}
+        onDelete={vi.fn()}
+      />
+    );
+
+    fireEvent.click(screen.getByTestId("toggle-comments-post-interaction-1"));
+
+    await waitFor(() => {
+      expect(screen.getByText("Page 1 comment")).toBeDefined();
+      expect(screen.getByTestId("load-more-comments-post-interaction-1")).toBeDefined();
+    });
+
+    fireEvent.click(screen.getByTestId("load-more-comments-post-interaction-1"));
+
+    await waitFor(() => {
+      expect(feedApi.listComments).toHaveBeenCalledWith("post-interaction-1", 2, 50);
+      expect(screen.getByText("Page 2 comment")).toBeDefined();
+    });
+  });
 });

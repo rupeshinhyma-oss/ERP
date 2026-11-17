@@ -39,6 +39,7 @@ from app.hrms.expense_service import HrmsExpenseService
 from app.hrms.models import (
     HrmsEmployeeLeaveBalance,
     HrmsExpense,
+    HrmsExpenseCategory,
     HrmsExpenseSettings,
     HrmsLeaveAdjustment,
     HrmsLeaveRequest,
@@ -65,10 +66,20 @@ from app.users.models import User, UserStatus
 # ===========================================================================
 
 
+def _configure_active_category_mock(mock_db: AsyncMock, category_name: str = "Travel") -> None:
+    mock_cat = MagicMock(spec=HrmsExpenseCategory)
+    mock_cat.name = category_name
+    mock_cat.is_active = True
+    mock_cat_res = MagicMock()
+    mock_cat_res.scalars.return_value.first.return_value = mock_cat
+    mock_db.execute = AsyncMock(return_value=mock_cat_res)
+
+
 @pytest.mark.asyncio
 async def test_expense_claim_exceeds_max_claim_amount_fails():
     """Expense claim amount exceeding settings max_claim_amount (e.g. ₹50,000) is rejected."""
     mock_db = AsyncMock()
+    _configure_active_category_mock(mock_db, "Travel")
     service = HrmsExpenseService(mock_db)
 
     settings = HrmsExpenseSettings(
@@ -106,6 +117,7 @@ async def test_expense_claim_exceeds_max_claim_amount_fails():
 async def test_expense_claim_missing_receipt_when_required_fails():
     """Submitting claim without receipt when policy requires receipt is rejected."""
     mock_db = AsyncMock()
+    _configure_active_category_mock(mock_db, "Meals")
     service = HrmsExpenseService(mock_db)
 
     settings = HrmsExpenseSettings(
@@ -142,6 +154,7 @@ async def test_expense_claim_missing_receipt_when_required_fails():
 async def test_expense_claim_future_date_fails():
     """Expense claims cannot be submitted for future dates."""
     mock_db = AsyncMock()
+    _configure_active_category_mock(mock_db, "Stationery")
     service = HrmsExpenseService(mock_db)
 
     settings = HrmsExpenseSettings(
@@ -178,6 +191,7 @@ async def test_expense_claim_future_date_fails():
 async def test_expense_claim_outside_submission_window_fails():
     """Expense claims older than submission_window_days (e.g. 30 days) are rejected."""
     mock_db = AsyncMock()
+    _configure_active_category_mock(mock_db, "Internet")
     service = HrmsExpenseService(mock_db)
 
     settings = HrmsExpenseSettings(
@@ -214,6 +228,7 @@ async def test_expense_claim_outside_submission_window_fails():
 async def test_expense_draft_can_be_saved_without_receipt():
     """Draft expense claims can be saved without a receipt before submission."""
     mock_db = AsyncMock()
+    _configure_active_category_mock(mock_db, "Stationery")
     service = HrmsExpenseService(mock_db)
 
     settings = HrmsExpenseSettings(
@@ -272,6 +287,34 @@ async def test_expense_admin_self_approval_blocked_in_service():
         )
     assert exc_info.value.status_code == 400
     assert "Self-approval is not permitted" in exc_info.value.detail
+
+
+@pytest.mark.asyncio
+async def test_expense_admin_self_rejection_blocked_in_service():
+    """An admin cannot self-reject their own expense claim in HrmsExpenseService."""
+    mock_db = AsyncMock()
+    service = HrmsExpenseService(mock_db)
+
+    admin_id = uuid.uuid4()
+    expense_id = uuid.uuid4()
+
+    mock_expense = MagicMock(spec=HrmsExpense)
+    mock_expense.id = expense_id
+    mock_expense.employee_id = admin_id
+    mock_expense.deleted_at = None
+    mock_expense.status = "PENDING"
+    mock_db.get.return_value = mock_expense
+
+    with pytest.raises(HTTPException) as exc_info:
+        await service.reject_expense(
+            expense_id=expense_id,
+            reviewer_id=admin_id,
+            is_admin=True,
+            rejection_reason="Attempting self-rejection",
+            is_approver=True,
+        )
+    assert exc_info.value.status_code == 400
+    assert "Self-rejection is not permitted" in exc_info.value.detail
 
 
 @pytest.mark.asyncio

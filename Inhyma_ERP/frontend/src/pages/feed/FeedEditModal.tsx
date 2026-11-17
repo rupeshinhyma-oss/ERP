@@ -3,7 +3,7 @@ import { Modal } from "@/components/ui";
 import { feedApi } from "@/lib/feedApi";
 import { useToast } from "@/lib/toast";
 import { errorMessage } from "@/lib/api";
-import type { FeedPost } from "@/types/feed";
+import { MAX_FEED_POST_CONTENT_LENGTH, type FeedPost } from "@/types/feed";
 
 interface FeedEditModalProps {
   post: FeedPost | null;
@@ -38,6 +38,13 @@ export function FeedEditModal({
     e.preventDefault();
     if (!content.trim()) {
       showToast("Message content is required.", "warning");
+      return;
+    }
+    if (content.length > MAX_FEED_POST_CONTENT_LENGTH) {
+      showToast(
+        `Message content must not exceed ${MAX_FEED_POST_CONTENT_LENGTH.toLocaleString()} characters.`,
+        "warning"
+      );
       return;
     }
 

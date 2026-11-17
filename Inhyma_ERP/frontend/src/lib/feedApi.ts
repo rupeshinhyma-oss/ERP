@@ -88,10 +88,14 @@ export const feedApi = {
   },
 
   /**
-   * List comments for an announcement.
+   * List comments for an announcement (supports bounded pagination).
    */
-  async listComments(postId: string) {
-    return apiGet<FeedCommentListResponse>(`/feed/posts/${postId}/comments`);
+  async listComments(postId: string, page?: number, pageSize?: number) {
+    const qs = new URLSearchParams();
+    if (page && page > 0) qs.set("page", String(page));
+    if (pageSize && pageSize > 0) qs.set("page_size", String(pageSize));
+    const suffix = qs.toString() ? `?${qs.toString()}` : "";
+    return apiGet<FeedCommentListResponse>(`/feed/posts/${postId}/comments${suffix}`);
   },
 
   /**

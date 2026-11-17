@@ -137,6 +137,50 @@ async def list_assets(
 # Individual Asset Operations
 # ===========================================================================
 
+def _allowed_employee_scope(ctx: HrmsUserContext) -> set[uuid.UUID]:
+    if ctx.is_manager:
+        return {ctx.user_id} | set(ctx.managed_employee_ids)
+    return {ctx.user_id}
+
+
+async def _get_authorized_asset(
+    asset_id: uuid.UUID,
+    service: HrmsAssetService,
+    ctx: HrmsUserContext,
+) -> AssetRead:
+    """
+    Shared authorization helper for GET /assets/{asset_id} and its sub-resources
+    (/assignments, /history, /maintenance):
+    - Enforces HRMS assets module access.
+    - Returns 404 for missing or soft-deleted assets via service.get_asset().
+    - Permits Admin and HR full access.
+    - Permits only the currently assigned employee or their authorized manager;
+      rejects unrelated employees (including on unassigned stock assets) with HTTP 403.
+    """
+    ctx.require_module_access("assets")
+    asset = await service.get_asset(asset_id)
+    if ctx.is_admin or ctx.is_hr:
+        return asset
+
+    assigned_uid = asset.assigned_to_user_id
+    is_owner = assigned_uid is not None and assigned_uid == ctx.user_id
+    is_authorized_manager = (
+        assigned_uid is not None
+        and ctx.is_manager
+        and assigned_uid in ctx.managed_employee_ids
+    )
+    if not (is_owner or is_authorized_manager):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have permission to view another employee's asset record.",
+        )
+
+    allowed_ids = _allowed_employee_scope(ctx)
+    if asset.history:
+        asset.history = [h for h in asset.history if h.user_id in allowed_ids]
+    return asset
+
+
 @router.get("/{asset_id}", response_model=None)
 async def get_asset(
     asset_id: uuid.UUID,
@@ -144,15 +188,7 @@ async def get_asset(
     ctx: HrmsUserContext = Depends(get_hrms_user_context),
 ):
     """Retrieve a single asset by ID with full history and assignments."""
-    ctx.require_module_access("assets")
-    asset = await service.get_asset(asset_id)
-    if not (ctx.is_admin or ctx.is_hr):
-        if asset.assigned_to_user_id and asset.assigned_to_user_id != ctx.user_id:
-            if not (ctx.is_manager and asset.assigned_to_user_id in ctx.managed_employee_ids):
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="You do not have permission to view another employee's asset record.",
-                )
+    asset = await _get_authorized_asset(asset_id, service, ctx)
 
     return build_success_response(
         data=asset.model_dump(mode="json"),
@@ -281,10 +317,14 @@ async def return_asset(
 async def get_asset_assignments(
     asset_id: uuid.UUID,
     service: HrmsAssetService = Depends(get_asset_service),
-    ctx: tuple[uuid.UUID, bool] = Depends(get_current_user_context),
+    ctx: HrmsUserContext = Depends(get_hrms_user_context),
 ):
-    """Fetch all assignment records for an asset."""
+    """Fetch assignment records for an asset with ownership/role scoping."""
+    await _get_authorized_asset(asset_id, service, ctx)
     assignments = await service.list_assignments(asset_id)
+    if not (ctx.is_admin or ctx.is_hr):
+        allowed_ids = _allowed_employee_scope(ctx)
+        assignments = [a for a in assignments if a.employee_id in allowed_ids]
     return build_success_response(
         data=[a.model_dump(mode="json") for a in assignments],
         message="Asset assignments retrieved successfully.",
@@ -295,10 +335,14 @@ async def get_asset_assignments(
 async def get_asset_history(
     asset_id: uuid.UUID,
     service: HrmsAssetService = Depends(get_asset_service),
-    ctx: tuple[uuid.UUID, bool] = Depends(get_current_user_context),
+    ctx: HrmsUserContext = Depends(get_hrms_user_context),
 ):
-    """Fetch complete event and audit history for an asset."""
+    """Fetch event and audit history for an asset with ownership/role scoping."""
+    await _get_authorized_asset(asset_id, service, ctx)
     history = await service.get_asset_history(asset_id)
+    if not (ctx.is_admin or ctx.is_hr):
+        allowed_ids = _allowed_employee_scope(ctx)
+        history = [h for h in history if h.user_id in allowed_ids]
     return build_success_response(
         data=[h.model_dump(mode="json") for h in history],
         message="Asset history retrieved successfully.",
@@ -327,9 +371,10 @@ async def create_asset_maintenance(
 async def get_asset_maintenance(
     asset_id: uuid.UUID,
     service: HrmsAssetService = Depends(get_asset_service),
-    ctx: tuple[uuid.UUID, bool] = Depends(get_current_user_context),
+    ctx: HrmsUserContext = Depends(get_hrms_user_context),
 ):
-    """Fetch all maintenance records for an asset."""
+    """Fetch maintenance records for an asset with ownership/role scoping."""
+    await _get_authorized_asset(asset_id, service, ctx)
     records = await service.list_maintenance(asset_id)
     return build_success_response(
         data=[m.model_dump(mode="json") for m in records],

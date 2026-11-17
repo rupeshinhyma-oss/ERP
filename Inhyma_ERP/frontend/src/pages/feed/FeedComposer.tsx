@@ -2,10 +2,11 @@ import { useState, useEffect, useRef, useMemo } from "react";
 import { feedApi } from "@/lib/feedApi";
 import { useToast } from "@/lib/toast";
 import { errorMessage } from "@/lib/api";
-import type {
-  EligibleDepartment,
-  EligibleRecipient,
-  FeedPostStatus,
+import {
+  MAX_FEED_POST_CONTENT_LENGTH,
+  type EligibleDepartment,
+  type EligibleRecipient,
+  type FeedPostStatus,
 } from "@/types/feed";
 
 type ComposerAudienceMode = "ALL" | "DEPARTMENTS" | "EMPLOYEES" | "COMBINED";
@@ -171,6 +172,14 @@ export function FeedComposer({
   const handleSubmit = async (targetStatus: FeedPostStatus) => {
     if (!content.trim()) {
       showToast("Message content is required.", "warning");
+      return;
+    }
+
+    if (content.length > MAX_FEED_POST_CONTENT_LENGTH) {
+      showToast(
+        `Message content must not exceed ${MAX_FEED_POST_CONTENT_LENGTH.toLocaleString()} characters.`,
+        "warning"
+      );
       return;
     }
 
@@ -540,7 +549,7 @@ export function FeedComposer({
           </div>
           {audienceMode !== "ALL" && (
             <div className="feed-summary-subnote">
-              🔒 Visible only to members of targeted departments, selected individuals, the author, and administrators.
+              🔒 Visible only to current members of targeted departments, explicitly selected recipients, and the author.
             </div>
           )}
         </div>

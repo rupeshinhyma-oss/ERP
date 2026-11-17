@@ -499,7 +499,12 @@ class HrmsExpenseService:
                 detail="You do not have permission to approve expense claims.",
             )
 
-        expense = await self.db.get(HrmsExpense, expense_id)
+        expense = await self.db.get(
+            HrmsExpense,
+            expense_id,
+            with_for_update=True,
+            populate_existing=True,
+        )
         if not expense or expense.deleted_at is not None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -563,7 +568,12 @@ class HrmsExpenseService:
                 detail="Rejection reason is required.",
             )
 
-        expense = await self.db.get(HrmsExpense, expense_id)
+        expense = await self.db.get(
+            HrmsExpense,
+            expense_id,
+            with_for_update=True,
+            populate_existing=True,
+        )
         if not expense or expense.deleted_at is not None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -574,6 +584,12 @@ class HrmsExpenseService:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="You do not have permission to reject expenses for this employee.",
+            )
+
+        if expense.employee_id == reviewer_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Self-rejection is not permitted.",
             )
 
         if expense.status != "PENDING":
@@ -613,7 +629,12 @@ class HrmsExpenseService:
                 detail="You do not have permission to mark expenses as reimbursed.",
             )
 
-        expense = await self.db.get(HrmsExpense, expense_id)
+        expense = await self.db.get(
+            HrmsExpense,
+            expense_id,
+            with_for_update=True,
+            populate_existing=True,
+        )
         if not expense or expense.deleted_at is not None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,

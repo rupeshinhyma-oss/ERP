@@ -278,8 +278,8 @@ describe("HRMS Day 3.5 — Attendance Policy Engine & Improvements", () => {
     fireEvent.change(punchOutInput, { target: { value: "19:01" } });
     expect(hoursBadge.textContent).toContain("8h13m");
 
-    // Admin direct regularize button is visible
-    expect(screen.getByTestId("direct-regularize-btn")).toBeDefined();
+    // Send Request button is visible, direct regularize self-blocked button is removed
     expect(screen.getByTestId("submit-regularization-btn")).toBeDefined();
+    expect(screen.queryByTestId("direct-regularize-self-blocked-btn")).toBeNull();
   });
 });

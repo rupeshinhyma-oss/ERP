@@ -10,30 +10,42 @@ import { errorMessage } from "@/lib/api";
 import { FeedComposer } from "./FeedComposer";
 import { FeedPostCard } from "./FeedPostCard";
 import { FeedEditModal } from "./FeedEditModal";
+import { FeedDirectMessages } from "./FeedDirectMessages";
 import type { FeedPost } from "@/types/feed";
 import "@/styles/feed.css";
 
+type FeedTab = "announcements" | "messages";
+
 export function FeedPage() {
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const activeTab: FeedTab = searchParams.get("tab") === "messages" ? "messages" : "announcements";
   const targetPostId = searchParams.get("post_id");
-  const { profile } = useAuth();
+  const targetConversationId = searchParams.get("conversation_id");
+
+  const { profile, hasPermission } = useAuth();
   const showToast = useToast();
+
+  // Enforce Feed RBAC permission contract (matching backend routes & AppShell)
+  const canView = Boolean(profile?.id) && hasPermission("feed.view");
+  const canCreate = canView && hasPermission("feed.create");
+  const canManage = canView && hasPermission("feed.manage");
+
+  // Unread DM badge state
+  const [dmUnreadCount, setDmUnreadCount] = useState<number>(0);
 
   // Deep-link target post highlight & resolution state
   const [highlightedPostId, setHighlightedPostId] = useState<string | null>(null);
   const [targetPostLoading, setTargetPostLoading] = useState(false);
   const resolvedTargetRef = useRef<string | null>(null);
 
-  // Every authenticated employee can create announcements (Phase 1)
-  const canCreate = Boolean(profile?.id);
-
   // Posts state
   const [posts, setPosts] = useState<FeedPost[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Pagination state
-  const [page, setPage] = useState(1);
+  // Pagination state (synced with ?page= query param so browser refresh preserves page)
+  const initialUrlPage = Math.max(1, parseInt(searchParams.get("page") || "1", 10) || 1);
+  const [page, setPage] = useState<number>(initialUrlPage);
   const [pageSize, setPageSize] = useState(10);
   const [total, setTotal] = useState(0);
   const [totalPages, setTotalPages] = useState(1);
@@ -50,8 +62,88 @@ export function FeedPage() {
   const [deletingPost, setDeletingPost] = useState<FeedPost | null>(null);
   const [deleteSubmitting, setDeleteSubmitting] = useState(false);
 
+  const handlePageChange = useCallback(
+    (nextPage: number) => {
+      const safePage = Math.max(1, nextPage);
+      setPage(safePage);
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          if (safePage > 1) {
+            next.set("page", String(safePage));
+          } else {
+            next.delete("page");
+          }
+          return next;
+        },
+        { replace: true }
+      );
+    },
+    [setSearchParams]
+  );
+
+  const handleSwitchTab = useCallback(
+    (tab: FeedTab) => {
+      setSearchParams((prev) => {
+        const next = new URLSearchParams(prev);
+        if (tab === "messages") {
+          next.set("tab", "messages");
+          next.delete("post_id");
+          next.delete("page");
+        } else {
+          next.delete("tab");
+          next.delete("conversation_id");
+        }
+        return next;
+      });
+    },
+    [setSearchParams]
+  );
+
+  const handleConversationSelect = useCallback(
+    (conversationId: string | null) => {
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          next.set("tab", "messages");
+          if (conversationId) {
+            next.set("conversation_id", conversationId);
+          } else {
+            next.delete("conversation_id");
+          }
+          return next;
+        },
+        { replace: true }
+      );
+    },
+    [setSearchParams]
+  );
+
+  // Fetch unread direct message count for tab badge
+  useEffect(() => {
+    if (!canView || typeof feedApi.getUnreadDirectMessagesCount !== "function") return;
+    let active = true;
+    feedApi
+      .getUnreadDirectMessagesCount()
+      .then((res) => {
+        if (active && typeof res?.data?.unread_count === "number") {
+          setDmUnreadCount(res.data.unread_count);
+        }
+      })
+      .catch(() => {
+        /* ignore non-fatal unread count errors */
+      });
+    return () => {
+      active = false;
+    };
+  }, [canView, profile?.id]);
+
   // Fetch posts from API
   const fetchPosts = useCallback(async () => {
+    if (!canView) {
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
@@ -62,31 +154,43 @@ export function FeedPage() {
       });
 
       const data = res.data;
-      setPosts(data.items || []);
-      setTotal(data.total || 0);
-      setTotalPages(data.total_pages || 1);
+      const items = data.items || [];
+      const totalRecords = data.total || 0;
+      const resolvedPages = Math.max(1, data.total_pages ?? data.pages ?? 1);
+
+      if (items.length === 0 && totalRecords > 0 && page > resolvedPages) {
+        handlePageChange(resolvedPages);
+        return;
+      }
+
+      setPosts(items);
+      setTotal(totalRecords);
+      setTotalPages(resolvedPages);
     } catch (err) {
       setError(errorMessage(err) || "Failed to load feed announcements.");
     } finally {
       setLoading(false);
     }
-  }, [page, pageSize, appliedSearch]);
+  }, [canView, page, pageSize, appliedSearch, handlePageChange]);
 
   useEffect(() => {
-    fetchPosts();
-  }, [fetchPosts]);
+    if (activeTab === "announcements") {
+      void fetchPosts();
+    }
+  }, [activeTab, fetchPosts]);
 
   // Clear sensitive Feed state when user identity changes
   useEffect(() => {
     setPosts([]);
     setPage(1);
+    setDmUnreadCount(0);
     resolvedTargetRef.current = null;
     setHighlightedPostId(null);
   }, [profile?.id]);
 
   // Deep-link resolution for /feed?post_id={id}
   useEffect(() => {
-    if (!targetPostId) {
+    if (!canView || activeTab !== "announcements" || !targetPostId) {
       resolvedTargetRef.current = null;
       setHighlightedPostId(null);
       return;
@@ -96,13 +200,11 @@ export function FeedPage() {
       return;
     }
 
-    // Wait if initial page load is still underway
     if (loading) return;
 
     let isMounted = true;
 
     const resolveTarget = async () => {
-      // 1. Check if post is already present in current page items
       const found = posts.some((p) => p.id === targetPostId);
       if (found) {
         resolvedTargetRef.current = targetPostId;
@@ -118,7 +220,6 @@ export function FeedPage() {
         return;
       }
 
-      // 2. Fetch directly by ID if not in the current page
       setTargetPostLoading(true);
       try {
         const res = await feedApi.getPost(targetPostId);
@@ -164,21 +265,20 @@ export function FeedPage() {
     return () => {
       isMounted = false;
     };
-  }, [targetPostId, loading, posts, highlightedPostId, showToast]);
+  }, [canView, activeTab, targetPostId, loading, posts, highlightedPostId, showToast]);
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    setPage(1);
+    handlePageChange(1);
     setAppliedSearch(search);
   };
 
   const handleClearSearch = () => {
     setSearch("");
     setAppliedSearch("");
-    setPage(1);
+    handlePageChange(1);
   };
 
-  // Delete action
   const confirmDelete = async () => {
     if (!deletingPost) return;
     setDeleteSubmitting(true);
@@ -186,13 +286,30 @@ export function FeedPage() {
       await feedApi.deletePost(deletingPost.id);
       showToast("Announcement deleted successfully.", "success");
       setDeletingPost(null);
-      fetchPosts();
+      void fetchPosts();
     } catch (err) {
       showToast(errorMessage(err) || "Failed to delete announcement.", "error");
     } finally {
       setDeleteSubmitting(false);
     }
   };
+
+  if (!canView) {
+    return (
+      <AppShell activeKey="feed">
+        <div className="feed-page-container">
+          <div className="feed-error-state" data-testid="feed-forbidden-state">
+            <div style={{ fontWeight: 600, fontSize: "15px", marginBottom: "8px" }}>
+              Access Restricted
+            </div>
+            <p style={{ margin: 0, fontSize: "13.5px" }}>
+              You do not have permission (`feed.view`) to access Feed & Broadcasts.
+            </p>
+          </div>
+        </div>
+      </AppShell>
+    );
+  }
 
   return (
     <AppShell activeKey="feed">
@@ -201,69 +318,115 @@ export function FeedPage() {
         <header className="feed-header">
           <div className="feed-title-block">
             <h1>Feed & Broadcast Messaging</h1>
-            <p>Publish company announcements and targeted updates to employees</p>
+            <p>Publish company announcements, targeted updates, and direct colleague messages</p>
           </div>
 
-          <div className="feed-header-actions">
-            {/* Search */}
-            <form onSubmit={handleSearchSubmit} className="feed-search-bar">
-              <span className="feed-search-icon">
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <circle cx="11" cy="11" r="8"></circle>
-                  <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
-                </svg>
-              </span>
-              <input
-                type="text"
-                className="feed-search-input"
-                placeholder="Search announcements..."
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                data-testid="feed-search-input"
-              />
-              {search && (
+          {activeTab === "announcements" && (
+            <div className="feed-header-actions">
+              {/* Search */}
+              <form onSubmit={handleSearchSubmit} className="feed-search-bar">
+                <span className="feed-search-icon">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="11" cy="11" r="8"></circle>
+                    <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                  </svg>
+                </span>
+                <input
+                  type="text"
+                  className="feed-search-input"
+                  placeholder="Search announcements..."
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  data-testid="feed-search-input"
+                />
+                {search && (
+                  <button
+                    type="button"
+                    className="feed-search-clear"
+                    onClick={handleClearSearch}
+                    title="Clear search"
+                    data-testid="feed-search-clear-btn"
+                  >
+                    ✕
+                  </button>
+                )}
+              </form>
+
+              {/* Toggle Composer button */}
+              {canCreate && !composerOpen && (
                 <button
                   type="button"
-                  className="feed-search-clear"
-                  onClick={handleClearSearch}
-                  title="Clear search"
-                  data-testid="feed-search-clear-btn"
+                  className="btn btn-primary"
+                  onClick={() => setComposerOpen(true)}
+                  data-testid="new-broadcast-btn"
+                  style={{ background: "#0061f2", color: "#ffffff", display: "inline-flex", alignItems: "center", gap: "6px" }}
                 >
-                  ✕
+                  <span>+</span>
+                  <span>New Announcement</span>
                 </button>
               )}
-            </form>
-
-            {/* Toggle Composer button */}
-            {canCreate && !composerOpen && (
-              <button
-                type="button"
-                className="btn btn-primary"
-                onClick={() => setComposerOpen(true)}
-                data-testid="new-broadcast-btn"
-                style={{ background: "#0061f2", color: "#ffffff", display: "inline-flex", alignItems: "center", gap: "6px" }}
-              >
-                <span>+</span>
-                <span>New Announcement</span>
-              </button>
-            )}
-          </div>
+            </div>
+          )}
         </header>
 
-        {/* Composer */}
-        {canCreate && composerOpen && (
-          <FeedComposer
-            currentUserName={String(profile?.display_name || profile?.full_name || [profile?.first_name, profile?.last_name].filter(Boolean).join(" ").trim() || "Me")}
-            onPostCreated={() => {
-              setPage(1);
-              fetchPosts();
-            }}
-            onCancel={() => setComposerOpen(false)}
-          />
-        )}
+        {/* Sub-view Navigation Tabs (Announcements vs Direct Messages) */}
+        <nav className="feed-nav-tabs" aria-label="Feed Views" data-testid="feed-nav-tabs">
+          <button
+            type="button"
+            className={`feed-nav-tab-btn ${activeTab === "announcements" ? "active" : ""}`}
+            onClick={() => handleSwitchTab("announcements")}
+            data-testid="feed-tab-announcements"
+          >
+            <span>📢</span>
+            <span>Announcements</span>
+          </button>
+          <button
+            type="button"
+            className={`feed-nav-tab-btn ${activeTab === "messages" ? "active" : ""}`}
+            onClick={() => handleSwitchTab("messages")}
+            data-testid="feed-tab-messages"
+          >
+            <span>💬</span>
+            <span>Direct Messages</span>
+            {dmUnreadCount > 0 && (
+              <span className="feed-nav-badge" data-testid="feed-dm-tab-badge">
+                {dmUnreadCount}
+              </span>
+            )}
+          </button>
+        </nav>
 
-        {/* Feed List */}
-        <section aria-label="Announcements Feed">
+        {activeTab === "messages" ? (
+          <section aria-label="Direct Messages">
+            <FeedDirectMessages
+              currentUserId={profile?.id}
+              initialConversationId={targetConversationId}
+              canCreateMessage={canCreate}
+              onConversationSelect={handleConversationSelect}
+              onUnreadCountChange={setDmUnreadCount}
+            />
+          </section>
+        ) : (
+          <>
+            {/* Composer */}
+            {canCreate && composerOpen && (
+              <FeedComposer
+                currentUserName={String(
+                  profile?.display_name ||
+                    profile?.full_name ||
+                    [profile?.first_name, profile?.last_name].filter(Boolean).join(" ").trim() ||
+                    "Me"
+                )}
+                onPostCreated={() => {
+                  handlePageChange(1);
+                  void fetchPosts();
+                }}
+                onCancel={() => setComposerOpen(false)}
+              />
+            )}
+
+            {/* Feed List */}
+            <section aria-label="Announcements Feed">
               {loading ? (
                 <div className="feed-posts-list" data-testid="feed-loading-state">
                   {[1, 2, 3].map((n) => (
@@ -289,7 +452,7 @@ export function FeedPage() {
                   <button
                     type="button"
                     className="btn btn-secondary"
-                    onClick={fetchPosts}
+                    onClick={() => void fetchPosts()}
                     data-testid="feed-retry-btn"
                   >
                     Try Again
@@ -353,8 +516,11 @@ export function FeedPage() {
                   )}
                   {posts.map((post) => {
                     const isAuthor = Boolean(post.is_author);
-                    const userCanEdit = isAuthor;
-                    const userCanDelete = isAuthor;
+                    const userCanEdit = post.can_edit ?? (isAuthor && canCreate);
+                    const userCanDelete =
+                      post.can_delete ??
+                      ((isAuthor && (canCreate || canManage)) ||
+                        (canManage && post.status === "PUBLISHED"));
 
                     return (
                       <FeedPostCard
@@ -363,6 +529,7 @@ export function FeedPage() {
                         isHighlighted={post.id === highlightedPostId}
                         canEdit={userCanEdit}
                         canDelete={userCanDelete}
+                        canInteract={canCreate}
                         onEdit={(p) => setEditingPost(p)}
                         onDelete={(p) => setDeletingPost(p)}
                       />
@@ -382,67 +549,68 @@ export function FeedPage() {
                       page_size: pageSize,
                     }}
                     pageSize={pageSize}
-                    onPageChange={(newPage) => setPage(newPage)}
+                    onPageChange={handlePageChange}
                     onPageSizeChange={(newSize) => {
                       setPageSize(newSize);
-                      setPage(1);
+                      handlePageChange(1);
                     }}
                   />
                 </div>
               )}
             </section>
 
-        {/* Edit Modal */}
-        <FeedEditModal
-          post={editingPost}
-          open={Boolean(editingPost)}
-          onClose={() => setEditingPost(null)}
-          onPostUpdated={fetchPosts}
-        />
+            {/* Edit Modal */}
+            <FeedEditModal
+              post={editingPost}
+              open={Boolean(editingPost)}
+              onClose={() => setEditingPost(null)}
+              onPostUpdated={fetchPosts}
+            />
 
-        {/* Delete Confirmation Modal */}
-        <Modal
-          open={Boolean(deletingPost)}
-          title="Delete Announcement"
-          onClose={() => setDeletingPost(null)}
-          variant="center"
-          cardStyle={{ maxWidth: "460px" }}
-          locked={deleteSubmitting}
-        >
-          <div data-testid="delete-confirm-modal">
-            <p style={{ fontSize: "14px", color: "#334155", margin: "0 0 20px 0", lineHeight: 1.5 }}>
-              Are you sure you want to delete this announcement? This action will permanently remove it from the feed.
-            </p>
-            {deletingPost?.title && (
-              <div style={{ padding: "8px 12px", background: "#f8fafc", borderRadius: "6px", fontSize: "13px", fontWeight: 600, color: "#0f172a", marginBottom: "20px" }}>
-                "{deletingPost.title}"
+            {/* Delete Confirmation Modal */}
+            <Modal
+              open={Boolean(deletingPost)}
+              title="Delete Announcement"
+              onClose={() => setDeletingPost(null)}
+              variant="center"
+              cardStyle={{ maxWidth: "460px" }}
+              locked={deleteSubmitting}
+            >
+              <div data-testid="delete-confirm-modal">
+                <p style={{ fontSize: "14px", color: "#334155", margin: "0 0 20px 0", lineHeight: 1.5 }}>
+                  Are you sure you want to delete this announcement? This action will permanently remove it from the feed.
+                </p>
+                {deletingPost?.title && (
+                  <div style={{ padding: "8px 12px", background: "#f8fafc", borderRadius: "6px", fontSize: "13px", fontWeight: 600, color: "#0f172a", marginBottom: "20px" }}>
+                    "{deletingPost.title}"
+                  </div>
+                )}
+                <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px" }}>
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={() => setDeletingPost(null)}
+                    disabled={deleteSubmitting}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-danger"
+                    onClick={() => void confirmDelete()}
+                    disabled={deleteSubmitting}
+                    data-testid="confirm-delete-btn"
+                    style={{ background: "#ef4444", color: "#ffffff", border: "none" }}
+                  >
+                    {deleteSubmitting ? "Deleting..." : "Delete Announcement"}
+                  </button>
+                </div>
               </div>
-            )}
-            <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px" }}>
-              <button
-                type="button"
-                className="btn btn-secondary"
-                onClick={() => setDeletingPost(null)}
-                disabled={deleteSubmitting}
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                className="btn btn-danger"
-                onClick={confirmDelete}
-                disabled={deleteSubmitting}
-                data-testid="confirm-delete-btn"
-                style={{ background: "#ef4444", color: "#ffffff", border: "none" }}
-              >
-                {deleteSubmitting ? "Deleting..." : "Delete Announcement"}
-              </button>
-            </div>
-          </div>
-        </Modal>
+            </Modal>
+          </>
+        )}
       </div>
     </AppShell>
   );
 }
 export default FeedPage;
-

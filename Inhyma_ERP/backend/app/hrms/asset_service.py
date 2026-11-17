@@ -14,11 +14,15 @@ Handles business logic for Asset Management:
 
 from __future__ import annotations
 
+import logging
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, List, Optional
 import uuid
 
+logger = logging.getLogger(__name__)
+
 from sqlalchemy import delete, desc, func, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -103,10 +107,11 @@ class HrmsAssetService:
                 HrmsEmployeeLocation.user_id == user_id,
                 HrmsLocation.deleted_at.is_(None),
             )
-            .order_by(HrmsEmployeeLocation.is_primary.desc())
+            .order_by(HrmsEmployeeLocation.is_primary.desc(), HrmsLocation.name.asc())
+            .limit(1)
         )
         res = await self.db.execute(stmt)
-        return res.scalar_one_or_none()
+        return res.scalars().first()
 
     async def _to_assignment_read(self, a: HrmsAssetAssignment) -> AssetAssignmentRead:
         """Transform an ORM HrmsAssetAssignment into AssetAssignmentRead schema."""
@@ -649,6 +654,7 @@ class HrmsAssetService:
         query = (
             select(HrmsAsset)
             .where(HrmsAsset.id == asset_id, HrmsAsset.deleted_at.is_(None))
+            .with_for_update()
         )
         res = await self.db.execute(query)
         asset = res.scalar_one_or_none()
@@ -747,6 +753,7 @@ class HrmsAssetService:
         query = (
             select(HrmsAsset)
             .where(HrmsAsset.id == asset_id, HrmsAsset.deleted_at.is_(None))
+            .with_for_update()
         )
         res = await self.db.execute(query)
         asset = res.scalar_one_or_none()
@@ -811,6 +818,7 @@ class HrmsAssetService:
         query = (
             select(HrmsAsset)
             .where(HrmsAsset.id == asset_id, HrmsAsset.deleted_at.is_(None))
+            .with_for_update()
         )
         res = await self.db.execute(query)
         asset = res.scalar_one_or_none()
@@ -896,15 +904,27 @@ class HrmsAssetService:
         )
         self.db.add(history)
 
-        await self.db.flush()
-        await notify_asset_assigned(
-            self.db,
-            employee_id=employee.id,
-            asset_name=asset.name,
-            asset_code=asset.asset_code,
-            actor_id=actor_id,
-        )
-        await self.db.commit()
+        try:
+            await self.db.flush()
+            try:
+                await notify_asset_assigned(
+                    self.db,
+                    employee_id=employee.id,
+                    asset_name=asset.asset_name,
+                    asset_code=asset.asset_code,
+                    actor_id=actor_id,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Failed to dispatch asset assignment notification for asset %s to employee %s: %s",
+                    asset.id,
+                    employee.id,
+                    exc,
+                )
+            await self.db.commit()
+        except IntegrityError:
+            await self.db.rollback()
+            raise ConflictException("Asset is already assigned to an employee. Return it first before reassigning.")
         return await self.get_asset(asset.id)
 
     async def return_asset(
@@ -1022,6 +1042,7 @@ class HrmsAssetService:
         query = (
             select(HrmsAsset)
             .where(HrmsAsset.id == asset_id, HrmsAsset.deleted_at.is_(None))
+            .with_for_update()
         )
         res = await self.db.execute(query)
         asset = res.scalar_one_or_none()
@@ -1192,6 +1213,7 @@ class HrmsAssetService:
         query = (
             select(HrmsAsset)
             .where(HrmsAsset.id == asset_id, HrmsAsset.deleted_at.is_(None))
+            .with_for_update()
         )
         res = await self.db.execute(query)
         asset = res.scalar_one_or_none()

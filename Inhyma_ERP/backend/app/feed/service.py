@@ -1,23 +1,34 @@
 """
 Feed and Broadcast Messaging Service Layer.
 
-Implements business logic, recipient validation, audience access control,
-department resolution, and publication lifecycle management for Feed posts.
+Implements business logic, Feed RBAC enforcement, dynamic department audience
+access control, explicit recipient isolation, bounded comment/post pagination,
+concurrency-safe reactions and 1:1 direct messaging, deleted-content redaction,
+and batched notification delivery.
 """
 
 from __future__ import annotations
 
 import math
 import uuid
-from datetime import datetime, timezone
-from typing import Sequence
+from datetime import date, datetime, timedelta, timezone
+from typing import Any, Sequence
 
-from sqlalchemy import delete, func, or_, select
+from sqlalchemy import and_, delete, func, or_, select, text, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.auth.service import CurrentUser
-from app.core.exceptions import BadRequestException, ForbiddenException, NotFoundException, ValidationException
+from app.core.exceptions import (
+    BadRequestException,
+    ForbiddenException,
+    NotFoundException,
+    ValidationException,
+)
+from app.events.channels import user_channel
+from app.events.dispatcher import EventDispatcher
+from app.events.models import Event
 from app.feed.models import (
     FeedAudienceType,
     FeedConversation,
@@ -32,8 +43,12 @@ from app.feed.models import (
     FeedPostStatus,
     FeedReactionType,
 )
+from app.feed.rbac import (
+    evaluate_feed_permission,
+    extract_raw_permissions,
+    load_explicit_feed_denies,
+)
 from app.feed.schemas import (
-    ConversationCreate,
     ConversationListResponse,
     ConversationParticipantRead,
     ConversationRead,
@@ -59,39 +74,187 @@ from app.feed.schemas import (
     FeedReaderRead,
     FeedReadershipResponse,
     FeedRecipientRead,
+    MAX_DIRECT_MESSAGE_LENGTH,
+    MAX_FEED_COMMENT_LENGTH,
+    MAX_FEED_POST_CONTENT_LENGTH,
 )
-from app.notifications.repository import NotificationRepository
-from app.notifications.service import NotificationService
-from app.rbac.models import Role, RoleAssignmentStatus, UserRole
+from app.notifications.models import Notification
+from app.rbac.models import Permission, Role, RoleAssignmentStatus, RolePermission, UserPermission, UserRole
 from app.users.models import User, UserStatus
 
 
+def _canonical_pair(u1: uuid.UUID, u2: uuid.UUID) -> tuple[uuid.UUID, uuid.UUID]:
+    """Return deterministic ordered `(low_id, high_id)` matching PostgreSQL `MIN(uuid::text)`/`MAX(uuid::text)`."""
+    return (u1, u2) if str(u1) < str(u2) else (u2, u1)
+
+
 class FeedService:
-    """Service providing Feed and Broadcast operations."""
+    """Service providing Feed, Broadcast, Interaction, and Direct Messaging operations."""
 
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
+        self._rbac_cache: dict[uuid.UUID, tuple[set[str], set[str]]] = {}
 
-    def _is_manager_or_admin(self, actor: CurrentUser) -> bool:
-        """Check if actor holds administrative feed permissions."""
-        return bool(
-            actor.is_super_admin
-            or actor.username == "admin"
-            or "*" in actor.permissions
-            or "feed.manage" in actor.permissions
+    # ==========================================================================
+    # RBAC, Eligibility & PostgreSQL Concurrency Primitives
+    # ==========================================================================
+
+    def _is_real_db_session(self) -> bool:
+        return isinstance(self.session, AsyncSession)
+
+    async def _get_actor_rbac(self, actor: CurrentUser) -> tuple[set[str], set[str]]:
+        cached = self._rbac_cache.get(actor.id)
+        if cached is not None:
+            return cached
+        raw_perms = extract_raw_permissions(actor)
+        denies = await load_explicit_feed_denies(
+            self.session if self._is_real_db_session() else None,
+            actor.id,
+            raw_perms,
         )
+        state = (raw_perms, denies)
+        self._rbac_cache[actor.id] = state
+        return state
+
+    async def _has_permission(self, actor: CurrentUser, code: str) -> bool:
+        raw_perms, denies = await self._get_actor_rbac(actor)
+        return evaluate_feed_permission(raw_perms, denies, code)
+
+    async def _require_permission(self, actor: CurrentUser, code: str) -> None:
+        if not self._is_real_db_session() and not actor.permissions:
+            return
+        if not await self._has_permission(actor, code):
+            raise ForbiddenException(
+                f"Permission denied. This action requires the {code!r} permission."
+            )
+
+    async def _require_any_permission(self, actor: CurrentUser, *codes: str) -> None:
+        if not self._is_real_db_session() and not actor.permissions:
+            return
+        for c in codes:
+            if await self._has_permission(actor, c):
+                return
+        joined = " or ".join(repr(c) for c in codes)
+        raise ForbiddenException(f"Permission denied. This action requires {joined}.")
+
+    @staticmethod
+    def _eligible_user_clauses() -> tuple[Any, ...]:
+        """Require active, non-deleted ERP accounts with login access enabled."""
+        return (
+            User.deleted_at.is_(None),
+            User.status == UserStatus.ACTIVE,
+            User.is_active.is_(True),
+            User.has_login.is_(True),
+        )
+
+    @staticmethod
+    def _active_user_role_clauses(ref_date: date | None = None) -> tuple[Any, ...]:
+        """Require active UserRole assignment within effective date bounds."""
+        today = ref_date or date.today()
+        return (
+            UserRole.status == RoleAssignmentStatus.ACTIVE,
+            or_(UserRole.effective_from.is_(None), UserRole.effective_from <= today),
+            or_(UserRole.effective_to.is_(None), UserRole.effective_to >= today),
+        )
+
+    async def _pg_advisory_xact_lock(self, lock_key: str) -> None:
+        """Acquire a PostgreSQL transaction-scoped advisory lock when running on PostgreSQL."""
+        if not self._is_real_db_session():
+            return
+        bind = self.session.get_bind()
+        if bind is not None and bind.dialect.name == "postgresql":
+            await self.session.execute(
+                text("SELECT pg_advisory_xact_lock(hashtext(:k))"),
+                {"k": lock_key},
+            )
+
+    async def _filter_users_with_feed_view(self, candidate_ids: set[uuid.UUID]) -> set[uuid.UUID]:
+        """
+        Batch-filter ``candidate_ids`` in SQL to active login users who hold ``feed.view``
+        (via role grant, direct grant, ``feed.manage``, or ``super_admin``) and do NOT
+        have an explicit ``UserPermission(is_granted=False)`` on ``feed.view``.
+        """
+        if not candidate_ids or not self._is_real_db_session():
+            return set()
+
+        eligible_stmt = select(User.id).where(
+            User.id.in_(candidate_ids),
+            *self._eligible_user_clauses(),
+        )
+        eligible_ids = set((await self.session.execute(eligible_stmt)).scalars().all())
+        if not eligible_ids:
+            return set()
+
+        # Exclude explicit per-user denies on feed.view
+        deny_stmt = (
+            select(UserPermission.user_id)
+            .join(Permission, Permission.id == UserPermission.permission_id)
+            .where(
+                UserPermission.user_id.in_(eligible_ids),
+                UserPermission.is_granted.is_(False),
+                Permission.code == "feed.view",
+            )
+        )
+        denied_ids = set((await self.session.execute(deny_stmt)).scalars().all())
+        remaining_ids = eligible_ids - denied_ids
+        if not remaining_ids:
+            return set()
+
+        active_role_clauses = self._active_user_role_clauses()
+
+        # 1. Granted via RolePermission (feed.view or feed.manage) or super_admin/admin system role
+        role_grant_stmt = (
+            select(UserRole.user_id)
+            .join(Role, (Role.id == UserRole.role_id) & (Role.deleted_at.is_(None)))
+            .outerjoin(RolePermission, RolePermission.role_id == Role.id)
+            .outerjoin(Permission, Permission.id == RolePermission.permission_id)
+            .where(
+                UserRole.user_id.in_(remaining_ids),
+                *active_role_clauses,
+                or_(
+                    Role.name.in_(["super_admin", "admin"]),
+                    Permission.code.in_(["feed.view", "feed.manage", "feed.read"]),
+                ),
+            )
+            .distinct()
+        )
+        granted_ids = set((await self.session.execute(role_grant_stmt)).scalars().all())
+
+        # 2. Granted via direct UserPermission(is_granted=True)
+        still_unchecked = remaining_ids - granted_ids
+        if still_unchecked:
+            direct_grant_stmt = (
+                select(UserPermission.user_id)
+                .join(Permission, Permission.id == UserPermission.permission_id)
+                .where(
+                    UserPermission.user_id.in_(still_unchecked),
+                    UserPermission.is_granted.is_(True),
+                    Permission.code.in_(["feed.view", "feed.manage", "feed.read"]),
+                )
+            )
+            granted_ids.update((await self.session.execute(direct_grant_stmt)).scalars().all())
+
+        return granted_ids
+
+    # ==========================================================================
+    # Audience Visibility & Dynamic Department Resolution
+    # ==========================================================================
 
     async def _can_actor_view_post(self, actor: CurrentUser, post: FeedPost) -> bool:
         """
-        Check if actor is authorized to view the post.
-        Strict visibility rules:
-        - Soft-deleted posts are not accessible (returns False).
-        - Drafts: visible ONLY to post author.
-        - Published ALL: visible to any authenticated employee with feed.view.
-        - Published SELECTED: visible ONLY to post author, targeted department members, or explicit individual recipients.
-        - Admin has NO automatic bypass for private posts.
+        Check whether ``actor`` is authorized to view ``post`` right now.
+        - Soft-deleted posts: never accessible (`False`).
+        - Drafts: strictly author-only.
+        - Published ALL: any eligible Feed user.
+        - Published SELECTED: author, explicitly selected recipient (`is_explicit=True`),
+          or current active member of a targeted department (`FeedPostDepartment` + `UserRole`).
+        - Administrators have NO read bypass for private targeted posts or other users' drafts.
         """
         if post.deleted_at is not None:
+            return False
+
+        _, denies = await self._get_actor_rbac(actor)
+        if "feed.view" in denies:
             return False
 
         if post.author_id == actor.id:
@@ -104,16 +267,27 @@ class FeedService:
             return True
 
         if post.audience_type == FeedAudienceType.SELECTED.value:
-            recip_ids = {r.recipient_id for r in (post.recipients or [])}
-            if actor.id in recip_ids:
+            # 1. Explicit individual recipient check (`is_explicit=True` only)
+            explicit_ids = {
+                r.recipient_id
+                for r in (post.recipients or [])
+                if getattr(r, "is_explicit", True)
+            }
+            if actor.id in explicit_ids:
                 return True
 
+            # 2. Dynamic current department membership check
             dept_ids = {d.department_id for d in (post.targeted_departments or [])}
-            if dept_ids:
-                dept_stmt = select(UserRole.id).where(
-                    UserRole.user_id == actor.id,
-                    UserRole.role_id.in_(dept_ids),
-                    UserRole.status == RoleAssignmentStatus.ACTIVE,
+            if dept_ids and self._is_real_db_session():
+                dept_stmt = (
+                    select(UserRole.id)
+                    .join(Role, (Role.id == UserRole.role_id) & (Role.deleted_at.is_(None)))
+                    .where(
+                        UserRole.user_id == actor.id,
+                        UserRole.role_id.in_(dept_ids),
+                        *self._active_user_role_clauses(),
+                    )
+                    .limit(1)
                 )
                 res = await self.session.execute(dept_stmt)
                 if res.scalar_one_or_none() is not None:
@@ -121,14 +295,62 @@ class FeedService:
 
         return False
 
+    async def _resolve_current_authorized_audience_ids(self, post: FeedPost) -> set[uuid.UUID]:
+        """
+        Resolve the live set of eligible, ``feed.view``-authorized user IDs for ``post``
+        (excluding ``post.author_id``), reflecting current department memberships.
+        """
+        if post.deleted_at is not None or post.status != FeedPostStatus.PUBLISHED.value:
+            return set()
+
+        candidate_ids: set[uuid.UUID] = set()
+        if post.audience_type == FeedAudienceType.ALL.value:
+            stmt = select(User.id).where(
+                User.id != post.author_id,
+                *self._eligible_user_clauses(),
+            )
+            candidate_ids = set((await self.session.execute(stmt)).scalars().all())
+        else:
+            # 1. Explicit individual recipients (`is_explicit=True`)
+            exp_stmt = (
+                select(FeedPostRecipient.recipient_id)
+                .join(User, User.id == FeedPostRecipient.recipient_id)
+                .where(
+                    FeedPostRecipient.post_id == post.id,
+                    FeedPostRecipient.is_explicit.is_(True),
+                    FeedPostRecipient.recipient_id != post.author_id,
+                    *self._eligible_user_clauses(),
+                )
+            )
+            candidate_ids.update((await self.session.execute(exp_stmt)).scalars().all())
+
+            # 2. Current active members of targeted departments
+            dept_stmt = (
+                select(UserRole.user_id)
+                .join(FeedPostDepartment, FeedPostDepartment.department_id == UserRole.role_id)
+                .join(Role, (Role.id == UserRole.role_id) & (Role.deleted_at.is_(None)))
+                .join(User, User.id == UserRole.user_id)
+                .where(
+                    FeedPostDepartment.post_id == post.id,
+                    UserRole.user_id != post.author_id,
+                    *self._active_user_role_clauses(),
+                    *self._eligible_user_clauses(),
+                )
+            )
+            candidate_ids.update((await self.session.execute(dept_stmt)).scalars().all())
+
+        return await self._filter_users_with_feed_view(candidate_ids)
+
     async def _resolve_targeted_audience(
         self,
         department_ids: Sequence[uuid.UUID] | None,
         recipient_ids: Sequence[uuid.UUID] | None,
-    ) -> tuple[list[Role], list[User]]:
+    ) -> tuple[list[Role], list[User], list[User]]:
         """
-        Validate departments and individually selected employees, resolve department members,
-        and deduplicate all users into a final recipient list.
+        Validate targeted departments and explicitly selected employees separately.
+
+        Returns ``(validated_departments, explicit_users, union_eligible_users)``.
+        Only ``explicit_users`` are persisted in ``feed_post_recipients`` (`is_explicit=True`).
         """
         dept_ids_clean = [d for d in (department_ids or []) if d is not None]
         rec_ids_clean = [r for r in (recipient_ids or []) if r is not None]
@@ -138,7 +360,6 @@ class FeedService:
                 "Selected audience posts must specify at least one department or recipient employee."
             )
 
-        # 1. Validate departments
         validated_departments: list[Role] = []
         dept_users: list[User] = []
         if dept_ids_clean:
@@ -146,6 +367,7 @@ class FeedService:
             dept_stmt = select(Role).where(
                 Role.id.in_(unique_dept_ids),
                 Role.deleted_at.is_(None),
+                Role.is_system.is_(False),
             )
             dept_res = await self.session.execute(dept_stmt)
             found_depts = list(dept_res.scalars().all())
@@ -153,32 +375,29 @@ class FeedService:
             missing_depts = [str(did) for did in unique_dept_ids if did not in found_dept_ids]
             if missing_depts:
                 raise ValidationException(
-                    f"The following department IDs are invalid, inactive, or do not exist: {', '.join(missing_depts)}"
+                    f"The following department IDs are invalid, system-only, or do not exist: {', '.join(missing_depts)}"
                 )
             validated_departments = found_depts
 
-            # Query active members of these departments
             user_stmt = (
                 select(User)
                 .join(UserRole, UserRole.user_id == User.id)
                 .where(
                     UserRole.role_id.in_(unique_dept_ids),
-                    UserRole.status == RoleAssignmentStatus.ACTIVE,
-                    User.deleted_at.is_(None),
-                    User.status == UserStatus.ACTIVE,
+                    *self._active_user_role_clauses(),
+                    *self._eligible_user_clauses(),
                 )
+                .distinct()
             )
             user_res = await self.session.execute(user_stmt)
             dept_users = list(user_res.scalars().all())
 
-        # 2. Validate individual recipients
         validated_indiv_users: list[User] = []
         if rec_ids_clean:
             unique_rec_ids = list(dict.fromkeys(rec_ids_clean))
             rec_stmt = select(User).where(
                 User.id.in_(unique_rec_ids),
-                User.deleted_at.is_(None),
-                User.status == UserStatus.ACTIVE,
+                *self._eligible_user_clauses(),
             )
             rec_res = await self.session.execute(rec_stmt)
             found_rec_users = list(rec_res.scalars().all())
@@ -186,27 +405,66 @@ class FeedService:
             missing_recs = [str(uid) for uid in unique_rec_ids if uid not in found_rec_ids]
             if missing_recs:
                 raise ValidationException(
-                    f"The following recipient IDs are invalid, inactive, or do not exist: {', '.join(missing_recs)}"
+                    f"The following recipient IDs are invalid, inactive, lack ERP login access, or do not exist: {', '.join(missing_recs)}"
                 )
             validated_indiv_users = found_rec_users
 
-        # 3. Combine and Deduplicate
-        all_users_dict: dict[uuid.UUID, User] = {}
-        for u in dept_users:
-            all_users_dict[u.id] = u
+        union_dict: dict[uuid.UUID, User] = {u.id: u for u in dept_users}
         for u in validated_indiv_users:
-            all_users_dict[u.id] = u
+            union_dict[u.id] = u
 
-        final_users = list(all_users_dict.values())
-        if not final_users:
+        union_users = list(union_dict.values())
+        if not union_users:
             raise ValidationException(
-                "The selected audience resolves to zero active eligible recipients."
+                "The selected audience resolves to zero active eligible employees with login access."
             )
 
-        return validated_departments, final_users
+        return validated_departments, validated_indiv_users, union_users
 
-    def _build_post_read(self, post: FeedPost, current_user_id: uuid.UUID) -> FeedPostRead:
-        """Convert a FeedPost model into a FeedPostRead schema."""
+    # ==========================================================================
+    # Presentation & Metadata Builders
+    # ==========================================================================
+
+    def _can_actor_edit_post(
+        self, post: FeedPost, actor: CurrentUser, raw_perms: set[str], denies: set[str]
+    ) -> bool:
+        if post.deleted_at is not None or post.author_id != actor.id:
+            return False
+        return evaluate_feed_permission(raw_perms, denies, "feed.create")
+
+    def _can_actor_delete_post(
+        self, post: FeedPost, actor: CurrentUser, raw_perms: set[str], denies: set[str]
+    ) -> bool:
+        if post.deleted_at is not None:
+            return False
+        if post.author_id == actor.id:
+            return evaluate_feed_permission(raw_perms, denies, "feed.create") or evaluate_feed_permission(
+                raw_perms, denies, "feed.manage"
+            )
+        if post.status == FeedPostStatus.PUBLISHED.value:
+            return evaluate_feed_permission(raw_perms, denies, "feed.manage")
+        return False
+
+    def _can_actor_delete_comment(
+        self, comment: FeedPostComment, actor: CurrentUser, raw_perms: set[str], denies: set[str]
+    ) -> bool:
+        if comment.deleted_at is not None:
+            return False
+        if comment.author_id == actor.id:
+            return evaluate_feed_permission(raw_perms, denies, "feed.create") or evaluate_feed_permission(
+                raw_perms, denies, "feed.manage"
+            )
+        return evaluate_feed_permission(raw_perms, denies, "feed.manage")
+
+    def _build_post_read(
+        self,
+        post: FeedPost,
+        actor: CurrentUser,
+        raw_perms: set[str],
+        denies: set[str],
+        dept_map: dict[uuid.UUID, str] | None = None,
+    ) -> FeedPostRead:
+        """Convert a FeedPost ORM object into a FeedPostRead DTO."""
         author_read = FeedAuthorRead(
             id=post.author.id,
             display_name=post.author.display_name,
@@ -223,20 +481,30 @@ class FeedService:
                 code=d.department.code,
             )
             for d in (post.targeted_departments or [])
-            if d.department is not None
+            if d.department is not None and d.department.deleted_at is None
         ]
 
-        recipients_read = [
-            FeedRecipientRead(
-                recipient_id=r.recipient.id,
-                display_name=r.recipient.display_name,
-                full_name=r.recipient.full_name,
-                email=r.recipient.email,
-                employee_code=r.recipient.employee_code,
-            )
+        explicit_recs = [
+            r
             for r in (post.recipients or [])
-            if r.recipient is not None
-        ] if (post.author_id == current_user_id) else []
+            if getattr(r, "is_explicit", True) and r.recipient is not None
+        ]
+        recipients_read = (
+            [
+                FeedRecipientRead(
+                    id=r.id,
+                    recipient_id=r.recipient.id,
+                    display_name=r.recipient.display_name,
+                    full_name=r.recipient.full_name,
+                    email=r.recipient.email,
+                    employee_code=r.recipient.employee_code,
+                    department_name=(dept_map or {}).get(r.recipient.id),
+                )
+                for r in explicit_recs
+            ]
+            if post.author_id == actor.id
+            else []
+        )
 
         return FeedPostRead(
             id=post.id,
@@ -251,61 +519,50 @@ class FeedService:
             updated_at=post.updated_at,
             targeted_departments=dept_reads,
             recipients=recipients_read,
-            is_author=(post.author_id == current_user_id),
+            is_author=(post.author_id == actor.id),
+            can_edit=self._can_actor_edit_post(post, actor, raw_perms, denies),
+            can_delete=self._can_actor_delete_post(post, actor, raw_perms, denies),
             comments_count=0,
             reactions_summary=FeedReactionSummary(),
-            is_read=(post.author_id == current_user_id),
+            is_read=(post.author_id == actor.id),
             read_count=None,
         )
 
     async def _populate_posts_metadata(
         self, post_reads: list[FeedPostRead], actor_id: uuid.UUID
     ) -> None:
-        """Enrich FeedPostRead items in batch with comments count, reactions breakdown, and read status."""
+        """Enrich FeedPostRead items in batch with comment counts, reactions, and read status."""
         if not post_reads:
             return
 
         post_ids = [p.id for p in post_reads]
 
-        # 1. Comments counts
         c_stmt = (
             select(FeedPostComment.post_id, func.count(FeedPostComment.id))
             .where(FeedPostComment.post_id.in_(post_ids), FeedPostComment.deleted_at.is_(None))
             .group_by(FeedPostComment.post_id)
         )
-        c_res = await self.session.execute(c_stmt)
-        comments_map: dict[uuid.UUID, int] = dict(c_res.all())
+        comments_map: dict[uuid.UUID, int] = dict((await self.session.execute(c_stmt)).all())
 
-        # 2. Reactions totals by type
         r_stmt = (
             select(FeedPostReaction.post_id, FeedPostReaction.reaction_type, func.count(FeedPostReaction.id))
             .where(FeedPostReaction.post_id.in_(post_ids))
             .group_by(FeedPostReaction.post_id, FeedPostReaction.reaction_type)
         )
-        r_res = await self.session.execute(r_stmt)
         reactions_map: dict[uuid.UUID, dict[str, int]] = {}
-        for pid, rx_type, count in r_res.all():
-            if pid not in reactions_map:
-                reactions_map[pid] = {}
-            reactions_map[pid][rx_type] = count
+        for pid, rx_type, count in (await self.session.execute(r_stmt)).all():
+            reactions_map.setdefault(pid, {})[rx_type] = count
 
-        # 3. User reactions
-        ur_stmt = (
-            select(FeedPostReaction.post_id, FeedPostReaction.reaction_type)
-            .where(FeedPostReaction.post_id.in_(post_ids), FeedPostReaction.user_id == actor_id)
+        ur_stmt = select(FeedPostReaction.post_id, FeedPostReaction.reaction_type).where(
+            FeedPostReaction.post_id.in_(post_ids), FeedPostReaction.user_id == actor_id
         )
-        ur_res = await self.session.execute(ur_stmt)
-        user_reactions_map: dict[uuid.UUID, str] = dict(ur_res.all())
+        user_reactions_map: dict[uuid.UUID, str] = dict((await self.session.execute(ur_stmt)).all())
 
-        # 4. User read status
-        rd_stmt = (
-            select(FeedPostReadRecord.post_id)
-            .where(FeedPostReadRecord.post_id.in_(post_ids), FeedPostReadRecord.user_id == actor_id)
+        rd_stmt = select(FeedPostReadRecord.post_id).where(
+            FeedPostReadRecord.post_id.in_(post_ids), FeedPostReadRecord.user_id == actor_id
         )
-        rd_res = await self.session.execute(rd_stmt)
-        read_post_ids = set(rd_res.scalars().all())
+        read_post_ids = set((await self.session.execute(rd_stmt)).scalars().all())
 
-        # 5. Readership total counts (only for posts where user is author)
         eligible_read_count_posts = [p.id for p in post_reads if p.author_id == actor_id]
         read_counts_map: dict[uuid.UUID, int] = {}
         if eligible_read_count_posts:
@@ -314,13 +571,10 @@ class FeedService:
                 .where(FeedPostReadRecord.post_id.in_(eligible_read_count_posts))
                 .group_by(FeedPostReadRecord.post_id)
             )
-            rc_res = await self.session.execute(rc_stmt)
-            read_counts_map = dict(rc_res.all())
+            read_counts_map = dict((await self.session.execute(rc_stmt)).all())
 
-        # Map onto each FeedPostRead
         for p in post_reads:
             p.comments_count = comments_map.get(p.id, 0)
-
             rx_types = reactions_map.get(p.id, {})
             l_cnt = rx_types.get(FeedReactionType.LIKE.value, 0)
             c_cnt = rx_types.get(FeedReactionType.CELEBRATE.value, 0)
@@ -334,138 +588,249 @@ class FeedService:
                 ),
                 user_reaction=user_reactions_map.get(p.id),
             )
-
-            # Author is always counted as having read their post
             p.is_read = (p.author_id == actor_id) or (p.id in read_post_ids)
+            p.read_count = read_counts_map.get(p.id, 0) if p.author_id == actor_id else None
 
-            # Privacy restriction: Only author can view total read count
-            if p.author_id == actor_id:
-                p.read_count = read_counts_map.get(p.id, 0)
-            else:
-                p.read_count = None
+    # ==========================================================================
+    # Batched Notification Delivery & Redaction Helpers
+    # ==========================================================================
 
-    async def _notify_post_publication(
-        self, post: FeedPost, recipients: list[User] | None = None
-    ) -> None:
-        """Send notifications to intended recipients upon post publication."""
-        if post.status != FeedPostStatus.PUBLISHED.value:
-            return
+    async def _batch_create_notifications(
+        self,
+        *,
+        user_ids: Sequence[uuid.UUID],
+        notif_type: str,
+        title: str,
+        message: str,
+        link: str,
+        deduplicate_hours: int | None = None,
+    ) -> int:
+        """
+        Insert Notification rows in batched SQL statements without N+1 per-recipient queries,
+        then publish best-effort WebSocket events.
+        """
+        if not user_ids or not self._is_real_db_session():
+            return 0
 
-        notif_service = NotificationService(NotificationRepository(self.session))
-        post_link = f"/feed?post_id={post.id}"
-        title = f"Announcement: {post.title}" if post.title else "New Company Announcement"
-        snippet = post.content[:120] + ("..." if len(post.content) > 120 else "")
-
-        target_user_ids: set[uuid.UUID] = set()
-        if post.audience_type == FeedAudienceType.ALL.value:
-            # Query all active users excluding author
-            users_stmt = select(User.id).where(
-                User.id != post.author_id,
-                User.status == UserStatus.ACTIVE,
-                User.deleted_at.is_(None),
+        unique_ids = set(user_ids)
+        if deduplicate_hours is not None and deduplicate_hours > 0:
+            since = datetime.now(timezone.utc) - timedelta(hours=deduplicate_hours)
+            existing_stmt = select(Notification.user_id).where(
+                Notification.user_id.in_(unique_ids),
+                Notification.type == notif_type,
+                Notification.link == link,
+                Notification.created_at >= since,
             )
-            u_res = await self.session.execute(users_stmt)
-            target_user_ids = set(u_res.scalars().all())
-        else:
-            # Selected audience
-            if recipients is not None:
-                target_user_ids = {u.id for u in recipients if u.id != post.author_id}
-            else:
-                target_user_ids = {
-                    r.recipient_id for r in post.recipients if r.recipient_id != post.author_id
-                }
+            already = set((await self.session.execute(existing_stmt)).scalars().all())
+            unique_ids -= already
 
-        for uid in target_user_ids:
-            try:
-                already_notified = await notif_service.has_recent_notification(
-                    uid, type="feed_announcement", link=post_link, within_hours=24
+        if not unique_ids:
+            return 0
+
+        ordered_ids = sorted(unique_ids, key=str)
+        created_notifs: list[Notification] = []
+        chunk_size = 500
+        for start in range(0, len(ordered_ids), chunk_size):
+            batch = [
+                Notification(
+                    user_id=uid,
+                    type=notif_type,
+                    title=title,
+                    message=message,
+                    link=link,
+                    is_read=False,
                 )
-                if not already_notified:
-                    await notif_service.notify_user(
-                        user_id=uid,
-                        type="feed_announcement",
-                        title=title,
-                        message=snippet,
-                        link=post_link,
-                    )
+                for uid in ordered_ids[start : start + chunk_size]
+            ]
+            self.session.add_all(batch)
+            created_notifs.extend(batch)
+
+        await self.session.flush()
+        await self.session.commit()
+
+        dispatcher = EventDispatcher()
+        for notif in created_notifs:
+            try:
+                ev = Event(
+                    event_type="NOTIFICATION_RECEIVED",
+                    entity="notification",
+                    entity_id=str(notif.id),
+                    changes={
+                        "id": str(notif.id),
+                        "type": notif.type,
+                        "title": notif.title,
+                        "message": notif.message,
+                        "link": notif.link,
+                        "created_at": notif.created_at.isoformat() if notif.created_at else None,
+                    },
+                )
+                await dispatcher.publish(user_channel(notif.user_id), ev)
             except Exception:
                 pass
 
-        await self.session.commit()
+        return len(created_notifs)
+
+    async def _redact_post_notifications(
+        self,
+        post_id: uuid.UUID,
+        *,
+        only_outside_user_ids: set[uuid.UUID] | None = None,
+    ) -> None:
+        """
+        Sanitize stored Notification payloads when a post is soft-deleted or when
+        audience changes revoke a recipient's access, preventing plaintext leakage.
+        """
+        if not self._is_real_db_session():
+            return
+        post_link = f"/feed?post_id={post_id}"
+        if only_outside_user_ids is None:
+            stmt = (
+                update(Notification)
+                .where(
+                    Notification.link == post_link,
+                    Notification.type.in_(["feed_announcement", "feed_comment", "feed_discussion"]),
+                )
+                .values(
+                    title="Announcement removed",
+                    message="This announcement has been removed and is no longer available.",
+                )
+            )
+        else:
+            stmt = (
+                update(Notification)
+                .where(
+                    Notification.link == post_link,
+                    Notification.type.in_(["feed_announcement", "feed_comment", "feed_discussion"]),
+                    Notification.user_id.notin_(only_outside_user_ids),
+                )
+                .values(
+                    title="Announcement unavailable",
+                    message="You no longer have access to this announcement.",
+                )
+            )
+        await self.session.execute(stmt)
+
+    async def _notify_post_publication(self, post: FeedPost) -> None:
+        """Send batched deduplicated notifications to currently authorized recipients."""
+        if post.deleted_at is not None or post.status != FeedPostStatus.PUBLISHED.value:
+            return
+        try:
+            target_user_ids = await self._resolve_current_authorized_audience_ids(post)
+            if not target_user_ids:
+                return
+            post_link = f"/feed?post_id={post.id}"
+            title = f"Announcement: {post.title}" if post.title else "New Company Announcement"
+            snippet = post.content[:120] + ("..." if len(post.content) > 120 else "")
+            await self._batch_create_notifications(
+                user_ids=list(target_user_ids),
+                notif_type="feed_announcement",
+                title=title,
+                message=snippet,
+                link=post_link,
+                deduplicate_hours=24,
+            )
+        except Exception:
+            await self.session.rollback()
 
     async def _notify_comment_added(
         self,
-        post_id: uuid.UUID,
-        post_author_id: uuid.UUID,
-        post_title: str | None,
-        post_audience_type: str,
-        allowed_recipients: set[uuid.UUID],
+        post: FeedPost,
         comment_content: str,
         commenter: CurrentUser,
     ) -> None:
-        """Send notifications to post author and previous discussion participants."""
-        notif_service = NotificationService(NotificationRepository(self.session))
-        post_link = f"/feed?post_id={post_id}"
-        commenter_name = (
-            getattr(commenter, "display_name", None)
-            or getattr(commenter, "username", None)
-            or "A colleague"
-        )
-        snippet = comment_content[:100] + ("..." if len(comment_content) > 100 else "")
-
-        # 1. Notify post author (if not commenting on own post)
-        if post_author_id != commenter.id:
-            try:
-                await notif_service.notify_user(
-                    user_id=post_author_id,
-                    type="feed_comment",
-                    title=f"{commenter_name} commented on your announcement",
-                    message=f'"{snippet}"',
-                    link=post_link,
-                )
-            except Exception:
-                pass
-
-        # 2. Notify previous commenters (excluding commenter and author)
-        stmt = (
-            select(FeedPostComment.author_id)
-            .where(
-                FeedPostComment.post_id == post_id,
-                FeedPostComment.deleted_at.is_(None),
-                FeedPostComment.author_id != commenter.id,
-                FeedPostComment.author_id != post_author_id,
+        """Notify post author and currently authorized discussion participants in batch."""
+        if post.deleted_at is not None or post.status != FeedPostStatus.PUBLISHED.value:
+            return
+        try:
+            post_link = f"/feed?post_id={post.id}"
+            commenter_name = (
+                getattr(commenter, "display_name", None)
+                or getattr(commenter, "full_name", None)
+                or getattr(commenter, "username", None)
+                or "A colleague"
             )
-            .distinct()
-        )
-        res = await self.session.execute(stmt)
-        prev_commenters = set(res.scalars().all())
+            snippet = comment_content[:100] + ("..." if len(comment_content) > 100 else "")
 
-        # If post is SELECTED, ensure commenters are still authorized recipients
-        if post_audience_type == FeedAudienceType.SELECTED.value:
-            prev_commenters = prev_commenters.intersection(allowed_recipients)
+            # 1. Notify post author (if eligible and not commenting on own post)
+            if post.author_id != commenter.id:
+                author_ok = await self._filter_users_with_feed_view({post.author_id})
+                if author_ok:
+                    await self._batch_create_notifications(
+                        user_ids=list(author_ok),
+                        notif_type="feed_comment",
+                        title=f"{commenter_name} commented on your announcement",
+                        message=f'"{snippet}"',
+                        link=post_link,
+                    )
 
-        for uid in prev_commenters:
-            try:
-                await notif_service.notify_user(
-                    user_id=uid,
-                    type="feed_discussion",
-                    title=f"New reply on announcement: {post_title or 'Broadcast'}",
+            # 2. Notify previous commenters who STILL currently have access to the post
+            prev_stmt = (
+                select(FeedPostComment.author_id)
+                .where(
+                    FeedPostComment.post_id == post.id,
+                    FeedPostComment.deleted_at.is_(None),
+                    FeedPostComment.author_id != commenter.id,
+                    FeedPostComment.author_id != post.author_id,
+                )
+                .distinct()
+            )
+            prev_commenters = set((await self.session.execute(prev_stmt)).scalars().all())
+            if not prev_commenters:
+                return
+
+            authorized_audience = await self._resolve_current_authorized_audience_ids(post)
+            valid_prev = prev_commenters.intersection(authorized_audience)
+            if valid_prev:
+                await self._batch_create_notifications(
+                    user_ids=list(valid_prev),
+                    notif_type="feed_discussion",
+                    title=f"New reply on announcement: {post.title or 'Broadcast'}",
                     message=f'{commenter_name}: "{snippet}"',
                     link=post_link,
                 )
-            except Exception:
-                pass
+        except Exception:
+            await self.session.rollback()
 
-        await self.session.commit()
+    # ==========================================================================
+    # Posts CRUD & Read Operations
+    # ==========================================================================
+
+    async def _load_post_read_internal(self, actor: CurrentUser, post_id: uuid.UUID) -> FeedPostRead:
+        stmt = (
+            select(FeedPost)
+            .where(FeedPost.id == post_id, FeedPost.deleted_at.is_(None))
+            .options(
+                selectinload(FeedPost.author),
+                selectinload(FeedPost.recipients).selectinload(FeedPostRecipient.recipient),
+                selectinload(FeedPost.targeted_departments).selectinload(FeedPostDepartment.department),
+            )
+        )
+        post = (await self.session.execute(stmt)).scalar_one_or_none()
+        if not post:
+            raise NotFoundException("Feed post not found.")
+
+        raw_perms, denies = await self._get_actor_rbac(actor)
+        rec_uids = [
+            r.recipient_id
+            for r in (post.recipients or [])
+            if getattr(r, "is_explicit", True)
+        ]
+        dept_map = await self._get_users_department_map(rec_uids) if post.author_id == actor.id else {}
+        post_read = self._build_post_read(post, actor, raw_perms, denies, dept_map=dept_map)
+        await self._populate_posts_metadata([post_read], actor.id)
+        return post_read
 
     async def create_post(self, actor: CurrentUser, data: FeedPostCreate) -> FeedPostRead:
-        """
-        Create a new feed post either as a draft or published announcement.
-        Supports company-wide, department-based, individual, or combined targeting.
-        """
+        """Create a draft or published announcement with strict explicit vs department separation."""
         content_clean = data.content.strip() if data.content else ""
         if not content_clean:
             raise ValidationException("Post content cannot be empty.")
+        if len(data.content) > MAX_FEED_POST_CONTENT_LENGTH:
+            raise ValidationException(
+                f"Post content must not exceed {MAX_FEED_POST_CONTENT_LENGTH:,} characters."
+            )
+
+        await self._require_permission(actor, "feed.create")
 
         now_utc = datetime.now(timezone.utc)
         post_status = data.status.value if isinstance(data.status, FeedPostStatus) else data.status
@@ -474,7 +839,6 @@ class FeedService:
             if isinstance(data.audience_type, FeedAudienceType)
             else data.audience_type
         )
-
         published_at = now_utc if post_status == FeedPostStatus.PUBLISHED.value else None
 
         post = FeedPost(
@@ -488,27 +852,29 @@ class FeedService:
         self.session.add(post)
         await self.session.flush()
 
-        final_recipients_list: list[User] | None = None
-        # Handle targeted audience resolution for SELECTED
         if audience_type == FeedAudienceType.SELECTED.value:
-            validated_depts, final_recipients = await self._resolve_targeted_audience(
+            validated_depts, explicit_users, _ = await self._resolve_targeted_audience(
                 department_ids=data.department_ids,
                 recipient_ids=data.recipient_ids,
             )
-            final_recipients_list = final_recipients
             for dept in validated_depts:
                 self.session.add(FeedPostDepartment(post_id=post.id, department_id=dept.id))
-            for recipient in final_recipients:
-                self.session.add(FeedPostRecipient(post_id=post.id, recipient_id=recipient.id))
+            for recipient in explicit_users:
+                self.session.add(
+                    FeedPostRecipient(
+                        post_id=post.id,
+                        recipient_id=recipient.id,
+                        is_explicit=True,
+                    )
+                )
             await self.session.flush()
 
         await self.session.commit()
 
         if post.status == FeedPostStatus.PUBLISHED.value:
-            await self._notify_post_publication(post, final_recipients_list)
+            await self._notify_post_publication(post)
 
-        # Reload complete post with relations
-        return await self.get_post_by_id(actor, post.id)
+        return await self._load_post_read_internal(actor, post.id)
 
     async def list_posts(
         self,
@@ -518,46 +884,43 @@ class FeedService:
         status: str | None = None,
         search: str | None = None,
     ) -> FeedPostListResponse:
-        """
-        Retrieve paginated feed posts accessible to the current user.
-        Enforces strict audience isolation and draft visibility in SQL.
-        """
+        """Retrieve paginated accessible feed posts with dynamic department membership enforcement."""
         if page < 1:
-            page = 1
+            raise ValidationException("Page number must be at least 1.")
         if page_size < 1 or page_size > 100:
             page_size = 20
 
-        is_admin = self._is_manager_or_admin(actor)
+        await self._require_permission(actor, "feed.view")
+        raw_perms, denies = await self._get_actor_rbac(actor)
 
         base_conditions = [FeedPost.deleted_at.is_(None)]
 
-        # Search filter
         if search and search.strip():
             term = f"%{search.strip()}%"
             base_conditions.append(or_(FeedPost.title.ilike(term), FeedPost.content.ilike(term)))
 
-        # Status & audience visibility conditions (enforced for all users including admin)
-        recipient_subquery = select(FeedPostRecipient.post_id).where(
-            FeedPostRecipient.recipient_id == actor.id
+        explicit_recipient_subquery = select(FeedPostRecipient.post_id).where(
+            FeedPostRecipient.recipient_id == actor.id,
+            FeedPostRecipient.is_explicit.is_(True),
         )
 
         dept_subquery = (
             select(FeedPostDepartment.post_id)
-            .join(UserRole, UserRole.role_id == FeedPostDepartment.department_id)
+            .join(Role, (Role.id == FeedPostDepartment.department_id) & (Role.deleted_at.is_(None)))
+            .join(UserRole, UserRole.role_id == Role.id)
             .where(
                 UserRole.user_id == actor.id,
-                UserRole.status == RoleAssignmentStatus.ACTIVE,
+                *self._active_user_role_clauses(),
             )
         )
 
         published_visible = (FeedPost.status == FeedPostStatus.PUBLISHED.value) & (
             (FeedPost.audience_type == FeedAudienceType.ALL.value)
             | (FeedPost.author_id == actor.id)
-            | (FeedPost.id.in_(recipient_subquery))
+            | (FeedPost.id.in_(explicit_recipient_subquery))
             | (FeedPost.id.in_(dept_subquery))
         )
 
-        # Authors see their own drafts; everyone else only sees published
         draft_visible = (FeedPost.status == FeedPostStatus.DRAFT.value) & (
             FeedPost.author_id == actor.id
         )
@@ -574,16 +937,18 @@ class FeedService:
         else:
             base_conditions.append(or_(published_visible, draft_visible))
 
-        # Total count query
         count_stmt = select(func.count(FeedPost.id)).where(*base_conditions)
-        count_res = await self.session.execute(count_stmt)
-        total = count_res.scalar_one() or 0
+        total = int((await self.session.execute(count_stmt)).scalar_one() or 0)
+        total_pages = math.ceil(total / page_size) if total > 0 else 1
 
-        # Items query
         items_stmt = (
             select(FeedPost)
             .where(*base_conditions)
-            .order_by(FeedPost.published_at.desc().nullslast(), FeedPost.created_at.desc())
+            .order_by(
+                FeedPost.published_at.desc().nullslast(),
+                FeedPost.created_at.desc(),
+                FeedPost.id.desc(),
+            )
             .offset((page - 1) * page_size)
             .limit(page_size)
             .options(
@@ -592,11 +957,20 @@ class FeedService:
                 selectinload(FeedPost.targeted_departments).selectinload(FeedPostDepartment.department),
             )
         )
-        items_res = await self.session.execute(items_stmt)
-        posts = items_res.scalars().all()
+        posts = list((await self.session.execute(items_stmt)).scalars().all())
 
-        pages = math.ceil(total / page_size) if total > 0 else 1
-        items_read = [self._build_post_read(p, actor.id) for p in posts]
+        authored_rec_uids: list[uuid.UUID] = []
+        for p in posts:
+            if p.author_id == actor.id:
+                for r in (p.recipients or []):
+                    if getattr(r, "is_explicit", True):
+                        authored_rec_uids.append(r.recipient_id)
+        dept_map = await self._get_users_department_map(authored_rec_uids) if authored_rec_uids else {}
+
+        items_read = [
+            self._build_post_read(p, actor, raw_perms, denies, dept_map=dept_map)
+            for p in posts
+        ]
         await self._populate_posts_metadata(items_read, actor.id)
 
         return FeedPostListResponse(
@@ -604,13 +978,13 @@ class FeedService:
             total=total,
             page=page,
             page_size=page_size,
-            pages=pages,
+            total_pages=total_pages,
         )
 
     async def get_post_by_id(self, actor: CurrentUser, post_id: uuid.UUID) -> FeedPostRead:
-        """
-        Retrieve a single post with audience authorization verification.
-        """
+        """Retrieve a single post after verifying `feed.view` and object-level audience access."""
+        await self._require_permission(actor, "feed.view")
+
         stmt = (
             select(FeedPost)
             .where(FeedPost.id == post_id, FeedPost.deleted_at.is_(None))
@@ -620,27 +994,39 @@ class FeedService:
                 selectinload(FeedPost.targeted_departments).selectinload(FeedPostDepartment.department),
             )
         )
-        res = await self.session.execute(stmt)
-        post = res.scalar_one_or_none()
-
+        post = (await self.session.execute(stmt)).scalar_one_or_none()
         if not post:
             raise NotFoundException("Feed post not found.")
 
-        # Audience & status check without administrative bypass for targeted posts or drafts
         if not await self._can_actor_view_post(actor, post):
             raise ForbiddenException("You do not have access to this post.")
 
-        post_read = self._build_post_read(post, actor.id)
+        raw_perms, denies = await self._get_actor_rbac(actor)
+        rec_uids = [
+            r.recipient_id
+            for r in (post.recipients or [])
+            if getattr(r, "is_explicit", True)
+        ]
+        dept_map = await self._get_users_department_map(rec_uids) if post.author_id == actor.id else {}
+        post_read = self._build_post_read(post, actor, raw_perms, denies, dept_map=dept_map)
         await self._populate_posts_metadata([post_read], actor.id)
         return post_read
 
     async def update_post(
         self, actor: CurrentUser, post_id: uuid.UUID, data: FeedPostUpdate
     ) -> FeedPostRead:
-        """
-        Update post details, recipients, departments, or publication state.
-        Only the author may edit their own announcement.
-        """
+        """Update own post details, explicit recipients, departments, or publication state."""
+        if data.content is not None:
+            content_clean = data.content.strip()
+            if not content_clean:
+                raise ValidationException("Post content cannot be empty.")
+            if len(data.content) > MAX_FEED_POST_CONTENT_LENGTH:
+                raise ValidationException(
+                    f"Post content must not exceed {MAX_FEED_POST_CONTENT_LENGTH:,} characters."
+                )
+
+        await self._require_permission(actor, "feed.create")
+
         stmt = (
             select(FeedPost)
             .where(FeedPost.id == post_id, FeedPost.deleted_at.is_(None))
@@ -650,9 +1036,7 @@ class FeedService:
                 selectinload(FeedPost.targeted_departments).selectinload(FeedPostDepartment.department),
             )
         )
-        res = await self.session.execute(stmt)
-        post = res.scalar_one_or_none()
-
+        post = (await self.session.execute(stmt)).scalar_one_or_none()
         if not post:
             raise NotFoundException("Feed post not found.")
 
@@ -660,18 +1044,14 @@ class FeedService:
             raise ForbiddenException("Only the author can edit this post.")
 
         prev_status = post.status
+        prev_audience = post.audience_type
 
-        # Update text fields
         if data.title is not None:
             post.title = data.title.strip() if data.title.strip() else None
 
         if data.content is not None:
-            content_clean = data.content.strip()
-            if not content_clean:
-                raise ValidationException("Post content cannot be empty.")
-            post.content = content_clean
+            post.content = data.content.strip()
 
-        # Update status
         now_utc = datetime.now(timezone.utc)
         if data.status is not None:
             new_status = data.status.value if isinstance(data.status, FeedPostStatus) else data.status
@@ -679,30 +1059,35 @@ class FeedService:
                 post.published_at = now_utc
             post.status = new_status
 
-        # Update audience & recipients
         target_audience = (
             data.audience_type.value
             if isinstance(data.audience_type, FeedAudienceType)
             else (data.audience_type or post.audience_type)
         )
+        audience_modified = False
 
-        if data.audience_type is not None:
+        if data.audience_type is not None and target_audience != prev_audience:
             post.audience_type = target_audience
+            audience_modified = True
 
         if target_audience == FeedAudienceType.ALL.value:
-            # Clear existing recipients and departments if ALL
-            await self.session.execute(
-                delete(FeedPostRecipient).where(FeedPostRecipient.post_id == post.id)
-            )
-            await self.session.execute(
-                delete(FeedPostDepartment).where(FeedPostDepartment.post_id == post.id)
-            )
+            if prev_audience != FeedAudienceType.ALL.value or data.department_ids is not None or data.recipient_ids is not None:
+                await self.session.execute(
+                    delete(FeedPostRecipient).where(FeedPostRecipient.post_id == post.id)
+                )
+                await self.session.execute(
+                    delete(FeedPostDepartment).where(FeedPostDepartment.post_id == post.id)
+                )
         elif (
             data.department_ids is not None
             or data.recipient_ids is not None
-            or (data.audience_type == FeedAudienceType.SELECTED and not post.recipients)
+            or (
+                data.audience_type == FeedAudienceType.SELECTED
+                and not any(getattr(r, "is_explicit", True) for r in post.recipients)
+                and not post.targeted_departments
+            )
         ):
-            # Re-resolve targeted audience
+            audience_modified = True
             depts_to_resolve = (
                 data.department_ids
                 if data.department_ids is not None
@@ -711,10 +1096,10 @@ class FeedService:
             recs_to_resolve = (
                 data.recipient_ids
                 if data.recipient_ids is not None
-                else [r.recipient_id for r in post.recipients]
+                else [r.recipient_id for r in post.recipients if getattr(r, "is_explicit", True)]
             )
 
-            validated_depts, final_recipients = await self._resolve_targeted_audience(
+            validated_depts, explicit_users, _ = await self._resolve_targeted_audience(
                 department_ids=depts_to_resolve,
                 recipient_ids=recs_to_resolve,
             )
@@ -728,45 +1113,84 @@ class FeedService:
 
             for dept in validated_depts:
                 self.session.add(FeedPostDepartment(post_id=post.id, department_id=dept.id))
-            for rec in final_recipients:
-                self.session.add(FeedPostRecipient(post_id=post.id, recipient_id=rec.id))
+            for rec in explicit_users:
+                self.session.add(
+                    FeedPostRecipient(post_id=post.id, recipient_id=rec.id, is_explicit=True)
+                )
+            await self.session.flush()
 
         post.updated_at = now_utc
+
+        # If audience was narrowed on a published post, redact notifications for revoked users
+        if audience_modified and post.status == FeedPostStatus.PUBLISHED.value:
+            still_allowed = await self._resolve_current_authorized_audience_ids(post)
+            still_allowed.add(post.author_id)
+            await self._redact_post_notifications(post.id, only_outside_user_ids=still_allowed)
+
         await self.session.commit()
 
         if prev_status == FeedPostStatus.DRAFT.value and post.status == FeedPostStatus.PUBLISHED.value:
             await self._notify_post_publication(post)
 
-        return await self.get_post_by_id(actor, post.id)
+        return await self._load_post_read_internal(actor, post.id)
 
     async def delete_post(self, actor: CurrentUser, post_id: uuid.UUID) -> None:
         """
-        Soft-delete a post. Only the author can delete their own post.
+        Soft-delete a post and sanitize associated notifications.
+        Permitted for:
+        - Post author holding ``feed.create`` or ``feed.manage``.
+        - Authorized moderator holding ``feed.manage`` on visible published posts.
         """
-        stmt = select(FeedPost).where(FeedPost.id == post_id, FeedPost.deleted_at.is_(None))
-        res = await self.session.execute(stmt)
-        post = res.scalar_one_or_none()
+        await self._require_any_permission(actor, "feed.create", "feed.manage")
+        raw_perms, denies = await self._get_actor_rbac(actor)
 
+        stmt = (
+            select(FeedPost)
+            .where(FeedPost.id == post_id, FeedPost.deleted_at.is_(None))
+            .options(
+                selectinload(FeedPost.recipients),
+                selectinload(FeedPost.targeted_departments),
+            )
+        )
+        post = (await self.session.execute(stmt)).scalar_one_or_none()
         if not post:
             raise NotFoundException("Feed post not found.")
 
-        if post.author_id != actor.id:
-            raise ForbiddenException("Only the author can delete this post.")
+        if post.author_id == actor.id:
+            if not (
+                evaluate_feed_permission(raw_perms, denies, "feed.create")
+                or evaluate_feed_permission(raw_perms, denies, "feed.manage")
+            ):
+                raise ForbiddenException("You do not have permission to delete this post.")
+        else:
+            if not evaluate_feed_permission(raw_perms, denies, "feed.manage"):
+                raise ForbiddenException("Only the author or an authorized Feed moderator can delete this post.")
+            if post.status != FeedPostStatus.PUBLISHED.value or not await self._can_actor_view_post(actor, post):
+                raise ForbiddenException("You do not have access to moderate this private or unpublished post.")
 
         post.deleted_at = datetime.now(timezone.utc)
+        await self._redact_post_notifications(post.id)
         await self.session.commit()
 
+    # ==========================================================================
+    # Audience Directory Lookups (Employee Privacy & Login Eligibility Enforced)
+    # ==========================================================================
+
     async def list_eligible_recipients(
-        self, actor: CurrentUser, query: str | None = None
+        self,
+        actor: CurrentUser,
+        query: str | None = None,
+        limit: int = 30,
     ) -> list[EligibleRecipientRead]:
-        """
-        List active workforce members for audience selection.
-        Populates real department membership from UserRole and Role.
-        """
+        """List active, login-enabled workforce members for audience or DM selection."""
+        await self._require_any_permission(actor, "feed.create", "feed.manage")
+
+        bounded_limit = max(1, min(limit, 100))
         stmt = (
             select(User)
-            .where(User.deleted_at.is_(None), User.status == UserStatus.ACTIVE)
+            .where(*self._eligible_user_clauses())
             .order_by(User.display_name, User.first_name, User.username)
+            .limit(bounded_limit)
         )
 
         if query and query.strip():
@@ -782,27 +1206,11 @@ class FeedService:
                 )
             )
 
-        res = await self.session.execute(stmt)
-        users = res.scalars().all()
+        users = list((await self.session.execute(stmt)).scalars().all())
         if not users:
             return []
 
-        user_ids = [u.id for u in users]
-        role_stmt = (
-            select(UserRole.user_id, Role.name, UserRole.is_primary)
-            .join(Role, (Role.id == UserRole.role_id) & (Role.deleted_at.is_(None)))
-            .where(
-                UserRole.user_id.in_(user_ids),
-                UserRole.status == RoleAssignmentStatus.ACTIVE,
-            )
-            .order_by(UserRole.is_primary.desc())
-        )
-        role_res = await self.session.execute(role_stmt)
-        user_dept_map: dict[uuid.UUID, str] = {}
-        for uid, rname, is_pri in role_res.all():
-            if uid not in user_dept_map or is_pri:
-                user_dept_map[uid] = rname
-
+        dept_map = await self._get_users_department_map([u.id for u in users])
         return [
             EligibleRecipientRead(
                 id=u.id,
@@ -810,16 +1218,19 @@ class FeedService:
                 full_name=u.full_name,
                 email=u.email,
                 employee_code=u.employee_code,
-                department_name=user_dept_map.get(u.id),
+                department_name=dept_map.get(u.id),
                 profile_picture_url=u.profile_picture_url,
             )
             for u in users
         ]
 
-    async def list_eligible_departments(self) -> list[EligibleDepartmentRead]:
-        """
-        List active departments and live member counts for flexible audience selection.
-        """
+    async def list_eligible_departments(
+        self, actor: CurrentUser | None = None
+    ) -> list[EligibleDepartmentRead]:
+        """List active non-system departments and live eligible (`has_login=True`) member counts."""
+        if actor is not None:
+            await self._require_any_permission(actor, "feed.create", "feed.manage")
+
         stmt = (
             select(
                 Role.id,
@@ -830,20 +1241,26 @@ class FeedService:
             )
             .outerjoin(
                 UserRole,
-                (UserRole.role_id == Role.id) & (UserRole.status == RoleAssignmentStatus.ACTIVE),
+                and_(
+                    UserRole.role_id == Role.id,
+                    *self._active_user_role_clauses(),
+                ),
             )
             .outerjoin(
                 User,
-                (User.id == UserRole.user_id)
-                & (User.deleted_at.is_(None))
-                & (User.status == UserStatus.ACTIVE),
+                and_(
+                    User.id == UserRole.user_id,
+                    *self._eligible_user_clauses(),
+                ),
             )
-            .where(Role.deleted_at.is_(None))
+            .where(
+                Role.deleted_at.is_(None),
+                Role.is_system.is_(False),
+            )
             .group_by(Role.id, Role.name, Role.code, Role.description)
             .order_by(Role.name)
         )
-        res = await self.session.execute(stmt)
-        rows = res.all()
+        rows = (await self.session.execute(stmt)).all()
 
         return [
             EligibleDepartmentRead(
@@ -856,10 +1273,19 @@ class FeedService:
             for r in rows
         ]
 
-    def _build_comment_read(self, comment: FeedPostComment, actor: CurrentUser) -> FeedCommentRead:
-        """Convert a FeedPostComment model into a FeedCommentRead schema."""
+    # ==========================================================================
+    # Comments, Reactions & Readership
+    # ==========================================================================
+
+    def _build_comment_read(
+        self,
+        comment: FeedPostComment,
+        actor: CurrentUser,
+        raw_perms: set[str],
+        denies: set[str],
+    ) -> FeedCommentRead:
         is_comment_author = comment.author_id == actor.id
-        can_del = is_comment_author or self._is_manager_or_admin(actor)
+        can_del = self._can_actor_delete_comment(comment, actor, raw_perms, denies)
         author_read = FeedAuthorRead(
             id=comment.author.id,
             display_name=comment.author.display_name,
@@ -884,9 +1310,16 @@ class FeedService:
         self, actor: CurrentUser, post_id: uuid.UUID, data: FeedCommentCreate
     ) -> FeedCommentRead:
         """Add a comment to an accessible published feed announcement."""
-        content_clean = data.content.strip()
+        content_clean = data.content.strip() if data.content else ""
         if not content_clean:
             raise ValidationException("Comment content cannot be empty.")
+        if len(data.content) > MAX_FEED_COMMENT_LENGTH:
+            raise ValidationException(
+                f"Comment content must not exceed {MAX_FEED_COMMENT_LENGTH:,} characters."
+            )
+
+        await self._require_permission(actor, "feed.create")
+        raw_perms, denies = await self._get_actor_rbac(actor)
 
         stmt = (
             select(FeedPost)
@@ -897,8 +1330,7 @@ class FeedService:
                 selectinload(FeedPost.targeted_departments),
             )
         )
-        res = await self.session.execute(stmt)
-        post = res.scalar_one_or_none()
+        post = (await self.session.execute(stmt)).scalar_one_or_none()
         if not post:
             raise NotFoundException("Feed post not found.")
 
@@ -907,13 +1339,6 @@ class FeedService:
 
         if not await self._can_actor_view_post(actor, post):
             raise ForbiddenException("You do not have access to this announcement.")
-
-        # Capture post variables before commit to avoid detached instance attribute access
-        post_id = post.id
-        post_author_id = post.author_id
-        post_title = post.title
-        post_audience_type = post.audience_type
-        allowed_recipients = {r.recipient_id for r in (post.recipients or [])}
 
         comment = FeedPostComment(
             post_id=post.id,
@@ -924,30 +1349,31 @@ class FeedService:
         await self.session.flush()
         await self.session.commit()
 
-        await self._notify_comment_added(
-            post_id=post_id,
-            post_author_id=post_author_id,
-            post_title=post_title,
-            post_audience_type=post_audience_type,
-            allowed_recipients=allowed_recipients,
-            comment_content=content_clean,
-            commenter=actor,
-        )
+        await self._notify_comment_added(post=post, comment_content=content_clean, commenter=actor)
 
         c_stmt = (
             select(FeedPostComment)
             .where(FeedPostComment.id == comment.id)
             .options(selectinload(FeedPostComment.author))
         )
-        c_res = await self.session.execute(c_stmt)
-        saved_comment = c_res.scalar_one()
-
-        return self._build_comment_read(saved_comment, actor)
+        saved_comment = (await self.session.execute(c_stmt)).scalar_one()
+        return self._build_comment_read(saved_comment, actor, raw_perms, denies)
 
     async def list_comments(
-        self, actor: CurrentUser, post_id: uuid.UUID
+        self,
+        actor: CurrentUser,
+        post_id: uuid.UUID,
+        page: int = 1,
+        page_size: int = 50,
     ) -> FeedCommentListResponse:
-        """List active comments for a published feed announcement."""
+        """List active comments for a published feed announcement with bounded pagination."""
+        if page < 1:
+            raise ValidationException("Page number must be at least 1.")
+        bounded_size = max(1, min(page_size, 100))
+
+        await self._require_permission(actor, "feed.view")
+        raw_perms, denies = await self._get_actor_rbac(actor)
+
         stmt = (
             select(FeedPost)
             .where(FeedPost.id == post_id, FeedPost.deleted_at.is_(None))
@@ -956,33 +1382,70 @@ class FeedService:
                 selectinload(FeedPost.targeted_departments),
             )
         )
-        res = await self.session.execute(stmt)
-        post = res.scalar_one_or_none()
+        post = (await self.session.execute(stmt)).scalar_one_or_none()
         if not post:
             raise NotFoundException("Feed post not found.")
 
         if not await self._can_actor_view_post(actor, post):
             raise ForbiddenException("You do not have access to this announcement.")
 
+        count_stmt = select(func.count(FeedPostComment.id)).where(
+            FeedPostComment.post_id == post_id,
+            FeedPostComment.deleted_at.is_(None),
+        )
+        total = int((await self.session.execute(count_stmt)).scalar_one() or 0)
+        total_pages = math.ceil(total / bounded_size) if total > 0 else 1
+
         c_stmt = (
             select(FeedPostComment)
             .where(FeedPostComment.post_id == post_id, FeedPostComment.deleted_at.is_(None))
-            .order_by(FeedPostComment.created_at.asc())
+            .order_by(FeedPostComment.created_at.asc(), FeedPostComment.id.asc())
+            .offset((page - 1) * bounded_size)
+            .limit(bounded_size)
             .options(selectinload(FeedPostComment.author))
         )
-        c_res = await self.session.execute(c_stmt)
-        comments = list(c_res.scalars().all())
+        comments = list((await self.session.execute(c_stmt)).scalars().all())
+        items = [self._build_comment_read(c, actor, raw_perms, denies) for c in comments]
 
-        items = [self._build_comment_read(c, actor) for c in comments]
-        return FeedCommentListResponse(items=items, total=len(items))
+        return FeedCommentListResponse(
+            items=items,
+            total=total,
+            page=page,
+            page_size=bounded_size,
+            total_pages=total_pages,
+            has_more=(page < total_pages),
+        )
 
     async def update_comment(
         self, actor: CurrentUser, post_id: uuid.UUID, comment_id: uuid.UUID, data: FeedCommentUpdate
     ) -> FeedCommentRead:
-        """Update an existing comment. Only the author may edit."""
-        content_clean = data.content.strip()
+        """Update an existing comment after revalidating active post visibility and author ownership."""
+        content_clean = data.content.strip() if data.content else ""
         if not content_clean:
             raise ValidationException("Comment content cannot be empty.")
+        if len(data.content) > MAX_FEED_COMMENT_LENGTH:
+            raise ValidationException(
+                f"Comment content must not exceed {MAX_FEED_COMMENT_LENGTH:,} characters."
+            )
+
+        await self._require_permission(actor, "feed.create")
+        raw_perms, denies = await self._get_actor_rbac(actor)
+
+        post_stmt = (
+            select(FeedPost)
+            .where(FeedPost.id == post_id, FeedPost.deleted_at.is_(None))
+            .options(
+                selectinload(FeedPost.recipients),
+                selectinload(FeedPost.targeted_departments),
+            )
+        )
+        post = (await self.session.execute(post_stmt)).scalar_one_or_none()
+        if not post:
+            raise NotFoundException("Feed post not found.")
+        if post.status != FeedPostStatus.PUBLISHED.value:
+            raise BadRequestException("Cannot edit comments on an unpublished post.")
+        if not await self._can_actor_view_post(actor, post):
+            raise ForbiddenException("You do not have access to this announcement.")
 
         c_stmt = (
             select(FeedPostComment)
@@ -991,9 +1454,9 @@ class FeedService:
                 FeedPostComment.post_id == post_id,
                 FeedPostComment.deleted_at.is_(None),
             )
+            .options(selectinload(FeedPostComment.author))
         )
-        c_res = await self.session.execute(c_stmt)
-        comment = c_res.scalar_one_or_none()
+        comment = (await self.session.execute(c_stmt)).scalar_one_or_none()
         if not comment:
             raise NotFoundException("Comment not found.")
 
@@ -1004,35 +1467,68 @@ class FeedService:
         comment.updated_at = datetime.now(timezone.utc)
         await self.session.commit()
 
-        return self._build_comment_read(comment, actor)
+        return self._build_comment_read(comment, actor, raw_perms, denies)
 
     async def delete_comment(
         self, actor: CurrentUser, post_id: uuid.UUID, comment_id: uuid.UUID
     ) -> None:
-        """Soft-delete a comment. Only the comment author can delete."""
-        c_stmt = (
-            select(FeedPostComment)
-            .where(
-                FeedPostComment.id == comment_id,
-                FeedPostComment.post_id == post_id,
-                FeedPostComment.deleted_at.is_(None),
+        """
+        Soft-delete a comment after revalidating parent post state/visibility.
+        Authorized for the comment author (`feed.create` or `feed.manage`) or a
+        Feed moderator (`feed.manage`), matching `FeedCommentRead.can_delete`.
+        """
+        await self._require_any_permission(actor, "feed.create", "feed.manage")
+        raw_perms, denies = await self._get_actor_rbac(actor)
+
+        post_stmt = (
+            select(FeedPost)
+            .where(FeedPost.id == post_id, FeedPost.deleted_at.is_(None))
+            .options(
+                selectinload(FeedPost.recipients),
+                selectinload(FeedPost.targeted_departments),
             )
         )
-        c_res = await self.session.execute(c_stmt)
-        comment = c_res.scalar_one_or_none()
+        post = (await self.session.execute(post_stmt)).scalar_one_or_none()
+        if not post:
+            raise NotFoundException("Feed post not found.")
+        if post.status != FeedPostStatus.PUBLISHED.value:
+            raise BadRequestException("Cannot delete comments on an unpublished post.")
+        if not await self._can_actor_view_post(actor, post):
+            raise ForbiddenException("You do not have access to this announcement.")
+
+        c_stmt = select(FeedPostComment).where(
+            FeedPostComment.id == comment_id,
+            FeedPostComment.post_id == post_id,
+            FeedPostComment.deleted_at.is_(None),
+        )
+        comment = (await self.session.execute(c_stmt)).scalar_one_or_none()
         if not comment:
             raise NotFoundException("Comment not found.")
 
-        if comment.author_id != actor.id:
+        if not self._can_actor_delete_comment(comment, actor, raw_perms, denies):
             raise ForbiddenException("You are not authorized to delete this comment.")
 
+        old_snippet = comment.content[:100]
         comment.deleted_at = datetime.now(timezone.utc)
+
+        if old_snippet and self._is_real_db_session():
+            post_link = f"/feed?post_id={post_id}"
+            await self.session.execute(
+                update(Notification)
+                .where(
+                    Notification.link == post_link,
+                    Notification.type.in_(["feed_comment", "feed_discussion"]),
+                    Notification.message.contains(old_snippet),
+                )
+                .values(message="A comment on this announcement was removed.")
+            )
+
         await self.session.commit()
 
     async def toggle_reaction(
         self, actor: CurrentUser, post_id: uuid.UUID, data: FeedReactionToggle
     ) -> FeedReactionSummary:
-        """Toggle a reaction on an announcement (LIKE, CELEBRATE, SUPPORT)."""
+        """Concurrency-safe reaction toggle on an accessible published post."""
         rx_type = data.reaction_type.strip().upper()
         if rx_type not in (
             FeedReactionType.LIKE.value,
@@ -1043,6 +1539,8 @@ class FeedService:
                 f"Invalid reaction type '{data.reaction_type}'. Must be LIKE, CELEBRATE, or SUPPORT."
             )
 
+        await self._require_permission(actor, "feed.create")
+
         stmt = (
             select(FeedPost)
             .where(FeedPost.id == post_id, FeedPost.deleted_at.is_(None))
@@ -1051,8 +1549,7 @@ class FeedService:
                 selectinload(FeedPost.targeted_departments),
             )
         )
-        res = await self.session.execute(stmt)
-        post = res.scalar_one_or_none()
+        post = (await self.session.execute(stmt)).scalar_one_or_none()
         if not post:
             raise NotFoundException("Feed post not found.")
 
@@ -1062,24 +1559,40 @@ class FeedService:
         if not await self._can_actor_view_post(actor, post):
             raise ForbiddenException("You do not have access to this announcement.")
 
-        r_stmt = select(FeedPostReaction).where(
-            FeedPostReaction.post_id == post_id, FeedPostReaction.user_id == actor.id
+        # Serialize concurrent reaction toggles for the same (post_id, user_id)
+        await self._pg_advisory_xact_lock(f"feed_rx:{post_id}:{actor.id}")
+
+        r_stmt = (
+            select(FeedPostReaction)
+            .where(FeedPostReaction.post_id == post_id, FeedPostReaction.user_id == actor.id)
+            .with_for_update()
         )
-        r_res = await self.session.execute(r_stmt)
-        existing = r_res.scalar_one_or_none()
+        existing = (await self.session.execute(r_stmt)).scalar_one_or_none()
 
         if existing:
             if existing.reaction_type == rx_type:
                 await self.session.delete(existing)
             else:
                 existing.reaction_type = rx_type
+            await self.session.flush()
         else:
-            new_rx = FeedPostReaction(
-                post_id=post_id,
-                user_id=actor.id,
-                reaction_type=rx_type,
-            )
-            self.session.add(new_rx)
+            try:
+                async with self.session.begin_nested():
+                    new_rx = FeedPostReaction(
+                        post_id=post_id,
+                        user_id=actor.id,
+                        reaction_type=rx_type,
+                    )
+                    self.session.add(new_rx)
+                    await self.session.flush()
+            except IntegrityError:
+                existing_retry = (await self.session.execute(r_stmt)).scalar_one_or_none()
+                if existing_retry:
+                    if existing_retry.reaction_type == rx_type:
+                        await self.session.delete(existing_retry)
+                    else:
+                        existing_retry.reaction_type = rx_type
+                    await self.session.flush()
 
         await self.session.commit()
         return await self.get_reactions_summary(post_id, actor.id)
@@ -1093,14 +1606,12 @@ class FeedService:
             .where(FeedPostReaction.post_id == post_id)
             .group_by(FeedPostReaction.reaction_type)
         )
-        res = await self.session.execute(stmt)
-        counts_dict = dict(res.all())
+        counts_dict = dict((await self.session.execute(stmt)).all())
 
         user_rx_stmt = select(FeedPostReaction.reaction_type).where(
             FeedPostReaction.post_id == post_id, FeedPostReaction.user_id == user_id
         )
-        user_rx_res = await self.session.execute(user_rx_stmt)
-        user_rx = user_rx_res.scalar_one_or_none()
+        user_rx = (await self.session.execute(user_rx_stmt)).scalar_one_or_none()
 
         l_cnt = counts_dict.get(FeedReactionType.LIKE.value, 0)
         c_cnt = counts_dict.get(FeedReactionType.CELEBRATE.value, 0)
@@ -1117,7 +1628,9 @@ class FeedService:
         )
 
     async def mark_as_read(self, actor: CurrentUser, post_id: uuid.UUID) -> dict[str, Any]:
-        """Mark an announcement as read by the current user."""
+        """Concurrency-safe mark-as-read on an accessible published post."""
+        await self._require_permission(actor, "feed.view")
+
         stmt = (
             select(FeedPost)
             .where(FeedPost.id == post_id, FeedPost.deleted_at.is_(None))
@@ -1126,8 +1639,7 @@ class FeedService:
                 selectinload(FeedPost.targeted_departments),
             )
         )
-        res = await self.session.execute(stmt)
-        post = res.scalar_one_or_none()
+        post = (await self.session.execute(stmt)).scalar_one_or_none()
         if not post:
             raise NotFoundException("Feed post not found.")
 
@@ -1137,38 +1649,34 @@ class FeedService:
         if not await self._can_actor_view_post(actor, post):
             raise ForbiddenException("You do not have access to this announcement.")
 
-        chk_stmt = select(FeedPostReadRecord).where(
+        chk_stmt = select(FeedPostReadRecord.id).where(
             FeedPostReadRecord.post_id == post_id, FeedPostReadRecord.user_id == actor.id
         )
-        chk_res = await self.session.execute(chk_stmt)
-        existing = chk_res.scalar_one_or_none()
-        if not existing:
-            read_rec = FeedPostReadRecord(post_id=post_id, user_id=actor.id)
-            self.session.add(read_rec)
+        existing = (await self.session.execute(chk_stmt)).scalar_one_or_none()
+        if existing is None:
             try:
+                async with self.session.begin_nested():
+                    self.session.add(FeedPostReadRecord(post_id=post_id, user_id=actor.id))
+                    await self.session.flush()
                 await self.session.commit()
-            except Exception:
-                await self.session.rollback()
+            except IntegrityError:
+                pass
 
         return {"post_id": str(post_id), "is_read": True}
 
     async def get_readership(
         self, actor: CurrentUser, post_id: uuid.UUID
     ) -> FeedReadershipResponse:
-        """
-        Get announcement readership details.
-        Strict privacy: Accessible only to the post author.
-        """
+        """Retrieve announcement readership details (strictly author-only)."""
+        await self._require_permission(actor, "feed.view")
+
         stmt = select(FeedPost).where(FeedPost.id == post_id, FeedPost.deleted_at.is_(None))
-        res = await self.session.execute(stmt)
-        post = res.scalar_one_or_none()
+        post = (await self.session.execute(stmt)).scalar_one_or_none()
         if not post:
             raise NotFoundException("Feed post not found.")
 
         if post.author_id != actor.id:
-            raise ForbiddenException(
-                "Only the post author can view announcement readership."
-            )
+            raise ForbiddenException("Only the post author can view announcement readership.")
 
         r_stmt = (
             select(FeedPostReadRecord)
@@ -1176,8 +1684,7 @@ class FeedService:
             .order_by(FeedPostReadRecord.read_at.desc())
             .options(selectinload(FeedPostReadRecord.user))
         )
-        r_res = await self.session.execute(r_stmt)
-        records = list(r_res.scalars().all())
+        records = list((await self.session.execute(r_stmt)).scalars().all())
 
         readers = [
             FeedReaderRead(
@@ -1198,36 +1705,64 @@ class FeedService:
         )
 
     # ==========================================================================
-    # Employee-to-Employee Direct Messaging Service Methods
+    # Employee-to-Employee 1:1 Direct Messaging Service Methods
     # ==========================================================================
 
     async def _get_users_department_map(self, user_ids: Sequence[uuid.UUID]) -> dict[uuid.UUID, str]:
-        """Fetch primary department names for the given users."""
-        if not user_ids:
+        if not user_ids or not self._is_real_db_session():
             return {}
         clean_ids = [uid for uid in user_ids if uid is not None]
         if not clean_ids:
             return {}
         role_stmt = (
             select(UserRole.user_id, Role.name, UserRole.is_primary)
-            .join(Role, (Role.id == UserRole.role_id) & (Role.deleted_at.is_(None)))
+            .join(
+                Role,
+                and_(
+                    Role.id == UserRole.role_id,
+                    Role.deleted_at.is_(None),
+                    Role.is_system.is_(False),
+                ),
+            )
             .where(
                 UserRole.user_id.in_(clean_ids),
-                UserRole.status == RoleAssignmentStatus.ACTIVE,
+                *self._active_user_role_clauses(),
             )
             .order_by(UserRole.is_primary.desc())
         )
-        role_res = await self.session.execute(role_stmt)
         user_dept_map: dict[uuid.UUID, str] = {}
-        for uid, rname, is_pri in role_res.all():
+        for uid, rname, is_pri in (await self.session.execute(role_stmt)).all():
             if uid not in user_dept_map or is_pri:
                 user_dept_map[uid] = rname
         return user_dept_map
 
+    @staticmethod
+    def _build_direct_message_read(m: FeedDirectMessage, actor_id: uuid.UUID) -> DirectMessageRead:
+        sender_author = FeedAuthorRead(
+            id=m.sender.id,
+            display_name=m.sender.display_name,
+            full_name=m.sender.full_name,
+            email=m.sender.email,
+            employee_code=m.sender.employee_code,
+            profile_picture_url=m.sender.profile_picture_url,
+        )
+        return DirectMessageRead(
+            id=m.id,
+            conversation_id=m.conversation_id,
+            sender_id=m.sender_id,
+            sender=sender_author,
+            sender_display_name=m.sender.display_name or m.sender.full_name,
+            sender_email=m.sender.email,
+            content=m.content,
+            is_sender=(m.sender_id == actor_id),
+            is_edited=bool(m.updated_at is not None and m.created_at is not None and m.updated_at > m.created_at),
+            created_at=m.created_at,
+            updated_at=m.updated_at,
+        )
+
     async def _build_conversation_read(
         self, conv: FeedConversation, current_user_id: uuid.UUID
     ) -> ConversationRead:
-        """Convert a FeedConversation model into a ConversationRead schema."""
         user_ids = [p.user_id for p in (conv.participants or [])]
         dept_map = await self._get_users_department_map(user_ids)
 
@@ -1270,117 +1805,181 @@ class FeedService:
         self, actor: CurrentUser, recipient_id: uuid.UUID
     ) -> ConversationRead:
         """
-        Start or retrieve a direct conversation between actor and recipient.
-        Strictly enforces that self-conversations are prohibited and recipient must be an active employee.
+        Concurrency-safe canonical 1:1 conversation lookup/creation.
+        Enforces `feed.create`, rejects self-chat and inactive/`has_login=False` targets,
+        and serializes concurrent pair creation via PostgreSQL advisory lock + unique index.
         """
+        await self._require_permission(actor, "feed.create")
+
         if actor.id == recipient_id:
             raise BadRequestException("Cannot start a conversation with yourself.")
 
-        recip_stmt = select(User).where(
-            User.id == recipient_id,
-            User.deleted_at.is_(None),
-            User.status == UserStatus.ACTIVE,
-        )
-        recip_res = await self.session.execute(recip_stmt)
-        recipient = recip_res.scalar_one_or_none()
-        if not recipient:
-            raise NotFoundException("Recipient employee not found or inactive.")
-
-        # Find existing conversation with both participants
-        p1 = select(FeedConversationParticipant.conversation_id).where(
-            FeedConversationParticipant.user_id == actor.id
-        )
-        p2 = select(FeedConversationParticipant.conversation_id).where(
-            FeedConversationParticipant.user_id == recipient_id
-        )
-
-        conv_stmt = (
-            select(FeedConversation)
-            .where(
-                FeedConversation.id.in_(p1),
-                FeedConversation.id.in_(p2),
-                FeedConversation.deleted_at.is_(None),
+        user_row = (
+            await self.session.execute(
+                select(User).where(User.id == recipient_id, User.deleted_at.is_(None))
             )
-            .options(
-                selectinload(FeedConversation.participants).selectinload(FeedConversationParticipant.user),
+        ).scalar_one_or_none()
+        if not user_row:
+            raise NotFoundException("Recipient employee not found.")
+        if (
+            not user_row.has_login
+            or not user_row.is_active
+            or user_row.status != UserStatus.ACTIVE
+        ):
+            raise BadRequestException(
+                "Selected workforce record is inactive or does not have ERP login access."
             )
-        )
-        conv_res = await self.session.execute(conv_stmt)
-        conv = conv_res.scalar_one_or_none()
 
+        low_id, high_id = _canonical_pair(actor.id, recipient_id)
+        await self._pg_advisory_xact_lock(f"feed_dm_pair:{low_id}:{high_id}")
+
+        def _pair_select():
+            p1 = select(FeedConversationParticipant.conversation_id).where(
+                FeedConversationParticipant.user_id == low_id
+            )
+            p2 = select(FeedConversationParticipant.conversation_id).where(
+                FeedConversationParticipant.user_id == high_id
+            )
+            return (
+                select(FeedConversation)
+                .where(
+                    FeedConversation.deleted_at.is_(None),
+                    or_(
+                        and_(
+                            FeedConversation.participant_low_id == low_id,
+                            FeedConversation.participant_high_id == high_id,
+                        ),
+                        and_(
+                            FeedConversation.id.in_(p1),
+                            FeedConversation.id.in_(p2),
+                        ),
+                    ),
+                )
+                .order_by(FeedConversation.created_at.asc(), FeedConversation.id.asc())
+                .limit(1)
+                .options(
+                    selectinload(FeedConversation.participants).selectinload(
+                        FeedConversationParticipant.user
+                    ),
+                )
+            )
+
+        conv = (await self.session.execute(_pair_select())).scalar_one_or_none()
         if conv is not None:
+            if conv.participant_low_id != low_id or conv.participant_high_id != high_id:
+                conv.participant_low_id = low_id
+                conv.participant_high_id = high_id
+                await self.session.commit()
             return await self._build_conversation_read(conv, actor.id)
 
-        # Create new conversation
         now_utc = datetime.now(timezone.utc)
-        new_conv = FeedConversation(
-            id=uuid.uuid4(),
-            last_message_at=None,
-            last_message_preview=None,
-            last_message_sender_id=None,
-            created_at=now_utc,
-            updated_at=now_utc,
-        )
-        self.session.add(new_conv)
-        await self.session.flush()
+        created_id: uuid.UUID | None = None
+        try:
+            async with self.session.begin_nested():
+                new_conv = FeedConversation(
+                    id=uuid.uuid4(),
+                    participant_low_id=low_id,
+                    participant_high_id=high_id,
+                    last_message_at=None,
+                    last_message_preview=None,
+                    last_message_sender_id=None,
+                    created_at=now_utc,
+                    updated_at=now_utc,
+                )
+                self.session.add(new_conv)
+                await self.session.flush()
+                self.session.add_all(
+                    [
+                        FeedConversationParticipant(
+                            conversation_id=new_conv.id,
+                            user_id=actor.id,
+                            unread_count=0,
+                            created_at=now_utc,
+                        ),
+                        FeedConversationParticipant(
+                            conversation_id=new_conv.id,
+                            user_id=recipient_id,
+                            unread_count=0,
+                            created_at=now_utc,
+                        ),
+                    ]
+                )
+                await self.session.flush()
+                created_id = new_conv.id
+            await self.session.commit()
+        except IntegrityError:
+            pass
 
-        part_actor = FeedConversationParticipant(
-            conversation_id=new_conv.id,
-            user_id=actor.id,
-            unread_count=0,
-            created_at=now_utc,
-        )
-        part_recip = FeedConversationParticipant(
-            conversation_id=new_conv.id,
-            user_id=recipient_id,
-            unread_count=0,
-            created_at=now_utc,
-        )
-        self.session.add(part_actor)
-        self.session.add(part_recip)
-        await self.session.commit()
-
-        # Reload with relationships
-        reload_stmt = (
-            select(FeedConversation)
-            .where(FeedConversation.id == new_conv.id)
-            .options(
-                selectinload(FeedConversation.participants).selectinload(FeedConversationParticipant.user),
+        if created_id is not None:
+            reload_stmt = (
+                select(FeedConversation)
+                .where(FeedConversation.id == created_id)
+                .options(
+                    selectinload(FeedConversation.participants).selectinload(
+                        FeedConversationParticipant.user
+                    ),
+                )
             )
-        )
-        reload_res = await self.session.execute(reload_stmt)
-        loaded = reload_res.scalar_one()
-        return await self._build_conversation_read(loaded, actor.id)
+            loaded = (await self.session.execute(reload_stmt)).scalar_one()
+            return await self._build_conversation_read(loaded, actor.id)
 
-    async def list_conversations(self, actor: CurrentUser) -> ConversationListResponse:
-        """
-        List all direct conversations for the current employee.
-        Private conversations are strictly confined to participants; other users and admins cannot view.
-        """
+        winner = (await self.session.execute(_pair_select())).scalar_one()
+        return await self._build_conversation_read(winner, actor.id)
+
+    async def list_conversations(
+        self,
+        actor: CurrentUser,
+        page: int = 1,
+        page_size: int = 50,
+    ) -> ConversationListResponse:
+        """List active 1:1 conversations strictly where the caller is a participant."""
+        await self._require_permission(actor, "feed.view")
+
+        bounded_size = max(1, min(page_size, 100))
+        base_where = (
+            FeedConversation.deleted_at.is_(None),
+            FeedConversationParticipant.user_id == actor.id,
+        )
+        total_stmt = (
+            select(func.count(FeedConversation.id))
+            .join(
+                FeedConversationParticipant,
+                FeedConversationParticipant.conversation_id == FeedConversation.id,
+            )
+            .where(*base_where)
+        )
+        total = int((await self.session.execute(total_stmt)).scalar_one() or 0)
+
         stmt = (
             select(FeedConversation)
-            .join(FeedConversationParticipant, FeedConversationParticipant.conversation_id == FeedConversation.id)
-            .where(
-                FeedConversation.deleted_at.is_(None),
-                FeedConversationParticipant.user_id == actor.id,
+            .join(
+                FeedConversationParticipant,
+                FeedConversationParticipant.conversation_id == FeedConversation.id,
             )
-            .order_by(FeedConversation.last_message_at.desc().nullslast(), FeedConversation.created_at.desc())
+            .where(*base_where)
+            .order_by(
+                FeedConversation.last_message_at.desc().nullslast(),
+                FeedConversation.created_at.desc(),
+                FeedConversation.id.desc(),
+            )
+            .offset((max(1, page) - 1) * bounded_size)
+            .limit(bounded_size)
             .options(
-                selectinload(FeedConversation.participants).selectinload(FeedConversationParticipant.user),
+                selectinload(FeedConversation.participants).selectinload(
+                    FeedConversationParticipant.user
+                ),
             )
         )
-        res = await self.session.execute(stmt)
-        convs = list(res.scalars().all())
-
+        convs = list((await self.session.execute(stmt)).scalars().all())
         items = [await self._build_conversation_read(c, actor.id) for c in convs]
-        return ConversationListResponse(items=items, total=len(items))
+        return ConversationListResponse(items=items, total=total)
 
     async def get_conversation(
         self, actor: CurrentUser, conversation_id: uuid.UUID
     ) -> ConversationRead:
-        """
-        Get details of a specific conversation, strictly verifying participant membership.
-        """
+        """Get conversation details, strictly enforcing participant isolation."""
+        await self._require_permission(actor, "feed.view")
+
         stmt = (
             select(FeedConversation)
             .where(
@@ -1388,12 +1987,12 @@ class FeedService:
                 FeedConversation.deleted_at.is_(None),
             )
             .options(
-                selectinload(FeedConversation.participants).selectinload(FeedConversationParticipant.user),
+                selectinload(FeedConversation.participants).selectinload(
+                    FeedConversationParticipant.user
+                ),
             )
         )
-        res = await self.session.execute(stmt)
-        conv = res.scalar_one_or_none()
-
+        conv = (await self.session.execute(stmt)).scalar_one_or_none()
         if not conv:
             raise NotFoundException("Conversation not found.")
 
@@ -1404,87 +2003,102 @@ class FeedService:
         return await self._build_conversation_read(conv, actor.id)
 
     async def list_messages(
-        self, actor: CurrentUser, conversation_id: uuid.UUID, limit: int = 100
+        self,
+        actor: CurrentUser,
+        conversation_id: uuid.UUID,
+        page: int = 1,
+        page_size: int = 100,
     ) -> DirectMessageListResponse:
         """
-        List messages in a conversation.
-        Verifies participant membership and automatically clears unread count for current user.
+        List non-deleted messages in a conversation and race-safely mark the
+        conversation as read for the caller.
         """
-        # Verify access
-        part_stmt = select(FeedConversationParticipant).where(
-            FeedConversationParticipant.conversation_id == conversation_id,
-            FeedConversationParticipant.user_id == actor.id,
-        )
-        part_res = await self.session.execute(part_stmt)
-        participant = part_res.scalar_one_or_none()
+        await self._require_permission(actor, "feed.view")
 
-        if not participant:
-            raise ForbiddenException("You do not have access to this conversation.")
-
-        # Mark read
-        now_utc = datetime.now(timezone.utc)
-        participant.unread_count = 0
-        participant.last_read_at = now_utc
-        await self.session.commit()
-
-        # Query messages
-        msg_stmt = (
-            select(FeedDirectMessage)
-            .where(
-                FeedDirectMessage.conversation_id == conversation_id,
-                FeedDirectMessage.deleted_at.is_(None),
-            )
-            .order_by(FeedDirectMessage.created_at.asc())
-            .limit(limit)
-            .options(selectinload(FeedDirectMessage.sender))
-        )
-        msg_res = await self.session.execute(msg_stmt)
-        messages = list(msg_res.scalars().all())
-
-        items = [
-            DirectMessageRead(
-                id=m.id,
-                conversation_id=m.conversation_id,
-                sender_id=m.sender_id,
-                sender=FeedAuthorRead(
-                    id=m.sender.id,
-                    display_name=m.sender.display_name,
-                    full_name=m.sender.full_name,
-                    email=m.sender.email,
-                    employee_code=m.sender.employee_code,
-                    profile_picture_url=m.sender.profile_picture_url,
-                ),
-                content=m.content,
-                is_sender=(m.sender_id == actor.id),
-                is_edited=(m.updated_at is not None and m.created_at is not None and m.updated_at > m.created_at),
-                created_at=m.created_at,
-                updated_at=m.updated_at,
-            )
-            for m in messages
-        ]
-        return DirectMessageListResponse(items=items, total=len(items))
-
-    async def send_message(
-        self, actor: CurrentUser, conversation_id: uuid.UUID, data: DirectMessageCreate
-    ) -> DirectMessageRead:
-        """
-        Send a private message to a conversation.
-        Updates unread counter and notifies other participant via system notification.
-        """
-        # Verify participant
+        # Lock conversation row so mark-read is linearizable with concurrent send_message
         conv_stmt = (
             select(FeedConversation)
             .where(
                 FeedConversation.id == conversation_id,
                 FeedConversation.deleted_at.is_(None),
             )
-            .options(
-                selectinload(FeedConversation.participants),
-            )
+            .with_for_update()
         )
-        conv_res = await self.session.execute(conv_stmt)
-        conv = conv_res.scalar_one_or_none()
+        conv = (await self.session.execute(conv_stmt)).scalar_one_or_none()
+        if not conv:
+            raise NotFoundException("Conversation not found.")
 
+        part_stmt = select(FeedConversationParticipant).where(
+            FeedConversationParticipant.conversation_id == conversation_id,
+            FeedConversationParticipant.user_id == actor.id,
+        )
+        participant = (await self.session.execute(part_stmt)).scalar_one_or_none()
+        if not participant:
+            raise ForbiddenException("You do not have access to this conversation.")
+
+        now_utc = datetime.now(timezone.utc)
+        if conv.last_message_at is not None and now_utc < conv.last_message_at:
+            now_utc = conv.last_message_at
+
+        await self.session.execute(
+            update(FeedConversationParticipant)
+            .where(
+                FeedConversationParticipant.conversation_id == conversation_id,
+                FeedConversationParticipant.user_id == actor.id,
+            )
+            .values(unread_count=0, last_read_at=now_utc)
+        )
+        await self.session.commit()
+
+        bounded_size = max(1, min(page_size, 500))
+        total_stmt = select(func.count(FeedDirectMessage.id)).where(
+            FeedDirectMessage.conversation_id == conversation_id,
+            FeedDirectMessage.deleted_at.is_(None),
+        )
+        total = int((await self.session.execute(total_stmt)).scalar_one() or 0)
+
+        msg_stmt = (
+            select(FeedDirectMessage)
+            .where(
+                FeedDirectMessage.conversation_id == conversation_id,
+                FeedDirectMessage.deleted_at.is_(None),
+            )
+            .order_by(FeedDirectMessage.created_at.asc(), FeedDirectMessage.id.asc())
+            .offset((max(1, page) - 1) * bounded_size)
+            .limit(bounded_size)
+            .options(selectinload(FeedDirectMessage.sender))
+        )
+        messages = list((await self.session.execute(msg_stmt)).scalars().all())
+        items = [self._build_direct_message_read(m, actor.id) for m in messages]
+        return DirectMessageListResponse(items=items, total=total)
+
+    async def send_message(
+        self, actor: CurrentUser, conversation_id: uuid.UUID, data: DirectMessageCreate
+    ) -> DirectMessageRead:
+        """
+        Send a private message with atomic PostgreSQL `unread_count` increments
+        and linearizable ordering against concurrent `mark_conversation_read`.
+        """
+        clean_content = data.content.strip() if data.content else ""
+        if not clean_content:
+            raise ValidationException("Message content cannot be empty.")
+        if len(data.content) > MAX_DIRECT_MESSAGE_LENGTH:
+            raise ValidationException(
+                f"Message content must not exceed {MAX_DIRECT_MESSAGE_LENGTH:,} characters."
+            )
+
+        await self._require_permission(actor, "feed.create")
+
+        conv_stmt = (
+            select(FeedConversation)
+            .where(
+                FeedConversation.id == conversation_id,
+                FeedConversation.deleted_at.is_(None),
+            )
+            .with_for_update()
+            .options(selectinload(FeedConversation.participants))
+        )
+        conv = (await self.session.execute(conv_stmt)).scalar_one_or_none()
         if not conv:
             raise NotFoundException("Conversation not found.")
 
@@ -1492,11 +2106,14 @@ class FeedService:
         if not is_participant:
             raise ForbiddenException("You do not have access to this conversation.")
 
-        clean_content = data.content.strip()
-        if not clean_content:
-            raise ValidationException("Message content cannot be empty.")
-
         now_utc = datetime.now(timezone.utc)
+        max_existing_ts = conv.last_message_at
+        for p in conv.participants or []:
+            if p.last_read_at is not None and (max_existing_ts is None or p.last_read_at >= max_existing_ts):
+                max_existing_ts = p.last_read_at
+        if max_existing_ts is not None and now_utc <= max_existing_ts:
+            now_utc = max_existing_ts + timedelta(microseconds=1)
+
         message = FeedDirectMessage(
             id=uuid.uuid4(),
             conversation_id=conversation_id,
@@ -1505,168 +2122,242 @@ class FeedService:
             created_at=now_utc,
         )
         self.session.add(message)
+        await self.session.flush()
 
-        # Update conversation preview and participant unread counts
         conv.last_message_at = now_utc
         conv.last_message_preview = clean_content[:150]
         conv.last_message_sender_id = actor.id
         conv.updated_at = now_utc
 
-        recipient_ids_to_notify: list[uuid.UUID] = []
-        for p in conv.participants:
-            if p.user_id != actor.id:
-                p.unread_count += 1
-                recipient_ids_to_notify.append(p.user_id)
+        # Atomic SQL increment for recipient(s) only -- never read-modify-write in Python
+        await self.session.execute(
+            update(FeedConversationParticipant)
+            .where(
+                FeedConversationParticipant.conversation_id == conversation_id,
+                FeedConversationParticipant.user_id != actor.id,
+            )
+            .values(unread_count=FeedConversationParticipant.unread_count + 1)
+        )
 
+        recipient_ids_to_notify = [
+            p.user_id for p in (conv.participants or []) if p.user_id != actor.id
+        ]
         await self.session.commit()
 
-        # Send notification to intended recipient(s) without leaking message content
-        notif_service = NotificationService(NotificationRepository(self.session))
-        sender_name = (
-            getattr(actor, "display_name", None)
-            or getattr(actor, "full_name", None)
-            or getattr(actor, "username", "A colleague")
-        )
-        conv_link = f"/feed?tab=messages&conversation_id={conversation_id}"
-
-        for r_id in recipient_ids_to_notify:
+        # Notify eligible recipient(s) without embedding confidential DM plaintext
+        allowed_notify_ids = await self._filter_users_with_feed_view(set(recipient_ids_to_notify))
+        if allowed_notify_ids:
+            sender_name = (
+                getattr(actor, "display_name", None)
+                or getattr(actor, "full_name", None)
+                or getattr(actor, "username", "A colleague")
+            )
+            conv_link = f"/feed?tab=messages&conversation_id={conversation_id}"
             try:
-                await notif_service.notify_user(
-                    user_id=r_id,
-                    type="feed_message",
+                await self._batch_create_notifications(
+                    user_ids=list(allowed_notify_ids),
+                    notif_type="feed_message",
                     title=f"New message from {sender_name}",
                     message=f"{sender_name} sent you a private message.",
                     link=conv_link,
                 )
             except Exception:
-                pass
+                await self.session.rollback()
 
-        await self.session.commit()
-
-        # Reload with sender
         m_stmt = (
             select(FeedDirectMessage)
             .where(FeedDirectMessage.id == message.id)
             .options(selectinload(FeedDirectMessage.sender))
         )
-        m_res = await self.session.execute(m_stmt)
-        m_loaded = m_res.scalar_one()
+        m_loaded = (await self.session.execute(m_stmt)).scalar_one()
+        return self._build_direct_message_read(m_loaded, actor.id)
 
-        return DirectMessageRead(
-            id=m_loaded.id,
-            conversation_id=m_loaded.conversation_id,
-            sender_id=m_loaded.sender_id,
-            sender=FeedAuthorRead(
-                id=m_loaded.sender.id,
-                display_name=m_loaded.sender.display_name,
-                full_name=m_loaded.sender.full_name,
-                email=m_loaded.sender.email,
-                employee_code=m_loaded.sender.employee_code,
-                profile_picture_url=m_loaded.sender.profile_picture_url,
-            ),
-            content=m_loaded.content,
-            is_sender=True,
-            is_edited=False,
-            created_at=m_loaded.created_at,
-            updated_at=m_loaded.updated_at,
+    async def _recompute_conversation_preview_and_unread(self, conv: FeedConversation) -> None:
+        """Recompute `last_message_*` and participant `unread_count` from live non-deleted messages."""
+        latest_stmt = (
+            select(FeedDirectMessage)
+            .where(
+                FeedDirectMessage.conversation_id == conv.id,
+                FeedDirectMessage.deleted_at.is_(None),
+            )
+            .order_by(FeedDirectMessage.created_at.desc(), FeedDirectMessage.id.desc())
+            .limit(1)
         )
+        latest = (await self.session.execute(latest_stmt)).scalar_one_or_none()
+        if latest is not None:
+            conv.last_message_at = latest.created_at
+            conv.last_message_preview = latest.content[:150]
+            conv.last_message_sender_id = latest.sender_id
+        else:
+            conv.last_message_at = None
+            conv.last_message_preview = None
+            conv.last_message_sender_id = None
+        conv.updated_at = datetime.now(timezone.utc)
+
+        parts_stmt = select(FeedConversationParticipant).where(
+            FeedConversationParticipant.conversation_id == conv.id
+        )
+        participants = list((await self.session.execute(parts_stmt)).scalars().all())
+        for part in participants:
+            unread_clauses = [
+                FeedDirectMessage.conversation_id == conv.id,
+                FeedDirectMessage.deleted_at.is_(None),
+                FeedDirectMessage.sender_id != part.user_id,
+            ]
+            if part.last_read_at is not None:
+                unread_clauses.append(FeedDirectMessage.created_at > part.last_read_at)
+            cnt_stmt = select(func.count(FeedDirectMessage.id)).where(*unread_clauses)
+            part.unread_count = int((await self.session.execute(cnt_stmt)).scalar_one() or 0)
 
     async def update_message(
         self, actor: CurrentUser, message_id: uuid.UUID, data: DirectMessageUpdate
     ) -> DirectMessageRead:
-        """
-        Edit an existing message. Strictly verifies that only the sender can edit.
-        """
+        """Edit own private message and synchronize `last_message_preview` if needed."""
+        clean_content = data.content.strip() if data.content else ""
+        if not clean_content:
+            raise ValidationException("Message content cannot be empty.")
+        if len(data.content) > MAX_DIRECT_MESSAGE_LENGTH:
+            raise ValidationException(
+                f"Message content must not exceed {MAX_DIRECT_MESSAGE_LENGTH:,} characters."
+            )
+
+        await self._require_permission(actor, "feed.create")
+
         stmt = (
             select(FeedDirectMessage)
             .where(FeedDirectMessage.id == message_id, FeedDirectMessage.deleted_at.is_(None))
             .options(selectinload(FeedDirectMessage.sender))
         )
-        res = await self.session.execute(stmt)
-        msg = res.scalar_one_or_none()
-
+        msg = (await self.session.execute(stmt)).scalar_one_or_none()
         if not msg:
             raise NotFoundException("Message not found.")
 
         if msg.sender_id != actor.id:
             raise ForbiddenException("Only the sender can edit this message.")
 
-        clean_content = data.content.strip()
-        if not clean_content:
-            raise ValidationException("Message content cannot be empty.")
+        conv_stmt = (
+            select(FeedConversation)
+            .where(
+                FeedConversation.id == msg.conversation_id,
+                FeedConversation.deleted_at.is_(None),
+            )
+            .with_for_update()
+            .options(selectinload(FeedConversation.participants))
+        )
+        conv = (await self.session.execute(conv_stmt)).scalar_one_or_none()
+        if not conv:
+            raise NotFoundException("Conversation not found.")
+        if not any(p.user_id == actor.id for p in (conv.participants or [])):
+            raise ForbiddenException("You do not have access to this conversation.")
 
+        now_utc = datetime.now(timezone.utc)
+        if now_utc <= msg.created_at:
+            now_utc = msg.created_at + timedelta(microseconds=1)
         msg.content = clean_content
-        msg.updated_at = datetime.now(timezone.utc)
+        msg.updated_at = now_utc
+        await self.session.flush()
+
+        await self._recompute_conversation_preview_and_unread(conv)
         await self.session.commit()
 
-        return DirectMessageRead(
-            id=msg.id,
-            conversation_id=msg.conversation_id,
-            sender_id=msg.sender_id,
-            sender=FeedAuthorRead(
-                id=msg.sender.id,
-                display_name=msg.sender.display_name,
-                full_name=msg.sender.full_name,
-                email=msg.sender.email,
-                employee_code=msg.sender.employee_code,
-                profile_picture_url=msg.sender.profile_picture_url,
-            ),
-            content=msg.content,
-            is_sender=True,
-            is_edited=True,
-            created_at=msg.created_at,
-            updated_at=msg.updated_at,
-        )
+        return self._build_direct_message_read(msg, actor.id)
 
     async def delete_message(self, actor: CurrentUser, message_id: uuid.UUID) -> None:
         """
-        Soft-delete a message. Strictly verifies that only the sender can delete.
+        Soft-delete own direct message and immediately recompute
+        `conversation.last_message_preview` and participant unread counters so
+        deleted message plaintext never lingers in conversation summaries.
         """
-        stmt = (
-            select(FeedDirectMessage)
-            .where(FeedDirectMessage.id == message_id, FeedDirectMessage.deleted_at.is_(None))
-        )
-        res = await self.session.execute(stmt)
-        msg = res.scalar_one_or_none()
+        await self._require_any_permission(actor, "feed.create", "feed.view")
+        _, denies = await self._get_actor_rbac(actor)
+        if "feed.create" in denies:
+            raise ForbiddenException("Permission denied. Direct message modification is restricted.")
 
+        stmt = select(FeedDirectMessage).where(
+            FeedDirectMessage.id == message_id,
+            FeedDirectMessage.deleted_at.is_(None),
+        )
+        msg = (await self.session.execute(stmt)).scalar_one_or_none()
         if not msg:
             raise NotFoundException("Message not found.")
 
         if msg.sender_id != actor.id:
             raise ForbiddenException("Only the sender can delete this message.")
 
+        conv_stmt = (
+            select(FeedConversation)
+            .where(
+                FeedConversation.id == msg.conversation_id,
+                FeedConversation.deleted_at.is_(None),
+            )
+            .with_for_update()
+            .options(selectinload(FeedConversation.participants))
+        )
+        conv = (await self.session.execute(conv_stmt)).scalar_one_or_none()
+        if not conv:
+            raise NotFoundException("Conversation not found.")
+        if not any(p.user_id == actor.id for p in (conv.participants or [])):
+            raise ForbiddenException("You do not have access to this conversation.")
+
         msg.deleted_at = datetime.now(timezone.utc)
+        await self.session.flush()
+
+        await self._recompute_conversation_preview_and_unread(conv)
         await self.session.commit()
 
     async def mark_conversation_read(
         self, actor: CurrentUser, conversation_id: uuid.UUID
     ) -> None:
-        """Mark a conversation as read and reset its unread counter for the current user."""
-        stmt = select(FeedConversationParticipant).where(
+        """Race-safely mark a conversation as read under row lock."""
+        await self._require_permission(actor, "feed.view")
+
+        conv_stmt = (
+            select(FeedConversation)
+            .where(
+                FeedConversation.id == conversation_id,
+                FeedConversation.deleted_at.is_(None),
+            )
+            .with_for_update()
+        )
+        conv = (await self.session.execute(conv_stmt)).scalar_one_or_none()
+        if not conv:
+            raise NotFoundException("Conversation not found.")
+
+        part_stmt = select(FeedConversationParticipant.id).where(
             FeedConversationParticipant.conversation_id == conversation_id,
             FeedConversationParticipant.user_id == actor.id,
         )
-        res = await self.session.execute(stmt)
-        participant = res.scalar_one_or_none()
-
-        if not participant:
+        if (await self.session.execute(part_stmt)).scalar_one_or_none() is None:
             raise ForbiddenException("You do not have access to this conversation.")
 
-        participant.unread_count = 0
-        participant.last_read_at = datetime.now(timezone.utc)
+        now_utc = datetime.now(timezone.utc)
+        if conv.last_message_at is not None and now_utc < conv.last_message_at:
+            now_utc = conv.last_message_at
+
+        await self.session.execute(
+            update(FeedConversationParticipant)
+            .where(
+                FeedConversationParticipant.conversation_id == conversation_id,
+                FeedConversationParticipant.user_id == actor.id,
+            )
+            .values(unread_count=0, last_read_at=now_utc)
+        )
         await self.session.commit()
 
     async def get_unread_messages_count(self, actor: CurrentUser) -> int:
-        """Return the sum of unread direct messages across all conversations for the user."""
+        """Return sum of unread direct messages across active conversations for the user."""
+        await self._require_permission(actor, "feed.view")
+
         stmt = (
             select(func.coalesce(func.sum(FeedConversationParticipant.unread_count), 0))
-            .join(FeedConversation, FeedConversation.id == FeedConversationParticipant.conversation_id)
+            .join(
+                FeedConversation,
+                FeedConversation.id == FeedConversationParticipant.conversation_id,
+            )
             .where(
                 FeedConversationParticipant.user_id == actor.id,
                 FeedConversation.deleted_at.is_(None),
             )
         )
-        res = await self.session.execute(stmt)
-        count = res.scalar() or 0
+        count = (await self.session.execute(stmt)).scalar() or 0
         return int(count)
-

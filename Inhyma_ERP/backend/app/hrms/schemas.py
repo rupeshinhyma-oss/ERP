@@ -6,7 +6,7 @@ Request and response validation models for HRMS Setup endpoints.
 from __future__ import annotations
 
 import uuid
-from datetime import date, datetime
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 from pydantic import BaseModel, Field, ConfigDict, model_validator
 
@@ -764,7 +764,7 @@ class LeaveAdjustmentCreate(BaseModel):
     reason: str = Field(..., min_length=1, description="Audit reason for manual balance change")
     remarks: str | None = None
     effective_date: date | None = None
-    year: int = Field(default=2026)
+    year: int = Field(default_factory=lambda: datetime.now(timezone(timedelta(hours=5, minutes=30))).year)
 
 
 class LeaveAdjustmentHistoryRead(BaseModel):

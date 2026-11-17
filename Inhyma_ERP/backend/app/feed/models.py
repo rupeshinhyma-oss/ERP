@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import TYPE_CHECKING
 
-from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database.base import GUID, Base, SoftDeleteMixin, TimestampMixin, UUIDPrimaryKeyMixin, _utcnow
@@ -115,9 +115,13 @@ class FeedPost(Base, UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin):
 
 class FeedPostRecipient(Base, UUIDPrimaryKeyMixin):
     """
-    Selected recipient link for a feed post.
+    Explicitly selected individual recipient link for a feed post.
 
-    Only populated when post.audience_type == 'SELECTED'.
+    Only populated for explicitly chosen individual recipients when
+    ``post.audience_type == 'SELECTED'``. Department-targeted membership is
+    resolved dynamically from ``FeedPostDepartment`` + active ``UserRole``
+    assignments; historical pre-remediation department-snapshot rows carry
+    ``is_explicit=False`` and do not grant post access after transfer.
     """
 
     __tablename__ = "feed_post_recipients"
@@ -127,6 +131,9 @@ class FeedPostRecipient(Base, UUIDPrimaryKeyMixin):
     )
     recipient_id: Mapped[uuid.UUID] = mapped_column(
         GUID(), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    is_explicit: Mapped[bool] = mapped_column(
+        Boolean, default=True, server_default="true", nullable=False
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow, nullable=False
@@ -139,6 +146,7 @@ class FeedPostRecipient(Base, UUIDPrimaryKeyMixin):
     __table_args__ = (
         UniqueConstraint("post_id", "recipient_id", name="uq_feed_post_recipients_post_user"),
         Index("ix_feed_post_recipients_recipient_post", "recipient_id", "post_id"),
+        Index("ix_feed_post_recipients_post_explicit", "post_id", "is_explicit"),
     )
 
     def __repr__(self) -> str:
@@ -270,12 +278,18 @@ class FeedPostReadRecord(Base, UUIDPrimaryKeyMixin):
 
 class FeedConversation(Base, UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin):
     """
-    Direct messaging conversation thread between employees.
-    Strictly isolated to participants.
+    Direct messaging 1:1 conversation thread between employees.
+    Strictly isolated to participants with canonical ordered participant-pair identity.
     """
 
     __tablename__ = "feed_conversations"
 
+    participant_low_id: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(), ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    participant_high_id: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(), ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True
+    )
     last_message_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, index=True
     )
@@ -298,6 +312,22 @@ class FeedConversation(Base, UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixi
         cascade="all, delete-orphan",
         lazy="selectin",
         order_by="FeedDirectMessage.created_at",
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "participant_low_id IS NULL OR participant_high_id IS NULL OR participant_low_id <> participant_high_id",
+            name="ck_feed_conversations_pair_distinct",
+        ),
+        Index(
+            "uq_feed_conversations_active_pair",
+            "participant_low_id",
+            "participant_high_id",
+            unique=True,
+            postgresql_where=text(
+                "deleted_at IS NULL AND participant_low_id IS NOT NULL AND participant_high_id IS NOT NULL"
+            ),
+        ),
     )
 
     def __repr__(self) -> str:

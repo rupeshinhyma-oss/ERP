@@ -37,7 +37,7 @@ export const NAV_SECTIONS: NavSection[] = [
     label: "DASHBOARD",
     items: [
       { key: "dashboard", label: "Dashboard", path: "/dashboard", icon: "dashboard" },
-      { key: "feed", label: "Feed", path: "/feed", icon: "messageSquare" },
+      { key: "feed", label: "Feed", path: "/feed", icon: "messageSquare", permission: "feed.view" },
     ],
   },
   {

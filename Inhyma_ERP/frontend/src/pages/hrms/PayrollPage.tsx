@@ -270,32 +270,85 @@ export function PayrollPage() {
   const { profile, isSuperAdmin, hasPermission } = useAuth();
   const showToast = useToast();
 
-  // Check if current user is HR or Admin
-  const isAdmin = useMemo(() => {
+  // Explicit payroll RBAC flags aligned with backend HrmsUserContext (no broad username/user.view heuristics)
+  const explicitPerms = useMemo<string[]>(() => {
+    const raw = (profile as any)?.permissions;
+    return Array.isArray(raw) ? raw.map((p: any) => String(p)) : [];
+  }, [profile]);
+
+  const normalizedRoles = useMemo<string[]>(() => {
+    const out: string[] = [];
+    const singleRole = String((profile as any)?.role || "").trim().toLowerCase();
+    if (singleRole) out.push(singleRole);
+    if (Array.isArray(profile?.roles)) {
+      for (const r of profile.roles) {
+        const rn = String((r as any)?.name || r || "").trim().toLowerCase();
+        if (rn) out.push(rn);
+      }
+    }
+    return out;
+  }, [profile]);
+
+  const isTrueAdmin = useMemo(() => {
     return Boolean(
       isSuperAdmin ||
       hasPermission("*") ||
       hasPermission("admin") ||
-      hasPermission("hrms") ||
-      hasPermission("hrms.manage") ||
-      hasPermission("hrms.view") ||
-      hasPermission("hrms.update") ||
-      hasPermission("hrms.approve") ||
       hasPermission("hrms:admin") ||
-      hasPermission("hrms:payroll:manage") ||
-      hasPermission("user.view") ||
-      hasPermission("user.manage") ||
-      profile?.username === "admin" ||
-      profile?.username === "super_admin" ||
-      profile?.username === "hr" ||
-      String((profile as any)?.role || "").toLowerCase() === "hr" ||
-      String((profile as any)?.role || "").toLowerCase() === "admin" ||
-      profile?.roles?.some((r: any) => String(r.name || r).toLowerCase() === "hr" || String(r.name || r).toLowerCase() === "admin")
+      normalizedRoles.includes("admin") ||
+      normalizedRoles.includes("super_admin")
     );
-  }, [isSuperAdmin, hasPermission, profile]);
+  }, [isSuperAdmin, hasPermission, normalizedRoles]);
+
+  const canConfigureSalary = useMemo(() => {
+    if (explicitPerms.includes("deny:hrms.payroll") || explicitPerms.includes("block:hrms.payroll")) {
+      return false;
+    }
+    if (isTrueAdmin) return true;
+    if (explicitPerms.includes("deny:hrms.payroll.configure")) return false;
+    return Boolean(
+      hasPermission("hrms.payroll.configure") ||
+      hasPermission("hrms.manage") ||
+      hasPermission("hrms.setup") ||
+      hasPermission("hrms:payroll:manage")
+    );
+  }, [isTrueAdmin, hasPermission, explicitPerms]);
+
+  const canApprovePayroll = useMemo(() => {
+    if (explicitPerms.includes("deny:hrms.payroll") || explicitPerms.includes("block:hrms.payroll")) {
+      return false;
+    }
+    if (isTrueAdmin) return true;
+    if (explicitPerms.includes("deny:hrms.payroll.approve")) return false;
+    return Boolean(
+      hasPermission("hrms.payroll.approve") ||
+      hasPermission("hrms.approve") ||
+      hasPermission("hrms.manage") ||
+      hasPermission("hrms:payroll:manage")
+    );
+  }, [isTrueAdmin, hasPermission, explicitPerms]);
+
+  // Check if current user can access Payroll administrative/review tabs vs self-service My Payslips
+  const isAdmin = useMemo(() => {
+    if (explicitPerms.includes("deny:hrms.payroll") || explicitPerms.includes("block:hrms.payroll")) {
+      return false;
+    }
+    return Boolean(
+      isTrueAdmin ||
+      canConfigureSalary ||
+      canApprovePayroll ||
+      hasPermission("hrms.payroll") ||
+      hasPermission("hrms.payroll.view") ||
+      normalizedRoles.includes("hr") ||
+      normalizedRoles.includes("human_resources") ||
+      normalizedRoles.includes("department_manager")
+    );
+  }, [isTrueAdmin, canConfigureSalary, canApprovePayroll, hasPermission, normalizedRoles, explicitPerms]);
 
   // PRIMARY WORKFLOW TABS: Strictly 3 tabs for Admin
-  const [activeTab, setActiveTab] = useState<"setup" | "salary" | "monthly">("setup");
+  const [activeTab, setActiveTab] = useState<"setup" | "salary" | "monthly">(
+    canConfigureSalary ? "setup" : "monthly"
+  );
 
   // ---------------------------------------------------------------------------
   // TAB 1: Global Setup State (Configuration-Driven Earnings & Deductions)
@@ -606,7 +659,7 @@ export function PayrollPage() {
     if (!month || !/^\d{4}-\d{2}$/.test(month)) return;
     try {
       setLoadingPayroll(true);
-      const res = await apiGet<MonthlyPayrollRecord>(`/hrms/payroll/monthly/${month}?auto_calculate=true`);
+      const res = await apiGet<MonthlyPayrollRecord>(`/hrms/payroll/monthly/${month}`);
       setMonthlyPayroll(res.data);
     } catch {
       setMonthlyPayroll(null);
@@ -854,13 +907,15 @@ export function PayrollPage() {
   // Initial load hooks
   useEffect(() => {
     if (isAdmin) {
-      fetchComponents();
-      fetchSetupPreview(testAnnualCtc);
-      fetchEmployeeSalaries();
+      if (canConfigureSalary) {
+        fetchComponents();
+        fetchSetupPreview(testAnnualCtc);
+        fetchEmployeeSalaries();
+      }
     } else {
       fetchMyPayslips();
     }
-  }, [isAdmin, fetchComponents, fetchSetupPreview, testAnnualCtc, fetchEmployeeSalaries, fetchMyPayslips]);
+  }, [isAdmin, canConfigureSalary, fetchComponents, fetchSetupPreview, testAnnualCtc, fetchEmployeeSalaries, fetchMyPayslips]);
 
   useEffect(() => {
     if (isAdmin && activeTab === "monthly") {
@@ -1855,16 +1910,18 @@ export function PayrollPage() {
                   />
                 </div>
 
-                <button
-                  type="button"
-                  id="btn-calculate-payroll"
-                  className="btn btn-outline"
-                  disabled={calculating || (monthlyPayroll?.status === "APPROVED")}
-                  onClick={handleCalculatePayroll}
-                  style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}
-                >
-                  <IconRefresh /> {calculating ? "Calculating Attendance..." : "Generate / Recalculate Payroll"}
-                </button>
+                {canConfigureSalary && (
+                  <button
+                    type="button"
+                    id="btn-calculate-payroll"
+                    className="btn btn-outline"
+                    disabled={calculating || (monthlyPayroll?.status === "APPROVED")}
+                    onClick={handleCalculatePayroll}
+                    style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}
+                  >
+                    <IconRefresh /> {calculating ? "Calculating Attendance..." : "Generate / Recalculate Payroll"}
+                  </button>
+                )}
 
                 <button
                   type="button"
@@ -1913,8 +1970,11 @@ export function PayrollPage() {
                   </span>
                 )}
 
-                {/* Approve button when in REVIEW or PROCESSED or DRAFT */}
-                {monthlyPayroll && monthlyPayroll.status !== "APPROVED" && (
+                {/* Approve button when in REVIEW or PROCESSED or DRAFT (dual-control: hidden if approver's own payslip is in batch) */}
+                {canApprovePayroll &&
+                  monthlyPayroll &&
+                  monthlyPayroll.status !== "APPROVED" &&
+                  !monthlyPayroll.items?.some((it) => profile?.id && it.employee_id === profile.id) && (
                   <button
                     type="button"
                     id="btn-approve-payroll"
@@ -1935,7 +1995,7 @@ export function PayrollPage() {
                 )}
 
                 {/* Controlled Reopen button when APPROVED */}
-                {monthlyPayroll && monthlyPayroll.status === "APPROVED" && (
+                {canApprovePayroll && monthlyPayroll && monthlyPayroll.status === "APPROVED" && (
                   <button
                     type="button"
                     className="btn btn-outline"
@@ -2636,7 +2696,7 @@ export function PayrollPage() {
               </>
             ) : (
               <>
-                {viewingItem && viewingItem.status !== "APPROVED" ? (
+                {viewingItem && viewingItem.status !== "APPROVED" && canConfigureSalary && viewingItem.employee_id !== profile?.id ? (
                   <button
                     type="button"
                     className="btn btn-outline"

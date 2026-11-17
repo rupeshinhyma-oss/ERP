@@ -290,21 +290,36 @@ export function SiteVisitPage() {
     return fn;
   }, [showToast]);
 
-  // Role permissions
+  // Role permissions aligned with backend site_visit_routes.py (Admin, HR, Department Manager; no substring heuristics)
   const canManageVisits = useMemo(() => {
     if (!currentUser) return false;
     const perms = (currentUser.permissions as string[]) || [];
-    const uname = (currentUser.username || "").toLowerCase();
-    const role = (currentUser.role || "").toUpperCase();
+    if (perms.includes("deny:hrms.site_visits") || perms.includes("block:hrms.site_visits")) {
+      return false;
+    }
+    const role = String(currentUser.role || "").trim().toUpperCase();
+    const roleList = Array.isArray((currentUser as any).roles)
+      ? ((currentUser as any).roles as any[]).map((r) => String(r?.name || r || "").trim().toLowerCase())
+      : [];
     return (
       Boolean(currentUser.is_super_admin) ||
       role === "ADMIN" ||
+      role === "SUPER_ADMIN" ||
+      role === "HR" ||
+      role === "HUMAN_RESOURCES" ||
+      role === "DEPARTMENT_MANAGER" ||
+      roleList.includes("admin") ||
+      roleList.includes("super_admin") ||
+      roleList.includes("hr") ||
+      roleList.includes("human_resources") ||
+      roleList.includes("department_manager") ||
+      roleList.some((r) => r.includes("manager")) ||
       perms.includes("*") ||
+      perms.includes("admin") ||
       perms.includes("hrms.manage") ||
       perms.includes("hrms.approve") ||
       perms.includes("hrms:admin") ||
-      perms.includes("hrms:approve") ||
-      uname.includes("admin")
+      perms.includes("hrms:approve")
     );
   }, [currentUser]);
 
@@ -608,7 +623,7 @@ export function SiteVisitPage() {
     // 1. Clean up any ongoing acquisition attempt and timers
     if (activeWatchIdRef.current !== null) {
       try {
-        navigator.geolocation.clearWatch(activeWatchIdRef.current);
+        navigator?.geolocation?.clearWatch?.(activeWatchIdRef.current);
       } catch {}
       activeWatchIdRef.current = null;
     }
@@ -652,7 +667,7 @@ export function SiteVisitPage() {
     const cleanupAttempt = () => {
       if (activeWatchIdRef.current !== null) {
         try {
-          navigator.geolocation.clearWatch(activeWatchIdRef.current);
+          navigator?.geolocation?.clearWatch?.(activeWatchIdRef.current);
         } catch {}
         activeWatchIdRef.current = null;
       }
@@ -793,7 +808,7 @@ export function SiteVisitPage() {
       // Modal closed: clean up active watch and timeout
       if (activeWatchIdRef.current !== null) {
         try {
-          navigator.geolocation.clearWatch(activeWatchIdRef.current);
+          navigator?.geolocation?.clearWatch?.(activeWatchIdRef.current);
         } catch {}
         activeWatchIdRef.current = null;
       }

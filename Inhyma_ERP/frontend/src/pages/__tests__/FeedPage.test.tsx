@@ -196,16 +196,19 @@ describe("Feed & Broadcast Messaging — Phase 2 & 3 Frontend Tests", () => {
   /* 1. Navigation & RBAC Structure                                             */
   /* -------------------------------------------------------------------------- */
   describe("1. Navigation & RBAC Integration", () => {
-    it("ensures Feed navigation item is registered under DASHBOARD section with messageSquare icon", () => {
+    it("ensures Feed navigation item is registered under DASHBOARD section with feed.view permission", () => {
       const dashboardSection = NAV_SECTIONS.find((sec) => sec.label === "DASHBOARD");
       expect(dashboardSection).toBeDefined();
+
+      const feedItems = NAV_SECTIONS.flatMap((sec) => sec.items).filter((i) => i.key === "feed" || i.path === "/feed");
+      expect(feedItems.length).toBe(1);
 
       const feedItem = dashboardSection?.items.find((i) => i.key === "feed");
       expect(feedItem).toBeDefined();
       expect(feedItem?.path).toBe("/feed");
       expect(feedItem?.label).toBe("Feed");
       expect(feedItem?.icon).toBe("messageSquare");
-      expect(feedItem?.permission).toBeUndefined();
+      expect(feedItem?.permission).toBe("feed.view");
     });
 
     it("ensures PAGE_TITLES registers feed with descriptive title", () => {
@@ -796,11 +799,33 @@ describe("Feed & Broadcast Messaging — Phase 2 & 3 Frontend Tests", () => {
       expect(screen.queryByTestId("delete-post-post-2")).toBeNull();
     });
 
-    it("enforces author-only edit/delete and hides controls from administrator on other users' posts", async () => {
+    it("allows feed.manage moderator to delete published posts while keeping Edit strictly author-only, and hides Delete when feed.manage is absent", async () => {
       mockAuthState = {
-        profile: { id: "user-admin", display_name: "Admin User", email: "admin@example.com" },
-        isSuperAdmin: true,
-        hasPermission: () => true,
+        profile: { id: "user-moderator", display_name: "Moderator User", email: "mod@example.com" },
+        isSuperAdmin: false,
+        hasPermission: (perm: string) => ["feed.view", "feed.manage"].includes(perm),
+      };
+
+      const { unmount } = render(
+        <MemoryRouter initialEntries={["/feed"]}>
+          <FeedPage />
+        </MemoryRouter>
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText("Targeted Strategy Note")).toBeDefined();
+      });
+
+      // Moderator never sees Edit on another user's post, but DOES see Delete for moderation
+      expect(screen.queryByTestId("edit-post-post-2")).toBeNull();
+      expect(screen.getByTestId("delete-post-post-2")).toBeDefined();
+      unmount();
+
+      // Admin-labeled user WITHOUT feed.manage does NOT see Delete on another user's post
+      mockAuthState = {
+        profile: { id: "user-hr-admin", display_name: "HR Admin", email: "hradmin@example.com" },
+        isSuperAdmin: false,
+        hasPermission: (perm: string) => ["feed.view", "feed.create"].includes(perm),
       };
 
       render(
@@ -813,16 +838,32 @@ describe("Feed & Broadcast Messaging — Phase 2 & 3 Frontend Tests", () => {
         expect(screen.getByText("Targeted Strategy Note")).toBeDefined();
       });
 
-      // Admin does NOT see edit or delete buttons on post-2 because admin is not the author
       expect(screen.queryByTestId("edit-post-post-2")).toBeNull();
       expect(screen.queryByTestId("delete-post-post-2")).toBeNull();
     });
 
-    it("allows ordinary users without feed.create or feed.manage to see composer and publish", async () => {
+    it("blocks access when feed.view is missing/denied and hides composer when user has feed.view only", async () => {
       mockAuthState = {
-        profile: { id: "user-ordinary", display_name: "Ordinary Employee", email: "emp@example.com" },
+        profile: { id: "user-no-perms", display_name: "Restricted User", email: "restricted@example.com" },
         isSuperAdmin: false,
         hasPermission: () => false,
+      };
+
+      const { unmount } = render(
+        <MemoryRouter initialEntries={["/feed"]}>
+          <FeedPage />
+        </MemoryRouter>
+      );
+
+      expect(screen.getByTestId("feed-forbidden-state")).toBeDefined();
+      expect(feedApi.listPosts).not.toHaveBeenCalled();
+      unmount();
+
+      // User with feed.view ONLY sees announcements but NOT the composer
+      mockAuthState = {
+        profile: { id: "user-view-only", display_name: "Reader Employee", email: "reader@example.com" },
+        isSuperAdmin: false,
+        hasPermission: (perm: string) => perm === "feed.view",
       };
 
       render(
@@ -834,9 +875,7 @@ describe("Feed & Broadcast Messaging — Phase 2 & 3 Frontend Tests", () => {
       await waitFor(() => {
         expect(screen.getByText("Company Townhall Q4")).toBeDefined();
       });
-
-      // Ordinary employee CAN see the composer (open access for all authenticated employees)
-      expect(screen.getByTestId("feed-composer")).toBeDefined();
+      expect(screen.queryByTestId("feed-composer")).toBeNull();
     });
 
     it("opens Edit modal and submits update", async () => {
@@ -998,6 +1037,120 @@ describe("Feed & Broadcast Messaging — Phase 2 & 3 Frontend Tests", () => {
         expect(feedApi.getPost).toHaveBeenCalledWith("nonexistent-post");
         expect(mockToast).toHaveBeenCalledWith("The requested announcement could not be found or has been removed.", "error");
       });
+    });
+  });
+
+  describe("10. Pagination, Content Validation & Direct Messages Integration", () => {
+    it("renders multi-page pagination controls and fetches page 2 on Next click", async () => {
+      (feedApi.listPosts as any)
+        .mockResolvedValueOnce({
+          data: {
+            items: samplePosts,
+            total: 17,
+            page: 1,
+            page_size: 10,
+            total_pages: 2,
+          },
+        })
+        .mockResolvedValueOnce({
+          data: {
+            items: [samplePosts[0]],
+            total: 17,
+            page: 2,
+            page_size: 10,
+            total_pages: 2,
+          },
+        });
+
+      render(
+        <MemoryRouter initialEntries={["/feed"]}>
+          <FeedPage />
+        </MemoryRouter>
+      );
+
+      await waitFor(() => {
+        expect(screen.getByTestId("feed-pagination")).toBeDefined();
+        expect(screen.getByText(/Page 1 of 2/i)).toBeDefined();
+      });
+
+      const nextBtn = screen.getByRole("button", { name: "Next" });
+      expect((nextBtn as HTMLButtonElement).disabled).toBe(false);
+      fireEvent.click(nextBtn);
+
+      await waitFor(() => {
+        expect(feedApi.listPosts).toHaveBeenCalledWith({
+          page: 2,
+          page_size: 10,
+          search: undefined,
+        });
+        expect(screen.getByText(/Page 2 of 2/i)).toBeDefined();
+      });
+    });
+
+    it("mounts Direct Messages view when ?tab=messages&conversation_id=... deep-link is opened", async () => {
+      (feedApi.getUnreadDirectMessagesCount as any).mockResolvedValue({
+        data: { unread_count: 3 },
+      });
+      (feedApi.getConversation as any).mockResolvedValueOnce({
+        data: {
+          id: "conv-deep-42",
+          created_at: "2026-11-16T10:00:00Z",
+          updated_at: "2026-11-16T10:05:00Z",
+          unread_count: 1,
+          participants: [],
+          other_participant: {
+            user_id: "emp-101",
+            display_name: "Alice Developer",
+            email: "alice@example.com",
+            department_name: "Engineering",
+          },
+          last_message_preview: "Deep-linked message preview",
+          last_message_at: "2026-11-16T10:05:00Z",
+        },
+      });
+
+      render(
+        <MemoryRouter initialEntries={["/feed?tab=messages&conversation_id=conv-deep-42"]}>
+          <FeedPage />
+        </MemoryRouter>
+      );
+
+      await waitFor(() => {
+        expect(screen.getByTestId("feed-dm-container")).toBeDefined();
+        expect(feedApi.getConversation).toHaveBeenCalledWith("conv-deep-42");
+        expect(screen.getAllByText("Alice Developer").length).toBeGreaterThanOrEqual(1);
+        expect(screen.getByText("Deep-linked message preview")).toBeDefined();
+      });
+    });
+
+    it("rejects oversized post content (> 20,000 chars) and displays accurate privacy copy", async () => {
+      render(
+        <MemoryRouter initialEntries={["/feed"]}>
+          <FeedPage />
+        </MemoryRouter>
+      );
+
+      await waitFor(() => {
+        expect(screen.getByTestId("feed-composer")).toBeDefined();
+      });
+
+      fireEvent.click(screen.getByTestId("audience-dept-btn"));
+      expect(screen.queryByText(/and administrators/i)).toBeNull();
+      expect(
+        screen.getByText(/current members of targeted departments, explicitly selected recipients, and the author/i)
+      ).toBeDefined();
+
+      fireEvent.click(screen.getByTestId("audience-all-btn"));
+      fireEvent.change(screen.getByTestId("feed-composer-content"), {
+        target: { value: "Z".repeat(20001) },
+      });
+      fireEvent.click(screen.getByTestId("publish-btn"));
+
+      expect(mockToast).toHaveBeenCalledWith(
+        "Message content must not exceed 20,000 characters.",
+        "warning"
+      );
+      expect(feedApi.createPost).not.toHaveBeenCalled();
     });
   });
 });

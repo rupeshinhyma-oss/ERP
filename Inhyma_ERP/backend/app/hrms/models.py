@@ -11,7 +11,7 @@ Permanent PostgreSQL schema for:
 
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, timedelta, timezone
 import uuid
 from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Integer, JSON, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -389,7 +389,12 @@ class HrmsEmployeeLeaveBalance(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     leave_type_id: Mapped[uuid.UUID] = mapped_column(
         GUID(), ForeignKey("hrms_leave_types.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    year: Mapped[int] = mapped_column(Integer, default=2026, nullable=False, index=True)
+    year: Mapped[int] = mapped_column(
+        Integer,
+        default=lambda: datetime.now(timezone(timedelta(hours=5, minutes=30))).year,
+        nullable=False,
+        index=True,
+    )
     allocated: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
     consumed: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
     adjusted: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)

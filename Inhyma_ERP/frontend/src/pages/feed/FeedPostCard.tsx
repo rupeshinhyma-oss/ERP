@@ -1,11 +1,12 @@
 import { useState, useEffect } from "react";
-import type {
-  FeedPost,
-  FeedComment,
-  FeedReactionType,
-  FeedReactionSummary,
-  FeedReadershipResponse,
-  FeedCommentListResponse,
+import {
+  MAX_FEED_COMMENT_LENGTH,
+  type FeedPost,
+  type FeedComment,
+  type FeedReactionType,
+  type FeedReactionSummary,
+  type FeedReadershipResponse,
+  type FeedCommentListResponse,
 } from "@/types/feed";
 import { feedApi } from "@/lib/feedApi";
 import { useToast } from "@/lib/toast";
@@ -16,6 +17,7 @@ interface FeedPostCardProps {
   isHighlighted?: boolean;
   canEdit: boolean;
   canDelete: boolean;
+  canInteract?: boolean;
   onEdit: (post: FeedPost) => void;
   onDelete: (post: FeedPost) => void;
 }
@@ -25,6 +27,7 @@ export function FeedPostCard({
   isHighlighted,
   canEdit,
   canDelete,
+  canInteract = true,
   onEdit,
   onDelete,
 }: FeedPostCardProps) {
@@ -43,17 +46,20 @@ export function FeedPostCard({
   );
   const [isReacting, setIsReacting] = useState(false);
 
-  // Comments state
+  // Comments state & bounded pagination
   const [commentsCount, setCommentsCount] = useState<number>(post.comments_count || 0);
   const [isCommentsOpen, setIsCommentsOpen] = useState(false);
   const [comments, setComments] = useState<FeedComment[]>([]);
+  const [commentPage, setCommentPage] = useState<number>(1);
+  const [hasMoreComments, setHasMoreComments] = useState<boolean>(false);
   const [isLoadingComments, setIsLoadingComments] = useState(false);
+  const [isLoadingMoreComments, setIsLoadingMoreComments] = useState(false);
   const [newCommentText, setNewCommentText] = useState("");
   const [isSubmittingComment, setIsSubmittingComment] = useState(false);
   const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
   const [editingText, setEditingText] = useState("");
 
-  // Readership modal state (Author / Admin only)
+  // Readership modal state (Author only)
   const [isReadershipOpen, setIsReadershipOpen] = useState(false);
   const [readershipData, setReadershipData] = useState<FeedReadershipResponse | null>(null);
   const [isLoadingReadership, setIsLoadingReadership] = useState(false);
@@ -94,7 +100,8 @@ export function FeedPostCard({
   // Automatically mark as read if published and not yet read
   useEffect(() => {
     if (!isRead && !post.is_author && post.status === "PUBLISHED" && typeof feedApi.markAsRead === "function") {
-      feedApi.markAsRead(post.id)
+      feedApi
+        .markAsRead(post.id)
         .then(() => setIsRead(true))
         .catch(() => {
           // Silent catch for read status
@@ -104,7 +111,7 @@ export function FeedPostCard({
 
   // Handle reaction toggle
   const handleReaction = async (type: FeedReactionType) => {
-    if (isReacting || post.status !== "PUBLISHED") return;
+    if (!canInteract || isReacting || post.status !== "PUBLISHED") return;
     setIsReacting(true);
     try {
       const res = await feedApi.toggleReaction(post.id, type);
@@ -137,8 +144,12 @@ export function FeedPostCard({
       try {
         const res = await feedApi.listComments(post.id);
         const data: FeedCommentListResponse = (res as any)?.data ?? res;
-        setComments(Array.isArray(data?.items) ? data.items : []);
-        setCommentsCount(typeof data?.total === "number" ? data.total : (data?.items?.length ?? 0));
+        const items = Array.isArray(data?.items) ? data.items : [];
+        const total = typeof data?.total === "number" ? data.total : items.length;
+        setComments(items);
+        setCommentsCount(total);
+        setCommentPage(data?.page ?? 1);
+        setHasMoreComments(Boolean(data?.has_more) || items.length < total);
       } catch (err) {
         console.error("Failed to load comments:", err);
         showToast(errorMessage(err) || "Failed to load comments.", "error");
@@ -148,11 +159,44 @@ export function FeedPostCard({
     }
   };
 
+  // Load additional page of comments
+  const handleLoadMoreComments = async () => {
+    if (isLoadingMoreComments || !hasMoreComments) return;
+    const nextPage = commentPage + 1;
+    setIsLoadingMoreComments(true);
+    try {
+      const res = await feedApi.listComments(post.id, nextPage, 50);
+      const data: FeedCommentListResponse = (res as any)?.data ?? res;
+      const nextItems = Array.isArray(data?.items) ? data.items : [];
+      const total = typeof data?.total === "number" ? data.total : commentsCount;
+      setComments((prev) => {
+        const existingIds = new Set(prev.map((c) => c.id));
+        const merged = [...prev, ...nextItems.filter((c) => !existingIds.has(c.id))];
+        setHasMoreComments(Boolean(data?.has_more) || merged.length < total);
+        return merged;
+      });
+      setCommentsCount(total);
+      setCommentPage(nextPage);
+    } catch (err) {
+      showToast(errorMessage(err) || "Failed to load more comments.", "error");
+    } finally {
+      setIsLoadingMoreComments(false);
+    }
+  };
+
   // Submit comment
   const handleAddComment = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!canInteract) return;
     const content = newCommentText.trim();
     if (!content || isSubmittingComment) return;
+    if (newCommentText.length > MAX_FEED_COMMENT_LENGTH) {
+      showToast(
+        `Comment content must not exceed ${MAX_FEED_COMMENT_LENGTH.toLocaleString()} characters.`,
+        "warning"
+      );
+      return;
+    }
 
     setIsSubmittingComment(true);
     try {
@@ -175,6 +219,13 @@ export function FeedPostCard({
   const handleSaveEditComment = async (commentId: string) => {
     const content = editingText.trim();
     if (!content) return;
+    if (editingText.length > MAX_FEED_COMMENT_LENGTH) {
+      showToast(
+        `Comment content must not exceed ${MAX_FEED_COMMENT_LENGTH.toLocaleString()} characters.`,
+        "warning"
+      );
+      return;
+    }
     try {
       const res = await feedApi.updateComment(post.id, commentId, content);
       const updated: FeedComment = (res as any)?.data ?? res;
@@ -185,6 +236,8 @@ export function FeedPostCard({
     } catch (err) {
       console.error("Failed to update comment:", err);
       showToast(errorMessage(err) || "Failed to update comment.", "error");
+    } finally {
+      /* keep mounted state clean */
     }
   };
 
@@ -282,7 +335,7 @@ export function FeedPostCard({
             ) : (
               <>
                 <span className="feed-badge feed-badge-selected" title="Targeted broadcast" data-testid="audience-selected-badge">
-                  🎯 Selected ({recipientCount})
+                  🎯 Selected{recipientCount > 0 ? ` (${recipientCount})` : ""}
                 </span>
                 {post.targeted_departments && post.targeted_departments.length > 0 && (
                   <span className="feed-badge feed-badge-dept" title="Targeted Departments" data-testid="audience-dept-badge">
@@ -365,16 +418,21 @@ export function FeedPostCard({
           {post.is_author && recipientCount > 0 && (
             <>
               <div className="feed-post-recipients-title">
-                Delivered to {recipientCount} recipient{recipientCount === 1 ? "" : "s"}:
+                Explicitly selected {recipientCount} recipient{recipientCount === 1 ? "" : "s"}:
               </div>
               <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
                 {displayedRecipients?.map((rec) => {
-                  const name = rec.recipient?.display_name || rec.recipient?.full_name || "Employee";
-                  const code = rec.recipient?.employee_code;
-                  const dept = rec.recipient?.department_name;
+                  const name =
+                    rec.display_name ||
+                    rec.recipient?.display_name ||
+                    rec.full_name ||
+                    rec.recipient?.full_name ||
+                    "Employee";
+                  const code = rec.employee_code || rec.recipient?.employee_code;
+                  const dept = rec.department_name || rec.recipient?.department_name;
                   return (
                     <span
-                      key={rec.id}
+                      key={rec.id || rec.recipient_id}
                       style={{
                         display: "inline-flex",
                         alignItems: "center",
@@ -425,7 +483,8 @@ export function FeedPostCard({
               type="button"
               className={`feed-reaction-btn ${reactionUser === "LIKE" ? "feed-reaction-active" : ""}`}
               onClick={() => handleReaction("LIKE")}
-              title="Like"
+              disabled={!canInteract || isReacting}
+              title={canInteract ? "Like" : "Requires feed.create permission to react"}
               data-testid={`reaction-like-${post.id}`}
             >
               <span>👍</span>
@@ -441,7 +500,8 @@ export function FeedPostCard({
               type="button"
               className={`feed-reaction-btn ${reactionUser === "CELEBRATE" ? "feed-reaction-active" : ""}`}
               onClick={() => handleReaction("CELEBRATE")}
-              title="Celebrate"
+              disabled={!canInteract || isReacting}
+              title={canInteract ? "Celebrate" : "Requires feed.create permission to react"}
               data-testid={`reaction-celebrate-${post.id}`}
             >
               <span>🎉</span>
@@ -457,7 +517,8 @@ export function FeedPostCard({
               type="button"
               className={`feed-reaction-btn ${reactionUser === "SUPPORT" ? "feed-reaction-active" : ""}`}
               onClick={() => handleReaction("SUPPORT")}
-              title="Support"
+              disabled={!canInteract || isReacting}
+              title={canInteract ? "Support" : "Requires feed.create permission to react"}
               data-testid={`reaction-support-${post.id}`}
             >
               <span>❤️</span>
@@ -566,9 +627,9 @@ export function FeedPostCard({
                         </div>
                       )}
 
-                      {!isEditing && (comment.is_author || comment.can_delete) && (
+                      {!isEditing && ((comment.is_author && canInteract) || comment.can_delete) && (
                         <div className="feed-comment-actions">
-                          {comment.is_author && (
+                          {comment.is_author && canInteract && (
                             <button
                               type="button"
                               className="feed-comment-action-btn"
@@ -597,32 +658,51 @@ export function FeedPostCard({
                   </div>
                 );
               })}
+
+              {hasMoreComments && (
+                <div style={{ textAlign: "center", paddingTop: "4px" }}>
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    onClick={handleLoadMoreComments}
+                    disabled={isLoadingMoreComments}
+                    data-testid={`load-more-comments-${post.id}`}
+                    style={{ fontSize: "12px" }}
+                  >
+                    {isLoadingMoreComments
+                      ? "Loading more..."
+                      : `Load more comments (${Math.max(0, commentsCount - comments.length)} remaining)`}
+                  </button>
+                </div>
+              )}
             </div>
           )}
 
           {/* Add Comment Input Form */}
-          <form className="feed-comment-input-row" onSubmit={handleAddComment}>
-            <input
-              type="text"
-              className="feed-comment-input"
-              placeholder="Write a comment..."
-              value={newCommentText}
-              onChange={(e) => setNewCommentText(e.target.value)}
-              data-testid={`comment-input-${post.id}`}
-            />
-            <button
-              type="submit"
-              className="feed-comment-submit-btn"
-              disabled={!newCommentText.trim() || isSubmittingComment}
-              data-testid={`comment-submit-${post.id}`}
-            >
-              {isSubmittingComment ? "Posting..." : "Post"}
-            </button>
-          </form>
+          {canInteract && (
+            <form className="feed-comment-input-row" onSubmit={handleAddComment}>
+              <input
+                type="text"
+                className="feed-comment-input"
+                placeholder="Write a comment..."
+                value={newCommentText}
+                onChange={(e) => setNewCommentText(e.target.value)}
+                data-testid={`comment-input-${post.id}`}
+              />
+              <button
+                type="submit"
+                className="feed-comment-submit-btn"
+                disabled={!newCommentText.trim() || isSubmittingComment}
+                data-testid={`comment-submit-${post.id}`}
+              >
+                {isSubmittingComment ? "Posting..." : "Post"}
+              </button>
+            </form>
+          )}
         </section>
       )}
 
-      {/* Readership Modal (Author & Admin Only) */}
+      {/* Readership Modal (Author Only) */}
       {isReadershipOpen && (
         <div
           className="feed-modal-backdrop"

@@ -117,8 +117,60 @@ describe("FeedDirectMessages Component", () => {
       expect(screen.getByText("Yes, I am available now.")).toBeDefined();
     });
 
-    // Check privacy tag
-    expect(screen.getByText(/End-to-end ERP Private/i)).toBeDefined();
+    // Check accurate non-E2EE privacy tag (FEED-AUD-10)
+    expect(screen.getByText(/Participants Only/i)).toBeDefined();
+    expect(screen.queryByText(/End-to-end/i)).toBeNull();
+  });
+
+  it("resolves deep-linked initialConversationId and handles 403 unauthorized safely", async () => {
+    const error403 = new Error("Forbidden");
+    (error403 as any).status = 403;
+    (feedApi.getConversation as any).mockRejectedValueOnce(error403);
+
+    render(
+      <FeedDirectMessages
+        currentUserId="user-1"
+        initialConversationId="conv-forbidden-99"
+      />
+    );
+
+    await waitFor(() => {
+      expect(feedApi.getConversation).toHaveBeenCalledWith("conv-forbidden-99");
+      expect(mockShowToast).toHaveBeenCalledWith(
+        "You do not have permission to view this conversation.",
+        "error"
+      );
+    });
+  });
+
+  it("hides message creation controls when canCreateMessage is false (feed.view only)", async () => {
+    render(<FeedDirectMessages currentUserId="user-1" canCreateMessage={false} />);
+
+    await waitFor(() => {
+      expect(screen.getAllByText("Bob Colleague").length).toBeGreaterThanOrEqual(1);
+    });
+
+    expect(screen.queryByTestId("start-dm-btn")).toBeNull();
+    expect(screen.queryByTestId("dm-message-input")).toBeNull();
+  });
+
+  it("rejects oversized direct messages exceeding 5,000 characters", async () => {
+    render(<FeedDirectMessages currentUserId="user-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("dm-message-input")).toBeDefined();
+    });
+
+    fireEvent.change(screen.getByTestId("dm-message-input"), {
+      target: { value: "x".repeat(5001) },
+    });
+    fireEvent.click(screen.getByTestId("dm-send-btn"));
+
+    expect(mockShowToast).toHaveBeenCalledWith(
+      "Message content must not exceed 5,000 characters.",
+      "warning"
+    );
+    expect(feedApi.sendMessage).not.toHaveBeenCalled();
   });
 
   it("sends a new private message to active conversation", async () => {

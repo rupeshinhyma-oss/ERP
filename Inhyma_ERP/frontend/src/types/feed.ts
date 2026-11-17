@@ -1,6 +1,11 @@
 /**
- * Inhyma ERP — Feed & Broadcast Messaging Types (Phase 3)
+ * Inhyma ERP — Feed & Broadcast Messaging Types
  */
+
+export const MAX_FEED_POST_TITLE_LENGTH = 255;
+export const MAX_FEED_POST_CONTENT_LENGTH = 20000;
+export const MAX_FEED_COMMENT_LENGTH = 5000;
+export const MAX_DIRECT_MESSAGE_LENGTH = 5000;
 
 export type FeedAudienceType = "ALL" | "SELECTED";
 export type FeedPostStatus = "DRAFT" | "PUBLISHED" | "ARCHIVED";
@@ -11,6 +16,7 @@ export interface FeedAuthor {
   full_name?: string | null;
   email: string;
   employee_code?: string | null;
+  profile_picture_url?: string | null;
 }
 
 export interface FeedRecipientUser {
@@ -23,8 +29,13 @@ export interface FeedRecipientUser {
 }
 
 export interface FeedRecipient {
-  id: string;
+  id?: string | null;
   recipient_id: string;
+  display_name?: string | null;
+  full_name?: string | null;
+  email?: string | null;
+  employee_code?: string | null;
+  department_name?: string | null;
   recipient?: FeedRecipientUser | null;
 }
 
@@ -71,6 +82,10 @@ export interface FeedComment {
 export interface FeedCommentListResponse {
   items: FeedComment[];
   total: number;
+  page?: number;
+  page_size?: number;
+  total_pages?: number;
+  has_more?: boolean;
 }
 
 export interface FeedReader {
@@ -102,6 +117,8 @@ export interface FeedPost {
   targeted_departments?: FeedDepartmentRead[];
   recipients: FeedRecipient[];
   is_author?: boolean;
+  can_edit?: boolean;
+  can_delete?: boolean;
   comments_count?: number;
   reactions_summary?: FeedReactionSummary;
   is_read?: boolean;
@@ -114,6 +131,7 @@ export interface FeedPostListResponse {
   page: number;
   page_size: number;
   total_pages: number;
+  pages?: number;
 }
 
 export interface EligibleRecipient {
@@ -138,6 +156,7 @@ export interface FeedPostCreatePayload {
 export interface FeedPostUpdatePayload {
   title?: string;
   content?: string;
+  audience_type?: FeedAudienceType;
   status?: FeedPostStatus;
   department_ids?: string[];
   recipient_ids?: string[];
@@ -145,23 +164,27 @@ export interface FeedPostUpdatePayload {
 
 export interface ConversationParticipant {
   user_id: string;
-  display_name: string;
-  email: string;
+  display_name?: string | null;
+  full_name?: string | null;
+  email?: string | null;
+  employee_code?: string | null;
   department_name?: string | null;
   last_read_at?: string | null;
+  unread_count?: number;
 }
 
 export interface DirectMessage {
   id: string;
   conversation_id: string;
   sender_id: string;
-  sender_display_name: string;
-  sender_email: string;
+  sender?: FeedAuthor | null;
+  sender_display_name?: string | null;
+  sender_email?: string | null;
   content: string;
   is_edited: boolean;
   is_sender: boolean;
   created_at: string;
-  updated_at: string;
+  updated_at?: string | null;
 }
 
 export interface Conversation {
@@ -171,6 +194,9 @@ export interface Conversation {
   participants: ConversationParticipant[];
   other_participant?: ConversationParticipant | null;
   last_message?: DirectMessage | null;
+  last_message_at?: string | null;
+  last_message_preview?: string | null;
+  last_message_sender_id?: string | null;
   unread_count: number;
 }
 
@@ -183,4 +209,3 @@ export interface DirectMessageListResponse {
   items: DirectMessage[];
   total: number;
 }
-

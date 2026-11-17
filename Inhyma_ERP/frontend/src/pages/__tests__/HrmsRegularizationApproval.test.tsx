@@ -31,7 +31,7 @@ vi.mock("@/lib/hooks", async () => {
     useAuth: () => ({
       profile: { id: "admin-1", username: "admin", role: "ADMIN", full_name: "System Admin" },
       isSuperAdmin: true,
-      hasPermission: () => true,
+      hasPermission: (perm?: string) => !perm?.startsWith("deny:") && !perm?.startsWith("block:"),
     }),
   };
 });
@@ -277,7 +277,7 @@ describe("HRMS Regularization → Approval Integration Tests", () => {
     });
   });
 
-  it("disables direct regularization action when Admin views their own calendar", async () => {
+  it("removes direct regularization disabled button when Admin views their own calendar and shows Send Request", async () => {
     render(
       <MemoryRouter initialEntries={["/hrms/attendance"]}>
         <AttendancePage />
@@ -293,9 +293,70 @@ describe("HRMS Regularization → Approval Integration Tests", () => {
 
     await waitFor(() => {
       expect(screen.getByTestId("regularization-drawer")).toBeDefined();
-      expect(screen.getByTestId("direct-regularize-self-blocked-btn")).toBeDefined();
-      expect(screen.getByTestId("direct-regularize-self-blocked-btn")).toHaveProperty("disabled", true);
+      // Direct Regularize (Disabled for Self) button is completely removed
+      expect(screen.queryByTestId("direct-regularize-self-blocked-btn")).toBeNull();
       expect(screen.queryByTestId("direct-regularize-btn")).toBeNull();
+      // Standard Send Request button is available
+      expect(screen.getByTestId("submit-regularization-btn")).toBeDefined();
+    });
+  });
+
+  it("allows Admin to review and approve their own pending regularization request in the Approval Tab", async () => {
+    const adminSelfPending = [
+      {
+        id: "reg-self-1",
+        employee_id: "admin-1", // Same as logged-in user profile.id
+        employee_name: "System Admin",
+        employee_email: "admin@inhyma.com",
+        attendance_record_id: "att-admin-1",
+        attendance_date: "2026-09-02",
+        request_type: "LATE_PUNCH",
+        reason: "Client Meeting",
+        notes: "Executive client visit",
+        status: "PENDING",
+        submitted_at: "2026-09-02T11:00:00Z",
+        reviewed_at: null,
+        reviewed_by: null,
+        reviewed_by_name: null,
+        manager_remarks: null,
+        action_taken: null,
+      },
+    ];
+
+    vi.mocked(apiModule.apiGet).mockImplementation(async (url: string) => {
+      if (url.includes("/hrms/attendance/regularizations")) return { data: adminSelfPending } as any;
+      if (url.includes("/hrms/attendance/calendar")) return { data: mockCalendarDays } as any;
+      if (url.includes("/hrms/attendance/policy")) return { data: mockPolicy } as any;
+      return { data: null } as any;
+    });
+
+    render(
+      <MemoryRouter initialEntries={["/hrms/attendance"]}>
+        <AttendancePage />
+      </MemoryRouter>
+    );
+
+    // Switch to Approval Tab
+    const approvalTabBtn = screen.getByRole("button", { name: /approval/i });
+    fireEvent.click(approvalTabBtn);
+
+    await waitFor(() => {
+      // For Admin, self-approval blocked badge must NOT be displayed
+      expect(screen.queryByTestId("self-approval-blocked-reg-self-1")).toBeNull();
+      // Approval action buttons must be available
+      expect(screen.getByTestId("approve-btn-reg-self-1")).toBeDefined();
+      expect(screen.getByTestId("reject-btn-reg-self-1")).toBeDefined();
+    });
+
+    // Click Approve
+    const approveBtn = screen.getByTestId("approve-btn-reg-self-1");
+    fireEvent.click(approveBtn);
+
+    await waitFor(() => {
+      expect(apiModule.apiPatch).toHaveBeenCalledWith(
+        "/hrms/attendance/regularizations/reg-self-1/approve",
+        expect.objectContaining({ action: "APPROVE" })
+      );
     });
   });
 });

@@ -123,8 +123,31 @@ describe("HRMS Day 3 — Employee Attendance Tests", () => {
     },
   ];
 
+  let mockGetCurrentPosition: any;
+
   beforeEach(() => {
     vi.clearAllMocks();
+
+    mockGetCurrentPosition = vi.fn((success) => {
+      success({
+        coords: {
+          latitude: 19.199824,
+          longitude: 72.956795,
+          accuracy: 10.0,
+        },
+        timestamp: Date.now(),
+      });
+    });
+
+    Object.defineProperty(navigator, "geolocation", {
+      value: {
+        getCurrentPosition: mockGetCurrentPosition,
+        watchPosition: vi.fn(),
+        clearWatch: vi.fn(),
+      },
+      writable: true,
+      configurable: true,
+    });
 
     vi.mocked(apiModule.apiGet).mockImplementation(async (url: string) => {
       if (url.includes("/hrms/attendance/policy")) {
@@ -182,7 +205,18 @@ describe("HRMS Day 3 — Employee Attendance Tests", () => {
   // -------------------------------------------------------------------------
   // Test 2: Geofence Validation on Punch In
   // -------------------------------------------------------------------------
-  it("blocks punch in when simulator is set to outside radius", async () => {
+  it("blocks punch in when GPS location is outside office geofence radius", async () => {
+    mockGetCurrentPosition.mockImplementation((success: any) => {
+      success({
+        coords: {
+          latitude: 19.25,
+          longitude: 72.99,
+          accuracy: 15.0,
+        },
+        timestamp: Date.now(),
+      });
+    });
+
     render(
       <MemoryRouter>
         <AttendancePage />
@@ -193,9 +227,9 @@ describe("HRMS Day 3 — Employee Attendance Tests", () => {
       expect(screen.getAllByText("Inhyma Thane Office").length).toBeGreaterThan(0);
     });
 
-    // Click Outside preset on Location Simulator
-    const outsideBtn = screen.getByText(/Outside \(500m\)/i);
-    fireEvent.click(outsideBtn);
+    // Refresh GPS to acquire simulated location outside office
+    const refreshGpsBtn = screen.getByRole("button", { name: /Refresh GPS/i });
+    fireEvent.click(refreshGpsBtn);
 
     // Verify distance chip reflects outside status
     await waitFor(() => {
@@ -207,7 +241,18 @@ describe("HRMS Day 3 — Employee Attendance Tests", () => {
     expect(punchInBtn.hasAttribute("disabled")).toBe(true);
   });
 
-  it("allows punch in when simulator is set to inside radius and starts session", async () => {
+  it("allows punch in when GPS location is inside office geofence radius and starts session", async () => {
+    mockGetCurrentPosition.mockImplementation((success: any) => {
+      success({
+        coords: {
+          latitude: 19.199824,
+          longitude: 72.956795,
+          accuracy: 10.0,
+        },
+        timestamp: Date.now(),
+      });
+    });
+
     const mockPunchedRecord = {
       id: "att-today-1",
       employee_id: "emp-1",
@@ -243,9 +288,13 @@ describe("HRMS Day 3 — Employee Attendance Tests", () => {
       expect(screen.getAllByText("Inhyma Thane Office").length).toBeGreaterThan(0);
     });
 
-    // Click Inside preset
-    const insideBtn = screen.getByText(/Inside \(10m\)/i);
-    fireEvent.click(insideBtn);
+    // Refresh GPS to acquire location inside office
+    const refreshGpsBtn = screen.getByRole("button", { name: /Refresh GPS/i });
+    fireEvent.click(refreshGpsBtn);
+
+    await waitFor(() => {
+      expect(screen.getByText(/Inside Geofence/i)).toBeDefined();
+    });
 
     const punchInBtn = screen.getByTestId("punch-in-button");
     expect(punchInBtn.hasAttribute("disabled")).toBe(false);
@@ -476,9 +525,16 @@ describe("HRMS Day 3 — Employee Attendance Tests", () => {
   });
 
   // -------------------------------------------------------------------------
-  // Test 7: Location Simulator presets (Inside, Edge, Outside)
+  // Test 7: Location Acquisition Failure / Permission Denied
   // -------------------------------------------------------------------------
-  it("switches simulator presets and updates distance calculations", async () => {
+  it("displays GPS denied indicator when geolocation permission is denied", async () => {
+    mockGetCurrentPosition.mockImplementation((_success: any, error: any) => {
+      error({
+        code: 1,
+        message: "User denied Geolocation",
+      });
+    });
+
     render(
       <MemoryRouter>
         <AttendancePage />
@@ -489,22 +545,14 @@ describe("HRMS Day 3 — Employee Attendance Tests", () => {
       expect(screen.getAllByText("Inhyma Thane Office").length).toBeGreaterThan(0);
     });
 
-    // 1. Edge preset
-    fireEvent.click(screen.getByText(/Edge \(135m\)/i));
+    const refreshGpsBtn = screen.getByRole("button", { name: /Refresh GPS/i });
+    fireEvent.click(refreshGpsBtn);
+
     await waitFor(() => {
-      expect(screen.getByText(/Simulator set: Edge of radius/i)).toBeDefined();
+      expect(screen.getByText(/GPS Denied/i)).toBeDefined();
     });
 
-    // 2. Outside preset
-    fireEvent.click(screen.getByText(/Outside \(500m\)/i));
-    await waitFor(() => {
-      expect(screen.getByText(/Simulator set: Outside radius/i)).toBeDefined();
-    });
-
-    // 3. Inside preset
-    fireEvent.click(screen.getByText(/Inside \(10m\)/i));
-    await waitFor(() => {
-      expect(screen.getByText(/Simulator set: Inside radius/i)).toBeDefined();
-    });
+    const punchInBtn = screen.getByTestId("punch-in-button");
+    expect(punchInBtn.hasAttribute("disabled")).toBe(true);
   });
 });

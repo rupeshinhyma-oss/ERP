@@ -18,7 +18,7 @@ from datetime import date
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -27,7 +27,7 @@ from app.auth.service import AuthService
 from app.common.storage import save_uploaded_file
 from app.core.responses import build_success_response
 from app.database.session import get_db_session
-from app.hrms.leave_service import HrmsLeaveService
+from app.hrms.leave_service import HrmsLeaveService, get_current_ist_date, get_current_ist_year
 from app.hrms.schemas import (
     EmployeeLeaveAdjustmentRow,
     EmployeeLeaveBalanceRead,
@@ -421,7 +421,7 @@ async def calculate_days(
 @router.get("/balances")
 async def get_employee_balances(
     employee_id: Optional[uuid.UUID] = Query(default=None),
-    year: int = Query(default=2026),
+    year: Optional[int] = Query(default=None),
     service: HrmsLeaveService = Depends(get_leave_service),
     ctx: tuple[uuid.UUID, bool] = Depends(get_current_user_context),
 ):
@@ -434,7 +434,8 @@ async def get_employee_balances(
                 detail="Employees cannot view other employees' leave balances.",
             )
     target_emp = employee_id if (employee_id and is_admin) else (employee_id or user_id)
-    balances = await service.get_or_create_employee_balances(target_emp, year=year)
+    target_year = year if isinstance(year, int) else get_current_ist_year()
+    balances = await service.get_or_create_employee_balances(target_emp, year=target_year)
     return build_success_response(
         data=[b.model_dump(mode="json") for b in balances],
         message="Employee leave balances retrieved successfully.",
@@ -444,7 +445,7 @@ async def get_employee_balances(
 @router.get("/balances/{employee_id}")
 async def get_employee_balances_by_id(
     employee_id: uuid.UUID,
-    year: int = Query(default=2026),
+    year: Optional[int] = Query(default=None),
     service: HrmsLeaveService = Depends(get_leave_service),
     ctx: tuple[uuid.UUID, bool] = Depends(get_current_user_context),
 ):
@@ -456,7 +457,8 @@ async def get_employee_balances_by_id(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Employees cannot view other employees' leave balances.",
             )
-    balances = await service.get_or_create_employee_balances(employee_id, year=year)
+    target_year = year if isinstance(year, int) else get_current_ist_year()
+    balances = await service.get_or_create_employee_balances(employee_id, year=target_year)
     return build_success_response(
         data=[b.model_dump(mode="json") for b in balances],
         message="Employee leave balances retrieved successfully.",
@@ -466,7 +468,7 @@ async def get_employee_balances_by_id(
 @router.get("/matrix")
 @router.get("/adjustments/matrix")
 async def get_leave_adjustment_matrix(
-    year: int = Query(default=2026),
+    year: Optional[int] = Query(default=None),
     search: Optional[str] = Query(default=None),
     department: Optional[str] = Query(default=None),
     branch: Optional[str] = Query(default=None),
@@ -475,8 +477,9 @@ async def get_leave_adjustment_matrix(
     ctx: tuple[uuid.UUID, bool] = Depends(get_current_user_context),
 ):
     user_id, is_admin = ctx
+    target_year = year if isinstance(year, int) else get_current_ist_year()
     matrix = await service.get_leave_adjustment_matrix(
-        year=year,
+        year=target_year,
         search=search,
         department=department,
         branch=branch,
@@ -820,8 +823,8 @@ async def reject_leave_request(
 
 class AttendanceAccrualPayload(BaseModel):
     employee_id: Optional[uuid.UUID] = None
-    year: int = 2026
-    month: int = 10
+    year: int = Field(default_factory=get_current_ist_year)
+    month: int = Field(default_factory=lambda: get_current_ist_date().month)
 
 
 @router.post("/evaluate-attendance-accrual")

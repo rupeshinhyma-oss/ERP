@@ -3,19 +3,26 @@ import { feedApi } from "@/lib/feedApi";
 import { errorMessage } from "@/lib/api";
 import { useToast } from "@/lib/toast";
 import { Modal } from "@/components/ui";
-import type {
-  Conversation,
-  DirectMessage,
-  EligibleRecipient,
+import {
+  MAX_DIRECT_MESSAGE_LENGTH,
+  type Conversation,
+  type DirectMessage,
+  type EligibleRecipient,
 } from "@/types/feed";
 
 interface FeedDirectMessagesProps {
   currentUserId?: string;
+  initialConversationId?: string | null;
+  canCreateMessage?: boolean;
+  onConversationSelect?: (conversationId: string | null) => void;
   onUnreadCountChange?: (count: number) => void;
 }
 
 export function FeedDirectMessages({
   currentUserId,
+  initialConversationId,
+  canCreateMessage = true,
+  onConversationSelect,
   onUnreadCountChange,
 }: FeedDirectMessagesProps) {
   const showToast = useToast();
@@ -23,12 +30,16 @@ export function FeedDirectMessages({
   showToastRef.current = showToast;
   const onUnreadCountChangeRef = useRef(onUnreadCountChange);
   onUnreadCountChangeRef.current = onUnreadCountChange;
+  const onConversationSelectRef = useRef(onConversationSelect);
+  onConversationSelectRef.current = onConversationSelect;
 
   // Conversations list state
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [loadingConversations, setLoadingConversations] = useState(true);
+  const [conversationsError, setConversationsError] = useState<string | null>(null);
   const [conversationFilter, setConversationFilter] = useState("");
   const [selectedConvId, setSelectedConvId] = useState<string | null>(null);
+  const resolvedDeepLinkRef = useRef<string | null>(null);
 
   // Active chat state
   const [activeConv, setActiveConv] = useState<Conversation | null>(null);
@@ -55,6 +66,13 @@ export function FeedDirectMessages({
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messageInputRef = useRef<HTMLTextAreaElement>(null);
 
+  const selectConversation = useCallback((convId: string | null) => {
+    setSelectedConvId(convId);
+    if (onConversationSelectRef.current) {
+      onConversationSelectRef.current(convId);
+    }
+  }, []);
+
   // Scroll to bottom of message list
   const scrollToBottom = useCallback((smooth = true) => {
     if (messagesEndRef.current && typeof messagesEndRef.current.scrollIntoView === "function") {
@@ -69,7 +87,7 @@ export function FeedDirectMessages({
   const refreshUnreadCount = useCallback(async () => {
     try {
       const res = await feedApi.getUnreadDirectMessagesCount();
-      if (onUnreadCountChangeRef.current && typeof res.data?.unread_count === "number") {
+      if (onUnreadCountChangeRef.current && typeof res?.data?.unread_count === "number") {
         onUnreadCountChangeRef.current(res.data.unread_count);
       }
     } catch {
@@ -78,27 +96,87 @@ export function FeedDirectMessages({
   }, []);
 
   // Load conversations
-  const loadConversations = useCallback(async (selectFirstIfNone = false) => {
-    try {
-      const res = await feedApi.listConversations(1, 100);
-      const items = res.data?.items || [];
-      setConversations(items);
-      refreshUnreadCount();
+  const loadConversations = useCallback(
+    async (selectFirstIfNone = false) => {
+      try {
+        setConversationsError(null);
+        const res = await feedApi.listConversations(1, 100);
+        const items = res.data?.items || [];
+        setConversations(items);
+        void refreshUnreadCount();
 
-      if (selectFirstIfNone && items.length > 0 && !selectedConvId) {
-        setSelectedConvId(items[0].id);
+        if (selectFirstIfNone && !initialConversationId && items.length > 0 && !selectedConvId) {
+          setSelectedConvId(items[0].id);
+        }
+      } catch (err) {
+        const msg = errorMessage(err) || "Failed to load direct messages.";
+        setConversationsError(msg);
+        showToastRef.current(msg, "error");
+      } finally {
+        setLoadingConversations(false);
       }
-    } catch (err) {
-      showToastRef.current(errorMessage(err) || "Failed to load direct messages.", "error");
-    } finally {
-      setLoadingConversations(false);
-    }
-  }, [selectedConvId, refreshUnreadCount]);
+    },
+    [initialConversationId, selectedConvId, refreshUnreadCount]
+  );
 
   // Initial load
   useEffect(() => {
-    loadConversations(true);
+    void loadConversations(true);
   }, []);
+
+  // Resolve deep-linked `?conversation_id=...` safely (validating participant access)
+  useEffect(() => {
+    if (!initialConversationId) {
+      resolvedDeepLinkRef.current = null;
+      return;
+    }
+    if (loadingConversations) return;
+    if (resolvedDeepLinkRef.current === initialConversationId && selectedConvId === initialConversationId) {
+      return;
+    }
+
+    const inList = conversations.find((c) => c.id === initialConversationId);
+    if (inList) {
+      resolvedDeepLinkRef.current = initialConversationId;
+      setSelectedConvId(inList.id);
+      setActiveConv(inList);
+      return;
+    }
+
+    let active = true;
+    const resolveLinkedConversation = async () => {
+      try {
+        const res = await feedApi.getConversation(initialConversationId);
+        const fetched = (res as any)?.data ?? res;
+        if (!active) return;
+        if (fetched && fetched.id) {
+          resolvedDeepLinkRef.current = initialConversationId;
+          setConversations((prev) =>
+            prev.some((c) => c.id === fetched.id) ? prev : [fetched, ...prev]
+          );
+          setSelectedConvId(fetched.id);
+          setActiveConv(fetched);
+        }
+      } catch (err: any) {
+        if (!active) return;
+        resolvedDeepLinkRef.current = initialConversationId;
+        const status = err?.status ?? err?.response?.status;
+        if (status === 403) {
+          showToastRef.current("You do not have permission to view this conversation.", "error");
+        } else if (status === 404 || status === 422) {
+          showToastRef.current("The requested conversation could not be found or has been removed.", "error");
+        } else {
+          showToastRef.current(errorMessage(err) || "Unable to open the requested conversation.", "error");
+        }
+        setSelectedConvId((prev) => (prev === initialConversationId ? null : prev));
+      }
+    };
+
+    void resolveLinkedConversation();
+    return () => {
+      active = false;
+    };
+  }, [initialConversationId, loadingConversations, conversations, selectedConvId]);
 
   // Keep activeConv in sync with conversations list or selectedConvId
   useEffect(() => {
@@ -114,40 +192,55 @@ export function FeedDirectMessages({
   }, [selectedConvId, conversations]);
 
   // Load messages whenever active conversation changes
-  const loadMessages = useCallback(async (convId: string) => {
-    setLoadingMessages(true);
-    try {
-      const res = await feedApi.listMessages(convId, 1, 100);
-      setMessages(res.data?.items || []);
-      // Mark as read
-      await feedApi.markConversationRead(convId);
-      // Update unread badge in state
-      setConversations((prev) =>
-        prev.map((c) => (c.id === convId ? { ...c, unread_count: 0 } : c))
-      );
-      refreshUnreadCount();
-      setTimeout(() => scrollToBottom(false), 50);
-    } catch (err) {
-      showToastRef.current(errorMessage(err) || "Failed to load messages.", "error");
-    } finally {
-      setLoadingMessages(false);
-    }
-  }, [scrollToBottom, refreshUnreadCount]);
+  const loadMessages = useCallback(
+    async (convId: string) => {
+      setLoadingMessages(true);
+      try {
+        const res = await feedApi.listMessages(convId, 1, 100);
+        setMessages(res.data?.items || []);
+        await feedApi.markConversationRead(convId);
+        setConversations((prev) =>
+          prev.map((c) => (c.id === convId ? { ...c, unread_count: 0 } : c))
+        );
+        void refreshUnreadCount();
+        setTimeout(() => scrollToBottom(false), 50);
+      } catch (err: any) {
+        const status = err?.status ?? err?.response?.status;
+        if (status === 403) {
+          showToastRef.current("You do not have permission to view this conversation.", "error");
+          setSelectedConvId(null);
+          setActiveConv(null);
+        } else if (status === 404) {
+          showToastRef.current("Conversation not found.", "error");
+          setSelectedConvId(null);
+          setActiveConv(null);
+        } else {
+          showToastRef.current(errorMessage(err) || "Failed to load messages.", "error");
+        }
+      } finally {
+        setLoadingMessages(false);
+      }
+    },
+    [scrollToBottom, refreshUnreadCount]
+  );
 
   useEffect(() => {
     if (selectedConvId) {
-      loadMessages(selectedConvId);
+      void loadMessages(selectedConvId);
     }
   }, [selectedConvId, loadMessages]);
 
   // Soft polling every 12 seconds for active conversation and conversation list
   useEffect(() => {
     const interval = setInterval(() => {
-      loadConversations(false);
+      void loadConversations(false);
       if (selectedConvId) {
-        feedApi.listMessages(selectedConvId, 1, 100).then((res) => {
-          setMessages(res.data?.items || []);
-        }).catch(() => {});
+        feedApi
+          .listMessages(selectedConvId, 1, 100)
+          .then((res) => {
+            setMessages(res.data?.items || []);
+          })
+          .catch(() => {});
       }
     }, 12000);
     return () => clearInterval(interval);
@@ -156,8 +249,16 @@ export function FeedDirectMessages({
   // Send message
   const handleSendMessage = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
+    if (!canCreateMessage) return;
     const content = newMessageText.trim();
     if (!content || !selectedConvId || sendingMessage) return;
+    if (newMessageText.length > MAX_DIRECT_MESSAGE_LENGTH) {
+      showToast(
+        `Message content must not exceed ${MAX_DIRECT_MESSAGE_LENGTH.toLocaleString()} characters.`,
+        "warning"
+      );
+      return;
+    }
 
     setSendingMessage(true);
     try {
@@ -165,7 +266,7 @@ export function FeedDirectMessages({
       setMessages((prev) => [...prev, res.data]);
       setNewMessageText("");
       setTimeout(() => scrollToBottom(true), 50);
-      loadConversations(false);
+      void loadConversations(false);
     } catch (err) {
       showToast(errorMessage(err) || "Failed to send message.", "error");
     } finally {
@@ -178,37 +279,39 @@ export function FeedDirectMessages({
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
-      handleSendMessage();
+      void handleSendMessage();
     }
   };
 
-  // Start edit
   const handleStartEdit = (msg: DirectMessage) => {
     setEditingMessageId(msg.id);
     setEditingContent(msg.content);
   };
 
-  // Cancel edit
   const handleCancelEdit = () => {
     setEditingMessageId(null);
     setEditingContent("");
   };
 
-  // Save edit
   const handleSaveEdit = async (msgId: string) => {
     const content = editingContent.trim();
     if (!content || savingEdit) return;
+    if (editingContent.length > MAX_DIRECT_MESSAGE_LENGTH) {
+      showToast(
+        `Message content must not exceed ${MAX_DIRECT_MESSAGE_LENGTH.toLocaleString()} characters.`,
+        "warning"
+      );
+      return;
+    }
 
     setSavingEdit(true);
     try {
       const res = await feedApi.updateMessage(msgId, content);
-      setMessages((prev) =>
-        prev.map((m) => (m.id === msgId ? res.data : m))
-      );
+      setMessages((prev) => prev.map((m) => (m.id === msgId ? res.data : m)));
       setEditingMessageId(null);
       setEditingContent("");
       showToast("Message updated.", "success");
-      loadConversations(false);
+      void loadConversations(false);
     } catch (err) {
       showToast(errorMessage(err) || "Failed to update message.", "error");
     } finally {
@@ -216,14 +319,13 @@ export function FeedDirectMessages({
     }
   };
 
-  // Delete message
   const handleDeleteMessage = async (msgId: string) => {
     setDeletingMessageId(msgId);
     try {
       await feedApi.deleteMessage(msgId);
       setMessages((prev) => prev.filter((m) => m.id !== msgId));
       showToast("Message deleted.", "success");
-      loadConversations(false);
+      void loadConversations(false);
     } catch (err) {
       showToast(errorMessage(err) || "Failed to delete message.", "error");
     } finally {
@@ -233,14 +335,15 @@ export function FeedDirectMessages({
 
   // Load eligible recipients for new chat dialog
   useEffect(() => {
-    if (!newModalOpen) return;
+    if (!newModalOpen || !canCreateMessage) return;
     const fetchRecipients = async () => {
       setLoadingRecipients(true);
       try {
         const res = await feedApi.getEligibleRecipients(recipientQuery || undefined, 40);
-        setEligibleRecipients(res.data || []);
+        const rows = (res.data || []).filter((emp) => emp.id !== currentUserId);
+        setEligibleRecipients(rows);
       } catch {
-        // silent fail
+        setEligibleRecipients([]);
       } finally {
         setLoadingRecipients(false);
       }
@@ -248,7 +351,7 @@ export function FeedDirectMessages({
 
     const timer = setTimeout(fetchRecipients, recipientQuery ? 250 : 0);
     return () => clearTimeout(timer);
-  }, [newModalOpen, recipientQuery]);
+  }, [newModalOpen, recipientQuery, canCreateMessage, currentUserId]);
 
   // Start conversation with selected colleague
   const handleSelectRecipient = async (recipient: EligibleRecipient) => {
@@ -259,7 +362,7 @@ export function FeedDirectMessages({
       setNewModalOpen(false);
       setRecipientQuery("");
       await loadConversations(false);
-      setSelectedConvId(conv.id);
+      selectConversation(conv.id);
       setActiveConv(conv);
     } catch (err) {
       showToast(errorMessage(err) || "Could not start conversation.", "error");
@@ -268,7 +371,6 @@ export function FeedDirectMessages({
     }
   };
 
-  // Format timestamp
   const formatTime = (isoString?: string | null) => {
     if (!isoString) return "";
     try {
@@ -288,13 +390,26 @@ export function FeedDirectMessages({
     }
   };
 
-  // Filtered conversations
+  const getOtherName = (conv?: Conversation | null) =>
+    conv?.other_participant?.display_name ||
+    conv?.other_participant?.full_name ||
+    "Colleague";
+
+  const getPreviewText = (conv: Conversation) =>
+    conv.last_message?.content ?? conv.last_message_preview ?? null;
+
+  const getPreviewSenderId = (conv: Conversation) =>
+    conv.last_message?.sender_id ?? conv.last_message_sender_id ?? null;
+
+  const getPreviewTime = (conv: Conversation) =>
+    conv.last_message?.created_at || conv.last_message_at || conv.updated_at;
+
   const filteredConversations = conversations.filter((c) => {
     if (!conversationFilter.trim()) return true;
     const q = conversationFilter.toLowerCase();
-    const otherName = c.other_participant?.display_name?.toLowerCase() || "";
+    const otherName = getOtherName(c).toLowerCase();
     const otherDept = c.other_participant?.department_name?.toLowerCase() || "";
-    const lastMsg = c.last_message?.content?.toLowerCase() || "";
+    const lastMsg = (getPreviewText(c) || "").toLowerCase();
     return otherName.includes(q) || otherDept.includes(q) || lastMsg.includes(q);
   });
 
@@ -305,19 +420,21 @@ export function FeedDirectMessages({
         <div className="feed-dm-sidebar-header">
           <div className="feed-dm-sidebar-title-row">
             <h2 className="feed-dm-sidebar-title">Direct Messages</h2>
-            <button
-              type="button"
-              className="feed-dm-new-btn"
-              onClick={() => setNewModalOpen(true)}
-              title="Start a new message"
-              data-testid="start-dm-btn"
-            >
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                <line x1="12" y1="5" x2="12" y2="19"></line>
-                <line x1="5" y1="12" x2="19" y2="12"></line>
-              </svg>
-              <span>New</span>
-            </button>
+            {canCreateMessage && (
+              <button
+                type="button"
+                className="feed-dm-new-btn"
+                onClick={() => setNewModalOpen(true)}
+                title="Start a new message"
+                data-testid="start-dm-btn"
+              >
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="12" y1="5" x2="12" y2="19"></line>
+                  <line x1="5" y1="12" x2="19" y2="12"></line>
+                </svg>
+                <span>New</span>
+              </button>
+            )}
           </div>
 
           <div className="feed-dm-search-wrap">
@@ -346,6 +463,18 @@ export function FeedDirectMessages({
                 </div>
               ))}
             </div>
+          ) : conversationsError ? (
+            <div className="feed-dm-empty-sidebar" data-testid="dm-error-state">
+              <p style={{ color: "#991b1b" }}>{conversationsError}</p>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => void loadConversations(true)}
+                style={{ fontSize: "12px", marginTop: "8px" }}
+              >
+                Retry
+              </button>
+            </div>
           ) : filteredConversations.length === 0 ? (
             <div className="feed-dm-empty-sidebar">
               <p>
@@ -353,48 +482,50 @@ export function FeedDirectMessages({
                   ? "No conversations match your search."
                   : "No conversations yet."}
               </p>
-              <button
-                type="button"
-                className="btn btn-secondary btn-sm"
-                onClick={() => setNewModalOpen(true)}
-                style={{ fontSize: "12px", marginTop: "8px" }}
-              >
-                + Start Conversation
-              </button>
+              {canCreateMessage && (
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => setNewModalOpen(true)}
+                  style={{ fontSize: "12px", marginTop: "8px" }}
+                >
+                  + Start Conversation
+                </button>
+              )}
             </div>
           ) : (
             filteredConversations.map((conv) => {
               const isSelected = conv.id === selectedConvId;
               const other = conv.other_participant;
-              const otherName = other?.display_name || "Colleague";
+              const otherName = getOtherName(conv);
               const initial = otherName.charAt(0).toUpperCase();
               const hasUnread = (conv.unread_count || 0) > 0;
+              const previewText = getPreviewText(conv);
+              const previewSenderId = getPreviewSenderId(conv);
 
               return (
                 <div
                   key={conv.id}
                   className={`feed-dm-item ${isSelected ? "active" : ""} ${hasUnread ? "unread" : ""}`}
-                  onClick={() => setSelectedConvId(conv.id)}
+                  onClick={() => selectConversation(conv.id)}
                   data-testid={`dm-conv-${conv.id}`}
                 >
-                  <div className="feed-dm-avatar">
-                    {initial}
-                  </div>
+                  <div className="feed-dm-avatar">{initial}</div>
                   <div className="feed-dm-item-body">
                     <div className="feed-dm-item-top">
                       <span className="feed-dm-item-name">{otherName}</span>
                       <span className="feed-dm-item-time">
-                        {formatTime(conv.last_message?.created_at || conv.updated_at)}
+                        {formatTime(getPreviewTime(conv))}
                       </span>
                     </div>
                     <div className="feed-dm-item-preview-row">
                       <span className="feed-dm-item-preview">
-                        {conv.last_message ? (
+                        {previewText ? (
                           <>
-                            {conv.last_message.sender_id === currentUserId ? (
+                            {previewSenderId && previewSenderId === currentUserId ? (
                               <span style={{ color: "#64748b" }}>You: </span>
                             ) : null}
-                            {conv.last_message.content}
+                            {previewText}
                           </>
                         ) : (
                           <span style={{ fontStyle: "italic", color: "#94a3b8" }}>No messages yet</span>
@@ -425,11 +556,11 @@ export function FeedDirectMessages({
             <div className="feed-dm-chat-header" data-testid="dm-chat-header">
               <div className="feed-dm-chat-header-user">
                 <div className="feed-dm-avatar">
-                  {(activeConv.other_participant?.display_name || "C").charAt(0).toUpperCase()}
+                  {getOtherName(activeConv).charAt(0).toUpperCase()}
                 </div>
                 <div className="feed-dm-chat-header-info">
                   <div className="feed-dm-chat-header-name">
-                    {activeConv.other_participant?.display_name || "Colleague"}
+                    {getOtherName(activeConv)}
                   </div>
                   <div className="feed-dm-chat-header-sub">
                     {activeConv.other_participant?.department_name ? (
@@ -439,7 +570,9 @@ export function FeedDirectMessages({
                     ) : (
                       <span>Employee</span>
                     )}
-                    <span className="feed-dm-privacy-tag">🔒 End-to-end ERP Private</span>
+                    <span className="feed-dm-privacy-tag" data-testid="dm-privacy-tag">
+                      🔒 Participants Only
+                    </span>
                   </div>
                 </div>
               </div>
@@ -456,10 +589,10 @@ export function FeedDirectMessages({
               ) : messages.length === 0 ? (
                 <div className="feed-dm-empty-messages">
                   <div className="feed-dm-lock-icon">🔒</div>
-                  <h4>Private ERP Conversation</h4>
+                  <h4>Direct ERP Conversation</h4>
                   <p>
-                    Messages sent here are strictly confidential and visible only to you and{" "}
-                    <strong>{activeConv.other_participant?.display_name}</strong>.
+                    Messages in this conversation are visible only to you and{" "}
+                    <strong>{getOtherName(activeConv)}</strong>.
                   </p>
                   <p style={{ fontSize: "12px", color: "#94a3b8" }}>
                     Say hello to start the conversation!
@@ -477,7 +610,6 @@ export function FeedDirectMessages({
                       data-testid={`dm-msg-${msg.id}`}
                     >
                       <div className="feed-dm-bubble-wrap">
-                        {/* Bubble */}
                         <div className={`feed-dm-bubble ${isOwn ? "own-bubble" : "incoming-bubble"}`}>
                           {isEditingThis ? (
                             <div className="feed-dm-inline-edit">
@@ -499,7 +631,7 @@ export function FeedDirectMessages({
                                 <button
                                   type="button"
                                   className="btn btn-sm btn-primary"
-                                  onClick={() => handleSaveEdit(msg.id)}
+                                  onClick={() => void handleSaveEdit(msg.id)}
                                   disabled={savingEdit || !editingContent.trim()}
                                 >
                                   {savingEdit ? "Saving..." : "Save"}
@@ -517,8 +649,7 @@ export function FeedDirectMessages({
                           )}
                         </div>
 
-                        {/* Actions for own message */}
-                        {isOwn && !isEditingThis && (
+                        {isOwn && !isEditingThis && canCreateMessage && (
                           <div className="feed-dm-msg-actions">
                             <button
                               type="button"
@@ -533,7 +664,7 @@ export function FeedDirectMessages({
                               type="button"
                               className="feed-dm-action-btn delete"
                               title="Delete message"
-                              onClick={() => handleDeleteMessage(msg.id)}
+                              onClick={() => void handleDeleteMessage(msg.id)}
                               disabled={deletingMessageId === msg.id}
                               data-testid={`delete-msg-${msg.id}`}
                             >
@@ -550,33 +681,35 @@ export function FeedDirectMessages({
             </div>
 
             {/* Chat Composer Footer */}
-            <form onSubmit={handleSendMessage} className="feed-dm-chat-footer">
-              <textarea
-                ref={messageInputRef}
-                className="feed-dm-input"
-                placeholder={`Write a private message to ${activeConv.other_participant?.display_name || "colleague"}... (Enter to send, Shift+Enter for newline)`}
-                value={newMessageText}
-                onChange={(e) => setNewMessageText(e.target.value)}
-                onKeyDown={handleKeyDown}
-                rows={2}
-                data-testid="dm-message-input"
-              />
-              <button
-                type="submit"
-                className="feed-dm-send-btn"
-                disabled={!newMessageText.trim() || sendingMessage}
-                data-testid="dm-send-btn"
-              >
-                {sendingMessage ? (
-                  <span>...</span>
-                ) : (
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <line x1="22" y1="2" x2="11" y2="13"></line>
-                    <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
-                  </svg>
-                )}
-              </button>
-            </form>
+            {canCreateMessage && (
+              <form onSubmit={handleSendMessage} className="feed-dm-chat-footer">
+                <textarea
+                  ref={messageInputRef}
+                  className="feed-dm-input"
+                  placeholder={`Write a private message to ${getOtherName(activeConv)}... (Enter to send, Shift+Enter for newline)`}
+                  value={newMessageText}
+                  onChange={(e) => setNewMessageText(e.target.value)}
+                  onKeyDown={handleKeyDown}
+                  rows={2}
+                  data-testid="dm-message-input"
+                />
+                <button
+                  type="submit"
+                  className="feed-dm-send-btn"
+                  disabled={!newMessageText.trim() || sendingMessage}
+                  data-testid="dm-send-btn"
+                >
+                  {sendingMessage ? (
+                    <span>...</span>
+                  ) : (
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <line x1="22" y1="2" x2="11" y2="13"></line>
+                      <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+                    </svg>
+                  )}
+                </button>
+              </form>
+            )}
           </>
         ) : (
           <div className="feed-dm-no-selection" data-testid="dm-no-conv-selected">
@@ -586,23 +719,25 @@ export function FeedDirectMessages({
               </svg>
             </div>
             <h3>Your Messages</h3>
-            <p>Select an existing conversation from the list or start a new private conversation with any colleague.</p>
-            <button
-              type="button"
-              className="btn btn-primary"
-              onClick={() => setNewModalOpen(true)}
-              style={{ background: "#0061f2", color: "#ffffff", marginTop: "12px" }}
-              data-testid="empty-start-dm-btn"
-            >
-              + Start New Conversation
-            </button>
+            <p>Select an existing conversation from the list or start a new direct conversation with an active colleague.</p>
+            {canCreateMessage && (
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => setNewModalOpen(true)}
+                style={{ background: "#0061f2", color: "#ffffff", marginTop: "12px" }}
+                data-testid="empty-start-dm-btn"
+              >
+                + Start New Conversation
+              </button>
+            )}
           </div>
         )}
       </div>
 
       {/* Start New Conversation Modal */}
       <Modal
-        open={newModalOpen}
+        open={newModalOpen && canCreateMessage}
         title="Start Direct Message"
         onClose={() => {
           setNewModalOpen(false);
@@ -613,7 +748,7 @@ export function FeedDirectMessages({
       >
         <div className="feed-dm-recipient-modal" data-testid="new-dm-modal">
           <p style={{ fontSize: "13px", color: "#64748b", margin: "0 0 12px 0" }}>
-            Search for an active ERP colleague to start a confidential 1-to-1 conversation.
+            Search for an active ERP colleague to open a 1-to-1 conversation.
           </p>
 
           <input
@@ -640,7 +775,7 @@ export function FeedDirectMessages({
                 <div
                   key={emp.id}
                   className="feed-dm-recipient-item"
-                  onClick={() => handleSelectRecipient(emp)}
+                  onClick={() => void handleSelectRecipient(emp)}
                   data-testid={`dm-recipient-${emp.id}`}
                 >
                   <div className="feed-dm-avatar small">

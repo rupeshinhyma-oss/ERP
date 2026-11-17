@@ -1172,9 +1172,24 @@ class HrmsPayrollService:
                 detail=f"Payroll for {payroll_month} not found. Please calculate first.",
             )
 
-        # Retrieve all items in the batch to update item statuses
+        if payroll.status == "APPROVED":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Payroll for {payroll_month} is already approved.",
+            )
+
+        # Retrieve all items in the batch and enforce dual-control BEFORE mutating statuses
         item_query = select(HrmsMonthlyPayrollItem).where(HrmsMonthlyPayrollItem.payroll_id == payroll.id)
         items = list((await self.db.execute(item_query)).scalars().all())
+
+        if any(it.employee_id == admin_id for it in items):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    "Self-approval of payroll is prohibited. An approver cannot approve a monthly payroll "
+                    "batch containing their own payslip."
+                ),
+            )
 
         payroll.status = "APPROVED"
         payroll.approved_at = datetime.now(timezone.utc)
@@ -1194,7 +1209,11 @@ class HrmsPayrollService:
         """
         Reopens an approved monthly payroll back to REVIEW so adjustments can be made, recording audit trail.
         """
-        pay_query = select(HrmsMonthlyPayroll).where(HrmsMonthlyPayroll.payroll_month == payroll_month)
+        pay_query = (
+            select(HrmsMonthlyPayroll)
+            .where(HrmsMonthlyPayroll.payroll_month == payroll_month)
+            .with_for_update()
+        )
         payroll = (await self.db.execute(pay_query)).scalar_one_or_none()
         if not payroll:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Payroll not found.")

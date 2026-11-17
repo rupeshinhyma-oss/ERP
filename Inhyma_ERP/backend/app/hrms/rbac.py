@@ -209,6 +209,29 @@ async def verify_approval_authorization(
     5. Cross-department or unassigned managers cannot approve other employees' requests.
     """
     if ctx.user_id == target_employee_id:
+        if module_name == "attendance":
+            # Attendance Regularization Self-Approval:
+            # 1. Admin / Super Admin can self-approve / self-reject.
+            # 2. Explicitly authorized HRMS personnel holding approval permissions
+            #    (hrms.approve, hrms.manage, hrms:approval, hrms.attendance.approve)
+            #    without explicit denial can self-approve / self-reject.
+            # 3. Regular employees and ordinary managers without explicit approval permission remain blocked.
+            has_explicit_approval_perm = any(
+                p in ctx.permissions
+                for p in ("hrms.approve", "hrms.manage", "hrms:approval", "hrms.attendance.approve")
+            )
+            has_denial = any(
+                d in ctx.permissions
+                for d in ("deny:hrms.approve", "deny:hrms.attendance", "block:hrms.attendance")
+            )
+            can_self_regularize = (
+                (ctx.is_admin or (ctx.is_hr and has_explicit_approval_perm) or has_explicit_approval_perm)
+                and not has_denial
+                and ctx.can_access_module("attendance")
+            )
+            if can_self_regularize:
+                return
+
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Self-approval is not permitted. You cannot {action_label} your own {module_name} request.",
