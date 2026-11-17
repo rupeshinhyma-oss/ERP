@@ -40,6 +40,7 @@ export const MODULE_NAMES: Record<string, string> = {
   task: "Tasks & Work Management",
   technicaltask: "Technical Tasks",
   report: "Reports & Analytics",
+  cargo_overview: "Cargo Overview",
 };
 
 const ACTION_LABELS: Record<string, string> = {
@@ -84,6 +85,14 @@ const FULL_CODE_LABELS: Record<string, string> = {
   "task.manage": "Manage All Tasks",
   "task.delete": "Delete Tasks",
   "hrms.location_assignments.manage": "Manage Location Assignments",
+  "cargo_overview.view": "View Cargo Overview List & Header",
+  "cargo_overview.finance.view": "View Section 1: Finance Planning",
+  "cargo_overview.gallery.view": "View Section 2: Consignment Gallery",
+  "cargo_overview.gallery.upload": "Upload Documents (Consignment Gallery)",
+  "cargo_overview.gallery.delete": "Delete Documents (Consignment Gallery)",
+  "cargo_overview.cargo_status.view": "View Section 3: Cargo Status Checklist",
+  "cargo_overview.cargo_status.edit": "Edit Cargo Status, ETD/ETA & Remarks",
+  "cargo_overview.product_summary.view": "View Section 4: Product Summary",
 };
 
 /** "product.create" -> "Create"; unknown actions fall back to the raw code. */

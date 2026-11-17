@@ -342,7 +342,9 @@ export function App() {
           <Route path="/financial-planning-report/list" element={<Navigate to="/reports/financial-planning" replace />} />
           <Route path="/finance-planning-report/list" element={<Navigate to="/reports/financial-planning" replace />} />
           <Route path="/reports/cargo-overview" element={<CargoOverviewPage />} />
+          <Route path="/reports/cargo-overview/detail/:key" element={<CargoOverviewPage />} />
           <Route path="/cargo-overview" element={<Navigate to="/reports/cargo-overview" replace />} />
+          <Route path="/cargo-overview/detail/:key" element={<CargoOverviewPage />} />
 
           <Route path="/planning" element={<Navigate to="/dashboard" replace />} />
           <Route path="/tasks/my" element={<Navigate to="/tasks?tab=my" replace />} />

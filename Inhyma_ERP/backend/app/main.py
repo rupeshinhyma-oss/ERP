@@ -418,6 +418,7 @@ def create_application() -> FastAPI:
     (uploads_dir / "private" / "sales_po").mkdir(parents=True, exist_ok=True)
     (uploads_dir / "private" / "sales_tally_bills").mkdir(parents=True, exist_ok=True)
     (uploads_dir / "private" / "financial_planning").mkdir(parents=True, exist_ok=True)
+    (uploads_dir / "private" / "cargo_overview").mkdir(parents=True, exist_ok=True)
 
     @app.get("/uploads/quotations/{filename}", summary="Download quotation attachment (authenticated)")
     async def download_quotation_attachment(

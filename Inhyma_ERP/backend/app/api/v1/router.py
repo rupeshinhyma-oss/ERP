@@ -77,6 +77,7 @@ from app.inventory.routes import router as inventory_router
 from app.sales.routes import router as sales_router
 from app.purchase.routes import router as purchase_router
 from app.financial_planning.routes import router as financial_planning_router
+from app.cargo_overview.routes import router as cargo_overview_router
 from app.hrms.routes import router as hrms_router
 from app.hrms.attendance_routes import router as hrms_attendance_router
 from app.hrms.leave_routes import router as hrms_leave_router
@@ -212,6 +213,7 @@ api_router.include_router(inventory_router)
 api_router.include_router(sales_router)
 api_router.include_router(purchase_router)
 api_router.include_router(financial_planning_router)
+api_router.include_router(cargo_overview_router)
 
 from app.durable_events.routes import router as durable_events_router  # noqa: E402
 from app.core.backup_routes import router as backup_router  # noqa: E402

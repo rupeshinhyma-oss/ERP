@@ -7,6 +7,7 @@ import {
   type FinancialPlanningRecord,
 } from "@/pages/FinancialPlanningReportPage";
 import { CargoOverviewPage } from "@/pages/CargoOverviewPage";
+import type { CargoOverviewListResponse } from "@/types/cargoOverview";
 
 const { mockApiGet, mockApiPatch, mockApiPost, mockApiPostMultipart, mockToast } = vi.hoisted(() => ({
   mockApiGet: vi.fn(),
@@ -330,15 +331,151 @@ describe("Financial Planning Report & Cargo Overview Modules", () => {
     });
   });
 
-  it("renders Cargo Overview blank module shell cleanly", () => {
+  it("renders Cargo Overview List View empty state, controls, and table columns", async () => {
+    mockApiGet.mockResolvedValueOnce({
+      data: {
+        total_consignments: 0,
+        pending_consignments: 0,
+        cleared_consignments: 0,
+        warehouses: ["Mumbai Main"],
+        items: [],
+      },
+    });
+
     render(
       <MemoryRouter initialEntries={["/reports/cargo-overview"]}>
         <CargoOverviewPage />
       </MemoryRouter>,
     );
 
+    await waitFor(() =>
+      expect(mockApiGet).toHaveBeenCalledWith("/cargo-overview?stage=all", expect.any(Object)),
+    );
+
     expect(screen.getByTestId("app-shell").getAttribute("data-active-key")).toBe("reports-cargo-overview");
     expect(screen.getByRole("heading", { name: "Cargo Overview" })).toBeTruthy();
-    expect(screen.getByTestId("cargo-overview-blank-canvas")).toBeTruthy();
+    expect(screen.getByTestId("cargo-overview-list-card")).toBeTruthy();
+    const filterBtn = screen.getByTestId("cargo-btn-toggle-filter");
+    const exportBtn = screen.getByTestId("cargo-btn-export");
+    expect(filterBtn.className).toContain("btn-filter-toggle");
+    expect(exportBtn.className).toContain("btn-imp-exp");
+    expect(screen.getByTestId("cargo-wh-tab-all").textContent).toBe("All (0)");
+    expect(screen.getByTestId("cargo-wh-tab-Mumbai Main")).toBeTruthy();
+    expect(screen.getByTestId("cargo-stage-tab-pending").textContent).toBe("Pending (0)");
+    expect(screen.getByTestId("cargo-stage-tab-cleared").textContent).toBe("Cleared (0)");
+    expect(screen.getByTestId("cargo-empty-state").textContent).toBe("No Data Available In Table");
+
+    // Toggle Filter panel above the table card
+    fireEvent.click(filterBtn);
+    const filterPanel = screen.getByTestId("cargo-filter-panel");
+    expect(filterPanel).toBeTruthy();
+    expect(within(filterPanel).getByLabelText("Warehouse")).toBeTruthy();
+    expect(within(filterPanel).getByLabelText("Finance Status")).toBeTruthy();
+    expect(within(filterPanel).getByTestId("cargo-filter-reset")).toBeTruthy();
+    expect(within(filterPanel).getByTestId("cargo-filter-search")).toBeTruthy();
+  });
+
+  it("renders Cargo Overview Detail View with Finance Planning (INR/USD), 22-slot Gallery, 12-item Checklist toggle, and Product Summary", () => {
+    const sampleData: CargoOverviewListResponse = {
+      total_consignments: 1,
+      pending_consignments: 1,
+      cleared_consignments: 0,
+      warehouses: ["Mumbai Main"],
+      items: [
+        {
+          consignment_key: "SBC-HH2026041412",
+          display_title: "SBC-HH2026041412",
+          invoice_or_order_summary: "SBC-HH2026041412",
+          batch_no: "201",
+          supplier_summary: "SHANDONG RUIDESHENG INTERNATIONAL",
+          warehouse: "Mumbai Main",
+          ordered_date: "2026-04-14",
+          etd_origin_date: "2026-05-20",
+          eta_port_date: "2026-06-23",
+          expected_arrival_date: "2026-06-28",
+          forwarder_name: "Maersk Logistics",
+          clearing_agent_name: "Liladhar Pasoo",
+          cargo_remarks: "Awaiting vessel berth",
+          overall_stage: "pending",
+          docs_uploaded_count: 1,
+          docs_total_count: 22,
+          checklist_yes_count: 1,
+          checklist_total_count: 12,
+          finance_rows: [
+            {
+              id: "f1",
+              role: "Supplier",
+              party_name: "SHANDONG RUIDESHENG INTERNATIONAL",
+              doc_no: "SBC-HH2026041412",
+              payment_terms: "100% Advance",
+              currency: "USD",
+              total_amount: 14148,
+              paid_amount: 14148,
+              balance_amount: 0,
+              due_date: "2026-06-23",
+              stage: "cleared",
+            },
+            {
+              id: "f2",
+              role: "Taxes",
+              party_name: "Total Taxes (INR)",
+              doc_no: "SBC-HH2026041412",
+              currency: "INR",
+              total_amount: 245000,
+              paid_amount: 100000,
+              balance_amount: 145000,
+              due_date: "2026-06-25",
+              stage: "pending",
+            },
+          ],
+          documents: [
+            { slot_key: "proforma_invoice", label: "Proforma Invoices File", file_url: "/files/pi.pdf", filename: "pi.pdf", is_auto_linked: false },
+            { slot_key: "sales_contract", label: "Sales Contract File", file_url: null, filename: null, is_auto_linked: false },
+          ],
+          checklist: [
+            { key: "draft_bl_received", label: "Draft Approved BL Received", value: true },
+            { key: "insurance_mail_sent", label: "Insurance Mail Sent", value: false },
+          ],
+          products: [
+            {
+              sr_no: 1,
+              product_name: "Sodium Bicarbonate-25kg",
+              product_code: "SBC-25",
+              quantity: 2160,
+              uom: "BAG",
+              batch_no: "201",
+              supplier_name: "SHANDONG RUIDESHENG INTERNATIONAL",
+              source_doc_no: "SBC-HH2026041412",
+            },
+          ],
+        },
+      ],
+    };
+
+    render(
+      <MemoryRouter initialEntries={["/reports/cargo-overview"]}>
+        <CargoOverviewPage initialData={sampleData} />
+      </MemoryRouter>,
+    );
+
+    // List row shows consignment and clicks into Detail View
+    expect(screen.getByTestId("cargo-row-SBC-HH2026041412")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "SBC-HH2026041412" }));
+
+    // Detail View sections render cleanly with INR & USD (zero UGX)
+    expect(screen.getByRole("heading", { name: "Overview — SBC-HH2026041412" })).toBeTruthy();
+    expect(screen.getByTestId("cargo-detail-header-strip")).toBeTruthy();
+    expect(screen.getByTestId("cargo-section-finance").textContent).toContain("$ 14,148.00");
+    expect(screen.getByTestId("cargo-section-finance").textContent).toContain("₹ 2,45,000.00");
+    expect(document.body.textContent).not.toContain("UGX");
+    expect(screen.getByTestId("cargo-section-gallery")).toBeTruthy();
+    expect(screen.getByTestId("cargo-section-status")).toBeTruthy();
+    expect(screen.getByTestId("cargo-section-products").textContent).toContain("Sodium Bicarbonate-25kg");
+
+    // Optimistic checklist toggle flips No -> Yes
+    const checkBtn = screen.getByTestId("cargo-check-insurance_mail_sent");
+    expect(checkBtn.textContent).toContain("No");
+    fireEvent.click(checkBtn);
+    expect(checkBtn.textContent).toContain("Yes");
   });
 });

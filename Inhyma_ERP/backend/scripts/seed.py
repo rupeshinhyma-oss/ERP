@@ -435,6 +435,16 @@ BOOTSTRAP_PERMISSIONS: list[tuple[str, str, str, str, str, str]] = [
     ("technician.export", "technician", "masters-technicians", "export", "ALL", "Export technician data."),
     ("technician.import", "technician", "masters-technicians", "import", "ALL", "Import technician data."),
     ("technician.bulk_action", "technician", "masters-technicians", "manage", "ALL", "Use Bulk Actions in the technician list."),
+    # Reports & Cargo Overview
+    ("report.view", "report", "reports", "view", "ALL", "View Reports & Analytics modules (Re-Order, Stock Transactions, Deleted Orders, General Reports, Financial Planning Report, Cargo Overview)."),
+    ("cargo_overview.view", "cargo_overview", "reports-cargo-overview", "view", "ALL", "View the Cargo Overview list, warehouse/stage tabs, and consignment header summary."),
+    ("cargo_overview.finance.view", "cargo_overview", "reports-cargo-overview", "view", "ALL", "View Section 1: Finance Planning inside Cargo Overview."),
+    ("cargo_overview.gallery.view", "cargo_overview", "reports-cargo-overview", "view", "ALL", "View Section 2: Consignment Gallery (22 document slots) and download uploaded documents."),
+    ("cargo_overview.gallery.upload", "cargo_overview", "reports-cargo-overview", "create", "ALL", "Upload documents to Consignment Gallery slots inside Cargo Overview."),
+    ("cargo_overview.gallery.delete", "cargo_overview", "reports-cargo-overview", "delete", "ALL", "Delete manually uploaded documents from Consignment Gallery slots."),
+    ("cargo_overview.cargo_status.view", "cargo_overview", "reports-cargo-overview", "view", "ALL", "View Section 3: Cargo Status — Shipment Checklist Details and cargo remarks."),
+    ("cargo_overview.cargo_status.edit", "cargo_overview", "reports-cargo-overview", "update", "ALL", "Toggle Cargo Status checklist items (Yes/No) and edit ETD, ETA, Expected Arrival, Forwarder, Clearing Agent, and Cargo Remarks."),
+    ("cargo_overview.product_summary.view", "cargo_overview", "reports-cargo-overview", "view", "ALL", "View Section 4: Product Summary inside Cargo Overview."),
 ]
 
 SUPER_ADMIN_ROLE_NAME = "super_admin"
