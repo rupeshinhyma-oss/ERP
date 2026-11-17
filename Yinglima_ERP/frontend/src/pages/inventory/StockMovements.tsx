@@ -13,6 +13,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
 import { apiGet, errorMessage } from "@/lib/api";
+import { TableSkeletonRows } from "@/components/Skeleton";
 import { useToast } from "@/lib/toast";
 import type {
   StockBalanceItem,
@@ -713,11 +714,7 @@ export function StockMovementsPage() {
                 </thead>
                 <tbody>
                   {loadingBalances ? (
-                    <tr>
-                      <td colSpan={9} style={{ padding: "40px", textAlign: "center", color: "#64748b" }}>
-                        Loading inventory ledger balances...
-                      </td>
-                    </tr>
+                    <TableSkeletonRows colCount={9} rowCount={8} cellPadding="12px 16px" />
                   ) : balances.length === 0 ? (
                     <tr>
                       <td colSpan={9} style={{ padding: "40px", textAlign: "center", color: "#64748b" }}>
@@ -915,11 +912,7 @@ export function StockMovementsPage() {
                 </thead>
                 <tbody>
                   {loadingMovements ? (
-                    <tr>
-                      <td colSpan={8} style={{ padding: "40px", textAlign: "center", color: "#64748b" }}>
-                        Loading {activeTab} movements...
-                      </td>
-                    </tr>
+                    <TableSkeletonRows colCount={8} rowCount={8} cellPadding="12px 16px" />
                   ) : movements.length === 0 ? (
                     <tr>
                       <td colSpan={8} style={{ padding: "40px", textAlign: "center", color: "#64748b" }}>

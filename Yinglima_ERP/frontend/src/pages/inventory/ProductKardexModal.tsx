@@ -7,6 +7,7 @@
 
 import { useEffect, useState } from "react";
 import { apiGet } from "@/lib/api";
+import { DetailSkeleton } from "@/components/Skeleton";
 import type { ProductKardexItem } from "@/types/stockMovement";
 
 interface ProductKardexModalProps {
@@ -164,9 +165,7 @@ export function ProductKardexModal({
         {/* Content Table */}
         <div style={{ flex: 1, overflowY: "auto", padding: "20px" }}>
           {loading ? (
-            <div style={{ textAlign: "center", padding: "40px", color: "#64748b" }}>
-              Loading transaction history...
-            </div>
+            <DetailSkeleton stripCount={0} rows={6} />
           ) : history.length === 0 ? (
             <div style={{ textAlign: "center", padding: "40px", color: "#64748b" }}>
               No stock transactions recorded for this item yet.

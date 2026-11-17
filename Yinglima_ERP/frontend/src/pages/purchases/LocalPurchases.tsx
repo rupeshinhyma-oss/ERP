@@ -10,6 +10,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
 import { AppShell } from "@/components/AppShell";
+import { TableSkeletonRows } from "@/components/Skeleton";
 import { apiDelete, apiGet, apiPatch, downloadExport, errorMessage } from "@/lib/api";
 import { useLookup } from "@/lib/lookups";
 import { useToast } from "@/lib/toast";
@@ -784,12 +785,7 @@ export function LocalPurchasesPage() {
               </thead>
               <tbody>
                 {loading ? (
-                  <tr>
-                    <td colSpan={10} style={{ padding: "40px", textAlign: "center", color: "#64748b" }}>
-                      <div style={{ display: "inline-block", fontSize: "16px", marginBottom: "8px" }}>⏳</div>
-                      <div>Loading local purchases...</div>
-                    </td>
-                  </tr>
+                  <TableSkeletonRows colCount={10} rowCount={8} cellPadding="10px 12px" />
                 ) : purchases.length === 0 ? (
                   <tr>
                     <td colSpan={10} style={{ padding: "40px", textAlign: "center", color: "#64748b" }}>

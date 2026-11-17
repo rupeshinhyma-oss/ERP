@@ -23,6 +23,7 @@ import { AppShell } from "@/components/AppShell";
 import { Banner, Can, TableMessageRow } from "@/components/ui";
 import { SearchableDropdown, type DropdownOption } from "@/components/SearchableDropdown";
 import { SelectField, TextAreaField, TextField } from "@/components/fields";
+import { InlineListSkeleton, InlineTextSkeleton } from "@/components/Skeleton";
 import { apiDelete, apiGet, apiPatch, apiPost, apiPut, API_BASE, ApiError, toQueryString } from "@/lib/api";
 import { Auth } from "@/lib/auth";
 import { useAuth } from "@/lib/hooks";
@@ -979,7 +980,7 @@ function MumStatusHistoryPopover({
           Cell Change History
         </div>
         {loading ? (
-          <div className="muted" style={{ fontSize: 12 }}>Loading history…</div>
+          <InlineListSkeleton count={3} compact />
         ) : !groupedEntries || groupedEntries.length === 0 ? (
           <div className="muted" style={{ fontSize: 12 }}>No changes recorded on these columns yet.</div>
         ) : (
@@ -1522,7 +1523,9 @@ function HistoryDrawer({
         </div>
         <div style={{ flex: 1, overflowY: "auto", padding: "8px 0" }}>
           {loading ? (
-            <div className="muted" style={{ padding: 20 }}>Loading history…</div>
+            <div style={{ padding: "12px 20px" }}>
+              <InlineListSkeleton count={4} compact />
+            </div>
           ) : entries.length === 0 ? (
             <div className="muted" style={{ padding: 20 }}>No changes recorded yet.</div>
           ) : (
@@ -4788,7 +4791,7 @@ export function PlanningPage() {
                   {!loading && grid && rows.length < (grid.total_rows ?? 0) && (
                     <tr ref={scrollSentinelRef}>
                       <td colSpan={orderedColumns.length + 1} style={{ textAlign: "center", padding: "10px 0", color: "#94A3B8", fontSize: 12, border: "none" }}>
-                        {loadingMoreRows ? "Loading more…" : ""}
+                        {loadingMoreRows ? <InlineTextSkeleton width={140} height={12} /> : ""}
                       </td>
                     </tr>
                   )}

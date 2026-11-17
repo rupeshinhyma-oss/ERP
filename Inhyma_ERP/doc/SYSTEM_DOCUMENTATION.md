@@ -60,7 +60,7 @@
    - 12.1. [Universal "Grey and Locked" Calculation Design Pattern](#121-universal-grey-and-locked-calculation-design-pattern-calc-locked)
    - 12.2. [Zero-Layout-Shift Floating Toast Architecture](#122-zero-layout-shift-floating-toast-architecture--banner-deprecation)
    - 12.3. [Universal "No Data" Empty State Standardization](#123-universal-no-data-empty-state-standardization)
-   - 12.4. [Unified Table Skeleton Loaders](#124-unified-table-skeleton-loaders)
+   - 12.4. [Unified Table Skeleton Loaders & Ghost Loading Standard](#124-unified-table-skeleton-loaders--ghost-loading-standard)
    - 12.5. [Universal Page Header & Spacing Standardization](#125-universal-page-header--spacing-standardization)
    - 12.6. [Universal Header Action Buttons Standard](#126-universal-header-action-buttons-standard-page-header-actions)
    - 12.7. [Filter Placement Hierarchy: Positioned Above KPI Summary Cards](#127-filter-placement-hierarchy-positioned-above-kpi-summary-cards)
@@ -196,13 +196,13 @@ Inhyma_ERP/
 │   │   ├── trash/             # Universal Recycle Bin recovery service
 │   │   ├── users/             # User accounts, HR profiles, reporting managers & ERP_Main sync
 │   │   └── main.py            # Composition root, lifespan lifecycle, middleware wiring
-│   ├── alembic/               # Database schema version migrations (single head z9a0b1c2d3e4)
+│   ├── alembic/               # Database schema version migrations (single head v9a0b1c2d3e4)
 │   ├── scripts/               # Idempotent seed.py (306 permissions, 2 system roles), seed_technical_task_permissions.py & utilities
 │   ├── tests/                 # SQLite-isolated pytest suite (conftest.py live-DB guard)
 │   └── requirements.txt       # Python dependencies
 └── frontend/
     ├── src/
-    │   ├── components/        # AppShell, MasterPage, SearchableDropdown, ImportWizard, UI, icons
+    │   ├── components/        # AppShell, MasterPage, SearchableDropdown, Skeleton, ImportWizard, UI, icons + __tests__/Skeleton.test.tsx
     │   ├── lib/               # API client, Auth Context, Navigation registry (nav.ts), WebSockets
     │   ├── pages/             # Inquiries, Planning, Suppliers, Buyers, Users, Rbac, Profile, TechnicianOperationsPage, FinancialPlanningReportPage, CargoOverviewPage
     │   │   ├── masters/       # Products, Brands, Categories, Currencies, Cities, Countries
@@ -1292,31 +1292,22 @@ A user may be assigned any number of Roles simultaneously (`POST /users/{id}/rol
   - **Pagination & Query Normalization:** Enforces standard `limit` parameter handling and newest-first sorting (`created_at DESC`) to ensure deterministic catalog views.
   - **WebSocket Fanout:** Emits real-time `PRODUCT_SYNCED` notifications to connected UI sessions upon ingestion, automatically refreshing product lookup caches.
 
-### 8.29. Communication: Internal Feed & Broadcast Announcements Engine
-- **Files:** `backend/app/feed/routes.py`, `backend/app/feed/models.py`, `backend/app/feed/schemas.py`, `backend/app/feed/service.py`, `frontend/src/pages/feed/FeedPage.tsx`, `frontend/src/pages/feed/FeedComposer.tsx`, `frontend/src/pages/feed/FeedPostCard.tsx`, `frontend/src/pages/feed/FeedEditModal.tsx`, `frontend/src/lib/feedApi.ts`, `frontend/src/styles/feed.css`.
-- **Database Architecture:**
-  - `feed_posts`: Primary post entity with `title`, `content`, `post_type` (`announcement`, `general`, `alert`), `is_pinned`, `author_id`, `created_at`, `updated_at`, `deleted_at`.
-  - `feed_post_departments`: Relational targeting junction table linking posts to specific department IDs.
-  - `feed_post_recipients`: Direct recipient targeting junction table linking confidential broadcasts to individual user IDs.
-  - `feed_post_comments`: Comment entity supporting threaded discussions under posts with author reference, content, and soft deletion.
-  - `feed_post_reactions`: Reaction entity capturing user emoji reactions (`like`, `love`, `celebrate`, `rocket`, `insightful`, `clap`) ensuring 1 reaction type per user per post.
-  - `feed_post_reads`: Read-receipt tracking recording user viewing timestamps for compliance and broadcast visibility confirmation.
-- **Backend Endpoints (`/api/v1/feed`):**
-  - `GET /posts`: List scoped feed posts with pagination, search, post type filter, and department visibility checks.
-  - `POST /posts`: Create a new feed post or broadcast with targeted departments/recipients and pin status.
-  - `GET /posts/{id}`: Detailed post record, comments, reaction aggregations, and viewer status.
-  - `PUT /posts/{id}`: Edit post content (creator or administrator only).
-  - `DELETE /posts/{id}`: Soft-delete post.
-  - `POST /posts/{id}/pin`: Toggle post pinned status (administrators and managers).
-  - `POST /posts/{id}/comments`: Post a comment on a feed entry.
-  - `DELETE /comments/{comment_id}`: Remove comment.
-  - `POST /posts/{id}/reactions`: Toggle emoji reaction on a post.
-  - `POST /posts/{id}/mark-read`: Record user read receipt.
+### 8.29. Communication: Internal Feed, Broadcast Announcements & 1:1 Direct Messages (`v9a0b1c2d3e4`)
+- **Files:** `backend/app/feed/{models,rbac,routes,schemas,service}.py`, `backend/alembic/versions/v9a0b1c2d3e4_remediate_feed_privacy_and_dm_pair_uniqueness.py`, `backend/tests/{test_feed,test_feed_remediation_pg18}.py`, `frontend/src/pages/feed/{FeedPage,FeedComposer,FeedPostCard,FeedEditModal,FeedDirectMessages}.tsx`, `frontend/src/lib/feedApi.ts`, `frontend/src/types/feed.ts`, `frontend/src/styles/feed.css`.
+- **Database Architecture & Migration (`v9a0b1c2d3e4_remediate_feed_privacy_and_dm_pair_uniqueness.py`):**
+  - `feed_posts`: Primary post entity with `title`, `content` (bounded), `post_type`, `is_pinned`, `author_id`, `created_at`, `updated_at`, `deleted_at`.
+  - `feed_post_departments`: Relational targeting junction table linking posts to active department IDs (`roles`), preserving dynamic membership privacy on transfers.
+  - `feed_post_recipients`: Direct recipient targeting junction table with `is_explicit` (`BOOLEAN NOT NULL DEFAULT TRUE`, indexed via `ix_feed_post_recipients_post_explicit`) separating explicit individual recipients from historical department-snapshot rows (`is_explicit = FALSE`).
+  - `feed_post_comments`, `feed_post_reactions`, `feed_post_reads`: Threaded comments, emoji reactions, and readership tracking.
+  - `feed_conversations` & `feed_direct_messages`: 1:1 private DM threads with canonical `participant_low_id` / `participant_high_id` columns and partial unique index `uq_feed_conversations_active_pair` consolidating duplicate 1:1 threads.
+- **Backend Endpoints (`/api/v1/feed`, 23 endpoints in `feed/routes.py`):**
+  - **Posts & Targeting:** `POST /posts`, `GET /posts`, `GET /posts/{post_id}`, `PATCH /posts/{post_id}`, `DELETE /posts/{post_id}`, `GET /recipients/eligible`, `GET /departments/eligible`.
+  - **Comments, Reactions & Readership:** `POST /posts/{post_id}/comments`, `GET /posts/{post_id}/comments`, `PATCH /posts/{post_id}/comments/{comment_id}`, `DELETE /posts/{post_id}/comments/{comment_id}`, `POST /posts/{post_id}/reactions`, `POST /posts/{post_id}/read`, `GET /posts/{post_id}/readership`.
+  - **1:1 Direct Messages:** `POST /conversations`, `GET /conversations`, `GET /conversations/unread-count`, `GET /conversations/{conversation_id}`, `GET /conversations/{conversation_id}/messages`, `POST /conversations/{conversation_id}/messages`, `PATCH /messages/{message_id}`, `DELETE /messages/{message_id}`, `POST /conversations/{conversation_id}/read`.
+- **RBAC & Privacy (`backend/app/feed/rbac.py`):**
+  - Enforces `feed.view`, `feed.create`, and `feed.manage` via `require_feed_permission` / `require_feed_any_permission` with strict `deny:feed.*` / `block:feed.*` DB override precedence (`load_explicit_feed_denies`, `evaluate_feed_permission`), strict 1:1 DM participant isolation, and soft-delete notification privacy.
 - **Frontend Architecture & UX:**
-  - Accessible via the `/feed` route and the topbar/sidebar navigation.
-  - **Feed Composer (`FeedComposer.tsx`):** WYSIWYG post composer with announcement priority toggles, department multi-select dropdown, and validation.
-  - **Feed Timeline & Post Cards (`FeedPostCard.tsx`):** Render author avatars, department badges, pinned visual ribbons, emoji reaction picker popover, reaction counters, and expandable comment threads.
-  - **Interaction Privacy & RBAC:** Enforces granular view and interaction permissions so confidential and department-specific broadcasts are isolated strictly to authorized personnel.
+  - Accessible via `/feed` (`FeedPage.tsx`, `FeedDirectMessages.tsx` mounted for 1:1 private conversations, `FeedComposer.tsx`, `FeedPostCard.tsx`, `FeedEditModal.tsx`).
 
 ### 8.30. Reports: Financial Planning Report (Live 3-Module Stage Wiring) & Cargo Overview Modules
 - **Files:**
@@ -1404,8 +1395,8 @@ A user may be assigned any number of Roles simultaneously (`POST /users/{id}/rol
 - **Universal "No Data" Empty State Standard:**
   - When query results or table datasets return 0 records, the table body MUST render a full-width row with the exact centered string: **`"No Data"`** (e.g. `<TableMessageRow colSpan={columns.length}>No Data</TableMessageRow>`).
   - Inconsistent, fragmented legacy empty messages (`"No records found."`, `"No suppliers found."`, `"No soft-deleted records found."`) are prohibited.
-- **Table Skeleton Row Loaders Architecture:**
-  - Reusable modular skeleton rows (e.g., `ProductSkeletonRows`, `CompanySkeletonRows`, `SupplierSkeletonRows`, `StockAdjustmentSkeletonRows`, `StockTransferSkeletonRows`) are rendered during table loading states.
+- **Table & Surface Skeleton Ghost Loaders Architecture (`Skeleton.tsx`):**
+  - Shared ghost-loading primitives in [`Inhyma_ERP/frontend/src/components/Skeleton.tsx`](Inhyma_ERP/frontend/src/components/Skeleton.tsx) (`TableSkeletonRows`, `CardGridSkeleton`, `DetailSkeleton`, `InlineListSkeleton`, `InlineTextSkeleton`) plus domain-specific skeleton rows (e.g., `ProductSkeletonRows`, `CompanySkeletonRows`, `SupplierSkeletonRows`, `StockAdjustmentSkeletonRows`, `StockTransferSkeletonRows`, `PlanningGridSkeletonRows`, `LeadsTableSkeletonRows`) render pulsating CSS shimmer placeholders (`.skeleton-line`, `.skeleton-box`, `.skeleton-circle`, `.skeleton-badge`) across tables, modals, drawers, inline sub-lists, Kanban boards, PDF preview viewers, and dropdowns during active data fetching.
   - Ensures zero layout shift, preserving column widths and header geometry until live records arrive from the backend.
 - **Universal Table Action Dropdown (`⋮` Actions Menu) Geometry & Overflow Protection:**
   - **Problem Statement:** Data tables wrapped in horizontal scroll containers (`overflow-x: auto` / `.table-scroll`) create an overflow clipping context. Absolutely-positioned action dropdown menus (`top: 100%` or `top: 36px`) on bottom rows or in tables with few rows extend past the container bounds, getting cut off by scrollbars or clipped at the table bottom.
@@ -1723,16 +1714,20 @@ A user may be assigned any number of Roles simultaneously (`POST /users/{id}/rol
 | **Workforce: Recurring**| `PATCH`| `/api/v1/tasks/recurring-schedules/{id}/status` | Pause, resume, or archive recurring schedule | `task.update` |
 | **Workforce: Recurring**| `POST` | `/api/v1/tasks/recurring-schedules/{id}/trigger` | Manually spawn next task instance immediately | `task.create` |
 | **Product: Sync** | `POST` | `/api/v1/products/sync-yinglima` | Trigger outbound product catalog synchronization from Yinglima to Inhyma | `product.manage` |
-| **Feed**            | `GET` | `/api/v1/feed/posts` | List scoped feed posts with pagination, search, and department visibility checks | Authenticated |
-| **Feed**            | `POST`| `/api/v1/feed/posts` | Create a new broadcast or discussion post with targeted departments/recipients | Authenticated |
-| **Feed**            | `GET` | `/api/v1/feed/posts/{id}` | Detailed post record, comments, reaction aggregations, and viewer status | Authenticated |
-| **Feed**            | `PUT` | `/api/v1/feed/posts/{id}` | Edit post content (creator or administrator only) | Authenticated |
-| **Feed**            | `DELETE`| `/api/v1/feed/posts/{id}` | Soft-delete feed post | Authenticated |
-| **Feed**            | `POST`| `/api/v1/feed/posts/{id}/pin` | Toggle post pinned status | `feed.pin` / Admin |
-| **Feed**            | `POST`| `/api/v1/feed/posts/{id}/comments` | Post comment on feed entry | Authenticated |
-| **Feed**            | `DELETE`| `/api/v1/feed/comments/{comment_id}` | Soft-delete comment | Authenticated |
-| **Feed**            | `POST`| `/api/v1/feed/posts/{id}/reactions` | Toggle emoji reaction on post | Authenticated |
-| **Feed**            | `POST`| `/api/v1/feed/posts/{id}/mark-read` | Record user read receipt for broadcast compliance | Authenticated |
+| **Feed**            | `GET / POST`| `/api/v1/feed/posts` | List scoped feed posts (with pagination & department/explicit-recipient privacy) / Create post | `feed.view` / `feed.create` |
+| **Feed**            | `GET / PATCH / DELETE` | `/api/v1/feed/posts/{post_id}` | Retrieve, edit (author), or soft-delete feed post | `feed.view` / `feed.create` / `feed.manage` |
+| **Feed**            | `GET` | `/api/v1/feed/recipients/eligible` | List eligible active workforce recipients for audience targeting | `feed.create \| feed.view` |
+| **Feed**            | `GET` | `/api/v1/feed/departments/eligible` | List eligible active departments for audience targeting | `feed.create \| feed.view` |
+| **Feed**            | `GET / POST` | `/api/v1/feed/posts/{post_id}/comments` | List or add comment on visible feed post | `feed.view` / `feed.create` |
+| **Feed**            | `PATCH / DELETE` | `/api/v1/feed/posts/{post_id}/comments/{comment_id}` | Edit (author) or delete comment (author or `feed.manage`) | `feed.create` / `feed.manage` |
+| **Feed**            | `POST` | `/api/v1/feed/posts/{post_id}/reactions` | Toggle emoji reaction on visible feed post | `feed.create` |
+| **Feed**            | `POST / GET` | `/api/v1/feed/posts/{post_id}/read` & `/readership` | Mark post read / Inspect announcement readership list | `feed.view` |
+| **Feed: DM**        | `POST / GET` | `/api/v1/feed/conversations` | Start canonical 1:1 DM thread (`participant_low_id`, `participant_high_id`) or list own conversations | `feed.create` / `feed.view` |
+| **Feed: DM**        | `GET` | `/api/v1/feed/conversations/unread-count` | Get total unread 1:1 direct message count for current user | `feed.view` |
+| **Feed: DM**        | `GET` | `/api/v1/feed/conversations/{conversation_id}` & `/messages` | Inspect participant-only 1:1 DM thread and list messages | `feed.view` |
+| **Feed: DM**        | `POST` | `/api/v1/feed/conversations/{conversation_id}/messages` | Send 1:1 direct message in conversation | `feed.create` |
+| **Feed: DM**        | `PATCH / DELETE` | `/api/v1/feed/messages/{message_id}` | Edit or soft-delete own direct message | `feed.create` |
+| **Feed: DM**        | `POST` | `/api/v1/feed/conversations/{conversation_id}/read` | Mark 1:1 DM conversation as read | `feed.view` |
 | **Technician Ops**  | `GET` | `/api/v1/technician-operations/lookups` | Master-driven lookups (Technicians, Companies, Physical Warehouses, Machines, Machine-Mapped Spare Parts + live warehouse stock, Cities, Open Technical Tasks, Sale Orders, Serial Registry) | `technicaltask.view \| technician.view \| saleorder.view` |
 | **Technician Ops**  | `GET` | `/api/v1/technician-operations/metrics` | Live KPI counters (active gatepasses, pending SO reconciliations, technician cash in hand, active warranties) | `technicaltask.view \| technician.view \| saleorder.view` |
 | **Technician Ops**  | `GET/POST`| `/api/v1/technician-operations/gatepasses` | List / issue Outward Spare Parts Gatepasses with physical warehouse stock deduction & serial warranty detection | `technicaltask.view` / `technicaltask.create \| technicaltask.update` |
@@ -1904,8 +1899,11 @@ To eliminate ambiguity between user-editable inputs and system-calculated or for
 #### 12.3. Universal "No Data" Empty State Standardization
 - All tables across the enterprise ERP display the standardized label `"No Data"` when empty, eliminating fragmented messages.
 
-#### 12.4. Unified Table Skeleton Loaders
-- Standardized skeleton row placeholders maintaining fixed column geometry during active loading states to prevent jarring layout jumps.
+#### 12.4. Unified Table Skeleton Loaders & Ghost Loading Standard
+- Standardized shimmer skeleton placeholders across both **Inhyma ERP** and **Yinglima ERP** via shared `frontend/src/components/Skeleton.tsx` (`TableSkeletonRows`, `CardGridSkeleton`, `DetailSkeleton`, `InlineListSkeleton`, `InlineTextSkeleton`) paired with existing shimmer utilities (`.skeleton-line`, `.skeleton-box`, `.skeleton-circle`, `.skeleton-badge`) in `src/styles/style.css`.
+- **Coverage across Inhyma ERP:** `CargoOverviewPage.tsx`, `FinancialPlanningReportPage.tsx`, `StockTransactionDetailPage.tsx`, `SaleProcessDetailModal.tsx`, `TechnicalTaskDetailPage.tsx`, `ImportPurchasePdfPage.tsx` (dark mode), `LocalPurchasePdfPage.tsx` (dark mode), `CrmLeadsPage.tsx` (Lead DB table, Kanban board, History tab, Team Oversight, Activity/Follow-up/Quotation/Stage/Ownership drawer tabs, Stage Transition selector), `LeadImportPage.tsx`, `PipelineSetupPage.tsx`, `SalespersonDistributionPage.tsx`, `RecurringTasksTab.tsx`, `CreateTaskModal.tsx`, `TaskDrawer.tsx`, `FeedPostCard.tsx`, `TaskWorkloadDashboard.tsx`, `SearchableDropdown.tsx`, `AppShell.tsx` notification bell, and `Planning.tsx` incremental scroll-load indicator.
+- **Coverage across Yinglima ERP:** `ConsignmentOverview.tsx`, `FinancialReport.tsx`, `VatReturn.tsx`, `StockMovements.tsx` (Balances & Inward/Outward tabs), `ProductKardexModal.tsx`, `LocalPurchases.tsx`, `LocalPurchaseDetailModal.tsx`, `LocalPurchaseInwardModal.tsx`, `LocalPurchaseForm.tsx`, `SaleProcessList.tsx`, `SaleProcessDetailModal.tsx`, `SaleProcessForm.tsx`, `SaleProcessOutwardModal.tsx`, `Products.tsx`, `ProductPrices.tsx`, `NotificationSettings.tsx`, `PublicSupplierQuotePage.tsx`, `Inquiries.tsx`, `Buyers.tsx`, `Planning.tsx`, `ProductTradeHistoryDrawer.tsx`, `SearchableDropdown.tsx`, and `AppShell.tsx` notification bell.
+- Empty states (`"No Data"` / `"fp-empty-state"` / empty-table messages) are strictly gated behind `!loading` so ghost skeletons display during initial fetch and empty states render cleanly once loading completes.
 
 #### 12.5. Universal Page Header & Spacing Standardization
 - **Global Page Geometry (`.page` & `.page-header`):**
@@ -2063,6 +2061,7 @@ To guarantee that local development (`localhost` / LAN) and cloud deployments (`
 - **Environment-First Peer Discovery (`.env` Locally, Platform Env in Cloud):**
   - **Central Control Plane (`ERP_Main`):** `landing.py` resolves peer dashboard destinations from `<KEY>_FRONTEND_URL` (`YINGLIMA_FRONTEND_URL`, `INHYMA_FRONTEND_URL`) and `FRONTEND_URL` (with `CORS_ALLOWED_ORIGINS` single-origin deduction when `FRONTEND_URL` is omitted on Render) before consulting `erp_instances.base_url`. `http_adapter.py` resolves spoke backend URLs from `<KEY>_API_URL` (`YINGLIMA_API_URL`, `INHYMA_API_URL`) first.
   - **Spoke & Control-Plane Frontends:** `ssoBridge.ts`, `ecosystemSession.ts`, and `EcosystemSwitcher.tsx` read `VITE_CONTROL_PLANE_URL`, `VITE_CONTROL_PLANE_API_URL`, `VITE_CENTRAL_AUTH_API`, `VITE_YINGLIMA_URL`, `VITE_YINGLIMA_API_URL`, `VITE_INHYMA_URL`, and `VITE_INHYMA_API_URL` from `.env` / `.env.defaults` locally and from Render environment variables in production.
+  - **Cross-ERP Federation Credentials (`Inhyma_ERP\.env` & `Inhyma_ERP\backend\.env`):** Stores `PEER_ERP_ENDPOINTS` alongside `PEER_SERVICE_CREDENTIALS` (matching central `ERP_MAIN_SERVICE_CREDENTIAL` / `FEDERATION_SERVICE_CREDENTIAL`) to authenticate bidirectional inter-ERP sync webhooks and federation requests.
 - **Strict Environment Class Isolation (`LOCAL` vs `PRODUCTION`):**
   - Backend `_matches_current_environment(url)` (`ERP_Main/backend/app/global_auth/landing.py`, `http_adapter.py`) rejects public hosted domains (`*.onrender.com`) when `ENVIRONMENT=local` and rejects loopback/RFC-1918 LAN addresses when `ENVIRONMENT=production`.
   - Frontend `sanitizeEnvMatchedUrl(raw)` (`ssoBridge.ts`, `EcosystemSwitcher.tsx`, `ecosystemSession.ts`, `AppShell.tsx`) enforces browser-origin parity across `routeForCentralSession()`, `enforceCentralLanding()`, `erpUrlFor()`, `controlPlaneUrl()`, and `planSwitch()`—preventing a `localhost` session (such as a single-ERP user visiting another local port) from ever jumping to a hosted Render URL, while automatically adapting loopback hostnames (`localhost`) to the browser's LAN IP when accessed over Wi-Fi/LAN.

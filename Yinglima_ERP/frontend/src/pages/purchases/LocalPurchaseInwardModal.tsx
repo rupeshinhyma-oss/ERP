@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { apiGet, apiPost, errorMessage } from "@/lib/api";
+import { DetailSkeleton } from "@/components/Skeleton";
 import { useToast } from "@/lib/toast";
 import type { LocalPurchaseDetail } from "@/types/localPurchase";
 import { getLocalPurchaseDetailCache, updateLocalPurchaseInCache } from "@/lib/localPurchaseCache";
@@ -283,9 +284,7 @@ export function LocalPurchaseInwardModal({
         <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", overflow: "hidden", flex: 1 }}>
           <div style={{ padding: "18px 20px", overflowY: "auto", flex: 1 }}>
             {loading ? (
-              <div style={{ padding: "40px", textAlign: "center", color: "#64748b" }}>
-                Loading purchase line items...
-              </div>
+              <DetailSkeleton stripCount={4} rows={5} />
             ) : (
               <>
                 {/* Receiving Meta Fields */}

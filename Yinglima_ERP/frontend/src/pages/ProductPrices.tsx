@@ -14,6 +14,7 @@ import { SideDrawer, DetailFieldGrid } from "@/components/SideDrawer";
 import { Banner, Modal } from "@/components/ui";
 import { SearchableDropdown, SearchableFilterDropdown } from "@/components/SearchableDropdown";
 import { ProductTradeHistoryDrawer } from "@/components/ProductTradeHistoryDrawer";
+import { DetailSkeleton, InlineListSkeleton, TableSkeletonRows } from "@/components/Skeleton";
 import { apiDelete, apiGet, apiPatch, apiPost, apiPut, API_ORIGIN, downloadExport, toQueryString } from "@/lib/api";
 import { useConfirm } from "@/lib/confirm";
 import { useLookup } from "@/lib/lookups";
@@ -1754,12 +1755,7 @@ export function ProductPricesPage() {
               </thead>
               <tbody>
                 {loading ? (
-                  <tr>
-                    <td colSpan={6} style={{ padding: "40px", textAlign: "center", color: "#64748b" }}>
-                      <div style={{ fontSize: "16px", marginBottom: "8px" }}>⏳ Loading product prices...</div>
-                      <div style={{ fontSize: "12px", color: "#94a3b8" }}>Searching through catalog items...</div>
-                    </td>
-                  </tr>
+                  <TableSkeletonRows colCount={6} rowCount={8} cellPadding="12px 14px" />
                 ) : items.length === 0 ? (
                   <tr>
                     <td colSpan={6} style={{ padding: "40px", textAlign: "center", color: "#64748b" }}>
@@ -2194,8 +2190,8 @@ export function ProductPricesPage() {
                                 </div>
 
                                 {isLoadingQuotes ? (
-                                  <div style={{ padding: "20px", textAlign: "center", color: "#64748b" }}>
-                                    Loading supplier quotations...
+                                  <div style={{ padding: "12px 4px" }}>
+                                    <InlineListSkeleton count={3} compact />
                                   </div>
                                 ) : quotes.length === 0 ? (
                                   <div style={{ padding: "16px", textAlign: "center", color: "#64748b" }}>
@@ -2949,9 +2945,7 @@ export function ProductPricesPage() {
           onClose={closeProductDrawer}
         >
           {drawerLoading || !drawerProduct ? (
-            <div style={{ textAlign: "center", padding: "40px", color: "#64748b" }}>
-              Loading product details...
-            </div>
+            <DetailSkeleton stripCount={4} rows={5} />
           ) : (
             <>
               {/* Product Photo */}

@@ -13,6 +13,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
+import { DetailSkeleton, InlineTextSkeleton } from "@/components/Skeleton";
 import { apiGet, apiPatch, apiPost, errorMessage } from "@/lib/api";
 import { useLookup } from "@/lib/lookups";
 import { useToast } from "@/lib/toast";
@@ -1190,9 +1191,8 @@ export function SaleProcessFormPage() {
   if (initialLoading) {
     return (
       <AppShell activeKey="sale-process">
-        <div style={{ padding: "80px 0", textAlign: "center", color: "#64748b" }}>
-          <div style={{ fontSize: "28px", marginBottom: "8px" }}>⏳</div>
-          Loading sale order details...
+        <div style={{ padding: "24px", width: "100%", boxSizing: "border-box" }}>
+          <DetailSkeleton stripCount={4} rows={6} />
         </div>
       </AppShell>
     );
@@ -1579,7 +1579,7 @@ export function SaleProcessFormPage() {
                   {!selectedEntityId ? (
                     <span style={{ fontSize: "11px", color: "#94a3b8", fontWeight: 600 }}>🔒 Locked</span>
                   ) : loadingSheets ? (
-                    <span style={{ fontSize: "11px", color: "#0284c7", fontWeight: 600 }}>Loading sheets...</span>
+                    <InlineTextSkeleton width={80} height={12} />
                   ) : (
                     <span style={{ fontSize: "11px", color: "#64748b" }}>
                       {availableSheets.length} sheet{availableSheets.length === 1 ? "" : "s"}
@@ -1764,7 +1764,7 @@ export function SaleProcessFormPage() {
                   ) : !selectedSheetId ? (
                     <span style={{ fontSize: "11px", color: "#94a3b8", fontWeight: 600 }}>🔒 Select Sheet first</span>
                   ) : loadingConsignments ? (
-                    <span style={{ fontSize: "11px", color: "#0284c7", fontWeight: 600 }}>Loading...</span>
+                    <InlineTextSkeleton width={68} height={12} />
                   ) : (
                     <span style={{ fontSize: "11px", color: "#64748b" }}>{filteredConsignments.length} available</span>
                   )}

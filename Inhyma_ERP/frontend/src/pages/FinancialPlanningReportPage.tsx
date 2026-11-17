@@ -26,6 +26,7 @@ import { DatePicker } from "@/components/DatePicker";
 import { DateRangePicker } from "@/components/DateRangePicker";
 import { Pagination } from "@/components/Pagination";
 import { SortHeader } from "@/components/SortHeader";
+import { TableSkeletonRows } from "@/components/Skeleton";
 import { Modal } from "@/components/ui";
 import { apiGet, apiPatch, apiPost, apiPostMultipart, errorMessage, isAbortError } from "@/lib/api";
 import { Auth } from "@/lib/auth";
@@ -1680,7 +1681,9 @@ export function FinancialPlanningReportPage({
               </thead>
 
               <tbody>
-                {paginatedRecords.length === 0 ? (
+                {loading && paginatedRecords.length === 0 ? (
+                  <TableSkeletonRows colCount={10} rowCount={8} cellPadding="12px 14px" />
+                ) : paginatedRecords.length === 0 ? (
                   <tr>
                     <td
                       colSpan={10}

@@ -15,6 +15,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
 import { Banner, Can, TableMessageRow } from "@/components/ui";
+import { InlineListSkeleton } from "@/components/Skeleton";
 import { SearchableDropdown, SearchableDropdownMultiPanel, type DropdownOption, type FetchOptions } from "@/components/SearchableDropdown";
 import { SelectField, TextAreaField, TextField } from "@/components/fields";
 import { apiDelete, apiGet, apiPatch, apiPost, downloadExport, toQueryString } from "@/lib/api";
@@ -2458,7 +2459,9 @@ function ItemsView({
           {/* Products Cards List */}
           <div style={{ display: "flex", flexDirection: "column", gap: "10px", flex: 1, maxHeight: "calc(100vh - 360px)", overflowY: "auto", paddingRight: "4px" }}>
             {loading ? (
-              <div style={{ padding: "20px", textAlign: "center", color: "#94a3b8", fontSize: "13px" }}>Loading products...</div>
+              <div style={{ padding: "8px 4px" }}>
+                <InlineListSkeleton count={5} compact />
+              </div>
             ) : filteredProducts.length === 0 ? (
               <div style={{ padding: "24px 12px", textAlign: "center", color: "#94a3b8", fontSize: "13px" }}>
                 No products found.

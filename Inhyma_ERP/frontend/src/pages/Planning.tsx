@@ -24,6 +24,7 @@ import { Breadcrumb } from "@/components/Breadcrumb";
 import { Banner, Can, TableMessageRow } from "@/components/ui";
 import { SearchableDropdown, type DropdownOption } from "@/components/SearchableDropdown";
 import { SelectField, TextAreaField, TextField } from "@/components/fields";
+import { InlineTextSkeleton } from "@/components/Skeleton";
 import { apiDelete, apiGet, apiPatch, apiPost, apiPut, API_BASE, ApiError, toQueryString } from "@/lib/api";
 import { Auth } from "@/lib/auth";
 import { useAuth } from "@/lib/hooks";
@@ -4013,7 +4014,7 @@ export function PlanningPage() {
                   {!loading && grid && rows.length < (grid.total_rows ?? 0) && (
                     <tr ref={scrollSentinelRef}>
                       <td colSpan={orderedColumns.length + 1} style={{ textAlign: "center", padding: "10px 0", color: "#94A3B8", fontSize: 12, border: "none" }}>
-                        {loadingMoreRows ? "Loading more…" : ""}
+                        {loadingMoreRows ? <InlineTextSkeleton width={140} height={12} /> : ""}
                       </td>
                     </tr>
                   )}

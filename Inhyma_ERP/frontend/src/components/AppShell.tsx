@@ -19,6 +19,7 @@ import { Link, Navigate, useLocation, useNavigate } from "react-router-dom";
 import { API_BASE, apiGet, apiPost } from "@/lib/api";
 import { Auth, initials, roleLabel } from "@/lib/auth";
 import { useAuth } from "@/lib/hooks";
+import { InlineListSkeleton } from "@/components/Skeleton";
 import {
   NAV_ITEMS_BY_KEY,
   NAV_SECTIONS,
@@ -365,8 +366,8 @@ export function NotificationBell() {
           {/* List */}
           <div style={{ maxHeight: "360px", overflowY: "auto" }}>
             {loading && notifications.length === 0 ? (
-              <div style={{ padding: "28px", textAlign: "center", color: "#64748b", fontSize: "13px" }}>
-                Loading alerts...
+              <div style={{ padding: "12px 16px" }}>
+                <InlineListSkeleton count={3} showAvatar compact />
               </div>
             ) : notifications.length === 0 ? (
               <div style={{ padding: "36px 20px", textAlign: "center", color: "#64748b", fontSize: "13px" }}>

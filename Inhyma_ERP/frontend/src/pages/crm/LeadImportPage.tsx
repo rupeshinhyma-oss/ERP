@@ -17,6 +17,7 @@ import React, { useState, useEffect, useMemo, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
 import { Breadcrumb } from "@/components/Breadcrumb";
+import { InlineTextSkeleton, TableSkeletonRows } from "@/components/Skeleton";
 import { apiGet, apiPostMultipart, apiDownloadBlob, errorMessage } from "@/lib/api";
 import { useToast } from "@/lib/toast";
 import { useAuth } from "@/lib/hooks";
@@ -2245,10 +2246,12 @@ export function LeadImportPage({ embedded = false, onClose, onSuccess }: LeadImp
                     </tr>
                   </thead>
                   <tbody>
-                    {batches.length === 0 ? (
+                    {loadingBatches && batches.length === 0 ? (
+                      <TableSkeletonRows colCount={12} rowCount={5} cellPadding="10px 14px" />
+                    ) : batches.length === 0 ? (
                       <tr>
                         <td colSpan={12} style={{ padding: "30px", textAlign: "center", color: "#94a3b8" }}>
-                          {loadingBatches ? "Loading batch history..." : "No lead import batches recorded yet."}
+                          No lead import batches recorded yet.
                         </td>
                       </tr>
                     ) : (

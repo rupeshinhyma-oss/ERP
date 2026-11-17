@@ -3,6 +3,7 @@ import { createTask, getAvailableAssignees, fetchEscalateOptions, tasksApi } fro
 import { SearchableUserSelect } from "@/components/SearchableUserSelect";
 import { VoiceNoteRecorder } from "@/components/VoiceNoteRecorder";
 import { AttachmentList } from "@/components/AttachmentList";
+import { InlineTextSkeleton } from "@/components/Skeleton";
 import type {
   AvailableUser,
   IssueType,
@@ -1011,11 +1012,7 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
                   }}
                 >
                   👥 Task Assignees ({selectedAssigneeIds.length}){" "}
-                  {loadingUsers && (
-                    <span style={{ fontSize: "11px", fontWeight: 400, color: "#64748b" }}>
-                      (Loading...)
-                    </span>
-                  )}
+                  {loadingUsers && <InlineTextSkeleton width={64} height={12} />}
                 </label>
                 <span style={{ fontSize: "11.5px", color: "#64748b" }}>
                   Assigned members receive instant notifications &amp; manage task progress

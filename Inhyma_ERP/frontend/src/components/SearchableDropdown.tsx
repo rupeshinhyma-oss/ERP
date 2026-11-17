@@ -20,6 +20,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSearchController } from "@/lib/hooks";
 import { autoTitleCase } from "@/components/fields";
+import { InlineListSkeleton } from "@/components/Skeleton";
 
 export interface DropdownOption {
   value: string;
@@ -1042,7 +1043,9 @@ export function SearchableDropdownMultiPanel({
           {/* Options list with checkboxes */}
           <div style={{ overflowY: "auto", flex: 1 }}>
             {loading ? (
-              <div style={{ padding: "10px 12px", fontSize: "13px", color: "#94a3b8", textAlign: "center" }}>Loading...</div>
+              <div style={{ padding: "8px 10px" }}>
+                <InlineListSkeleton count={3} compact />
+              </div>
             ) : options.length === 0 ? (
               <div style={{ padding: "10px 12px", fontSize: "13px", color: "#94a3b8", textAlign: "center" }}>No matching results</div>
             ) : (

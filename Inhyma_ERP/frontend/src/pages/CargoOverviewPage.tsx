@@ -18,6 +18,7 @@ import { AppShell } from "@/components/AppShell";
 import { Breadcrumb } from "@/components/Breadcrumb";
 import { DateRangePicker } from "@/components/DateRangePicker";
 import { Pagination } from "@/components/Pagination";
+import { TableSkeletonRows } from "@/components/Skeleton";
 import { Modal } from "@/components/ui";
 import {
   apiDelete,
@@ -2287,14 +2288,7 @@ export function CargoOverviewPage({ initialData }: CargoOverviewPageProps = {}) 
               </thead>
               <tbody>
                 {loading && pagedItems.length === 0 ? (
-                  <tr>
-                    <td
-                      colSpan={15}
-                      style={{ padding: "32px", textAlign: "center", color: "#64748b" }}
-                    >
-                      Loading Cargo Overviews...
-                    </td>
-                  </tr>
+                  <TableSkeletonRows colCount={15} rowCount={8} cellPadding="10px 12px" />
                 ) : pagedItems.length === 0 ? (
                   <tr>
                     <td

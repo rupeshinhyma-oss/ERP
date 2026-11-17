@@ -4,7 +4,7 @@
 > **Location:** Root Workspace (`/MODULES_AND_FEATURES_TEST_MANUAL.md`)  
 > **Purpose:** Exhaustive reference catalog detailing every single module, page layout, table column, action button, modal window, drawer, form tab, and form field across the entire ERP. Designed for developers, QA testers, and autonomous AI agents to execute manual and automated regression tests before and after code changes.  
 > **Strict Policy:** When developing or modifying features, no existing module, form, or field listed in this document may be removed, broken, or regressed.  
-> **Last Updated:** November 4, 2026
+> **Last Updated:** November 17, 2026
 
 ---
 
@@ -3354,27 +3354,27 @@ Positioned directly underneath the collapsible filter card and powered by `GET /
 - [ ] **Employee Isolation:** Employee A cannot view Employee B's monthly payroll items or payslips (`HTTP 403 Forbidden`).
 - [ ] **Self-Escalation Prevention:** Restricted HR or normal users cannot grant themselves permissions or alter their roles via `/api/v1/rbac/users/{id}/roles` or `/permissions` (`HTTP 403 Forbidden`).
 - [ ] **Asset Summary & Mutation Admin/HR Gate:** Non-Admin/non-HR employees calling `GET /api/v1/hrms/assets/summary` or `PATCH`/`PUT /api/v1/hrms/assets/{id}` (`/status`) receive `HTTP 403 Forbidden`.
-- [ ] **Self-Action Prohibitions (Attendance, Expenses & Payroll):** Admin attempting `direct_regularize=True` on their own attendance receives `HTTP 400 Bad Request`; user attempting to reimburse their own expense (`POST /hrms/expenses/{id}/reimburse`) receives `HTTP 403 Forbidden`; user attempting to edit their own payroll item (`PATCH /hrms/payroll/items/{id}`) or add a self-adjustment (`POST /hrms/payroll/adjustments`) receives `HTTP 400 Bad Request`.
+- [ ] **Self-Action Prohibitions & Attendance Regularization Self-Approval (`hrms/rbac.py`):** Admin/Super Admin and explicitly authorized HRMS personnel holding `hrms.approve`, `hrms.manage`, `hrms:approval`, or `hrms.attendance.approve` (without explicit `deny:hrms.approve`/`deny:hrms.attendance`) can self-approve/self-reject their own one-day attendance regularization (`can_self_regularize`), whereas regular employees and ordinary managers without explicit approval permission receive `HTTP 400 Bad Request`; user attempting to reimburse their own expense (`POST /hrms/expenses/{id}/reimburse`) receives `HTTP 403 Forbidden`; user attempting to edit their own payroll item (`PATCH /hrms/payroll/items/{id}`) or add a self-adjustment (`POST /hrms/payroll/adjustments`) receives `HTTP 400 Bad Request`.
 - [ ] **Payroll Approval Persistence, Deduplication & Manager `"ALL"` Payslip Scope:** Approving monthly payroll (`POST /hrms/payroll/{month}/approve`) returns deduplicated employee rows with `APPROVED` propagated to every child item, and department managers requesting `GET /hrms/payroll/payslips?employee_id=ALL` see `APPROVED` payslips strictly for their managed employees.
 
 ---
 
-## 69. FEED: Open Broadcasting & 1-to-1 Private Employee Messaging
+## 69. FEED: Internal Feed, RBAC Remediation (`v9a0b1c2d3e4`) & Mounted 1:1 Direct Messaging
 
 ### Overview & Architectural Foundation
-- **Mandatory Requirements:**
-  - Universal announcement publishing for all authenticated ERP employees without requiring `feed.create` or `feed.manage` permissions.
-  - 1-to-1 private messaging module integrated within the Feed page with real-time employee search.
-  - Strict privacy: only conversation participants can view conversation threads and messages. Admins and third parties receive `HTTP 403 Forbidden`.
-  - Author-only edit and soft-delete controls across announcements and direct messages.
-  - Notification integration without leaking message content.
+- **Mandatory Requirements & Remediation (`FEED-AUD-01`..`FEED-AUD-12`):**
+  - Granular RBAC (`backend/app/feed/rbac.py`) across all 23 Feed endpoints using `feed.view`, `feed.create`, and `feed.manage` with strict `deny:feed.*` / `block:feed.*` override precedence.
+  - Dynamic department privacy via `feed_post_recipients.is_explicit` (`v9a0b1c2d3e4`), ensuring former department members lose access after transfer while explicit individual recipients retain access.
+  - Mounted 1:1 private messaging (`FeedDirectMessages.tsx`) inside `/feed` with canonical pair uniqueness (`participant_low_id`, `participant_high_id`, `uq_feed_conversations_active_pair`) and eligible active workforce filtering (`/recipients/eligible`, `/departments/eligible`).
+  - Strict privacy: only conversation participants can view conversation threads and messages (`HTTP 403 Forbidden` for third parties and non-participant Admins).
+  - Author-only edit and soft-delete controls across posts, comments, and direct messages (with `feed.manage` moderation on visible posts/comments), content length bounds, batched O(1) notification fanout, and soft-delete notification privacy.
   - Read tracking and unread count badges.
 
 ### QA Verification Test Cases
-- [ ] **Open Broadcasting:** Any authenticated employee with zero special feed permissions can publish company-wide (`ALL`) announcements.
-- [ ] **Targeted Announcements:** Any authenticated employee can target one or more departments (`SELECTED` + `department_ids`), specific employees (`SELECTED` + `recipient_ids`), or combined.
-- [ ] **Author-Only Announcement Management:** Only the post author can edit (`PATCH /api/v1/feed/posts/{id}`) or delete (`DELETE /api/v1/feed/posts/{id}`). Non-authors receive `HTTP 403 Forbidden`.
-- [ ] **Direct Conversation Initialization:** Any employee can start a 1-to-1 conversation with any eligible active employee in the tenant via `POST /api/v1/feed/conversations`. Self-conversations return `HTTP 400 Bad Request`.
+- [ ] **Permission & Deny Precedence Enforcement:** Users with `feed.view` / `feed.create` can read/publish Feed announcements and DMs; explicit `deny:feed.view` or `deny:feed.create` blocks access (`HTTP 403 Forbidden`) even when role grants or admin flags exist.
+- [ ] **Dynamic Department Privacy (`is_explicit`):** Post targeting a department is visible to current department members; transferring a user out of that department revokes access to department-targeted posts (`is_explicit = FALSE`) while preserving access where `is_explicit = TRUE`.
+- [ ] **Author-Only Announcement Management:** Only the post author can edit (`PATCH /api/v1/feed/posts/{id}`); deletion requires author or `feed.manage` on a visible post (`HTTP 403 Forbidden` otherwise).
+- [ ] **Canonical 1:1 Direct Conversation Initialization:** Starting a 1:1 conversation via `POST /api/v1/feed/conversations` reuses the single canonical `(participant_low_id, participant_high_id)` thread regardless of initiator order. Self-conversations return `HTTP 400 Bad Request`.
 - [ ] **Strict Participant Isolation:** Only participants in the conversation can list messages via `GET /api/v1/feed/conversations/{id}/messages`. Third-party employees receive `HTTP 403 Forbidden`.
 - [ ] **Admin Privacy Enforcement:** Administrators cannot automatically access or inject messages into another employee's private conversation (`HTTP 403 Forbidden`).
 - [ ] **Author-Only Message Lifecycle:** Senders can edit (`PATCH /api/v1/feed/messages/{id}`) and delete (`DELETE /api/v1/feed/messages/{id}`) their own messages. Intended recipients cannot edit or delete the sender's messages (`HTTP 403 Forbidden`).
@@ -3787,6 +3787,7 @@ Positioned directly underneath the collapsible filter card and powered by `GET /
   - [ ] **TC-CARGO-03 (Checklist Toggles, Remarks & Gallery Upload/Delete):** Toggle checklist items, edit `Cargo Remark`/ETD/ETA/Forwarder/Agent, and upload/delete a file in Consignment Gallery -> reload and verify persistence in `cargo_overviews`.
 - [ ] **TC-DEPLOY-01 (Render `GET` & `HEAD` Root/Health Probe Verification):** Send both `GET` and `HEAD` requests to `/`, `/health`, `/api/v1/health`, and `/api/v1/health/live` when `FRONTEND_DIST_DIR` is unset (API-only service mode) -> verify all 8 probes return `200 OK` immediately without touching external dependencies.
 - [ ] **TC-WS-01 (Compact JWT, Zero `400 Bad Request` WebSocket Handshake & No `Reconnecting` UI Pill):** Log in as `admin` (300+ permissions) -> verify issued `access_token` is compact (< 400 bytes), `/api/v1/events/live` WebSocket upgrades cleanly with `101 Switching Protocols` (zero `connection rejected (400 Bad Request)` in Uvicorn logs, including for legacy 8.5 KB tokens via `WEBSOCKETS_MAX_LINE_LENGTH=65536` and first-frame `auth`), concurrent API calls share a single `central_session_state` check to `ERP_Main`, and no bottom-left `Reconnecting.....` badge ever appears in the UI.
+- [ ] **TC-GHOST-01 (Unified Shimmer Ghost Loading Across All Data-Fetching Modules):** Navigate to every list table, detail modal/drawer, Kanban board, PDF viewer (`ImportPurchasePdfPage`, `LocalPurchasePdfPage`), CRM drawer tabs (`CrmLeadsPage`, `LeadImportPage`, `PipelineSetupPage`, `SalespersonDistributionPage`), Tasks views (`RecurringTasksTab`, `TaskWorkloadDashboard`, `TaskDrawer`, `CreateTaskModal`), Feed comments/readership (`FeedPostCard`), Reports (`FinancialPlanningReportPage`, `CargoOverviewPage`, `StockTransactionDetailPage`), Notification Bell (`AppShell`), and Async Dropdowns (`SearchableDropdown`) under throttled network conditions -> verify shared `Skeleton.tsx` (`TableSkeletonRows`, `CardGridSkeleton`, `DetailSkeleton`, `InlineListSkeleton`, `InlineTextSkeleton`) shimmer placeholders render during active `loading`/`isLoading` states without layout shift, and vanish immediately once data or empty-state messages resolve.
 
 ---
-*End of Master Features & Testing Specification Manual. Maintained for Inhyma Solutions Enterprise ERP. Last updated: November 17, 2026 (Cargo Overview Full-Stack Architecture: List + Detail View, 22-Slot Consignment Gallery, 12-Item Cargo Status Checklist, Finance Planning & Product Summary Sections, Standardized Filter-Above-Table Panel & UTF-8 BOM CSV Export, Pluggable Data Extractor, Granular RBAC & Migration `z9a0b1c2d3e4`; Compact JWT + WebSocket `400 Bad Request` Handshake Fix; Render `GET`/`HEAD` Root & Health Probe Readiness Hardening; Section 79: Financial Planning Report Full-Stack Live Wiring).*
+*End of Master Features & Testing Specification Manual. Maintained for Inhyma Solutions Enterprise ERP. Last updated: November 17, 2026 (Unified Shimmer Ghost Loading Rollout via `Skeleton.tsx`; Feed Remediation `FEED-AUD-01..12`, Mounted 1:1 DM Canonical Pair Uniqueness [Migration `v9a0b1c2d3e4`] & HRMS Attendance Regularization Self-Approval Authorization; Cargo Overview Full-Stack Architecture: List + Detail View, 22-Slot Consignment Gallery, 12-Item Cargo Status Checklist, Finance Planning & Product Summary Sections, Standardized Filter-Above-Table Panel & UTF-8 BOM CSV Export, Pluggable Data Extractor, Granular RBAC & Migration `z9a0b1c2d3e4`; Compact JWT + WebSocket `400 Bad Request` Handshake Fix; Section 79: Financial Planning Report Full-Stack Live Wiring).*

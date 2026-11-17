@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { apiGet, apiPost, errorMessage } from "@/lib/api";
+import { DetailSkeleton } from "@/components/Skeleton";
 import { useToast } from "@/lib/toast";
 import type { SaleOrder } from "@/types/saleProcess";
 import { getSaleOrderDetailCache, updateSaleOrderInCache } from "@/lib/saleProcessCache";
@@ -259,8 +260,8 @@ export function SaleProcessOutwardModal({
 
         {/* Form Body */}
         {loading ? (
-          <div style={{ padding: "60px", textAlign: "center", color: "#64748b" }}>
-            Loading order line items and warehouse data...
+          <div style={{ padding: "20px 24px" }}>
+            <DetailSkeleton stripCount={4} rows={5} />
           </div>
         ) : (
           <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", flex: 1, overflow: "hidden" }}>
