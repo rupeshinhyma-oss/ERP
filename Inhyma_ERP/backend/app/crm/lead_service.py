@@ -14,7 +14,8 @@ import uuid
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import and_, case, desc, func, or_, select
+from sqlalchemy import and_, case, desc, func, or_, select, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from sqlalchemy.orm.attributes import flag_modified
@@ -187,18 +188,26 @@ class CrmLeadService:
         roles = list((await self.session.execute(user_roles_stmt)).scalars().all())
         role_names = [r.name.lower() for r in roles]
 
-        is_manager = bool(
+        has_explicit_manager_role = bool(
             "department_manager" in role_names
             or any("manager" in r for r in role_names)
+        )
+        is_manager = bool(
+            has_explicit_manager_role
             or len(direct_reports) > 0
             or len(led_dept_ids) > 0
         )
 
         if is_manager:
             managed_dept_ids: set[uuid.UUID] = set(led_dept_ids)
-            for r in roles:
-                if r.name.lower() not in ("user", "super_admin", "admin", "department_manager", "employee"):
-                    managed_dept_ids.add(r.id)
+            if has_explicit_manager_role and not managed_dept_ids:
+                for r in roles:
+                    if r.name.lower() not in ("user", "super_admin", "admin", "department_manager", "employee"):
+                        managed_dept_ids.add(r.id)
+            elif has_explicit_manager_role:
+                for r in roles:
+                    if "manager" in r.name.lower() and r.name.lower() != "department_manager":
+                        managed_dept_ids.add(r.id)
 
             scoped_user_ids: set[uuid.UUID] = {actor.id}
             scoped_user_ids.update(direct_reports)
@@ -212,6 +221,65 @@ class CrmLeadService:
             return "manager", scoped_user_ids
 
         return "salesperson", {actor.id}
+
+    async def get_actor_managed_departments(self, actor: CurrentUser) -> set[uuid.UUID] | None:
+        """
+        Return None for global admins, or the set of department Role IDs managed by actor.
+        Only uses DepartmentLeadershipAssignment and explicit department-manager relationships.
+        """
+        role_type, _ = await self.get_actor_role_and_scope(actor)
+        if role_type == "admin":
+            return None
+        if role_type == "salesperson":
+            return set()
+
+        leadership_stmt = select(DepartmentLeadershipAssignment.department_id).where(
+            DepartmentLeadershipAssignment.employee_id == actor.id,
+            DepartmentLeadershipAssignment.status == OrgRecordStatus.ACTIVE,
+        )
+        led_dept_ids = set((await self.session.execute(leadership_stmt)).scalars().all())
+
+        user_roles_stmt = (
+            select(Role)
+            .join(UserRole, UserRole.role_id == Role.id)
+            .where(
+                UserRole.user_id == actor.id,
+                UserRole.status == RoleAssignmentStatus.ACTIVE,
+                Role.deleted_at.is_(None),
+            )
+        )
+        roles = list((await self.session.execute(user_roles_stmt)).scalars().all())
+        role_names = [r.name.lower() for r in roles]
+        has_explicit_manager_role = bool(
+            "department_manager" in role_names
+            or any("manager" in r for r in role_names)
+        )
+
+        managed_dept_ids: set[uuid.UUID] = set(led_dept_ids)
+        if has_explicit_manager_role and not managed_dept_ids:
+            for r in roles:
+                if r.name.lower() not in ("user", "super_admin", "admin", "department_manager", "employee"):
+                    managed_dept_ids.add(r.id)
+        elif has_explicit_manager_role:
+            for r in roles:
+                if "manager" in r.name.lower() and r.name.lower() != "department_manager":
+                    managed_dept_ids.add(r.id)
+        return managed_dept_ids
+
+    @staticmethod
+    def _is_lead_in_manager_scope(lead: CrmLead, scoped_user_ids: set[uuid.UUID]) -> bool:
+        """
+        Authoritative department-manager scope rule for a CrmLead:
+        - Assigned lead (`assigned_to is not None`): `assigned_to in scoped_user_ids`
+          OR (`created_by is not None and created_by in scoped_user_ids`).
+        - Unassigned lead (`assigned_to is None`): `created_by is None`
+          OR `created_by in scoped_user_ids`.
+        """
+        if lead.assigned_to is not None:
+            return lead.assigned_to in scoped_user_ids or (
+                lead.created_by is not None and lead.created_by in scoped_user_ids
+            )
+        return lead.created_by is None or lead.created_by in scoped_user_ids
 
     async def list_leads(
         self,
@@ -250,13 +318,27 @@ class CrmLeadService:
                     )
                 conditions.append(CrmLead.assigned_to == assigned_to)
             elif unassigned_only:
-                conditions.append(CrmLead.assigned_to.is_(None))
+                conditions.append(
+                    and_(
+                        CrmLead.assigned_to.is_(None),
+                        or_(
+                            CrmLead.created_by.is_(None),
+                            CrmLead.created_by.in_(scoped_user_ids),
+                        ),
+                    )
+                )
             else:
                 conditions.append(
                     or_(
                         CrmLead.assigned_to.in_(scoped_user_ids),
                         CrmLead.created_by.in_(scoped_user_ids),
-                        CrmLead.assigned_to.is_(None),
+                        and_(
+                            CrmLead.assigned_to.is_(None),
+                            or_(
+                                CrmLead.created_by.is_(None),
+                                CrmLead.created_by.in_(scoped_user_ids),
+                            ),
+                        ),
                     )
                 )
         elif role_type == "salesperson":
@@ -422,20 +504,7 @@ class CrmLeadService:
             raise NotFoundException(f"Lead with id {lead_id} not found.")
 
         # Scope enforcement
-        role_type, scoped_user_ids = await self.get_actor_role_and_scope(actor)
-        if role_type == "manager":
-            assert scoped_user_ids is not None
-            is_scoped = (
-                (lead.assigned_to is not None and lead.assigned_to in scoped_user_ids)
-                or (lead.created_by is not None and lead.created_by in scoped_user_ids)
-                or lead.assigned_to is None
-            )
-            if not is_scoped:
-                raise ForbiddenException("You do not have permission to view this lead.")
-        elif role_type == "salesperson":
-            is_scoped = lead.assigned_to == actor.id or lead.created_by == actor.id
-            if not is_scoped:
-                raise ForbiddenException("You do not have permission to view this lead.")
+        await self._check_lead_scope(lead, actor, action="view")
 
         p_name = lead.pipeline.name if lead.pipeline else None
         s_name = lead.stage.name if lead.stage else None
@@ -540,7 +609,15 @@ class CrmLeadService:
         if phone_err or not norm_phone:
             raise BadRequestException(phone_err or "Invalid phone number format.")
 
-        # 2. Duplicate protection against active CRM leads
+        # 2. Duplicate protection against active CRM leads (serialized via transaction-scoped advisory lock)
+        try:
+            await self.session.execute(
+                text("SELECT pg_advisory_xact_lock(hashtext(:lock_key))"),
+                {"lock_key": f"crm_lead_phone:{norm_phone}"},
+            )
+        except Exception:
+            pass
+
         dup_stmt = (
             select(CrmLead)
             .where(
@@ -714,7 +791,13 @@ class CrmLeadService:
             custom_fields=custom_fields,
         )
         self.session.add(new_lead)
-        await self.session.flush()
+        try:
+            await self.session.flush()
+        except IntegrityError as exc:
+            await self.session.rollback()
+            raise ConflictException(
+                f"A lead with phone '{norm_phone}' already exists in CRM. Duplicate lead creation prevented."
+            ) from exc
 
         # 6. Record Activity touchpoint
         activity = CrmActivity(
@@ -777,20 +860,7 @@ class CrmLeadService:
             raise NotFoundException(f"Lead with id {lead_id} not found.")
 
         # Scope enforcement
-        role_type, scoped_user_ids = await self.get_actor_role_and_scope(actor)
-        if role_type == "manager":
-            assert scoped_user_ids is not None
-            is_scoped = (
-                (lead.assigned_to is not None and lead.assigned_to in scoped_user_ids)
-                or (lead.created_by is not None and lead.created_by in scoped_user_ids)
-                or lead.assigned_to is None
-            )
-            if not is_scoped:
-                raise ForbiddenException("You do not have permission to modify this lead.")
-        elif role_type == "salesperson":
-            is_scoped = lead.assigned_to == actor.id or lead.created_by == actor.id
-            if not is_scoped:
-                raise ForbiddenException("You do not have permission to modify this lead.")
+        await self._check_lead_scope(lead, actor, action="modify")
 
         # Update provided fields & track material changes
         material_changes = []
@@ -1071,11 +1141,7 @@ class CrmLeadService:
         # If manager, enforce that lead is within their departmental scope
         if role_type == "manager":
             assert scoped_user_ids is not None
-            is_lead_in_scope = (
-                (lead.assigned_to is not None and lead.assigned_to in scoped_user_ids)
-                or (lead.created_by is not None and lead.created_by in scoped_user_ids)
-                or lead.assigned_to is None
-            )
+            is_lead_in_scope = self._is_lead_in_manager_scope(lead, scoped_user_ids)
             if not is_lead_in_scope:
                 raise ForbiddenException("You do not have permission to reassign leads outside your department.")
 
@@ -1180,11 +1246,7 @@ class CrmLeadService:
             return
         if role_type == "manager":
             assert scoped_user_ids is not None
-            is_scoped = (
-                (lead.assigned_to is not None and lead.assigned_to in scoped_user_ids)
-                or (lead.created_by is not None and lead.created_by in scoped_user_ids)
-                or (action == "view" and lead.assigned_to is None)
-            )
+            is_scoped = self._is_lead_in_manager_scope(lead, scoped_user_ids)
             if not is_scoped:
                 raise ForbiddenException(f"You do not have permission to {action} this lead.")
         elif role_type == "salesperson":
@@ -2323,10 +2385,34 @@ class CrmLeadService:
 
         scope_type: str
         target_reps: list[User] = []
+        resolved_department_name: str | None = None
+
+        if department_id is not None:
+            dept_role = (
+                await self.session.execute(
+                    select(Role).where(Role.id == department_id, Role.deleted_at.is_(None))
+                )
+            ).scalar_one_or_none()
+            if not dept_role:
+                raise NotFoundException(f"Department with id {department_id} not found.")
+            resolved_department_name = dept_role.name
 
         if role_type == "manager":
             scope_type = "team"
             assert scoped_user_ids is not None
+            managed_dept_ids = await self.get_actor_managed_departments(actor) or set()
+            if department_id is not None and department_id not in managed_dept_ids:
+                raise ForbiddenException("You are not authorized to view team oversight metrics for this department.")
+            if resolved_department_name is None and len(managed_dept_ids) == 1:
+                only_dept_id = next(iter(managed_dept_ids))
+                only_dept = (
+                    await self.session.execute(
+                        select(Role).where(Role.id == only_dept_id, Role.deleted_at.is_(None))
+                    )
+                ).scalar_one_or_none()
+                if only_dept:
+                    resolved_department_name = only_dept.name
+
             reps_stmt = (
                 select(User)
                 .where(
@@ -2364,11 +2450,24 @@ class CrmLeadService:
             )
             target_reps = list((await self.session.execute(reps_stmt)).scalars().all())
 
+        if department_id is not None:
+            dept_members_stmt = select(UserRole.user_id).where(
+                UserRole.role_id == department_id,
+                UserRole.status == RoleAssignmentStatus.ACTIVE,
+            )
+            dept_member_ids = set((await self.session.execute(dept_members_stmt)).scalars().all())
+            dept_leaders_stmt = select(DepartmentLeadershipAssignment.employee_id).where(
+                DepartmentLeadershipAssignment.department_id == department_id,
+                DepartmentLeadershipAssignment.status == OrgRecordStatus.ACTIVE,
+            )
+            dept_member_ids.update((await self.session.execute(dept_leaders_stmt)).scalars().all())
+            target_reps = [u for u in target_reps if u.id in dept_member_ids]
+
         if not target_reps:
             return CrmTeamOversightResponse(
                 scope_type=scope_type,
                 department_id=department_id,
-                department_name=None,
+                department_name=resolved_department_name,
                 reps=[],
                 total_active_leads=0,
                 total_overdue_follow_ups=0,
@@ -2567,7 +2666,7 @@ class CrmLeadService:
         return CrmTeamOversightResponse(
             scope_type=scope_type,
             department_id=department_id,
-            department_name=None,
+            department_name=resolved_department_name,
             reps=rep_items,
             total_active_leads=tot_active,
             total_overdue_follow_ups=tot_overdue,

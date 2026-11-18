@@ -471,7 +471,7 @@ export function LeadsPage() {
       if (filtersToUse.status.trim()) params.append("lead_status", filtersToUse.status.trim());
 
       const res = await apiGet<{ items: Lead[]; total: number }>(
-        `/leads/?${params.toString()}`
+        `/leads?${params.toString()}`
       );
 
       if (res.data && Array.isArray(res.data.items)) {
@@ -999,7 +999,7 @@ export function LeadsPage() {
         await apiPut(`/leads/${currentEditId}`, formData);
         showToast("Lead updated successfully.", "success");
       } else {
-        await apiPost("/leads/", formData);
+        await apiPost("/leads", formData);
         showToast("New lead created successfully.", "success");
       }
       setDrawerOpen(false);

@@ -505,7 +505,7 @@ export function App() {
           <Route path="/calltype/list" element={<Navigate to="/masters/call-types" replace />} />
           <Route path="/call_types/list" element={<Navigate to="/masters/call-types" replace />} />
           {/* Follow Up Logs Module (erp.inhymasolutions.com/follow-up/list) */}
-          <Route path="/follow-up/list" element={<FollowUpsPage />} />
+          <Route path="/follow-up/list" element={<HrmsRouteGuard permission="crm.leads.view"><FollowUpsPage /></HrmsRouteGuard>} />
           <Route path="/follow-ups" element={<Navigate to="/follow-up/list" replace />} />
           <Route path="/follow-up" element={<Navigate to="/follow-up/list" replace />} />
           <Route path="/followups" element={<Navigate to="/follow-up/list" replace />} />
@@ -513,7 +513,7 @@ export function App() {
           <Route path="/call-logs/follow-ups" element={<Navigate to="/follow-up/list" replace />} />
 
           {/* Leads Module (erp.inhymasolutions.com/lead/list) */}
-          <Route path="/lead/list" element={<LeadsPage />} />
+          <Route path="/lead/list" element={<HrmsRouteGuard permission="crm.leads.view"><LeadsPage /></HrmsRouteGuard>} />
           <Route path="/leads" element={<Navigate to="/lead/list" replace />} />
           <Route path="/lead" element={<Navigate to="/lead/list" replace />} />
           <Route path="/leads/list" element={<Navigate to="/lead/list" replace />} />

@@ -135,12 +135,41 @@ export const Auth = {
     if (code.startsWith("feed.") && (rawPerms.includes("deny:feed.view") || rawPerms.includes("block:feed.view"))) {
       return false;
     }
+    if (
+      (code.startsWith("crm.leads.") || code.startsWith("leads.")) &&
+      (rawPerms.includes("deny:crm.leads.view") ||
+        rawPerms.includes("block:crm.leads.view") ||
+        rawPerms.includes("deny:leads.view") ||
+        rawPerms.includes("block:leads.view"))
+    ) {
+      return false;
+    }
+    if (
+      code.startsWith("crm.pipelines.") &&
+      (rawPerms.includes("deny:crm.pipelines.view") || rawPerms.includes("block:crm.pipelines.view"))
+    ) {
+      return false;
+    }
+    if (
+      code.startsWith("crm.distribution.") &&
+      (rawPerms.includes("deny:crm.distribution.view") || rawPerms.includes("block:crm.distribution.view"))
+    ) {
+      return false;
+    }
 
     if (this.isSuperAdmin()) return true;
     if (!Array.isArray(profile.permissions)) return false;
     const perms = profile.permissions;
 
     if (perms.includes("*") || perms.includes(code)) return true;
+
+    // Legacy Leads <-> Modern CRM Leads compatibility
+    if (code === "crm.leads.view" && (perms.includes("leads.view") || perms.includes("leads.manage"))) {
+      return true;
+    }
+    if (code === "crm.leads.manage" && perms.includes("leads.manage")) {
+      return true;
+    }
 
     // View <-> Read compatibility alias
     if (code.endsWith(".view")) {

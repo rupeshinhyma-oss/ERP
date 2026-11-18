@@ -20,7 +20,11 @@ from app.audit.service import AuditService
 from app.auth.service import CurrentUser
 from app.core.logging import get_logger
 from app.core.responses import build_success_response
-from app.crm.dependencies import get_crm_pipeline_service
+from app.crm.dependencies import (
+    get_crm_pipeline_service,
+    require_crm_any_permission as require_any_permission,
+    require_crm_permission as require_permission,
+)
 from app.crm.schemas import (
     CrmPipelineCreate,
     CrmPipelineUpdate,
@@ -29,7 +33,6 @@ from app.crm.schemas import (
     CrmStageUpdate,
 )
 from app.crm.service import CrmPipelineService
-from app.rbac.dependencies import require_any_permission, require_permission
 
 router = APIRouter(prefix="/crm/pipelines", tags=["CRM Pipelines"])
 logger = get_logger(__name__)

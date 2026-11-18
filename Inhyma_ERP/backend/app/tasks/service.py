@@ -1761,6 +1761,8 @@ class TaskService:
         await self._assert_can_mutate_task(task, current_user, action="delete")
         task.deleted_at = datetime.now(timezone.utc)
         task.deleted_by = current_user.id
+        from app.crm.follow_up_task_sync import unlink_deleted_task_from_follow_ups
+        await unlink_deleted_task_from_follow_ups(self.repository.session, task.id)
         await self.repository.session.commit()
 
         await self.audit_service.record(
@@ -2380,6 +2382,14 @@ class TaskService:
                         task_id=tid,
                         actor_id=current_user.id,
                         actor_username=getattr(current_user, "display_name", None) or getattr(current_user, "full_name", None) or current_user.username,
+                    )
+        elif payload.action == "DELETE":
+            from app.crm.follow_up_task_sync import unlink_deleted_task_from_follow_ups
+            for tid in authorized_task_ids:
+                if tid not in more_failed:
+                    await unlink_deleted_task_from_follow_ups(
+                        session=self.repository.session,
+                        task_id=tid,
                     )
         await self.repository.session.commit()
 

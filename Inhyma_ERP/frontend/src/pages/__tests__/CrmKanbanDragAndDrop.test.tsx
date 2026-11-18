@@ -456,4 +456,124 @@ describe("CrmKanbanDragAndDrop (Phase 2)", () => {
       expect(screen.queryByTestId("kanban-board")).toBeNull();
     });
   });
+
+  it("CRM-AUD-06: does not fire duplicate pipeline or lead requests when initializing Kanban view", async () => {
+    const apiGetSpy = vi.spyOn(apiModule, "apiGet");
+
+    render(
+      <BrowserRouter>
+        <CrmLeadsPage />
+      </BrowserRouter>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("LD-2026-001")).toBeTruthy();
+    });
+
+    apiGetSpy.mockClear();
+
+    // Switch to Kanban tab
+    fireEvent.click(screen.getByRole("button", { name: /Pipeline Kanban/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Prospecting")).toBeTruthy();
+      expect(screen.getByTestId("kanban-card-lead-1")).toBeTruthy();
+    });
+
+    const pipe1StageCalls = apiGetSpy.mock.calls.filter(([url]) =>
+      String(url).includes("/crm/pipelines/pipe-1")
+    );
+    const pipe1KanbanLeadCalls = apiGetSpy.mock.calls.filter(
+      ([url]) => String(url).includes("/crm/leads") && String(url).includes("pipeline_id=pipe-1")
+    );
+
+    expect(pipe1StageCalls).toHaveLength(1);
+    expect(pipe1KanbanLeadCalls).toHaveLength(1);
+  });
+
+  it("CRM-AUD-06: discards stale Kanban responses during rapid pipeline switching", async () => {
+    let resolveDelayedPipe1Leads: ((val: any) => void) | null = null;
+
+    vi.spyOn(apiModule, "apiGet").mockImplementation((url: string) => {
+      if (url.includes("/crm/pipelines/pipe-1")) {
+        return Promise.resolve({
+          data: { id: "pipe-1", name: "Direct Sales Pipeline", stages: PIPE_1_STAGES },
+        });
+      }
+      if (url.includes("/crm/pipelines/pipe-2")) {
+        return Promise.resolve({
+          data: { id: "pipe-2", name: "Channel Partner Pipeline", stages: PIPE_2_STAGES },
+        });
+      }
+      if (url.includes("/crm/pipelines")) {
+        return Promise.resolve({ data: PIPELINES });
+      }
+      if (url.includes("/crm/leads") && url.includes("pipeline_id=pipe-1") && url.includes("page_size=100")) {
+        return new Promise((resolve) => {
+          resolveDelayedPipe1Leads = resolve;
+        });
+      }
+      if (url.includes("/crm/leads") && url.includes("pipeline_id=pipe-2")) {
+        return Promise.resolve({
+          data: {
+            items: PIPE_2_LEADS,
+            total: PIPE_2_LEADS.length,
+            page: 1,
+            page_size: 100,
+            total_pages: 1,
+          },
+        });
+      }
+      if (url.includes("/crm/leads")) {
+        return Promise.resolve({
+          data: {
+            items: PIPE_1_LEADS,
+            total: PIPE_1_LEADS.length,
+            page: 1,
+            page_size: 100,
+            total_pages: 1,
+          },
+        });
+      }
+      return Promise.resolve({ data: [] });
+    });
+
+    render(
+      <BrowserRouter>
+        <CrmLeadsPage />
+      </BrowserRouter>
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /Pipeline Kanban/i }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("kanban-pipeline-select")).toBeTruthy();
+    });
+
+    // Rapidly switch to pipe-2 while pipe-1's Kanban request is still in flight
+    fireEvent.change(screen.getByTestId("kanban-pipeline-select"), { target: { value: "pipe-2" } });
+
+    await waitFor(() => {
+      expect(screen.getByText("Inbound Referral")).toBeTruthy();
+      expect(screen.getByText("Gamma Tech")).toBeTruthy();
+    });
+
+    // Resolve the stale pipe-1 response late — it must NOT overwrite pipe-2 stages or leads
+    if (resolveDelayedPipe1Leads) {
+      (resolveDelayedPipe1Leads as (val: any) => void)({
+        data: {
+          items: PIPE_1_LEADS,
+          total: PIPE_1_LEADS.length,
+          page: 1,
+          page_size: 100,
+          total_pages: 1,
+        },
+      });
+    }
+
+    await waitFor(() => {
+      expect(screen.getByText("Gamma Tech")).toBeTruthy();
+      expect(screen.queryByText("Alpha Corp")).toBeNull();
+    });
+  });
 });

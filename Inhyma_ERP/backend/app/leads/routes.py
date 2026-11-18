@@ -13,11 +13,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.dependencies import CurrentUser, get_current_user
 from app.database.session import get_db_session
 from app.core.responses import build_success_response
+from app.crm.dependencies import require_crm_any_permission, require_crm_permission
 from app.leads.models import Lead
 from app.leads.repository import LeadRepository
 from app.leads.schemas import LeadAllotRequest, LeadBulkDeleteRequest, LeadCreate, LeadRead, LeadUpdate
 from app.leads.service import LeadService
-from app.rbac.dependencies import require_any_permission
 
 router = APIRouter(prefix="", tags=["Leads"])
 
@@ -57,7 +57,7 @@ async def list_leads(
     page_size: int | None = Query(default=None, ge=1, le=500),
     service: LeadService = Depends(get_service),
     current_user: CurrentUser = Depends(
-        require_any_permission("crm.leads.view", "crm.leads.manage", "leads.view", "leads.manage")
+        require_crm_any_permission("crm.leads.view", "crm.leads.manage")
     ),
 ) -> dict:
     effective_limit = page_size if page_size is not None else (limit if limit is not None else 50)
@@ -117,7 +117,7 @@ async def create_lead(
     request: Request,
     service: LeadService = Depends(get_service),
     current_user: CurrentUser = Depends(
-        require_any_permission("crm.leads.manage", "leads.manage")
+        require_crm_any_permission("crm.leads.view", "crm.leads.manage")
     ),
 ) -> dict:
     lead = await service.create(payload, actor=current_user)
@@ -129,7 +129,7 @@ async def get_lead(
     lead_id: uuid.UUID,
     service: LeadService = Depends(get_service),
     current_user: CurrentUser = Depends(
-        require_any_permission("crm.leads.view", "crm.leads.manage", "leads.view", "leads.manage")
+        require_crm_any_permission("crm.leads.view", "crm.leads.manage")
     ),
 ) -> dict:
     lead = await service.get_by_id(lead_id, actor=current_user)
@@ -142,7 +142,7 @@ async def update_lead(
     payload: LeadUpdate,
     service: LeadService = Depends(get_service),
     current_user: CurrentUser = Depends(
-        require_any_permission("crm.leads.manage", "leads.manage")
+        require_crm_any_permission("crm.leads.view", "crm.leads.manage")
     ),
 ) -> dict:
     lead = await service.update(lead_id, payload, actor=current_user)
@@ -155,7 +155,7 @@ async def allot_lead(
     payload: LeadAllotRequest,
     service: LeadService = Depends(get_service),
     current_user: CurrentUser = Depends(
-        require_any_permission("crm.leads.manage", "leads.manage")
+        require_crm_permission("crm.leads.manage")
     ),
 ) -> dict:
     lead = await service.allot_lead(lead_id, payload.allotted_to, actor=current_user)
@@ -167,7 +167,7 @@ async def delete_lead(
     lead_id: uuid.UUID,
     service: LeadService = Depends(get_service),
     current_user: CurrentUser = Depends(
-        require_any_permission("crm.leads.manage", "leads.manage")
+        require_crm_permission("crm.leads.manage")
     ),
 ) -> dict:
     await service.delete(lead_id, actor=current_user)
@@ -179,7 +179,7 @@ async def bulk_delete_leads(
     payload: LeadBulkDeleteRequest,
     service: LeadService = Depends(get_service),
     current_user: CurrentUser = Depends(
-        require_any_permission("crm.leads.manage", "leads.manage")
+        require_crm_permission("crm.leads.manage")
     ),
 ) -> dict:
     deleted_count = await service.bulk_delete(payload.ids, actor=current_user)

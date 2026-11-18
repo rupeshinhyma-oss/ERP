@@ -10,15 +10,17 @@ Exposes RESTful endpoints for:
 from __future__ import annotations
 
 import uuid
+from typing import Any
 
 from fastapi import APIRouter, Depends, Query, Request, Response, status
 from app.core.config import settings
+from app.core.responses import build_success_response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import get_current_user
 from app.auth.service import CurrentUser
 from app.database.session import get_db_session
-from app.rbac.dependencies import require_permission
+from app.crm.dependencies import require_crm_any_permission
 from app.crm.quotation_service import CrmQuotationService
 from app.crm.schemas import (
     CrmLeadProductCreate,
@@ -41,6 +43,30 @@ def get_quotation_service(session: AsyncSession = Depends(get_db_session)) -> Cr
     return CrmQuotationService(session)
 
 
+def _with_envelope(
+    model_or_dict: Any,
+    request: Request | None = None,
+    message: str = "Operation completed successfully",
+) -> dict[str, Any]:
+    """
+    Return a backward-compatible response dictionary containing both the standard ERP
+    envelope (`success`, `data`, `message`, `meta`) and top-level payload keys so both
+    envelope-aware clients and direct field consumers operate seamlessly.
+    """
+    dumped = (
+        model_or_dict.model_dump(mode="json")
+        if hasattr(model_or_dict, "model_dump")
+        else dict(model_or_dict)
+    )
+    req_id = (
+        getattr(request.state, "request_id", "-")
+        if request is not None and hasattr(request, "state")
+        else "-"
+    )
+    envelope = build_success_response(data=dumped, message=message, request_id=req_id)
+    return {**dumped, **envelope}
+
+
 # -----------------------------------------------------------------------------
 # 1. Product Master Lookup for CRM
 # -----------------------------------------------------------------------------
@@ -48,17 +74,18 @@ def get_quotation_service(session: AsyncSession = Depends(get_db_session)) -> Cr
 
 @router.get(
     "/products/lookup",
-    response_model=CrmProductLookupResponse,
     summary="Search active products for CRM quotation and association",
 )
 async def lookup_products(
+    request: Request,
     q: str | None = Query(None, description="Search term for product name, code, or barcode"),
     limit: int = Query(50, ge=1, le=100),
     service: CrmQuotationService = Depends(get_quotation_service),
-    current_user: CurrentUser = Depends(require_permission("crm.leads.view")),
-) -> CrmProductLookupResponse:
+    current_user: CurrentUser = Depends(require_crm_any_permission("crm.leads.view", "crm.leads.manage")),
+) -> dict[str, Any]:
     """Search and lookup non-deleted, active, sellable Product Master items."""
-    return await service.search_products(query=q, limit=limit, actor=current_user)
+    res = await service.search_products(query=q, limit=limit, actor=current_user)
+    return _with_envelope(res, request)
 
 
 # -----------------------------------------------------------------------------
@@ -68,32 +95,34 @@ async def lookup_products(
 
 @router.get(
     "/leads/{lead_id}/products",
-    response_model=CrmLeadProductListResponse,
     summary="List products associated with a CRM lead",
 )
 async def list_lead_products(
+    request: Request,
     lead_id: uuid.UUID,
     service: CrmQuotationService = Depends(get_quotation_service),
-    current_user: CurrentUser = Depends(require_permission("crm.leads.view")),
-) -> CrmLeadProductListResponse:
+    current_user: CurrentUser = Depends(require_crm_any_permission("crm.leads.view", "crm.leads.manage")),
+) -> dict[str, Any]:
     """List associated products of interest for a lead."""
-    return await service.list_lead_products(lead_id=lead_id, actor=current_user)
+    res = await service.list_lead_products(lead_id=lead_id, actor=current_user)
+    return _with_envelope(res, request)
 
 
 @router.post(
     "/leads/{lead_id}/products",
-    response_model=CrmLeadProductRead,
     status_code=status.HTTP_201_CREATED,
     summary="Associate a product with a CRM lead",
 )
 async def associate_lead_product(
+    request: Request,
     lead_id: uuid.UUID,
     payload: CrmLeadProductCreate,
     service: CrmQuotationService = Depends(get_quotation_service),
-    current_user: CurrentUser = Depends(require_permission("crm.leads.manage")),
-) -> CrmLeadProductRead:
+    current_user: CurrentUser = Depends(require_crm_any_permission("crm.leads.view", "crm.leads.manage")),
+) -> dict[str, Any]:
     """Link an existing Product Master product to a lead."""
-    return await service.associate_product(lead_id=lead_id, payload=payload, actor=current_user)
+    res = await service.associate_product(lead_id=lead_id, payload=payload, actor=current_user)
+    return _with_envelope(res, request, message="Product associated with lead successfully.")
 
 
 @router.delete(
@@ -107,7 +136,7 @@ async def remove_lead_product(
     lead_id: uuid.UUID,
     product_id: uuid.UUID,
     service: CrmQuotationService = Depends(get_quotation_service),
-    current_user: CurrentUser = Depends(require_permission("crm.leads.manage")),
+    current_user: CurrentUser = Depends(require_crm_any_permission("crm.leads.view", "crm.leads.manage")),
 ) -> Response:
     """Remove a product association from a lead."""
     await service.remove_lead_product(lead_id=lead_id, product_id=product_id, actor=current_user)
@@ -121,81 +150,85 @@ async def remove_lead_product(
 
 @router.get(
     "/leads/{lead_id}/quotations",
-    response_model=CrmSalesQuotationListResponse,
     summary="List sales quotations for a CRM lead",
 )
 async def list_lead_quotations(
+    request: Request,
     lead_id: uuid.UUID,
     service: CrmQuotationService = Depends(get_quotation_service),
-    current_user: CurrentUser = Depends(require_permission("crm.leads.view")),
-) -> CrmSalesQuotationListResponse:
+    current_user: CurrentUser = Depends(require_crm_any_permission("crm.leads.view", "crm.leads.manage")),
+) -> dict[str, Any]:
     """List all quotations created for a lead."""
-    return await service.list_lead_quotations(lead_id=lead_id, actor=current_user)
+    res = await service.list_lead_quotations(lead_id=lead_id, actor=current_user)
+    return _with_envelope(res, request)
 
 
 @router.post(
     "/leads/{lead_id}/quotations",
-    response_model=CrmSalesQuotationRead,
     status_code=status.HTTP_201_CREATED,
     summary="Create a new sales quotation draft for a lead",
 )
 async def create_sales_quotation(
+    request: Request,
     lead_id: uuid.UUID,
     payload: CrmSalesQuotationCreate,
     service: CrmQuotationService = Depends(get_quotation_service),
-    current_user: CurrentUser = Depends(require_permission("crm.leads.manage")),
-) -> CrmSalesQuotationRead:
+    current_user: CurrentUser = Depends(require_crm_any_permission("crm.leads.view", "crm.leads.manage")),
+) -> dict[str, Any]:
     """Create a new sales quotation with validated items and decimal-safe totals."""
-    return await service.create_quotation(lead_id=lead_id, payload=payload, actor=current_user)
+    res = await service.create_quotation(lead_id=lead_id, payload=payload, actor=current_user)
+    return _with_envelope(res, request, message="Sales quotation created successfully.")
 
 
 @router.get(
     "/quotations/{quotation_id}",
-    response_model=CrmSalesQuotationRead,
     summary="Get sales quotation details, line items, and revision history",
 )
 async def get_sales_quotation(
+    request: Request,
     quotation_id: uuid.UUID,
     service: CrmQuotationService = Depends(get_quotation_service),
-    current_user: CurrentUser = Depends(require_permission("crm.leads.view")),
-) -> CrmSalesQuotationRead:
+    current_user: CurrentUser = Depends(require_crm_any_permission("crm.leads.view", "crm.leads.manage")),
+) -> dict[str, Any]:
     """Get single quotation details, checking lead access authorization."""
-    return await service.get_quotation(quotation_id=quotation_id, actor=current_user)
+    res = await service.get_quotation(quotation_id=quotation_id, actor=current_user)
+    return _with_envelope(res, request)
 
 
 @router.patch(
     "/quotations/{quotation_id}",
-    response_model=CrmSalesQuotationRead,
     summary="Update sales quotation or create a new revision",
 )
 @router.put(
     "/quotations/{quotation_id}",
-    response_model=CrmSalesQuotationRead,
     summary="Update sales quotation or create a new revision",
 )
 async def update_sales_quotation(
+    request: Request,
     quotation_id: uuid.UUID,
     payload: CrmSalesQuotationUpdate,
     service: CrmQuotationService = Depends(get_quotation_service),
-    current_user: CurrentUser = Depends(require_permission("crm.leads.manage")),
-) -> CrmSalesQuotationRead:
+    current_user: CurrentUser = Depends(require_crm_any_permission("crm.leads.view", "crm.leads.manage")),
+) -> dict[str, Any]:
     """Update quotation draft or finalize revision snapshot."""
-    return await service.update_quotation(quotation_id=quotation_id, payload=payload, actor=current_user)
+    res = await service.update_quotation(quotation_id=quotation_id, payload=payload, actor=current_user)
+    return _with_envelope(res, request, message="Sales quotation updated successfully.")
 
 
 @router.patch(
     "/quotations/{quotation_id}/status",
-    response_model=CrmSalesQuotationRead,
     summary="Update sales quotation status",
 )
 async def update_quotation_status(
+    request: Request,
     quotation_id: uuid.UUID,
     payload: CrmQuotationStatusUpdate,
     service: CrmQuotationService = Depends(get_quotation_service),
-    current_user: CurrentUser = Depends(require_permission("crm.leads.manage")),
-) -> CrmSalesQuotationRead:
+    current_user: CurrentUser = Depends(require_crm_any_permission("crm.leads.view", "crm.leads.manage")),
+) -> dict[str, Any]:
     """Change quotation lifecycle status."""
-    return await service.update_quotation_status(quotation_id=quotation_id, payload=payload, actor=current_user)
+    res = await service.update_quotation_status(quotation_id=quotation_id, payload=payload, actor=current_user)
+    return _with_envelope(res, request, message="Sales quotation status updated successfully.")
 
 
 @router.get(
@@ -206,7 +239,7 @@ async def update_quotation_status(
 async def list_quotation_versions(
     quotation_id: uuid.UUID,
     service: CrmQuotationService = Depends(get_quotation_service),
-    current_user: CurrentUser = Depends(require_permission("crm.leads.view")),
+    current_user: CurrentUser = Depends(require_crm_any_permission("crm.leads.view", "crm.leads.manage")),
 ) -> list[CrmQuotationVersionRead]:
     """Retrieve archived revision snapshots of a sales quotation."""
     return await service.list_quotation_versions(quotation_id=quotation_id, actor=current_user)
@@ -222,7 +255,7 @@ async def get_quotation_pdf(
     quotation_id: uuid.UUID,
     version: int | None = Query(None, description="Optional revision version number (defaults to current version)"),
     service: CrmQuotationService = Depends(get_quotation_service),
-    current_user: CurrentUser = Depends(require_permission("crm.leads.view")),
+    current_user: CurrentUser = Depends(require_crm_any_permission("crm.leads.view", "crm.leads.manage")),
 ) -> Response:
     """
     Generate and stream official Sales Quotation PDF from saved snapshot.
@@ -266,18 +299,19 @@ async def get_quotation_pdf(
     summary="Record email or whatsapp quotation sharing attempt or opened event",
 )
 async def record_quotation_share_activity(
+    request: Request,
     quotation_id: uuid.UUID,
     payload: CrmQuotationShareActivityCreate,
     service: CrmQuotationService = Depends(get_quotation_service),
-    current_user: CurrentUser = Depends(require_permission("crm.leads.view")),
-) -> dict:
+    current_user: CurrentUser = Depends(require_crm_any_permission("crm.leads.view", "crm.leads.manage")),
+) -> dict[str, Any]:
     """
     Log sharing attempt or opened composer action for email/whatsapp.
     Enforces RBAC lead scope and deduplicates repeated submissions.
     """
-    return await service.record_share_activity(
+    res = await service.record_share_activity(
         quotation_id=quotation_id,
         payload=payload,
         actor=current_user,
     )
-
+    return _with_envelope(res, request)

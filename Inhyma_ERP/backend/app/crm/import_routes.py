@@ -23,9 +23,11 @@ from app.auth.service import CurrentUser
 from app.core.exceptions import BadRequestException
 from app.core.logging import get_logger
 from app.core.responses import build_success_response
-from app.crm.dependencies import get_crm_import_service
+from app.crm.dependencies import (
+    get_crm_import_service,
+    require_crm_permission as require_permission,
+)
 from app.crm.import_service import CrmImportService
-from app.rbac.dependencies import require_permission
 
 router = APIRouter(prefix="/crm/import", tags=["CRM Lead Import"])
 logger = get_logger(__name__)

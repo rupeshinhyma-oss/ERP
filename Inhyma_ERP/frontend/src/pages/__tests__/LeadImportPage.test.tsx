@@ -742,5 +742,84 @@ describe("LeadImportPage", () => {
       expect(screen.queryByText("Unassigned")).toBeNull();
     });
   });
+
+  it("CRM-AUD-09: renders Resolved Company Results table in Step 5 when row_results include company metadata", async () => {
+    vi.spyOn(apiModule, "apiPostMultipart").mockImplementation((url: string) => {
+      if (url.includes("/crm/import/preview")) {
+        return Promise.resolve({ data: MOCK_PREVIEW_RESPONSE as any, meta: undefined });
+      }
+      if (url.includes("/crm/import/confirm")) {
+        return Promise.resolve({
+          data: {
+            ...MOCK_CONFIRM_RESPONSE,
+            status: "completed",
+            display_status: "Success",
+            total_rows: 2,
+            success_count: 2,
+            duplicate_skipped_count: 0,
+            failed_count: 0,
+            row_results: [
+              {
+                row_number: 2,
+                name: "Rohit",
+                original_phone: "9876543210",
+                normalized_phone: "+919876543210",
+                company: "Existing Automation Ltd",
+                company_id: "comp-1",
+                matched_company_name: "Existing Automation Ltd",
+                company_action: "EXISTING",
+                company_resolution_note: "Linked to existing company",
+                status: "VALID",
+                is_valid_candidate: true,
+              },
+              {
+                row_number: 3,
+                name: "Sneha",
+                original_phone: "9876543211",
+                normalized_phone: "+919876543211",
+                company: "Brand New Industries",
+                company_id: "comp-2",
+                matched_company_name: "Brand New Industries",
+                company_action: "NEW",
+                company_resolution_note: "Created new company record",
+                status: "VALID",
+                is_valid_candidate: true,
+              },
+            ],
+          } as any,
+          meta: undefined,
+        });
+      }
+      return Promise.resolve({ data: {} as any, meta: undefined });
+    });
+
+    renderComponent();
+
+    const file = new File(["Name,Number,Campaign,Company\nRohit,9876543210,Camp,Existing Automation Ltd\n"], "leads.csv", {
+      type: "text/csv",
+    });
+    const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
+    fireEvent.change(fileInput, { target: { files: [file] } });
+
+    await waitFor(() => expect(screen.getByText("leads.csv")).toBeDefined());
+    fireEvent.click(screen.getByText("Continue to Pipeline Selection \u2192"));
+
+    await waitFor(() => expect(screen.getByText(/New Inbound Leads/)).toBeDefined());
+    fireEvent.click(screen.getByText("Validate & Preview Leads \u2192"));
+
+    await waitFor(() => expect(screen.getByText("Proceed to Confirmation \u2192")).toBeDefined());
+    fireEvent.click(screen.getByText("Proceed to Confirmation \u2192"));
+
+    await waitFor(() => expect(screen.getByText("Confirm and Commit Import")).toBeDefined());
+    fireEvent.click(screen.getByText("Confirm and Commit Import"));
+
+    await waitFor(() => {
+      expect(screen.getByText("Imported Row Company Resolution")).toBeDefined();
+      expect(screen.getByText("Existing Automation Ltd")).toBeDefined();
+      expect(screen.getByText("Brand New Industries")).toBeDefined();
+      expect(screen.getByText(/Linked to existing company/i)).toBeDefined();
+      expect(screen.getByText(/Created new company record/i)).toBeDefined();
+    });
+  });
 });
 

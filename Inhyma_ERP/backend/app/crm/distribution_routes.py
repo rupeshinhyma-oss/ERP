@@ -21,14 +21,17 @@ from app.audit.service import AuditService
 from app.auth.service import CurrentUser
 from app.core.logging import get_logger
 from app.core.responses import build_success_response
-from app.crm.dependencies import get_crm_salesperson_distribution_service
+from app.crm.dependencies import (
+    get_crm_salesperson_distribution_service,
+    require_crm_any_permission as require_any_permission,
+    require_crm_permission as require_permission,
+)
 from app.crm.schemas import (
     SalespersonBulkEligibilityUpdate,
     SalespersonDistributionItem,
     SalespersonDistributionUpdate,
 )
 from app.crm.service import CrmSalespersonDistributionService
-from app.rbac.dependencies import require_any_permission, require_permission
 
 router = APIRouter(prefix="/crm/distribution", tags=["CRM Salesperson Distribution"])
 logger = get_logger(__name__)

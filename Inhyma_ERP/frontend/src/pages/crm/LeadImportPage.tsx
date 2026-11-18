@@ -2100,6 +2100,68 @@ export function LeadImportPage({ embedded = false, onClose, onSuccess }: LeadImp
                       </div>
                     )}
 
+                    {/* Resolved Company Outcomes for Imported Rows */}
+                    {Array.isArray(importResult.row_results) &&
+                      importResult.row_results.some((r) => Boolean(r.matched_company_name || r.company)) && (
+                        <div
+                          data-testid="step5-company-outcomes"
+                          style={{
+                            marginBottom: "18px",
+                            textAlign: "left",
+                            border: "1px solid #e2e8f0",
+                            borderRadius: "6px",
+                            overflow: "hidden",
+                          }}
+                        >
+                          <div
+                            style={{
+                              background: "#f8fafc",
+                              padding: "8px 12px",
+                              borderBottom: "1px solid #e2e8f0",
+                              display: "flex",
+                              justifyContent: "space-between",
+                              alignItems: "center",
+                            }}
+                          >
+                            <span style={{ fontSize: "12px", fontWeight: 700, color: "#0f172a" }}>
+                              Imported Row Company Resolution
+                            </span>
+                            <span style={{ fontSize: "11px", color: "#64748b" }}>
+                              Resolved Company Master links
+                            </span>
+                          </div>
+                          <div style={{ maxHeight: "180px", overflowY: "auto" }}>
+                            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "11.5px" }}>
+                              <thead style={{ background: "#f8fafc" }}>
+                                <tr style={{ borderBottom: "1px solid #e2e8f0", textAlign: "left" }}>
+                                  <th style={{ padding: "6px 10px", color: "#475569" }}>Lead</th>
+                                  <th style={{ padding: "6px 10px", color: "#475569" }}>Resolved Company</th>
+                                  <th style={{ padding: "6px 10px", color: "#475569" }}>Resolution</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {importResult.row_results
+                                  .filter((r) => r.status === "VALID" || r.status === "CRM_DUPLICATE")
+                                  .map((r, idx) => (
+                                    <tr key={idx} style={{ borderBottom: "1px solid #f1f5f9" }}>
+                                      <td style={{ padding: "6px 10px", fontWeight: 600, color: "#0f172a" }}>
+                                        {r.name} {r.matched_lead_code ? `(${r.matched_lead_code})` : ""}
+                                      </td>
+                                      <td style={{ padding: "6px 10px", color: "#334155" }}>
+                                        {r.matched_company_name || r.company || "—"}
+                                      </td>
+                                      <td style={{ padding: "6px 10px", color: "#059669", fontWeight: 600 }}>
+                                        {r.company_action || "NONE"}
+                                        {r.company_resolution_note ? ` — ${r.company_resolution_note}` : ""}
+                                      </td>
+                                    </tr>
+                                  ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      )}
+
                     {/* Action Buttons: 2 Primary + 1 Secondary */}
                     <div
                       style={{
