@@ -1,7 +1,7 @@
 # Enterprise ERP System — Unified Architecture, Feature & Technical Manual
 
 > **System Version:** 1.0.0 (Production)  
-> **Last Updated:** November 17, 2026  
+> **Last Updated:** November 18, 2026  
 > **Architectural Pattern:** Modular Async Monolith (FastAPI) + React 18 SPA (Vite) + Real-Time WebSocket Event Bus  
 > **Target Audience:** Systems Architects, Software Engineers, DevOps, and Autonomous AI Coding Assistants.  
 > **Scope:** Complete end-to-end technical reference containing all system features, data models, API endpoints, background workers, frontend architecture, and developer integration guidelines.
@@ -913,7 +913,7 @@ A user may be assigned any number of Roles simultaneously (`POST /users/{id}/rol
   - `All (<all_count>)`: Displays all active (non-cancelled) chargeable tasks (`payment_collected=all`).
   - `Pending (<pending_count>)`: Displays active chargeable tasks with unpaid or partial payment balance (default active tab).
   - `Completed (<completed_count>)`: Displays active chargeable tasks where full service charge payment has been collected and reconciled.
-  - Selectable pagination (`10`, `25`, `50`, `100` Items/Page), instant live search across company, city, machine model, contact person, technician, and priority.
+  - Selectable pagination (`10`, `25`, `50`, `100` Items/Page) via a single unified `<Pagination />` footer (`Showing X–Y of Z total (Page A of B)` + `Previous` / page buttons / `Next` — duplicate manual `"Showing..."` text removed), and instant live search across company, city, machine model, contact person, technician, and priority.
   - Collapsible filter drawer: City, Task Type (`Telecall`, `Onsite Visit - Client Location`, `Onsite Visit - Third-Party Location`, `In-House`), Priority (`A`, `B`), Technician, and Date Range.
 - **Dual Amount Display, Dynamic Fallbacks & RBAC Gating:**
   - `Total Amount`: Shows formatted INR currency (`₹...`) alongside green `Chargeable` pill badge.
@@ -2137,7 +2137,10 @@ To guarantee single-source-of-truth integrity across PostgreSQL and FastAPI Mast
 - **Production Error Integrity & Test-Only Fixture Gating (`AddCompanyDrawer.tsx`, `EditAddressDrawer.tsx`, `CompanyForm1Modal.tsx`, `AddTransferOrderPage.tsx`, `StockTransferPage.tsx`, `SaleProcessList.tsx`, `SaleProcessDetailModal.tsx`, `DiscountPaymentsPage.tsx`, `ProductStockPage.tsx`, `ProductReorderPage.tsx`, `SalesOrderPdfPage.tsx`, `GatePassPdfPage.tsx`, `TransferOrderPdfPage.tsx`, `salesOrderPdf.ts`, `stockTransferPdf.ts`):**
   - Eliminated offline `localStorage` persistence (`local_stock_transfers`), silent mutation fallbacks (company creation, follow-up creation, SO file deletion, status change), and hardcoded customer/organization sample defaults (`"GARUDA..."`, `"Dhairya Shah"`, `"Abhishek Patel"`, `"SO-MH/26-27/3826"`, hardcoded Thane contact/GST).
   - Remaining seed fixtures used by offline Vitest suites (`INITIAL_STOCK_ITEMS`, `INITIAL_GOODS_EXPECTED_ITEMS`, `INITIAL_REORDER_ITEMS`, `INITIAL_SALE_ORDERS`, `INITIAL_DISCOUNT_ORDERS`, `INITIAL_TRANSFERS`, `TRANSFER_52_EXACT_ITEMS`) are strictly gated behind `import.meta.env.MODE === "test"` and never execute in production builds.
+- **Filter Layout & Pagination Cleanups (`StockTransferPage.tsx`, `styles/stockTransfer.css`, `PaymentsPage.tsx`, `TechnicalTasksPage.tsx`):**
+  - Updated `.transfer-filter-panel` (`display: block; width: 100%`), `.transfer-filter-field` (`width: 100%; min-width: 0`), and `.transfer-filter-grid` (`grid-template-columns: repeat(auto-fit, minmax(220px, 1fr))`) so **Transfer Date**, **From Warehouse**, and **To Warehouse** align horizontally on a single row.
+  - Removed the redundant manual `"Showing X – Y of Z total"` footer above `<Pagination />` in `PaymentsPage.tsx`, leaving `<Pagination />` as the single footer summary & pager, and removed the standalone `Imp / Exp ▾` header button from `TechnicalTasksPage.tsx`.
 
 ---
-*Maintained and verified for Inhyma Solutions Enterprise ERP. Last updated: November 17, 2026 (Zero-Hardcoded Cross-Module Master Data & Fallback Purge Architecture across Sales, CRM, Masters, Inventory, Technical Tasks, Tasks & Financial Planning; Render Cloud Deployment Port-Binding, `os.execv` PID-1 Handoff, Bulk Seed Optimization & `GET`/`HEAD` Readiness Hardening, Financial Planning Report Full-Stack Live Stage Wiring, Cargo Overview Module Shell, Technician Ops & Wallet Physical Stock Conservation & Sales Order Pre-Fill Bridge [z7e8f9a0b1c2], Technical Tasks Granular RBAC Permissions [306 Total Permissions], Display Name Primary Identity & Internal-Only Username Governance, DB-Backed Product Specification Documents [z4b5c6d7e8f9], Engine-Level Pytest Supabase Guard & Synthetic Artifact DB Purge [z5c6d7e8f9a0], and System-Wide Active-Only Cross-Module Extraction).*
+*Maintained and verified for Inhyma Solutions Enterprise ERP. Last updated: November 18, 2026 (Zero-Hardcoded Cross-Module Master Data & Fallback Purge Architecture, Stock Transfer Single-Row Filter Grid, Payments Single Pagination Footer, and Technical Tasks Header Action Cleanup; Render Cloud Deployment Port-Binding, `os.execv` PID-1 Handoff, Bulk Seed Optimization & `GET`/`HEAD` Readiness Hardening, Financial Planning Report Full-Stack Live Stage Wiring, Cargo Overview Module Shell, Technician Ops & Wallet Physical Stock Conservation & Sales Order Pre-Fill Bridge [z7e8f9a0b1c2], Technical Tasks Granular RBAC Permissions [306 Total Permissions], Display Name Primary Identity & Internal-Only Username Governance, DB-Backed Product Specification Documents [z4b5c6d7e8f9], Engine-Level Pytest Supabase Guard & Synthetic Artifact DB Purge [z5c6d7e8f9a0], and System-Wide Active-Only Cross-Module Extraction).*
 
