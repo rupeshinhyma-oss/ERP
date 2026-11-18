@@ -8,7 +8,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import Select, func, or_, select
+from sqlalchemy import Select, and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common.base_repository import BaseRepository
@@ -95,6 +95,8 @@ class FollowUpRepository(BaseRepository[FollowUp]):
         call_type: str | None = None,
         marketing_person: str | None = None,
         marketing_person_names: set[str] | None = None,
+        scoped_user_ids: set[uuid.UUID] | None = None,
+        scoped_usernames: set[str] | None = None,
         business_type: str | None = None,
         state: str | None = None,
         district: str | None = None,
@@ -128,7 +130,23 @@ class FollowUpRepository(BaseRepository[FollowUp]):
             stmt = stmt.where(func.lower(FollowUp.call_category) == call_category.strip().lower())
         if call_type and call_type.strip() and call_type.strip().lower() not in ("all", "select"):
             stmt = stmt.where(func.lower(FollowUp.call_type) == call_type.strip().lower())
-        if marketing_person_names:
+        if scoped_user_ids is not None:
+            scope_conds = [
+                FollowUp.owner_user_id.in_(list(scoped_user_ids)),
+                and_(FollowUp.owner_user_id.is_(None), FollowUp.created_by_user_id.in_(list(scoped_user_ids))),
+            ]
+            if scoped_usernames:
+                scope_conds.append(
+                    and_(
+                        FollowUp.owner_user_id.is_(None),
+                        FollowUp.created_by_user_id.is_(None),
+                        func.lower(FollowUp.marketing_person).in_(sorted(scoped_usernames)),
+                    )
+                )
+            stmt = stmt.where(or_(*scope_conds))
+            if marketing_person and marketing_person.strip() and marketing_person.strip().lower() not in ("all", "select"):
+                stmt = stmt.where(func.lower(FollowUp.marketing_person) == marketing_person.strip().lower())
+        elif marketing_person_names:
             stmt = stmt.where(func.lower(FollowUp.marketing_person).in_(sorted(marketing_person_names)))
         elif marketing_person and marketing_person.strip() and marketing_person.strip().lower() not in ("all", "select"):
             stmt = stmt.where(func.lower(FollowUp.marketing_person) == marketing_person.strip().lower())

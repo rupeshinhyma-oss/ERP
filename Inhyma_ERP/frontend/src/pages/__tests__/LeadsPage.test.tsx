@@ -808,6 +808,56 @@ describe("LeadsPage", () => {
     // Email column is NOT present in headers
     expect(headers.some((h) => h.includes("Email"))).toBe(false);
   });
+
+  it("CRM-AUD-10: calls /leads without trailing slash on GET and POST", async () => {
+    render(
+      <BrowserRouter>
+        <LeadsPage />
+      </BrowserRouter>
+    );
+
+    await waitFor(() => {
+      expect(apiGet).toHaveBeenCalled();
+    });
+
+    const leadGetCalls = (apiGet as any).mock.calls
+      .map(([url]: [string]) => String(url))
+      .filter((u: string) => u.includes("/leads"));
+
+    expect(leadGetCalls.length).toBeGreaterThan(0);
+    for (const url of leadGetCalls) {
+      expect(url.startsWith("/leads?")).toBe(true);
+      expect(url.includes("/leads/?")).toBe(false);
+    }
+  });
+
+  it("CRM-AUD-10: Auth.hasPermission enforces CRM permissions and explicit denies on legacy routes", async () => {
+    const { Auth } = await import("@/lib/auth");
+
+    // 1. Zero-permission user -> blocked
+    vi.spyOn(Auth, "isSuperAdmin").mockReturnValue(false);
+    vi.spyOn(Auth, "getProfile").mockReturnValue({ id: "u1", permissions: ["feed.view"] } as any);
+    expect(Auth.hasPermission("crm.leads.view")).toBe(false);
+
+    // 2. User with crm.leads.view -> allowed
+    vi.spyOn(Auth, "getProfile").mockReturnValue({ id: "u1", permissions: ["crm.leads.view"] } as any);
+    expect(Auth.hasPermission("crm.leads.view")).toBe(true);
+
+    // 3. User with crm.leads.manage only -> allowed via hierarchy
+    vi.spyOn(Auth, "getProfile").mockReturnValue({ id: "u1", permissions: ["crm.leads.manage"] } as any);
+    expect(Auth.hasPermission("crm.leads.view")).toBe(true);
+
+    // 4. User with legacy leads.view -> allowed via legacy alias
+    vi.spyOn(Auth, "getProfile").mockReturnValue({ id: "u1", permissions: ["leads.view"] } as any);
+    expect(Auth.hasPermission("crm.leads.view")).toBe(true);
+
+    // 5. User with crm.leads.view + explicit deny:crm.leads.view -> blocked
+    vi.spyOn(Auth, "getProfile").mockReturnValue({
+      id: "u1",
+      permissions: ["crm.leads.view", "deny:crm.leads.view"],
+    } as any);
+    expect(Auth.hasPermission("crm.leads.view")).toBe(false);
+  });
 });
 
 

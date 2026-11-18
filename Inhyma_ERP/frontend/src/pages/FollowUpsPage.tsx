@@ -1249,7 +1249,11 @@ export default function FollowUpsPage() {
       };
       setFollowUps((prev) => [created, ...prev]);
       setIsAddDrawerOpen(false);
-    } catch {
+    } catch (err: any) {
+      if (err?.status === 403 || err?.status === 401) {
+        setDeleteConfirmTarget(null);
+        return;
+      }
       // Local fallback
       setFollowUps((prev) => [
         {
@@ -1280,8 +1284,11 @@ export default function FollowUpsPage() {
       const idsToDelete = Array.from(selectedIds);
       try {
         await apiPost("/follow-ups/bulk-delete", { ids: idsToDelete });
-      } catch {
-        // Continue local deletion
+      } catch (err: any) {
+        if (err?.status === 403 || err?.status === 401) {
+          setDeleteConfirmTarget(null);
+          return;
+        }
       }
       setFollowUps((prev) => prev.filter((item) => !selectedIds.has(item.id)));
       setSelectedIds(new Set());
@@ -1289,8 +1296,11 @@ export default function FollowUpsPage() {
       const item = deleteConfirmTarget;
       try {
         await apiDelete(`/follow-ups/${item.id}`);
-      } catch {
-        // Continue local deletion
+      } catch (err: any) {
+        if (err?.status === 403 || err?.status === 401) {
+          setDeleteConfirmTarget(null);
+          return;
+        }
       }
       setFollowUps((prev) => prev.filter((i) => i.id !== item.id));
       setSelectedIds((prev) => {

@@ -19,7 +19,8 @@ from datetime import datetime, timezone
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Any
 
-from sqlalchemy import desc, func, inspect as sa_inspect, or_, select
+from sqlalchemy import desc, func, inspect as sa_inspect, or_, select, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -561,24 +562,42 @@ class CrmQuotationService:
     # 3. Commercial Calculations & Numbering Helpers
     # -------------------------------------------------------------------------
 
-    async def _generate_quotation_number(self) -> str:
+    async def _generate_quotation_number(self, prefix: str | None = None) -> str:
         """
         Generate next sequential unique quotation number in SQ-YYYYMM-XXXX format.
+        Uses a transaction-scoped PostgreSQL advisory lock and length-first numeric sorting
+        so concurrent creations serialize cleanly and sequences beyond 9999 increment
+        monotonically (9998 -> 9999 -> 10000 -> 10001).
         """
-        prefix = f"SQ-{datetime.now(timezone.utc).strftime('%Y%m')}"
+        prefix = prefix or f"SQ-{datetime.now(timezone.utc).strftime('%Y%m')}"
+        try:
+            await self.session.execute(
+                text("SELECT pg_advisory_xact_lock(hashtext(:lock_key))"),
+                {"lock_key": f"crm_quote_num:{prefix}"},
+            )
+        except Exception:
+            pass
+
         stmt = (
             select(CrmSalesQuotation.quotation_number)
             .where(CrmSalesQuotation.quotation_number.like(f"{prefix}-%"))
-            .order_by(desc(CrmSalesQuotation.quotation_number))
+            .order_by(
+                func.length(CrmSalesQuotation.quotation_number).desc(),
+                desc(CrmSalesQuotation.quotation_number),
+            )
             .limit(1)
         )
         last_num = (await self.session.execute(stmt)).scalar_one_or_none()
 
         next_seq = 1
         if last_num:
-            parts = last_num.split("-")
-            if len(parts) == 3 and parts[2].isdigit():
-                next_seq = int(parts[2]) + 1
+            suffix = last_num[len(prefix) + 1 :] if last_num.startswith(f"{prefix}-") else ""
+            if suffix.isdigit():
+                next_seq = int(suffix) + 1
+            else:
+                parts = last_num.split("-")
+                if len(parts) == 3 and parts[2].isdigit():
+                    next_seq = int(parts[2]) + 1
 
         return f"{prefix}-{next_seq:04d}"
 
@@ -910,7 +929,13 @@ class CrmQuotationService:
             updated_by=actor.id,
         )
         self.session.add(quotation)
-        await self.session.flush()
+        try:
+            await self.session.flush()
+        except IntegrityError as exc:
+            await self.session.rollback()
+            raise ConflictException(
+                f"Quotation number '{quotation_number}' conflict detected under concurrency. Please retry."
+            ) from exc
 
         for line_data in line_data_list:
             item = CrmQuotationItem(
@@ -1023,6 +1048,7 @@ class CrmQuotationService:
                 CrmSalesQuotation.id == quotation_id,
                 CrmSalesQuotation.deleted_at.is_(None),
             )
+            .with_for_update()
         )
         q = (await self.session.execute(stmt)).scalar_one_or_none()
         if not q:
@@ -1120,7 +1146,13 @@ class CrmQuotationService:
         self.session.add(activity)
 
         q.lead.updated_at = _utcnow()
-        await self.session.commit()
+        try:
+            await self.session.commit()
+        except IntegrityError as exc:
+            await self.session.rollback()
+            raise ConflictException(
+                "Concurrent quotation revision conflict detected. Please refresh and retry."
+            ) from exc
 
         return await self.get_quotation(q.id, actor=actor)
 
@@ -1139,6 +1171,7 @@ class CrmQuotationService:
                 CrmSalesQuotation.id == quotation_id,
                 CrmSalesQuotation.deleted_at.is_(None),
             )
+            .with_for_update()
         )
         q = (await self.session.execute(stmt)).scalar_one_or_none()
         if not q:

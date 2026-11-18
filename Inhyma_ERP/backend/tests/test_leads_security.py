@@ -81,6 +81,7 @@ def make_follow_up(
         company_name=company_name,
         marketing_person=marketing_person,
         call_type="Call",
+        current_status="New",
         lead_status="Ongoing",
         added_on=date.today(),
         created_at=now,
@@ -320,16 +321,22 @@ async def test_classic_follow_ups_anonymous_denials():
 
 
 async def test_classic_routes_permission_enforcement():
-    """Read-only user has access to GET, but 403 on mutations."""
+    """
+    Verify RBAC and explicit-deny enforcement on classic leads & follow-ups routes:
+    - Zero-permission user gets 403 on all endpoints.
+    - Salesperson (crm.leads.view) can GET, POST (create own), and PUT (update own),
+      but gets 403 on manager-only allot, delete, and bulk-delete endpoints.
+    - Explicit deny (deny:crm.leads.view) overrides crm.leads.manage and returns 403.
+    """
     app = create_application()
     app.dependency_overrides[get_db_session] = dummy_db_session
 
-    read_only_user = CurrentUser(
+    current_actor = CurrentUser(
         id=uuid.uuid4(),
-        username="viewer",
-        permissions={"crm.leads.view"},
+        username="zero_perm",
+        permissions={"hrms.view"},
     )
-    app.dependency_overrides[get_current_user] = lambda: read_only_user
+    app.dependency_overrides[get_current_user] = lambda: current_actor
 
     mock_lead_service = AsyncMock()
     mock_fu_service = AsyncMock()
@@ -338,25 +345,45 @@ async def test_classic_routes_permission_enforcement():
 
     mock_lead_service.list_leads.return_value = ([], 0)
     mock_fu_service.list_follow_ups.return_value = ([], 0)
+    mock_lead_service.create.return_value = make_lead()
+    mock_lead_service.update.return_value = make_lead()
+    mock_fu_service.create.return_value = make_follow_up()
+    mock_fu_service.update.return_value = make_follow_up()
 
     transport = ASGITransport(app=app)
     random_id = uuid.uuid4()
 
     async with AsyncClient(transport=transport, base_url="http://testserver") as client:
-        # GET list should SUCCEED with 200
+        # 1. Zero-CRM-permission user -> 403 on everything
+        for path in ("/api/v1/leads", "/api/v1/follow-ups"):
+            assert (await client.get(path)).status_code == 403
+            assert (await client.post(path, json={"company_name": "Test"})).status_code == 403
+
+        # 2. Salesperson (crm.leads.view) -> allowed on GET, POST (own), PUT (own); 403 on allot/delete/bulk-delete
+        current_actor = CurrentUser(
+            id=uuid.uuid4(),
+            username="viewer",
+            permissions={"crm.leads.view"},
+        )
         res = await client.get("/api/v1/leads")
         assert res.status_code == 200
 
         res = await client.get("/api/v1/follow-ups")
         assert res.status_code == 200
 
-        # Mutations should FAIL with 403 Forbidden
         res = await client.post("/api/v1/leads", json={"company_name": "Test"})
-        assert res.status_code == 403
+        assert res.status_code == 201
 
         res = await client.put(f"/api/v1/leads/{random_id}", json={"company_name": "Updated"})
-        assert res.status_code == 403
+        assert res.status_code == 200
 
+        res = await client.post("/api/v1/follow-ups", json={"company_name": "Test"})
+        assert res.status_code == 201
+
+        res = await client.put(f"/api/v1/follow-ups/{random_id}", json={"company_name": "Updated"})
+        assert res.status_code == 200
+
+        # Manager-only operations -> 403 for salesperson
         res = await client.post(f"/api/v1/leads/{random_id}/allot", json={"allotted_to": "someone"})
         assert res.status_code == 403
 
@@ -366,17 +393,21 @@ async def test_classic_routes_permission_enforcement():
         res = await client.post("/api/v1/leads/bulk-delete", json={"lead_ids": [str(random_id)]})
         assert res.status_code == 403
 
-        res = await client.post("/api/v1/follow-ups", json={"company_name": "Test"})
-        assert res.status_code == 403
-
-        res = await client.put(f"/api/v1/follow-ups/{random_id}", json={"company_name": "Updated"})
-        assert res.status_code == 403
-
         res = await client.delete(f"/api/v1/follow-ups/{random_id}")
         assert res.status_code == 403
 
         res = await client.post("/api/v1/follow-ups/bulk-delete", json={"ids": [str(random_id)]})
         assert res.status_code == 403
+
+        # 3. Explicit deny overrides crm.leads.manage -> 403
+        current_actor = CurrentUser(
+            id=uuid.uuid4(),
+            username="denied_mgr",
+            permissions={"crm.leads.manage", "deny:crm.leads.view"},
+        )
+        assert (await client.get("/api/v1/leads")).status_code == 403
+        assert (await client.post("/api/v1/leads", json={"company_name": "Test"})).status_code == 403
+        assert (await client.get("/api/v1/follow-ups")).status_code == 403
 
 
 # =============================================================================

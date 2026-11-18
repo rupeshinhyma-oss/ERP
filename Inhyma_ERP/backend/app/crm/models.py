@@ -31,6 +31,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -137,6 +138,13 @@ class CrmLead(Base, UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, Versio
     __table_args__ = (
         UniqueConstraint("external_source_system", "external_record_id", name="uq_crm_leads_external_source_record"),
         Index("ix_crm_leads_normalized_phone", "normalized_phone"),
+        Index(
+            "uq_crm_leads_active_normalized_phone",
+            "normalized_phone",
+            unique=True,
+            postgresql_where=text("deleted_at IS NULL AND normalized_phone IS NOT NULL"),
+            sqlite_where=text("deleted_at IS NULL AND normalized_phone IS NOT NULL"),
+        ),
         Index("ix_crm_leads_assigned_to", "assigned_to"),
         Index("ix_crm_leads_pipeline_stage", "pipeline_id", "stage_id"),
         Index("ix_crm_leads_status", "status"),
@@ -709,6 +717,9 @@ class CrmQuotationVersion(Base, UUIDPrimaryKeyMixin):
     """
 
     __tablename__ = "crm_quotation_versions"
+    __table_args__ = (
+        UniqueConstraint("quotation_id", "version", name="uq_crm_quotation_versions_quotation_version"),
+    )
 
     quotation_id: Mapped[uuid.UUID] = mapped_column(
         GUID(), ForeignKey("crm_sales_quotations.id", ondelete="CASCADE"), nullable=False, index=True

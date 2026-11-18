@@ -18,7 +18,10 @@ from app.auth.service import CurrentUser
 from app.core.exceptions import ForbiddenException
 from app.core.logging import get_logger
 from app.core.responses import build_success_response
-from app.crm.dependencies import get_crm_lead_service
+from app.crm.dependencies import (
+    get_crm_lead_service,
+    require_crm_any_permission as require_any_permission,
+)
 from app.crm.lead_service import CrmLeadService
 from app.crm.schemas import (
     CrmActivityCreate,
@@ -30,8 +33,6 @@ from app.crm.schemas import (
     CrmLeadStageTransitionRequest,
     CrmLeadUpdate,
 )
-from app.rbac.dependencies import require_any_permission
-
 router = APIRouter(tags=["CRM Leads & Assignment Visibility"])
 logger = get_logger(__name__)
 
