@@ -59,13 +59,13 @@ export function generateSalesOrderPdf(
   const margin = 12;
   const contentWidth = pageWidth - margin * 2; // 186mm
 
-  const orderNo = order.order_no || "SO-MH/26-27/3826";
-  const orderDate = order.order_date || "12-09-2026";
+  const orderNo = order.order_no || "";
+  const orderDate = order.order_date || "";
   const expDispatchDate =
     order.exp_dispatch_date || order.expected_delivery_date || orderDate;
-  const paymentTerms = order.payment_terms || "100% Advance";
-  const salesPerson = order.sales_person || "Abhishek Patel";
-  const createdAt = order.created_at || `${orderDate} 11:26 AM`;
+  const paymentTerms = order.payment_terms || "";
+  const salesPerson = order.sales_person || "";
+  const createdAt = order.created_at || orderDate;
 
   doc.setProperties({
     title: isWarehouse ? `Warehouse SO: ${orderNo}` : `Sale No: ${orderNo}`,
@@ -188,32 +188,34 @@ export function generateSalesOrderPdf(
   doc.text(brandName.toUpperCase(), compInfoX, currentY + 6);
 
   // 2. Address Lines
-  const rawAddress =
-    orgProfile?.address?.trim() ||
-    "4th Floor, Office No 421, Supremus -II, Road No- 22, Near Passport Office, Wagle Estate";
+  const rawAddress = orgProfile?.address?.trim() || "";
   doc.setFont("helvetica", "normal");
   doc.setFontSize(7.5);
 
-  const addrLines = doc.splitTextToSize(rawAddress, maxCompWidth);
-  const displayAddrLines = addrLines.slice(0, 2);
   let compLineY = currentY + 10;
-  displayAddrLines.forEach((line: string) => {
-    doc.text(line, compInfoX, compLineY);
-    compLineY += 3.6;
-  });
+  if (rawAddress) {
+    const addrLines = doc.splitTextToSize(rawAddress, maxCompWidth);
+    const displayAddrLines = addrLines.slice(0, 2);
+    displayAddrLines.forEach((line: string) => {
+      doc.text(line, compInfoX, compLineY);
+      compLineY += 3.6;
+    });
+  }
 
   // 3. City, State, Postal Code
   const cityStateParts = [orgProfile?.city?.trim(), orgProfile?.state?.trim()].filter(Boolean);
   const zip = orgProfile?.postal_code?.trim();
   const cityLine = cityStateParts.length
     ? cityStateParts.join(", ") + (zip ? ` - ${zip}` : "")
-    : "Thane, Maharashtra - 400604";
-  doc.text(cityLine, compInfoX, compLineY);
-  compLineY += 3.6;
+    : "";
+  if (cityLine) {
+    doc.text(cityLine, compInfoX, compLineY);
+    compLineY += 3.6;
+  }
 
   // 4. Contact Details (Email & Phone)
-  const orgEmail = orgProfile?.email?.trim() || "payment.darsh@gmail.com";
-  const orgPhone = orgProfile?.phone?.trim() || "+91 96532 61742";
+  const orgEmail = orgProfile?.email?.trim() || "";
+  const orgPhone = orgProfile?.phone?.trim() || "";
   const contactParts = [orgEmail ? `Email: ${orgEmail}` : "", orgPhone ? `Phone: ${orgPhone}` : ""].filter(Boolean);
   if (contactParts.length > 0) {
     doc.text(contactParts.join(", "), compInfoX, compLineY);
@@ -221,9 +223,11 @@ export function generateSalesOrderPdf(
   }
 
   // 5. GST Number
-  const orgGst = orgProfile?.gst_number?.trim() || "27AAKFI9869H1ZL";
-  doc.setFont("helvetica", "bold");
-  doc.text(`GST No: ${orgGst}`, compInfoX, compLineY);
+  const orgGst = orgProfile?.gst_number?.trim() || "";
+  if (orgGst) {
+    doc.setFont("helvetica", "bold");
+    doc.text(`GST No: ${orgGst}`, compInfoX, compLineY);
+  }
 
   currentY += companyBoxHeight;
 

@@ -21,8 +21,23 @@ vi.mock("@/components/AppShell", () => ({
   ),
 }));
 
-// Mock InventoryApi
+// Mock InventoryApi & apiGet
 vi.mock("@/lib/api", () => ({
+  apiGet: vi.fn().mockImplementation((url: string) => {
+    if (url.startsWith("/masters/warehouses")) {
+      return Promise.resolve({
+        success: true,
+        data: {
+          items: [
+            { id: "w1", name: "Ahmedabad" },
+            { id: "w2", name: "Mumbai" },
+            { id: "w3", name: "Indore" },
+          ],
+        },
+      });
+    }
+    return Promise.resolve({ success: true, data: [] });
+  }),
   InventoryApi: {
     listStockTransfers: vi.fn().mockResolvedValue({
       data: {

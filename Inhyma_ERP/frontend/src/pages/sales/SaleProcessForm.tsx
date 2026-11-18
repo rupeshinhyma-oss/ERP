@@ -58,15 +58,7 @@ export function getAutoHsnForProduct(p?: any): string {
   if (directHsn && directHsn !== "—") return directHsn;
   const barcode = (p.barcode || "").toString().trim();
   if (barcode && /\d/.test(barcode)) return barcode;
-  const name = (p.product_name || p.product_name_tally || "").toString().trim();
-  const lower = name.toLowerCase();
-  if (lower.includes("spare") || lower.includes("part") || lower.includes("sensor") || lower.includes("block") || lower.includes("relay") || lower.includes("motor")) {
-    return "8422.90.90";
-  }
-  if (lower.includes("sealer") || lower.includes("band") || lower.includes("vacuum") || lower.includes("filler") || lower.includes("machine")) {
-    return "8422.30.00";
-  }
-  return name ? "8422.30.00" : "";
+  return "";
 }
 
 export function normalizeHsn(hsn?: string | null): string {
@@ -90,38 +82,18 @@ export function resolveGstPercent(hsnCode?: string | null, customMap?: Record<st
     }
   }
 
-  const KNOWN_HSN_GST: Record<string, number> = {
-    "8422": 18,
-    "84223000": 18,
-    "84224000": 18,
-    "84229090": 18,
-    "8423": 18,
-    "84233000": 18,
-    "996511": 18,
-    "996713": 18,
-    "9954": 18,
-    "9971": 18,
-    "9987": 18,
-    "9968": 18,
-  };
-
-  if (KNOWN_HSN_GST[norm] !== undefined) return KNOWN_HSN_GST[norm];
-  for (const [k, v] of Object.entries(KNOWN_HSN_GST)) {
-    if (norm.startsWith(k)) return v;
-  }
-
   return 18;
 }
 
-export function resolveChargeHsn(chargeType?: string): { hsn: string; gst: number } {
-  const norm = (chargeType || "").toLowerCase();
-  if (norm.includes("freight") || norm.includes("transport")) return { hsn: "996511", gst: 18 };
-  if (norm.includes("packing") || norm.includes("forwarding")) return { hsn: "996713", gst: 18 };
-  if (norm.includes("loading")) return { hsn: "9954", gst: 18 };
-  if (norm.includes("insurance")) return { hsn: "9971", gst: 18 };
-  if (norm.includes("installation")) return { hsn: "9987", gst: 18 };
-  if (norm.includes("courier")) return { hsn: "9968", gst: 18 };
-  return { hsn: "996511", gst: 18 };
+export function resolveChargeHsn(
+  chargeType?: string,
+  chargeMap?: Record<string, { hsn: string; gst: number }>
+): { hsn: string; gst: number } {
+  const key = (chargeType || "").trim().toLowerCase();
+  if (key && chargeMap && chargeMap[key]) {
+    return chargeMap[key];
+  }
+  return { hsn: "", gst: 18 };
 }
 
 export interface FormLineItem {
@@ -235,6 +207,29 @@ export function SaleProcessFormPage() {
   }, [masterTransports]);
 
   const effectiveAdditionalChargeTypes = useMasterNames("/masters/additional-charges");
+  const [additionalChargeMap, setAdditionalChargeMap] = useState<Record<string, { hsn: string; gst: number }>>({});
+
+  useEffect(() => {
+    void apiGet<Array<{ name: string; hsn_number?: string | null; gst_percent?: number | null }>>(
+      "/masters/additional-charges/lookup?limit=250"
+    )
+      .then((res) => {
+        const list = Array.isArray(res?.data) ? res.data : [];
+        const map: Record<string, { hsn: string; gst: number }> = {};
+        for (const row of list) {
+          const name = String(row?.name || "").trim().toLowerCase();
+          if (!name) continue;
+          map[name] = {
+            hsn: String(row?.hsn_number || "").trim(),
+            gst: typeof row?.gst_percent === "number" ? row.gst_percent : 18,
+          };
+        }
+        setAdditionalChargeMap(map);
+      })
+      .catch(() => {
+        // leave empty on failure
+      });
+  }, []);
 
   const loggedInUserName = useMemo(() => {
     if (!profile) return "Admin";
@@ -800,7 +795,7 @@ export function SaleProcessFormPage() {
       const target = { ...updated[index], [field]: val };
 
       if (field === "charge_type" && target.is_additional_charge) {
-        const res = resolveChargeHsn(String(val));
+        const res = resolveChargeHsn(String(val), additionalChargeMap);
         target.product_name = String(val);
         target.hsn = res.hsn;
         target.gst_percent = res.gst;
@@ -859,7 +854,7 @@ export function SaleProcessFormPage() {
       is_additional_charge: true,
       charge_type: "",
       product_name: "",
-      hsn: "996511",
+      hsn: "",
       quantity: 1,
       unit_price: 0,
       unit_discount: 0,

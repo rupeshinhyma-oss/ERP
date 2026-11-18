@@ -41,16 +41,6 @@ SALES_ACC_CONFIRMED_STATUSES: frozenset[str] = frozenset(
     }
 )
 
-DEFAULT_PAYMENT_TERMS: tuple[str, ...] = (
-    "100% Advance",
-    "CAD",
-    "30 Days Credit",
-    "45 Days Credit",
-    "60 Days Credit",
-    "90 Days Credit",
-    "LC",
-)
-
 
 def normalize_sale_status(raw: str | None) -> str:
     """Normalize a SaleOrder.status value for stage comparison."""
@@ -246,8 +236,8 @@ class FinancialPlanningService:
                 .order_by(PaymentTerm.name.asc())
             )
         ).scalars().all()
-        terms_options: list[str] = list(DEFAULT_PAYMENT_TERMS)
-        seen_lower = {t.lower() for t in terms_options}
+        terms_options: list[str] = []
+        seen_lower: set[str] = set()
         for pt_name in pt_rows:
             clean_pt = (pt_name or "").strip()
             if clean_pt and clean_pt.lower() not in seen_lower:

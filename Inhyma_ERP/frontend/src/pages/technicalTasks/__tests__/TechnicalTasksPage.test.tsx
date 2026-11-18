@@ -95,7 +95,7 @@ describe("TechnicalTasksPage", () => {
     expect(screen.getByRole("heading", { name: "Technical Task List" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: /\+ QUICK ADD/i })).toBeNull();
     expect(screen.getByRole("button", { name: /\+ ADD NEW/i })).toBeTruthy();
-    expect(screen.getByRole("button", { name: /Imp \/ Exp/i })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Imp \/ Exp/i })).toBeNull();
     expect(screen.getByRole("button", { name: /Bulk Actions/i })).toBeTruthy();
   });
 
@@ -834,6 +834,19 @@ describe("TechnicalTasksPage", () => {
   });
 
   it("opens Machine & Model dropdown when clicked and supports both write and dropdown selection", async () => {
+    vi.mocked(apiGet).mockImplementation((url: string) => {
+      if (url.startsWith("/masters/products")) {
+        return Promise.resolve({
+          data: [
+            { product_name: "ISL150 Rotary PFS 4 Stations" },
+            { product_name: "DZ800 Double Face Shaping Vacuum Machine 10Kgs" },
+          ],
+          status: 200,
+          success: true,
+        } as any);
+      }
+      return Promise.resolve({ data: [], status: 200, success: true } as any);
+    });
     vi.mocked(technicalTasksApi.fetchTechnicalTasks).mockResolvedValueOnce({
       data: sampleTasks,
       meta: { pagination: { total_items: sampleTasks.length } },
@@ -849,10 +862,10 @@ describe("TechnicalTasksPage", () => {
     const machineInput = screen.getByPlaceholderText("Search Product...") as HTMLInputElement;
     expect(machineInput).toBeTruthy();
 
-    // Clicking the input opens the dropdown list
+    // Clicking the input opens the dropdown list populated from product master API
     fireEvent.click(machineInput);
     expect(screen.getByTestId("field-machine-model-dropdown")).toBeTruthy();
-    expect(screen.getByText("ISL150 Rotary PFS 4 Stations")).toBeTruthy();
+    expect(await screen.findByText("ISL150 Rotary PFS 4 Stations")).toBeTruthy();
 
     // Clicking an option selects it
     fireEvent.click(screen.getByText("ISL150 Rotary PFS 4 Stations"));

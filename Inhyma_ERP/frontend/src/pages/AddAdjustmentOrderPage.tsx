@@ -3,7 +3,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
 import { ClientNameAutocomplete } from "@/components/ClientNameAutocomplete";
 import { ScrollableNumberInput } from "@/components/ScrollableNumberInput";
-import { InventoryApi } from "@/lib/api";
+import { InventoryApi, apiGet } from "@/lib/api";
 import { INITIAL_STOCK_ITEMS, ProductStockItem } from "@/pages/ProductStockPage";
 import "@/styles/stockAdjustment.css";
 
@@ -42,16 +42,6 @@ interface SelectedAdjustmentProduct {
   uom: string;
 }
 
-const WAREHOUSE_OPTIONS = ["Ahmedabad", "Mumbai", "Indore", "Main Warehouse - Bhiwandi"];
-
-const PURPOSE_OPTIONS = [
-  "Return From Client",
-  "Split",
-  "Damage",
-  "Inventory Count Variance",
-  "Internal Transfer Correction",
-];
-
 export function AddAdjustmentOrderPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -70,6 +60,8 @@ export function AddAdjustmentOrderPage() {
   const [invoiceNo, setInvoiceNo] = useState<string>("");
   const [remark, setRemark] = useState<string>("");
 
+  const [warehouseOptions, setWarehouseOptions] = useState<string[]>([]);
+  const [purposeOptions, setPurposeOptions] = useState<string[]>([]);
   const [stockCatalog, setStockCatalog] = useState<ProductStockItem[]>(isTestMode ? INITIAL_STOCK_ITEMS : []);
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [showSearchDropdown, setShowSearchDropdown] = useState<boolean>(false);
@@ -81,6 +73,43 @@ export function AddAdjustmentOrderPage() {
   useEffect(() => {
     setAdjustmentType(initialType);
   }, [initialType]);
+
+  // Fetch active warehouses and adjustment purposes from Masters API
+  useEffect(() => {
+    let cancelled = false;
+    Promise.all([
+      apiGet<any>("/masters/warehouses?page_size=100&status=active").catch(() => null),
+      apiGet<any>("/masters/adjustment-purposes/lookup?limit=100").catch(() => null),
+    ]).then(([whRes, purRes]) => {
+      if (cancelled) return;
+      const whData = whRes?.data?.items || whRes?.data || (whRes as any)?.items || whRes;
+      if (Array.isArray(whData)) {
+        const names = Array.from(
+          new Set(
+            whData
+              .filter((w: any) => !String(w?.name || "").toLowerCase().includes("ordered"))
+              .map((w: any) => (typeof w === "string" ? w : String(w?.name || "")).trim())
+              .filter(Boolean)
+          )
+        );
+        setWarehouseOptions(names);
+      }
+      const purData = purRes?.data?.items || purRes?.data || (purRes as any)?.items || purRes;
+      if (Array.isArray(purData)) {
+        const names = Array.from(
+          new Set(
+            purData
+              .map((p: any) => (typeof p === "string" ? p : String(p?.name || p?.purpose || "")).trim())
+              .filter(Boolean)
+          )
+        );
+        setPurposeOptions(names);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // In production, fetch live catalog from Inventory API
   useEffect(() => {
@@ -153,7 +182,7 @@ export function AddAdjustmentOrderPage() {
           product_name: product.product_name_tally,
           product_code: product.product_code !== "-" ? product.product_code : `SKU-${product.sr_no.toString().padStart(3, "0")}`,
           category: product.category || "Machines",
-          hsn_code: product.hsn_code || "84224000",
+          hsn_code: product.hsn_code || "",
           gst_rate: product.gst_rate || "18%",
           available_qty: product.available_in_warehouse,
           qty: 1,
@@ -269,7 +298,7 @@ export function AddAdjustmentOrderPage() {
             product_name: p.product_name,
             product_code: p.product_code || undefined,
             category: p.category || "Machines",
-            hsn_code: p.hsn_code || "84224000",
+            hsn_code: p.hsn_code || "",
             gst_rate: p.gst_rate || "18%",
             qty: q,
             uom: p.uom || "SET",
@@ -357,7 +386,7 @@ export function AddAdjustmentOrderPage() {
                 required
               >
                 <option value="">Select</option>
-                {PURPOSE_OPTIONS.map((opt) => (
+                {purposeOptions.map((opt) => (
                   <option key={opt} value={opt}>
                     {opt}
                   </option>
@@ -377,7 +406,7 @@ export function AddAdjustmentOrderPage() {
                 }}
               >
                 <option value="">Select Warehouse</option>
-                {WAREHOUSE_OPTIONS.map((w) => (
+                {warehouseOptions.map((w) => (
                   <option key={w} value={w}>
                     {w}
                   </option>

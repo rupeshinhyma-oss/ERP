@@ -4,7 +4,7 @@ import { Breadcrumb } from "@/components/Breadcrumb";
 import { SideDrawer } from "@/components/SideDrawer";
 import { Pagination } from "@/components/Pagination";
 import type { PaginationMeta } from "@/types";
-import { DeletedOrdersApi, type DeletedOrderItem } from "@/lib/api";
+import { DeletedOrdersApi, apiGet, type DeletedOrderItem } from "@/lib/api";
 import { generateSalesOrderPdf } from "@/lib/salesOrderPdf";
 import "@/styles/deletedOrders.css";
 
@@ -151,25 +151,29 @@ export const INITIAL_DELETED_ORDERS: DeletedOrderItem[] = [
   },
 ];
 
-const STATE_OPTIONS = [
-  "Maharashtra",
-  "Gujarat",
-  "Madhya Pradesh",
-  "Telangana",
-  "Rajasthan",
-  "Delhi",
-  "Karnataka",
-  "Tamil Nadu",
-];
-
-const SALES_PERSONS = [
-  "Sunita Pawar",
-  "Dhairya Shah",
-  "Bhavin Suthar",
-  "Siddhi Kilaje",
-  "Abhishek Patel",
-  "Rupesh Inhyma",
-];
+const extractMasterNames = (raw: unknown): string[] => {
+  const arr = Array.isArray(raw)
+    ? raw
+    : Array.isArray((raw as { items?: unknown[] })?.items)
+    ? (raw as { items: unknown[] }).items
+    : [];
+  const names: string[] = [];
+  for (const row of arr) {
+    if (typeof row === "string" && row.trim()) {
+      names.push(row.trim());
+    } else if (row && typeof row === "object") {
+      const obj = row as Record<string, unknown>;
+      const val =
+        (typeof obj.name === "string" && obj.name) ||
+        (typeof obj.full_name === "string" && obj.full_name) ||
+        (typeof obj.username === "string" && obj.username) ||
+        (typeof obj.label === "string" && obj.label) ||
+        "";
+      if (val.trim()) names.push(val.trim());
+    }
+  }
+  return Array.from(new Set(names));
+};
 
 const DeletedOrdersSkeletonRows: React.FC<{ count?: number }> = ({ count = 8 }) => (
   <>
@@ -197,9 +201,14 @@ const DeletedOrdersSkeletonRows: React.FC<{ count?: number }> = ({ count = 8 }) 
 );
 
 export function DeletedOrdersPage({ defaultFilterOpen = false }: { defaultFilterOpen?: boolean } = {}) {
-  const [items, setItems] = useState<DeletedOrderItem[]>(INITIAL_DELETED_ORDERS);
+  const [items, setItems] = useState<DeletedOrderItem[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
   const [showFilterPanel, setShowFilterPanel] = useState<boolean>(defaultFilterOpen);
+
+  // Master-backed filter options
+  const [masterStates, setMasterStates] = useState<string[]>([]);
+  const [masterSalesPersons, setMasterSalesPersons] = useState<string[]>([]);
+  const [masterWarehouses, setMasterWarehouses] = useState<string[]>([]);
 
   // Filter state
   const [orderDateRange, setOrderDateRange] = useState<string>("");
@@ -224,6 +233,47 @@ export function DeletedOrdersPage({ defaultFilterOpen = false }: { defaultFilter
   const [timelineOrder, setTimelineOrder] = useState<DeletedOrderItem | null>(null);
   const [accountInfoOrder, setAccountInfoOrder] = useState<DeletedOrderItem | null>(null);
 
+  useEffect(() => {
+    let cancelled = false;
+    Promise.all([
+      apiGet<any>("/masters/states?page_size=250&status=active").catch(() => null),
+      apiGet<any>("/companies/sales-persons").catch(() => null),
+      apiGet<any>("/masters/warehouses?status=active").catch(() => null),
+    ]).then(([statesRes, spRes, whRes]) => {
+      if (cancelled) return;
+      if (statesRes) setMasterStates(extractMasterNames(statesRes?.data ?? statesRes));
+      if (spRes) setMasterSalesPersons(extractMasterNames(spRes?.data ?? spRes));
+      if (whRes) setMasterWarehouses(extractMasterNames(whRes?.data ?? whRes));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const warehouseOptions = useMemo(() => {
+    const combined = new Set<string>(masterWarehouses);
+    items.forEach((o) => {
+      if (o.warehouse) combined.add(o.warehouse);
+    });
+    return Array.from(combined).sort();
+  }, [masterWarehouses, items]);
+
+  const salesPersonOptions = useMemo(() => {
+    const combined = new Set<string>(masterSalesPersons);
+    items.forEach((o) => {
+      if (o.sales_person) combined.add(o.sales_person);
+    });
+    return Array.from(combined).sort();
+  }, [masterSalesPersons, items]);
+
+  const stateOptions = useMemo(() => {
+    const combined = new Set<string>(masterStates);
+    items.forEach((o) => {
+      if (o.state) combined.add(o.state);
+    });
+    return Array.from(combined).sort();
+  }, [masterStates, items]);
+
   // Fetch from backend
   const fetchDeletedOrders = useCallback(async () => {
     try {
@@ -236,15 +286,12 @@ export function DeletedOrdersPage({ defaultFilterOpen = false }: { defaultFilter
       });
 
       if (res && res.data && Array.isArray(res.data.items)) {
-        if (res.data.items.length > 0) {
-          setItems(res.data.items);
-        } else {
-          setItems(INITIAL_DELETED_ORDERS);
-        }
+        setItems(res.data.items);
+      } else {
+        setItems([]);
       }
     } catch {
-      // Local fallback
-      setItems(INITIAL_DELETED_ORDERS);
+      setItems([]);
     } finally {
       setLoading(false);
     }
@@ -480,9 +527,11 @@ export function DeletedOrdersPage({ defaultFilterOpen = false }: { defaultFilter
                   onChange={(e) => setWarehouseFilter(e.target.value)}
                 >
                   <option value="All">All</option>
-                  <option value="Mumbai">Mumbai</option>
-                  <option value="Ahmedabad">Ahmedabad</option>
-                  <option value="Indore">Indore</option>
+                  {warehouseOptions.map((wh) => (
+                    <option key={wh} value={wh}>
+                      {wh}
+                    </option>
+                  ))}
                 </select>
               </div>
             </div>
@@ -498,7 +547,7 @@ export function DeletedOrdersPage({ defaultFilterOpen = false }: { defaultFilter
                   onChange={(e) => setSalesPersonFilter(e.target.value)}
                 >
                   <option value="All">All</option>
-                  {SALES_PERSONS.map((sp) => (
+                  {salesPersonOptions.map((sp) => (
                     <option key={sp} value={sp}>
                       {sp}
                     </option>
@@ -546,7 +595,7 @@ export function DeletedOrdersPage({ defaultFilterOpen = false }: { defaultFilter
                       + Add State...
                     </option>
                     <option value="All">All</option>
-                    {STATE_OPTIONS.map((st) => (
+                    {stateOptions.map((st) => (
                       <option key={st} value={st}>
                         {st}
                       </option>

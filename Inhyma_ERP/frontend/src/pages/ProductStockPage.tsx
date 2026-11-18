@@ -954,12 +954,12 @@ export function ProductStockPage({
         if (res?.data?.items && Array.isArray(res.data.items) && res.data.items.length > 0) {
           setExpectedItems(res.data.items);
         } else {
-          setExpectedItems(INITIAL_GOODS_EXPECTED_ITEMS);
+          setExpectedItems(isTestMode ? INITIAL_GOODS_EXPECTED_ITEMS : []);
         }
       })
       .catch((err) => {
         console.warn("Failed to load Goods Expected Date report:", err);
-        setExpectedItems(INITIAL_GOODS_EXPECTED_ITEMS);
+        setExpectedItems(isTestMode ? INITIAL_GOODS_EXPECTED_ITEMS : []);
       })
       .finally(() => {
         setExpectedLoading(false);

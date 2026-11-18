@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from "react";
 import { apiGet } from "@/lib/api";
-import { DEFAULT_INDIAN_STATES } from "./AddCompanyDrawer";
 
 export interface EditAddressData {
   company_name: string;
@@ -104,14 +103,14 @@ export function EditAddressDrawer({
 
     void apiGet<any[]>("/masters/states?page_size=250&status=active")
       .then((res) => {
-        if (res?.data && Array.isArray(res.data) && res.data.length > 0) {
+        if (res?.data && Array.isArray(res.data)) {
           setStates(res.data.map((s: any) => ({ id: String(s.id), name: s.name })));
         } else {
-          setStates(DEFAULT_INDIAN_STATES.map((s, idx) => ({ id: String(idx + 1), name: s })));
+          setStates([]);
         }
       })
       .catch(() => {
-        setStates(DEFAULT_INDIAN_STATES.map((s, idx) => ({ id: String(idx + 1), name: s })));
+        setStates([]);
       });
   }, [isOpen]);
 

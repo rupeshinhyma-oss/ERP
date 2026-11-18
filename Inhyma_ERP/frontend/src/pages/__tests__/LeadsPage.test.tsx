@@ -31,6 +31,14 @@ describe("LeadsPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     (apiGet as any).mockImplementation((url: string) => {
+      if (url.includes("/companies/sales-persons")) {
+        return Promise.resolve({
+          data: [
+            { id: "sp-1", full_name: "Rupesh Malla", username: "rupesh" },
+            { id: "sp-2", full_name: "Dhairya Shah", username: "dhairya" },
+          ],
+        });
+      }
       if (url.includes("/masters/lead-sources")) {
         return Promise.resolve({
           data: [{ id: "1", name: "IndiaMart" }, { id: "2", name: "Website" }],
@@ -313,6 +321,14 @@ describe("LeadsPage", () => {
 
   it("extracts unique filter options dynamically from the leads list and filters correctly", async () => {
     (apiGet as any).mockImplementation((url: string) => {
+      if (url.includes("/companies/sales-persons")) {
+        return Promise.resolve({
+          data: [
+            { id: "sp-1", full_name: "Rupesh Malla", username: "rupesh" },
+            { id: "sp-2", full_name: "Dhairya Shah", username: "dhairya" },
+          ],
+        });
+      }
       if (url.includes("/leads")) {
         return Promise.resolve({
           data: {
@@ -444,6 +460,14 @@ describe("LeadsPage", () => {
     ];
 
     (apiGet as any).mockImplementation((url: string) => {
+      if (url.includes("/companies/sales-persons")) {
+        return Promise.resolve({
+          data: [
+            { id: "sp-1", full_name: "Rupesh Malla", username: "rupesh" },
+            { id: "sp-2", full_name: "Dhairya Shah", username: "dhairya" },
+          ],
+        });
+      }
       if (url.includes("/leads")) {
         return Promise.resolve({
           data: {
@@ -743,6 +767,14 @@ describe("LeadsPage", () => {
     };
 
     (apiGet as any).mockImplementation((url: string) => {
+      if (url.includes("/companies/sales-persons")) {
+        return Promise.resolve({
+          data: [
+            { id: "sp-1", full_name: "Rupesh Malla", username: "rupesh" },
+            { id: "sp-2", full_name: "Dhairya Shah", username: "dhairya" },
+          ],
+        });
+      }
       if (url.includes("/leads")) {
         return Promise.resolve({
           data: {
@@ -779,6 +811,9 @@ describe("LeadsPage", () => {
 
     // Select salesperson
     const selectSalesperson = document.getElementById("allot-lead-select") as HTMLSelectElement;
+    await waitFor(() => {
+      expect(selectSalesperson.querySelector('option[value="Rupesh Malla"]')).toBeTruthy();
+    });
     fireEvent.change(selectSalesperson, { target: { value: "Rupesh Malla" } });
 
     // Confirm Allotment

@@ -306,26 +306,6 @@ function TechnicalTaskSkeletonRows({
     </>
   );
 }
-const DEFAULT_MACHINE_MODELS = [
-  "ISL150 Rotary PFS 4 Stations",
-  "DZ800 Double Face Shaping Vacuum Machine 10Kgs",
-  "Sensor (Banding)",
-  "ISL250 Rotary PFS 8 Head With Zipper & Nitrogen",
-  "XLSG36100 Capping Machine",
-  "Automatic Tube Filling & Sealing Machine",
-  "Semi Automatic MAP (Vacuum + 2 Gases) Tray/Cup Sealing Machine",
-  "Cup Filler 16LTR",
-  "AF1000T Auto Auger Filler Conveyor 30LTR",
-  "PFFS200 Pneumatic 4 Side Sealer 240mm PLC",
-  "PFFS1000 Pneumatic Centre Sealer 420mm PLC",
-  "GF100FD Granular Filler Double Head FFS",
-];
-
-/**
- * TypableCombobox Component
- * Allows user to freely type custom text into the input field
- * as well as open a dropdown menu to select from predefined options.
- */
 function TypableCombobox({
   value,
   onChange,
@@ -672,9 +652,7 @@ function TechnicalTasksPageContent() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   // Header dropdown menus
-  const [impExpOpen, setImpExpOpen] = useState<boolean>(false);
   const [bulkActionsOpen, setBulkActionsOpen] = useState<boolean>(false);
-  const impExpRef = useRef<HTMLDivElement>(null);
   const bulkActionsRef = useRef<HTMLDivElement>(null);
 
   // Action Menu Dropdown inside table cell
@@ -712,7 +690,7 @@ function TechnicalTasksPageContent() {
   const [submittingCancel, setSubmittingCancel] = useState<boolean>(false);
 
   // Product Combobox Options for Machine & Model
-  const [productOptions, setProductOptions] = useState<string[]>(DEFAULT_MACHINE_MODELS);
+  const [productOptions, setProductOptions] = useState<string[]>([]);
 
   // Serial Number Filter & Lookup States
   const [filterSerialNumber, setFilterSerialNumber] = useState<string>("");
@@ -787,9 +765,6 @@ function TechnicalTasksPageContent() {
   // Close menus on document click
   useEffect(() => {
     function handleDocClick(e: MouseEvent) {
-      if (impExpRef.current && !impExpRef.current.contains(e.target as Node)) {
-        setImpExpOpen(false);
-      }
       if (bulkActionsRef.current && !bulkActionsRef.current.contains(e.target as Node)) {
         setBulkActionsOpen(false);
       }
@@ -1068,70 +1043,6 @@ function TechnicalTasksPageContent() {
     } catch (err) {
       setActionError(err);
     }
-  };
-
-  // CSV Export
-  const handleExportCsv = () => {
-    if (!tasks.length) {
-      alert("No tasks to export.");
-      return;
-    }
-    const headers = [
-      "Sr No",
-      "Company Name",
-      "Task Type",
-      "City",
-      "Third Party",
-      "Priority",
-      "Machine & Model",
-      "Description",
-      "Contact Person",
-      "Contact Designation",
-      "Contact Phone",
-      "Task Created Date",
-      "Task Created By",
-      "Service Type",
-      "Service Charge",
-      "Call Type",
-      "Task Approved By",
-      "Task Approved Date",
-      "Task Allotted To",
-      "Payment Status",
-      "Status",
-    ];
-
-    const csvRows = tasks.map((t, idx) => [
-      idx + 1,
-      `"${(t.company_name || "").replace(/"/g, '""')}"`,
-      `"${(t.task_type || "").replace(/"/g, '""')}"`,
-      `"${(t.city || "").replace(/"/g, '""')}"`,
-      `"${(t.third_party || "").replace(/"/g, '""')}"`,
-      `"${(t.priority || "").replace(/"/g, '""')}"`,
-      `"${(t.machine_model || "").replace(/"/g, '""')}"`,
-      `"${(t.task_description || "").replace(/"/g, '""')}"`,
-      `"${(t.contact_person_name || "").replace(/"/g, '""')}"`,
-      `"${(t.contact_designation || "").replace(/"/g, '""')}"`,
-      `"${(t.contact_phone || "").replace(/"/g, '""')}"`,
-      `"${(t.task_created_date || "").replace(/"/g, '""')}"`,
-      `"${(t.created_by_name || "").replace(/"/g, '""')}"`,
-      `"${(t.service_type || "").replace(/"/g, '""')}"`,
-      t.service_charge || 0,
-      `"${(t.call_type || "").replace(/"/g, '""')}"`,
-      `"${(t.task_approved_by || "").replace(/"/g, '""')}"`,
-      `"${(t.task_approved_date || "").replace(/"/g, '""')}"`,
-      `"${(t.task_allotted_to || "").replace(/"/g, '""')}"`,
-      `"${(t.payment_status || "").replace(/"/g, '""')}"`,
-      `"${(t.status || "").replace(/"/g, '""')}"`,
-    ]);
-
-    const csvContent = [headers.join(","), ...csvRows.map((r) => r.join(","))].join("\n");
-    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `technical_tasks_${new Date().toISOString().slice(0, 10)}.csv`;
-    link.click();
-    URL.revokeObjectURL(url);
   };
 
   // Product Search handler for Machine & Model combobox
@@ -1507,7 +1418,6 @@ function TechnicalTasksPageContent() {
   const canUpdate = isAdminLevel || hasPermission("technicaltask.update");
   const canApprove = isAdminLevel || hasPermission("technicaltask.approve");
   const canDeletePerm = isAdminLevel || hasPermission("technicaltask.delete");
-  const canExport = isAdminLevel || hasPermission("technicaltask.export");
   const canBulkAction = isAdminLevel || hasPermission("technicaltask.bulk_action");
   const myActorLabels = new Set(
     [authProfile?.display_name, authProfile?.full_name, authProfile?.username]
@@ -1771,63 +1681,6 @@ function TechnicalTasksPageContent() {
               >
                 + ADD NEW
               </button>
-            )}
-
-            {/* Imp / Exp ▾ */}
-            {canExport && (
-            <div ref={impExpRef} style={{ position: "relative", display: "inline-block" }}>
-              <button
-                type="button"
-                className="btn btn-imp-exp"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setImpExpOpen((v) => !v);
-                }}
-              >
-                Imp / Exp ▾
-              </button>
-              {impExpOpen && (
-                <div
-                  style={{
-                    position: "absolute",
-                    top: "100%",
-                    right: 0,
-                    marginTop: "4px",
-                    background: "#ffffff",
-                    borderRadius: "6px",
-                    boxShadow: "0 10px 25px rgba(0,0,0,0.15)",
-                    border: "1px solid #e2e8f0",
-                    zIndex: 1000,
-                    minWidth: "160px",
-                    overflow: "hidden",
-                  }}
-                >
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setImpExpOpen(false);
-                      handleExportCsv();
-                    }}
-                    style={{
-                      width: "100%",
-                      textAlign: "left",
-                      padding: "10px 14px",
-                      fontSize: "13.5px",
-                      color: "#334155",
-                      fontWeight: 600,
-                      background: "none",
-                      border: "none",
-                      cursor: "pointer",
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "8px",
-                    }}
-                  >
-                    📤 Export to CSV
-                  </button>
-                </div>
-              )}
-            </div>
             )}
 
             {/* Bulk Actions ▾ */}
@@ -4197,7 +4050,7 @@ function TechnicalTasksPageContent() {
                     onSearch={(val) => {
                       handleProductSearch(val);
                     }}
-                    options={productOptions.length > 0 ? productOptions : DEFAULT_MACHINE_MODELS}
+                    options={productOptions}
                     placeholder="Search Product..."
                     emptyText="No products found"
                     customText={(val) => `Use "${val}" as custom machine/model`}

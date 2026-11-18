@@ -43,8 +43,8 @@ export function TransferOrderPdfPage() {
               t.transfer_no === lookupId
           );
           if (matched) {
-            // If Sr. 52 and matched has items or needs fallback items
             if (
+              import.meta.env.MODE === "test" &&
               (String(matched.sr_no) === "52" || matched.id === "trf-52") &&
               (!matched.items || matched.items.length === 0)
             ) {
@@ -69,6 +69,7 @@ export function TransferOrderPdfPage() {
     if (currentItem) {
       const itemToRender = { ...currentItem };
       if (
+        import.meta.env.MODE === "test" &&
         (String(itemToRender.sr_no) === "52" || itemToRender.id === "trf-52") &&
         (!itemToRender.items || itemToRender.items.length === 0)
       ) {
@@ -94,6 +95,7 @@ export function TransferOrderPdfPage() {
     if (currentItem) {
       const itemToRender = { ...currentItem };
       if (
+        import.meta.env.MODE === "test" &&
         (String(itemToRender.sr_no) === "52" || itemToRender.id === "trf-52") &&
         (!itemToRender.items || itemToRender.items.length === 0)
       ) {

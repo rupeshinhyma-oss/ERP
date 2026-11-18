@@ -361,18 +361,17 @@
   color: #64748b;
 }
 
-/* Filter Panel (Exact Screenshot Replica) */
+/* Filter Panel */
 .transfer-filter-panel {
   background: #ffffff;
   border: 1px solid #e2e8f0;
   border-radius: 8px;
-  padding: 16px 20px;
+  padding: 18px 22px;
   margin-bottom: 16px;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 20px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
   position: relative;
 }
 
@@ -380,7 +379,8 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
-  width: 280px;
+  width: 100%;
+  min-width: 0;
 }
 
 .transfer-filter-field label {

@@ -30,22 +30,6 @@ const EMPTY: FormState = {
   status: "active",
 };
 
-const POPULAR_BANKS = [
-  "HDFC Bank",
-  "ICICI Bank",
-  "State Bank of India",
-  "Axis Bank",
-  "Kotak Mahindra Bank",
-  "Punjab National Bank",
-  "Bank of Baroda",
-  "IndusInd Bank",
-  "Yes Bank",
-  "Union Bank of India",
-  "Canara Bank",
-  "Standard Chartered Bank",
-  "Citibank",
-];
-
 function formatRegisterOn(dateStr?: string | null): string {
   if (!dateStr) return "—";
   try {
@@ -68,6 +52,7 @@ function formatRegisterOn(dateStr?: string | null): string {
 
 export function BillingCompaniesPage() {
   const cities = useLookup<City>("/masters/cities", 300);
+  const banks = useLookup<{ id: string; bank_name: string }>("/masters/banks/lookup", 250);
   const logoInputRef = useRef<HTMLInputElement | null>(null);
   const sigInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -504,16 +489,6 @@ export function BillingCompaniesPage() {
                   {c.name}
                 </option>
               ))}
-              {/* Fallback default cities if cities lookup still loading */}
-              {cities.items.length === 0 && (
-                <>
-                  <option value="Indore">Indore</option>
-                  <option value="Ahmedabad">Ahmedabad</option>
-                  <option value="Mumbai">Mumbai</option>
-                  <option value="Delhi">Delhi</option>
-                  <option value="Bangalore">Bangalore</option>
-                </>
-              )}
             </SelectField>
             <TextField
               id="zip_code"
@@ -583,9 +558,14 @@ export function BillingCompaniesPage() {
               onChange={(v) => set("bank_name", v)}
             >
               <option value="">Select</option>
-              {POPULAR_BANKS.map((bank) => (
-                <option key={bank} value={bank}>
-                  {bank}
+              {Array.from(
+                new Set([
+                  ...(f.bank_name ? [f.bank_name] : []),
+                  ...banks.items.map((b) => b.bank_name).filter(Boolean),
+                ])
+              ).map((bankName) => (
+                <option key={bankName} value={bankName}>
+                  {bankName}
                 </option>
               ))}
             </SelectField>

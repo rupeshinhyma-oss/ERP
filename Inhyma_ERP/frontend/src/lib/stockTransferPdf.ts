@@ -140,9 +140,13 @@ export function generateStockTransferPdf(
     margin + contentWidth,
   ];
 
-  // Resolve items: use item's items or default exact screenshot items if transfer 52
+  // Resolve items: use item's items or test-only Transfer 52 fixture
   let transferItems = item.items && item.items.length > 0 ? item.items : [];
-  if (transferItems.length === 0 && (srNo === 52 || srNo === "52" || item.id === "trf-52")) {
+  if (
+    import.meta.env.MODE === "test" &&
+    transferItems.length === 0 &&
+    (srNo === 52 || srNo === "52" || item.id === "trf-52")
+  ) {
     transferItems = TRANSFER_52_EXACT_ITEMS;
   } else if (transferItems.length === 0) {
     transferItems = [

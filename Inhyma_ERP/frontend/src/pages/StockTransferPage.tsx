@@ -5,7 +5,8 @@ import { SideDrawer, DetailFieldGrid } from "@/components/SideDrawer";
 import { DateRangePicker } from "@/components/DateRangePicker";
 import { Pagination } from "@/components/Pagination";
 import type { PaginationMeta } from "@/types";
-import { InventoryApi } from "@/lib/api";
+import { InventoryApi, apiGet } from "@/lib/api";
+import { useAuth } from "@/lib/hooks";
 import "@/styles/stockTransfer.css";
 
 export interface StockTransferLineItem {
@@ -342,6 +343,7 @@ export function StockTransferPage({
   initialLoading = import.meta.env.MODE !== "test",
 }: StockTransferPageProps = {}) {
   const navigate = useNavigate();
+  const { profile } = useAuth();
   const isTestMode = import.meta.env.MODE === "test";
   const [loading, setLoading] = useState<boolean>(initialLoading);
   const [items, setItems] = useState<StockTransferItem[]>(isTestMode ? INITIAL_TRANSFERS : []);
@@ -409,11 +411,41 @@ export function StockTransferPage({
   const [openActionMenuId, setOpenActionMenuId] = useState<string | null>(null);
 
   // Add new modal state
+  const [warehouseOptions, setWarehouseOptions] = useState<string[]>([]);
   const [showAddModal, setShowAddModal] = useState<boolean>(false);
-  const [newFromWh, setNewFromWh] = useState("Ahmedabad");
-  const [newToWh, setNewToWh] = useState("Mumbai");
+  const [newFromWh, setNewFromWh] = useState("");
+  const [newToWh, setNewToWh] = useState("");
   const [newAmount, setNewAmount] = useState("");
   const [newRemarks, setNewRemarks] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    apiGet<any>("/masters/warehouses?page_size=100&status=active")
+      .then((res) => {
+        if (cancelled) return;
+        const rows = res?.data?.items || res?.data || (res as any)?.items || res;
+        if (!Array.isArray(rows)) return;
+        const names = Array.from(
+          new Set(
+            rows
+              .filter((w: any) => !String(w?.name || "").toLowerCase().includes("ordered"))
+              .map((w: any) => (typeof w === "string" ? w : String(w?.name || "")).trim())
+              .filter(Boolean)
+          )
+        );
+        setWarehouseOptions(names);
+        if (names.length > 0) {
+          setNewFromWh((prev) => prev || names[0]);
+          setNewToWh((prev) => prev || names[1] || names[0]);
+        }
+      })
+      .catch((err) => {
+        console.warn("Failed to load warehouses:", err);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Close menus on outside click
   useEffect(() => {
@@ -515,34 +547,22 @@ export function StockTransferPage({
     })
       .then((res) => {
         if (!cancelled && res?.data?.items && Array.isArray(res.data.items)) {
-          const savedStr = localStorage.getItem("local_stock_transfers");
-          const localSaved: StockTransferItem[] = savedStr ? JSON.parse(savedStr) : [];
           const dbItems: StockTransferItem[] = res.data.items;
-          const merged = [
-            ...localSaved.filter((l) => !dbItems.some((d) => d.id === l.id || d.sr_no === l.sr_no)),
-            ...dbItems,
-          ];
-          setItems(merged);
+          setItems(dbItems);
           if (res.data.tab_counts) {
-            setTabCounts({
-              ...res.data.tab_counts,
-              all: res.data.tab_counts.all + localSaved.length,
-              received: res.data.tab_counts.received + localSaved.length,
-            });
-          } else if (merged.length === 0 && !isTestMode) {
+            setTabCounts(res.data.tab_counts);
+          } else if (dbItems.length === 0 && !isTestMode) {
             setTabCounts({ all: 0, pending: 0, confirmed: 0, received: 0, cancel: 0 });
           }
         }
       })
       .catch((err) => {
-        console.warn("Using offline transfers fallback:", err);
-        const savedStr = localStorage.getItem("local_stock_transfers");
-        const localSaved: StockTransferItem[] = savedStr ? JSON.parse(savedStr) : [];
+        console.warn("Failed to load stock transfers:", err);
         if (isTestMode) {
-          setItems([...localSaved, ...INITIAL_TRANSFERS]);
+          setItems(INITIAL_TRANSFERS);
         } else {
-          setItems(localSaved);
-          setTabCounts({ all: localSaved.length, pending: 0, confirmed: 0, received: localSaved.length, cancel: 0 });
+          setItems([]);
+          setTabCounts({ all: 0, pending: 0, confirmed: 0, received: 0, cancel: 0 });
         }
       })
       .finally(() => {
@@ -643,48 +663,52 @@ export function StockTransferPage({
       now.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
 
     const totalVal = parseFloat(newAmount) || 0;
-    const newRecord: StockTransferItem = {
-      id: `trf-${Date.now()}`,
-      sr_no: nextSr,
-      transfer_no: `TRF-2026-${String(nextSr).padStart(3, "0")}`,
-      transfer_date: dateStr,
-      from_warehouse: newFromWh,
-      to_warehouse: newToWh,
-      total_amount: totalVal,
-      added_by: "Akshata Wadekar",
-      status: "Received",
-      remarks: newRemarks,
-      items: [
-        {
-          product_name: "General Inventory Transfer Batch",
-          category: "Machines",
-          quantity: 1,
-          uom: "SET",
-          rate: totalVal,
-          amount: totalVal,
-        },
-      ],
-    };
-
-    setItems((prev) => [newRecord, ...prev]);
-    setTabCounts((prev) => ({
-      ...prev,
-      all: prev.all + 1,
-      received: prev.received + 1,
-    }));
-    setShowAddModal(false);
+    const addedBy = profile?.full_name || profile?.username || "";
+    const transferItems = [
+      {
+        product_name: "General Inventory Transfer Batch",
+        category: "Machines",
+        quantity: 1,
+        uom: "SET",
+        rate: totalVal,
+        amount: totalVal,
+      },
+    ];
 
     try {
-      await InventoryApi.createStockTransfer({
+      const res = await InventoryApi.createStockTransfer({
         transfer_date: dateStr,
         from_warehouse: newFromWh,
         to_warehouse: newToWh,
         total_amount: totalVal,
-        added_by: "Akshata Wadekar",
+        ...(addedBy ? { added_by: addedBy } : {}),
         status: "Received",
         remarks: newRemarks,
-        items: newRecord.items || [],
+        items: transferItems,
       });
+      const created = res?.data;
+      const newRecord: StockTransferItem = created?.id
+        ? created
+        : {
+            id: `trf-${Date.now()}`,
+            sr_no: nextSr,
+            transfer_no: `TRF-2026-${String(nextSr).padStart(3, "0")}`,
+            transfer_date: dateStr,
+            from_warehouse: newFromWh,
+            to_warehouse: newToWh,
+            total_amount: totalVal,
+            added_by: addedBy,
+            status: "Received",
+            remarks: newRemarks,
+            items: transferItems,
+          };
+      setItems((prev) => [newRecord, ...prev]);
+      setTabCounts((prev) => ({
+        ...prev,
+        all: prev.all + 1,
+        received: prev.received + 1,
+      }));
+      setShowAddModal(false);
     } catch (err) {
       console.warn("Failed to persist transfer to DB:", err);
     }
@@ -1016,10 +1040,12 @@ export function StockTransferPage({
             }}
           >
             <div
+              className="transfer-filter-grid"
               style={{
                 display: "grid",
-                gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))",
+                gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
                 gap: "18px 24px",
+                width: "100%",
               }}
             >
               <div className="transfer-filter-field">
@@ -1050,9 +1076,11 @@ export function StockTransferPage({
                   style={{ width: "100%", height: "38px", borderRadius: "5px", border: "1px solid #cbd5e1", padding: "0 10px", fontSize: "13.5px" }}
                 >
                   <option value="All">All</option>
-                  <option value="Ahmedabad">Ahmedabad</option>
-                  <option value="Mumbai">Mumbai</option>
-                  <option value="Indore">Indore</option>
+                  {Array.from(new Set([...warehouseOptions, ...items.map((i) => i.from_warehouse).filter(Boolean)])).map((wh) => (
+                    <option key={wh} value={wh}>
+                      {wh}
+                    </option>
+                  ))}
                 </select>
               </div>
 
@@ -1067,9 +1095,11 @@ export function StockTransferPage({
                   style={{ width: "100%", height: "38px", borderRadius: "5px", border: "1px solid #cbd5e1", padding: "0 10px", fontSize: "13.5px" }}
                 >
                   <option value="All">All</option>
-                  <option value="Ahmedabad">Ahmedabad</option>
-                  <option value="Mumbai">Mumbai</option>
-                  <option value="Indore">Indore</option>
+                  {Array.from(new Set([...warehouseOptions, ...items.map((i) => i.to_warehouse).filter(Boolean)])).map((wh) => (
+                    <option key={wh} value={wh}>
+                      {wh}
+                    </option>
+                  ))}
                 </select>
               </div>
             </div>
@@ -1779,9 +1809,12 @@ export function StockTransferPage({
                       onChange={(e) => setNewFromWh(e.target.value)}
                       style={{ width: "100%", padding: "8px 12px", border: "1px solid #cbd5e1", borderRadius: "6px", fontSize: "13px" }}
                     >
-                      <option value="Ahmedabad">Ahmedabad</option>
-                      <option value="Mumbai">Mumbai</option>
-                      <option value="Indore">Indore</option>
+                      <option value="">Select Warehouse</option>
+                      {warehouseOptions.map((wh) => (
+                        <option key={wh} value={wh}>
+                          {wh}
+                        </option>
+                      ))}
                     </select>
                   </div>
 
@@ -1794,9 +1827,12 @@ export function StockTransferPage({
                       onChange={(e) => setNewToWh(e.target.value)}
                       style={{ width: "100%", padding: "8px 12px", border: "1px solid #cbd5e1", borderRadius: "6px", fontSize: "13px" }}
                     >
-                      <option value="Mumbai">Mumbai</option>
-                      <option value="Ahmedabad">Ahmedabad</option>
-                      <option value="Indore">Indore</option>
+                      <option value="">Select Warehouse</option>
+                      {warehouseOptions.map((wh) => (
+                        <option key={wh} value={wh}>
+                          {wh}
+                        </option>
+                      ))}
                     </select>
                   </div>
 

@@ -149,16 +149,6 @@ export function TechniciansPage() {
                 {c.name}
               </option>
             ))}
-            {/* Fallback default cities if cities lookup still loading */}
-            {cities.items.length === 0 && (
-              <>
-                <option value="Mumbai">Mumbai</option>
-                <option value="Ahmedabad">Ahmedabad</option>
-                <option value="Indore">Indore</option>
-                <option value="Delhi">Delhi</option>
-                <option value="Bangalore">Bangalore</option>
-              </>
-            )}
           </SelectField>
           <TextField
             id="password"

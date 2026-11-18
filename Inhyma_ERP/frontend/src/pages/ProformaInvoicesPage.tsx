@@ -41,37 +41,13 @@ const PROFORMA_OPTION_GROUPS = [
 type StatusTab = { key: string; label: string; cardLabel: string; badge: string; actionLabel?: string; actionColor?: string };
 type CatalogProduct = { product_name: string; product_code?: string; hsn: string; rate: number; gst_percent: number; min_price: number; available_stock?: number };
 
-const PRODUCT_HSN_MAP: Record<string, string> = {
-  "ISL150 Rotary PFS 4 Stations": "8422.30.00",
-  "DZ800 Double Face Shaping Vacuum Machine 10Kgs": "8422.30.00",
-  "Sensor (Banding)": "8422.90.90",
-  "ISL250 Rotary PFS 8 Head With Zipper & Nitrogen": "8423.30.00",
-  "XLSG36100 Capping Machine": "8423.30.00",
-  "Automatic Tube Filling & Sealing Machine": "8423.30.00",
-  "Semi Automatic MAP (Vacuum + 2 Gases) Tray/Cup Sealing Machine": "8423.30.00",
-  "Cup Filler 16LTR": "8422.30.00",
-  "AF1000T Auto Auger Filler Conveyor 30LTR": "8422.30.00",
-  "PFFS200 Pneumatic 4 Side Sealer 240mm PLC": "8422.40.00",
-  "PFFS1000 Pneumatic Centre Sealer 420mm PLC": "8422.40.00",
-  "GF100FD Granular Filler Double Head FFS": "8422.40.00",
-};
-
 export function getAutoHsnForProduct(p?: any): string {
   if (!p) return "";
   const directHsn = (p.hsn || p.hsn_number || p.hsn_code || "").toString().trim();
   if (directHsn && directHsn !== "—") return directHsn;
   const barcode = (p.barcode || "").toString().trim();
   if (barcode && /\d/.test(barcode)) return barcode;
-  const name = (p.product_name || p.product_name_tally || "").toString().trim();
-  if (PRODUCT_HSN_MAP[name]) return PRODUCT_HSN_MAP[name];
-  const lower = name.toLowerCase();
-  if (lower.includes("spare") || lower.includes("part") || lower.includes("sensor") || lower.includes("block") || lower.includes("relay") || lower.includes("motor")) {
-    return "8422.90.90";
-  }
-  if (lower.includes("sealer") || lower.includes("band") || lower.includes("vacuum") || lower.includes("filler") || lower.includes("machine")) {
-    return "8422.30.00";
-  }
-  return name ? "8422.30.00" : "";
+  return "";
 }
 
 export function normalizeHsn(hsn?: string | null): string {
@@ -84,7 +60,7 @@ export function resolveGstPercent(hsnCode?: string | null, customMap?: Record<st
   const clean = hsnCode.trim();
   const norm = normalizeHsn(clean);
 
-  // 1. Database Taxes Master match
+  // Database Taxes Master match
   if (customMap) {
     if (customMap[clean] !== undefined) return customMap[clean];
     if (customMap[norm] !== undefined) return customMap[norm];
@@ -95,32 +71,6 @@ export function resolveGstPercent(hsnCode?: string | null, customMap?: Record<st
       }
     }
   }
-
-  // 2. Standard HSN mapping defaults
-  const KNOWN_HSN_GST: Record<string, number> = {
-    "996511": 18, // Transport
-    "996713": 18, // Packing & Forwarding
-    "8422": 18,
-    "84223000": 18,
-    "8422.30.00": 18,
-    "84229090": 18,
-    "8422.90.90": 18,
-    "8423": 18,
-    "8427": 18,
-    "8428": 18,
-    "8443": 18,
-    "8431": 18,
-    "9612": 18,
-    "9987": 18,
-    "8479": 18,
-    "8474": 18,
-  };
-
-  if (KNOWN_HSN_GST[clean] !== undefined) return KNOWN_HSN_GST[clean];
-  if (KNOWN_HSN_GST[norm] !== undefined) return KNOWN_HSN_GST[norm];
-
-  const prefix4 = norm.slice(0, 4);
-  if (KNOWN_HSN_GST[prefix4] !== undefined) return KNOWN_HSN_GST[prefix4];
 
   return 18;
 }
@@ -2899,10 +2849,11 @@ export function ProformaInvoicesPage({
                   }}
                 >
                   <option value="All">All</option>
-                  <option value="Deepika Samel">Deepika Samel</option>
-                  <option value="Dhairya Shah">Dhairya Shah</option>
-                  <option value="Sunita Pawar">Sunita Pawar</option>
-                  <option value="Bhavin Suthar">Bhavin Suthar</option>
+                  {effectiveSalesPersonOptions.map((sp) => (
+                    <option key={sp} value={sp}>
+                      {sp}
+                    </option>
+                  ))}
                 </select>
               </div>
 
@@ -2930,11 +2881,11 @@ export function ProformaInvoicesPage({
                   }}
                 >
                   <option value="All">All</option>
-                  <option value="Other">Other</option>
-                  <option value="Direct">Direct</option>
-                  <option value="IndiaMART">IndiaMART</option>
-                  <option value="TradeIndia">TradeIndia</option>
-                  <option value="Website">Website</option>
+                  {LEAD_SOURCE_OPTIONS.map((ls) => (
+                    <option key={ls} value={ls}>
+                      {ls}
+                    </option>
+                  ))}
                 </select>
               </div>
 

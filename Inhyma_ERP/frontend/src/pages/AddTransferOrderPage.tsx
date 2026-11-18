@@ -2,7 +2,8 @@ import React, { useState, useMemo, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
 import { ScrollableNumberInput } from "@/components/ScrollableNumberInput";
-import { InventoryApi } from "@/lib/api";
+import { InventoryApi, apiGet, errorMessage as getErrorMessage } from "@/lib/api";
+import { useAuth } from "@/lib/hooks";
 import { INITIAL_STOCK_ITEMS, ProductStockItem } from "@/pages/ProductStockPage";
 import "@/styles/stockTransfer.css";
 
@@ -41,32 +42,16 @@ export interface SelectedTransferProduct {
   uom: string;
 }
 
-export const PHYSICAL_WAREHOUSES = [
-  "Ahmedabad",
-  "Mumbai",
-  "Indore",
-  "Main Warehouse - Bhiwandi",
-];
-
-export const TRANSIT_WAREHOUSES = [
-  "Ahmedabad Transit",
-  "Mumbai Transit",
-  "Indore Transit",
-  "Main Warehouse - Bhiwandi Transit",
-];
-
-export const WAREHOUSE_OPTIONS = [
-  ...PHYSICAL_WAREHOUSES,
-  ...TRANSIT_WAREHOUSES,
-];
-
 export function AddTransferOrderPage() {
   const navigate = useNavigate();
+  const { profile } = useAuth();
 
   const [fromWarehouse, setFromWarehouse] = useState<string>("");
   const [toWarehouse, setToWarehouse] = useState<string>("");
   const [remark, setRemark] = useState<string>("");
 
+  const [physicalWarehouses, setPhysicalWarehouses] = useState<string[]>([]);
+  const [transitWarehouses, setTransitWarehouses] = useState<string[]>([]);
   const [stockCatalog, setStockCatalog] = useState<ProductStockItem[]>(isTestMode ? INITIAL_STOCK_ITEMS : []);
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [showSearchDropdown, setShowSearchDropdown] = useState<boolean>(false);
@@ -75,6 +60,38 @@ export function AddTransferOrderPage() {
   const [submitting, setSubmitting] = useState<boolean>(false);
 
   const searchContainerRef = useRef<HTMLDivElement>(null);
+
+  // Load active warehouses from Masters API (physical vs transit)
+  useEffect(() => {
+    let cancelled = false;
+    apiGet<any>("/masters/warehouses?page_size=100&status=active")
+      .then((res) => {
+        if (cancelled) return;
+        const rows = res?.data?.items || res?.data || (res as any)?.items || res;
+        if (!Array.isArray(rows)) return;
+        const phys: string[] = [];
+        const transit: string[] = [];
+        for (const w of rows) {
+          const name = (typeof w === "string" ? w : String(w?.name || "")).trim();
+          if (!name) continue;
+          const lower = name.toLowerCase();
+          if (lower.includes("ordered")) continue;
+          if ((w && typeof w === "object" && w.main_warehouse_id) || lower.includes("transit")) {
+            if (!transit.includes(name)) transit.push(name);
+          } else {
+            if (!phys.includes(name)) phys.push(name);
+          }
+        }
+        setPhysicalWarehouses(phys);
+        setTransitWarehouses(transit);
+      })
+      .catch((err) => {
+        console.warn("Failed to load warehouses:", err);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // In production, fetch live catalog from Inventory API
   useEffect(() => {
@@ -288,12 +305,13 @@ export function AddTransferOrderPage() {
         " " +
         now.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
 
+      const addedBy = profile?.full_name || profile?.username || undefined;
       const payload = {
         transfer_date: dateStr,
         from_warehouse: fromWarehouse,
         to_warehouse: toWarehouse,
         total_amount: grandTotal,
-        added_by: "Akshata Wadekar",
+        ...(addedBy ? { added_by: addedBy } : {}),
         status: "Received",
         remarks: remark || undefined,
         items: selectedProducts.map((p) => {
@@ -311,48 +329,17 @@ export function AddTransferOrderPage() {
         }),
       };
 
-      try {
-        await InventoryApi.createStockTransfer(payload);
-      } catch (err: any) {
-        const errorDetail = err?.response?.data?.detail?.message || err?.response?.data?.detail || err?.message;
-        if (err?.response?.status === 400 || err?.response?.status === 409) {
-          setErrorMessage(String(errorDetail || "Insufficient physical stock in warehouse."));
-          return;
-        }
-        console.warn("API createStockTransfer fallback to local persistence:", err);
-      }
-
-      // Save locally to localStorage so StockTransferPage can read it immediately
-      const savedListStr = localStorage.getItem("local_stock_transfers");
-      const currentSaved = savedListStr ? JSON.parse(savedListStr) : [];
-      const nextSr = 53 + currentSaved.length;
-      const newRecord = {
-        id: `trf-${Date.now()}`,
-        sr_no: nextSr,
-        transfer_no: `TRF-2026-${String(nextSr).padStart(3, "0")}`,
-        transfer_date: dateStr,
-        from_warehouse: fromWarehouse,
-        to_warehouse: toWarehouse,
-        total_amount: grandTotal,
-        added_by: "Akshata Wadekar",
-        status: "Received",
-        remarks: remark,
-        items: selectedProducts.map((p) => ({
-          product_name: p.product_name,
-          product_code: p.product_code,
-          category: p.category,
-          quantity: p.transfer_qty,
-          uom: p.uom,
-          rate: p.unit_price,
-          amount: p.total_price,
-        })),
-      };
-      localStorage.setItem("local_stock_transfers", JSON.stringify([newRecord, ...currentSaved]));
+      await InventoryApi.createStockTransfer(payload);
 
       // Navigate back to stock transfer list
       navigate("/transfer/list");
     } catch (err: any) {
-      setErrorMessage(err.message || "Failed to create stock transfer order.");
+      setErrorMessage(
+        err?.response?.data?.detail?.message ||
+          err?.response?.data?.detail ||
+          getErrorMessage(err) ||
+          "Failed to create stock transfer order."
+      );
     } finally {
       setSubmitting(false);
     }
@@ -400,7 +387,7 @@ export function AddTransferOrderPage() {
               >
                 <option value="">Select</option>
                 <optgroup label="Physical Warehouses">
-                  {PHYSICAL_WAREHOUSES.map((w) => (
+                  {physicalWarehouses.map((w) => (
                     <option key={w} value={w}>
                       {w}
                     </option>
@@ -425,14 +412,14 @@ export function AddTransferOrderPage() {
               >
                 <option value="">Select</option>
                 <optgroup label="Physical Warehouses">
-                  {PHYSICAL_WAREHOUSES.map((w) => (
+                  {physicalWarehouses.map((w) => (
                     <option key={w} value={w} disabled={w === fromWarehouse}>
                       {w}
                     </option>
                   ))}
                 </optgroup>
                 <optgroup label="Transit Warehouses (Goods In-Transit)">
-                  {TRANSIT_WAREHOUSES.map((w) => (
+                  {transitWarehouses.map((w) => (
                     <option key={w} value={w} disabled={w === fromWarehouse}>
                       {w}
                     </option>

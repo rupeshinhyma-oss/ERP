@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from "react";
-import { apiPost, apiPut } from "@/lib/api";
+import React, { useState, useEffect, useMemo } from "react";
+import { apiGet, apiPost, apiPut } from "@/lib/api";
 import type { Lead } from "@/types";
 
 export interface AllotLeadModalProps {
@@ -10,25 +10,39 @@ export interface AllotLeadModalProps {
   availableAssignees?: string[];
 }
 
-const DEFAULT_SALESPERSONS = [
-  "Rupesh Malla",
-  "Dhairya Shah",
-  "Devendra Marade",
-  "Vikram Rathod",
-  "Pooja Vani",
-  "Sales Team A",
-  "Sales Team B",
-  "Admin User",
-];
-
 export function AllotLeadModal({
   isOpen,
   onClose,
   lead,
   onSuccess,
-  availableAssignees = DEFAULT_SALESPERSONS,
+  availableAssignees = [],
 }: AllotLeadModalProps) {
-  const assignees = availableAssignees && availableAssignees.length > 0 ? availableAssignees : DEFAULT_SALESPERSONS;
+  const [fetchedAssignees, setFetchedAssignees] = useState<string[]>([]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    let cancelled = false;
+    apiGet<Array<{ display_name?: string | null; full_name?: string; username?: string }>>("/companies/sales-persons")
+      .then((res) => {
+        if (cancelled) return;
+        const raw = Array.isArray(res?.data) ? res.data : [];
+        const names = raw
+          .map((u) => (u.display_name || u.full_name || u.username || "").trim())
+          .filter(Boolean);
+        setFetchedAssignees(Array.from(new Set(names)));
+      })
+      .catch(() => {
+        if (!cancelled) setFetchedAssignees([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen]);
+
+  const assignees = useMemo(
+    () => Array.from(new Set([...fetchedAssignees, ...(availableAssignees || []).filter(Boolean)])),
+    [availableAssignees, fetchedAssignees]
+  );
   const [selectedPerson, setSelectedPerson] = useState<string>("");
   const [customPerson, setCustomPerson] = useState<string>("");
   const [saving, setSaving] = useState(false);

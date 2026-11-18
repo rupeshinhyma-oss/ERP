@@ -99,25 +99,6 @@ const COMPANY_IMPORT_HEADERS: ImportHeader[] = [
   { key: "Status", label: "Status" },
 ];
 
-const COMPANY_SECTORS = [
-  "Automobile",
-  "Bakery",
-  "Beverage",
-  "Chemical",
-  "Confectionary",
-  "Dairy",
-  "Electrical",
-  "Electronics",
-  "Hardware",
-  "Mechanical Items",
-  "Other Food",
-  "Others (Misc.)",
-  "Pharmaceutical",
-  "Snacks",
-  "Textile",
-];
-
-
 const GST_STATE_CODE_MAP: Record<string, string> = {
   "01": "Jammu and Kashmir",
   "02": "Himachal Pradesh",
@@ -1305,6 +1286,7 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
   const [filterDistricts, setFilterDistricts] = useState<Array<{ id: string; name: string; state_id?: string }>>([]);
   const [filterCities, setFilterCities] = useState<Array<{ id: string; name: string; state_id?: string; district_id?: string }>>([]);
   const [companyCategories, setCompanyCategories] = useState<Array<{ id: string; name: string; business_type?: string }>>([]);
+  const [companySectors, setCompanySectors] = useState<string[]>([]);
   const [filterSalesPersons, setFilterSalesPersons] = useState<Array<{ id: string; display_name?: string | null; full_name: string; username: string }>>([]);
   const [salesPersons, setSalesPersons] = useState<Array<{ id: string; display_name?: string | null; full_name: string; username: string }>>([]);
   const [filterBusinessTypes] = useState<Array<{ value: string; label: string }>>([
@@ -1334,6 +1316,19 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
       .then((res) => {
         if (res?.data) {
           setCompanyCategories(res.data);
+        }
+      })
+      .catch(() => { });
+
+    void apiGet<Array<{ id: string; name: string }>>("/masters/company-sectors/lookup")
+      .then((res) => {
+        if (res?.data && Array.isArray(res.data)) {
+          setCompanySectors(
+            res.data
+              .map((s) => (s.name || "").trim())
+              .filter(Boolean)
+              .sort((a, b) => a.localeCompare(b))
+          );
         }
       })
       .catch(() => { });
@@ -4404,8 +4399,8 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
                         >
                           <option value="">Select</option>
                           {[
-                            ...(form.sector && !(COMPANY_SECTORS as readonly string[]).includes(form.sector) ? [form.sector] : []),
-                            ...COMPANY_SECTORS,
+                            ...(form.sector && !companySectors.includes(form.sector) ? [form.sector] : []),
+                            ...companySectors,
                           ].map((v) => (
                             <option key={v} value={v}>
                               {v}
@@ -6323,7 +6318,7 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
                       }}
                     >
                       <option value="">All</option>
-                      {COMPANY_SECTORS.map((sec) => (
+                      {companySectors.map((sec) => (
                         <option key={sec} value={sec}>
                           {sec}
                         </option>

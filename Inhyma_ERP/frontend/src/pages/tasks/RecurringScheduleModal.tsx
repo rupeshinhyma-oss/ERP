@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import type {
   AvailableUser,
   QuarterScheduleDetail,
@@ -11,6 +11,7 @@ import type {
   TaskRecurringScheduleUpdateInput,
 } from "@/types/tasks";
 import { tasksApi } from "@/lib/tasksApi";
+import { apiGet } from "@/lib/api";
 
 interface RecurringScheduleModalProps {
   isOpen: boolean;
@@ -19,21 +20,6 @@ interface RecurringScheduleModalProps {
   scheduleToEdit?: TaskRecurringSchedule | null;
   availableUsers: AvailableUser[];
 }
-
-const DEPARTMENTS = [
-  "Frontend",
-  "Backend",
-  "Cloud Setup",
-  "IT",
-  "Director",
-  "Management",
-  "Design",
-  "QA",
-  "Sales",
-  "Operations",
-  "Finance",
-  "HR",
-];
 
 const MONTH_NAMES = [
   "Jan", "Feb", "Mar", "Apr", "May", "Jun",
@@ -112,6 +98,38 @@ export const RecurringScheduleModal: React.FC<RecurringScheduleModalProps> = ({
   const [previewLoading, setPreviewLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
+
+  const [roleDepartments, setRoleDepartments] = useState<string[]>([]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    let cancelled = false;
+    apiGet<Array<{ name?: string }>>("/rbac/roles?limit=250")
+      .then((res) => {
+        if (cancelled) return;
+        const rows = Array.isArray(res?.data) ? res.data : [];
+        const names = rows
+          .map((r) => (r.name || "").trim())
+          .filter((n) => n && !["super_admin", "admin", "user"].includes(n.toLowerCase()));
+        setRoleDepartments(Array.from(new Set(names)));
+      })
+      .catch(() => {
+        if (!cancelled) setRoleDepartments([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen]);
+
+  const departmentOptions = useMemo(() => {
+    const set = new Set<string>(roleDepartments);
+    availableUsers.forEach((u) => {
+      const dept = (u.department || "").trim();
+      if (dept) set.add(dept);
+    });
+    if (department.trim()) set.add(department.trim());
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [roleDepartments, availableUsers, department]);
 
   // Populate form on edit or reset on create
   useEffect(() => {
@@ -732,7 +750,7 @@ export const RecurringScheduleModal: React.FC<RecurringScheduleModalProps> = ({
                     }}
                   >
                     <option value="">-- Select Department --</option>
-                    {DEPARTMENTS.map((d) => (
+                    {departmentOptions.map((d) => (
                       <option key={d} value={d}>
                         {d}
                       </option>

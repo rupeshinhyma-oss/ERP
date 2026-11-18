@@ -144,7 +144,7 @@ class StockTransfer(Base, UUIDPrimaryKeyMixin, TimestampMixin, VersionMixin, Sof
     from_warehouse: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
     to_warehouse: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
     total_amount: Mapped[float] = mapped_column(Float, default=0.0, server_default="0", nullable=False)
-    added_by: Mapped[str] = mapped_column(String(100), default="Akshata Wadekar", server_default="Akshata Wadekar", nullable=False)
+    added_by: Mapped[str] = mapped_column(String(100), default="", server_default="", nullable=False)
     status: Mapped[str] = mapped_column(String(50), default="Received", server_default="Received", index=True, nullable=False)
     remarks: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 

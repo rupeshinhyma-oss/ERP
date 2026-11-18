@@ -1147,33 +1147,14 @@ export function PaymentsPage() {
               </table>
             </div>
 
-            {/* Pagination Controls inside Card matching Companies */}
+            {/* Pagination Controls inside Card */}
             <div
               style={{
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                padding: "12px 16px",
                 borderTop: "1px solid #e2e8f0",
                 background: "#ffffff",
-                flexWrap: "wrap",
-                gap: "10px",
+                padding: "4px 16px",
               }}
             >
-              <div style={{ fontSize: "13px", color: "#64748b" }}>
-                Showing{" "}
-                <strong style={{ color: "#1e293b" }}>
-                  {totalRecords === 0 ? 0 : (page - 1) * pageSize + 1}
-                </strong>
-                {" "}–{" "}
-                <strong style={{ color: "#1e293b" }}>
-                  {Math.min(page * pageSize, totalRecords)}
-                </strong>
-                {" "}of{" "}
-                <strong style={{ color: "#1e293b" }}>{totalRecords}</strong>
-                {" "}total (Page {page} of {Math.max(1, Math.ceil(totalRecords / pageSize))})
-              </div>
-
               <Pagination
                 pagination={paginationMeta}
                 pageSize={pageSize}

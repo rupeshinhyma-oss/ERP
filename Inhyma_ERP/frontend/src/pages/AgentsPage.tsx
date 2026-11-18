@@ -198,52 +198,7 @@ export function AgentsPage() {
       }
     } catch (err: any) {
       console.warn("Could not load agents from API:", err);
-      if (agents.length === 0) {
-        setAgents([
-          {
-            id: "ag-01",
-            full_name: "Rajesh Kumar Sharma",
-            agent_type: "Sales Agent",
-            company_name: "Sharma Industrial Agency",
-            work_description: "Promotes packaging machinery to FMCG and pharmaceutical manufacturing units.",
-            calling_number: "9825012345",
-            whatsapp_number: "9825012345",
-            state: "Gujarat",
-            district: "Ahmedabad",
-            city: "Ahmedabad",
-            area: "Narol",
-            birth_date: "1988-06-15",
-            age: 38,
-            agent_grade: "A",
-            current_status: "Existing",
-            potential: "Yes",
-            sales_person: "Abhishek Patel",
-            remarks: "Consistent top-performing sourcing agent with 10+ years regional experience.",
-            added_on: "2026-04-10",
-          },
-          {
-            id: "ag-02",
-            full_name: "Mahesh V. Joshi",
-            agent_type: "Commission Agent",
-            company_name: "Joshi Enterprise",
-            work_description: "Sourcing leads and coordinating machine demonstrations in Thane & Navi Mumbai.",
-            calling_number: "9892098765",
-            whatsapp_number: "9892098765",
-            state: "Maharashtra",
-            district: "Thane",
-            city: "Thane",
-            area: "Wagle Estate",
-            birth_date: "1992-11-20",
-            age: 34,
-            agent_grade: "B",
-            current_status: "New",
-            potential: "Yes",
-            sales_person: "Prathamesh",
-            remarks: "Recently onboarded; handling bakery and confectionery packaging inquiries.",
-            added_on: "2026-05-18",
-          },
-        ]);
-      }
+      setAgents([]);
     } finally {
       setLoading(false);
     }
@@ -265,28 +220,20 @@ export function AgentsPage() {
           apiGet<Array<{ display_name?: string | null; full_name: string; username: string }>>("/api/v1/users?limit=100&status=ACTIVE").catch(() => null),
         ]);
 
-        if (typesRes?.data && Array.isArray(typesRes.data) && typesRes.data.length > 0) {
-          setAgentTypes(typesRes.data.map((t: { name: string }) => t.name));
-        } else {
-          setAgentTypes(["Sales Agent", "Sourcing Agent", "Commission Agent", "Distributor Agent", "Channel Partner"]);
+        if (typesRes?.data && Array.isArray(typesRes.data)) {
+          setAgentTypes(typesRes.data.map((t: { name: string }) => t.name).filter(Boolean));
         }
 
         if (statesRes?.data && Array.isArray(statesRes.data)) {
-          setMasterStates(statesRes.data.map((s: { name: string }) => s.name).sort());
-        } else {
-          setMasterStates(["Gujarat", "Maharashtra", "Madhya Pradesh", "Rajasthan", "Delhi"]);
+          setMasterStates(statesRes.data.map((s: { name: string }) => s.name).filter(Boolean).sort());
         }
 
         if (districtsRes?.data && Array.isArray(districtsRes.data)) {
-          setMasterDistricts(districtsRes.data.map((d: { name: string }) => d.name).sort());
-        } else {
-          setMasterDistricts(["Ahmedabad", "Surat", "Vadodara", "Thane", "Mumbai", "Pune", "Indore", "Dhar"]);
+          setMasterDistricts(districtsRes.data.map((d: { name: string }) => d.name).filter(Boolean).sort());
         }
 
         if (citiesRes?.data && Array.isArray(citiesRes.data)) {
-          setMasterCities(citiesRes.data.map((c: { name: string }) => c.name).sort());
-        } else {
-          setMasterCities(["Ahmedabad", "Surat", "Vadodara", "Thane", "Mumbai", "Pune", "Indore"]);
+          setMasterCities(citiesRes.data.map((c: { name: string }) => c.name).filter(Boolean).sort());
         }
 
         if (usersRes?.data && Array.isArray(usersRes.data)) {
@@ -295,11 +242,9 @@ export function AgentsPage() {
               .map((u: { display_name?: string | null; full_name?: string; username?: string }) => u.display_name || u.full_name || u.username)
               .filter(Boolean) as string[]
           );
-        } else {
-          setSalesPersons(["Abhishek Patel", "Prathamesh", "Jalpesh", "Sales Admin"]);
         }
       } catch (err) {
-        // fallback defaults
+        console.warn("Could not load agent master lookups:", err);
       }
     }
     loadMasters();

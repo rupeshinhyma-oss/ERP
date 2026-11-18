@@ -355,22 +355,6 @@ export function computeCbm(lStr?: string | number, wStr?: string | number, hStr?
 const isUUID = (s?: string | null): boolean =>
   !!s && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
 
-// Known HSN mappings for legacy ERP catalog products
-const PRODUCT_HSN_MAP: Record<string, string> = {
-  "ISL150 Rotary PFS 4 Stations": "8422.30.00",
-  "DZ800 Double Face Shaping Vacuum Machine 10Kgs": "8422.30.00",
-  "Sensor (Banding)": "8422.90.90",
-  "ISL250 Rotary PFS 8 Head With Zipper & Nitrogen": "8423.30.00",
-  "XLSG36100 Capping Machine": "8423.30.00",
-  "Automatic Tube Filling & Sealing Machine": "8423.30.00",
-  "Semi Automatic MAP (Vacuum + 2 Gases) Tray/Cup Sealing Machine": "8423.30.00",
-  "Cup Filler 16LTR": "8422.30.00",
-  "AF1000T Auto Auger Filler Conveyor 30LTR": "8422.30.00",
-  "PFFS200 Pneumatic 4 Side Sealer 240mm PLC": "8422.40.00",
-  "PFFS1000 Pneumatic Centre Sealer 420mm PLC": "8422.40.00",
-  "GF100FD Granular Filler Double Head FFS": "8422.40.00",
-};
-
 // Initial Seed Products matching screenshot erp.inhymasolutions.com/product/list
 export const INITIAL_PRODUCT_MASTER_ITEMS: Product[] = [
   {
@@ -804,7 +788,7 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
 
   const allUoms = useMemo(() => {
     const list = [...uoms.items];
-    for (const su of (isTestMode || uoms.items.length === 0) ? STANDARD_UOMS : []) {
+    for (const su of isTestMode ? STANDARD_UOMS : []) {
       if (!list.some((u) => u.id === su.id || u.code?.toUpperCase() === su.code)) {
         list.push(su as unknown as Uom);
       }
@@ -844,8 +828,6 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
     const cat = findCategoryById(p.category_id);
     if (cat?.name) return cat.name;
     if ((p as any).category_name) return (p as any).category_name;
-    if (p.category_id === "cat-machines") return "Machines";
-    if (p.category_id === "cat-spares") return "Spares";
     return "";
   };
 
@@ -853,7 +835,6 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
     if (!p) return false;
     const catName = getCategoryNameForProduct(p).toLowerCase();
     if (catName.includes("spare")) return true;
-    if (p.category_id === "cat-spares") return true;
     if ((p.product_type || "").trim().toLowerCase() === "spare part") return true;
     return false;
   };
@@ -1155,7 +1136,7 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
         const q = searchTerm.toLowerCase();
         const brandName = brands.items.find((b) => b.id === p.brand_id)?.name || "";
         const subCatName = subCategories.items.find((sc) => sc.id === p.sub_category_id)?.name || "";
-        const hsn = p.hsn_number || PRODUCT_HSN_MAP[p.product_name_tally || p.product_name || ""] || "";
+        const hsn = p.hsn_number || "";
 
         const match =
           (p.product_name_tally && p.product_name_tally.toLowerCase().includes(q)) ||
@@ -1219,8 +1200,8 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
           valB = b.standard_price || 0;
           break;
         case 7: // HSN
-          valA = a.hsn_number || PRODUCT_HSN_MAP[a.product_name_tally || a.product_name || ""] || "";
-          valB = b.hsn_number || PRODUCT_HSN_MAP[b.product_name_tally || b.product_name || ""] || "";
+          valA = a.hsn_number || "";
+          valB = b.hsn_number || "";
           break;
         case 8: // UOM
           valA = (uoms.items.find((x) => x.id === a.uom_id)?.name || "").toLowerCase();
@@ -1367,7 +1348,7 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
       const code = (p.product_code || "").toLowerCase();
       const brand = (brands.items.find((b) => b.id === p.brand_id)?.name || "").toLowerCase();
       const sub = (subCategories.items.find((sc) => sc.id === p.sub_category_id)?.name || "").toLowerCase();
-      const hsn = (p.hsn_number || PRODUCT_HSN_MAP[p.product_name_tally || p.product_name || ""] || "").toLowerCase();
+      const hsn = (p.hsn_number || "").toLowerCase();
       return (
         name.includes(term) ||
         code.includes(term) ||
@@ -1516,15 +1497,10 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
   // Open Edit Form
   const handleOpenEdit = (p: Product) => {
     setEditingProduct(p);
-    // Prefer the real FK from the backend; fall back to matching the
-    // legacy PRODUCT_HSN_MAP-derived code (pre-migration local seed rows
-    // that were never saved against a real Tax record) by HSN number.
-    const fallbackHsnNumber = PRODUCT_HSN_MAP[p.product_name_tally || p.product_name || ""] || "8422.30.00";
     const activeTaxesForEdit = allTaxes.filter((t) => (t.status || "active").toLowerCase() !== "inactive");
     const resolvedTax =
       findTaxById(p.hsn_id) ||
       findTaxByHsnNumber(p.hsn_number) ||
-      findTaxByHsnNumber(fallbackHsnNumber) ||
       activeTaxesForEdit[0] ||
       allTaxes[0];
     const resolvedCat = p.category_id ? findCategoryById(p.category_id) : undefined;
@@ -2879,7 +2855,7 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
               <div><strong>Category:</strong> {getCategoryNameForProduct(drawerProduct) || "—"}</div>
               <div><strong>Brand:</strong> {brands.items.find((b) => b.id === drawerProduct.brand_id)?.name || "Yinglima"}</div>
               <div><strong>Sub Category:</strong> {subCategories.items.find((sc) => sc.id === drawerProduct.sub_category_id)?.name || "Miscellaneous"}</div>
-              <div><strong>HSN Code:</strong> {drawerProduct.hsn_number || PRODUCT_HSN_MAP[drawerProduct.product_name_tally || ""] || "8422.30.00"}</div>
+              <div><strong>HSN Code:</strong> {drawerProduct.hsn_number || "—"}</div>
               <div><strong>GST %:</strong> {drawerProduct.gst_percent != null ? `${drawerProduct.gst_percent}%` : "18%"}</div>
               <div><strong>Import Duty:</strong> {drawerProduct.import_duty_percent != null ? `${drawerProduct.import_duty_percent}%` : "7.5%"}</div>
               <div><strong>UOM:</strong> {uoms.items.find((u) => u.id === drawerProduct.uom_id)?.code || "NOS"}</div>
@@ -3145,7 +3121,7 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
                         const brandName = brands.items.find((b) => b.id === sp.brand_id)?.name || "—";
                         const subCatName = subCategories.items.find((sc) => sc.id === sp.sub_category_id)?.name || "—";
                         const uomName = uoms.items.find((u) => u.id === sp.uom_id)?.code || "NOS";
-                        const hsn = sp.hsn_number || PRODUCT_HSN_MAP[sp.product_name_tally || sp.product_name || ""] || "—";
+                        const hsn = sp.hsn_number || "—";
                         const displayName = sp.product_name_tally || sp.product_name || "—";
                         return (
                           <tr key={sp.id} style={{ borderBottom: "1px solid #e2e8f0" }}>
@@ -3496,7 +3472,7 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
                       const brandName = brands.items.find((b) => b.id === sp.brand_id)?.name || "—";
                       const subCatName = subCategories.items.find((sc) => sc.id === sp.sub_category_id)?.name || "—";
                       const uomName = uoms.items.find((u) => u.id === sp.uom_id)?.code || "NOS";
-                      const hsn = sp.hsn_number || PRODUCT_HSN_MAP[sp.product_name_tally || sp.product_name || ""] || "—";
+                      const hsn = sp.hsn_number || "—";
                       const displayName = sp.product_name_tally || sp.product_name || "—";
 
                       return (
@@ -4471,7 +4447,7 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
                           else subCatName = "—";
                         }
 
-                        const hsn = p.hsn_number || PRODUCT_HSN_MAP[name] || "—";
+                        const hsn = p.hsn_number || "—";
                         const uomObj = uoms.items.find((u) => u.id === p.uom_id);
                         const uomName = uomObj?.code || uomObj?.name || "Nos";
                         const isChecked = selectedIds.includes(p.id);

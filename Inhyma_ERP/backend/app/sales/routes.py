@@ -938,6 +938,7 @@ async def create_discount_payment(
     payload: DiscountPaymentCreate,
     request: Request,
     db: AsyncSession = Depends(get_db_session),
+    current_user: CurrentUser = Depends(get_current_user),
 ) -> dict:
     """Create a new discount payment authorization record."""
     from app.sales.service import IST, _format_ist_timeline_dt
@@ -947,63 +948,42 @@ async def create_discount_payment(
     net = round(payload.total_order_amount - disc_amt, 2)
     today_str = datetime.now(IST).strftime("%d-%m-%Y")
     now_ist_str = _format_ist_timeline_dt()
+    actor_name = (
+        getattr(current_user, "display_name", None)
+        or getattr(current_user, "full_name", None)
+        or getattr(current_user, "username", None)
+        or "Admin"
+    )
 
-    try:
-        total_existing = (await db.execute(select(func.count()).select_from(DiscountPayment))).scalar() or 0
-        p_no = f"DP-26-27/{total_existing + 1:04d}"
-        rec = DiscountPayment(
-            payment_no=p_no,
-            payment_date=today_str,
-            order_ref=payload.order_ref,
-            customer_name=payload.customer_name,
-            sales_person=payload.sales_person,
-            total_order_amount=payload.total_order_amount,
-            discount_percent=payload.discount_percent,
-            discount_amount=disc_amt,
-            paid_discount=0.0,
-            due_discount=disc_amt,
-            net_payable=net,
-            status="Pending",
-            status_updated_at=now_ist_str,
-            settled=False,
-            payments=[],
-            remarks=payload.remarks,
-            created_by="Admin User",
-        )
-        db.add(rec)
-        await db.flush()
-        await db.refresh(rec)
-        return build_success_response(
-            data=_serialize_discount_payment(rec),
-            message="Discount payment recorded successfully.",
-            request_id=req_id,
-        )
-    except Exception:
-        mock_data = {
-            "id": str(uuid.uuid4()),
-            "payment_no": "DP-26-27/0099",
-            "payment_date": today_str,
-            "order_ref": payload.order_ref,
-            "customer_name": payload.customer_name,
-            "sales_person": payload.sales_person or "Admin",
-            "warehouse": "Mumbai",
-            "total_order_amount": payload.total_order_amount,
-            "discount_percent": payload.discount_percent,
-            "discount_amount": disc_amt,
-            "paid_discount": 0.0,
-            "due_discount": disc_amt,
-            "net_payable": net,
-            "status": "Pending",
-            "settled": False,
-            "payments": [],
-            "remarks": payload.remarks,
-            "created_by": "Admin User",
-        }
-        return build_success_response(
-            data=mock_data,
-            message="Discount payment recorded successfully.",
-            request_id=req_id,
-        )
+    total_existing = (await db.execute(select(func.count()).select_from(DiscountPayment))).scalar() or 0
+    p_no = f"DP-26-27/{total_existing + 1:04d}"
+    rec = DiscountPayment(
+        payment_no=p_no,
+        payment_date=today_str,
+        order_ref=payload.order_ref,
+        customer_name=payload.customer_name,
+        sales_person=payload.sales_person,
+        total_order_amount=payload.total_order_amount,
+        discount_percent=payload.discount_percent,
+        discount_amount=disc_amt,
+        paid_discount=0.0,
+        due_discount=disc_amt,
+        net_payable=net,
+        status="Pending",
+        status_updated_at=now_ist_str,
+        settled=False,
+        payments=[],
+        remarks=payload.remarks,
+        created_by=actor_name,
+    )
+    db.add(rec)
+    await db.flush()
+    await db.refresh(rec)
+    return build_success_response(
+        data=_serialize_discount_payment(rec),
+        message="Discount payment recorded successfully.",
+        request_id=req_id,
+    )
 
 
 @router.patch("/sales/discount-payments/{payment_id}", summary="Record settlement or adjustment for a discount payment")
@@ -1028,10 +1008,9 @@ async def update_discount_payment_settlement(
     )
     rec = (await db.execute(stmt)).scalars().first()
     if not rec:
-        return build_success_response(
-            data={"id": payment_id, "settled": payload.get("settled", True)},
-            message="Settlement updated (mock).",
-            request_id=req_id,
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Discount payment record not found.",
         )
 
     total_disc = round(float(rec.discount_amount or 0.0), 2)
@@ -1145,149 +1124,6 @@ async def update_discount_payment_settlement(
 # Deleted Orders (erp.inhymasolutions.com/delete_order_report/list#)
 # ==============================================================================
 
-_DELETED_ORDERS_SEED = [
-    {
-        "id": "del-1",
-        "order_no": "SO-MP/26-27/0618",
-        "order_date": "07-10-2026",
-        "warehouse": "Indore",
-        "expected_delivery_date": "07-10-2026",
-        "company_name": "SMART PACKAGING SYSTEMS",
-        "city": "Indore",
-        "state": "Madhya Pradesh",
-        "third_party": "No",
-        "po": "No",
-        "sales_person": "Sunita Pawar",
-        "amount_inc_gst": 17700.0,
-        "discount": 0.0,
-        "status": "Trash",
-        "deleted_at": "07-10-2026 01:21 PM",
-        "acc_dep": "Pending",
-        "gatepass": "Pending",
-        "remark": "",
-    },
-    {
-        "id": "del-2",
-        "order_no": "SO-MH/26-27/4476",
-        "order_date": "07-10-2026",
-        "warehouse": "Mumbai",
-        "expected_delivery_date": "07-10-2026",
-        "company_name": "SHANTI PACKAGING",
-        "city": "Navi Mumbai",
-        "state": "Maharashtra",
-        "third_party": "No",
-        "po": "No",
-        "sales_person": "Dhairya Shah",
-        "amount_inc_gst": 6608.0,
-        "discount": 0.0,
-        "status": "Trash",
-        "deleted_at": "07-10-2026 12:21 PM",
-        "acc_dep": "Pending",
-        "gatepass": "Pending",
-        "remark": "",
-    },
-    {
-        "id": "del-3",
-        "order_no": "SO-MH/26-27/4402",
-        "order_date": "03-10-2026",
-        "warehouse": "Mumbai",
-        "expected_delivery_date": "03-10-2026",
-        "company_name": "HARSH PLASTIC AND MACHINERY",
-        "city": "Bhadran",
-        "state": "Gujarat",
-        "third_party": "No",
-        "po": "No",
-        "sales_person": "Bhavin Suthar",
-        "amount_inc_gst": 177000.0,
-        "discount": 0.0,
-        "status": "Trash",
-        "deleted_at": "03-10-2026 02:40 PM",
-        "acc_dep": "Pending",
-        "gatepass": "Pending",
-        "remark": "",
-    },
-    {
-        "id": "del-4",
-        "order_no": "SO-MH/26-27/4401",
-        "order_date": "03-10-2026",
-        "warehouse": "Mumbai",
-        "expected_delivery_date": "03-10-2026",
-        "company_name": "DHUMER AUTOMATION & SERVICES",
-        "city": "Vapi",
-        "state": "Gujarat",
-        "third_party": "No",
-        "po": "No",
-        "sales_person": "Bhavin Suthar",
-        "amount_inc_gst": 118000.0,
-        "discount": 0.0,
-        "status": "Trash",
-        "deleted_at": "03-10-2026 02:30 PM",
-        "acc_dep": "Pending",
-        "gatepass": "Pending",
-        "remark": "Order cancelled by client",
-    },
-    {
-        "id": "del-5",
-        "order_no": "SO-MH/26-27/4394",
-        "order_date": "03-10-2026",
-        "warehouse": "Mumbai",
-        "expected_delivery_date": "03-10-2026",
-        "company_name": "SPARKLING CLEANERS",
-        "city": "Mira-Bhayandar",
-        "state": "Maharashtra",
-        "third_party": "No",
-        "po": "No",
-        "sales_person": "Siddhi Kilaje",
-        "amount_inc_gst": 74340.0,
-        "discount": 0.0,
-        "status": "Trash",
-        "deleted_at": "03-10-2026 02:26 PM",
-        "acc_dep": "Pending",
-        "gatepass": "Pending",
-        "remark": "",
-    },
-    {
-        "id": "del-6",
-        "order_no": "SO-GJ/26-27/0862",
-        "order_date": "03-10-2026",
-        "warehouse": "Ahmedabad",
-        "expected_delivery_date": "03-10-2026",
-        "company_name": "MAGICPACK AUTOMATIONS PVT LTD",
-        "city": "Medchal",
-        "state": "Telangana",
-        "third_party": "No",
-        "po": "No",
-        "sales_person": "Abhishek Patel",
-        "amount_inc_gst": 53100.0,
-        "discount": 0.0,
-        "status": "Trash",
-        "deleted_at": "03-10-2026 03:50 PM",
-        "acc_dep": "Pending",
-        "gatepass": "Pending",
-        "remark": "",
-    },
-    {
-        "id": "del-7",
-        "order_no": "SO-MH/26-27/4386",
-        "order_date": "03-10-2026",
-        "warehouse": "Mumbai",
-        "expected_delivery_date": "03-10-2026",
-        "company_name": "GLOBAL IMPEX MACHINERY",
-        "city": "AHMEDABAD",
-        "state": "Gujarat",
-        "third_party": "Yes",
-        "po": "No",
-        "sales_person": "Dhairya Shah",
-        "amount_inc_gst": 122130.0,
-        "discount": 0.0,
-        "status": "Trash",
-        "deleted_at": "04-10-2026 11:41 AM",
-        "acc_dep": "Pending",
-        "gatepass": "Pending",
-        "remark": "",
-    },
-]
-
 
 @router.get("/sales/deleted-orders", summary="List deleted / cancelled orders")
 @router.get("/delete_order_report/list", summary="Alias for deleted orders report")
@@ -1304,36 +1140,32 @@ async def list_deleted_orders(
 ) -> dict:
     """Return deleted orders matching filters."""
     req_id = getattr(request.state, "request_id", "-")
-    items = [dict(o) for o in _DELETED_ORDERS_SEED]
+    items: list[dict] = []
 
-    try:
-        from app.sales.models import SaleOrder
-        # Also query DB for any soft-deleted SaleOrder records
-        db_stmt = select(SaleOrder).where(SaleOrder.deleted_at.is_not(None)).order_by(SaleOrder.deleted_at.desc())
-        db_rows = (await db.execute(db_stmt)).scalars().all()
-        for r in db_rows:
-            items.append({
-                "id": str(r.id),
-                "order_no": r.order_no,
-                "order_date": r.order_date,
-                "warehouse": r.warehouse or "Mumbai",
-                "expected_delivery_date": r.delivery_date or r.order_date,
-                "company_name": r.company_name or r.buyer_name,
-                "city": r.city or "",
-                "state": r.state or "",
-                "third_party": r.third_party_delivery or "No",
-                "po": "No",
-                "sales_person": r.sales_person or "Admin",
-                "amount_inc_gst": float(r.amount_inc_gst or r.total_amount or 0.0),
-                "discount": float(r.discount or 0.0),
-                "status": "Trash",
-                "deleted_at": r.deleted_at.strftime("%d-%m-%Y %I:%M %p") if r.deleted_at else "Recently",
-                "acc_dep": "Pending",
-                "gatepass": r.gatepass or "Pending",
-                "remark": r.remarks or "",
-            })
-    except Exception:
-        pass
+    from app.sales.models import SaleOrder
+    db_stmt = select(SaleOrder).where(SaleOrder.deleted_at.is_not(None)).order_by(SaleOrder.deleted_at.desc())
+    db_rows = (await db.execute(db_stmt)).scalars().all()
+    for r in db_rows:
+        items.append({
+            "id": str(r.id),
+            "order_no": r.order_no,
+            "order_date": r.order_date,
+            "warehouse": r.warehouse or "",
+            "expected_delivery_date": r.delivery_date or r.order_date,
+            "company_name": r.company_name or r.buyer_name,
+            "city": r.city or "",
+            "state": r.state or "",
+            "third_party": r.third_party_delivery or "No",
+            "po": "No",
+            "sales_person": r.sales_person or "",
+            "amount_inc_gst": float(r.amount_inc_gst or r.total_amount or 0.0),
+            "discount": float(r.discount or 0.0),
+            "status": "Trash",
+            "deleted_at": r.deleted_at.strftime("%d-%m-%Y %I:%M %p") if r.deleted_at else "",
+            "acc_dep": "Pending",
+            "gatepass": r.gatepass or "Pending",
+            "remark": r.remarks or "",
+        })
 
     # Apply filters
     filtered = items

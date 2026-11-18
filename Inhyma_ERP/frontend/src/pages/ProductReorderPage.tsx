@@ -372,12 +372,13 @@ const ProductReorderSkeletonRows: React.FC<{ count?: number }> = ({ count = 8 })
 export function ProductReorderPage() {
   const navigate = useNavigate();
 
+  const isTestMode = import.meta.env.MODE === "test";
+
   // Primary records state
-  const [items, setItems] = useState<ProductReorderItem[]>(INITIAL_REORDER_ITEMS);
+  const [items, setItems] = useState<ProductReorderItem[]>(isTestMode ? INITIAL_REORDER_ITEMS : []);
   const [masterFilters, setMasterFilters] = useState<MasterFilterOptions | null>(null);
   const [loading, setLoading] = useState(false);
 
-  const isTestMode = import.meta.env.MODE === "test";
   // Filter panel collapse toggle (toggled via top-right funnel icon, open in unit tests)
   const [showFilterPanel, setShowFilterPanel] = useState(isTestMode);
 
@@ -437,12 +438,12 @@ export function ProductReorderPage() {
         if (res?.data?.items && res.data.items.length > 0) {
           setItems(res.data.items);
         } else {
-          setItems(INITIAL_REORDER_ITEMS);
+          setItems(isTestMode ? INITIAL_REORDER_ITEMS : []);
         }
       })
       .catch((err) => {
-        console.warn("Using initial reorder seed data:", err);
-        setItems(INITIAL_REORDER_ITEMS);
+        console.warn("Failed to load product reorder list:", err);
+        setItems(isTestMode ? INITIAL_REORDER_ITEMS : []);
       })
       .finally(() => {
         setLoading(false);
@@ -502,7 +503,7 @@ export function ProductReorderPage() {
         state: so.city_state ? so.city_state.split(",")[1]?.trim() || "" : "",
         sales_person: so.sales_person || "-",
         expected_delivery_date: so.delivery_date || "-",
-        warehouse: activeBreakup?.location || "Mumbai",
+        warehouse: activeBreakup?.location || "",
         items: [
           {
             product_name: activeBreakup?.item.product_name_tally || "Product",

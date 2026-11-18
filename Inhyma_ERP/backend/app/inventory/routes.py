@@ -2373,6 +2373,7 @@ async def create_stock_transfer(
     payload: StockTransferCreate,
     request: Request,
     db: AsyncSession = Depends(get_db_session),
+    current_user: CurrentUser = Depends(get_current_user),
 ) -> dict:
     """Insert new stock transfer into PostgreSQL and update warehouse inventory."""
     from app.masters.products.models import Product
@@ -2411,6 +2412,14 @@ async def create_stock_transfer(
     next_sr = total_existing + 1
     transfer_no = f"TRF-2026-{next_sr:03d}"
 
+    actor_name = (
+        (payload.added_by or "").strip()
+        or getattr(current_user, "display_name", None)
+        or getattr(current_user, "full_name", None)
+        or getattr(current_user, "username", None)
+        or "Admin"
+    )
+
     new_transfer = StockTransfer(
         sr_no=next_sr,
         transfer_no=transfer_no,
@@ -2418,7 +2427,7 @@ async def create_stock_transfer(
         from_warehouse=payload.from_warehouse,
         to_warehouse=payload.to_warehouse,
         total_amount=calc_total,
-        added_by=payload.added_by,
+        added_by=actor_name,
         status=payload.status,
         remarks=payload.remarks,
     )
