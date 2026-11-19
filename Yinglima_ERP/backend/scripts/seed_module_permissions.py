@@ -60,10 +60,9 @@ NEW_MODULE_PERMISSIONS = [
     ("sale_process.export", "sale_process", "sales", "export", "ALL", "Export sale orders to Excel and download Commercial Invoice & Packing List."),
 
     # --- Stock Movements ---
-    ("stock_movement.view", "stock_movement", "stock-movement", "view", "ALL", "View stock movements, live balances, and Kardex ledgers."),
-    ("stock_movement.create", "stock_movement", "stock-movement", "create", "ALL", "Create inward receipts and outward dispatches."),
-    ("stock_movement.cancel", "stock_movement", "stock-movement", "update", "ALL", "Cancel or reverse stock movements."),
-    ("stock_movement.delete", "stock_movement", "stock-movement", "delete", "ALL", "Delete stock movement records."),
+    ("stock_movement.inward.view", "stock_movement", "stock-movement", "inward_view", "ALL", "View Inward Register and total inward received stock."),
+    ("stock_movement.outward.view", "stock_movement", "stock-movement", "outward_view", "ALL", "View Outward Register and total outward dispatched stock."),
+    ("stock_movement.ledger.view", "stock_movement", "stock-movement", "ledger_view", "ALL", "View Current Stock Ledger and net warehouse stock."),
 
     # --- Notification Rules ---
     ("notification_settings.view", "notification_settings", "notification-settings", "view", "ALL", "View notification trigger rules and mapped recipients."),
@@ -75,7 +74,9 @@ DEFAULT_USER_VIEW_PERMS = {
     "product_price.view",
     "local_purchase.view",
     "sale_process.view",
-    "stock_movement.view",
+    "stock_movement.inward.view",
+    "stock_movement.outward.view",
+    "stock_movement.ledger.view",
     "notification_settings.view",
 }
 
