@@ -17,7 +17,7 @@ import React, { useState, useEffect, useMemo, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
 import { Breadcrumb } from "@/components/Breadcrumb";
-import { InlineTextSkeleton, TableSkeletonRows } from "@/components/Skeleton";
+import { TableSkeletonRows } from "@/components/Skeleton";
 import { apiGet, apiPostMultipart, apiDownloadBlob, errorMessage } from "@/lib/api";
 import { useToast } from "@/lib/toast";
 import { useAuth } from "@/lib/hooks";
