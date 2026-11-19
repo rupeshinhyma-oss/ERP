@@ -1348,7 +1348,7 @@ export function SaleProcessListPage() {
                 </button>
 
                 {activeOrder.status === "pending" && (
-                  <Can permission="sale_process.update">
+                  <Can permission="sale_process.approve">
                     <button
                       type="button"
                       onClick={() => handleUpdateStatus(activeOrder.id, "confirmed")}
@@ -1376,7 +1376,7 @@ export function SaleProcessListPage() {
                 )}
 
                 {(activeOrder.status === "confirmed" || activeOrder.status === "sales_confirmed") && (
-                  <Can permission="sale_process.update">
+                  <Can permission="sale_process.approve">
                     <button
                       type="button"
                       onClick={() => handleUpdateStatus(activeOrder.id, "pending")}
@@ -1404,7 +1404,7 @@ export function SaleProcessListPage() {
                 )}
 
                 {(activeOrder.status === "confirmed" || activeOrder.status === "sales_confirmed" || activeOrder.status === "admin_approved") ? (
-                  <Can permission="sale_process.update">
+                  <Can permission="sale_process.approve">
                     <button
                       type="button"
                       onClick={() => {
@@ -1450,7 +1450,7 @@ export function SaleProcessListPage() {
                 ) : null}
 
                 {activeOrder.status === "dispatched" && (
-                  <Can permission="sale_process.update">
+                  <Can permission="sale_process.approve">
                     <button
                       type="button"
                       onClick={() => openStatusModal("lr", activeOrder)}
@@ -1478,7 +1478,7 @@ export function SaleProcessListPage() {
                 )}
 
                 {(activeOrder.status === "pending" || activeOrder.status === "confirmed" || activeOrder.status === "sales_confirmed") && (
-                  <Can permission="sale_process.update">
+                  <Can permission="sale_process.approve">
                     <button
                       type="button"
                       onClick={() => openStatusModal("cancel", activeOrder)}

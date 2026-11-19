@@ -46,7 +46,7 @@ from app.integration.repository import IntegrationOutboxRepository
 from app.integration.service import IntegrationService
 from app.masters.countries.repository import CountryRepository
 from app.queue.service import QueueService
-from app.rbac.dependencies import require_permission
+from app.rbac.dependencies import require_any_permission, require_permission
 
 router = APIRouter(prefix="/buyers", tags=["Buyers"])
 
@@ -313,7 +313,7 @@ async def list_buyers(
     category_id: uuid.UUID | None = None,
     sub_category_id: uuid.UUID | None = None,
     service: BuyerService = Depends(get_buyer_service),
-    _current_user: CurrentUser = Depends(require_permission("buyer.view")),
+    _current_user: CurrentUser = Depends(require_any_permission("buyer.view", "inquiry.view", "inquiry.create", "inquiry.update", "sale_process.view", "sale_process.create", "sale_process.update", "planning.view", "stock_movement.inward.view", "stock_movement.outward.view", "stock_movement.ledger.view", "finance_report.view", "consignment_overview.view")),
 ) -> dict:
     """
     List buyers, with search/sort/filter/pagination.
@@ -393,7 +393,7 @@ async def get_buyer(
     buyer_id: uuid.UUID,
     request: Request,
     service: BuyerService = Depends(get_buyer_service),
-    _current_user: CurrentUser = Depends(require_permission("buyer.view")),
+    _current_user: CurrentUser = Depends(require_any_permission("buyer.view", "inquiry.view", "inquiry.create", "inquiry.update", "sale_process.view", "sale_process.create", "sale_process.update", "planning.view", "stock_movement.inward.view", "stock_movement.outward.view", "stock_movement.ledger.view", "finance_report.view", "consignment_overview.view")),
 ) -> dict:
     """Fetch a single buyer profile by ID, including contacts, emails, and category links."""
     buyer = await service.get_by_id_or_raise(buyer_id)
@@ -699,7 +699,7 @@ async def list_buyer_contacts(
     buyer_id: uuid.UUID,
     request: Request,
     service: BuyerService = Depends(get_buyer_service),
-    _current_user: CurrentUser = Depends(require_permission("buyer.view")),
+    _current_user: CurrentUser = Depends(require_any_permission("buyer.view", "inquiry.view", "inquiry.create", "inquiry.update", "sale_process.view", "sale_process.create", "sale_process.update", "planning.view", "stock_movement.inward.view", "stock_movement.outward.view", "stock_movement.ledger.view", "finance_report.view", "consignment_overview.view")),
 ) -> dict:
     """List every contact person for a buyer (document: "Main Form contact details should appear in the Contact list also")."""
     await service.get_by_id_or_raise(buyer_id)
@@ -775,4 +775,4 @@ async def make_primary_contact(
         entity_id=contact.id,
         description=f"Promoted contact {contact.person_name!r} to primary for buyer {buyer_id}.",
     )
-    return build_success_response(data=data, request_id=request.state.request_id, message="Contact set as primary.")
+    return build_success_response(data=data, request_id=request.state.request_id, message="Contact set as primary.")

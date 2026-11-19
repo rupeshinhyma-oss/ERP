@@ -44,6 +44,10 @@ from app.rbac.schemas import (
 )
 from app.cache.dependency import get_cache_manager
 from app.cache.manager import CacheManager
+from app.events.channels import NOTIFICATIONS_CHANNEL, user_channel
+from app.events.dependencies import get_event_dispatcher
+from app.events.dispatcher import EventDispatcher
+from app.events.models import Event
 from app.rbac.models import Role
 from app.rbac.service import RBACService
 
@@ -53,9 +57,41 @@ router = APIRouter(prefix="/rbac", tags=["Roles & Permissions"])
 async def _invalidate_rbac_cache(cache_manager: CacheManager) -> None:
     try:
         await cache_manager.delete("rbac::roles_with_permissions")
-        await cache_manager.delete("rbac::all_permissions")
+        await cache_manager.delete("rbac::all_permissions::v2")
     except Exception:
         pass
+
+
+async def _notify_permissions_updated(
+    dispatcher: EventDispatcher,
+    *,
+    actor_id: uuid.UUID,
+    user_id: uuid.UUID | None = None,
+    role_id: uuid.UUID | None = None,
+) -> None:
+    """Push a lightweight live event so open browser tabs refresh permissions immediately."""
+    if user_id is not None:
+        await dispatcher.publish(
+            user_channel(user_id),
+            Event(
+                event_type="rbac.permissions_updated",
+                entity="rbac",
+                entity_id=str(user_id),
+                user_id=str(actor_id),
+                changes={"user_id": str(user_id)},
+            ),
+        )
+        return
+    await dispatcher.publish(
+        NOTIFICATIONS_CHANNEL,
+        Event(
+            event_type="rbac.permissions_updated",
+            entity="rbac",
+            entity_id=str(role_id or "all"),
+            user_id=str(actor_id),
+            changes={"role_id": str(role_id)} if role_id else {},
+        ),
+    )
 
 
 async def _role_with_permissions(role: Role, rbac_service: RBACService) -> RoleWithPermissions:
@@ -167,6 +203,7 @@ async def update_role(
     current_user: CurrentUser = Depends(require_permission("roles_permissions.action")),
     audit_service: AuditService = Depends(get_audit_service),
     cache_manager: CacheManager = Depends(get_cache_manager),
+    dispatcher: EventDispatcher = Depends(get_event_dispatcher),
 ) -> dict:
     """Update a role's name/description. System roles cannot be renamed."""
     unset_parent = "parent_department_id" in payload.model_fields_set and payload.parent_department_id is None
@@ -176,6 +213,7 @@ async def update_role(
         unset_parent=unset_parent,
     )
     await _invalidate_rbac_cache(cache_manager)
+    await _notify_permissions_updated(dispatcher, actor_id=current_user.id, role_id=role_id)
     data = (await _role_with_permissions(role, rbac_service)).model_dump(mode="json")
     await audit_service.record(
         action=AuditAction.UPDATE,
@@ -459,9 +497,11 @@ async def grant_permission(
     rbac_service: RBACService = Depends(get_rbac_service),
     current_user: CurrentUser = Depends(require_permission("roles_permissions.action")),
     audit_service: AuditService = Depends(get_audit_service),
+    dispatcher: EventDispatcher = Depends(get_event_dispatcher),
 ) -> dict:
     """Grant a permission to a role, if not already granted."""
     await rbac_service.grant_permission(role_id, payload.permission_id, actor_user_id=current_user.id)
+    await _notify_permissions_updated(dispatcher, actor_id=current_user.id, role_id=role_id)
     await audit_service.record(
         action=AuditAction.PERMISSION_ASSIGNED,
         module="rbac",
@@ -490,9 +530,11 @@ async def revoke_permission(
     rbac_service: RBACService = Depends(get_rbac_service),
     current_user: CurrentUser = Depends(require_permission("roles_permissions.action")),
     audit_service: AuditService = Depends(get_audit_service),
+    dispatcher: EventDispatcher = Depends(get_event_dispatcher),
 ) -> dict:
     """Revoke a permission from a role."""
     await rbac_service.revoke_permission(role_id, permission_id, actor_user_id=current_user.id)
+    await _notify_permissions_updated(dispatcher, actor_id=current_user.id, role_id=role_id)
     await audit_service.record(
         action=AuditAction.PERMISSION_REMOVED,
         module="rbac",
@@ -540,10 +582,12 @@ async def assign_user_permission(
     rbac_service: RBACService = Depends(get_rbac_service),
     current_user: CurrentUser = Depends(require_any_permission("roles_permissions.action", "user.action")),
     audit_service: AuditService = Depends(get_audit_service),
+    dispatcher: EventDispatcher = Depends(get_event_dispatcher),
 ) -> dict:
     await rbac_service.assign_user_permission(
         user_id, payload.permission_id, is_granted=payload.is_granted, granted_by=current_user.id
     )
+    await _notify_permissions_updated(dispatcher, actor_id=current_user.id, user_id=user_id)
     await audit_service.record(
         action=AuditAction.USER_OVERRIDE_ADDED,
         module="rbac",
@@ -572,8 +616,10 @@ async def remove_user_permission(
     rbac_service: RBACService = Depends(get_rbac_service),
     current_user: CurrentUser = Depends(require_any_permission("roles_permissions.action", "user.action")),
     audit_service: AuditService = Depends(get_audit_service),
+    dispatcher: EventDispatcher = Depends(get_event_dispatcher),
 ) -> dict:
     await rbac_service.remove_user_permission(user_id, permission_id)
+    await _notify_permissions_updated(dispatcher, actor_id=current_user.id, user_id=user_id)
     await audit_service.record(
         action=AuditAction.USER_OVERRIDE_REMOVED,
         module="rbac",
@@ -602,11 +648,13 @@ async def set_user_permissions_bulk(
     rbac_service: RBACService = Depends(get_rbac_service),
     current_user: CurrentUser = Depends(require_any_permission("roles_permissions.action", "user.action")),
     audit_service: AuditService = Depends(get_audit_service),
+    dispatcher: EventDispatcher = Depends(get_event_dispatcher),
 ) -> dict:
     overrides_tuples = [(item.permission_id, item.is_granted) for item in payload.overrides]
     count = await rbac_service.set_user_permissions_bulk(
         user_id, overrides_tuples, granted_by=current_user.id
     )
+    await _notify_permissions_updated(dispatcher, actor_id=current_user.id, user_id=user_id)
     await audit_service.record(
         action=AuditAction.PERMISSION_CHANGED,
         module="rbac",
@@ -647,6 +695,7 @@ async def clone_permission_set(
     rbac_service: RBACService = Depends(get_rbac_service),
     current_user: CurrentUser = Depends(require_permission("roles_permissions.create")),
     audit_service: AuditService = Depends(get_audit_service),
+    dispatcher: EventDispatcher = Depends(get_event_dispatcher),
 ) -> dict:
     cloned_count = await rbac_service.clone_permission_set(
         source_type=payload.source_type,
@@ -654,6 +703,12 @@ async def clone_permission_set(
         target_type=payload.target_type,
         target_id=payload.target_id,
         cloned_by=current_user.id,
+    )
+    await _notify_permissions_updated(
+        dispatcher,
+        actor_id=current_user.id,
+        user_id=payload.target_id if payload.target_type == "user" else None,
+        role_id=payload.target_id if payload.target_type != "user" else None,
     )
     await audit_service.record(
         action=AuditAction.PERMISSION_CHANGED,

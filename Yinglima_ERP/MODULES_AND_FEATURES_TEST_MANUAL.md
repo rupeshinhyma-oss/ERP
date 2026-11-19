@@ -794,7 +794,7 @@ Manage complete vendor team directory:
 
 4. **PRODUCT CODE:** Unique SKU / Item code.
 
-5. **PRODUCT NAME (TALLY):** Official internal accounting name.
+5. **PRODUCT NAME (TALLY):** Official internal accounting name (displays in a `280px–420px` column with 2-line wrapping for long names and full hover tooltip).
 
 6. **INVOICE NAME:** Commercial description used on billing documents.
 
@@ -4876,3 +4876,26 @@ A standardized suite of 8 production-grade Excel (`.xlsx`) files is maintained d
 1. In **Yinglima_ERP** (`/sale/process`), create a Sale Order with Buyer **`Inhyma`** and Branch **`Inhyma Mumbai`** (or `Inhyma Ahmedabad` / `Inhyma Indore`) and click **Confirm Order**.
 2. Open **Inhyma_ERP -> PURCHASE -> Import Purchase** (`/purchase/importpurchase`) -> verify a **`pending`** Import Purchase appears automatically under **`Mumbai Ordered`** (or `Ahmedabad Ordered` / `Indore Ordered`) with today's USD→INR conversion rate, items, and CBM.
 3. In **Yinglima_ERP**, revert the confirmed order to **Pending** (or **Cancel** it) -> verify the `pending` Import Purchase in **Inhyma_ERP** is automatically cancelled/removed (while any Import Purchase already confirmed or received in Inhyma is left untouched).
+
+- **Full Permission Labels Verification:** Verify all permission cards in `/rbac` (especially under `💰 Finance`) display their complete label text without `...` truncation.
+
+### Test Case RBAC-PARITY-01: Supplier Current Status, Trash Granular Permissions & UI Action Gates
+1. Open **USER MANAGEMENT -> Departments & Permissions** (`/rbac`) -> verify **Suppliers** now shows **`Current Status`** (`supplier.currentstatus`) alongside `Edit Grade` and `Edit Potential`, and **Trash** shows **`Restore from Trash`** (`trash.restore`) and **`Permanent Delete / Empty Trash`** (`trash.delete`).
+2. **Suppliers Current Status Isolation:** Grant a user `supplier.view` without `supplier.currentstatus` -> verify the `Current Status` column in `/suppliers` renders as a read-only pill (and `PATCH /suppliers/{id}/current-status` returns `403`).
+3. **Trash Isolation:** Grant a user `trash.view` without `trash.restore` / `trash.delete` -> verify `/trash` hides `Restore`, `Delete`, and `Empty Trash` buttons (and backend endpoints return `403`).
+4. **Sale Process & Inquiries UI Parity:** Verify status workflow buttons in `/sale/process` follow `sale_process.approve`, and `/inquiries` hides Import/Export/Send Email when `inquiry.import`, `inquiry.export`, and `inquiry.send_message` are revoked.
+5. **Form Dropdown Lookup Parity (No Masters / Planning Permission Required):**
+   - Grant a user only `supplier.view` + `supplier.create` + `supplier.update` (without `suppliertype.view` or other `Settings -> Masters` permissions) -> verify the **Add/Edit Supplier** form opens and loads **Supplier Type**, **Category**, **Sub-Category**, **Products**, **Country**, **Province**, and **City** dropdowns with zero `403` errors, while `Settings -> Masters` remains hidden in the sidebar.
+   - Grant a user `sale_process.view` + `sale_process.create` (without `planning.view`) -> verify `/sale/process/new` loads **Planning Sheet / Branch** (`GET /planning/sheets`) and **Planning Consignment Column** dropdowns cleanly while **Shipment Planning** remains hidden in the sidebar.
+6. **Live Dynamic Permission Sync (Zero Refresh):**
+   - Keep **User D** open in one browser tab and edit User D's permissions or department permissions in an Admin tab -> verify User D's sidebar and action buttons update automatically within ~1 second without refreshing the page.
+7. **Local Purchase Price History Permission (`local_purchase.price_history`):**
+   - Grant a user **Local Purchase → View Price History** (`local_purchase.price_history`) without `product_price.view` -> verify `/purchase/local/new` shows the `📜 History` button and opens the **Trade & Price History** drawer cleanly while **Product Prices** stays hidden in the sidebar; unchecking it hides the button.
+8. **Product Prices Sub-Table Order Preservation:**
+   - Expand a product in `/inventory/product-prices` that already has Supplier A (e.g., ¥100), then add Supplier B with a lower quote (e.g., ¥88, without `Set as Preferred`) -> verify Supplier A stays in row 1 and Supplier B stays below it with the green **`LOWEST`** badge (and stays in that order after page refresh).
+9. **Product Prices Trade History Permission (`product_price.trade_history`):**
+   - Grant a user `product_price.view` without `product_price.trade_history` -> verify `/inventory/product-prices` hides `📜 History`, `📜 Full Trade History`, and `📜 View Trade & Price History`; checking `View Trade History` restores all three buttons and loads the drawer.
+10. **Product Gallery Granular Section & Delete Permissions (`productgallery.*`):**
+   - Grant a user only `productgallery.products.view` (without `suppliers.view`, `quotations.view`, or `delete`) -> verify **Product Gallery** appears in the sidebar, shows only **Product Photos**, and hides Supplier Visit Photos, Quotation Docs, and delete buttons; toggling `Delete Photos / Media` (`productgallery.delete`) enables media deletion without needing `product.update` or `supplier.update`.
+11. **Stock Movement 3-Tab View Permissions (`stock_movement.*`):**
+   - Grant a user only `stock_movement.inward.view` -> verify **Stock Movement** appears in the sidebar, shows only **Inward Register** (hiding **Outward Register** and **Current Stock Ledger**), and `GET /stock/movements?movement_type=outward` / `GET /stock/balances` return `403`.

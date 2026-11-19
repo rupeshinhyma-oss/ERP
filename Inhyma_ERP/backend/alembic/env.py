@@ -56,7 +56,6 @@ import app.masters.company_categories.models  # noqa: F401,E402
 import app.masters.company_sectors.models  # noqa: F401,E402
 import app.masters.warehouses.models  # noqa: F401,E402
 import app.masters.billing_companies.models  # noqa: F401,E402
-import app.masters.technicians.models  # noqa: F401,E402
 import app.masters.banks.models  # noqa: F401,E402
 import app.masters.transports.models  # noqa: F401,E402
 import app.masters.payment_terms.models  # noqa: F401,E402

@@ -23,6 +23,7 @@ from fastapi import APIRouter, Depends, Request, status
 from app.audit.constants import AuditAction
 from app.audit.dependencies import get_audit_service
 from app.audit.service import AuditService
+from app.auth.dependencies import get_current_user
 from app.auth.service import CurrentUser
 from app.core.responses import build_success_response
 from app.rbac.dependencies import get_rbac_service, require_any_permission, require_permission
@@ -62,6 +63,17 @@ async def list_permissions(
     """List every permission in the system."""
     permissions = await rbac_service.list_permissions()
     data = [PermissionRead.model_validate(p).model_dump(mode="json") for p in permissions]
+    return build_success_response(data=data, request_id=request.state.request_id)
+
+
+@router.get("/technicians/lookup", summary="List active Technician department users (authenticated)")
+async def lookup_technicians(
+    request: Request,
+    rbac_service: RBACService = Depends(get_rbac_service),
+    _current_user: CurrentUser = Depends(get_current_user),
+) -> dict:
+    """List active users assigned to the fixed Technician system department."""
+    data = await rbac_service.list_active_technician_users()
     return build_success_response(data=data, request_id=request.state.request_id)
 
 

@@ -357,8 +357,11 @@ type GalleryTab = "all" | "products" | "suppliers" | "quotations";
 export function ProductGalleryPage() {
   const { hasPermission } = useAuth();
   const confirm = useConfirm();
-  const canDeleteProductMedia = hasPermission("product.update");
-  const canDeleteSupplierMedia = hasPermission("supplier.update");
+  const canViewProducts = hasPermission("productgallery.products.view");
+  const canViewSuppliers = hasPermission("productgallery.suppliers.view");
+  const canViewQuotations = hasPermission("productgallery.quotations.view");
+  const canDeleteProductMedia = hasPermission("productgallery.delete") || hasPermission("product.update");
+  const canDeleteSupplierMedia = hasPermission("productgallery.delete") || hasPermission("supplier.update");
 
   const [products, setProducts] = useState<Product[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
@@ -421,26 +424,38 @@ export function ProductGalleryPage() {
       if (subCategoryFilter) prodParams.sub_category_id = subCategoryFilter;
       if (brandFilter) prodParams.brand_id = brandFilter;
 
-      const prodQuery = new URLSearchParams(prodParams).toString();
-      const prodRes = await apiGet<Product[] | { items: Product[] }>(`/masters/products?${prodQuery}`);
-      let prodItems = Array.isArray(prodRes.data) ? prodRes.data : (prodRes.data?.items || []);
-      // Fallback: if has_images didn't return any, fetch standard page of 60 products
-      if (prodItems.length === 0 && !categoryFilter && !subCategoryFilter && !brandFilter) {
-        const fallbackRes = await apiGet<Product[] | { items: Product[] }>("/masters/products?page=1&page_size=60&sort_order=desc&status=active");
-        prodItems = Array.isArray(fallbackRes.data) ? fallbackRes.data : (fallbackRes.data?.items || []);
+      if (canViewProducts) {
+        const prodQuery = new URLSearchParams(prodParams).toString();
+        const prodRes = await apiGet<Product[] | { items: Product[] }>(`/masters/products?${prodQuery}`);
+        let prodItems = Array.isArray(prodRes.data) ? prodRes.data : (prodRes.data?.items || []);
+        // Fallback: if has_images didn't return any, fetch standard page of 60 products
+        if (prodItems.length === 0 && !categoryFilter && !subCategoryFilter && !brandFilter) {
+          const fallbackRes = await apiGet<Product[] | { items: Product[] }>("/masters/products?page=1&page_size=60&sort_order=desc&status=active");
+          prodItems = Array.isArray(fallbackRes.data) ? fallbackRes.data : (fallbackRes.data?.items || []);
+        }
+        setProducts(prodItems);
+      } else {
+        setProducts([]);
       }
-      setProducts(prodItems);
 
-      const suppRes = await apiGet<Supplier[] | { items: Supplier[] }>("/suppliers?page=1&page_size=100&is_active=true");
-      const suppItems = Array.isArray(suppRes.data) ? suppRes.data : (suppRes.data?.items || []);
-      setSuppliers(suppItems);
+      if (canViewSuppliers) {
+        const suppRes = await apiGet<Supplier[] | { items: Supplier[] }>("/suppliers?page=1&page_size=100&is_active=true");
+        const suppItems = Array.isArray(suppRes.data) ? suppRes.data : (suppRes.data?.items || []);
+        setSuppliers(suppItems);
+      } else {
+        setSuppliers([]);
+      }
 
-      try {
-        const quoteRes = await apiGet<QuotationDocument[]>("/inquiries/quotation-documents");
-        const quoteItems = Array.isArray(quoteRes.data) ? quoteRes.data : [];
-        setQuotationDocs(quoteItems);
-      } catch (qErr) {
-        console.warn("Failed to fetch quotation documents for gallery:", qErr);
+      if (canViewQuotations) {
+        try {
+          const quoteRes = await apiGet<QuotationDocument[]>("/inquiries/quotation-documents");
+          const quoteItems = Array.isArray(quoteRes.data) ? quoteRes.data : [];
+          setQuotationDocs(quoteItems);
+        } catch (qErr) {
+          console.warn("Failed to fetch quotation documents for gallery:", qErr);
+        }
+      } else {
+        setQuotationDocs([]);
       }
     } catch (err) {
       console.error("Failed to fetch gallery data:", err);
@@ -639,74 +654,82 @@ export function ProductGalleryPage() {
         </div>
 
         <div style={{ display: "flex", gap: "12px", marginBottom: "20px", flexWrap: "wrap" }}>
-          <button
-            type="button"
-            className="btn"
-            onClick={() => setGalleryTab("all")}
-            style={{
-              background: galleryTab === "all" ? "#0061f2" : "#ffffff",
-              color: galleryTab === "all" ? "#ffffff" : "#475569",
-              border: galleryTab === "all" ? "none" : "1px solid #cbd5e0",
-              borderRadius: "6px",
-              padding: "8px 16px",
-              fontWeight: 600,
-              fontSize: "13.5px",
-              cursor: "pointer",
-            }}
-          >
-            🌐 All Combined Media ({allProductMediaCount + allSupplierMediaCount + quotationDocs.length})
-          </button>
-          <button
-            type="button"
-            className="btn"
-            onClick={() => setGalleryTab("products")}
-            style={{
-              background: galleryTab === "products" ? "#0061f2" : "#ffffff",
-              color: galleryTab === "products" ? "#ffffff" : "#475569",
-              border: galleryTab === "products" ? "none" : "1px solid #cbd5e0",
-              borderRadius: "6px",
-              padding: "8px 16px",
-              fontWeight: 600,
-              fontSize: "13.5px",
-              cursor: "pointer",
-            }}
-          >
-            📦 Product Photos ({allProductMediaCount})
-          </button>
-          <button
-            type="button"
-            className="btn"
-            onClick={() => setGalleryTab("suppliers")}
-            style={{
-              background: galleryTab === "suppliers" ? "#0061f2" : "#ffffff",
-              color: galleryTab === "suppliers" ? "#ffffff" : "#475569",
-              border: galleryTab === "suppliers" ? "none" : "1px solid #cbd5e0",
-              borderRadius: "6px",
-              padding: "8px 16px",
-              fontWeight: 600,
-              fontSize: "13.5px",
-              cursor: "pointer",
-            }}
-          >
-            🏭 Supplier Visit Photos ({allSupplierMediaCount})
-          </button>
-          <button
-            type="button"
-            className="btn"
-            onClick={() => setGalleryTab("quotations")}
-            style={{
-              background: galleryTab === "quotations" ? "#0061f2" : "#ffffff",
-              color: galleryTab === "quotations" ? "#ffffff" : "#475569",
-              border: galleryTab === "quotations" ? "none" : "1px solid #cbd5e0",
-              borderRadius: "6px",
-              padding: "8px 16px",
-              fontWeight: 600,
-              fontSize: "13.5px",
-              cursor: "pointer",
-            }}
-          >
-            📄 Supplier Quotation Sheets / PDFs ({quotationDocs.length})
-          </button>
+          {(Number(canViewProducts) + Number(canViewSuppliers) + Number(canViewQuotations) > 1) && (
+            <button
+              type="button"
+              className="btn"
+              onClick={() => setGalleryTab("all")}
+              style={{
+                background: galleryTab === "all" ? "#0061f2" : "#ffffff",
+                color: galleryTab === "all" ? "#ffffff" : "#475569",
+                border: galleryTab === "all" ? "none" : "1px solid #cbd5e0",
+                borderRadius: "6px",
+                padding: "8px 16px",
+                fontWeight: 600,
+                fontSize: "13.5px",
+                cursor: "pointer",
+              }}
+            >
+              🌐 All Combined Media ({(canViewProducts ? allProductMediaCount : 0) + (canViewSuppliers ? allSupplierMediaCount : 0) + (canViewQuotations ? quotationDocs.length : 0)})
+            </button>
+          )}
+          {canViewProducts && (
+            <button
+              type="button"
+              className="btn"
+              onClick={() => setGalleryTab("products")}
+              style={{
+                background: galleryTab === "products" ? "#0061f2" : "#ffffff",
+                color: galleryTab === "products" ? "#ffffff" : "#475569",
+                border: galleryTab === "products" ? "none" : "1px solid #cbd5e0",
+                borderRadius: "6px",
+                padding: "8px 16px",
+                fontWeight: 600,
+                fontSize: "13.5px",
+                cursor: "pointer",
+              }}
+            >
+              📦 Product Photos ({allProductMediaCount})
+            </button>
+          )}
+          {canViewSuppliers && (
+            <button
+              type="button"
+              className="btn"
+              onClick={() => setGalleryTab("suppliers")}
+              style={{
+                background: galleryTab === "suppliers" ? "#0061f2" : "#ffffff",
+                color: galleryTab === "suppliers" ? "#ffffff" : "#475569",
+                border: galleryTab === "suppliers" ? "none" : "1px solid #cbd5e0",
+                borderRadius: "6px",
+                padding: "8px 16px",
+                fontWeight: 600,
+                fontSize: "13.5px",
+                cursor: "pointer",
+              }}
+            >
+              🏭 Supplier Visit Photos ({allSupplierMediaCount})
+            </button>
+          )}
+          {canViewQuotations && (
+            <button
+              type="button"
+              className="btn"
+              onClick={() => setGalleryTab("quotations")}
+              style={{
+                background: galleryTab === "quotations" ? "#0061f2" : "#ffffff",
+                color: galleryTab === "quotations" ? "#ffffff" : "#475569",
+                border: galleryTab === "quotations" ? "none" : "1px solid #cbd5e0",
+                borderRadius: "6px",
+                padding: "8px 16px",
+                fontWeight: 600,
+                fontSize: "13.5px",
+                cursor: "pointer",
+              }}
+            >
+              📄 Supplier Quotation Sheets / PDFs ({quotationDocs.length})
+            </button>
+          )}
 
           <div style={{ marginLeft: "auto", position: "relative", minWidth: "240px", flex: "0 1 280px" }}>
             <input
@@ -914,7 +937,7 @@ export function ProductGalleryPage() {
               gap: "20px",
             }}
           >
-            {(galleryTab === "all" || galleryTab === "products") &&
+            {canViewProducts && (galleryTab === "all" || galleryTab === "products") &&
               filteredProducts.map((prod: Product) => {
                 const imgList = Array.isArray(prod.images) && prod.images.length > 0
                   ? prod.images
@@ -1151,7 +1174,7 @@ export function ProductGalleryPage() {
                 );
               })}
 
-            {(galleryTab === "all" || galleryTab === "suppliers") &&
+            {canViewSuppliers && (galleryTab === "all" || galleryTab === "suppliers") &&
               filteredSuppliers.map((supp: Supplier) => {
                 const sMedia = getSupplierMedia(supp);
                 const firstImg = sMedia[0];
@@ -1359,7 +1382,7 @@ export function ProductGalleryPage() {
                 );
               })}
 
-            {(galleryTab === "all" || galleryTab === "quotations") &&
+            {canViewQuotations && (galleryTab === "all" || galleryTab === "quotations") &&
               filteredQuotations.map((q: QuotationDocument) => {
                 const isPdf = Boolean(q.attachment_filename?.toLowerCase().endsWith(".pdf") || q.attachment_url?.toLowerCase().endsWith(".pdf"));
                 const hasAttachment = Boolean(q.attachment_url);

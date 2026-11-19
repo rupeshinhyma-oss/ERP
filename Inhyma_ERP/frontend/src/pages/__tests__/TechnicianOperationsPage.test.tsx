@@ -413,9 +413,9 @@ describe("TechnicianOperationsPage", () => {
     });
   });
 
-  it("enforces read-only RBAC mode when user only has technicaltask.view permission", async () => {
+  it("enforces read-only RBAC mode when user only has technician_operations.view (or unrelated technicaltask.manage) permission", async () => {
     authState.isSuperAdmin = false;
-    authState.perms = ["technicaltask.view"];
+    authState.perms = ["technician_operations.view", "technicaltask.manage"];
 
     render(
       <MemoryRouter initialEntries={["/technician-operations"]}>

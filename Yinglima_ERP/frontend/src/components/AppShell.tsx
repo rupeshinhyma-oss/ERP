@@ -19,6 +19,7 @@ import { Link, Navigate, useLocation, useNavigate } from "react-router-dom";
 import { API_BASE, apiGet, apiPost } from "@/lib/api";
 import { Auth, initials, roleLabel } from "@/lib/auth";
 import { useAuth } from "@/lib/hooks";
+import { liveClient } from "@/lib/live/liveClient";
 import { InlineListSkeleton } from "@/components/Skeleton";
 import {
   NAV_ITEMS_BY_KEY,
@@ -649,7 +650,9 @@ function Sidebar({
           .filter((item) => {
             if (item.children) return item.children.length > 0;
             if (item.superAdminOnly && !isSuperAdmin) return false;
-            return !item.permission || hasPermission(item.permission);
+            if (item.permission && !hasPermission(item.permission)) return false;
+            if (item.anyPermissions && !item.anyPermissions.some((p) => hasPermission(p))) return false;
+            return true;
           }),
       })).filter((section) => section.items.length > 0),
     [isSuperAdmin, hasPermission]
@@ -1279,6 +1282,34 @@ export function AppShell({ activeKey, children, pageClassName }: AppShellProps) 
       });
   }, [loggedIn]);
 
+  // Live dynamic permission sync: when an admin updates this user's role or
+  // overrides, refresh /auth/profile immediately without requiring a page reload.
+  useEffect(() => {
+    const profileId = Auth.getProfile()?.id;
+    if (!loggedIn || !profileId) return;
+    const userChannel = `user:${profileId}`;
+    liveClient.subscribe(userChannel);
+    liveClient.subscribe("notifications");
+    const unsub = liveClient.onEvent((event) => {
+      if (event.event_type !== "rbac.permissions_updated") return;
+      const targetUserId = event.changes?.user_id as string | undefined;
+      if (targetUserId && targetUserId !== profileId) return;
+      apiGet<Profile>("/auth/profile")
+        .then((res) => {
+          if (res && res.data) {
+            Auth.updateProfile(res.data);
+            Auth.markProfileSynced();
+          }
+        })
+        .catch(() => undefined);
+    });
+    return () => {
+      unsub();
+      liveClient.unsubscribe(userChannel);
+      liveClient.unsubscribe("notifications");
+    };
+  }, [loggedIn]);
+
   useEffect(() => subscribeBrandName(setBrandName), []);
 
   useEffect(() => {
@@ -1411,7 +1442,9 @@ export function AppShell({ activeKey, children, pageClassName }: AppShellProps) 
   const navItem = NAV_ITEMS_BY_KEY[activeKey];
   if (navItem && activeKey !== "403") {
     const deniedBySuperAdmin = navItem.superAdminOnly && !isSuperAdmin;
-    const deniedByPermission = navItem.permission && !hasPermission(navItem.permission);
+    const deniedByPermission =
+      (navItem.permission && !hasPermission(navItem.permission)) ||
+      (navItem.anyPermissions && !navItem.anyPermissions.some((p) => hasPermission(p)));
     if (deniedBySuperAdmin || deniedByPermission) {
       const moduleName = PAGE_TITLES[activeKey] || activeKey;
       return <Navigate to={`/403?module=${encodeURIComponent(moduleName)}`} replace />;

@@ -794,12 +794,7 @@ function TechnicalTasksPageContent() {
       }
 
       try {
-        let rows: any[] = [];
-        try {
-          rows = extractRows(await apiGet<any>("/masters/technicians?page=1&page_size=100&status=active"));
-        } catch {
-          rows = extractRows(await apiGet<any>("/masters/technicians/lookup"));
-        }
+        const rows = extractRows(await apiGet<any>("/rbac/technicians/lookup"));
         setTechnicianOptions(rows.map((t: any) => t.name || t.technician_name).filter(Boolean));
       } catch (err) {
         console.warn("Could not load technicians lookup:", err);
@@ -1414,11 +1409,20 @@ function TechnicalTasksPageContent() {
   // The API enforces the same rules; these only decide which menu items are shown.
   const { profile: authProfile, isSuperAdmin, hasPermission } = useAuth();
   const isAdminLevel = isSuperAdmin || hasPermission("technicaltask.manage");
+  const canViewPendingTab = isAdminLevel || hasPermission("technicaltask.pending.view");
+  const canViewApprovedTab = isAdminLevel || hasPermission("technicaltask.approved.view");
+  const canViewCompletedTab = isAdminLevel || hasPermission("technicaltask.completed.view");
+  const canViewCancelTab = isAdminLevel || hasPermission("technicaltask.cancel.view");
   const canCreate = isAdminLevel || hasPermission("technicaltask.create");
   const canUpdate = isAdminLevel || hasPermission("technicaltask.update");
   const canApprove = isAdminLevel || hasPermission("technicaltask.approve");
+  const canComplete = isAdminLevel || hasPermission("technicaltask.complete");
+  const canCancel = isAdminLevel || hasPermission("technicaltask.cancel");
+  const canReopen = isAdminLevel || hasPermission("technicaltask.reopen");
   const canDeletePerm = isAdminLevel || hasPermission("technicaltask.delete");
   const canBulkAction = isAdminLevel || hasPermission("technicaltask.bulk_action");
+  const canViewActionColumn = isAdminLevel || hasPermission("technicaltask.action.view");
+  const canViewCallLogs = isAdminLevel || hasPermission("technicaltask.call_logs.view");
   const myActorLabels = new Set(
     [authProfile?.display_name, authProfile?.full_name, authProfile?.username]
       .map((v) => String(v || "").trim())
@@ -1435,7 +1439,7 @@ function TechnicalTasksPageContent() {
   };
   const canDeleteTask = (t: TechnicalTask) => canDeletePerm && (t.status.toLowerCase() === "pending" || isAdminLevel);
   const canReopenTask = (t: TechnicalTask) =>
-    (canApprove || canUpdate) &&
+    canReopen &&
     (isAdminLevel || !t.task_approved_by || myActorLabels.has(String(t.task_approved_by).trim()));
 
   const loadCompanyContacts = useCallback(async (companyId?: string | null) => {
@@ -1460,8 +1464,9 @@ function TechnicalTasksPageContent() {
   }, []);
 
   const displayOrder = useMemo(() => {
-    return Array.from({ length: TOTAL_COLS_COUNT }, (_, i) => i);
-  }, []);
+    const allCols = Array.from({ length: TOTAL_COLS_COUNT }, (_, i) => i);
+    return canViewActionColumn ? allCols : allCols.filter((i) => i !== 17);
+  }, [canViewActionColumn]);
 
   const getFreezeStyle = useCallback((_colIdx: number, isHeader = false): React.CSSProperties => {
     return isHeader
@@ -1743,7 +1748,7 @@ function TechnicalTasksPageContent() {
                         ✓ Bulk Mark Approved ({selectedIds.size})
                       </button>
                       )}
-                      {canUpdate && (
+                      {canComplete && (
                       <button
                         type="button"
                         onClick={() => {
@@ -1794,6 +1799,11 @@ function TechnicalTasksPageContent() {
                       >
                         🗑️ Bulk Delete ({selectedIds.size})
                       </button>
+                      )}
+                      {!canApprove && !canComplete && !canDeletePerm && (
+                        <div style={{ padding: "10px 14px", fontSize: "12.5px", color: "#64748b", fontStyle: "italic" }}>
+                          No bulk actions permitted
+                        </div>
                       )}
                     </>
                   )}
@@ -2030,12 +2040,14 @@ function TechnicalTasksPageContent() {
           {/* Active / Inactive / Status Top Tabs */}
           <div style={{ display: "flex", gap: "20px", borderBottom: "1px solid #e2e8f0", padding: "6px 16px 0", overflowX: "auto" }}>
             {[
-              { key: "all", label: `All (${counts.all})` },
-              { key: "pending", label: `Pending (${counts.pending})` },
-              { key: "approved", label: `Approved (${counts.approved})` },
-              { key: "completed", label: `Completed (${counts.completed})` },
-              { key: "cancel", label: `Cancel (${counts.cancel})` },
-            ].map((tab) => {
+              { key: "all", label: `All (${counts.all})`, visible: true },
+              { key: "pending", label: `Pending (${counts.pending})`, visible: canViewPendingTab },
+              { key: "approved", label: `Approved (${counts.approved})`, visible: canViewApprovedTab },
+              { key: "completed", label: `Completed (${counts.completed})`, visible: canViewCompletedTab },
+              { key: "cancel", label: `Cancel (${counts.cancel})`, visible: canViewCancelTab },
+            ]
+              .filter((tab) => tab.visible)
+              .map((tab) => {
               const isActive = activeTab.toLowerCase() === tab.key.toLowerCase();
               return (
                 <button
@@ -2253,7 +2265,7 @@ function TechnicalTasksPageContent() {
                 ) : apiError ? (
                   <tr>
                     <td
-                      colSpan={TOTAL_COLS_COUNT}
+                      colSpan={displayOrder.length}
                       style={{
                         textAlign: "left",
                         padding: "48px 24px 48px 120px",
@@ -2323,7 +2335,7 @@ function TechnicalTasksPageContent() {
                 ) : tasks.length === 0 ? (
                   <tr>
                     <td
-                      colSpan={TOTAL_COLS_COUNT}
+                      colSpan={displayOrder.length}
                       style={{ textAlign: "center", padding: "50px 20px" }}
                     >
                       <div
@@ -2675,6 +2687,15 @@ function TechnicalTasksPageContent() {
 
                                     {openActionMenuId === task.id && (() => {
                                       const openUpward = tasks.length >= 3 && index >= tasks.length - (tasks.length >= 4 ? 2 : 1);
+                                      const statusLower = task.status.toLowerCase();
+                                      const showCallLogs = canViewCallLogs;
+                                      const showApprove = statusLower === "pending" && canApprove;
+                                      const showComplete = statusLower === "approved" && canComplete;
+                                      const showCancel = statusLower === "approved" && canCancel;
+                                      const showEdit = (statusLower === "pending" || statusLower === "approved") && canEditTask(task);
+                                      const showReopen = (statusLower === "cancel" || statusLower === "cancelled") && canReopenTask(task);
+                                      const showDelete = canDeleteTask(task);
+                                      const hasAnyAction = showCallLogs || showApprove || showComplete || showCancel || showEdit || showReopen || showDelete;
                                       return (
                                         <div
                                           onClick={(e) => e.stopPropagation()}
@@ -2696,33 +2717,35 @@ function TechnicalTasksPageContent() {
                                             overflow: "hidden",
                                           }}
                                         >
-                                        <button
-                                          type="button"
-                                          onClick={() => {
-                                            handleOpenCallLogs(task, srNo);
-                                            setOpenActionMenuId(null);
-                                          }}
-                                          style={{
-                                            padding: "8px 12px",
-                                            background: "none",
-                                            border: "none",
-                                            textAlign: "left",
-                                            fontSize: "13px",
-                                            cursor: "pointer",
-                                            display: "flex",
-                                            alignItems: "center",
-                                            gap: "6px",
-                                            color: "#0284c7",
-                                          }}
-                                        >
-                                          <span>📞</span>
-                                          <span>Call Logs</span>
-                                        </button>
+                                        {showCallLogs && (
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              handleOpenCallLogs(task, srNo);
+                                              setOpenActionMenuId(null);
+                                            }}
+                                            style={{
+                                              padding: "8px 12px",
+                                              background: "none",
+                                              border: "none",
+                                              textAlign: "left",
+                                              fontSize: "13px",
+                                              cursor: "pointer",
+                                              display: "flex",
+                                              alignItems: "center",
+                                              gap: "6px",
+                                              color: "#0284c7",
+                                            }}
+                                          >
+                                            <span>📞</span>
+                                            <span>Call Logs</span>
+                                          </button>
+                                        )}
 
                                         {/* Stage 1: Pending -> Approved, Edit, Delete */}
-                                        {task.status.toLowerCase() === "pending" && (
+                                        {statusLower === "pending" && (
                                           <>
-                                            {canApprove && (
+                                            {showApprove && (
                                               <button
                                                 type="button"
                                                 onClick={() => {
@@ -2747,7 +2770,7 @@ function TechnicalTasksPageContent() {
                                                 <span>Approved</span>
                                               </button>
                                             )}
-                                            {canEditTask(task) && (
+                                            {showEdit && (
                                               <button
                                                 type="button"
                                                 onClick={() => {
@@ -2775,61 +2798,61 @@ function TechnicalTasksPageContent() {
                                         )}
 
                                         {/* Stage 2: Approved -> Completed, Cancel, Edit, Delete */}
-                                        {task.status.toLowerCase() === "approved" && (
+                                        {statusLower === "approved" && (
                                           <>
-                                            {canUpdate && (
-                                              <>
-                                                <button
-                                                  type="button"
-                                                  onClick={() => {
-                                                    openCompleteModal(task);
-                                                    setOpenActionMenuId(null);
-                                                  }}
-                                                  style={{
-                                                    padding: "8px 12px",
-                                                    background: "none",
-                                                    border: "none",
-                                                    textAlign: "left",
-                                                    fontSize: "13px",
-                                                    cursor: "pointer",
-                                                    display: "flex",
-                                                    alignItems: "center",
-                                                    gap: "6px",
-                                                    color: "#16a34a",
-                                                    fontWeight: 600,
-                                                  }}
-                                                >
-                                                  <span>✔️</span>
-                                                  <span>Completed</span>
-                                                </button>
-                                                <button
-                                                  type="button"
-                                                  onClick={() => {
-                                                    setCancelModalTask(task);
-                                                    setCancelRemarks("");
-                                                    setCancelError(null);
-                                                    setOpenActionMenuId(null);
-                                                  }}
-                                                  style={{
-                                                    padding: "8px 12px",
-                                                    background: "none",
-                                                    border: "none",
-                                                    textAlign: "left",
-                                                    fontSize: "13px",
-                                                    cursor: "pointer",
-                                                    display: "flex",
-                                                    alignItems: "center",
-                                                    gap: "6px",
-                                                    color: "#ea580c",
-                                                    fontWeight: 500,
-                                                  }}
-                                                >
-                                                  <span>❌</span>
-                                                  <span>Cancel</span>
-                                                </button>
-                                              </>
+                                            {showComplete && (
+                                              <button
+                                                type="button"
+                                                onClick={() => {
+                                                  openCompleteModal(task);
+                                                  setOpenActionMenuId(null);
+                                                }}
+                                                style={{
+                                                  padding: "8px 12px",
+                                                  background: "none",
+                                                  border: "none",
+                                                  textAlign: "left",
+                                                  fontSize: "13px",
+                                                  cursor: "pointer",
+                                                  display: "flex",
+                                                  alignItems: "center",
+                                                  gap: "6px",
+                                                  color: "#16a34a",
+                                                  fontWeight: 600,
+                                                }}
+                                              >
+                                                <span>✔️</span>
+                                                <span>Completed</span>
+                                              </button>
                                             )}
-                                            {canEditTask(task) && (
+                                            {showCancel && (
+                                              <button
+                                                type="button"
+                                                onClick={() => {
+                                                  setCancelModalTask(task);
+                                                  setCancelRemarks("");
+                                                  setCancelError(null);
+                                                  setOpenActionMenuId(null);
+                                                }}
+                                                style={{
+                                                  padding: "8px 12px",
+                                                  background: "none",
+                                                  border: "none",
+                                                  textAlign: "left",
+                                                  fontSize: "13px",
+                                                  cursor: "pointer",
+                                                  display: "flex",
+                                                  alignItems: "center",
+                                                  gap: "6px",
+                                                  color: "#ea580c",
+                                                  fontWeight: 500,
+                                                }}
+                                              >
+                                                <span>❌</span>
+                                                <span>Cancel</span>
+                                              </button>
+                                            )}
+                                            {showEdit && (
                                               <button
                                                 type="button"
                                                 onClick={() => {
@@ -2857,7 +2880,7 @@ function TechnicalTasksPageContent() {
                                         )}
 
                                         {/* Stage 3: Cancel -> Reopen / Reassign (admin or approver) */}
-                                        {(task.status.toLowerCase() === "cancel" || task.status.toLowerCase() === "cancelled") && canReopenTask(task) && (
+                                        {showReopen && (
                                           <button
                                             type="button"
                                             onClick={() => {
@@ -2884,7 +2907,7 @@ function TechnicalTasksPageContent() {
                                         )}
 
                                         {/* Delete: Pending for everyone; later stages are admin level */}
-                                        {canDeleteTask(task) && (<>
+                                        {showDelete && (<>
                                           <div style={{ borderTop: "1px solid #f1f5f9" }} />
                                           <button
                                             type="button"
@@ -2909,6 +2932,11 @@ function TechnicalTasksPageContent() {
                                             <span>Delete</span>
                                           </button>
                                         </>)}
+                                        {!hasAnyAction && (
+                                          <div style={{ padding: "10px 12px", fontSize: "12px", color: "#64748b", fontStyle: "italic" }}>
+                                            No actions permitted
+                                          </div>
+                                        )}
                                         </div>
                                       );
                                     })()}

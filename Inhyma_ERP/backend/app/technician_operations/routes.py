@@ -24,16 +24,11 @@ from app.technician_operations.service import TechnicianOperationsService
 
 router = APIRouter(prefix="/technician-operations", tags=["Technician Operations"])
 
-_VIEW_PERMS = ("technicaltask.view", "technicaltask.manage", "technician.view")
-_WRITE_PERMS = (
-    "technicaltask.create",
-    "technicaltask.update",
-    "technicaltask.manage",
-    "technician.create",
-    "technician.update",
-)
+_VIEW_PERMS = ("technician_operations.view", "technician_operations.manage")
+_CREATE_PERMS = ("technician_operations.create", "technician_operations.manage")
+_UPDATE_PERMS = ("technician_operations.update", "technician_operations.manage")
 _SO_BRIDGE_PERMS = (*_VIEW_PERMS, "saleorder.view", "saleorder.create", "saleorder.update")
-_LINK_SO_PERMS = (*_WRITE_PERMS, "saleorder.create", "saleorder.update")
+_LINK_SO_PERMS = (*_UPDATE_PERMS, "saleorder.create", "saleorder.update")
 
 
 def get_service(session: AsyncSession = Depends(get_db_session)) -> TechnicianOperationsService:
@@ -104,7 +99,7 @@ async def list_warranties(
 async def register_warranty(
     payload: WarrantyRegisterPayload,
     service: TechnicianOperationsService = Depends(get_service),
-    current_user: CurrentUser = Depends(require_any_permission(*_WRITE_PERMS)),
+    current_user: CurrentUser = Depends(require_any_permission(*_CREATE_PERMS)),
 ) -> dict[str, Any]:
     warranty = await service.register_warranty(payload)
     return build_success_response(
@@ -154,7 +149,7 @@ async def list_gatepasses(
 async def create_gatepass(
     payload: GatepassCreate,
     service: TechnicianOperationsService = Depends(get_service),
-    current_user: CurrentUser = Depends(require_any_permission(*_WRITE_PERMS)),
+    current_user: CurrentUser = Depends(require_any_permission(*_CREATE_PERMS)),
 ) -> dict[str, Any]:
     gatepass = await service.create_gatepass(payload, current_user=current_user)
     return build_success_response(
@@ -178,7 +173,7 @@ async def record_parts_return(
     gatepass_id: uuid.UUID,
     payload: GatepassReturnPayload,
     service: TechnicianOperationsService = Depends(get_service),
-    current_user: CurrentUser = Depends(require_any_permission(*_WRITE_PERMS)),
+    current_user: CurrentUser = Depends(require_any_permission(*_UPDATE_PERMS)),
 ) -> dict[str, Any]:
     updated_gp = await service.record_parts_return(gatepass_id, payload)
     return build_success_response(
@@ -253,7 +248,7 @@ async def list_wallet_transactions(
 async def record_wallet_transaction(
     payload: WalletTransactionCreate,
     service: TechnicianOperationsService = Depends(get_service),
-    current_user: CurrentUser = Depends(require_any_permission(*_WRITE_PERMS)),
+    current_user: CurrentUser = Depends(require_any_permission(*_CREATE_PERMS)),
 ) -> dict[str, Any]:
     txn = await service.record_wallet_transaction(payload, current_user=current_user)
     return build_success_response(

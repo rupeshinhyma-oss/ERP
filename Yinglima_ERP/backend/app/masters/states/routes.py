@@ -28,7 +28,7 @@ from app.events.dispatcher import EventDispatcher
 from app.masters.states.dependencies import get_state_service
 from app.masters.states.schemas import StateLookupRead, StateRead, StateCreate, StateUpdate, ImportSummaryRead
 from app.masters.states.service import StateService
-from app.rbac.dependencies import require_permission
+from app.rbac.dependencies import require_any_permission, require_permission
 
 router = APIRouter(prefix="/masters/states", tags=["Masters - States"])
 
@@ -120,7 +120,7 @@ async def list_states(
     request: Request,
     query: ListQueryParams = Depends(get_list_query_params),
     service: StateService = Depends(get_state_service),
-    _current_user: CurrentUser = Depends(require_permission("state.view")),
+    _current_user: CurrentUser = Depends(require_any_permission("state.view", "city.view", "supplier.view", "supplier.create", "supplier.update", "buyer.view", "buyer.create", "buyer.update", "organizationlist.view", "organizationlist.create", "organizationlist.update")),
 ) -> dict:
     """List states, with search/sort/filter/pagination."""
     states, total = await service.list_paginated(query)

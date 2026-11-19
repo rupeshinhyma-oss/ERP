@@ -5,12 +5,13 @@ Business logic for role & permission management: creating/updating/deleting
 roles, individual user permissions, and resolving a user's multi-source
 permissions.
 
-Exactly two system roles exist and are protected from deletion, renaming,
-and re-creation under a different meaning: ``super_admin`` (shown to users
-as "Admin" -- reserved for the single bootstrap admin account only, see
-``app.users.service.UserService.assign_role``) and ``user`` (the default
-role every other new account gets). Everything else is a regular,
-fully-editable custom role.
+Three system roles exist and are protected from deletion, renaming, and
+re-creation under a different meaning: ``super_admin`` (shown to users as
+"Admin" -- reserved for the single bootstrap admin account only, see
+``app.users.service.UserService.assign_role``), ``user`` (the default role
+every other new account gets), and ``technician`` (shown to users as
+"Technician" -- field-service technician department; admins assign users to
+it). Everything else is a regular, fully-editable custom role/department.
 """
 
 from __future__ import annotations
@@ -37,8 +38,11 @@ from app.rbac.repository import (
 
 # Role names that are reserved for the system and can never be created,
 # renamed to, or deleted through the admin API -- "super_admin" (shown to
-# users as "Admin", reserved for the bootstrap admin account only) and
-# "user" (the default role auto-assigned to every new account).
+# users as "Admin", reserved for the bootstrap admin account only),
+# "user" (the default role auto-assigned to every new account), and
+# "technician" (shown to users as "Technician", the fixed system
+# department whose members appear in Technician dropdowns, Gatepasses,
+# and Technician Wallet).
 #
 # "admin" is ALSO reserved even though it isn't a real system role name --
 # a previous version of this app used to seed a duplicate "admin" role
@@ -47,7 +51,7 @@ from app.rbac.repository import (
 # similar rows ("admin" and "Admin") in the Roles & Permissions list. The
 # comparison below is case-insensitive, so "Admin", "ADMIN", etc. are
 # blocked too.
-RESERVED_ROLE_NAMES = {"super_admin", "user", "admin"}
+RESERVED_ROLE_NAMES = {"super_admin", "user", "admin", "technician"}
 
 
 class RBACService:
@@ -115,6 +119,43 @@ class RBACService:
         """List every role currently assigned to a user."""
         links = await self.user_role_repository.list_for_user(user_id)
         return [link.role for link in links]
+
+    async def list_active_technician_users(self) -> list[dict[str, str | None]]:
+        """List active non-deleted users belonging to the system ``technician`` department."""
+        from sqlalchemy import func, select
+        from app.rbac.models import UserRole
+        from app.users.models import User, UserStatus
+
+        stmt = (
+            select(User)
+            .join(UserRole, UserRole.user_id == User.id)
+            .join(Role, Role.id == UserRole.role_id)
+            .where(
+                User.deleted_at.is_(None),
+                User.is_active.is_(True),
+                User.status == UserStatus.ACTIVE,
+                Role.deleted_at.is_(None),
+                func.lower(Role.name) == "technician",
+            )
+            .order_by(func.coalesce(User.display_name, User.first_name, User.username))
+        )
+        users = (await self.role_repository.session.scalars(stmt)).all()
+        seen_ids: set[uuid.UUID] = set()
+        result: list[dict[str, str | None]] = []
+        for user in users:
+            if user.id in seen_ids:
+                continue
+            seen_ids.add(user.id)
+            name = (user.display_name or user.full_name or user.username or "").strip()
+            result.append(
+                {
+                    "id": str(user.id),
+                    "name": name,
+                    "mobile": user.phone,
+                    "city": user.city,
+                }
+            )
+        return result
 
     async def get_permission_codes_for_role(self, role_id: uuid.UUID) -> list[str]:
         """List the active (non-deprecated) permission codes granted to a single role."""

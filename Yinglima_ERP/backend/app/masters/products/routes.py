@@ -38,7 +38,7 @@ from app.masters.products.sync_inhyma import (
     sync_product_to_inhyma,
     was_product_synced_to_inhyma,
 )
-from app.rbac.dependencies import require_permission
+from app.rbac.dependencies import require_any_permission, require_permission
 
 router = APIRouter(prefix="/masters/products", tags=["Masters - Products"])
 logger = get_logger(__name__)
@@ -149,7 +149,7 @@ async def list_products(
     request: Request,
     query: ListQueryParams = Depends(get_list_query_params),
     service: ProductService = Depends(get_product_service),
-    _current_user: CurrentUser = Depends(require_permission("product.view")),
+    _current_user: CurrentUser = Depends(require_any_permission("product.view", "supplier.view", "supplier.create", "supplier.update", "buyer.view", "buyer.create", "buyer.update", "inquiry.view", "inquiry.create", "inquiry.update", "local_purchase.view", "local_purchase.create", "local_purchase.update", "sale_process.view", "sale_process.create", "sale_process.update", "planning.view", "product_price.view", "productgallery.products.view", "stock_movement.inward.view", "stock_movement.outward.view", "stock_movement.ledger.view", "consignment_overview.view", "vat_return.view")),
     light_list: bool | None = None,
 ) -> dict:
     """List products, with search/sort/filter/pagination.
@@ -246,7 +246,7 @@ async def get_product_names_lookup(
     search: str | None = None,
     limit: int = 25,
     service: ProductService = Depends(get_product_service),
-    _current_user: CurrentUser = Depends(require_permission("product.view")),
+    _current_user: CurrentUser = Depends(require_any_permission("product.view", "supplier.view", "supplier.create", "supplier.update", "buyer.view", "buyer.create", "buyer.update", "inquiry.view", "inquiry.create", "inquiry.update", "local_purchase.view", "local_purchase.create", "local_purchase.update", "sale_process.view", "sale_process.create", "sale_process.update", "planning.view", "product_price.view", "productgallery.products.view", "stock_movement.inward.view", "stock_movement.outward.view", "stock_movement.ledger.view", "consignment_overview.view", "vat_return.view")),
 ) -> dict:
     """Return lightweight product name suggestions matching search term anywhere in the name."""
     names = await service.search_product_names(search=search, limit=min(limit, 50))
@@ -283,12 +283,17 @@ async def update_product(
     payload: ProductUpdate,
     request: Request,
     service: ProductService = Depends(get_product_service),
-    current_user: CurrentUser = Depends(require_permission("product.update")),
+    current_user: CurrentUser = Depends(require_any_permission("product.update", "productgallery.delete")),
     audit_service: AuditService = Depends(get_audit_service),
     db: AsyncSession = Depends(get_db_session),
     dispatcher: EventDispatcher = Depends(get_event_dispatcher),
 ) -> dict:
-    product = await service.update(product_id, **payload.model_dump(exclude_unset=True))
+    patch_data = payload.model_dump(exclude_unset=True)
+    if "product.update" not in current_user.permissions:
+        if not set(patch_data.keys()).issubset({"images", "image_url", "images_json"}):
+            from app.core.exceptions import ForbiddenException
+            raise ForbiddenException("This action requires the 'product.update' permission.")
+    product = await service.update(product_id, **patch_data)
     data = ProductRead.model_validate(product).model_dump(mode="json")
     await _record_action(
         audit_service=audit_service,

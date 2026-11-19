@@ -50,12 +50,14 @@ import {
  * someone could recreate a same-named role through "+ ADD NEW", producing
  * two confusingly similar rows ("admin" and "Admin") in this list.
  */
-const RESERVED_ROLE_NAMES = new Set(["super_admin", "user", "admin"]);
+const RESERVED_ROLE_NAMES = new Set(["super_admin", "user", "admin", "technician"]);
 
 /** Friendly display name for a role -- "super_admin" reads as "Admin" everywhere in the UI. */
 function roleDisplayName(name: string): string {
-  if (name === "super_admin") return "Admin";
-  if (name === "user") return "User";
+  const lower = name.toLowerCase();
+  if (lower === "super_admin") return "Admin";
+  if (lower === "user") return "User";
+  if (lower === "technician") return "Technician";
   return name;
 }
 
@@ -1911,7 +1913,7 @@ export function RbacPage() {
                   ))}
               </select>
               <span className="muted" style={{ fontSize: "12px", marginTop: "4px", display: "block" }}>
-                System departments (Admin, User) cannot be overwritten as a clone target.
+                System departments (Admin, User, Technician) cannot be overwritten as a clone target.
               </span>
             </div>
           </div>

@@ -10,7 +10,7 @@ import { useSearchParams } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
 import { Banner } from "@/components/ui";
 import { apiGet, apiPost } from "@/lib/api";
-import { usePendingGuard } from "@/lib/hooks";
+import { useAuth, usePendingGuard } from "@/lib/hooks";
 import { useConfirm } from "@/lib/confirm";
 
 interface TrashItem {
@@ -64,6 +64,9 @@ function TrashTableSkeletonRows({ count = 6 }: { count?: number }) {
 let trashCache: TrashItem[] | null = null;
 
 export function TrashPage() {
+  const { hasPermission } = useAuth();
+  const canRestore = hasPermission("trash.restore");
+  const canDelete = hasPermission("trash.delete");
   const [searchParams] = useSearchParams();
   const confirm = useConfirm();
   const deepLinkQ = searchParams.get("q");
@@ -277,7 +280,7 @@ export function TrashPage() {
           <div>
             <h1 className="page-title">Trash</h1>
           </div>
-          {items.length > 0 && (
+          {items.length > 0 && canDelete && (
             <button
               type="button"
               className="btn btn-danger"
@@ -367,44 +370,48 @@ export function TrashPage() {
               <span style={{ fontSize: "13px", fontWeight: 600, color: "#0061f2" }}>
                 {selectedIds.size} selected
               </span>
-              <button
-                type="button"
-                className="btn"
-                onClick={handleBulkRestore}
-                disabled={isRowActionPending("bulk-restore")}
-                style={{
-                  background: "#059669",
-                  color: "#ffffff",
-                  border: "none",
-                  borderRadius: "6px",
-                  padding: "7px 14px",
-                  fontSize: "13px",
-                  fontWeight: 600,
-                  cursor: isRowActionPending("bulk-restore") ? "default" : "pointer",
-                  opacity: isRowActionPending("bulk-restore") ? 0.7 : 1,
-                }}
-              >
-                {isRowActionPending("bulk-restore") ? "Restoring…" : "🔄 Restore Selected"}
-              </button>
-              <button
-                type="button"
-                className="btn"
-                onClick={handleBulkPermanentDelete}
-                disabled={isRowActionPending("bulk-delete")}
-                style={{
-                  background: "#dc2626",
-                  color: "#ffffff",
-                  border: "none",
-                  borderRadius: "6px",
-                  padding: "7px 14px",
-                  fontSize: "13px",
-                  fontWeight: 600,
-                  cursor: isRowActionPending("bulk-delete") ? "default" : "pointer",
-                  opacity: isRowActionPending("bulk-delete") ? 0.7 : 1,
-                }}
-              >
-                {isRowActionPending("bulk-delete") ? "Deleting…" : "🗑️ Delete Selected Permanently"}
-              </button>
+              {canRestore && (
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={handleBulkRestore}
+                  disabled={isRowActionPending("bulk-restore")}
+                  style={{
+                    background: "#059669",
+                    color: "#ffffff",
+                    border: "none",
+                    borderRadius: "6px",
+                    padding: "7px 14px",
+                    fontSize: "13px",
+                    fontWeight: 600,
+                    cursor: isRowActionPending("bulk-restore") ? "default" : "pointer",
+                    opacity: isRowActionPending("bulk-restore") ? 0.7 : 1,
+                  }}
+                >
+                  {isRowActionPending("bulk-restore") ? "Restoring…" : "🔄 Restore Selected"}
+                </button>
+              )}
+              {canDelete && (
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={handleBulkPermanentDelete}
+                  disabled={isRowActionPending("bulk-delete")}
+                  style={{
+                    background: "#dc2626",
+                    color: "#ffffff",
+                    border: "none",
+                    borderRadius: "6px",
+                    padding: "7px 14px",
+                    fontSize: "13px",
+                    fontWeight: 600,
+                    cursor: isRowActionPending("bulk-delete") ? "default" : "pointer",
+                    opacity: isRowActionPending("bulk-delete") ? 0.7 : 1,
+                  }}
+                >
+                  {isRowActionPending("bulk-delete") ? "Deleting…" : "🗑️ Delete Selected Permanently"}
+                </button>
+              )}
             </div>
           )}
         </div>
@@ -543,46 +550,50 @@ export function TrashPage() {
                       </td>
                       <td style={{ padding: "12px 16px", textAlign: "right" }}>
                         <div style={{ display: "flex", gap: "8px", justifyContent: "flex-end" }}>
-                          <button
-                            type="button"
-                            className="btn btn-sm"
-                            onClick={() => handleRestoreSingle(item.entity_type, item.id, item.name)}
-                            disabled={isRowActionPending(`restore:${key}`)}
-                            style={{
-                              background: "#ecfdf5",
-                              color: "#047857",
-                              border: "1px solid #a7f3d0",
-                              padding: "4px 10px",
-                              borderRadius: "4px",
-                              fontSize: "12px",
-                              fontWeight: 600,
-                              cursor: isRowActionPending(`restore:${key}`) ? "default" : "pointer",
-                              opacity: isRowActionPending(`restore:${key}`) ? 0.6 : 1,
-                            }}
-                            title="Restore back to active state"
-                          >
-                            {isRowActionPending(`restore:${key}`) ? "Restoring…" : "🔄 Restore"}
-                          </button>
-                          <button
-                            type="button"
-                            className="btn btn-sm btn-danger"
-                            onClick={() => handlePermanentDeleteSingle(item.entity_type, item.id, item.name)}
-                            disabled={isRowActionPending(`delete:${key}`)}
-                            style={{
-                              background: "#fef2f2",
-                              color: "#dc2626",
-                              border: "1px solid #fecaca",
-                              padding: "4px 10px",
-                              borderRadius: "4px",
-                              fontSize: "12px",
-                              fontWeight: 600,
-                              cursor: isRowActionPending(`delete:${key}`) ? "default" : "pointer",
-                              opacity: isRowActionPending(`delete:${key}`) ? 0.6 : 1,
-                            }}
-                            title="Completely delete from database"
-                          >
-                            {isRowActionPending(`delete:${key}`) ? "Deleting…" : "🗑️ Delete"}
-                          </button>
+                          {canRestore && (
+                            <button
+                              type="button"
+                              className="btn btn-sm"
+                              onClick={() => handleRestoreSingle(item.entity_type, item.id, item.name)}
+                              disabled={isRowActionPending(`restore:${key}`)}
+                              style={{
+                                background: "#ecfdf5",
+                                color: "#047857",
+                                border: "1px solid #a7f3d0",
+                                padding: "4px 10px",
+                                borderRadius: "4px",
+                                fontSize: "12px",
+                                fontWeight: 600,
+                                cursor: isRowActionPending(`restore:${key}`) ? "default" : "pointer",
+                                opacity: isRowActionPending(`restore:${key}`) ? 0.6 : 1,
+                              }}
+                              title="Restore back to active state"
+                            >
+                              {isRowActionPending(`restore:${key}`) ? "Restoring…" : "🔄 Restore"}
+                            </button>
+                          )}
+                          {canDelete && (
+                            <button
+                              type="button"
+                              className="btn btn-sm btn-danger"
+                              onClick={() => handlePermanentDeleteSingle(item.entity_type, item.id, item.name)}
+                              disabled={isRowActionPending(`delete:${key}`)}
+                              style={{
+                                background: "#fef2f2",
+                                color: "#dc2626",
+                                border: "1px solid #fecaca",
+                                padding: "4px 10px",
+                                borderRadius: "4px",
+                                fontSize: "12px",
+                                fontWeight: 600,
+                                cursor: isRowActionPending(`delete:${key}`) ? "default" : "pointer",
+                                opacity: isRowActionPending(`delete:${key}`) ? 0.6 : 1,
+                              }}
+                              title="Completely delete from database"
+                            >
+                              {isRowActionPending(`delete:${key}`) ? "Deleting…" : "🗑️ Delete"}
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>

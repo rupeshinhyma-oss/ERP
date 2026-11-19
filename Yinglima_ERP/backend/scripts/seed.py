@@ -90,11 +90,10 @@ BOOTSTRAP_PERMISSIONS: list[tuple[str, str, str, str, str, str]] = [
     ("organizationlist.export", "organizationlist", "masters-company-list", "export", "ALL", "Export Organization List data."),
     ("organizationlist.import", "organizationlist", "masters-company-list", "import", "ALL", "Import Organization List data."),
     ("organizationlist.bulk_action", "organizationlist", "masters-company-list", "manage", "ALL", "Use Bulk Actions in the Organization List."),
-    # Trash (System > Trash). Deliberately view-only by design: restoring,
-    # permanently deleting, and emptying trash are NOT gated by this or any
-    # other permission -- that matches how this module already behaves today
-    # and is an intentional, explicit choice, not an oversight.
+    # Trash (System > Trash).
     ("trash.view", "trash", "trash", "view", "ALL", "View the Trash (list of soft-deleted items)."),
+    ("trash.restore", "trash", "trash", "update", "ALL", "Restore soft-deleted items from Trash."),
+    ("trash.delete", "trash", "trash", "delete", "ALL", "Permanently delete items or empty Trash."),
     # Roles & Permissions (User Management > Roles & Permissions). This page
     # is currently superAdminOnly in the frontend nav, and every backend route
     # in app.rbac.routes has NO permission check at all -- it relies entirely
@@ -115,6 +114,7 @@ BOOTSTRAP_PERMISSIONS: list[tuple[str, str, str, str, str, str]] = [
     ("supplier.bulk_action", "supplier", "suppliers", "manage", "ALL", "Use Bulk Actions (bulk activate, deactivate, or delete) in the supplier list."),
     ("supplier.grade_edit", "supplier", "suppliers", "update", "ALL", "Edit the Grade dropdown in the supplier list (read-only without this)."),
     ("supplier.potential_edit", "supplier", "suppliers", "update", "ALL", "Edit the Potential dropdown in the supplier list (read-only without this)."),
+    ("supplier.currentstatus", "supplier", "suppliers", "update", "ALL", "Edit the Current Status dropdown in the supplier list and edit form (read-only without this)."),
     # Supplier Types (Configurations master; independent of the Suppliers module above)
     ("suppliertype.view", "suppliertype", "supplier-types", "view", "ALL", "View supplier types; use search, filters, and the Active/Inactive tabs."),
     ("suppliertype.create", "suppliertype", "supplier-types", "create", "ALL", "Create supplier types."),
@@ -214,19 +214,17 @@ BOOTSTRAP_PERMISSIONS: list[tuple[str, str, str, str, str, str]] = [
     ("product.export", "product", "masters-products", "export", "ALL", "Export product records."),
     ("product.import", "product", "masters-products", "import", "ALL", "Import product records."),
     ("product.bulk_action", "product", "masters-products", "manage", "ALL", "Use Bulk Actions in the Product Master list."),
-    # Product Gallery (Inventory > Product Gallery; separate page from Product
-    # Master above). Deliberately view-only: this page has no create/edit/
-    # delete/bulk actions of its own to gate (the two photo-delete buttons it
-    # does have are already separately gated on product.update /
-    # supplier.update).
-    ("productgallery.view", "productgallery", "product-gallery", "view", "ALL", "View the Product & Supplier Gallery."),
+    # Product Gallery (Inventory > Product Gallery; separate page from Product Master above).
+    ("productgallery.products.view", "productgallery", "product-gallery", "view", "ALL", "View Product Master photos tab in Product Gallery."),
+    ("productgallery.suppliers.view", "productgallery", "product-gallery", "view", "ALL", "View Supplier Visit photos and videos tab in Product Gallery."),
+    ("productgallery.quotations.view", "productgallery", "product-gallery", "view", "ALL", "View Quotation Documents tab in Product Gallery."),
+    ("productgallery.delete", "productgallery", "product-gallery", "delete", "ALL", "Delete photos and media from Product Gallery."),
     # Audit Log
     ("audit.view", "audit", "audit", "view", "ALL", "View audit log entries."),
     # Shipment Planning (dynamic branch-sheet grid: Mum Branch, MP Branch, ...)
     ("planning.view", "planning", "planning", "view", "ALL", "View planning sheets, grids, and change history."),
     ("planning.sheet.manage", "planning", "planning", "manage", "ALL", "Create, rename, and delete planning sheets (branch tabs); create custom status tags."),
     ("planning.column.manage", "planning", "planning", "manage", "ALL", "Add, rename, move, and delete planning columns (unlimited, admin-named)."),
-    ("planning.row.manage", "planning", "planning", "manage", "ALL", "Add, rename, move, and delete planning rows (unlimited)."),
     ("planning.cell.edit", "planning", "planning", "update", "ALL", "Edit the Mum group value cells and their Remarks cells, and set Blue/Custom status tags or clear a tag. Does not cover TEST(Y/N), APPROVAL DATE, or Red/Green status, which each have their own independent permission."),
     ("planning.textyn.edit", "planning", "planning", "update", "ALL", "Edit the TEST(Y/N) column specifically, independent of planning.cell.edit."),
     ("planning.approvaldate.edit", "planning", "planning", "update", "ALL", "Edit the APPROVAL DATE column specifically, independent of planning.cell.edit."),
@@ -240,10 +238,9 @@ BOOTSTRAP_PERMISSIONS: list[tuple[str, str, str, str, str, str]] = [
     ("sale_process.delete", "sale_process", "sales", "delete", "ALL", "Delete or cancel sale orders."),
     ("sale_process.export", "sale_process", "sales", "export", "ALL", "Export sale orders to Excel and download Commercial Invoice & Packing List."),
     # Stock Movements
-    ("stock_movement.view", "stock_movement", "stock-movement", "view", "ALL", "View stock movements, live balances, and Kardex ledgers."),
-    ("stock_movement.create", "stock_movement", "stock-movement", "create", "ALL", "Create inward receipts and outward dispatches."),
-    ("stock_movement.cancel", "stock_movement", "stock-movement", "update", "ALL", "Cancel or reverse stock movements."),
-    ("stock_movement.delete", "stock_movement", "stock-movement", "delete", "ALL", "Delete stock movement records."),
+    ("stock_movement.inward.view", "stock_movement", "stock-movement", "view", "ALL", "View Inward Register tab in Stock Movement."),
+    ("stock_movement.outward.view", "stock_movement", "stock-movement", "view", "ALL", "View Outward Register tab in Stock Movement."),
+    ("stock_movement.ledger.view", "stock_movement", "stock-movement", "view", "ALL", "View Current Stock Ledger & Product Kardex in Stock Movement."),
     # Notification Rules
     ("notification_settings.view", "notification_settings", "notification-settings", "view", "ALL", "View notification trigger rules and mapped recipients."),
     ("notification_settings.manage", "notification_settings", "notification-settings", "manage", "ALL", "Configure and update notification rules and recipient mappings."),
@@ -263,6 +260,7 @@ BOOTSTRAP_PERMISSIONS: list[tuple[str, str, str, str, str, str]] = [
     ("product_price.delete", "product_price", "product_prices", "delete", "ALL", "Delete product price records."),
     ("product_price.export", "product_price", "product_prices", "export", "ALL", "Export product prices catalog to Excel/CSV."),
     ("product_price.import", "product_price", "product_prices", "import", "ALL", "Bulk import product price lists."),
+    ("product_price.trade_history", "product_price", "product_prices", "view", "ALL", "View Trade & Price History drawer in Product Prices."),
     # Local Purchase Orders
     ("local_purchase.view", "local_purchase", "local_purchases", "view", "ALL", "View local purchase orders list and detail modal."),
     ("local_purchase.create", "local_purchase", "local_purchases", "create", "ALL", "Create new local purchase orders."),
@@ -270,6 +268,7 @@ BOOTSTRAP_PERMISSIONS: list[tuple[str, str, str, str, str, str]] = [
     ("local_purchase.inward", "local_purchase", "local_purchases", "inward", "ALL", "Inward confirmed local purchases into warehouse stock inventory and generate receipt vouchers."),
     ("local_purchase.delete", "local_purchase", "local_purchases", "delete", "ALL", "Delete or cancel local purchase orders."),
     ("local_purchase.export", "local_purchase", "local_purchases", "export", "ALL", "Export or print local purchase orders."),
+    ("local_purchase.price_history", "local_purchase", "local_purchases", "view", "ALL", "View Trade & Price History drawer for products inside Local Purchase."),
     # Warehouses Master
     ("warehouse.view", "warehouse", "masters-warehouses", "view", "ALL", "View warehouses and godown locations."),
     ("warehouse.create", "warehouse", "masters-warehouses", "create", "ALL", "Create warehouses."),
@@ -332,7 +331,9 @@ USER_ROLE_PERMISSION_CODES: list[str] = [
     "local_purchase.view",
     "planning.view",
     "sale_process.view",
-    "stock_movement.view",
+    "stock_movement.inward.view",
+    "stock_movement.outward.view",
+    "stock_movement.ledger.view",
     "finance_report.view",
     "consignment_overview.view",
     "vat_return.view",
@@ -381,6 +382,24 @@ async def seed_with_session(session) -> None:
     user_repo = UserRepository(session)
 
     # --- 1. Permissions --------------------------------------------------------
+    # Clean up retired permissions that are no longer part of the RBAC matrix.
+    from sqlalchemy import delete as _sa_delete
+    from app.rbac.models import RolePermission, UserPermission
+    for retired_code in (
+        "planning.row.manage",
+        "productgallery.view",
+        "stock_movement.view",
+        "stock_movement.create",
+        "stock_movement.cancel",
+        "stock_movement.delete",
+    ):
+        retired_perm = await permission_repo.get_by_code(retired_code)
+        if retired_perm is not None:
+            await session.execute(_sa_delete(RolePermission).where(RolePermission.permission_id == retired_perm.id))
+            await session.execute(_sa_delete(UserPermission).where(UserPermission.permission_id == retired_perm.id))
+            await session.delete(retired_perm)
+            await session.flush()
+
     created_permissions: list[Permission] = []
     for code, module, page, action, scope, description in BOOTSTRAP_PERMISSIONS:
         existing = await permission_repo.get_by_code(code)

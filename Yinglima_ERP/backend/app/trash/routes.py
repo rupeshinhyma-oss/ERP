@@ -38,7 +38,7 @@ async def list_trash(
 async def restore_trash(
     payload: TrashRestoreRequest,
     request: Request,
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permission("trash.restore")),
     db: AsyncSession = Depends(get_db_session),
 ) -> dict:
     """Restore selected soft-deleted items back to active state."""
@@ -61,7 +61,7 @@ async def restore_trash(
 async def permanent_delete_trash(
     payload: TrashPermanentDeleteRequest,
     request: Request,
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permission("trash.delete")),
     db: AsyncSession = Depends(get_db_session),
 ) -> dict:
     """Permanently delete selected soft-deleted items from the database."""
@@ -98,7 +98,7 @@ async def permanent_delete_trash(
 @router.post("/empty", summary="Empty all items in trash permanently")
 async def empty_trash(
     request: Request,
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permission("trash.delete")),
     db: AsyncSession = Depends(get_db_session),
 ) -> dict:
     """Permanently delete ALL soft-deleted records from the database that have no active transaction dependencies."""

@@ -28,7 +28,7 @@ from app.events.dispatcher import EventDispatcher
 from app.masters.brands.dependencies import get_brand_service
 from app.masters.brands.schemas import BrandRead, BrandCreate, BrandUpdate, ImportSummaryRead
 from app.masters.brands.service import BrandService
-from app.rbac.dependencies import require_permission
+from app.rbac.dependencies import require_any_permission, require_permission
 
 router = APIRouter(prefix="/masters/brands", tags=["Masters - Brands"])
 
@@ -120,7 +120,7 @@ async def list_brands(
     request: Request,
     query: ListQueryParams = Depends(get_list_query_params),
     service: BrandService = Depends(get_brand_service),
-    _current_user: CurrentUser = Depends(require_permission("brand.view")),
+    _current_user: CurrentUser = Depends(require_any_permission("brand.view", "product.view", "product.create", "product.update", "productgallery.products.view", "productgallery.suppliers.view", "inquiry.view", "inquiry.create", "inquiry.update", "local_purchase.view", "local_purchase.create", "local_purchase.update")),
 ) -> dict:
     """List brands, with search/sort/filter/pagination."""
     brands, total = await service.list_paginated(query)

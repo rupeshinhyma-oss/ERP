@@ -39,6 +39,8 @@ export const MODULE_NAMES: Record<string, string> = {
   hrms: "HRMS & Workforce",
   task: "Tasks & Work Management",
   technicaltask: "Technical Tasks",
+  payment: "Payments",
+  technician_operations: "Technician Gatepass & Wallet Management",
   report: "Reports & Analytics",
   cargo_overview: "Cargo Overview",
 };
@@ -93,6 +95,22 @@ const FULL_CODE_LABELS: Record<string, string> = {
   "cargo_overview.cargo_status.view": "View Section 3: Cargo Status Checklist",
   "cargo_overview.cargo_status.edit": "Edit Cargo Status, ETD/ETA & Remarks",
   "cargo_overview.product_summary.view": "View Section 4: Product Summary",
+  "technicaltask.view": "View",
+  "technicaltask.pending.view": "View Pending Tab",
+  "technicaltask.approved.view": "View Approved Tab",
+  "technicaltask.completed.view": "View Completed Tab",
+  "technicaltask.cancel.view": "View Cancel Tab",
+  "technicaltask.create": "+ Add New (Create)",
+  "technicaltask.bulk_action": "Bulk Actions",
+  "technicaltask.action.view": "View Action Column (⋮)",
+  "technicaltask.call_logs.view": "Action: View Call Logs",
+  "technicaltask.approve": "Action: Approved (Pending Stage)",
+  "technicaltask.complete": "Action: Completed (Approved Stage)",
+  "technicaltask.cancel": "Action: Cancel (Approved Stage)",
+  "technicaltask.reopen": "Action: Reopen / Reassign (Cancel Stage)",
+  "technicaltask.update": "Action: Edit",
+  "technicaltask.delete": "Action: Delete",
+  "technicaltask.manage": "Manage All",
 };
 
 /** "product.create" -> "Create"; unknown actions fall back to the raw code. */
@@ -132,17 +150,19 @@ export function groupPermissionsByModule(permissions: Permission[]): Record<stri
  * role every other new account gets automatically. "admin" is blocked too,
  * so a same-named duplicate role can't be recreated after being retired.
  */
-export const RESERVED_ROLE_NAMES = new Set(["super_admin", "user", "admin"]);
+export const RESERVED_ROLE_NAMES = new Set(["super_admin", "user", "admin", "technician"]);
 
 /**
  * Friendly display name for a role name coming back from the API.
- * "super_admin" reads as "Admin" and "user" as "User" everywhere in the
- * UI -- used by the Roles & Permissions page, the Users page, and the
- * Shipment Planning column role-lock picker so a role name renders
- * identically no matter where it's shown.
+ * "super_admin" reads as "Admin", "user" as "User", and "technician" as
+ * "Technician" everywhere in the UI -- used by the Roles & Permissions
+ * page, the Users page, and the Shipment Planning column role-lock picker
+ * so a role name renders identically no matter where it's shown.
  */
 export function roleDisplayName(name: string): string {
-  if (name === "super_admin") return "Admin";
-  if (name === "employee" || name === "user") return "User";
+  const lower = name.toLowerCase();
+  if (lower === "super_admin") return "Admin";
+  if (lower === "employee" || lower === "user") return "User";
+  if (lower === "technician") return "Technician";
   return name;
 }

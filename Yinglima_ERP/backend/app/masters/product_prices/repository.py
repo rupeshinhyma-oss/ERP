@@ -223,8 +223,8 @@ class ProductPriceRepository:
                     ORDER BY 
                         spl.product_id, 
                         (CASE WHEN spl.supplier_id = p2.supplier_id THEN 0 ELSE 1 END) ASC,
-                        {norm_spl_price_sql} ASC, 
-                        spl.updated_at DESC
+                        spl.created_at ASC,
+                        spl.id ASC
                 ) best ON best.product_id = p.id
                 ORDER BY {order_sql};
             """
@@ -282,8 +282,8 @@ class ProductPriceRepository:
                     ORDER BY 
                         spl.product_id, 
                         (CASE WHEN spl.supplier_id = p2.supplier_id THEN 0 ELSE 1 END) ASC,
-                        {norm_spl_price_sql} ASC, 
-                        spl.updated_at DESC
+                        spl.created_at ASC,
+                        spl.id ASC
                 ) best ON best.product_id = p.id
                 WHERE {where_sql}
                 ORDER BY {order_sql}
@@ -362,12 +362,8 @@ class ProductPriceRepository:
             WHERE spl.product_id = :product_id
             ORDER BY 
                 (CASE WHEN spl.supplier_id = p.supplier_id THEN 0 ELSE 1 END) ASC,
-                (CASE 
-                    WHEN UPPER(COALESCE(spl.currency, 'USD')) IN ('CNY', 'RMB') THEN spl.unit_price / :cny_rate
-                    WHEN UPPER(COALESCE(spl.currency, 'USD')) = 'EUR' THEN spl.unit_price / :eur_rate
-                    WHEN UPPER(COALESCE(spl.currency, 'USD')) = 'INR' THEN spl.unit_price / :inr_rate
-                    ELSE spl.unit_price
-                  END) ASC NULLS LAST, spl.updated_at DESC;
+                spl.created_at ASC,
+                spl.id ASC;
         """)
 
         res = await self.session.execute(query, {"product_id": str(product_id), "cny_rate": cny_rate, "eur_rate": eur_rate, "inr_rate": inr_rate})

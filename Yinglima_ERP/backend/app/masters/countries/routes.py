@@ -28,7 +28,7 @@ from app.events.dispatcher import EventDispatcher
 from app.masters.countries.dependencies import get_country_service
 from app.masters.countries.schemas import CountryLookupRead, CountryRead, CountryCreate, CountryUpdate, ImportSummaryRead
 from app.masters.countries.service import CountryService
-from app.rbac.dependencies import require_permission
+from app.rbac.dependencies import require_any_permission, require_permission
 
 router = APIRouter(prefix="/masters/countries", tags=["Masters - Countries"])
 
@@ -120,7 +120,7 @@ async def list_countrys(
     request: Request,
     query: ListQueryParams = Depends(get_list_query_params),
     service: CountryService = Depends(get_country_service),
-    _current_user: CurrentUser = Depends(require_permission("country.view")),
+    _current_user: CurrentUser = Depends(require_any_permission("country.view", "state.view", "city.view", "supplier.view", "supplier.create", "supplier.update", "buyer.view", "buyer.create", "buyer.update", "organizationlist.view", "organizationlist.create", "organizationlist.update")),
 ) -> dict:
     """List countrys, with search/sort/filter/pagination."""
     countrys, total = await service.list_paginated(query)

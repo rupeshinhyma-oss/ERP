@@ -67,10 +67,10 @@ const TechnicalPaymentsSkeletonRows: React.FC<{ count?: number }> = ({ count = 8
 
 export function PaymentsPage() {
   const { isSuperAdmin, hasPermission } = useAuth();
-  const canManageAll = isSuperAdmin || hasPermission("technicaltask.manage");
-  const canCreate = canManageAll || hasPermission("technicaltask.create");
-  const canUpdate = canManageAll || hasPermission("technicaltask.update");
-  const canDelete = canManageAll || hasPermission("technicaltask.delete");
+  const canManageAll = isSuperAdmin || hasPermission("payment.manage");
+  const canCreate = canManageAll || hasPermission("payment.create");
+  const canUpdate = canManageAll || hasPermission("payment.update");
+  const canDelete = canManageAll || hasPermission("payment.delete");
 
   // Tabs & Summary
   const [activeTab, setActiveTab] = useState<TabType>("pending");

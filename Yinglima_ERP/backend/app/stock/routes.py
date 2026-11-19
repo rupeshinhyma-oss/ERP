@@ -22,7 +22,7 @@ from app.auth.dependencies import get_current_user
 from app.auth.service import CurrentUser
 from app.core.responses import build_success_response
 from app.database.session import get_db_session
-from app.rbac.dependencies import require_permission
+from app.rbac.dependencies import require_any_permission, require_permission, require_super_admin
 from app.stock.schemas import (
     StockMovementCreate,
     StockMovementResponse,
@@ -37,7 +37,9 @@ router = APIRouter(prefix="/stock", tags=["Stock Movement"])
 async def get_stock_metrics(
     request: Request,
     db: AsyncSession = Depends(get_db_session),
-    current_user: CurrentUser = Depends(require_permission("stock_movement.view")),
+    current_user: CurrentUser = Depends(
+        require_any_permission("stock_movement.inward.view", "stock_movement.outward.view", "stock_movement.ledger.view")
+    ),
 ) -> dict:
     service = StockMovementService(db)
     metrics = await service.get_summary_metrics()
@@ -59,9 +61,17 @@ async def list_stock_movements(
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=200),
     db: AsyncSession = Depends(get_db_session),
-    current_user: CurrentUser = Depends(require_permission("stock_movement.view")),
+    current_user: CurrentUser = Depends(
+        require_any_permission("stock_movement.inward.view", "stock_movement.outward.view", "stock_movement.ledger.view")
+    ),
 ) -> dict:
     service = StockMovementService(db)
+    if movement_type == "inward" and "stock_movement.inward.view" not in current_user.permissions:
+        from app.core.exceptions import ForbiddenException
+        raise ForbiddenException("This action requires the 'stock_movement.inward.view' permission.")
+    if movement_type == "outward" and "stock_movement.outward.view" not in current_user.permissions:
+        from app.core.exceptions import ForbiddenException
+        raise ForbiddenException("This action requires the 'stock_movement.outward.view' permission.")
     offset = (page - 1) * page_size
     movements, total = await service.list_movements(
         movement_type=movement_type,
@@ -85,7 +95,7 @@ async def create_stock_movement(
     request: Request,
     payload: StockMovementCreate,
     db: AsyncSession = Depends(get_db_session),
-    current_user: CurrentUser = Depends(require_permission("stock_movement.create")),
+    current_user: CurrentUser = Depends(require_super_admin()),
 ) -> dict:
     service = StockMovementService(db)
     movement = await service.create_movement(
@@ -105,7 +115,9 @@ async def get_stock_movement_detail(
     request: Request,
     movement_id: uuid.UUID,
     db: AsyncSession = Depends(get_db_session),
-    current_user: CurrentUser = Depends(require_permission("stock_movement.view")),
+    current_user: CurrentUser = Depends(
+        require_any_permission("stock_movement.inward.view", "stock_movement.outward.view", "stock_movement.ledger.view")
+    ),
 ) -> dict:
     service = StockMovementService(db)
     movement = await service.get_movement(movement_id)
@@ -121,7 +133,7 @@ async def cancel_stock_movement(
     movement_id: uuid.UUID,
     reason: str | None = Query(None),
     db: AsyncSession = Depends(get_db_session),
-    current_user: CurrentUser = Depends(require_permission("stock_movement.cancel")),
+    current_user: CurrentUser = Depends(require_super_admin()),
 ) -> dict:
     service = StockMovementService(db)
     movement = await service.cancel_movement(movement_id, reason=reason)
@@ -137,7 +149,7 @@ async def delete_stock_movement(
     request: Request,
     movement_id: uuid.UUID,
     db: AsyncSession = Depends(get_db_session),
-    current_user: CurrentUser = Depends(require_permission("stock_movement.delete")),
+    current_user: CurrentUser = Depends(require_super_admin()),
 ) -> dict:
     service = StockMovementService(db)
     await service.delete_movement(movement_id)
@@ -155,7 +167,9 @@ async def get_available_stock(
     product_code: str | None = Query(None),
     product_name: str | None = Query(None),
     db: AsyncSession = Depends(get_db_session),
-    current_user: CurrentUser = Depends(require_permission("stock_movement.view")),
+    current_user: CurrentUser = Depends(
+        require_any_permission("stock_movement.inward.view", "stock_movement.outward.view", "stock_movement.ledger.view")
+    ),
 ) -> dict:
     service = StockMovementService(db)
     stock = await service.get_available_stock(
@@ -172,7 +186,9 @@ async def extract_from_purchase(
     request: Request,
     purchase_id: uuid.UUID,
     db: AsyncSession = Depends(get_db_session),
-    current_user: CurrentUser = Depends(require_permission("stock_movement.view")),
+    current_user: CurrentUser = Depends(
+        require_any_permission("stock_movement.inward.view", "stock_movement.outward.view", "stock_movement.ledger.view")
+    ),
 ) -> dict:
     service = StockMovementService(db)
     data = await service.extract_from_local_purchase(purchase_id)
@@ -187,7 +203,9 @@ async def extract_from_sale_order(
     request: Request,
     sale_order_id: uuid.UUID,
     db: AsyncSession = Depends(get_db_session),
-    current_user: CurrentUser = Depends(require_permission("stock_movement.view")),
+    current_user: CurrentUser = Depends(
+        require_any_permission("stock_movement.inward.view", "stock_movement.outward.view", "stock_movement.ledger.view")
+    ),
 ) -> dict:
     service = StockMovementService(db)
     data = await service.extract_from_sale_order(sale_order_id)
@@ -204,7 +222,7 @@ async def get_stock_balances(
     page: int = Query(1, ge=1),
     page_size: int = Query(100, ge=1, le=500),
     db: AsyncSession = Depends(get_db_session),
-    current_user: CurrentUser = Depends(require_permission("stock_movement.view")),
+    current_user: CurrentUser = Depends(require_permission("stock_movement.ledger.view")),
 ) -> dict:
     service = StockMovementService(db)
     offset = (page - 1) * page_size
@@ -221,7 +239,9 @@ async def get_product_kardex(
     product_id: uuid.UUID | None = Query(None),
     product_name: str | None = Query(None),
     db: AsyncSession = Depends(get_db_session),
-    current_user: CurrentUser = Depends(require_permission("stock_movement.view")),
+    current_user: CurrentUser = Depends(
+        require_any_permission("stock_movement.inward.view", "stock_movement.outward.view", "stock_movement.ledger.view")
+    ),
 ) -> dict:
     service = StockMovementService(db)
     kardex = await service.get_product_kardex(product_id=product_id, product_name=product_name)

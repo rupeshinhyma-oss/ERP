@@ -1356,7 +1356,7 @@ export function UsersPage() {
                   <th>Department</th>
                   <th>Status</th>
                   <th>Last Login</th>
-                  <th>Actions</th>
+                  <th style={{ textAlign: "center" }}>Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -1451,7 +1451,7 @@ export function UsersPage() {
                         <td>
                           {u.last_login_at ? new Date(u.last_login_at).toLocaleString() : "Never"}
                         </td>
-                        <td className="actions" style={{ textAlign: "right" }}>
+                        <td className="actions" style={{ textAlign: "center" }}>
                           {canManage && actions.length > 0 ? (
                             <ActionDropdown items={actions} />
                           ) : null}

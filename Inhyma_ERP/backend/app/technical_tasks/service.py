@@ -426,8 +426,9 @@ class TechnicalTaskService:
         """Auto-post Self collect task payments into Technician Wallet Ledger (COLLECTION)."""
         try:
             from sqlalchemy import func, select
-            from app.masters.technicians.models import Technician
+            from app.rbac.models import Role, UserRole
             from app.technician_operations.models import TechnicianWalletTransaction
+            from app.users.models import User
 
             raw_tech = (task.task_allotted_to or actor or "Technician").strip()
             async with self.repository.session.begin_nested():
@@ -435,19 +436,32 @@ class TechnicalTaskService:
                 tech_name = raw_tech
                 try:
                     async with self.repository.session.begin_nested():
-                        tech_row = (
+                        tech_users = (
                             await self.repository.session.execute(
-                                select(Technician)
+                                select(User)
+                                .join(UserRole, UserRole.user_id == User.id)
+                                .join(Role, Role.id == UserRole.role_id)
                                 .where(
-                                    Technician.deleted_at.is_(None),
-                                    func.lower(Technician.name) == raw_tech.lower(),
+                                    User.deleted_at.is_(None),
+                                    Role.deleted_at.is_(None),
+                                    func.lower(Role.name) == "technician",
                                 )
-                                .limit(1)
                             )
-                        ).scalar_one_or_none()
-                        if tech_row is not None:
-                            tech_id = tech_row.id
-                            tech_name = tech_row.name
+                        ).scalars().all()
+                        needle = raw_tech.lower()
+                        for tech_user in tech_users:
+                            canonical = (
+                                tech_user.display_name or tech_user.full_name or tech_user.username or ""
+                            ).strip()
+                            candidates = {
+                                (tech_user.display_name or "").strip().lower(),
+                                (tech_user.full_name or "").strip().lower(),
+                                (tech_user.username or "").strip().lower(),
+                            }
+                            if needle in candidates and canonical:
+                                tech_id = tech_user.id
+                                tech_name = canonical
+                                break
                 except Exception:
                     pass
 

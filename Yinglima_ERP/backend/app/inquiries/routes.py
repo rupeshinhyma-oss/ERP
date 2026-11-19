@@ -189,7 +189,7 @@ async def _publish_inquiry_message_event(
 async def get_all_quotation_documents(
     request: Request,
     service: InquiryService = Depends(get_inquiry_service),
-    _current_user: CurrentUser = Depends(require_any_permission("product.view", "productgallery.view", "inquiry.view")),
+    _current_user: CurrentUser = Depends(require_any_permission("product.view", "productgallery.quotations.view", "inquiry.view")),
 ) -> dict:
     """Fetch all quotations with product and supplier metadata for the Product & Supplier Gallery."""
     if not service.quotation_repository:

@@ -14,6 +14,7 @@ import { Link } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
 import { apiGet, errorMessage } from "@/lib/api";
 import { TableSkeletonRows } from "@/components/Skeleton";
+import { useAuth } from "@/lib/hooks";
 import { useToast } from "@/lib/toast";
 import type {
   StockBalanceItem,
@@ -30,9 +31,28 @@ const stockMovementsCache = new Map<string, { items: StockMovement[]; total: num
 const stockBalancesCache = new Map<string, StockBalanceItem[]>();
 
 export function StockMovementsPage() {
+  const { hasPermission } = useAuth();
+  const canViewInward = hasPermission("stock_movement.inward.view");
+  const canViewOutward = hasPermission("stock_movement.outward.view");
+  const canViewLedger = hasPermission("stock_movement.ledger.view");
   const showToast = useToast();
 
-  const [activeTab, setActiveTab] = useState<ActiveTab>("inward");
+  const [activeTab, setActiveTab] = useState<ActiveTab>(() =>
+    canViewInward ? "inward" : canViewOutward ? "outward" : "balances"
+  );
+
+  useEffect(() => {
+    if (activeTab === "inward" && !canViewInward) {
+      if (canViewOutward) setActiveTab("outward");
+      else if (canViewLedger) setActiveTab("balances");
+    } else if (activeTab === "outward" && !canViewOutward) {
+      if (canViewInward) setActiveTab("inward");
+      else if (canViewLedger) setActiveTab("balances");
+    } else if (activeTab === "balances" && !canViewLedger) {
+      if (canViewInward) setActiveTab("inward");
+      else if (canViewOutward) setActiveTab("outward");
+    }
+  }, [activeTab, canViewInward, canViewOutward, canViewLedger]);
   const [metrics, setMetrics] = useState<StockSummaryMetrics | null>(null);
 
   // Movements state
@@ -96,6 +116,8 @@ export function StockMovementsPage() {
   // Fetch Inward/Outward movements
   const loadMovements = useCallback(async () => {
     if (activeTab === "balances") return;
+    if (activeTab === "inward" && !canViewInward) return;
+    if (activeTab === "outward" && !canViewOutward) return;
     const cacheKey = `${activeTab}:${debouncedSearch}:${dateFrom}:${dateTo}`;
     const cached = stockMovementsCache.get(cacheKey) || stockMovementsCache.get(activeTab);
     if (cached) {
@@ -131,7 +153,7 @@ export function StockMovementsPage() {
 
   // Fetch Live Stock Balances
   const loadBalances = useCallback(async () => {
-    if (activeTab !== "balances") return;
+    if (activeTab !== "balances" || !canViewLedger) return;
     const cacheKey = `balances:${debouncedSearch}`;
     const cached = stockBalancesCache.get(cacheKey) || stockBalancesCache.get("balances");
     if (cached) {
@@ -293,146 +315,152 @@ export function StockMovementsPage() {
           }}
         >
           {/* Inward Card */}
-          <div
-            style={{
-              backgroundColor: "#ffffff",
-              borderRadius: "14px",
-              padding: "20px",
-              border: "1px solid #e2e8f0",
-              boxShadow: "0 1px 3px rgba(0,0,0,0.05)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-            }}
-          >
-            <div>
-              <div style={{ fontSize: "12px", fontWeight: 700, color: "#64748b", textTransform: "uppercase" }}>
-                Total Inward Received
-              </div>
-              <div style={{ fontSize: "26px", fontWeight: 800, color: "#16a34a", marginTop: "4px" }}>
-                {metrics ? metrics.total_inward_quantity.toLocaleString() : "—"}{" "}
-                <span style={{ fontSize: "14px", fontWeight: 500, color: "#64748b" }}>units</span>
-              </div>
-              <div style={{ fontSize: "12px", color: "#64748b", marginTop: "4px" }}>
-                Across {metrics ? metrics.total_inward_records : 0} confirmed shipments
-              </div>
-            </div>
+          {canViewInward && (
             <div
               style={{
-                width: "48px",
-                height: "48px",
-                borderRadius: "12px",
-                backgroundColor: "#dcfce7",
-                color: "#16a34a",
-                fontSize: "24px",
+                backgroundColor: "#ffffff",
+                borderRadius: "14px",
+                padding: "20px",
+                border: "1px solid #e2e8f0",
+                boxShadow: "0 1px 3px rgba(0,0,0,0.05)",
                 display: "flex",
                 alignItems: "center",
-                justifyContent: "center",
+                justifyContent: "space-between",
               }}
             >
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
-                <polyline points="3.27 6.96 12 12.01 20.73 6.96" />
-                <line x1="12" y1="22.08" x2="12" y2="12" />
-              </svg>
-            </div>
-          </div>
-
-          {/* Outward Card */}
-          <div
-            style={{
-              backgroundColor: "#ffffff",
-              borderRadius: "14px",
-              padding: "20px",
-              border: "1px solid #e2e8f0",
-              boxShadow: "0 1px 3px rgba(0,0,0,0.05)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-            }}
-          >
-            <div>
-              <div style={{ fontSize: "12px", fontWeight: 700, color: "#64748b", textTransform: "uppercase" }}>
-                Total Outward Dispatched
-              </div>
-              <div style={{ fontSize: "26px", fontWeight: 800, color: "#2563eb", marginTop: "4px" }}>
-                {metrics ? metrics.total_outward_quantity.toLocaleString() : "—"}{" "}
-                <span style={{ fontSize: "14px", fontWeight: 500, color: "#64748b" }}>units</span>
-              </div>
-              <div style={{ fontSize: "12px", color: "#64748b", marginTop: "4px" }}>
-                Across {metrics ? metrics.total_outward_records : 0} client dispatches
-              </div>
-            </div>
-            <div
-              style={{
-                width: "48px",
-                height: "48px",
-                borderRadius: "12px",
-                backgroundColor: "#dbeafe",
-                color: "#2563eb",
-                fontSize: "24px",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-              }}
-            >
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                <rect x="1" y="3" width="15" height="13" rx="2" />
-                <polygon points="16 8 20 8 23 11 23 16 16 16 16 8" />
-                <circle cx="5.5" cy="18.5" r="2.5" />
-                <circle cx="18.5" cy="18.5" r="2.5" />
-              </svg>
-            </div>
-          </div>
-
-          {/* Net Available Stock Card */}
-          <div
-            style={{
-              backgroundColor: "#ffffff",
-              borderRadius: "14px",
-              padding: "20px",
-              border: "1px solid #e2e8f0",
-              boxShadow: "0 1px 3px rgba(0,0,0,0.05)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-            }}
-          >
-            <div>
-              <div style={{ fontSize: "12px", fontWeight: 700, color: "#64748b", textTransform: "uppercase" }}>
-                Net Current Warehouse Stock
+              <div>
+                <div style={{ fontSize: "12px", fontWeight: 700, color: "#64748b", textTransform: "uppercase" }}>
+                  Total Inward Received
+                </div>
+                <div style={{ fontSize: "26px", fontWeight: 800, color: "#16a34a", marginTop: "4px" }}>
+                  {metrics ? metrics.total_inward_quantity.toLocaleString() : "—"}{" "}
+                  <span style={{ fontSize: "14px", fontWeight: 500, color: "#64748b" }}>units</span>
+                </div>
+                <div style={{ fontSize: "12px", color: "#64748b", marginTop: "4px" }}>
+                  Across {metrics ? metrics.total_inward_records : 0} confirmed shipments
+                </div>
               </div>
               <div
                 style={{
-                  fontSize: "26px",
-                  fontWeight: 800,
-                  color: (metrics?.total_net_stock_quantity || 0) >= 0 ? "#0f172a" : "#dc2626",
-                  marginTop: "4px",
+                  width: "48px",
+                  height: "48px",
+                  borderRadius: "12px",
+                  backgroundColor: "#dcfce7",
+                  color: "#16a34a",
+                  fontSize: "24px",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
                 }}
               >
-                {metrics ? metrics.total_net_stock_quantity.toLocaleString() : "—"}{" "}
-                <span style={{ fontSize: "14px", fontWeight: 500, color: "#64748b" }}>units</span>
-              </div>
-              <div style={{ fontSize: "12px", color: "#64748b", marginTop: "4px" }}>
-                Live ledger balance (+Inward - Outward)
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
+                  <polyline points="3.27 6.96 12 12.01 20.73 6.96" />
+                  <line x1="12" y1="22.08" x2="12" y2="12" />
+                </svg>
               </div>
             </div>
+          )}
+
+          {/* Outward Card */}
+          {canViewOutward && (
             <div
               style={{
-                width: "48px",
-                height: "48px",
-                borderRadius: "12px",
-                backgroundColor: "#f1f5f9",
-                color: "#0f172a",
-                fontSize: "24px",
+                backgroundColor: "#ffffff",
+                borderRadius: "14px",
+                padding: "20px",
+                border: "1px solid #e2e8f0",
+                boxShadow: "0 1px 3px rgba(0,0,0,0.05)",
                 display: "flex",
                 alignItems: "center",
-                justifyContent: "center",
+                justifyContent: "space-between",
               }}
             >
-              📊
+              <div>
+                <div style={{ fontSize: "12px", fontWeight: 700, color: "#64748b", textTransform: "uppercase" }}>
+                  Total Outward Dispatched
+                </div>
+                <div style={{ fontSize: "26px", fontWeight: 800, color: "#2563eb", marginTop: "4px" }}>
+                  {metrics ? metrics.total_outward_quantity.toLocaleString() : "—"}{" "}
+                  <span style={{ fontSize: "14px", fontWeight: 500, color: "#64748b" }}>units</span>
+                </div>
+                <div style={{ fontSize: "12px", color: "#64748b", marginTop: "4px" }}>
+                  Across {metrics ? metrics.total_outward_records : 0} client dispatches
+                </div>
+              </div>
+              <div
+                style={{
+                  width: "48px",
+                  height: "48px",
+                  borderRadius: "12px",
+                  backgroundColor: "#dbeafe",
+                  color: "#2563eb",
+                  fontSize: "24px",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="1" y="3" width="15" height="13" rx="2" />
+                  <polygon points="16 8 20 8 23 11 23 16 16 16 16 8" />
+                  <circle cx="5.5" cy="18.5" r="2.5" />
+                  <circle cx="18.5" cy="18.5" r="2.5" />
+                </svg>
+              </div>
             </div>
-          </div>
+          )}
+
+          {/* Net Available Stock Card */}
+          {canViewLedger && (
+            <div
+              style={{
+                backgroundColor: "#ffffff",
+                borderRadius: "14px",
+                padding: "20px",
+                border: "1px solid #e2e8f0",
+                boxShadow: "0 1px 3px rgba(0,0,0,0.05)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+              }}
+            >
+              <div>
+                <div style={{ fontSize: "12px", fontWeight: 700, color: "#64748b", textTransform: "uppercase" }}>
+                  Net Current Warehouse Stock
+                </div>
+                <div
+                  style={{
+                    fontSize: "26px",
+                    fontWeight: 800,
+                    color: (metrics?.total_net_stock_quantity || 0) >= 0 ? "#0f172a" : "#dc2626",
+                    marginTop: "4px",
+                  }}
+                >
+                  {metrics ? metrics.total_net_stock_quantity.toLocaleString() : "—"}{" "}
+                  <span style={{ fontSize: "14px", fontWeight: 500, color: "#64748b" }}>units</span>
+                </div>
+                <div style={{ fontSize: "12px", color: "#64748b", marginTop: "4px" }}>
+                  Live ledger balance (+Inward - Outward)
+                </div>
+              </div>
+              <div
+                style={{
+                  width: "48px",
+                  height: "48px",
+                  borderRadius: "12px",
+                  backgroundColor: "#f1f5f9",
+                  color: "#0f172a",
+                  fontSize: "24px",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                📊
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Collapsible Filter Options Card */}
@@ -566,76 +594,82 @@ export function StockMovementsPage() {
         >
           {/* Tabs */}
           <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-            <button
-              type="button"
-              onClick={() => setActiveTab("inward")}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: "8px",
-                padding: "8px 16px",
-                borderRadius: "8px",
-                fontSize: "13px",
-                fontWeight: 600,
-                cursor: "pointer",
-                border: "none",
-                backgroundColor: activeTab === "inward" ? "#16a34a" : "#f1f5f9",
-                color: activeTab === "inward" ? "#ffffff" : "#475569",
-              }}
-            >
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
-                <polyline points="3.27 6.96 12 12.01 20.73 6.96" />
-                <line x1="12" y1="22.08" x2="12" y2="12" />
-              </svg>
-              Inward Register {activeTab === "inward" && totalMovements > 0 ? `(${totalMovements})` : ""}
-            </button>
+            {canViewInward && (
+              <button
+                type="button"
+                onClick={() => setActiveTab("inward")}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
+                  padding: "8px 16px",
+                  borderRadius: "8px",
+                  fontSize: "13px",
+                  fontWeight: 600,
+                  cursor: "pointer",
+                  border: "none",
+                  backgroundColor: activeTab === "inward" ? "#16a34a" : "#f1f5f9",
+                  color: activeTab === "inward" ? "#ffffff" : "#475569",
+                }}
+              >
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
+                  <polyline points="3.27 6.96 12 12.01 20.73 6.96" />
+                  <line x1="12" y1="22.08" x2="12" y2="12" />
+                </svg>
+                Inward Register {activeTab === "inward" && totalMovements > 0 ? `(${totalMovements})` : ""}
+              </button>
+            )}
 
-            <button
-              type="button"
-              onClick={() => setActiveTab("outward")}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: "8px",
-                padding: "8px 16px",
-                borderRadius: "8px",
-                fontSize: "13px",
-                fontWeight: 600,
-                cursor: "pointer",
-                border: "none",
-                backgroundColor: activeTab === "outward" ? "#2563eb" : "#f1f5f9",
-                color: activeTab === "outward" ? "#ffffff" : "#475569",
-              }}
-            >
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                <rect x="1" y="3" width="15" height="13" rx="2" />
-                <polygon points="16 8 20 8 23 11 23 16 16 16 16 8" />
-                <circle cx="5.5" cy="18.5" r="2.5" />
-                <circle cx="18.5" cy="18.5" r="2.5" />
-              </svg>
-              Outward Register {activeTab === "outward" && totalMovements > 0 ? `(${totalMovements})` : ""}
-            </button>
+            {canViewOutward && (
+              <button
+                type="button"
+                onClick={() => setActiveTab("outward")}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
+                  padding: "8px 16px",
+                  borderRadius: "8px",
+                  fontSize: "13px",
+                  fontWeight: 600,
+                  cursor: "pointer",
+                  border: "none",
+                  backgroundColor: activeTab === "outward" ? "#2563eb" : "#f1f5f9",
+                  color: activeTab === "outward" ? "#ffffff" : "#475569",
+                }}
+              >
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="1" y="3" width="15" height="13" rx="2" />
+                  <polygon points="16 8 20 8 23 11 23 16 16 16 16 8" />
+                  <circle cx="5.5" cy="18.5" r="2.5" />
+                  <circle cx="18.5" cy="18.5" r="2.5" />
+                </svg>
+                Outward Register {activeTab === "outward" && totalMovements > 0 ? `(${totalMovements})` : ""}
+              </button>
+            )}
 
-            <button
-              type="button"
-              onClick={() => setActiveTab("balances")}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: "8px",
-                padding: "8px 16px",
-                borderRadius: "8px",
-                fontSize: "13px",
-                fontWeight: 600,
-                cursor: "pointer",
-                border: "none",
-                backgroundColor: activeTab === "balances" ? "#0f172a" : "#f1f5f9",
-                color: activeTab === "balances" ? "#ffffff" : "#475569",
-              }}
-            >
-              <span>📊</span> Current Stock Ledger
-            </button>
+            {canViewLedger && (
+              <button
+                type="button"
+                onClick={() => setActiveTab("balances")}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
+                  padding: "8px 16px",
+                  borderRadius: "8px",
+                  fontSize: "13px",
+                  fontWeight: 600,
+                  cursor: "pointer",
+                  border: "none",
+                  backgroundColor: activeTab === "balances" ? "#0f172a" : "#f1f5f9",
+                  color: activeTab === "balances" ? "#ffffff" : "#475569",
+                }}
+              >
+                <span>📊</span> Current Stock Ledger
+              </button>
+            )}
           </div>
 
           {/* Inline Quick Search Input */}

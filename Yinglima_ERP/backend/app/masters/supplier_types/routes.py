@@ -23,7 +23,7 @@ from app.masters.supplier_types.schemas import (
     SupplierTypeUpdate,
 )
 from app.masters.supplier_types.service import SupplierTypeService
-from app.rbac.dependencies import require_permission
+from app.rbac.dependencies import require_any_permission, require_permission
 
 router = APIRouter(prefix="/masters/supplier-types", tags=["Masters - Supplier Types"])
 
@@ -84,7 +84,7 @@ async def list_supplier_types(
     request: Request,
     query: ListQueryParams = Depends(get_list_query_params),
     service: SupplierTypeService = Depends(get_supplier_type_service),
-    _current_user: CurrentUser = Depends(require_permission("suppliertype.view")),
+    _current_user: CurrentUser = Depends(require_any_permission("suppliertype.view", "supplier.view", "supplier.create", "supplier.update")),
 ) -> dict:
     items, total = await service.list_paginated(query)
     meta = PageMeta.build(page=query.page.page, page_size=query.page.page_size, total_records=total).as_meta_dict()

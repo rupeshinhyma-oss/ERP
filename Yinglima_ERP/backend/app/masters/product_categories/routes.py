@@ -35,7 +35,7 @@ from app.masters.product_categories.schemas import (
     ProductCategoryUpdate,
 )
 from app.masters.product_categories.service import ProductCategoryService
-from app.rbac.dependencies import require_permission
+from app.rbac.dependencies import require_any_permission, require_permission
 
 router = APIRouter(prefix="/masters/product-categories", tags=["Masters - Product Categories"])
 
@@ -130,7 +130,7 @@ async def list_categories(
     request: Request,
     query: ListQueryParams = Depends(get_list_query_params),
     service: ProductCategoryService = Depends(get_product_category_service),
-    _current_user: CurrentUser = Depends(require_permission("category.view")),
+    _current_user: CurrentUser = Depends(require_any_permission("category.view", "subcategory.view", "subcategory.create", "subcategory.update", "product.view", "product.create", "product.update", "productgallery.products.view", "productgallery.suppliers.view", "product_price.view", "supplier.view", "supplier.create", "supplier.update", "buyer.view", "buyer.create", "buyer.update", "inquiry.view", "inquiry.create", "inquiry.update")),
 ) -> dict:
     """List product categories, with search/sort/filter/pagination."""
     categories, total = await service.list_paginated(query)

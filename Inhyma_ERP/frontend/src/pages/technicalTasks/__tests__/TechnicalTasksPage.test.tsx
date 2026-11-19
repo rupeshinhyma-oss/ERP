@@ -472,10 +472,7 @@ describe("TechnicalTasksPage", () => {
 
   it("opens Approve & Allot Task modal on Approved click, enforces technician allotment, and supports approver overrides", async () => {
     (apiGet as any).mockImplementation(async (path: string) => {
-      if (path.startsWith("/masters/technicians?")) {
-        throw new Error("403 Forbidden: technician.view required");
-      }
-      if (path === "/masters/technicians/lookup") {
+      if (path === "/rbac/technicians/lookup") {
         return { data: [{ name: "Devendra Marade" }] };
       }
       return { data: [] };
@@ -520,7 +517,7 @@ describe("TechnicalTasksPage", () => {
       });
       expect(statusSpy).not.toHaveBeenCalled();
 
-      // Select technician (loaded via /masters/technicians/lookup fallback) and override Free -> Chargeable
+      // Select technician (loaded via /rbac/technicians/lookup) and override Free -> Chargeable
       const techSelect = screen.getByTestId("approve-technician") as HTMLSelectElement;
       await screen.findByRole("option", { name: "Devendra Marade" });
       fireEvent.change(techSelect, { target: { value: "Devendra Marade" } });
@@ -645,9 +642,13 @@ describe("TechnicalTasksPage", () => {
     authState.username = "sales1";
     authState.perms = [
       "technicaltask.view",
+      "technicaltask.action.view",
+      "technicaltask.call_logs.view",
       "technicaltask.create",
       "technicaltask.update",
       "technicaltask.approve",
+      "technicaltask.complete",
+      "technicaltask.cancel",
       "technicaltask.delete",
     ];
     try {
@@ -674,9 +675,13 @@ describe("TechnicalTasksPage", () => {
     authState.username = "sales1";
     authState.perms = [
       "technicaltask.view",
+      "technicaltask.action.view",
+      "technicaltask.call_logs.view",
       "technicaltask.create",
       "technicaltask.update",
       "technicaltask.approve",
+      "technicaltask.complete",
+      "technicaltask.cancel",
       "technicaltask.delete",
     ];
     try {
@@ -700,16 +705,36 @@ describe("TechnicalTasksPage", () => {
     const { MODULE_NAMES, friendlyPermissionLabel } = await import("@/lib/permissionLabels");
 
     expect(NAV_ITEMS_BY_KEY["technical-tasks"]?.permission).toBe("technicaltask.view");
-    expect(NAV_ITEMS_BY_KEY["payments"]?.permission).toBe("technicaltask.view");
+    expect(NAV_ITEMS_BY_KEY["payments"]?.permission).toBe("payment.view");
+    expect(NAV_ITEMS_BY_KEY["technician-operations"]?.permission).toBe("technician_operations.view");
     expect(MODULE_NAMES.technicaltask).toBe("Technical Tasks");
+    expect(MODULE_NAMES.payment).toBe("Payments");
+    expect(MODULE_NAMES.technician_operations).toBe("Technician Gatepass & Wallet Management");
     expect(friendlyPermissionLabel("technicaltask.view")).toBe("View");
-    expect(friendlyPermissionLabel("technicaltask.create")).toBe("Create");
-    expect(friendlyPermissionLabel("technicaltask.update")).toBe("Edit");
-    expect(friendlyPermissionLabel("technicaltask.approve")).toBe("Approve");
-    expect(friendlyPermissionLabel("technicaltask.delete")).toBe("Delete");
-    expect(friendlyPermissionLabel("technicaltask.export")).toBe("Export");
+    expect(friendlyPermissionLabel("technicaltask.pending.view")).toBe("View Pending Tab");
+    expect(friendlyPermissionLabel("technicaltask.approved.view")).toBe("View Approved Tab");
+    expect(friendlyPermissionLabel("technicaltask.completed.view")).toBe("View Completed Tab");
+    expect(friendlyPermissionLabel("technicaltask.cancel.view")).toBe("View Cancel Tab");
+    expect(friendlyPermissionLabel("technicaltask.create")).toBe("+ Add New (Create)");
     expect(friendlyPermissionLabel("technicaltask.bulk_action")).toBe("Bulk Actions");
+    expect(friendlyPermissionLabel("technicaltask.action.view")).toBe("View Action Column (⋮)");
+    expect(friendlyPermissionLabel("technicaltask.call_logs.view")).toBe("Action: View Call Logs");
+    expect(friendlyPermissionLabel("technicaltask.approve")).toBe("Action: Approved (Pending Stage)");
+    expect(friendlyPermissionLabel("technicaltask.complete")).toBe("Action: Completed (Approved Stage)");
+    expect(friendlyPermissionLabel("technicaltask.cancel")).toBe("Action: Cancel (Approved Stage)");
+    expect(friendlyPermissionLabel("technicaltask.reopen")).toBe("Action: Reopen / Reassign (Cancel Stage)");
+    expect(friendlyPermissionLabel("technicaltask.update")).toBe("Action: Edit");
+    expect(friendlyPermissionLabel("technicaltask.delete")).toBe("Action: Delete");
     expect(friendlyPermissionLabel("technicaltask.manage")).toBe("Manage All");
+    expect(friendlyPermissionLabel("payment.view")).toBe("View");
+    expect(friendlyPermissionLabel("payment.create")).toBe("Create");
+    expect(friendlyPermissionLabel("payment.update")).toBe("Edit");
+    expect(friendlyPermissionLabel("payment.delete")).toBe("Delete");
+    expect(friendlyPermissionLabel("payment.manage")).toBe("Manage All");
+    expect(friendlyPermissionLabel("technician_operations.view")).toBe("View");
+    expect(friendlyPermissionLabel("technician_operations.create")).toBe("Create");
+    expect(friendlyPermissionLabel("technician_operations.update")).toBe("Edit");
+    expect(friendlyPermissionLabel("technician_operations.manage")).toBe("Manage All");
 
     authState.isSuperAdmin = false;
     authState.username = "viewer1";
@@ -719,12 +744,26 @@ describe("TechnicalTasksPage", () => {
         data: [{ ...sampleTasks[0], status: "Pending", task_approved_by: null }] as any,
         meta: { total: 1, page: 1, page_size: 50, total_pages: 1 } as any,
       });
-      render(<MemoryRouter><TechnicalTasksPage /></MemoryRouter>);
+      const { unmount } = render(<MemoryRouter><TechnicalTasksPage /></MemoryRouter>);
 
+      // Only All tab is visible; Pending/Approved/Completed/Cancel tabs, + ADD NEW, Bulk Actions, and ACTION column are hidden
+      expect(screen.getByRole("button", { name: /^All \(/ })).toBeTruthy();
+      expect(screen.queryByRole("button", { name: /^Pending \(/ })).toBeNull();
+      expect(screen.queryByRole("button", { name: /^Approved \(/ })).toBeNull();
+      expect(screen.queryByRole("button", { name: /^Completed \(/ })).toBeNull();
+      expect(screen.queryByRole("button", { name: /^Cancel \(/ })).toBeNull();
       expect(screen.queryByText("+ ADD NEW")).toBeNull();
       expect(screen.queryByText(/Imp \/ Exp/)).toBeNull();
       expect(screen.queryByText(/Bulk Actions/)).toBeNull();
+      expect(screen.queryByText("Action")).toBeNull();
+      expect(screen.queryByRole("button", { name: "⋮" })).toBeNull();
+      unmount();
 
+      // Grant Pending tab + Action column + Call Logs view -> those specific items appear, others stay hidden
+      authState.perms = ["technicaltask.view", "technicaltask.pending.view", "technicaltask.action.view", "technicaltask.call_logs.view"];
+      render(<MemoryRouter><TechnicalTasksPage /></MemoryRouter>);
+      expect(screen.getByRole("button", { name: /^Pending \(/ })).toBeTruthy();
+      expect(screen.queryByRole("button", { name: /^Approved \(/ })).toBeNull();
       await openMenuFor("SHREE KHODIYAR ENTERPRISE");
       expect(screen.queryByText("View Details")).toBeNull();
       expect(screen.getByText("Call Logs")).toBeTruthy();

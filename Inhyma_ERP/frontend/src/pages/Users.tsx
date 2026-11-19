@@ -58,7 +58,7 @@ const STATUS_OPTIONS: [string, string][] = [
  * role every other new account gets automatically. "admin" is blocked too,
  * so a same-named duplicate role can't be recreated after being retired.
  */
-const RESERVED_ROLE_NAMES = new Set(["super_admin", "user", "admin"]);
+const RESERVED_ROLE_NAMES = new Set(["super_admin", "user", "admin", "technician"]);
 
 
 
@@ -108,11 +108,13 @@ function UserTableSkeletonRows({ count = 8 }: { count?: number }) {
 
 /** Friendly display name for a role name coming back from the API. */
 function roleDisplayName(name: string): string {
-  if (name === "super_admin") return "Admin";
+  const lower = name.toLowerCase();
+  if (lower === "super_admin") return "Admin";
   // "employee" was the old internal name for the default role in an
   // earlier version of the seed script; "user" is the current one.
   // Both are shown the same way in case an older database still has it.
-  if (name === "employee" || name === "user") return "User";
+  if (lower === "employee" || lower === "user") return "User";
+  if (lower === "technician") return "Technician";
   return name;
 }
 
