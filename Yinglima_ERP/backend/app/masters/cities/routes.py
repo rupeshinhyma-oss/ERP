@@ -28,7 +28,7 @@ from app.events.dispatcher import EventDispatcher
 from app.masters.cities.dependencies import get_city_service
 from app.masters.cities.schemas import CityLookupRead, CityRead, CityCreate, CityUpdate, ImportSummaryRead
 from app.masters.cities.service import CityService
-from app.rbac.dependencies import require_permission
+from app.rbac.dependencies import require_any_permission, require_permission
 
 router = APIRouter(prefix="/masters/cities", tags=["Masters - Cities"])
 
@@ -120,7 +120,7 @@ async def list_citys(
     request: Request,
     query: ListQueryParams = Depends(get_list_query_params),
     service: CityService = Depends(get_city_service),
-    _current_user: CurrentUser = Depends(require_permission("city.view")),
+    _current_user: CurrentUser = Depends(require_any_permission("city.view", "supplier.view", "supplier.create", "supplier.update", "buyer.view", "buyer.create", "buyer.update", "warehouse.view", "warehouse.create", "warehouse.update", "organizationlist.view", "organizationlist.create", "organizationlist.update")),
 ) -> dict:
     """List citys, with search/sort/filter/pagination."""
     citys, total = await service.list_paginated(query)

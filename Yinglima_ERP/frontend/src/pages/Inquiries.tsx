@@ -1293,6 +1293,7 @@ function ItemsView({
   onError: (err: unknown) => void;
 }) {
   const confirm = useConfirm();
+  const { hasPermission } = useAuth();
   const initialDetail = inquiriesDetailCache.get(inquiryId);
   const [inquiry, setInquiry] = useState<Inquiry | null>(() => initialDetail || null);
   const [loading, setLoading] = useState(() => !initialDetail);
@@ -2165,8 +2166,8 @@ function ItemsView({
             onError={(msg) => setImportError(msg)}
             onComplete={() => void load(false)}
             onExportCsv={() => void handleExport("xlsx")}
-            showImport={true}
-            showExport={items.length > 0}
+            showImport={hasPermission("inquiry.import")}
+            showExport={hasPermission("inquiry.export") && items.length > 0}
             onOpenImportPage={() => {
               setImportError(null);
               setImportSummary(null);
@@ -3683,28 +3684,30 @@ function ItemsView({
                         {/* Bottom Action Bar (Gmail Style) */}
                         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingTop: "4px" }}>
                           <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                            <button
-                              type="submit"
-                              disabled={sendingEmail || !composerBody.trim() || !composerTo.trim()}
-                              style={{
-                                padding: "8px 20px",
-                                background: "#2563eb",
-                                color: "#ffffff",
-                                border: "none",
-                                borderRadius: "8px",
-                                fontSize: "13px",
-                                fontWeight: 700,
-                                cursor: sendingEmail ? "not-allowed" : "pointer",
-                                display: "flex",
-                                alignItems: "center",
-                                gap: "6px",
-                                boxShadow: "0 2px 4px rgba(37,99,235,0.2)",
-                                opacity: sendingEmail || !composerBody.trim() || !composerTo.trim() ? 0.7 : 1,
-                              }}
-                            >
-                              <span>{sendingEmail ? "⏳" : "✈️"}</span>
-                              <span>{sendingEmail ? "Sending Email..." : "Send Email"}</span>
-                            </button>
+                            <Can permission="inquiry.send_message">
+                              <button
+                                type="submit"
+                                disabled={sendingEmail || !composerBody.trim() || !composerTo.trim()}
+                                style={{
+                                  padding: "8px 20px",
+                                  background: "#2563eb",
+                                  color: "#ffffff",
+                                  border: "none",
+                                  borderRadius: "8px",
+                                  fontSize: "13px",
+                                  fontWeight: 700,
+                                  cursor: sendingEmail ? "not-allowed" : "pointer",
+                                  display: "flex",
+                                  alignItems: "center",
+                                  gap: "6px",
+                                  boxShadow: "0 2px 4px rgba(37,99,235,0.2)",
+                                  opacity: sendingEmail || !composerBody.trim() || !composerTo.trim() ? 0.7 : 1,
+                                }}
+                              >
+                                <span>{sendingEmail ? "⏳" : "✈️"}</span>
+                                <span>{sendingEmail ? "Sending Email..." : "Send Email"}</span>
+                              </button>
+                            </Can>
 
                             <label
                               style={{

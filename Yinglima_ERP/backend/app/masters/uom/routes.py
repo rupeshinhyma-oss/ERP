@@ -28,7 +28,7 @@ from app.events.dispatcher import EventDispatcher
 from app.masters.uom.dependencies import get_uom_service
 from app.masters.uom.schemas import UomRead, UomCreate, UomUpdate, ImportSummaryRead
 from app.masters.uom.service import UomService
-from app.rbac.dependencies import require_permission
+from app.rbac.dependencies import require_any_permission, require_permission
 
 router = APIRouter(prefix="/masters/uom", tags=["Masters - UoM"])
 
@@ -120,7 +120,7 @@ async def list_uoms(
     request: Request,
     query: ListQueryParams = Depends(get_list_query_params),
     service: UomService = Depends(get_uom_service),
-    _current_user: CurrentUser = Depends(require_permission("uom.view")),
+    _current_user: CurrentUser = Depends(require_any_permission("uom.view", "product.view", "product.create", "product.update", "inquiry.view", "inquiry.create", "inquiry.update", "local_purchase.view", "local_purchase.create", "local_purchase.update", "sale_process.view", "sale_process.create", "sale_process.update")),
 ) -> dict:
     """List uoms, with search/sort/filter/pagination."""
     uoms, total = await service.list_paginated(query)

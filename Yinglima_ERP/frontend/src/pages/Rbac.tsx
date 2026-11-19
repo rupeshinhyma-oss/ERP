@@ -236,10 +236,13 @@ export function RbacPage() {
   useEffect(() => {
     (async () => {
       try {
-        const permsRes = await apiGet<Permission[]>("/rbac/permissions");
+        const [permsRes] = await Promise.all([
+          apiGet<Permission[]>("/rbac/permissions"),
+          loadRoles(Boolean(rbacPageCache)),
+          loadUsers(),
+        ]);
         const permsData = permsRes.data || [];
         setAllPermissions(permsData);
-        await Promise.all([loadRoles(Boolean(rbacPageCache)), loadUsers()]);
         rbacPageCache = {
           permissions: permsData,
           roles: allRoles,

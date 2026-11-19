@@ -14,6 +14,7 @@ export interface NavSubItem {
   path: string;
   icon?: IconKey;
   permission?: string;
+  anyPermissions?: string[];
   superAdminOnly?: boolean;
 }
 
@@ -23,6 +24,7 @@ export interface NavItem {
   path?: string;
   icon: IconKey;
   permission?: string;
+  anyPermissions?: string[];
   superAdminOnly?: boolean;
   children?: NavSubItem[];
 }
@@ -51,8 +53,20 @@ export const NAV_SECTIONS: NavSection[] = [
     items: [
       { key: "masters-products", label: "Product Master", path: "/masters/products", icon: "box", permission: "product.view" },
       { key: "product-prices", label: "Product Prices", path: "/inventory/product-prices", icon: "coins", permission: "product_price.view" },
-      { key: "product-gallery", label: "Product Gallery", path: "/product-gallery", icon: "image", permission: "productgallery.view" },
-      { key: "stock-movement", label: "Stock Movement", path: "/inventory/stock-movements", icon: "stockMovement", permission: "stock_movement.view" },
+      {
+        key: "product-gallery",
+        label: "Product Gallery",
+        path: "/product-gallery",
+        icon: "image",
+        anyPermissions: ["productgallery.products.view", "productgallery.suppliers.view", "productgallery.quotations.view"],
+      },
+      {
+        key: "stock-movement",
+        label: "Stock Movement",
+        path: "/inventory/stock-movements",
+        icon: "stockMovement",
+        anyPermissions: ["stock_movement.inward.view", "stock_movement.outward.view", "stock_movement.ledger.view"],
+      },
     ],
   },
   {

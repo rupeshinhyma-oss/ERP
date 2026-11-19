@@ -21,7 +21,7 @@ from app.masters.company_list.schemas import (
     ImportSummaryRead,
 )
 from app.masters.company_list.service import CompanyService
-from app.rbac.dependencies import require_permission
+from app.rbac.dependencies import require_any_permission, require_permission
 
 router = APIRouter(prefix="/masters/company-list", tags=["Masters - Company List"])
 
@@ -31,7 +31,7 @@ async def list_companies(
     request: Request,
     query: ListQueryParams = Depends(get_list_query_params),
     service: CompanyService = Depends(get_company_service),
-    _current_user: CurrentUser = Depends(require_permission("organizationlist.view")),
+    _current_user: CurrentUser = Depends(require_any_permission("organizationlist.view", "product.view", "product.create", "product.update", "inquiry.view", "inquiry.create", "inquiry.update", "local_purchase.view", "local_purchase.create", "local_purchase.update", "sale_process.view", "sale_process.create", "sale_process.update", "user.view", "user.action", "planning.view", "consignment_overview.view")),
 ) -> dict:
     """List companies with search/pagination."""
     companies, total = await service.list_paginated(query)

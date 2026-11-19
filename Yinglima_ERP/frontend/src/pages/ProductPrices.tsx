@@ -565,8 +565,7 @@ export function ProductPricesPage() {
       // Also keep the main row strictly synchronized with the database quotes
       if (quotes.length > 0) {
         const preferredQuote = quotes.find((q) => q.is_preferred);
-        const sorted = [...quotes].sort((a, b) => toUsd(a.unit_price, a.currency) - toUsd(b.unit_price, b.currency));
-        const activeQuote = preferredQuote || sorted[0];
+        const activeQuote = preferredQuote || quotes[0];
         setItems((prev) =>
           prev.map((r) => {
             if (r.product_id === productId) {
@@ -624,8 +623,7 @@ export function ProductPricesPage() {
               is_preferred: true,
             };
           } else if (!supplierId) {
-            const sorted = [...quotes].sort((a, b) => toUsd(a.unit_price, a.currency) - toUsd(b.unit_price, b.currency));
-            const best = sorted[0];
+            const best = quotes[0];
             return {
               ...r,
               primary_supplier_id: best ? best.supplier_id : null,
@@ -704,17 +702,17 @@ export function ProductPricesPage() {
       return;
     }
 
-    // 1. INSTANT OPTIMISTIC SUB-TABLE UPDATE
+    // 1. INSTANT OPTIMISTIC SUB-TABLE UPDATE (preserve added/preferred order; never reorder by price)
     const updatedQuotes = (supplierQuotes[productId] || []).map((q) =>
       q.link_id === linkId ? { ...q, unit_price: num } : q
     );
-    updatedQuotes.sort((a, b) => toUsd(a.unit_price, a.currency) - toUsd(b.unit_price, b.currency));
     setSupplierQuotes((prev) => ({ ...prev, [productId]: updatedQuotes }));
 
     // 2. INSTANT OPTIMISTIC MAIN ROW UPDATE
-    const bestQuote = updatedQuotes.find((q) => q.unit_price != null);
-    const newLowest = bestQuote ? bestQuote.unit_price : num;
-    const newBestQuote = bestQuote || updatedQuotes[0];
+    const preferredQuote = updatedQuotes.find((q) => q.is_preferred);
+    const firstQuoted = updatedQuotes.find((q) => q.unit_price != null);
+    const newBestQuote = preferredQuote || firstQuoted || updatedQuotes[0];
+    const newLowest = newBestQuote ? newBestQuote.unit_price : num;
 
     setItems((prev) =>
       prev.map((row) => {
@@ -760,13 +758,14 @@ export function ProductPricesPage() {
     });
     if (!confirmed) return;
 
-    // 1. INSTANT OPTIMISTIC SUB-TABLE REMOVAL
+    // 1. INSTANT OPTIMISTIC SUB-TABLE REMOVAL (preserve added/preferred order)
     const remainingQuotes = (supplierQuotes[productId] || []).filter((q) => q.link_id !== linkId);
-    remainingQuotes.sort((a, b) => toUsd(a.unit_price, a.currency) - toUsd(b.unit_price, b.currency));
     setSupplierQuotes((prev) => ({ ...prev, [productId]: remainingQuotes }));
 
     // 2. INSTANT OPTIMISTIC MAIN ROW UPDATE
-    const bestQuote = remainingQuotes.find((q) => q.unit_price != null);
+    const preferredQuote = remainingQuotes.find((q) => q.is_preferred);
+    const firstQuoted = remainingQuotes.find((q) => q.unit_price != null);
+    const bestQuote = preferredQuote || firstQuoted || null;
     const newLowest = bestQuote ? bestQuote.unit_price : null;
     const newBestQuote = bestQuote || null;
 
@@ -848,7 +847,7 @@ export function ProductPricesPage() {
       };
       const cleaned = isPref ? existing.map(q => ({ ...q, is_preferred: false })) : existing;
       const nextList = idx >= 0 ? cleaned.map((q, i) => (i === idx ? newQuote : q)) : [...cleaned, newQuote];
-      nextList.sort((a, b) => toUsd(a.unit_price, a.currency) - toUsd(b.unit_price, b.currency));
+      nextList.sort((a, b) => (a.is_preferred === b.is_preferred ? 0 : a.is_preferred ? -1 : 1));
       return { ...prev, [productId]: nextList };
     });
 
@@ -856,10 +855,9 @@ export function ProductPricesPage() {
     setItems((prev) =>
       prev.map((row) => {
         if (row.product_id === productId) {
-          const isNewBest = row.best_price == null || toUsd(priceNum, curr) <= toUsd(row.best_price, row.best_currency);
           const wasLinked = supplierQuotes[productId]?.some((q) => q.supplier_id === suppId);
           const newCount = wasLinked ? row.supplier_count : (row.supplier_count || 0) + 1;
-          const makeActive = isPref || (!row.is_preferred && isNewBest);
+          const makeActive = isPref || row.primary_supplier_id == null || (wasLinked && row.primary_supplier_id === suppId);
           return {
             ...row,
             best_price: makeActive ? priceNum : row.best_price,
@@ -962,10 +960,9 @@ export function ProductPricesPage() {
     setItems((prev) =>
       prev.map((row) => {
         if (row.product_id === productId) {
-          const isNewBest = row.best_price == null || toUsd(priceVal, curr) <= toUsd(row.best_price, row.best_currency);
           const wasLinked = supplierQuotes[productId]?.some((q) => q.supplier_id === suppId);
           const newCount = wasLinked ? row.supplier_count : (row.supplier_count || 0) + 1;
-          const makeActive = assignIsPreferred || (!row.is_preferred && isNewBest);
+          const makeActive = assignIsPreferred || row.primary_supplier_id == null || (wasLinked && row.primary_supplier_id === suppId);
           return {
             ...row,
             best_price: makeActive ? priceVal : row.best_price,
@@ -1008,7 +1005,7 @@ export function ProductPricesPage() {
       };
       const cleaned = assignIsPreferred ? existing.map(q => ({ ...q, is_preferred: false })) : existing;
       const nextList = idx >= 0 ? cleaned.map((q, i) => (i === idx ? newQuote : q)) : [...cleaned, newQuote];
-      nextList.sort((a, b) => toUsd(a.unit_price, a.currency) - toUsd(b.unit_price, b.currency));
+      nextList.sort((a, b) => (a.is_preferred === b.is_preferred ? 0 : a.is_preferred ? -1 : 1));
       return { ...prev, [productId]: nextList };
     });
 
@@ -2099,24 +2096,26 @@ export function ProductPricesPage() {
                                           + Quote
                                         </button>
                                       )}
-                                      <button
-                                        type="button"
-                                        onClick={() => openHistoryDrawer(row)}
-                                        className="btn btn-small"
-                                        style={{
-                                          fontSize: "12px",
-                                          padding: "4px 8px",
-                                          background: "#eff6ff",
-                                          color: "#1d4ed8",
-                                          border: "1px solid #bfdbfe",
-                                          display: "inline-flex",
-                                          alignItems: "center",
-                                          gap: "4px",
-                                        }}
-                                        title="View complete Purchase and Sales History"
-                                      >
-                                        📜 History
-                                      </button>
+                                      {hasPermission("product_price.trade_history") && (
+                                        <button
+                                          type="button"
+                                          onClick={() => openHistoryDrawer(row)}
+                                          className="btn btn-small"
+                                          style={{
+                                            fontSize: "12px",
+                                            padding: "4px 8px",
+                                            background: "#eff6ff",
+                                            color: "#1d4ed8",
+                                            border: "1px solid #bfdbfe",
+                                            display: "inline-flex",
+                                            alignItems: "center",
+                                            gap: "4px",
+                                          }}
+                                          title="View complete Purchase and Sales History"
+                                        >
+                                          📜 History
+                                        </button>
+                                      )}
                                       <button
                                         type="button"
                                         onClick={() => toggleRowExpansion(row.product_id, row.supplier_count)}
@@ -2170,15 +2169,17 @@ export function ProductPricesPage() {
                                     </strong>
                                   </div>
                                   <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                                    <button
-                                      type="button"
-                                      className="btn btn-tiny btn-outline"
-                                      onClick={() => openHistoryDrawer(row)}
-                                      style={{ display: "inline-flex", alignItems: "center", gap: "4px" }}
-                                      title="Open complete Purchase & Sales trade history"
-                                    >
-                                      📜 Full Trade History
-                                    </button>
+                                    {hasPermission("product_price.trade_history") && (
+                                      <button
+                                        type="button"
+                                        className="btn btn-tiny btn-outline"
+                                        onClick={() => openHistoryDrawer(row)}
+                                        style={{ display: "inline-flex", alignItems: "center", gap: "4px" }}
+                                        title="Open complete Purchase & Sales trade history"
+                                      >
+                                        📜 Full Trade History
+                                      </button>
+                                    )}
                                     <button
                                       type="button"
                                       className="btn btn-tiny btn-secondary"
@@ -3091,22 +3092,24 @@ export function ProductPricesPage() {
               )}
 
               {/* View History Button */}
-              <div style={{ marginTop: "20px", display: "flex", gap: "10px" }}>
-                <button
-                  type="button"
-                  className="btn btn-secondary"
-                  onClick={() => {
-                    openHistoryDrawer({
-                      product_id: drawerProduct.id,
-                      product_name: drawerProduct.product_name_tally || drawerProduct.product_name || "Product",
-                      product_code: drawerProduct.product_code || null,
-                    });
-                  }}
-                  style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}
-                >
-                  📜 View Trade &amp; Price History
-                </button>
-              </div>
+              {hasPermission("product_price.trade_history") && (
+                <div style={{ marginTop: "20px", display: "flex", gap: "10px" }}>
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={() => {
+                      openHistoryDrawer({
+                        product_id: drawerProduct.id,
+                        product_name: drawerProduct.product_name_tally || drawerProduct.product_name || "Product",
+                        product_code: drawerProduct.product_code || null,
+                      });
+                    }}
+                    style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}
+                  >
+                    📜 View Trade &amp; Price History
+                  </button>
+                </div>
+              )}
             </>
           )}
         </SideDrawer>

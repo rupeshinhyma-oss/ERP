@@ -28,7 +28,7 @@ from app.events.dispatcher import EventDispatcher
 from app.masters.currencies.dependencies import get_currency_service
 from app.masters.currencies.schemas import CurrencyRead, CurrencyCreate, CurrencyUpdate, ImportSummaryRead
 from app.masters.currencies.service import CurrencyService
-from app.rbac.dependencies import require_permission
+from app.rbac.dependencies import require_any_permission, require_permission
 
 router = APIRouter(prefix="/masters/currencies", tags=["Masters - Currencies"])
 
@@ -120,7 +120,7 @@ async def list_currencys(
     request: Request,
     query: ListQueryParams = Depends(get_list_query_params),
     service: CurrencyService = Depends(get_currency_service),
-    _current_user: CurrentUser = Depends(require_permission("currency.view")),
+    _current_user: CurrentUser = Depends(require_any_permission("currency.view", "inquiry.view", "inquiry.create", "inquiry.update", "local_purchase.view", "local_purchase.create", "local_purchase.update", "sale_process.view", "sale_process.create", "sale_process.update", "finance_report.view", "vat_return.view")),
 ) -> dict:
     """List currencys, with search/sort/filter/pagination."""
     currencys, total = await service.list_paginated(query)

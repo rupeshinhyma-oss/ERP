@@ -3,7 +3,7 @@
 **System:** Yinglima_ERP (China Procurement & Sourcing)  
 **Module:** Supplier & Factory Management (`/suppliers`)  
 **Status:** Active / Production Ready  
-**Last Updated:** 2026-10-13  
+**Last Updated:** 2026-11-17  
 **Document Purpose:** Single source of truth detailing the exact business requirements, data structures, field validations, UI layouts, side-drawer specifications, and downstream cross-module integrations for the Supplier module.
 
 ---

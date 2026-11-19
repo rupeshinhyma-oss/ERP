@@ -902,7 +902,16 @@ export function ProductsPage() {
             const name = p.product_name_tally || p.product_name || "—";
             const hasLicense = Boolean(p.license_certificate_required && p.license_certificate_required.trim());
             return (
-              <div style={{ display: "inline-flex", alignItems: "center", gap: "8px", maxWidth: "360px", minWidth: "240px", flexWrap: "nowrap" }}>
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
+                  minWidth: "280px",
+                  maxWidth: hasLicense ? "460px" : "420px",
+                  flexWrap: "nowrap",
+                }}
+              >
                 <a
                   href="#"
                   className="cell-primary"
@@ -910,10 +919,16 @@ export function ProductsPage() {
                   style={{
                     color: hasLicense ? "#dc2626" : "var(--color-primary)",
                     fontWeight: 700,
-                    maxWidth: hasLicense ? "220px" : "320px",
+                    lineHeight: 1.35,
+                    whiteSpace: "normal",
+                    display: "-webkit-box",
+                    WebkitLineClamp: 2,
+                    WebkitBoxOrient: "vertical",
                     overflow: "hidden",
                     textOverflow: "ellipsis",
-                    whiteSpace: "nowrap",
+                    wordBreak: "break-word",
+                    flex: 1,
+                    minWidth: 0,
                   }}
                   onClick={(e) => {
                     e.preventDefault();

@@ -23,7 +23,7 @@ from app.masters.buyer_types.schemas import (
     ImportSummaryRead,
 )
 from app.masters.buyer_types.service import BuyerTypeService
-from app.rbac.dependencies import require_permission
+from app.rbac.dependencies import require_any_permission, require_permission
 
 router = APIRouter(prefix="/masters/buyer-types", tags=["Masters - Buyer Types"])
 
@@ -84,7 +84,7 @@ async def list_buyer_types(
     request: Request,
     query: ListQueryParams = Depends(get_list_query_params),
     service: BuyerTypeService = Depends(get_buyer_type_service),
-    _current_user: CurrentUser = Depends(require_permission("buyertype.view")),
+    _current_user: CurrentUser = Depends(require_any_permission("buyertype.view", "buyer.view", "buyer.create", "buyer.update")),
 ) -> dict:
     items, total = await service.list_paginated(query)
     meta = PageMeta.build(page=query.page.page, page_size=query.page.page_size, total_records=total).as_meta_dict()

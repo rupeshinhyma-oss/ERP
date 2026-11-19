@@ -84,7 +84,7 @@ async def list_warehouses(
     request: Request,
     query: ListQueryParams = Depends(get_list_query_params),
     service: WarehouseService = Depends(get_warehouse_service),
-    _current_user: CurrentUser = Depends(require_permission("warehouse.view")),
+    _current_user: CurrentUser = Depends(require_any_permission("warehouse.view", "local_purchase.view", "local_purchase.inward", "sale_process.view", "sale_process.approve", "stock_movement.inward.view", "stock_movement.outward.view", "stock_movement.ledger.view")),
 ) -> dict:
     items, total = await service.list_paginated(query)
     meta = PageMeta.build(page=query.page.page, page_size=query.page.page_size, total_records=total).as_meta_dict()
@@ -156,7 +156,7 @@ async def get_warehouse(
     warehouse_id: uuid.UUID,
     request: Request,
     service: WarehouseService = Depends(get_warehouse_service),
-    _current_user: CurrentUser = Depends(require_permission("warehouse.view")),
+    _current_user: CurrentUser = Depends(require_any_permission("warehouse.view", "local_purchase.view", "local_purchase.inward", "sale_process.view", "sale_process.approve", "stock_movement.inward.view", "stock_movement.outward.view", "stock_movement.ledger.view")),
 ) -> dict:
     """Fetch a single warehouse by ID."""
     item = await service.get_by_id_or_raise(warehouse_id)

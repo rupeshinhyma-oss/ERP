@@ -55,7 +55,7 @@ async def _record_action(
 @router.get("/direct-reports/{employee_id}", summary="List an employee's direct reports")
 async def get_direct_reports(
     employee_id: uuid.UUID, request: Request, service: ReportingService = Depends(get_reporting_service),
-    _current_user: CurrentUser = Depends(require_permission("reporting.view")),
+    _current_user: CurrentUser = Depends(require_permission("user.view")),
 ) -> dict:
     """List everyone who currently reports to this employee (any active relationship type)."""
     reports = await service.list_direct_reports(employee_id)
@@ -66,7 +66,7 @@ async def get_direct_reports(
 @router.get("/managers/{employee_id}", summary="List an employee's managers")
 async def get_managers(
     employee_id: uuid.UUID, request: Request, service: ReportingService = Depends(get_reporting_service),
-    _current_user: CurrentUser = Depends(require_permission("reporting.view")),
+    _current_user: CurrentUser = Depends(require_permission("user.view")),
 ) -> dict:
     """List every manager this employee currently reports to (across relationship types/departments)."""
     managers = await service.list_managers(employee_id)
@@ -78,7 +78,7 @@ async def get_managers(
 async def create_reporting_relationship(
     payload: ReportingRelationshipCreate, request: Request,
     service: ReportingService = Depends(get_reporting_service),
-    current_user: CurrentUser = Depends(require_permission("reporting.manage")),
+    current_user: CurrentUser = Depends(require_permission("user.action")),
     audit_service: AuditService = Depends(get_audit_service),
 ) -> dict:
     """
@@ -103,7 +103,7 @@ async def create_reporting_relationship(
 async def set_primary_manager(
     employee_id: uuid.UUID, payload: SetPrimaryManagerRequest, request: Request,
     service: ReportingService = Depends(get_reporting_service),
-    current_user: CurrentUser = Depends(require_permission("reporting.manage")),
+    current_user: CurrentUser = Depends(require_permission("user.action")),
     audit_service: AuditService = Depends(get_audit_service),
 ) -> dict:
     """
@@ -128,7 +128,7 @@ async def set_primary_manager(
 @router.delete("/{relationship_id}", summary="Remove a reporting relationship")
 async def remove_reporting_relationship(
     relationship_id: uuid.UUID, request: Request, service: ReportingService = Depends(get_reporting_service),
-    current_user: CurrentUser = Depends(require_permission("reporting.manage")),
+    current_user: CurrentUser = Depends(require_permission("user.action")),
     audit_service: AuditService = Depends(get_audit_service),
 ) -> dict:
     """End a reporting relationship (marks it INACTIVE; history is preserved per Part 14)."""
@@ -144,7 +144,7 @@ async def remove_reporting_relationship(
 async def reassign_direct_reports(
     manager_employee_id: uuid.UUID, payload: ReassignDirectReportsRequest, request: Request,
     service: ReportingService = Depends(get_reporting_service),
-    current_user: CurrentUser = Depends(require_permission("reporting.manage")),
+    current_user: CurrentUser = Depends(require_permission("user.action")),
     audit_service: AuditService = Depends(get_audit_service),
 ) -> dict:
     """
@@ -168,7 +168,7 @@ async def reassign_direct_reports(
 async def get_org_chart(
     request: Request, reporting_service: ReportingService = Depends(get_reporting_service),
     db: AsyncSession = Depends(get_db_session),
-    _current_user: CurrentUser = Depends(require_permission("reporting.view")),
+    _current_user: CurrentUser = Depends(require_permission("user.view")),
 ) -> dict:
     """
     Return the full set of active PRIMARY_REPORTING edges, with employee

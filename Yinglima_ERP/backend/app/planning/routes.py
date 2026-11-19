@@ -366,7 +366,9 @@ async def duplicate_sheet(
 async def list_sheets(
     request: Request,
     service: PlanningService = Depends(get_planning_service),
-    _current_user: CurrentUser = Depends(require_permission("planning.view")),
+    _current_user: CurrentUser = Depends(
+        require_any_permission("planning.view", "sale_process.view", "sale_process.create", "sale_process.update")
+    ),
 ) -> dict:
     sheets = await service.list_sheets()
     data = [PlanningSheetRead.model_validate(s).model_dump(mode="json") for s in sheets]
@@ -973,7 +975,7 @@ async def auto_populate_rows_from_item_source(
     payload: PlanningItemAutoPopulate,
     request: Request,
     service: PlanningService = Depends(get_planning_service),
-    current_user: CurrentUser = Depends(require_permission("planning.row.manage")),
+    current_user: CurrentUser = Depends(require_permission("planning.column.manage")),
 ) -> dict:
     """
     "Load everything from that field's data automatically" -- the checkbox
@@ -1228,7 +1230,7 @@ async def rename_row(
     payload: PlanningRowRename,
     request: Request,
     service: PlanningService = Depends(get_planning_service),
-    current_user: CurrentUser = Depends(require_permission("planning.row.manage")),
+    current_user: CurrentUser = Depends(require_permission("planning.column.manage")),
 ) -> dict:
     row = await service.rename_row(sheet_id, row_id, label=payload.label, user_id=current_user.id, username=_actor_display_name(current_user))
     data = PlanningRowRead.model_validate(_row_to_read_dict(row)).model_dump(mode="json")
@@ -1266,7 +1268,7 @@ async def move_row(
     payload: PlanningRowMove,
     request: Request,
     service: PlanningService = Depends(get_planning_service),
-    current_user: CurrentUser = Depends(require_permission("planning.row.manage")),
+    current_user: CurrentUser = Depends(require_permission("planning.column.manage")),
 ) -> dict:
     row = await service.move_row(
         sheet_id, row_id, new_position=payload.position, user_id=current_user.id, username=_actor_display_name(current_user)
@@ -1282,7 +1284,7 @@ async def delete_row(
     row_id: uuid.UUID,
     request: Request,
     service: PlanningService = Depends(get_planning_service),
-    current_user: CurrentUser = Depends(require_permission("planning.row.manage")),
+    current_user: CurrentUser = Depends(require_permission("planning.column.manage")),
 ) -> dict:
     await service.delete_row(sheet_id, row_id, user_id=current_user.id, username=_actor_display_name(current_user))
     await _broadcast(sheet_id, "row_deleted", {"row_id": str(row_id)}, current_user=current_user, service=service)

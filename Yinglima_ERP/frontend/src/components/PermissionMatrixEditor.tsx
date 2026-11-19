@@ -630,9 +630,6 @@ export const PermissionMatrixEditor: React.FC<PermissionMatrixEditorProps> = ({
                                       </span>
                                     )}
                                   </div>
-                                  <span style={{ fontSize: "10px", color: "#64748b", fontFamily: "monospace", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                                    {p.code.split(".").slice(1).join(".") || p.code}
-                                  </span>
                                 </div>
                               </label>
                             );

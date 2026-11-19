@@ -100,7 +100,7 @@ export function ActionDropdown({
           setOpen((v) => !v);
         }}
       >
-        {label || (iconOnly ? "⋮" : "⋮ Actions ▾")}
+        {label || (iconOnly ? "⋮" : "⋮")}
       </button>
       {open &&
         createPortal(

@@ -36,7 +36,7 @@ from app.masters.product_sub_categories.schemas import (
     ProductSubCategoryUpdate,
 )
 from app.masters.product_sub_categories.service import ProductSubCategoryService
-from app.rbac.dependencies import require_permission
+from app.rbac.dependencies import require_any_permission, require_permission
 
 router = APIRouter(prefix="/masters/product-sub-categories", tags=["Masters - Product Sub-Categories"])
 
@@ -131,7 +131,7 @@ async def list_sub_categories(
     request: Request,
     query: ListQueryParams = Depends(get_list_query_params),
     service: ProductSubCategoryService = Depends(get_product_sub_category_service),
-    _current_user: CurrentUser = Depends(require_permission("subcategory.view")),
+    _current_user: CurrentUser = Depends(require_any_permission("subcategory.view", "product.view", "product.create", "product.update", "productgallery.products.view", "productgallery.suppliers.view", "product_price.view", "supplier.view", "supplier.create", "supplier.update", "buyer.view", "buyer.create", "buyer.update", "inquiry.view", "inquiry.create", "inquiry.update")),
 ) -> dict:
     """List product sub-categories, with search/sort/filter/pagination."""
     sub_categories, total = await service.list_paginated(query)

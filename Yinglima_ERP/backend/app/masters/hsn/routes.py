@@ -28,7 +28,7 @@ from app.events.dispatcher import EventDispatcher
 from app.masters.hsn.dependencies import get_hsn_service
 from app.masters.hsn.schemas import HsnRead, HsnCreate, HsnUpdate, ImportSummaryRead
 from app.masters.hsn.service import HsnService
-from app.rbac.dependencies import require_permission
+from app.rbac.dependencies import require_any_permission, require_permission
 
 router = APIRouter(prefix="/masters/hsn", tags=["Masters - HSN"])
 
@@ -120,7 +120,7 @@ async def list_hsns(
     request: Request,
     query: ListQueryParams = Depends(get_list_query_params),
     service: HsnService = Depends(get_hsn_service),
-    _current_user: CurrentUser = Depends(require_permission("hsn.view")),
+    _current_user: CurrentUser = Depends(require_any_permission("hsn.view", "product.view", "product.create", "product.update", "local_purchase.view", "local_purchase.create", "local_purchase.update", "sale_process.view", "sale_process.create", "sale_process.update", "vat_return.view", "vat_return.create", "vat_return.update")),
 ) -> dict:
     """List hsns, with search/sort/filter/pagination."""
     hsns, total = await service.list_paginated(query)

@@ -453,7 +453,7 @@ export function SuppliersPage() {
   const canBulkAction = hasPermission("supplier.bulk_action");
   const canEditGrade = hasPermission("supplier.grade_edit");
   const canEditPotential = hasPermission("supplier.potential_edit");
-  const canEditCurrentStatus = hasPermission("supplier.currentstatus") || hasPermission("supplier.update");
+  const canEditCurrentStatus = hasPermission("supplier.currentstatus");
 
   const initialCache = supplierListCache.get("default");
   const [rows, setRows] = useState<Supplier[]>(() => initialCache?.rows || []);

@@ -3,7 +3,7 @@
 **System:** Yinglima_ERP  
 **Module:** Local Procurement & Purchases (`/purchases/local`)  
 **Status:** Active / Production Ready  
-**Last Updated:** 2026-10-12  
+**Last Updated:** 2026-11-18  
 
 ---
 

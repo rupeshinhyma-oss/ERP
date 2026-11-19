@@ -199,6 +199,7 @@ export const ACTION_ICONS: Record<string, string> = {
   clientgrade: "⭐",
   cancel: "↩️",
   inward: "📦",
+  restore: "♻️",
 };
 
 /**
@@ -208,20 +209,38 @@ export const ACTION_ICONS: Record<string, string> = {
  * special-cased by their exact, full code instead.
  */
 const FULL_CODE_LABELS: Record<string, string> = {
+  "planning.view": "View Planning Sheets",
+  "planning.sheet.manage": "Manage Sheets & Tabs",
+  "planning.column.manage": "Manage Columns (Add / Edit)",
+  "planning.cell.edit": "Edit Cells & Remarks",
   "planning.textyn.edit": "Edit TEST(Y/N) Column",
   "planning.approvaldate.edit": "Edit APPROVAL DATE Column",
-  "planning.colorstatusred.edit": "Set Status: Red",
-  "planning.colorstatusgreen.edit": "Set Status: Green",
+  "planning.colorstatusred.edit": "Set Status: Red (Requirement)",
+  "planning.colorstatusgreen.edit": "Set Status: Green (Purchased)",
+  "organization.manage": "Manage Organization Profile",
+  "roles_permissions.action": "Manage Roles & Overrides",
+  "user.action": "Manage Users & Overrides",
   "buyer.currentstatus": "Current Status",
   "buyer.potential": "Potential",
   "buyer.clientgrade": "Client Grade",
+  "supplier.currentstatus": "Current Status",
+  "trash.restore": "Restore from Trash",
+  "trash.delete": "Permanent Delete / Empty Trash",
   "inquiry.approve": "Approve Quotation",
   "inquiry.send_message": "Send Messages (Email/WeChat)",
   "local_purchase.export": "Export / Print",
   "local_purchase.inward": "Inward to Warehouse",
+  "local_purchase.price_history": "View Price History",
+  "product_price.trade_history": "View Trade History",
+  "productgallery.products.view": "View Product Photos",
+  "productgallery.suppliers.view": "View Supplier Photos",
+  "productgallery.quotations.view": "View Quotation Docs",
+  "productgallery.delete": "Delete Photos / Media",
+  "stock_movement.inward.view": "View Inward Register",
+  "stock_movement.outward.view": "View Outward Register",
+  "stock_movement.ledger.view": "View Current Stock Ledger",
   "sale_process.approve": "Update Status / Workflow",
   "sale_process.export": "Export Excel & CI/Packing Docs",
-  "stock_movement.cancel": "Cancel / Reverse Movement",
   "notification_settings.manage": "Manage Notification Rules",
   // Financial Report
   "finance_report.view": "View Financial Report & History",
@@ -268,6 +287,13 @@ export function friendlyActionIcon(code: string): string {
   if (code === "consignment_overview.cargo_status.edit") return "✅";
   if (code === "consignment_overview.product_summary.view") return "📦";
   if (code === "vat_return.receipt") return "💳";
+  if (code === "local_purchase.price_history" || code === "product_price.trade_history") return "📜";
+  if (code === "productgallery.products.view") return "📦";
+  if (code === "productgallery.suppliers.view") return "🏭";
+  if (code === "productgallery.quotations.view") return "📄";
+  if (code === "stock_movement.inward.view") return "📥";
+  if (code === "stock_movement.outward.view") return "📤";
+  if (code === "stock_movement.ledger.view") return "📊";
   const parts = code.split(".");
   const action = parts[parts.length - 1];
   return ACTION_ICONS[action] || "🔹";

@@ -27,7 +27,7 @@ from app.masters.product_prices.schemas import (
     UpdatePricePayload,
 )
 from app.masters.product_prices.service import ProductPriceService
-from app.rbac.dependencies import require_permission
+from app.rbac.dependencies import require_any_permission, require_permission
 
 logger = get_logger(__name__)
 
@@ -111,7 +111,7 @@ async def get_product_trade_history(
     request: Request,
     product_id: uuid.UUID,
     service: ProductPriceService = Depends(get_service),
-    _current_user: CurrentUser = Depends(require_permission("product_price.view")),
+    _current_user: CurrentUser = Depends(require_any_permission("product_price.trade_history", "local_purchase.price_history")),
 ) -> dict:
     history = await service.get_trade_history(product_id)
     return build_success_response(

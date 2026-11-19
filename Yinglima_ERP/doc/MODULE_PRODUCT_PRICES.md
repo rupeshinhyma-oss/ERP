@@ -3,7 +3,7 @@
 **System:** Yinglima_ERP  
 **Module:** Inventory — Product Prices (`/inventory/product-prices`)  
 **Status:** Active / Production Ready  
-**Last Updated:** 2026-10-27  
+**Last Updated:** 2026-11-18  
 
 ---
 
@@ -96,3 +96,8 @@ In industrial procurement and international trade, **the cheapest supplier is NO
 4. **100% Zoom Compact Modal Layout & Footer Visibility (`ProductPrices.tsx` & `style.css`):**
    * Wrapped the form fields inside a single zero-padding body container (`padding: 0, gap: "12px"`) so the global `.modal-card form > :not(.form-actions)` CSS rule does not inject `20px 24px` padding onto each individual input row.
    * Configured `.modal-centered-backdrop` with `overflow-y: auto` and `.modal-dialog-card.modal-overflow-visible` with `max-height: none; margin: auto`, ensuring the `Cancel` and `+ Add Supplier Quote` action buttons are always 100% visible at 100% browser zoom on all screen resolutions.
+5. **Supplier Quote & Main-Row Ordering Rule (`created_at ASC`, Never Auto-Switched by Lowest Price):**
+   * In both the backend (`ProductPriceRepository.list_paginated` & `get_product_suppliers`) and frontend (`ProductPrices.tsx`), both the **main row (`SUPPLIER BRAND` / `BEST PRICE (QUOTE)`)** and the expandable **Supplier Quotations & Comparison** sub-table show **Preferred Supplier first** (only if explicitly marked `⭐ Preferred`), followed by **added/creation order (`created_at ASC`)**.
+   * Adding or editing a lower-priced supplier quote **never** promotes that supplier to row 1 or overwrites the main row's `SUPPLIER BRAND` automatically—it stays in its added position while the green **`LOWEST`** badge highlights whichever quote has the lowest price.
+6. **Granular Trade History Permission (`product_price.trade_history`):**
+   * The `📜 History`, `📜 Full Trade History`, and `📜 View Trade & Price History` buttons in `ProductPrices.tsx` (and `GET /inventory/product-prices/{product_id}/history` alongside `local_purchase.price_history`) are gated by `product_price.trade_history` (**View Trade History**), allowing admins to grant or revoke Trade & Price History independently of `product_price.view`.
