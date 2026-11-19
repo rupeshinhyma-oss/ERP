@@ -11,8 +11,9 @@ export function GatePassPdfPage() {
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const [liveItem, setLiveItem] = useState<SaleOrder | null>(null);
 
-  // Find order item from static datasets or fallback
+  // Find order item from static datasets only in test mode
   const staticItem = useMemo(() => {
+    if (import.meta.env.MODE !== "test") return null;
     const saleMatch = INITIAL_SALE_ORDERS.find(
       (it) =>
         it.id === id ||

@@ -33,8 +33,9 @@ export function SalesOrderPdfPage() {
     setSearchParams(newParams);
   };
 
-  // Find order item from static datasets or fallback to 3826
+  // Find order item from static datasets only in test mode
   const staticItem = useMemo(() => {
+    if (import.meta.env.MODE !== "test") return null;
     // 1. Search in INITIAL_DISCOUNT_ORDERS
     const discountMatch = INITIAL_DISCOUNT_ORDERS.find(
       (it) =>

@@ -8,7 +8,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import Select, func, or_, select
+from sqlalchemy import Select, and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common.base_repository import BaseRepository
@@ -50,6 +50,8 @@ class LeadRepository(BaseRepository[Lead]):
         business_type: str | None = None,
         allotted_to: str | None = None,
         allotted_to_names: set[str] | None = None,
+        scoped_user_ids: set[uuid.UUID] | None = None,
+        scoped_usernames: set[str] | None = None,
         created_by: str | None = None,
         status: str | None = None,
         city: str | None = None,
@@ -80,7 +82,26 @@ class LeadRepository(BaseRepository[Lead]):
             stmt = stmt.where(func.lower(Lead.priority) == priority.strip().lower())
         if business_type and business_type.strip():
             stmt = stmt.where(func.lower(Lead.business_type) == business_type.strip().lower())
-        if allotted_to_names:
+        if scoped_user_ids is not None:
+            scope_conds = [
+                Lead.owner_user_id.in_(list(scoped_user_ids)),
+                and_(Lead.owner_user_id.is_(None), Lead.created_by_user_id.in_(list(scoped_user_ids))),
+            ]
+            if scoped_usernames:
+                scope_conds.append(
+                    and_(
+                        Lead.owner_user_id.is_(None),
+                        Lead.created_by_user_id.is_(None),
+                        or_(
+                            func.lower(Lead.allotted_to).in_(sorted(scoped_usernames)),
+                            func.lower(Lead.created_by).in_(sorted(scoped_usernames)),
+                        ),
+                    )
+                )
+            stmt = stmt.where(or_(*scope_conds))
+            if allotted_to and allotted_to.strip():
+                stmt = stmt.where(func.lower(Lead.allotted_to) == allotted_to.strip().lower())
+        elif allotted_to_names:
             stmt = stmt.where(func.lower(Lead.allotted_to).in_(sorted(allotted_to_names)))
         elif allotted_to and allotted_to.strip():
             stmt = stmt.where(func.lower(Lead.allotted_to) == allotted_to.strip().lower())

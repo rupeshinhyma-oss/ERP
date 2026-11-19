@@ -795,8 +795,32 @@ export function DiscountPaymentsPage({
   }, [sortedOrders, currentPage, perPage]);
 
 
+  const [masterWarehouses, setMasterWarehouses] = useState<string[]>([]);
+  const [masterSalesPersons, setMasterSalesPersons] = useState<string[]>([]);
+
+  useEffect(() => {
+    if (isTestMode) return;
+    void apiGet<any>("/masters/warehouses?status=active")
+      .then((res) => {
+        const raw = Array.isArray(res?.data) ? res.data : Array.isArray(res?.data?.items) ? res.data.items : [];
+        const names = raw.map((w: any) => String(w?.name || w?.warehouse_name || w || "").trim()).filter(Boolean);
+        setMasterWarehouses(Array.from(new Set(names)));
+      })
+      .catch(() => {});
+
+    void apiGet<any>("/companies/sales-persons")
+      .then((res) => {
+        const raw = Array.isArray(res?.data) ? res.data : Array.isArray(res?.data?.items) ? res.data.items : [];
+        const names = raw
+          .map((u: any) => String(u?.display_name || u?.full_name || u?.name || u?.username || "").trim())
+          .filter(Boolean);
+        setMasterSalesPersons(Array.from(new Set(names)));
+      })
+      .catch(() => {});
+  }, [isTestMode]);
+
   const warehouseOptions = useMemo(() => {
-    const base = ["Mumbai", "Ahmedabad", "Indore", "Mumbai Transit"];
+    const base = [...masterWarehouses];
     const seen = new Set(base.map((w) => w.toLowerCase()));
     orders.forEach((o) => {
       const w = (o.warehouse || "").trim();
@@ -806,18 +830,10 @@ export function DiscountPaymentsPage({
       }
     });
     return base;
-  }, [orders]);
+  }, [orders, masterWarehouses]);
 
   const salesPersonOptions = useMemo(() => {
-    const base = [
-      "Abhishek Patel",
-      "Dhairya Shah",
-      "Bhavin Suthar",
-      "Deepika Samel",
-      "Sunita Pawar",
-      "Gayatri Pandey",
-      "Rupesh Malia",
-    ];
+    const base = [...masterSalesPersons];
     const seen = new Set(base.map((s) => s.toLowerCase()));
     orders.forEach((o) => {
       const sp = (o.sales_person || "").trim();
@@ -827,7 +843,7 @@ export function DiscountPaymentsPage({
       }
     });
     return base;
-  }, [orders]);
+  }, [orders, masterSalesPersons]);
 
   // Top KPI Metrics (reactively updates when adjustments are submitted)
   const metrics = useMemo(() => {
@@ -2960,10 +2976,10 @@ export function DiscountPaymentsPage({
                       Full Name / Designation
                     </div>
                     <div style={{ fontSize: "12.5px", color: "#1e293b" }}>
-                      {selectedCompanyOrder.contact_name || selectedCompanyOrder.contact_person_name || "Mr Jalpesh"}
+                      {selectedCompanyOrder.contact_name || selectedCompanyOrder.contact_person_name || "—"}
                     </div>
                     <div style={{ fontSize: "12px", color: "#475569", marginTop: "1px" }}>
-                      {selectedCompanyOrder.designation || "Owner"}
+                      {selectedCompanyOrder.designation || "—"}
                     </div>
                   </div>
                   <div>
@@ -2971,7 +2987,7 @@ export function DiscountPaymentsPage({
                       GST No
                     </div>
                     <div style={{ fontSize: "12.5px", color: "#1e293b" }}>
-                      {selectedCompanyOrder.gst_no || "24ALCPG8895N1ZG"}
+                      {selectedCompanyOrder.gst_no || "—"}
                     </div>
                   </div>
                 </div>
@@ -2981,17 +2997,21 @@ export function DiscountPaymentsPage({
                   <div style={{ fontSize: "12px", fontWeight: 700, color: "#1e293b", marginBottom: "4px" }}>
                     Contact Number <i>(Direct)</i>
                   </div>
-                  <a
-                    href={`tel:${selectedCompanyOrder.contact_number || selectedCompanyOrder.contact_person_mobile || "9427419237"}`}
-                    style={{
-                      fontSize: "12.5px",
-                      color: "#0061f2",
-                      textDecoration: "none",
-                      fontWeight: 500,
-                    }}
-                  >
-                    {selectedCompanyOrder.contact_number || selectedCompanyOrder.contact_person_mobile || "9427419237"}
-                  </a>
+                  {selectedCompanyOrder.contact_number || selectedCompanyOrder.contact_person_mobile ? (
+                    <a
+                      href={`tel:${selectedCompanyOrder.contact_number || selectedCompanyOrder.contact_person_mobile}`}
+                      style={{
+                        fontSize: "12.5px",
+                        color: "#0061f2",
+                        textDecoration: "none",
+                        fontWeight: 500,
+                      }}
+                    >
+                      {selectedCompanyOrder.contact_number || selectedCompanyOrder.contact_person_mobile}
+                    </a>
+                  ) : (
+                    <span style={{ fontSize: "12.5px", color: "#64748b" }}>—</span>
+                  )}
                 </div>
 
                 {/* Row 3: Address / Area */}
@@ -3000,8 +3020,7 @@ export function DiscountPaymentsPage({
                     Address / Area
                   </div>
                   <div style={{ fontSize: "12.5px", color: "#1e293b", lineHeight: 1.4 }}>
-                    {selectedCompanyOrder.address_area ||
-                      "C-15,MARUTI ESTATE, NR KIRAN INDUSTRIES, BOMBAY CONDUCTOR ROAD, GIDC VATVA, GIDC VATVA"}
+                    {selectedCompanyOrder.address_area || "—"}
                   </div>
                 </div>
 
@@ -3018,7 +3037,7 @@ export function DiscountPaymentsPage({
                       City
                     </div>
                     <div style={{ fontSize: "12.5px", color: "#1e293b" }}>
-                      {selectedCompanyOrder.city || "Ahmedabad"}
+                      {selectedCompanyOrder.city || "—"}
                     </div>
                   </div>
                   <div>
@@ -3026,7 +3045,7 @@ export function DiscountPaymentsPage({
                       District
                     </div>
                     <div style={{ fontSize: "12.5px", color: "#1e293b" }}>
-                      {selectedCompanyOrder.district || "Ahmedabad"}
+                      {selectedCompanyOrder.district || "—"}
                     </div>
                   </div>
                   <div>
@@ -3034,7 +3053,7 @@ export function DiscountPaymentsPage({
                       State
                     </div>
                     <div style={{ fontSize: "12.5px", color: "#1e293b" }}>
-                      {selectedCompanyOrder.state || "Maharashtra"}
+                      {selectedCompanyOrder.state || "—"}
                     </div>
                   </div>
                 </div>
@@ -3063,7 +3082,7 @@ export function DiscountPaymentsPage({
                         fontWeight: 500,
                       }}
                     >
-                      {selectedCompanyOrder.current_status || "Existing"}
+                      {selectedCompanyOrder.current_status || "—"}
                     </span>
                   </div>
                   <div>
@@ -3071,7 +3090,7 @@ export function DiscountPaymentsPage({
                       Bussiness Type
                     </div>
                     <div style={{ fontSize: "12.5px", color: "#1e293b" }}>
-                      {selectedCompanyOrder.business_type || "B2B"}
+                      {selectedCompanyOrder.business_type || "—"}
                     </div>
                   </div>
                   <div>
@@ -3079,7 +3098,7 @@ export function DiscountPaymentsPage({
                       Category
                     </div>
                     <div style={{ fontSize: "12.5px", color: "#1e293b" }}>
-                      {selectedCompanyOrder.category || "Traditional"}
+                      {selectedCompanyOrder.category || "—"}
                     </div>
                   </div>
                   <div>
@@ -3087,7 +3106,7 @@ export function DiscountPaymentsPage({
                       Potential Type
                     </div>
                     <div style={{ fontSize: "12.5px", color: "#1e293b" }}>
-                      {selectedCompanyOrder.potential_type || "Yes"}
+                      {selectedCompanyOrder.potential_type || "—"}
                     </div>
                   </div>
                 </div>
@@ -3105,7 +3124,7 @@ export function DiscountPaymentsPage({
                       Business Categories
                     </div>
                     <div style={{ fontSize: "12.5px", color: "#1e293b" }}>
-                      {selectedCompanyOrder.business_categories || "Manufacturer"}
+                      {selectedCompanyOrder.business_categories || "—"}
                     </div>
                   </div>
                   <div>
@@ -3113,7 +3132,7 @@ export function DiscountPaymentsPage({
                       Machines Currently Buying From
                     </div>
                     <div style={{ fontSize: "12.5px", color: "#1e293b" }}>
-                      {selectedCompanyOrder.machines_currently_buying_from || "Arjun"}
+                      {selectedCompanyOrder.machines_currently_buying_from || "—"}
                     </div>
                   </div>
                   <div>
@@ -3121,7 +3140,7 @@ export function DiscountPaymentsPage({
                       Products Interested To Buy From Us
                     </div>
                     <div style={{ fontSize: "12.5px", color: "#1e293b" }}>
-                      {selectedCompanyOrder.products_interested_to_buy_from_us || "Flow Wrap"}
+                      {selectedCompanyOrder.products_interested_to_buy_from_us || "—"}
                     </div>
                   </div>
                 </div>
@@ -3132,7 +3151,7 @@ export function DiscountPaymentsPage({
                     Sales Person
                   </div>
                   <div style={{ fontSize: "12.5px", color: "#1e293b" }}>
-                    {selectedCompanyOrder.sales_person || "Abhishek Patel"}
+                    {selectedCompanyOrder.sales_person || "—"}
                   </div>
                 </div>
               </div>

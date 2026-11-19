@@ -31,6 +31,14 @@ describe("LeadsPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     (apiGet as any).mockImplementation((url: string) => {
+      if (url.includes("/companies/sales-persons")) {
+        return Promise.resolve({
+          data: [
+            { id: "sp-1", full_name: "Rupesh Malla", username: "rupesh" },
+            { id: "sp-2", full_name: "Dhairya Shah", username: "dhairya" },
+          ],
+        });
+      }
       if (url.includes("/masters/lead-sources")) {
         return Promise.resolve({
           data: [{ id: "1", name: "IndiaMart" }, { id: "2", name: "Website" }],
@@ -313,6 +321,14 @@ describe("LeadsPage", () => {
 
   it("extracts unique filter options dynamically from the leads list and filters correctly", async () => {
     (apiGet as any).mockImplementation((url: string) => {
+      if (url.includes("/companies/sales-persons")) {
+        return Promise.resolve({
+          data: [
+            { id: "sp-1", full_name: "Rupesh Malla", username: "rupesh" },
+            { id: "sp-2", full_name: "Dhairya Shah", username: "dhairya" },
+          ],
+        });
+      }
       if (url.includes("/leads")) {
         return Promise.resolve({
           data: {
@@ -444,6 +460,14 @@ describe("LeadsPage", () => {
     ];
 
     (apiGet as any).mockImplementation((url: string) => {
+      if (url.includes("/companies/sales-persons")) {
+        return Promise.resolve({
+          data: [
+            { id: "sp-1", full_name: "Rupesh Malla", username: "rupesh" },
+            { id: "sp-2", full_name: "Dhairya Shah", username: "dhairya" },
+          ],
+        });
+      }
       if (url.includes("/leads")) {
         return Promise.resolve({
           data: {
@@ -743,6 +767,14 @@ describe("LeadsPage", () => {
     };
 
     (apiGet as any).mockImplementation((url: string) => {
+      if (url.includes("/companies/sales-persons")) {
+        return Promise.resolve({
+          data: [
+            { id: "sp-1", full_name: "Rupesh Malla", username: "rupesh" },
+            { id: "sp-2", full_name: "Dhairya Shah", username: "dhairya" },
+          ],
+        });
+      }
       if (url.includes("/leads")) {
         return Promise.resolve({
           data: {
@@ -779,6 +811,9 @@ describe("LeadsPage", () => {
 
     // Select salesperson
     const selectSalesperson = document.getElementById("allot-lead-select") as HTMLSelectElement;
+    await waitFor(() => {
+      expect(selectSalesperson.querySelector('option[value="Rupesh Malla"]')).toBeTruthy();
+    });
     fireEvent.change(selectSalesperson, { target: { value: "Rupesh Malla" } });
 
     // Confirm Allotment
@@ -807,6 +842,56 @@ describe("LeadsPage", () => {
 
     // Email column is NOT present in headers
     expect(headers.some((h) => h.includes("Email"))).toBe(false);
+  });
+
+  it("CRM-AUD-10: calls /leads without trailing slash on GET and POST", async () => {
+    render(
+      <BrowserRouter>
+        <LeadsPage />
+      </BrowserRouter>
+    );
+
+    await waitFor(() => {
+      expect(apiGet).toHaveBeenCalled();
+    });
+
+    const leadGetCalls = (apiGet as any).mock.calls
+      .map(([url]: [string]) => String(url))
+      .filter((u: string) => u.includes("/leads"));
+
+    expect(leadGetCalls.length).toBeGreaterThan(0);
+    for (const url of leadGetCalls) {
+      expect(url.startsWith("/leads?")).toBe(true);
+      expect(url.includes("/leads/?")).toBe(false);
+    }
+  });
+
+  it("CRM-AUD-10: Auth.hasPermission enforces CRM permissions and explicit denies on legacy routes", async () => {
+    const { Auth } = await import("@/lib/auth");
+
+    // 1. Zero-permission user -> blocked
+    vi.spyOn(Auth, "isSuperAdmin").mockReturnValue(false);
+    vi.spyOn(Auth, "getProfile").mockReturnValue({ id: "u1", permissions: ["feed.view"] } as any);
+    expect(Auth.hasPermission("crm.leads.view")).toBe(false);
+
+    // 2. User with crm.leads.view -> allowed
+    vi.spyOn(Auth, "getProfile").mockReturnValue({ id: "u1", permissions: ["crm.leads.view"] } as any);
+    expect(Auth.hasPermission("crm.leads.view")).toBe(true);
+
+    // 3. User with crm.leads.manage only -> allowed via hierarchy
+    vi.spyOn(Auth, "getProfile").mockReturnValue({ id: "u1", permissions: ["crm.leads.manage"] } as any);
+    expect(Auth.hasPermission("crm.leads.view")).toBe(true);
+
+    // 4. User with legacy leads.view -> allowed via legacy alias
+    vi.spyOn(Auth, "getProfile").mockReturnValue({ id: "u1", permissions: ["leads.view"] } as any);
+    expect(Auth.hasPermission("crm.leads.view")).toBe(true);
+
+    // 5. User with crm.leads.view + explicit deny:crm.leads.view -> blocked
+    vi.spyOn(Auth, "getProfile").mockReturnValue({
+      id: "u1",
+      permissions: ["crm.leads.view", "deny:crm.leads.view"],
+    } as any);
+    expect(Auth.hasPermission("crm.leads.view")).toBe(false);
   });
 });
 

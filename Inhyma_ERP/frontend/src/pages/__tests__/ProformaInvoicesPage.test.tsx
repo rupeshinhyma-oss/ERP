@@ -158,6 +158,19 @@ function fakeApiGet(url: string) {
   }
   if (url.startsWith("/masters/lead-sources")) return Promise.resolve({ data: [{ name: "Website" }, { name: "IndiaMART" }] });
   if (url.startsWith("/masters/additional-charges")) return Promise.resolve({ data: [{ name: "Transport Charges" }, { name: "Packing & Forwarding" }] });
+  if (url.startsWith("/masters/states")) {
+    return Promise.resolve({
+      data: [
+        { id: "1", name: "Gujarat" },
+        { id: "2", name: "Maharashtra" },
+      ],
+    });
+  }
+  if (url.startsWith("/companies/sales-persons")) {
+    return Promise.resolve({
+      data: [{ id: "sp-1", full_name: "Rupesh Malla", username: "rupesh" }],
+    });
+  }
   if (url.startsWith("/masters/products")) return Promise.resolve({ data: CATALOG });
   if (url.startsWith("/companies/lookup")) {
     return Promise.resolve({
@@ -999,10 +1012,16 @@ describe("Proforma list: workflow actions follow the database rules and the user
     // Drawer should open
     expect(await screen.findByRole("heading", { name: "Add Company" })).toBeTruthy();
 
+    // Wait for master state & salesperson options
+    const stateSelect = screen.getByLabelText(/State/) as HTMLSelectElement;
+    await waitFor(() => {
+      expect(stateSelect.querySelector('option[value="1"]')).toBeTruthy();
+    });
+
     // Fill drawer fields
     fireEvent.change(screen.getByLabelText(/Company Name/), { target: { value: "NEW TECH ENTERPRISES" } });
     fireEvent.change(screen.getByLabelText(/GST No Of Company/), { target: { value: "24AAAAA0000A1Z5" } });
-    fireEvent.change(screen.getByLabelText(/State/), { target: { value: "1" } });
+    fireEvent.change(stateSelect, { target: { value: "1" } });
 
     // Submit drawer form
     fireEvent.click(screen.getByTestId("btn-drawer-submit-company"));
@@ -1113,10 +1132,14 @@ describe("Proforma list: workflow actions follow the database rules and the user
     expect((screen.getByTestId("input-edit-company-name") as HTMLInputElement).value).toBe("");
 
     // Enter billing details
+    const stateSelect = screen.getByTestId("select-edit-state") as HTMLSelectElement;
+    await waitFor(() => {
+      expect(stateSelect.querySelector('option[value="Maharashtra"]')).toBeTruthy();
+    });
     fireEvent.change(screen.getByTestId("input-edit-company-name"), { target: { value: "GLOBAL CORP" } });
     fireEvent.change(screen.getByTestId("input-edit-gst-no"), { target: { value: "27AAAAA0000A1Z5" } });
     fireEvent.change(screen.getByTestId("input-edit-address"), { target: { value: "SECTOR 18, MIDC" } });
-    fireEvent.change(screen.getByTestId("select-edit-state"), { target: { value: "Maharashtra" } });
+    fireEvent.change(stateSelect, { target: { value: "Maharashtra" } });
     const cityInput = screen.queryByTestId("select-edit-city") || screen.getByTestId("input-edit-city");
     fireEvent.change(cityInput, { target: { value: "Navi Mumbai" } });
     fireEvent.change(screen.getByTestId("input-edit-pincode"), { target: { value: "400705" } });

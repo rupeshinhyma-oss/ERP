@@ -1,43 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { apiGet } from "@/lib/api";
 
-export const DEFAULT_INDIAN_STATES = [
-  "Andhra Pradesh",
-  "Arunachal Pradesh",
-  "Assam",
-  "Bihar",
-  "Chhattisgarh",
-  "Goa",
-  "Gujarat",
-  "Haryana",
-  "Himachal Pradesh",
-  "Jharkhand",
-  "Karnataka",
-  "Kerala",
-  "Madhya Pradesh",
-  "Maharashtra",
-  "Manipur",
-  "Meghalaya",
-  "Mizoram",
-  "Nagaland",
-  "Odisha",
-  "Punjab",
-  "Rajasthan",
-  "Sikkim",
-  "Tamil Nadu",
-  "Telangana",
-  "Tripura",
-  "Uttar Pradesh",
-  "Uttarakhand",
-  "West Bengal",
-  "Delhi",
-  "Jammu and Kashmir",
-  "Ladakh",
-  "Chandigarh",
-  "Puducherry",
-  "Dadra and Nagar Haveli and Daman and Diu",
-];
-
 export interface AddCompanyDrawerProps {
   isOpen: boolean;
   onClose: () => void;
@@ -120,39 +83,29 @@ export function AddCompanyDrawer({ isOpen, onClose, onSuccess }: AddCompanyDrawe
 
     void apiGet<any[]>("/masters/states?page_size=250&status=active")
       .then((res) => {
-        if (res?.data && Array.isArray(res.data) && res.data.length > 0) {
+        if (res?.data && Array.isArray(res.data)) {
           setStates(res.data.map((s: any) => ({ id: String(s.id), name: s.name })));
         } else {
-          setStates(DEFAULT_INDIAN_STATES.map((s, idx) => ({ id: String(idx + 1), name: s })));
+          setStates([]);
         }
       })
       .catch(() => {
-        setStates(DEFAULT_INDIAN_STATES.map((s, idx) => ({ id: String(idx + 1), name: s })));
+        setStates([]);
       });
 
     void apiGet<any[]>("/companies/sales-persons")
       .then((res) => {
         if (res?.data && Array.isArray(res.data) && res.data.length > 0) {
           setSalesPersons(res.data);
-          const rupesh = res.data.find(
-            (sp: any) =>
-              sp.display_name?.toLowerCase().includes("rupesh") ||
-              sp.full_name?.toLowerCase().includes("rupesh") ||
-              sp.username?.toLowerCase().includes("rupesh")
-          );
-          if (rupesh) {
-            setSalesPersonId(String(rupesh.id));
-          } else {
-            setSalesPersonId(String(res.data[0].id));
-          }
+          setSalesPersonId(String(res.data[0].id));
         } else {
-          setSalesPersons([{ id: "rupesh-malla", full_name: "Rupesh Malla", username: "rupesh" }]);
-          setSalesPersonId("rupesh-malla");
+          setSalesPersons([]);
+          setSalesPersonId("");
         }
       })
       .catch(() => {
-        setSalesPersons([{ id: "rupesh-malla", full_name: "Rupesh Malla", username: "rupesh" }]);
-        setSalesPersonId("rupesh-malla");
+        setSalesPersons([]);
+        setSalesPersonId("");
       });
   }, [isOpen]);
 

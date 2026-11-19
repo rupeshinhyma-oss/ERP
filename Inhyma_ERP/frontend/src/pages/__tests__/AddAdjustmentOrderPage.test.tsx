@@ -25,18 +25,44 @@ vi.mock("@/lib/api", () => ({
     createStockAdjustment: vi.fn().mockResolvedValue({ success: true }),
     listProductStock: vi.fn().mockResolvedValue({ data: { items: [] } }),
   },
-  // client names come from the company master (/companies/lookup)
-  apiGet: vi.fn().mockImplementation((url: string) =>
-    Promise.resolve({
-      success: true,
-      data: url.startsWith("/companies/lookup")
-        ? [
+  // master dropdowns come from API masters
+  apiGet: vi.fn().mockImplementation((url: string) => {
+    if (url.startsWith("/companies/lookup")) {
+      return Promise.resolve({
+        success: true,
+        data: [
           { id: "c1", company_name: "Cirkla Technologies Pvt Ltd" },
           { id: "c2", company_name: "Apex Valves & Automation India Pvt Ltd" },
-        ]
-        : [],
-    })
-  ),
+        ],
+      });
+    }
+    if (url.startsWith("/masters/warehouses")) {
+      return Promise.resolve({
+        success: true,
+        data: {
+          items: [
+            { id: "w1", name: "Ahmedabad" },
+            { id: "w2", name: "Mumbai" },
+            { id: "w3", name: "Indore" },
+            { id: "w4", name: "Main Warehouse - Bhiwandi" },
+          ],
+        },
+      });
+    }
+    if (url.startsWith("/masters/adjustment-purposes")) {
+      return Promise.resolve({
+        success: true,
+        data: [
+          { id: "p1", name: "Return From Client" },
+          { id: "p2", name: "Split" },
+          { id: "p3", name: "Damage" },
+          { id: "p4", name: "Inventory Count Variance" },
+          { id: "p5", name: "Internal Transfer Correction" },
+        ],
+      });
+    }
+    return Promise.resolve({ success: true, data: [] });
+  }),
 }));
 
 describe("AddAdjustmentOrderPage", () => {
@@ -90,7 +116,7 @@ describe("AddAdjustmentOrderPage", () => {
     expect(searchInput.disabled).toBe(true);
   });
 
-  it("enables product search after selecting a warehouse", () => {
+  it("enables product search after selecting a warehouse", async () => {
     render(
       <BrowserRouter>
         <AddAdjustmentOrderPage />
@@ -98,6 +124,7 @@ describe("AddAdjustmentOrderPage", () => {
     );
 
     const warehouseSelect = screen.getByLabelText("Warehouse");
+    await screen.findByRole("option", { name: "Ahmedabad" });
     fireEvent.change(warehouseSelect, { target: { value: "Ahmedabad" } });
 
     expect(screen.queryByText("Please Select Warehouse First.")).toBeNull();
@@ -158,6 +185,8 @@ describe("AddAdjustmentOrderPage", () => {
         <AddAdjustmentOrderPage />
       </BrowserRouter>
     );
+    await screen.findByRole("option", { name: "Split" });
+    await screen.findByRole("option", { name: "Mumbai" });
     const selects = Array.from(document.querySelectorAll("select"));
     fireEvent.change(selects[1], { target: { value: Array.from(selects[1].options).find((o) => o.textContent?.startsWith("Split"))!.value } });
     fireEvent.change(selects[2], { target: { value: Array.from(selects[2].options).find((o) => o.textContent?.startsWith("Mumbai"))!.value } });

@@ -13,8 +13,27 @@ vi.mock("@/components/AppShell", () => ({
   ),
 }));
 
-// Mock InventoryApi
+// Mock InventoryApi & apiGet
 vi.mock("@/lib/api", () => ({
+  apiGet: vi.fn().mockImplementation((url: string) => {
+    if (url.startsWith("/masters/warehouses")) {
+      return Promise.resolve({
+        success: true,
+        data: {
+          items: [
+            { id: "w1", name: "Ahmedabad" },
+            { id: "w2", name: "Mumbai" },
+            { id: "w3", name: "Indore" },
+            { id: "w4", name: "Main Warehouse - Bhiwandi" },
+            { id: "w5", name: "Mumbai Transit", main_warehouse_id: "w2" },
+          ],
+        },
+      });
+    }
+    return Promise.resolve({ success: true, data: [] });
+  }),
+  errorMessage: (err: unknown) =>
+    err instanceof Error ? err.message : typeof err === "string" ? err : "Unknown error",
   InventoryApi: {
     listStockTransfers: vi.fn().mockResolvedValue({
       data: {
@@ -85,7 +104,7 @@ describe("AddTransferOrderPage", () => {
     expect(screen.getByRole("button", { name: "Submit" })).toBeTruthy();
   });
 
-  it("disables search input and shows helper note until From Warehouse is selected", () => {
+  it("disables search input and shows helper note until From Warehouse is selected", async () => {
     render(
       <BrowserRouter>
         <AddTransferOrderPage />
@@ -96,8 +115,11 @@ describe("AddTransferOrderPage", () => {
     const searchInput = screen.getByPlaceholderText("Enter Product Name / Model No") as HTMLInputElement;
     expect(searchInput.disabled).toBe(true);
 
-    // Select From Warehouse
     const fromWhSelect = screen.getByLabelText(/From Warehouse/i);
+    await waitFor(() => {
+      expect(fromWhSelect.querySelector('option[value="Ahmedabad"]')).toBeTruthy();
+    });
+    // Select From Warehouse
     fireEvent.change(fromWhSelect, { target: { value: "Ahmedabad" } });
 
     expect(searchInput.disabled).toBe(false);
@@ -111,8 +133,12 @@ describe("AddTransferOrderPage", () => {
       </BrowserRouter>
     );
 
+    const fromWhSelect = screen.getByLabelText(/From Warehouse/i);
+    await waitFor(() => {
+      expect(fromWhSelect.querySelector('option[value="Mumbai"]')).toBeTruthy();
+    });
     // Select From Warehouse
-    fireEvent.change(screen.getByLabelText(/From Warehouse/i), { target: { value: "Mumbai" } });
+    fireEvent.change(fromWhSelect, { target: { value: "Mumbai" } });
     fireEvent.change(screen.getByLabelText(/To Warehouse/i), { target: { value: "Ahmedabad" } });
 
     const searchInput = screen.getByPlaceholderText("Enter Product Name / Model No");
@@ -139,7 +165,11 @@ describe("AddTransferOrderPage", () => {
       </BrowserRouter>
     );
 
-    fireEvent.change(screen.getByLabelText(/From Warehouse/i), { target: { value: "Ahmedabad" } });
+    const fromWhSelect = screen.getByLabelText(/From Warehouse/i);
+    await waitFor(() => {
+      expect(fromWhSelect.querySelector('option[value="Ahmedabad"]')).toBeTruthy();
+    });
+    fireEvent.change(fromWhSelect, { target: { value: "Ahmedabad" } });
     fireEvent.change(screen.getByLabelText(/To Warehouse/i), { target: { value: "Ahmedabad" } });
 
     fireEvent.click(screen.getByRole("button", { name: "Submit" }));
@@ -154,7 +184,11 @@ describe("AddTransferOrderPage", () => {
       </BrowserRouter>
     );
 
-    fireEvent.change(screen.getByLabelText(/From Warehouse/i), { target: { value: "Ahmedabad" } });
+    const fromWhSelect = screen.getByLabelText(/From Warehouse/i);
+    await waitFor(() => {
+      expect(fromWhSelect.querySelector('option[value="Ahmedabad"]')).toBeTruthy();
+    });
+    fireEvent.change(fromWhSelect, { target: { value: "Ahmedabad" } });
     fireEvent.change(screen.getByLabelText(/To Warehouse/i), { target: { value: "Mumbai" } });
 
     fireEvent.click(screen.getByRole("button", { name: "Submit" }));
@@ -169,7 +203,11 @@ describe("AddTransferOrderPage", () => {
       </BrowserRouter>
     );
 
-    fireEvent.change(screen.getByLabelText(/From Warehouse/i), { target: { value: "Mumbai" } });
+    const fromWhSelect = screen.getByLabelText(/From Warehouse/i);
+    await waitFor(() => {
+      expect(fromWhSelect.querySelector('option[value="Mumbai"]')).toBeTruthy();
+    });
+    fireEvent.change(fromWhSelect, { target: { value: "Mumbai" } });
     fireEvent.change(screen.getByLabelText(/To Warehouse/i), { target: { value: "Ahmedabad" } });
     fireEvent.change(screen.getByLabelText("Remark"), { target: { value: "Test inter-warehouse transfer" } });
 
@@ -213,6 +251,10 @@ describe("AddTransferOrderPage", () => {
 
     const fromWh = screen.getByLabelText(/From Warehouse/i);
     const toWh = screen.getByLabelText(/To Warehouse/i);
+    await waitFor(() => {
+      expect(fromWh.querySelector('option[value="Ahmedabad"]')).toBeTruthy();
+      expect(toWh.querySelector('option[value="Mumbai Transit"]')).toBeTruthy();
+    });
 
     fireEvent.change(fromWh, { target: { value: "Ahmedabad" } });
     fireEvent.change(toWh, { target: { value: "Mumbai Transit" } });
@@ -227,7 +269,11 @@ describe("AddTransferOrderPage", () => {
       </BrowserRouter>
     );
 
-    fireEvent.change(screen.getByLabelText(/From Warehouse/i), { target: { value: "Mumbai" } });
+    const fromWhSelect = screen.getByLabelText(/From Warehouse/i);
+    await waitFor(() => {
+      expect(fromWhSelect.querySelector('option[value="Mumbai"]')).toBeTruthy();
+    });
+    fireEvent.change(fromWhSelect, { target: { value: "Mumbai" } });
     fireEvent.change(screen.getByLabelText(/To Warehouse/i), { target: { value: "Ahmedabad" } });
 
     const searchInput = screen.getByPlaceholderText("Enter Product Name / Model No");

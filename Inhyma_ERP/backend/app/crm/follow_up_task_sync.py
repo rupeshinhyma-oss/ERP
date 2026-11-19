@@ -72,6 +72,11 @@ async def sync_follow_up_to_task(
 
     if follow_up.task_id:
         task = await session.get(Task, follow_up.task_id)
+        if task is not None and task.deleted_at is not None:
+            # Never resurrect or update a soft-deleted task in Trash; unlink it so a fresh
+            # active task is created when the follow-up is pending.
+            follow_up.task_id = None
+            task = None
 
     # Fallback lookup to prevent duplicates if task_id was not set or during retries
     if not task:
@@ -96,15 +101,12 @@ async def sync_follow_up_to_task(
     is_reassigned = False
 
     if task:
-        # Update existing task without overwriting unrelated fields modified by users
+        # Update existing active task without overwriting unrelated fields modified by users
         task.title = f"CRM Follow-up — {lead.name}"
         task.due_date = due_date_val
 
-        # If follow-up was previously cancelled or marked done, re-activate if now pending
+        # If follow-up was previously marked done/on-hold on an active task, re-activate if now pending
         if follow_up.status == "pending":
-            if task.deleted_at is not None:
-                task.deleted_at = None
-                task.deleted_by = None
             if task.status in (TaskStatus.ON_HOLD, TaskStatus.DONE):
                 task.status = TaskStatus.TODO
                 task.hold_reason = None
@@ -215,12 +217,18 @@ async def complete_follow_up_task(
     task: Task | None = None
     if follow_up.task_id:
         task = await session.get(Task, follow_up.task_id)
+        if task is not None and task.deleted_at is not None:
+            follow_up.task_id = None
+            task = None
 
     if not task:
         ref_str = f"CRM Follow-up Reference: ID {follow_up.id}"
         stmt = (
             select(Task)
-            .where(Task.description.contains(ref_str))
+            .where(
+                Task.description.contains(ref_str),
+                Task.deleted_at.is_(None),
+            )
             .limit(1)
         )
         task = (await session.execute(stmt)).scalar_one_or_none()
@@ -276,12 +284,18 @@ async def cancel_follow_up_task(
     task: Task | None = None
     if follow_up.task_id:
         task = await session.get(Task, follow_up.task_id)
+        if task is not None and task.deleted_at is not None:
+            follow_up.task_id = None
+            task = None
 
     if not task:
         ref_str = f"CRM Follow-up Reference: ID {follow_up.id}"
         stmt = (
             select(Task)
-            .where(Task.description.contains(ref_str))
+            .where(
+                Task.description.contains(ref_str),
+                Task.deleted_at.is_(None),
+            )
             .limit(1)
         )
         task = (await session.execute(stmt)).scalar_one_or_none()
@@ -399,4 +413,29 @@ async def sync_task_completion_to_follow_up(
         lead.updated_at = now_dt
 
     return follow_up
+
+
+async def unlink_deleted_task_from_follow_ups(
+    session: AsyncSession,
+    task_id: uuid.UUID,
+) -> int:
+    """
+    When a Workforce Task is soft-deleted in the Tasks module, transactionally unlink
+    any active CrmFollowUp rows referencing ``task_id`` (`follow_up.task_id = None`)
+    while retaining the CRM follow-up's pending status so no dangling link remains
+    to a deleted task in Trash.
+    """
+    stmt = select(CrmFollowUp).where(
+        CrmFollowUp.task_id == task_id,
+        CrmFollowUp.deleted_at.is_(None),
+    )
+    follow_ups = list((await session.execute(stmt)).scalars().all())
+    now_dt = _utcnow()
+    for fu in follow_ups:
+        fu.task_id = None
+        fu.updated_at = now_dt
+    if follow_ups:
+        await session.flush()
+    return len(follow_ups)
+
 

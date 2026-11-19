@@ -714,22 +714,14 @@ export function TechnicianOperationsPage() {
   const currentTab = searchParams.get("tab") || "gatepasses";
   const { isSuperAdmin, hasPermission } = useAuth();
 
-  const canMutate = useMemo(
-    () =>
-      Boolean(
-        isSuperAdmin ||
-          hasPermission("technicaltask.create") ||
-          hasPermission("technicaltask.update") ||
-          hasPermission("technicaltask.manage") ||
-          hasPermission("technician.create") ||
-          hasPermission("technician.update")
-      ),
-    [isSuperAdmin, hasPermission]
-  );
+  const canManageAll = isSuperAdmin || hasPermission("technician_operations.manage");
+  const canCreate = canManageAll || hasPermission("technician_operations.create");
+  const canUpdate = canManageAll || hasPermission("technician_operations.update");
+  const canMutate = canCreate || canUpdate;
 
   const canLinkSO = useMemo(
-    () => Boolean(canMutate || hasPermission("saleorder.create") || hasPermission("saleorder.update")),
-    [canMutate, hasPermission]
+    () => Boolean(canUpdate || hasPermission("saleorder.create") || hasPermission("saleorder.update")),
+    [canUpdate, hasPermission]
   );
   const canCreateSO = canLinkSO;
 
@@ -1579,7 +1571,7 @@ export function TechnicianOperationsPage() {
               </span>
             )}
 
-            {canMutate && currentTab === "gatepasses" && (
+            {canCreate && currentTab === "gatepasses" && (
               <button
                 type="button"
                 className="btn btn-primary"
@@ -1600,7 +1592,7 @@ export function TechnicianOperationsPage() {
               </button>
             )}
 
-            {canMutate && currentTab === "wallets" && (
+            {canCreate && currentTab === "wallets" && (
               <button
                 type="button"
                 className="btn btn-primary"
@@ -1629,7 +1621,7 @@ export function TechnicianOperationsPage() {
               </button>
             )}
 
-            {canMutate && currentTab === "warranty" && (
+            {canCreate && currentTab === "warranty" && (
               <button
                 type="button"
                 className="btn btn-primary"
@@ -2248,7 +2240,7 @@ export function TechnicianOperationsPage() {
                           <td style={{ padding: "12px 14px", textAlign: "right", whiteSpace: "nowrap" }}>
                             <div style={{ display: "inline-flex", gap: "6px", alignItems: "center" }}>
                               {/* Record Return */}
-                              {canMutate && gp.status !== "CLOSED" && (
+                              {canUpdate && gp.status !== "CLOSED" && (
                                 <button
                                   type="button"
                                   className="btn btn-sm btn-outline-primary"
@@ -2528,7 +2520,7 @@ export function TechnicianOperationsPage() {
                         </div>
 
                         {/* Quick action buttons */}
-                        {canMutate && (
+                        {canCreate && (
                           <div style={{ display: "flex", gap: "6px" }}>
                             <button
                               type="button"
@@ -3432,15 +3424,21 @@ export function TechnicianOperationsPage() {
                 </button>
               </div>
 
-              <div className="table-responsive" style={{ border: "1px solid #e2e8f0", borderRadius: "6px" }}>
-                <table className="table" style={{ margin: 0, fontSize: "12px" }}>
+              <div
+                className="table-responsive"
+                style={{ border: "1px solid #e2e8f0", borderRadius: "6px", overflowX: "auto" }}
+              >
+                <table
+                  className="table"
+                  style={{ margin: 0, fontSize: "12px", width: "100%", tableLayout: "fixed" }}
+                >
                   <thead style={{ background: "#f8fafc" }}>
                     <tr>
-                      <th style={{ width: "44%" }}>Master Catalog / Part Name *</th>
-                      <th style={{ width: "18%" }}>Code &amp; Stock</th>
-                      <th style={{ width: "14%" }}>Qty *</th>
+                      <th style={{ width: "42%" }}>Master Catalog / Part Name *</th>
+                      <th style={{ width: "22%" }}>Code &amp; Stock</th>
+                      <th style={{ width: "12%" }}>Qty *</th>
                       <th style={{ width: "16%" }}>Unit Rate (₹)</th>
-                      <th style={{ width: "8%" }}></th>
+                      <th style={{ width: "8%", textAlign: "center" }}></th>
                     </tr>
                   </thead>
                   <tbody>
@@ -3450,35 +3448,57 @@ export function TechnicianOperationsPage() {
                         availStock !== null && Number(item.quantity_issued) > availStock + 1e-6;
                       return (
                         <tr key={idx}>
-                          <td>
-                            {lookups.spare_parts.length > 0 && (
-                              <select
-                                aria-label={`Select Catalog Part ${idx + 1}`}
-                                value={item.product_id || ""}
-                                onChange={(e) => {
-                                  const prodId = e.target.value;
-                                  const copy = [...newGpItems];
-                                  if (!prodId) {
-                                    copy[idx].product_id = null;
-                                  } else {
-                                    const sp = lookups.spare_parts.find((p) => p.id === prodId);
-                                    if (sp) {
-                                      copy[idx].product_id = sp.id;
-                                      copy[idx].product_name = sp.product_name;
-                                      copy[idx].product_code = sp.product_code || "";
-                                      copy[idx].uom = sp.uom || "NOS";
-                                      copy[idx].unit_rate = Number(sp.unit_rate || 0);
+                          <td style={{ whiteSpace: "normal", verticalAlign: "top", padding: "8px 10px" }}>
+                            <div style={{ display: "flex", flexDirection: "column", gap: "6px", width: "100%" }}>
+                              {lookups.spare_parts.length > 0 && (
+                                <select
+                                  aria-label={`Select Catalog Part ${idx + 1}`}
+                                  value={item.product_id || ""}
+                                  onChange={(e) => {
+                                    const prodId = e.target.value;
+                                    const copy = [...newGpItems];
+                                    if (!prodId) {
+                                      copy[idx].product_id = null;
+                                    } else {
+                                      const sp = lookups.spare_parts.find((p) => p.id === prodId);
+                                      if (sp) {
+                                        copy[idx].product_id = sp.id;
+                                        copy[idx].product_name = sp.product_name;
+                                        copy[idx].product_code = sp.product_code || "";
+                                        copy[idx].uom = sp.uom || "NOS";
+                                        copy[idx].unit_rate = Number(sp.unit_rate || 0);
+                                      }
                                     }
-                                  }
-                                  setNewGpItems(copy);
-                                }}
-                                className="form-control form-control-sm"
-                                style={{ marginBottom: "4px", fontSize: "11px" }}
-                              >
-                                <option value="">-- Select Spare Part from Master Catalog --</option>
-                                {compatibleParts.length > 0 && (
-                                  <optgroup label={`Compatible with ${newGpMachineModel || "Selected Machine"}`}>
-                                    {compatibleParts.map((sp) => {
+                                    setNewGpItems(copy);
+                                  }}
+                                  className="form-control form-control-sm"
+                                  style={{ fontSize: "11.5px", width: "100%", minWidth: 0 }}
+                                >
+                                  <option value="">-- Select Spare Part from Master Catalog --</option>
+                                  {compatibleParts.length > 0 && (
+                                    <optgroup label={`Compatible with ${newGpMachineModel || "Selected Machine"}`}>
+                                      {compatibleParts.map((sp) => {
+                                        const st = newGpWarehouse
+                                          ? (sp.stock_by_warehouse?.[newGpWarehouse] ?? 0)
+                                          : null;
+                                        return (
+                                          <option key={sp.id} value={sp.id}>
+                                            {sp.product_code ? `[${sp.product_code}] ` : ""}
+                                            {sp.product_name}
+                                            {st !== null ? ` (Avail: ${st} ${sp.uom})` : ""}
+                                          </option>
+                                        );
+                                      })}
+                                    </optgroup>
+                                  )}
+                                  <optgroup
+                                    label={
+                                      compatibleParts.length > 0
+                                        ? "Other Spare Parts & Products"
+                                        : "Master Spare Parts & Products"
+                                    }
+                                  >
+                                    {otherParts.map((sp) => {
                                       const st = newGpWarehouse
                                         ? (sp.stock_by_warehouse?.[newGpWarehouse] ?? 0)
                                         : null;
@@ -3491,79 +3511,62 @@ export function TechnicianOperationsPage() {
                                       );
                                     })}
                                   </optgroup>
-                                )}
-                                <optgroup
-                                  label={
-                                    compatibleParts.length > 0
-                                      ? "Other Spare Parts & Products"
-                                      : "Master Spare Parts & Products"
-                                  }
-                                >
-                                  {otherParts.map((sp) => {
-                                    const st = newGpWarehouse
-                                      ? (sp.stock_by_warehouse?.[newGpWarehouse] ?? 0)
-                                      : null;
-                                    return (
-                                      <option key={sp.id} value={sp.id}>
-                                        {sp.product_code ? `[${sp.product_code}] ` : ""}
-                                        {sp.product_name}
-                                        {st !== null ? ` (Avail: ${st} ${sp.uom})` : ""}
-                                      </option>
-                                    );
-                                  })}
-                                </optgroup>
-                              </select>
-                            )}
-                            <input
-                              type="text"
-                              required
-                              aria-label={`Part Name ${idx + 1}`}
-                              placeholder="e.g. Heating Element"
-                              value={item.product_name}
-                              onChange={(e) => {
-                                const copy = [...newGpItems];
-                                copy[idx].product_name = e.target.value;
-                                setNewGpItems(copy);
-                              }}
-                              className="form-control form-control-sm"
-                            />
-                          </td>
-                          <td>
-                            <input
-                              type="text"
-                              placeholder="SP-001"
-                              value={item.product_code}
-                              onChange={(e) => {
-                                const copy = [...newGpItems];
-                                copy[idx].product_code = e.target.value;
-                                setNewGpItems(copy);
-                              }}
-                              className="form-control form-control-sm"
-                            />
-                            {availStock !== null && (
-                              <div
-                                style={{
-                                  marginTop: "4px",
-                                  fontSize: "11px",
-                                  fontWeight: 700,
-                                  color: exceedsStock ? "#dc2626" : "#15803d",
-                                  display: "inline-flex",
-                                  alignItems: "center",
-                                  gap: "4px",
+                                </select>
+                              )}
+                              <input
+                                type="text"
+                                required
+                                aria-label={`Part Name ${idx + 1}`}
+                                placeholder="e.g. Heating Element"
+                                value={item.product_name}
+                                onChange={(e) => {
+                                  const copy = [...newGpItems];
+                                  copy[idx].product_name = e.target.value;
+                                  setNewGpItems(copy);
                                 }}
-                              >
-                                {exceedsStock ? (
-                                  <TechOpsIconAlertTriangle size={12} />
-                                ) : (
-                                  <TechOpsIconCheckCircle size={12} />
-                                )}
-                                <span>
-                                  Avail: {availStock} {item.uom}
-                                </span>
-                              </div>
-                            )}
+                                className="form-control form-control-sm"
+                                style={{ width: "100%", minWidth: 0 }}
+                              />
+                            </div>
                           </td>
-                          <td>
+                          <td style={{ whiteSpace: "normal", verticalAlign: "top", padding: "8px 10px" }}>
+                            <div style={{ display: "flex", flexDirection: "column", gap: "4px", width: "100%" }}>
+                              <input
+                                type="text"
+                                placeholder="e.g. SP-001"
+                                value={item.product_code}
+                                onChange={(e) => {
+                                  const copy = [...newGpItems];
+                                  copy[idx].product_code = e.target.value;
+                                  setNewGpItems(copy);
+                                }}
+                                className="form-control form-control-sm"
+                                style={{ width: "100%", minWidth: 0 }}
+                              />
+                              {availStock !== null && (
+                                <div
+                                  style={{
+                                    fontSize: "11px",
+                                    fontWeight: 700,
+                                    color: exceedsStock ? "#dc2626" : "#15803d",
+                                    display: "inline-flex",
+                                    alignItems: "center",
+                                    gap: "4px",
+                                  }}
+                                >
+                                  {exceedsStock ? (
+                                    <TechOpsIconAlertTriangle size={12} />
+                                  ) : (
+                                    <TechOpsIconCheckCircle size={12} />
+                                  )}
+                                  <span>
+                                    Avail: {availStock} {item.uom}
+                                  </span>
+                                </div>
+                              )}
+                            </div>
+                          </td>
+                          <td style={{ verticalAlign: "top", padding: "8px 10px" }}>
                             <input
                               type="number"
                               required
@@ -3577,10 +3580,14 @@ export function TechnicianOperationsPage() {
                                 setNewGpItems(copy);
                               }}
                               className="form-control form-control-sm"
-                              style={exceedsStock ? { borderColor: "#dc2626", background: "#fef2f2" } : undefined}
+                              style={{
+                                width: "100%",
+                                minWidth: 0,
+                                ...(exceedsStock ? { borderColor: "#dc2626", background: "#fef2f2" } : {}),
+                              }}
                             />
                           </td>
-                          <td>
+                          <td style={{ verticalAlign: "top", padding: "8px 10px" }}>
                             <input
                               type="number"
                               min="0"
@@ -3592,9 +3599,10 @@ export function TechnicianOperationsPage() {
                                 setNewGpItems(copy);
                               }}
                               className="form-control form-control-sm"
+                              style={{ width: "100%", minWidth: 0 }}
                             />
                           </td>
-                          <td style={{ textAlign: "center", verticalAlign: "middle" }}>
+                          <td style={{ textAlign: "center", verticalAlign: "middle", padding: "8px 6px" }}>
                             {newGpItems.length > 1 && (
                               <button
                                 type="button"
@@ -3706,16 +3714,22 @@ export function TechnicianOperationsPage() {
                 Reconcile Issued Parts: Returned vs Consumed
               </div>
 
-              <div className="table-responsive" style={{ border: "1px solid #e2e8f0", borderRadius: "6px" }}>
-                <table className="table" style={{ margin: 0, fontSize: "12px" }}>
+              <div
+                className="table-responsive"
+                style={{ border: "1px solid #e2e8f0", borderRadius: "6px", overflowX: "auto" }}
+              >
+                <table
+                  className="table"
+                  style={{ margin: 0, fontSize: "12px", width: "100%", tableLayout: "fixed" }}
+                >
                   <thead style={{ background: "#f8fafc" }}>
                     <tr>
                       <th>Part Name</th>
                       <th style={{ width: "80px", textAlign: "center" }}>Issued</th>
                       <th style={{ width: "110px" }}>Returned</th>
                       <th style={{ width: "110px" }}>Consumed</th>
-                      <th style={{ width: "120px" }}>Warranty FOC?</th>
-                      <th style={{ width: "155px" }}>Status</th>
+                      <th style={{ width: "120px", textAlign: "center" }}>Warranty FOC?</th>
+                      <th style={{ width: "160px" }}>Status</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -3725,7 +3739,7 @@ export function TechnicianOperationsPage() {
                         Number(row.quantity_issued) + 1e-6;
                       return (
                         <tr key={row.item_id} style={rowOver ? { background: "#fef2f2" } : undefined}>
-                          <td style={{ fontWeight: 600 }}>{row.product_name}</td>
+                          <td style={{ fontWeight: 600, whiteSpace: "normal" }}>{row.product_name}</td>
                           <td style={{ textAlign: "center", fontWeight: 700, color: "#2563eb" }}>
                             {row.quantity_issued}
                           </td>

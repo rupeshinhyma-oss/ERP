@@ -53,9 +53,9 @@ from app.masters.product_sub_categories.models import ProductSubCategory  # noqa
 from app.masters.products.models import Product, ProductDimensionRow, ProductMachineSpare  # noqa: E402
 from app.masters.states.models import State  # noqa: E402
 from app.masters.taxes.models import Tax  # noqa: E402
-from app.masters.technicians.models import Technician  # noqa: E402
 from app.masters.uom.models import UnitOfMeasurement  # noqa: E402
 from app.masters.warehouses.models import Warehouse  # noqa: E402
+from app.rbac.models import DepartmentHierarchy, Permission, Role, RolePermission, UserRole  # noqa: E402
 from app.sales.models import SaleOrder, SaleOrderItem  # noqa: E402
 from app.sales.process_routes import router as sale_router  # noqa: E402
 from app.technical_tasks.models import TechnicalTask, TechnicalTaskCallLog, TechnicalTaskLog  # noqa: E402
@@ -77,13 +77,18 @@ from app.technician_operations.schemas import (  # noqa: E402
     TechnicianWalletSummary,
     WalletTransactionCreate,
 )
-from app.users.models import User  # noqa: E402
+from app.users.models import User, UserStatus  # noqa: E402
 
 VERSIONS = Path(__file__).resolve().parents[1] / "alembic" / "versions"
 SALE_WORKFLOW_SEED = "s1b2c3d4e5fa_sale_order_workflow.py"
 
 TABLES = [
     User.__table__,
+    Permission.__table__,
+    Role.__table__,
+    DepartmentHierarchy.__table__,
+    RolePermission.__table__,
+    UserRole.__table__,
     Country.__table__,
     State.__table__,
     District.__table__,
@@ -95,7 +100,6 @@ TABLES = [
     CompanyCategoryLink.__table__,
     CompanySubCategoryLink.__table__,
     CompanyProductLink.__table__,
-    Technician.__table__,
     OptionList.__table__,
     Brand.__table__,
     ProductCategory.__table__,
@@ -119,7 +123,12 @@ TABLES = [
 ]
 
 ADMIN = CurrentUser(id=uuid.uuid4(), username="admin", is_super_admin=True, permissions={"*"})
-TECH_VIEWER = CurrentUser(id=uuid.uuid4(), username="viewer", permissions={"technicaltask.view"})
+TECH_OPS_VIEWER = CurrentUser(id=uuid.uuid4(), username="viewer", permissions={"technician_operations.view"})
+TECH_TASK_ONLY = CurrentUser(
+    id=uuid.uuid4(),
+    username="techtask_mgr",
+    permissions={"technicaltask.view", "technicaltask.create", "technicaltask.update", "technicaltask.manage", "payment.manage"},
+)
 UNPRIVILEGED = CurrentUser(id=uuid.uuid4(), username="guest", permissions=set())
 
 
@@ -165,11 +174,25 @@ async def env():
             contact_full_name="Rajesh Mehta",
             contact_calling_number="9820011223",
         )
-        tech = Technician(name="Ramesh Kumar", mobile="9876543210", city="Mumbai")
+        tech_role = Role(name="technician", description="Technician Department", is_system=True)
+        tech = User(
+            username="ramesh.kumar",
+            email="ramesh.kumar@example.com",
+            password_hash="x",
+            first_name="Ramesh",
+            last_name="Kumar",
+            display_name="Ramesh Kumar",
+            phone="9876543210",
+            city="Mumbai",
+            is_active=True,
+            status=UserStatus.ACTIVE,
+        )
         uom = UnitOfMeasurement(code="NOS", name="Numbers", short_name="Nos")
         tax = Tax(hsn_number="84229090", gst_percent=18, import_duty_percent=10)
         wh = Warehouse(name="Mumbai", address="Bhiwandi Hub", billing_company="Inhyma Solutions LLP")
-        s.add_all([company, tech, uom, tax, wh])
+        s.add_all([company, tech_role, tech, uom, tax, wh])
+        await s.flush()
+        s.add(UserRole(user_id=tech.id, role_id=tech_role.id))
         await s.flush()
 
         cat_machine = ProductCategory(name="Machines", code="CAT-M")
@@ -854,8 +877,20 @@ async def test_rbac_enforcement_on_technician_operations(env):
             )
         ).status_code == 403
 
-    # Read-only viewer (technicaltask.view) -> 200 on GET, 403 on POST mutations
-    async with AsyncClient(transport=ASGITransport(app=build_app(TECH_VIEWER)), base_url="http://test") as viewer:
+    # Technical Task / Payment permissions alone MUST NOT grant access to Technician Operations
+    async with AsyncClient(transport=ASGITransport(app=build_app(TECH_TASK_ONLY)), base_url="http://test") as tt_user:
+        assert (await tt_user.get("/api/v1/technician-operations/gatepasses")).status_code == 403
+        assert (await tt_user.get("/api/v1/technician-operations/wallet/summaries")).status_code == 403
+        assert (await tt_user.get("/api/v1/technician-operations/lookups")).status_code == 403
+        assert (
+            await tt_user.post(
+                "/api/v1/technician-operations/wallet/transactions",
+                json={"technician_name": "Ramesh Kumar", "transaction_type": "COLLECTION", "amount": 500},
+            )
+        ).status_code == 403
+
+    # Read-only viewer (technician_operations.view) -> 200 on GET, 403 on POST mutations
+    async with AsyncClient(transport=ASGITransport(app=build_app(TECH_OPS_VIEWER)), base_url="http://test") as viewer:
         assert (await viewer.get("/api/v1/technician-operations/gatepasses")).status_code == 200
         assert (await viewer.get("/api/v1/technician-operations/lookups")).status_code == 200
         assert (

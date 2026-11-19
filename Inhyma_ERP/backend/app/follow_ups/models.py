@@ -10,10 +10,10 @@ from __future__ import annotations
 import uuid
 from datetime import date, datetime
 
-from sqlalchemy import Date, DateTime, String, Text
+from sqlalchemy import Date, DateTime, ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.database.base import Base, SoftDeleteMixin, TimestampMixin, UUIDPrimaryKeyMixin, VersionMixin
+from app.database.base import Base, GUID, SoftDeleteMixin, TimestampMixin, UUIDPrimaryKeyMixin, VersionMixin
 
 
 class FollowUp(Base, UUIDPrimaryKeyMixin, TimestampMixin, VersionMixin, SoftDeleteMixin):
@@ -38,6 +38,12 @@ class FollowUp(Base, UUIDPrimaryKeyMixin, TimestampMixin, VersionMixin, SoftDele
     call_type: Mapped[str | None] = mapped_column(String(50), nullable=True, index=True)
     call_category: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
     marketing_person: Mapped[str | None] = mapped_column(String(150), nullable=True, index=True)
+    owner_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    created_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     current_status: Mapped[str] = mapped_column(String(50), nullable=False, default="New", index=True)
     feedback: Mapped[str | None] = mapped_column(Text, nullable=True)
 

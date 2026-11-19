@@ -51,11 +51,15 @@ router = APIRouter(prefix="/technical-tasks", tags=["Technical Tasks"])
 SCOPE_OWN_PERMISSION = "technical_task.scope.own"            # sees only tasks they created
 
 
+def _has_any_perm(user: CurrentUser | None, *codes: str) -> bool:
+    if user is None or user.is_admin or "*" in user.permissions:
+        return True
+    return any(code in user.permissions for code in codes)
+
+
 def _is_privileged(user: CurrentUser | None) -> bool:
     """Admin-level actions (edit approved / delete beyond Pending / reopen others' cancelled tasks)."""
-    if user is None:
-        return True
-    return user.is_admin or "*" in user.permissions or "technicaltask.manage" in user.permissions
+    return _has_any_perm(user, "technicaltask.manage")
 
 
 def _actor_label(user: CurrentUser | None, default: str | None = None) -> str | None:
@@ -121,11 +125,27 @@ async def list_technical_tasks(
     page: int | None = Query(default=None, ge=1),
     page_size: int | None = Query(default=None, ge=1, le=500),
     service: TechnicalTaskService = Depends(get_service),
-    current_user: CurrentUser = Depends(require_any_permission("technicaltask.view", "technicaltask.manage")),
+    current_user: CurrentUser = Depends(
+        require_any_permission("technicaltask.view", "technicaltask.manage", "payment.view", "payment.manage")
+    ),
 ) -> dict:
     effective_tab = status or tab
     effective_dir = sort_dir or ("desc" if sort_desc is None or sort_desc else "asc")
     effective_tech = technician or task_allotted_to
+    effective_service_type = (
+        service_type if _has_any_perm(current_user, "technicaltask.view", "technicaltask.manage") else "Chargeable"
+    )
+    if effective_tab and not _is_privileged(current_user) and _has_any_perm(current_user, "technicaltask.view"):
+        tab_perm_map = {
+            "pending": "technicaltask.pending.view",
+            "approved": "technicaltask.approved.view",
+            "completed": "technicaltask.completed.view",
+            "cancel": "technicaltask.cancel.view",
+            "cancelled": "technicaltask.cancel.view",
+        }
+        req_tab_perm = tab_perm_map.get(effective_tab.strip().lower())
+        if req_tab_perm and req_tab_perm not in current_user.permissions:
+            raise ForbiddenException(f"Viewing the '{effective_tab}' tab requires the '{req_tab_perm}' permission.")
     effective_limit = page_size if page_size is not None else (limit if limit is not None else 50)
     effective_offset = (
         ((page - 1) * effective_limit) if page is not None else (offset if offset is not None else 0)
@@ -140,7 +160,7 @@ async def list_technical_tasks(
         third_party_city=third_party_city,
         task_type=task_type,
         call_type=call_type,
-        service_type=service_type,
+        service_type=effective_service_type,
         priority=priority,
         technician=effective_tech,
         payment_collected=payment_collected,
@@ -187,7 +207,7 @@ async def get_task_counts(
 @router.get("/payment-summary", summary="Get payment summary KPIs (total, paid, due, pending/completed counts)")
 async def get_payment_summary(
     service: TechnicalTaskService = Depends(get_service),
-    current_user: CurrentUser = Depends(require_any_permission("technicaltask.view", "technicaltask.manage")),
+    current_user: CurrentUser = Depends(require_any_permission("payment.view", "payment.manage")),
 ) -> dict:
     summary = await service.get_payment_summary(**_scope_for(current_user))
     return {"success": True, "data": summary}
@@ -234,7 +254,19 @@ async def monthly_summary(
 async def upload_payment_screenshot(
     request: Request,
     file: UploadFile = File(...),
-    current_user: CurrentUser = Depends(require_any_permission("technicaltask.update", "technicaltask.create", "technicaltask.manage")),
+    current_user: CurrentUser = Depends(
+        require_any_permission(
+            "technicaltask.update",
+            "technicaltask.create",
+            "technicaltask.manage",
+            "payment.create",
+            "payment.update",
+            "payment.manage",
+            "technician_operations.create",
+            "technician_operations.update",
+            "technician_operations.manage",
+        )
+    ),
 ) -> dict:
     content = await file.read()
     public_url, stored_name = await save_uploaded_file(
@@ -270,7 +302,7 @@ async def lookup_by_serial_number(
 async def get_technical_task(
     task_id: str,
     service: TechnicalTaskService = Depends(get_service),
-    current_user: CurrentUser = Depends(require_any_permission("technicaltask.view", "technicaltask.manage")),
+    current_user: CurrentUser = Depends(require_any_permission("technicaltask.call_logs.view", "technicaltask.manage")),
 ) -> dict:
     task = await service.resolve_task(task_id, **_scope_for(current_user))
     return {"success": True, "data": _to_dict(task)}
@@ -280,8 +312,15 @@ async def get_technical_task(
 async def create_technical_task(
     payload: TechnicalTaskCreate,
     service: TechnicalTaskService = Depends(get_service),
-    current_user: CurrentUser = Depends(require_any_permission("technicaltask.create", "technicaltask.manage")),
+    current_user: CurrentUser = Depends(
+        require_any_permission("technicaltask.create", "technicaltask.manage", "payment.create", "payment.manage")
+    ),
 ) -> dict:
+    if (
+        not _has_any_perm(current_user, "technicaltask.create", "technicaltask.manage")
+        and (payload.service_type or "").strip().lower() != "chargeable"
+    ):
+        raise ForbiddenException("Creating non-chargeable technical tasks requires the 'technicaltask.create' permission.")
     creator = _actor_label(current_user, "Admin") or "Admin"
     task = await service.create(
         payload, creator_name=creator, creator_user_id=current_user.id if current_user else None
@@ -308,7 +347,13 @@ async def update_technical_task_status(
     payload: TechnicalTaskStatusUpdate,
     service: TechnicalTaskService = Depends(get_service),
     current_user: CurrentUser = Depends(
-        require_any_permission("technicaltask.update", "technicaltask.approve", "technicaltask.manage")
+        require_any_permission(
+            "technicaltask.update",
+            "technicaltask.approve",
+            "technicaltask.complete",
+            "technicaltask.cancel",
+            "technicaltask.manage",
+        )
     ),
 ) -> dict:
     target = canonical_status(payload.status)
@@ -316,6 +361,12 @@ async def update_technical_task_status(
         if target == "Approved":
             if "technicaltask.approve" not in current_user.permissions:
                 raise ForbiddenException("This action requires the 'technicaltask.approve' permission.")
+        elif target == "Completed":
+            if "technicaltask.complete" not in current_user.permissions:
+                raise ForbiddenException("This action requires the 'technicaltask.complete' permission.")
+        elif target == "Cancel":
+            if "technicaltask.cancel" not in current_user.permissions:
+                raise ForbiddenException("This action requires the 'technicaltask.cancel' permission.")
         else:
             if "technicaltask.update" not in current_user.permissions:
                 raise ForbiddenException("This action requires the 'technicaltask.update' permission.")
@@ -330,7 +381,7 @@ async def reopen_technical_task(
     payload: TechnicalTaskStatusUpdate,
     service: TechnicalTaskService = Depends(get_service),
     current_user: CurrentUser = Depends(
-        require_any_permission("technicaltask.approve", "technicaltask.update", "technicaltask.manage")
+        require_any_permission("technicaltask.reopen", "technicaltask.manage")
     ),
 ) -> dict:
     user_name = _actor_label(current_user, "Admin")
@@ -349,7 +400,7 @@ async def record_technical_task_payment(
     task_id: uuid.UUID,
     payload: TechnicalTaskPaymentRecordRequest,
     service: TechnicalTaskService = Depends(get_service),
-    current_user: CurrentUser = Depends(require_any_permission("technicaltask.update", "technicaltask.manage")),
+    current_user: CurrentUser = Depends(require_any_permission("payment.update", "payment.manage")),
 ) -> dict:
     user_name = _actor_label(current_user, "Accounts")
     task = await service.record_payment(
@@ -384,10 +435,17 @@ async def bulk_delete_technical_tasks(
     payload: TechnicalTaskBulkDeleteRequest,
     service: TechnicalTaskService = Depends(get_service),
     current_user: CurrentUser = Depends(
-        require_any_permission("technicaltask.bulk_action", "technicaltask.delete", "technicaltask.manage")
+        require_any_permission(
+            "technicaltask.bulk_action",
+            "technicaltask.delete",
+            "technicaltask.manage",
+            "payment.delete",
+            "payment.manage",
+        )
     ),
 ) -> dict:
-    deleted_count = await service.bulk_delete(payload.ids, privileged=_is_privileged(current_user))
+    privileged = _is_privileged(current_user) or _has_any_perm(current_user, "payment.manage")
+    deleted_count = await service.bulk_delete(payload.ids, privileged=privileged)
     return {
         "success": True,
         "message": f"Successfully deleted {deleted_count} technical task(s).",
@@ -399,7 +457,7 @@ async def bulk_delete_technical_tasks(
 async def get_task_call_logs(
     task_id: str,
     service: TechnicalTaskService = Depends(get_service),
-    current_user: CurrentUser = Depends(require_any_permission("technicaltask.view", "technicaltask.manage")),
+    current_user: CurrentUser = Depends(require_any_permission("technicaltask.call_logs.view", "technicaltask.manage")),
 ) -> dict:
     logs = await service.list_call_logs(task_id, **_scope_for(current_user))
     return {"success": True, "data": [_log_to_dict(l) for l in logs]}
@@ -409,7 +467,7 @@ async def get_task_call_logs(
 async def get_technical_task_logs(
     task_id: str,
     service: TechnicalTaskService = Depends(get_service),
-    current_user: CurrentUser = Depends(require_any_permission("technicaltask.view", "technicaltask.manage")),
+    current_user: CurrentUser = Depends(require_any_permission("technicaltask.call_logs.view", "technicaltask.manage")),
 ) -> dict:
     logs = await service.list_task_logs(task_id, **_scope_for(current_user))
     return {"success": True, "data": [_task_log_to_dict(l) for l in logs]}

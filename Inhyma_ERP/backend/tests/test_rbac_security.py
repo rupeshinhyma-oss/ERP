@@ -232,4 +232,101 @@ async def test_role_deletion_impact_and_reassignment():
         await service.delete_role(role_id)
 
 
+async def test_technician_system_department_reserved_and_lookup():
+    """Verify 'technician' is a reserved system department and lists active members cleanly."""
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+    from sqlalchemy.pool import StaticPool
+    from app.database.base import Base
+    from app.rbac.models import DepartmentHierarchy, RolePermission, UserRole
+    from app.rbac.repository import PermissionRepository, RoleRepository, UserRoleRepository
+    from app.rbac.service import RESERVED_ROLE_NAMES, RBACService
+    from app.core.exceptions import ConflictException, ForbiddenException
+
+    assert "technician" in RESERVED_ROLE_NAMES
+
+    engine = create_async_engine(
+        "sqlite+aiosqlite://",
+        poolclass=StaticPool,
+        connect_args={"check_same_thread": False},
+    )
+    async with engine.begin() as conn:
+        await conn.run_sync(
+            lambda c: Base.metadata.create_all(
+                c,
+                tables=[
+                    User.__table__,
+                    Permission.__table__,
+                    Role.__table__,
+                    DepartmentHierarchy.__table__,
+                    RolePermission.__table__,
+                    UserRole.__table__,
+                ],
+            )
+        )
+
+    maker = async_sessionmaker(engine, expire_on_commit=False)
+    async with maker() as s:
+        tech_role = Role(name="technician", description="Technician Dept", is_system=True)
+        other_role = Role(name="sales", description="Sales", is_system=False)
+        active_tech = User(
+            username="ravi.tech",
+            email="ravi@example.com",
+            password_hash="x",
+            first_name="Ravi",
+            last_name="Patel",
+            display_name="Ravi Patel",
+            phone="9876543210",
+            city="Indore",
+            is_active=True,
+            status=UserStatus.ACTIVE,
+        )
+        inactive_tech = User(
+            username="old.tech",
+            email="old@example.com",
+            password_hash="x",
+            first_name="Old",
+            last_name="Tech",
+            display_name="Old Tech",
+            phone="9000000000",
+            is_active=False,
+            status=UserStatus.INACTIVE,
+        )
+        sales_user = User(
+            username="sales.rep",
+            email="sales@example.com",
+            password_hash="x",
+            first_name="Sales",
+            last_name="Rep",
+            display_name="Sales Rep",
+            is_active=True,
+            status=UserStatus.ACTIVE,
+        )
+        s.add_all([tech_role, other_role, active_tech, inactive_tech, sales_user])
+        await s.flush()
+        s.add_all([
+            UserRole(user_id=active_tech.id, role_id=tech_role.id),
+            UserRole(user_id=inactive_tech.id, role_id=tech_role.id),
+            UserRole(user_id=sales_user.id, role_id=other_role.id),
+        ])
+        await s.commit()
+
+        service = RBACService(
+            role_repository=RoleRepository(s),
+            permission_repository=PermissionRepository(s),
+            user_role_repository=UserRoleRepository(s),
+        )
+        with pytest.raises(ConflictException, match="reserved"):
+            await service.create_role(name="Technician", description="", permission_codes=[])
+        with pytest.raises(ForbiddenException, match="System roles cannot be deleted"):
+            await service.delete_role(tech_role.id)
+
+        rows = await service.list_active_technician_users()
+        assert len(rows) == 1
+        assert rows[0]["name"] == "Ravi Patel"
+        assert rows[0]["mobile"] == "9876543210"
+        assert rows[0]["city"] == "Indore"
+    await engine.dispose()
+
+
+
 

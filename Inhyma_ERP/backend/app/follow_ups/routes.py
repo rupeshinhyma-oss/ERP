@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.dependencies import CurrentUser, get_current_user
 from app.database.session import get_db_session
 from app.core.responses import build_success_response
+from app.crm.dependencies import require_crm_any_permission, require_crm_permission
 from app.follow_ups.models import FollowUp
 from app.follow_ups.repository import FollowUpRepository
 from app.follow_ups.schemas import (
@@ -22,7 +23,6 @@ from app.follow_ups.schemas import (
     FollowUpUpdate,
 )
 from app.follow_ups.service import FollowUpService
-from app.rbac.dependencies import require_any_permission
 
 router = APIRouter(prefix="", tags=["Follow Ups"])
 
@@ -69,7 +69,7 @@ async def list_follow_ups(
     page_size: int | None = Query(default=None, ge=1, le=500),
     service: FollowUpService = Depends(get_service),
     current_user: CurrentUser = Depends(
-        require_any_permission("crm.leads.view", "crm.leads.manage", "leads.view", "leads.manage")
+        require_crm_any_permission("crm.leads.view", "crm.leads.manage")
     ),
 ) -> dict:
     effective_limit = page_size if page_size is not None else (limit if limit is not None else 50)
@@ -135,7 +135,7 @@ async def create_follow_up(
     payload: FollowUpCreate,
     service: FollowUpService = Depends(get_service),
     current_user: CurrentUser = Depends(
-        require_any_permission("crm.leads.manage", "leads.manage")
+        require_crm_any_permission("crm.leads.view", "crm.leads.manage")
     ),
 ) -> dict:
     item = await service.create(payload, actor=current_user)
@@ -151,7 +151,7 @@ async def bulk_delete_follow_ups(
     payload: FollowUpBulkDeleteRequest,
     service: FollowUpService = Depends(get_service),
     current_user: CurrentUser = Depends(
-        require_any_permission("crm.leads.manage", "leads.manage")
+        require_crm_permission("crm.leads.manage")
     ),
 ) -> dict:
     deleted_count = await service.bulk_delete(payload.ids, actor=current_user)
@@ -167,7 +167,7 @@ async def get_follow_up(
     item_id: uuid.UUID,
     service: FollowUpService = Depends(get_service),
     current_user: CurrentUser = Depends(
-        require_any_permission("crm.leads.view", "crm.leads.manage", "leads.view", "leads.manage")
+        require_crm_any_permission("crm.leads.view", "crm.leads.manage")
     ),
 ) -> dict:
     item = await service.get_by_id(item_id, actor=current_user)
@@ -183,7 +183,7 @@ async def update_follow_up(
     payload: FollowUpUpdate,
     service: FollowUpService = Depends(get_service),
     current_user: CurrentUser = Depends(
-        require_any_permission("crm.leads.manage", "leads.manage")
+        require_crm_any_permission("crm.leads.view", "crm.leads.manage")
     ),
 ) -> dict:
     item = await service.update(item_id, payload, actor=current_user)
@@ -199,7 +199,7 @@ async def delete_follow_up(
     item_id: uuid.UUID,
     service: FollowUpService = Depends(get_service),
     current_user: CurrentUser = Depends(
-        require_any_permission("crm.leads.manage", "leads.manage")
+        require_crm_permission("crm.leads.manage")
     ),
 ) -> dict:
     await service.delete(item_id, actor=current_user)

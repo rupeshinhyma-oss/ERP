@@ -952,9 +952,12 @@ class CrmSalespersonDistributionService:
         roles = list((await self.session.execute(user_roles_stmt)).scalars().all())
         role_names = [r.name.lower() for r in roles]
 
-        is_manager = bool(
+        has_explicit_manager_role = bool(
             "department_manager" in role_names
             or any("manager" in r for r in role_names)
+        )
+        is_manager = bool(
+            has_explicit_manager_role
             or len(direct_reports) > 0
             or len(led_dept_ids) > 0
         )
@@ -964,9 +967,14 @@ class CrmSalespersonDistributionService:
 
         # Resolve departments managed by this manager
         managed_dept_ids: set[uuid.UUID] = set(led_dept_ids)
-        for r in roles:
-            if r.name.lower() not in ("user", "super_admin", "admin", "department_manager", "employee"):
-                managed_dept_ids.add(r.id)
+        if has_explicit_manager_role and not managed_dept_ids:
+            for r in roles:
+                if r.name.lower() not in ("user", "super_admin", "admin", "department_manager", "employee"):
+                    managed_dept_ids.add(r.id)
+        elif has_explicit_manager_role:
+            for r in roles:
+                if "manager" in r.name.lower() and r.name.lower() != "department_manager":
+                    managed_dept_ids.add(r.id)
 
         # Build scope of user IDs: direct reports + members of managed departments + self
         scoped_user_ids: set[uuid.UUID] = {actor.id}

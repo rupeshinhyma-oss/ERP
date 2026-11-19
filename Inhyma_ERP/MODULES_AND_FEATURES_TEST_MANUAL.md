@@ -4,7 +4,7 @@
 > **Location:** Root Workspace (`/MODULES_AND_FEATURES_TEST_MANUAL.md`)  
 > **Purpose:** Exhaustive reference catalog detailing every single module, page layout, table column, action button, modal window, drawer, form tab, and form field across the entire ERP. Designed for developers, QA testers, and autonomous AI agents to execute manual and automated regression tests before and after code changes.  
 > **Strict Policy:** When developing or modifying features, no existing module, form, or field listed in this document may be removed, broken, or regressed.  
-> **Last Updated:** November 17, 2026
+> **Last Updated:** November 18, 2026
 
 ---
 
@@ -89,6 +89,7 @@
 77. [IDENTITY & UX GOVERNANCE: Display Name Primary Across All Modules & Removal of Username from UI](#77-identity--ux-governance-display-name-primary-across-all-modules--removal-of-username-from-ui)
 78. [TASK: Technician Ops & Wallet — Spare Parts Gatepass Stock Conservation, Sales Process Bridge, Wallet Voucher Ledger & Machine Warranty Registry](#78-task-technician-ops--wallet--spare-parts-gatepass-stock-conservation-sales-process-bridge-wallet-voucher-ledger--machine-warranty-registry)
 79. [REPORTS: Financial Planning Report & Cargo Overview Modules](#79-reports-financial-planning-report--cargo-overview-modules)
+80. [PLATFORM GOVERNANCE: Zero-Hardcoded Cross-Module Master Data, Live Error Integrity & Fallback Purge](#80-platform-governance-zero-hardcoded-cross-module-master-data-live-error-integrity--fallback-purge)
 
 ---
 
@@ -138,9 +139,9 @@
 | **REPORTS** | Cargo Overview | `/reports/cargo-overview` & `/reports/cargo-overview/detail/:key` (`/cargo-overview` redirect) | `reports-cargo-overview` | `anchor` | `report.view` / `cargo_overview.*` |
 | **TASK** | Tasks | `/tasks` | `tasks` | `task` | `task.view` |
 | **TASK** | Technical Tasks | `/technical-task/list` (`/technical-tasks` redirect) | `technical-tasks` | `wrench` | `technicaltask.view` |
-| **TASK** | Technical Task Call & Task Logs | `/technical-task/detail/:id` | `technical-tasks` | `wrench` | `technicaltask.view` |
-| **TASK** | Payments | `/payments` | `payments` | `currency` | `technicaltask.view` |
-| **TASK** | Technician Ops & Wallet | `/technician-operations` | `technician-operations` | `truck` | Authenticated |
+| **TASK** | Technical Task Call & Task Logs | `/technical-task/detail/:id` | `technical-tasks` | `wrench` | `technicaltask.view` + `technicaltask.call_logs.view` |
+| **TASK** | Payments | `/payments` | `payments` | `currency` | `payment.view` |
+| **TASK** | Technician Ops & Wallet | `/technician-operations` | `technician-operations` | `truck` | `technician_operations.view` |
 | **USER MANAGEMENT** | Users | `/users` | `users` | `user` | `user.view` |
 | **USER MANAGEMENT** | Positions | `/positions` | `positions` | `briefcase` | `position.view` |
 | **USER MANAGEMENT** | Organization Chart | `/org-chart` | `org-chart` | `orgChart` | `reporting.view` |
@@ -159,7 +160,6 @@
 | **CONFIGURATIONS** | Company Sectors | `/masters/company-sectors` | `masters-company-sectors` | `layers` | `companysector.view` |
 | **CONFIGURATIONS** | Warehouses | `/masters/warehouses` | `masters-warehouses` | `home` | `warehouse.view` |
 | **CONFIGURATIONS** | Billing Company | `/masters/billing-company` | `masters-billing-company` | `building` | `billingcompany.view` |
-| **CONFIGURATIONS** | Technicians | `/masters/technicians` | `masters-technicians` | `user` | `technician.view` |
 | **CONFIGURATIONS** | ERP Settings | `/organization` | `organization` | `settings` | `organization.manage` |
 | **CONFIGURATIONS** | Organization List | `/masters/company-list` | `masters-company-list` | `building` | `organizationlist.view` |
 | **CONFIGURATIONS** | Audit Log | `/audit` | `audit` | `clock` | `audit.view` |
@@ -976,7 +976,7 @@ Manage complete vendor team directory:
 - **Bidirectional Live Auto-Sync:** Connecting a child department under a parent (e.g. Sales under Operations) immediately updates both departments' rosters so Operations lists Sales as a child, and Sales lists Operations as a parent.
 - **DAG Cycle Detection:** Server-side validation prevents circular hierarchies (e.g. A -> B -> A or A -> B -> C -> A) and returns HTTP 409 Conflict with an alert.
 - **Permission Matrix Grid:**
-  - Grouped by module cards (`306` total permissions across all modules, including `Technical Tasks` with `8` permissions: `technicaltask.view`, `technicaltask.create`, `technicaltask.update`, `technicaltask.approve`, `technicaltask.delete`, `technicaltask.export`, `technicaltask.bulk_action`, `technicaltask.manage`).
+  - Grouped by module cards (`325` unique permissions across all modules, including `Technical Tasks` with `16` permissions: `technicaltask.view`, `technicaltask.pending.view`, `technicaltask.approved.view`, `technicaltask.completed.view`, `technicaltask.cancel.view`, `technicaltask.create`, `technicaltask.bulk_action`, `technicaltask.action.view`, `technicaltask.call_logs.view`, `technicaltask.approve`, `technicaltask.complete`, `technicaltask.cancel`, `technicaltask.reopen`, `technicaltask.update`, `technicaltask.delete`, `technicaltask.manage`; `Payments` with `5` independent permissions: `payment.view`, `payment.create`, `payment.update`, `payment.delete`, `payment.manage`; and `Technician Gatepass & Wallet Management` with `4` independent permissions: `technician_operations.view`, `technician_operations.create`, `technician_operations.update`, `technician_operations.manage`; the `Technicians` Master module and `technician.*` permissions were removed in favor of the fixed `Technician` `SYSTEM` department).
   - `Select All` / `Select Group` toggles per module.
   - Checkboxes for granular permissions (`.view`, `.create`, `.update`, `.approve`, `.delete`, `.export`, `.import`, `.bulk_action`, `.manage`, etc.).
 - **Clone Department Button:** Creates a copy of the department with all permissions pre-checked.
@@ -993,7 +993,8 @@ Manage complete vendor team directory:
 - [ ] In `Sales`, select another parent department (e.g. `Executive Management`) and click `+ Add Parent`. Verify `Sales` now lists multiple parents (`Operations` and `Executive Management`).
 - [ ] Attempt to add `Operations` as a child department of `Sales`. Verify cycle detection triggers and rejects the circular connection with the error: *"This would create a circular department hierarchy."*
 - [ ] In `Operations` -> Child Departments, click `Remove` next to `Sales`. Verify `Sales` is unlinked and no longer appears under Child Departments or as Sales's parent.
-- [ ] In any department on `/rbac` (and in User Direct Permission Overrides), verify the **TECHNICAL TASKS** permission group (`0 / 8 active`) is displayed with all 8 checkboxes: `View` (`technicaltask.view`), `Create` (`technicaltask.create`), `Edit` (`technicaltask.update`), `Approve` (`technicaltask.approve`), `Delete` (`technicaltask.delete`), `Export` (`technicaltask.export`), `Bulk Actions` (`technicaltask.bulk_action`), and `Manage All` (`technicaltask.manage`), and that total assigned permissions denominator reflects `306`.
+- [ ] In any department on `/rbac` (and in User Direct Permission Overrides), verify the **TECHNICAL TASKS** permission group (`0 / 16 active`: `View`, `View Pending Tab`, `View Approved Tab`, `View Completed Tab`, `View Cancel Tab`, `+ Add New (Create)`, `Bulk Actions`, `View Action Column (⋮)`, `Action: View Call Logs`, `Action: Approved (Pending Stage)`, `Action: Completed (Approved Stage)`, `Action: Cancel (Approved Stage)`, `Action: Reopen / Reassign (Cancel Stage)`, `Action: Edit`, `Action: Delete`, `Manage All`), the **PAYMENTS** permission group (`0 / 5 active`: `View` `payment.view`, `Create` `payment.create`, `Edit` `payment.update`, `Delete` `payment.delete`, `Manage All` `payment.manage`), and the **TECHNICIAN GATEPASS & WALLET MANAGEMENT** permission group (`0 / 4 active`: `View` `technician_operations.view`, `Create` `technician_operations.create`, `Edit` `technician_operations.update`, `Manage All` `technician_operations.manage`) are displayed as separate groups, verify the **TECHNICIAN** Master group is absent, verify `Admin` (`super_admin`), `User` (`user`), and `Technician` (`technician`) carry the `SYSTEM` badge (protected from rename/deletion), and verify total assigned permissions denominator reflects `325`.
+- [ ] Verify **3-Module RBAC Separation**: Grant `technicaltask.view` only to a test user -> verify ONLY `Technical Tasks` appears in the `TASK` sidebar section (not `Payments` or `Technician Ops & Wallet`), and navigating directly to `/payments` or `/technician-operations` redirects to `/403`. Grant `payment.view` only -> verify ONLY `Payments` appears in `TASK`. Grant `technician_operations.view` only -> verify ONLY `Technician Ops & Wallet` appears in `TASK`.
 
 ---
 
@@ -1817,15 +1818,23 @@ Checklist to execute:
 
 - **Route:** `/technical-task/list`, `/technical-task/detail/:id`
 - **Legacy Redirects:** `/technical-tasks`, `/technical-tasks/detail/:id`
-- **Required Permissions (`module="technicaltask"`, `page="technical-tasks"`):**
-  - `technicaltask.view` (*View* — sidebar link visibility, `/technical-task/list` route guard, list/counts/detail/call-logs read APIs, and `module:technical_tasks` WebSocket channel)
-  - `technicaltask.create` (*Create* — `+ ADD NEW` header button and `POST /api/v1/technical-tasks`)
-  - `technicaltask.update` (*Edit* — row `Edit`, `Completed`, `Cancel`, `Payment Collected`, `/payments` `Record Payment`, Call Log submission, `PATCH /{id}`, `PATCH /{id}/status`, `POST /{id}/record-payment`)
-  - `technicaltask.approve` (*Approve* — row `Approved` action, `Reopen / Reassign`, and `PATCH /{id}/status` to `Approved`)
-  - `technicaltask.delete` (*Delete* — row `Delete` action and `DELETE /{id}`)
-  - `technicaltask.export` (*Export* — `Imp / Exp ▾` header menu and `Export Selected` bulk option)
+- **Required Permissions (`module="technicaltask"`, `page="technical-tasks"` — 16 permissions):**
+  - `technicaltask.view` (*View* — sidebar link visibility, `/technical-task/list` route guard, `All` tab, counts/monthly/serial APIs, and `module:technical_tasks` WebSocket channel)
+  - `technicaltask.pending.view` (*View Pending Tab* — `Pending (N)` tab & `?tab=pending` filter)
+  - `technicaltask.approved.view` (*View Approved Tab* — `Approved (N)` tab & `?tab=approved` filter)
+  - `technicaltask.completed.view` (*View Completed Tab* — `Completed (N)` tab & `?tab=completed` filter)
+  - `technicaltask.cancel.view` (*View Cancel Tab* — `Cancel (N)` tab & `?tab=cancel` filter)
+  - `technicaltask.create` (*+ Add New (Create)* — `+ ADD NEW` header button and `POST /api/v1/technical-tasks`)
   - `technicaltask.bulk_action` (*Bulk Actions* — `Bulk Actions ▾` menu and `POST /api/v1/technical-tasks/bulk-delete`)
-  - `technicaltask.manage` (*Manage All* — grants full administrative access across all Technical Tasks UI actions, non-creator edits on approved tasks, post-Pending deletes, and all API routes)
+  - `technicaltask.action.view` (*View Action Column (⋮)* — `ACTION` column header and `⋮` 3-dot row menu trigger)
+  - `technicaltask.call_logs.view` (*Action: View Call Logs* — `Call Logs` item in `⋮` menu and `/technical-task/detail/:id`)
+  - `technicaltask.approve` (*Action: Approved (Pending Stage)* — row `Approved` action on Pending tasks, `Bulk Mark Approved`, and `PATCH /{id}/status` to `Approved`)
+  - `technicaltask.complete` (*Action: Completed (Approved Stage)* — row `Completed` action on Approved tasks, `Bulk Mark Completed`, and `PATCH /{id}/status` to `Completed`)
+  - `technicaltask.cancel` (*Action: Cancel (Approved Stage)* — row `Cancel` action on Approved tasks and `PATCH /{id}/status` to `Cancel`)
+  - `technicaltask.reopen` (*Action: Reopen / Reassign (Cancel Stage)* — row `Reopen / Reassign` action on Cancel tasks and `POST /{id}/reopen`)
+  - `technicaltask.update` (*Action: Edit* — row `Edit` action, `+ ADD NEW CALL LOG` submission, `PATCH /{id}`, and `POST /{id}/call-logs`)
+  - `technicaltask.delete` (*Action: Delete* — row `Delete` action, `Bulk Delete`, and `DELETE /{id}`)
+  - `technicaltask.manage` (*Manage All* — grants full administrative access across all Technical Tasks tabs, header buttons, `ACTION` column, all `⋮` stage actions, non-creator edits on approved tasks, post-Pending deletes, and all API routes)
 - **Purpose:** Field service ticket management, preventive maintenance scheduling, machine breakdown triage, and service technician engineering dispatch.
 
 ### Visual Elements & Layout
@@ -1834,14 +1843,13 @@ Checklist to execute:
 3. **Header Action Buttons (`.page-header-actions`, 35px Universal Standard):**
    - **Funnel Filter Toggle (`#556987`)** — Expands/collapses the top 10-control filter card above the main table card (default collapsed).
    - **`+ ADD NEW`** (Primary blue button, gated by `technicaltask.create | technicaltask.manage`) — Opens the **Add Technical Task** slide-over drawer.
-   - **`Imp / Exp ▾`** (Golden-amber `#f59e0b`, gated by `technicaltask.export | technicaltask.manage`) — Opens dropdown containing `📤 Export to CSV`.
-   - **`Bulk Actions ▾`** (Emerald button, gated by `technicaltask.bulk_action | technicaltask.manage`) — Multi-row dropdown containing `✓ Bulk Mark Approved (N)` (`technicaltask.approve`), `🏁 Bulk Mark Completed (N)` (`technicaltask.update`), and `🗑️ Bulk Delete (N)` (`technicaltask.delete`).
+   - **`Bulk Actions ▾`** (Emerald button, gated by `technicaltask.bulk_action | technicaltask.manage`) — Multi-row dropdown containing `✓ Bulk Mark Approved (N)` (`technicaltask.approve`), `🏁 Bulk Mark Completed (N)` (`technicaltask.complete`), and `🗑️ Bulk Delete (N)` (`technicaltask.delete`). *(The standalone `Imp / Exp ▾` header button was removed.)*
 4. **Status Workflow Tabs (with Live Counter Badges from `GET /api/v1/technical-tasks/counts`):**
-   - `All (N)` — Total technical service tasks across all stages.
-   - `Pending (N)` — Newly created customer service tickets awaiting approval & technician allotment.
-   - `Approved (N)` — Approved tickets allotted to a field service technician.
-   - `Completed (N)` — Resolved service tickets (both free tasks and chargeable tasks; unpaid chargeable collections are tracked in `/payments`).
-   - `Cancel (N)` — Cancelled service tickets with mandatory cancellation remarks.
+   - `All (N)` — Total technical service tasks across all stages (`technicaltask.view`).
+   - `Pending (N)` — Newly created customer service tickets awaiting approval & technician allotment (`technicaltask.pending.view | technicaltask.manage`).
+   - `Approved (N)` — Approved tickets allotted to a field service technician (`technicaltask.approved.view | technicaltask.manage`).
+   - `Completed (N)` — Resolved service tickets (`technicaltask.completed.view | technicaltask.manage`).
+   - `Cancel (N)` — Cancelled service tickets with mandatory cancellation remarks (`technicaltask.cancel.view | technicaltask.manage`).
 5. **Filter Toolbar & Sub-Toolbar:**
    - **Sub-Toolbar:** `Items/Page` selector (`10`, `20`, `50`, `100`, default `50`) and single unified `Search...` input (`data-testid="filter-serial-number"`) querying Company Name, Machine Model, Serial Number, Task Description, Contact Person, Phone, or City, with 1-click serial badge deep-filtering on table rows.
    - **Collapsible Filter Card (3-column grid with `Reset` and `Search` buttons):**
@@ -1851,7 +1859,7 @@ Checklist to execute:
      - `City` (`TypableCombobox` populated from `/masters/cities` with `/masters/cities/lookup` fallback)
      - `Call Type` (`All`, populated from `/masters/call-types` with `/masters/call-types/lookup` fallback)
      - `Service Type` (`All`, `Free`, `Chargeable`)
-     - `Task Allotted To` (`All`, populated from `/masters/technicians` with `/masters/technicians/lookup` fallback)
+     - `Task Allotted To` (`All`, populated from active `Technician` department users via `/rbac/technicians/lookup`)
      - `Priority` (`All`, `A`, `B`)
      - `Third-Party Site City` (`TypableCombobox`)
      - `Payment Collected` (`All`, `Yes (Collected)`, `Pending`)
@@ -1898,7 +1906,7 @@ Checklist to execute:
      - **`Task Log Summary` Tab:** 3-column table (`Updated By` with display name + italicized `DD-MM-YYYY hh:mm AM/PM` timestamp, `Title`, and `Status` pill badge).
    - **`Add Call Log` Right-Side Slide-Over Drawer:** Header `Add Call Log`, `Task Type` radio buttons (`Telecall` default, `Physical Visit`), `Remarks` textarea, and sticky bottom full-width `Submit` button.
 10. **Technical Tasks Payments Module (`/payments` — `PaymentsPage.tsx`) & Technician Wallet Auto-Sync:**
-    - **Route & RBAC:** `/payments` under `TASK` sidebar (`permission: "technicaltask.view"`); `+ ADD NEW` (`technicaltask.create`), `Record Payment` (`technicaltask.update`), and `DELETE` (`technicaltask.delete`) gated via `useAuth()`.
+    - **Route & RBAC:** `/payments` under `TASK` sidebar (`permission: "payment.view"`); `+ ADD NEW` (`payment.create`), `Record Payment` (`payment.update`), and `DELETE` (`payment.delete`) gated via `useAuth()` (`payment.manage` grants full access; `technicaltask.*` does NOT grant access to `/payments`).
     - **KPI Summary Cards:** `TOTAL PAYMENT` (slate `#0f172a`), `PAID` (green `#16a34a`), and `DUE` (red `#dc2626`) aggregated across active (non-cancelled) `Chargeable` tasks (`Cancel` / `Cancelled` tasks are strictly excluded).
     - **Stage Tabs (`Discount.docx`):** `All (<all_count>)`, `Pending (<pending_count>)` (default active), and `Completed (<completed_count>)`.
     - **Table & Filters:** Renders `Chargeable` badge, `Paid: ₹...` / `Due: ₹...`, dynamic `"—"` dashes for unassigned `Task Approved By` / `Task Allotted To` / `Machine & Model` (zero hardcoded mock strings), and collapsible filters for `City`, `Task Type` (`Telecall`, `Onsite Visit - Client Location`, `Onsite Visit - Third-Party Location`, `In-House`), `Priority` (`A`, `B`), `Task Allotted To`, and `Task Create Date Range`.
@@ -1909,7 +1917,7 @@ Checklist to execute:
 - [ ] Verify status tabs render with dynamic badge counts matching database records.
 - [ ] Verify switching between status tabs (`All`, `Pending`, `Approved`, `Completed`, `Cancel`) filters tickets accurately.
 - [ ] Verify clicking `+ ADD NEW` opens the creation drawer with all customer, machine, and technician fields.
-- [ ] Verify technician dropdown populates with active technicians from the Technicians master.
+- [ ] Verify technician dropdown populates with active users assigned to the fixed `Technician` `SYSTEM` department (`/rbac/technicians/lookup`).
 - [ ] Verify status transitions update ticket state and log the action in the audit trail.
 - [ ] Verify soft-deleting a technical task moves it to Trash (`/trash`) with restore capability.
 - [ ] Verify multi-select checkboxes allow bulk deletion of technical service tasks.
@@ -1917,9 +1925,9 @@ Checklist to execute:
 - [ ] Verify clicking a serial number badge on any row filters the table and populates the unified search input.
 - [ ] Verify the table body empty state displays a clean illustration without any redundant '+ Add New Task' button (using the primary '+ ADD NEW' button in the page header).
 - [ ] **RBAC Sidebar & Route Guard (`technicaltask.view`):** Assign a user to a department without `technicaltask.view` (or `technicaltask.manage`). Verify `Technical Tasks` is hidden in the `TASK` sidebar section, direct navigation to `/technical-task/list` redirects to `/403`, and `GET /api/v1/technical-tasks` returns `403 Forbidden`.
-- [ ] **RBAC Granular Action Gating (`technicaltask.*`):** Grant `technicaltask.view` only and verify `+ ADD NEW`, `+ ADD NEW CALL LOG`, `Imp / Exp ▾`, `Bulk Actions ▾`, row `Approved` / `Edit` / `Completed` / `Cancel` / `Delete` are hidden while read-only `Detail` and `/technical-task/detail/:id` (`Call Log Summary` & `Task Log Summary`) remain accessible; then grant `create`, `update`, `approve`, `export`, `bulk_action`, and `delete` individually and verify each corresponding UI button and API endpoint unlocks accurately.
+- [ ] **RBAC Granular Tab, Header, Action Column & Stage-Action Gating (`technicaltask.*`):** Grant `technicaltask.view` only and verify only the `All` tab is shown while `Pending`, `Approved`, `Completed`, `Cancel` tabs, `+ ADD NEW`, `Bulk Actions ▾`, and the `ACTION` column (`⋮`) are hidden; then grant `pending.view`, `approved.view`, `completed.view`, `cancel.view`, `create`, `bulk_action`, `action.view`, `call_logs.view`, `approve`, `complete`, `cancel`, `reopen`, `update`, and `delete` individually and verify each tab, button, and `⋮` stage action (`Call Logs`, Pending→`Approved`, Approved→`Completed`/`Cancel`, Cancel→`Reopen / Reassign`, `Edit`, `Delete`) unlocks independently.
 - [ ] **Call Logs Detail Page & Add Call Log Drawer (`/technical-task/detail/:id`):** Click `⋮` ➔ `Call Logs` on any row in `/technical-task/list`. Verify it navigates to `/technical-task/detail/<number>`, dynamically renders `Task Details` (`Nature Of Complain / Description`, `Task Type`, `Machine & Model`, `Priority`, `Created By`, `Created At`, `Assign To`) and `Company Details`, switches cleanly between `Call Log Summary` and `Task Log Summary` (showing `Create Technical Task` + status transitions), and clicking `+ ADD NEW CALL LOG` opens the right-side `Add Call Log` drawer (`Telecall` / `Physical Visit` + `Remarks` + `Submit`) and appends the new entry immediately.
-- [ ] **Doc-Compliant `Approved` / `Completed` / `Cancel` Centered Modals (`/technical-task/list`):** Click `⋮` ➔ `Approved` on a `Pending` row and verify `Approve & Allot Task` immediately opens centered over the viewport (`position: fixed`), populates active technicians (including via `/masters/technicians/lookup` for non-master viewers), displays an inline red validation banner if saved without `Allot Technician *`, allows overriding `Task Type` / `Service Type` / `Amount *` / `Payment Terms *`, and shows `Scheduled / Visit Date` only for Onsite / Client / Third-Party visits; click `⋮` ➔ `Completed` on a `Chargeable` `Approved` row and verify `No (Pending in Payments)` marks the task `Completed` with `payment_status = "Pending"` (tracked in `/payments`) while `Yes` captures `Company Acc` / `Self collect` + `Amount Collected` and moves it to `Completed` + `Paid`; click `⋮` ➔ `Cancel` and verify blank remarks are blocked with `"Cancellation remarks are strictly mandatory."`.
+- [ ] **Doc-Compliant `Approved` / `Completed` / `Cancel` Centered Modals (`/technical-task/list`):** Click `⋮` ➔ `Approved` on a `Pending` row and verify `Approve & Allot Task` immediately opens centered over the viewport (`position: fixed`), populates active users in the `Technician` department via `/rbac/technicians/lookup`, displays an inline red validation banner if saved without `Allot Technician *`, allows overriding `Task Type` / `Service Type` / `Amount *` / `Payment Terms *`, and shows `Scheduled / Visit Date` only for Onsite / Client / Third-Party visits; click `⋮` ➔ `Completed` on a `Chargeable` `Approved` row and verify `No (Pending in Payments)` marks the task `Completed` with `payment_status = "Pending"` (tracked in `/payments`) while `Yes` captures `Company Acc` / `Self collect` + `Amount Collected` and moves it to `Completed` + `Paid`; click `⋮` ➔ `Cancel` and verify blank remarks are blocked with `"Cancellation remarks are strictly mandatory."`.
 - [ ] **Payments Stage Tabs, Cancelled Exclusion & `Self collect` Wallet Sync (`/payments` & `/technician-operations`):** Open `/payments` and verify `All (N)`, `Pending (N)`, and `Completed (N)` tabs render with `Chargeable` spelling and `"—"` for unassigned fields; cancel a chargeable task and verify its amount is excluded from `TOTAL PAYMENT`, `DUE`, and `/payments` tabs; record a `Self collect` payment and verify a `VERIFIED` `COLLECTION` transaction automatically appears in Technician Wallet (`/technician-operations`).
 
 ---
@@ -2308,7 +2316,7 @@ Checklist to execute:
 
 ### Overview & Visual Specification
 - **Component:** `StatusToggle.tsx` integrated with `MasterPage.tsx`
-- **Location:** All 27 Master Data admin tables (`/masters/payment-terms`, `/masters/cities`, `/masters/districts`, `/masters/states`, `/masters/countries`, `/masters/currencies`, `/masters/taxes`, `/masters/additional-charges`, `/masters/social-media`, `/masters/agent-types`, `/masters/company-categories`, `/masters/company-sectors`, `/masters/supplier-types`, `/masters/buyer-types`, `/masters/warehouses`, `/masters/uom`, `/masters/billing-company`, `/masters/company-list`, `/masters/technicians`, `/masters/banks`, `/masters/transport`, `/masters/lead-sources`, `/masters/adjustment-purpose`, `/masters/call-types`, `/masters/brands`, `/masters/categories`, `/masters/subcategories`).
+- **Location:** All 26 Master Data admin tables (`/masters/payment-terms`, `/masters/cities`, `/masters/districts`, `/masters/states`, `/masters/countries`, `/masters/currencies`, `/masters/taxes`, `/masters/additional-charges`, `/masters/social-media`, `/masters/agent-types`, `/masters/company-categories`, `/masters/company-sectors`, `/masters/supplier-types`, `/masters/buyer-types`, `/masters/warehouses`, `/masters/uom`, `/masters/billing-company`, `/masters/company-list`, `/masters/banks`, `/masters/transport`, `/masters/lead-sources`, `/masters/adjustment-purpose`, `/masters/call-types`, `/masters/brands`, `/masters/categories`, `/masters/subcategories`). *(Note: Technicians was converted into the fixed `Technician` `SYSTEM` department under `/rbac`.)*
 - **Visual Design (Exact Reference Match):**
   - **Pill track:** 42px width, 22px height, 9999px border-radius.
   - **Active State (ON):** Vibrant emerald green (`#10b981`) background, white 16px thumb slid to the right (`translateX(20px)`), tooltip: *"Active — Click to deactivate"*.
@@ -3627,12 +3635,12 @@ Positioned directly underneath the collapsible filter card and powered by `GET /
 3. **Idempotent Synthetic Artifact Purge Migration (`z5c6d7e8f9a0_purge_synthetic_pytest_artifacts.py`):**
    - Surgically removes synthetic pytest users (`rec_mgr_*`, `rec_user_*`, `outsider_rep_*`, `*@inhyma.test`, etc.), their `task_recurring_schedules`, spawned recurring test `tasks`, notifications, and unreferenced synthetic pytest `companies` during `alembic upgrade head`, while leaving real users (`admin`, `usera`, `userd`, etc.) and real operational records untouched.
 4. **Canonical 2-System-Role & 306-Permission Bootstrap (`backend/scripts/seed.py`, `backend/scripts/seed_technical_task_permissions.py`):**
-   - `scripts/seed.py` seeds strictly `super_admin` (`Admin SYSTEM`, `306/306` permissions including granular `hrms.*`, `bank.*`, `billingcompany.*`, `technician.*`, and `technicaltask.*` permissions) and `user` (`User SYSTEM`), without creating hardcoded business roles.
+   - `scripts/seed.py` seeds strictly `super_admin` (`Admin SYSTEM`, `325/325` unique permissions including granular `hrms.*`, `bank.*`, `billingcompany.*`, `technicaltask.*`, `payment.*`, and `technician_operations.*` permissions), `user` (`User SYSTEM`), and `technician` (`Technician SYSTEM`), without creating hardcoded business roles.
 5. **HRMS Default Seed Soft-Delete Non-Recreation (`app/hrms/service.py`, `app/hrms/leave_service.py`):**
    - `ensure_seeds()` checks total row existence (including soft-deleted rows) for `HrmsLocation`, `HrmsLeaveType`, `HrmsExpenseCategory`, `HrmsHoliday`, and `HrmsLeavePlan`, ensuring soft-deleted defaults never re-create on subsequent page loads.
 
 ### QA Verification Test Cases
-- [ ] **TC-ISO-01 (Clean Users & Departments Directories):** Navigate to `USER MANAGEMENT` ➔ `Users` (`/users`) and `USER MANAGEMENT` ➔ `Departments & Permissions` (`/rbac`). Verify only authentic provisioned accounts and real departments/roles appear, only the two bootstrap roles (`Admin` / `super_admin` and `User` / `user`) carry the `SYSTEM` lock badge, and zero synthetic hex-suffixed test roles (`Admin_04ae`, `Engineering_xxxx`, `HR Dept_xxxxxx`, duplicate `admin`/`Admin`) or `@example.com` / `rec_mgr_*` / `rec_user_*` test personas exist.
+- [ ] **TC-ISO-01 (Clean Users & Departments Directories & Fixed Technician System Department):** Navigate to `USER MANAGEMENT` ➔ `Users` (`/users`) and `USER MANAGEMENT` ➔ `Departments & Permissions` (`/rbac`). Verify only authentic provisioned accounts and real departments/roles appear, only the three bootstrap roles (`Admin` / `super_admin`, `User` / `user`, and `Technician` / `technician`) carry the `SYSTEM` lock badge (and cannot be renamed, deleted, or clone-overwritten), admins can add/remove existing Users to `Technician` via `/rbac` ("Users in this Department") or `/users`, active `Technician` users populate Technical Tasks / Technician Gatepasses / Technician Wallet (`/rbac/technicians/lookup`), and zero synthetic hex-suffixed test roles (`Admin_04ae`, `Engineering_xxxx`, `HR Dept_xxxxxx`, duplicate `admin`/`Admin`) or `@example.com` / `rec_mgr_*` / `rec_user_*` test personas exist.
 - [ ] **TC-ISO-02 (Zero Live-DB Mutation & Engine-Level Supabase Block During Pytest):** Record `SELECT COUNT(*) FROM users` in `Inhyma_ERP`'s live database, execute `pytest tests/test_pytest_live_db_guard.py` inside `Inhyma_ERP/backend`, and re-query `SELECT COUNT(*) FROM users`. Verify `get_engine()` diverts Supabase URLs to `sqlite+aiosqlite:///:memory:` and the live user count remains 100% unchanged.
 - [ ] **TC-ISO-03 (Automatic Colleague Sweeper Deletes Lingering Retired QA Files):** Place a dummy file at one of the retired QA paths (e.g. `backend/tests/test_tasks_recurring.py` inside a scratch copy or via `test_pytest_live_db_guard.py`) and run `purge_retired_qa_files()`; verify the retired file is deleted while active test suites remain untouched.
 - [ ] **TC-ISO-04 (Deleted Departments & HRMS Defaults Never Re-Seed):** Delete a custom department on `/rbac` or a default master entry on `/hrms/setup` (Location, Leave Type, Expense Category, Holiday, Leave Plan), reload the page and restart the backend (`python -m scripts.seed`), and verify the deleted record is never automatically re-created.
@@ -3698,14 +3706,15 @@ Positioned directly underneath the collapsible filter card and powered by `GET /
 
 ### Feature Overview & UI Specifications
 1. **Navigation, Enterprise Vector Icons & RBAC Gating (`nav.ts`, `TechnicianOperationsPage.tsx` & `useAuth`):**
-   - Sidebar item `Technician Ops & Wallet` under `TASK` requires `technicaltask.view`.
+   - Sidebar item `Technician Ops & Wallet` under `TASK` requires `technician_operations.view` (independent of `technicaltask.view` and `payment.view`).
    - All KPI ribbon cards (`Active Gatepasses` truck, `Pending Sales Orders` alert-triangle, `Cash in Hand` banknote, `Active Machine Warranties` shield-check), header action buttons, navigation tabs (`Package`, `Wallet`, `ShieldCheck`), table badges, and modals/drawers render crisp `24x24` Lucide-style stroke `<svg aria-hidden="true">` icons (zero cartoon emojis).
-   - Read-only users (`technicaltask.view` without create/update/manage permissions) see a `Read-Only Access` lock badge and all mutation buttons (`Issue Outward Gatepass`, `Return`, `Record Wallet Transaction`, `Collect`, `Handover`, `Expense`, `Register Machine Warranty`) are hidden; Sales users with `saleorder.create | saleorder.update` retain access to `Create SO`, `Draft SO`, and `Link SO`.
+   - Read-only users (`technician_operations.view` without `technician_operations.create` / `.update` / `.manage` permissions) see a `Read-Only Access` lock badge and all mutation buttons (`Issue Outward Gatepass`, `Return`, `Record Wallet Transaction`, `Collect`, `Handover`, `Expense`, `Register Machine Warranty`) are hidden; Sales users with `saleorder.create | saleorder.update` retain access to `Create SO`, `Draft SO`, and `Link SO`.
 2. **Tab 1 — Spare Parts Gatepass & Returns (`?tab=gatepasses`):**
    - **KPI Ribbon:** `Active Gatepasses` (`#eff6ff` / `#dbeafe`), `Pending Sales Orders` (`#fef3c7` / `#fde68a`), `Cash in Hand (Technicians)` (`#dcfce7` / `#bbf7d0`), `Active Machine Warranties` (`#ede9fe` / `#ddd6fe`).
    - **Filter & Count Bar:** Instant search (`Gatepass / Technician / Customer / Serial`), Status selector (`All Statuses`, `ISSUED`, `PARTIALLY_RETURNED`, `RECONCILED`, `CLOSED`), and accurate pagination counter (`Showing X of Y gatepasses` backed by `meta.pagination.total` & `total_records`).
    - **Table Columns & Row Actions:** `Gatepass #` (with `<Warehouse>` vector badge & `Ret: <RGP-#>`), `Technician` (with phone icon), `Customer & Serial` (with `Machine Model` and `[Warranty FOC]` / `[Chargeable]` pill), `Issue Date`, `Parts Issued`, `Returned / Consumed`, `SO & Reconciliation Status`, and `Actions` (`Return`, `Draft SO`, `Create SO`, `Link SO`, `Print Gatepass Slip` printer icon button, `Details` drawer).
    - **Issue Outward Gatepass Modal (`maxWidth: 900px`):**
+     - Fixed centered dialog scrollbars (`style.css`: single outer `<form>` scroll only when needed) and fixed-layout line-item table (`tableLayout: fixed; whiteSpace: normal`) with vertically stacked Master Catalog selector / Part Name and Part Code / Stock badge so inputs never overlap adjacent columns.
      - `Dispatch Warehouse *` `<select>` populated from active physical warehouses (defaults to primary warehouse).
      - `Link Open Technical Task` `<select>` (optional auto-fill of Technician + Mobile, Customer Company, Machine Model, Serial Number, Purpose, and automatic serial warranty check).
      - Master-backed `<datalist>` inputs for `Technician Name *`, `Customer Company`, `Machine Model`, and `Machine Serial Number` (+ `Check` warranty button).
@@ -3730,7 +3739,7 @@ Positioned directly underneath the collapsible filter card and powered by `GET /
 - [ ] **TC-TECHOPS-03 (Verified Sales Order Link & Linked SO Cancellation Reversal):** Attempt `Link SO` with a non-existent or cancelled SO number -> verify `400 Bad Request`. Link a valid confirmed SO -> verify Gatepass closes. Cancel that Sales Order in `/sales/process` -> verify warehouse stock returns to `7` (still holding the `2` consumed units on the gatepass) and Gatepass reopens `SO Required`.
 - [ ] **TC-TECHOPS-04 (Sales Order Serial -> Machine Warranty & Technical Task Lookup Sync):** Create a Sales Order for a machine with Serial Number `SN-SYNC-2026`. Verify `SN-SYNC-2026` immediately resolves as `UNDER WARRANTY` in both `/technician-operations?tab=warranty` (`Verify Serial`) and Technical Task `Product by Serial No.` lookup (`/technical-tasks/serial-lookup/SN-SYNC-2026`).
 - [ ] **TC-TECHOPS-05 (`Self collect` Wallet Sync, Cancellation Reversal & Receipt Upload):** Complete a Chargeable Technical Task with `Self collect` (`₹2,500`) -> verify `+ ₹2,500` `Task Sync` appears in Technician Wallet. Cancel or delete that Technical Task -> verify the synced wallet entry is reversed/removed. Record a manual `FIELD_EXPENSE` or `HANDOVER_DEPOSIT` with a receipt image upload -> verify `View Receipt` opens the uploaded file.
-- [ ] **TC-TECHOPS-06 (Printable Gatepass Voucher, Vector SVG Icons & Read-Only RBAC):** Verify KPI ribbon cards, primary header CTA, and module tabs render crisp SVG stroke icons with zero OS emojis. Click the printer icon (`Print Gatepass Slip`) on any Gatepass row or inside `Details` -> verify formatted Outward/Return Material Reconciliation Voucher opens with Technician, Store Keeper, and Authorized Signatory signature blocks. Sign in with `technicaltask.view`-only user -> verify `Read-Only Access` badge and absence of all write buttons (`403 Forbidden` on direct POST).
+- [ ] **TC-TECHOPS-06 (Printable Gatepass Voucher, Single-Scroll Centered Modals, Vector SVG Icons & Read-Only RBAC):** Verify KPI ribbon cards, primary header CTA, and module tabs render crisp SVG stroke icons with zero OS emojis. Open `Record Technician Wallet Transaction`, `Issue Outward Spare Parts Gatepass`, `Record Parts Return`, `Link Sales Order`, and `Register Machine Warranty Policy` (`variant="center"`) -> verify centered forms do not render stacked per-field vertical scrollbars (`Record Technician Wallet Transaction` fits cleanly without any scrollbar on standard desktop viewports, and tall centered dialogs render at most a single outer `<form>` scrollbar). Click the printer icon (`Print Gatepass Slip`) on any Gatepass row or inside `Details` -> verify formatted Outward/Return Material Reconciliation Voucher opens with Technician, Store Keeper, and Authorized Signatory signature blocks. Sign in with `technician_operations.view`-only user -> verify `Read-Only Access` badge and absence of all write buttons (`403 Forbidden` on direct POST). Also verify a `technicaltask.manage` user without `technician_operations.view` cannot see `Technician Ops & Wallet` in the sidebar and receives `403` on `/api/v1/technician-operations/*`.
 
 ---
 
@@ -3790,4 +3799,33 @@ Positioned directly underneath the collapsible filter card and powered by `GET /
 - [ ] **TC-GHOST-01 (Unified Shimmer Ghost Loading Across All Data-Fetching Modules):** Navigate to every list table, detail modal/drawer, Kanban board, PDF viewer (`ImportPurchasePdfPage`, `LocalPurchasePdfPage`), CRM drawer tabs (`CrmLeadsPage`, `LeadImportPage`, `PipelineSetupPage`, `SalespersonDistributionPage`), Tasks views (`RecurringTasksTab`, `TaskWorkloadDashboard`, `TaskDrawer`, `CreateTaskModal`), Feed comments/readership (`FeedPostCard`), Reports (`FinancialPlanningReportPage`, `CargoOverviewPage`, `StockTransactionDetailPage`), Notification Bell (`AppShell`), and Async Dropdowns (`SearchableDropdown`) under throttled network conditions -> verify shared `Skeleton.tsx` (`TableSkeletonRows`, `CardGridSkeleton`, `DetailSkeleton`, `InlineListSkeleton`, `InlineTextSkeleton`) shimmer placeholders render during active `loading`/`isLoading` states without layout shift, and vanish immediately once data or empty-state messages resolve.
 
 ---
-*End of Master Features & Testing Specification Manual. Maintained for Inhyma Solutions Enterprise ERP. Last updated: November 17, 2026 (Unified Shimmer Ghost Loading Rollout via `Skeleton.tsx`; Feed Remediation `FEED-AUD-01..12`, Mounted 1:1 DM Canonical Pair Uniqueness [Migration `v9a0b1c2d3e4`] & HRMS Attendance Regularization Self-Approval Authorization; Cargo Overview Full-Stack Architecture: List + Detail View, 22-Slot Consignment Gallery, 12-Item Cargo Status Checklist, Finance Planning & Product Summary Sections, Standardized Filter-Above-Table Panel & UTF-8 BOM CSV Export, Pluggable Data Extractor, Granular RBAC & Migration `z9a0b1c2d3e4`; Compact JWT + WebSocket `400 Bad Request` Handshake Fix; Section 79: Financial Planning Report Full-Stack Live Wiring).*
+
+## 80. PLATFORM GOVERNANCE: Zero-Hardcoded Cross-Module Master Data, Live Error Integrity & Fallback Purge
+
+### Scope & Master Data Sources
+Cross-module selectors, defaults, and document/table renders across `Inhyma_ERP` must resolve strictly from PostgreSQL Masters/Users/Options APIs (with static test fixtures isolated exclusively under `import.meta.env.MODE === "test"`):
+
+1. **Master & User Dropdowns Wired to Live APIs (No Hardcoded Cross-Module Arrays):**
+   - **Inventory (`AddAdjustmentOrderPage.tsx`, `AddTransferOrderPage.tsx`, `StockTransferPage.tsx`):** `Warehouse` and `Adjustment Purpose` selects load dynamically from `/masters/warehouses?page_size=100&status=active` (excluding `"ordered"` warehouses, partitioning `main_warehouse_id` / `"transit"` entries cleanly into `Transit Warehouses`) and `/masters/adjustment-purposes/lookup?limit=100`. Transfer author `added_by` attributes the signed-in user (`useAuth().profile` / backend `current_user`), never `"Akshata Wadekar"`.
+   - **Masters & Settings (`BillingCompanies.tsx`, `Warehouses.tsx`, `Products.tsx`):** Banks load from `/masters/banks/lookup`, Billing Companies load from `/masters/billing-companies/lookup` (`billing_company` initializes `""` instead of `"INHYMA SOLUTIONS LLP (M)"`), Cities/UOMs omit hardcoded `<option>` / `STANDARD_UOMS` fallbacks in production, and Products omit `PRODUCT_HSN_MAP`, `"8422.30.00"`, and `cat-machines`/`cat-spares` ID fallbacks.
+   - **CRM, Drawers & Modals (`Companies.tsx`, `AddCompanyDrawer.tsx`, `EditAddressDrawer.tsx`, `CompanyForm1Modal.tsx`, `AllotLeadModal.tsx`, `LeadsPage.tsx`, `FollowUpsPage.tsx`, `AgentsPage.tsx`, `IndustrialZonesPage.tsx`):** States (`/masters/states`), Districts (`/masters/districts`), Cities (`/masters/cities`), Company Sectors (`/masters/company-sectors/lookup`), Agent Types (`/masters/agent-types`), Call Types (`/masters/call-types/lookup`), Business Types (`option_lists` / `B2B`, `B2C`), and Salespersons (`/companies/sales-persons` — always fetched and merged in `AllotLeadModal.tsx`) load dynamically with zero `DEFAULT_INDIAN_STATES` / `DEFAULT_SALESPERSONS` / `ag-01` / `iz-01` production fallbacks.
+   - **Sales, Proforma, Reports & Tasks (`ProformaInvoicesPage.tsx`, `SaleProcessForm.tsx`, `SaleProcessList.tsx`, `SaleProcessDetailModal.tsx`, `DiscountPaymentsPage.tsx`, `DeletedOrdersPage.tsx`, `FinancialPlanningReportPage.tsx`, `TechnicalTasksPage.tsx`, `RecurringScheduleModal.tsx`):** Removed `PRODUCT_HSN_MAP`, `KNOWN_HSN_GST`, keyword HSN guesses, `"rupesh-malla"` / `"Dhairya Shah"` / `"Abhishek Patel"` / `"GARUDA..."` / hardcoded filter lists, `DEFAULT_MACHINE_MODELS`, `DEPARTMENTS` (`RecurringScheduleModal` fetches `/rbac/roles?limit=250`), `DEFAULT_PAYMENT_TERMS`, and `_DELETED_ORDERS_SEED`. `SaleProcessForm.resolveChargeHsn()` resolves SAC HSN & GST from `/masters/additional-charges/lookup?limit=250`.
+
+2. **Live Error Surface & Production Print Safety:**
+   - **No Offline/Mock Persistence in Production:** `AddTransferOrderPage.tsx` (removed `local_stock_transfers` `localStorage`), `StockTransferPage.tsx`, `CompanyForm1Modal.tsx`, `FollowUpsPage.tsx`, `SaleProcessList.tsx` (`handleDeleteOrderFile`), and backend `POST /api/v1/sales/discount-payments` / `PATCH /api/v1/sales/discount-payments/{id}/settlement` surface real validation/API/DB errors rather than returning mock success payloads or closing drawers silently.
+   - **Print & PDF Integrity (`salesOrderPdf.ts`, `stockTransferPdf.ts`, `SalesOrderPdfPage.tsx`, `GatePassPdfPage.tsx`, `TransferOrderPdfPage.tsx`, `ProductReorderPage.tsx`, `ProductStockPage.tsx`):** Static sample fixtures (`INITIAL_SALE_ORDERS`, `INITIAL_DISCOUNT_ORDERS`, `INITIAL_STOCK_ITEMS`, `INITIAL_GOODS_EXPECTED_ITEMS`, `INITIAL_REORDER_ITEMS`, `INITIAL_TRANSFERS`, `TRANSFER_52_EXACT_ITEMS`) are gated to `import.meta.env.MODE === "test"`, and `salesOrderPdf.ts` omits hardcoded company address/email/phone/GST/order-no strings when backend metadata is absent.
+
+3. **Filter Layout, Pagination & Toolbar Cleanups:**
+   - **Stock Transfer Single-Row Filter Grid (`StockTransferPage.tsx`, `styles/stockTransfer.css`):** `.transfer-filter-panel` (`display: block; width: 100%`), `.transfer-filter-field` (`width: 100%; min-width: 0`), and `.transfer-filter-grid` (`repeat(auto-fit, minmax(220px, 1fr))`) render **Transfer Date**, **From Warehouse**, and **To Warehouse** aligned horizontally on one row.
+   - **Payments Single Pagination Summary (`PaymentsPage.tsx`):** Removed duplicate manual `"Showing X – Y of Z total"` footer above `<Pagination />` so only a single pagination bar renders.
+   - **Technical Tasks Header (`TechnicalTasksPage.tsx`):** Removed the standalone `Imp / Exp ▾` dropdown button from `.page-header-actions`.
+
+### QA Verification Test Cases
+- [ ] **TC-NOFALLBACK-01 (Dynamic Master Selects & Empty/Unseeded Behavior):** Open `AddAdjustmentOrderPage`, `AddTransferOrderPage`, `Warehouses`, `BillingCompanies`, `Companies`, `LeadsPage`, `FollowUpsPage`, and `TechnicalTasksPage` against live Masters -> verify every dropdown renders only active DB Master/Role/Salesperson records with zero hardcoded sample cities, states, banks, sectors, or user names.
+- [ ] **TC-NOFALLBACK-02 (Stock Transfer Error Integrity & Actor Attribution):** Intercept `POST /api/v1/inventory/stock-transfers` to fail -> verify `AddTransferOrderPage` displays the API error banner, does not write `local_stock_transfers` to `localStorage`, and stays on the form; submit a valid transfer -> verify `added_by` matches the signed-in user rather than `"Akshata Wadekar"`.
+- [ ] **TC-NOFALLBACK-03 (Additional Charge & Product HSN Resolution):** In `SaleProcessFormPage`, add an additional charge row (`+ Add Charge Row`) and select an item configured in `/masters/additional-charges` -> verify HSN and GST % match the Additional Charges Master record without keyword-guessed fallbacks.
+- [ ] **TC-NOFALLBACK-04 (Deleted Orders & Discount Payments Backend Live-DB):** Call `GET /api/v1/sales/deleted-orders` on a clean DB -> verify empty list (`[]`) with zero `_DELETED_ORDERS_SEED` rows; verify `PATCH /api/v1/sales/discount-payments/{missing_id}/settlement` returns `404` instead of `"Settlement updated (mock)."`.
+- [ ] **TC-NOFALLBACK-05 (Stock Transfer Filter Row, Payments Single Footer & Technical Task Header):** On `/stock-transfer`, open the filter panel -> verify `Transfer Date`, `From Warehouse`, and `To Warehouse` sit side-by-side on one horizontal row; on `/payments`, verify only one `"Showing X–Y of Z total"` pagination footer appears; on `/technical-task/list`, verify `Imp / Exp ▾` is absent.
+
+---
+*End of Master Features & Testing Specification Manual. Maintained for Inhyma Solutions Enterprise ERP. Last updated: November 18, 2026 (Shift Technicians from Masters into Fixed `Technician` `SYSTEM` Department [Migration `z2a3b4c5d6e7`, 325 Unique Permissions, `/rbac/technicians/lookup`]; Granular Technical Tasks Tab/Action/Stage RBAC Permissions [`16` permissions, Migrations `x1c2d3e4f5a6` & `y1d2e3f4a5b6`] + Separated Independent RBAC Permissions for Technical Tasks [`technicaltask.*`], Payments [`payment.*`], and Technician Gatepass & Wallet Management [`technician_operations.*`] [Migration `w0b1c2d3e4f5`]; Section 80: Zero-Hardcoded Cross-Module Master Data, Live Error Integrity, Fallback Purge, Stock Transfer Filter Row, Payments Single Pagination Footer & Technical Tasks Header Cleanup; Unified Shimmer Ghost Loading Rollout via `Skeleton.tsx`; Feed Remediation `FEED-AUD-01..12`, Mounted 1:1 DM Canonical Pair Uniqueness [Migration `v9a0b1c2d3e4`] & HRMS Attendance Regularization Self-Approval Authorization; Cargo Overview Full-Stack Architecture & Migration `z9a0b1c2d3e4`; Compact JWT + WebSocket `400 Bad Request` Handshake Fix; Section 79: Financial Planning Report Full-Stack Live Wiring).*

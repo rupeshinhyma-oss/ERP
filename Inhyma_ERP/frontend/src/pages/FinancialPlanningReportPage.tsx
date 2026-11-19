@@ -86,16 +86,6 @@ export interface FinancialPlanningReportPageProps {
   initialRecords?: FinancialPlanningRecord[];
 }
 
-const DEFAULT_PAYMENT_TERMS_OPTIONS = [
-  "100% Advance",
-  "CAD",
-  "30 Days Credit",
-  "45 Days Credit",
-  "60 Days Credit",
-  "90 Days Credit",
-  "LC",
-];
-
 const PAYMENT_MODES = [
   "Bank Transfer / NEFT / RTGS",
   "Wire Transfer / SWIFT",
@@ -446,7 +436,7 @@ export function FinancialPlanningReportPage({
   }, [openActionRowId, closeActionMenu]);
 
   const paymentTermsOptions = useMemo(() => {
-    const set = new Set<string>(DEFAULT_PAYMENT_TERMS_OPTIONS);
+    const set = new Set<string>();
     for (const term of serverPaymentTerms) {
       const clean = (term || "").trim();
       if (clean) set.add(clean);

@@ -1185,7 +1185,7 @@ select::-ms-expand {
   margin: 0;
 }
 
-.modal-card form {
+.modal-card:not(.modal-dialog-card) form {
   display: flex;
   flex-direction: column;
   flex: 1;
@@ -1194,27 +1194,27 @@ select::-ms-expand {
   overflow: hidden;
 }
 
-.modal-card form > :not(.form-actions):not(.modal-footer) {
+.modal-card:not(.modal-dialog-card) form > :not(.form-actions):not(.modal-footer) {
   padding: 20px 24px;
   overflow-y: auto;
   flex: 1;
   min-height: 0;
 }
 
-.modal-card form > :not(.form-actions):not(.modal-footer)::-webkit-scrollbar {
+.modal-card:not(.modal-dialog-card) form > :not(.form-actions):not(.modal-footer)::-webkit-scrollbar {
   width: 6px;
 }
 
-.modal-card form > :not(.form-actions):not(.modal-footer)::-webkit-scrollbar-track {
+.modal-card:not(.modal-dialog-card) form > :not(.form-actions):not(.modal-footer)::-webkit-scrollbar-track {
   background: #f1f5f9;
 }
 
-.modal-card form > :not(.form-actions):not(.modal-footer)::-webkit-scrollbar-thumb {
+.modal-card:not(.modal-dialog-card) form > :not(.form-actions):not(.modal-footer)::-webkit-scrollbar-thumb {
   background: #cbd5e1;
   border-radius: 4px;
 }
 
-.modal-card form > :not(.form-actions):not(.modal-footer)::-webkit-scrollbar-thumb:hover {
+.modal-card:not(.modal-dialog-card) form > :not(.form-actions):not(.modal-footer)::-webkit-scrollbar-thumb:hover {
   background: #94a3b8;
 }
 
@@ -1314,14 +1314,43 @@ select::-ms-expand {
   margin: 0;
 }
 
-.modal-dialog-card form {
+.modal-dialog-card form:not(.payment-modal-form) {
+  display: block;
   height: auto;
   max-height: calc(90vh - 65px);
   overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.modal-dialog-card form:not(.payment-modal-form)::-webkit-scrollbar {
+  width: 6px;
+}
+
+.modal-dialog-card form:not(.payment-modal-form)::-webkit-scrollbar-track {
+  background: #f1f5f9;
+}
+
+.modal-dialog-card form:not(.payment-modal-form)::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+}
+
+.modal-dialog-card form:not(.payment-modal-form)::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+.modal-dialog-card form.payment-modal-form {
+  display: flex;
+  flex-direction: column;
+  height: auto;
+  max-height: calc(90vh - 65px);
+  overflow: hidden;
 }
 
 /* Universal ERP Form Control */
 .form-control {
+  display: block;
+  box-sizing: border-box;
   height: 38px;
   padding: 8px 12px;
   border: 1px solid var(--color-border-strong, #cbd5e1);
@@ -1333,6 +1362,18 @@ select::-ms-expand {
   width: 100%;
   outline: none;
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.form-control.form-control-sm {
+  height: 32px;
+  padding: 5px 10px;
+  font-size: 12.5px;
+}
+
+input[type="file"].form-control.form-control-sm {
+  height: auto;
+  min-height: 32px;
+  padding: 4px 10px;
 }
 
 textarea.form-control {

@@ -17,11 +17,12 @@ from app.inventory import stock_service
 from app.inventory.models import ProductStock
 from app.masters.products.models import Product, ProductMachineSpare
 from app.masters.taxes.models import Tax
-from app.masters.technicians.models import Technician
 from app.masters.uom.models import UnitOfMeasurement
 from app.masters.warehouses.models import Warehouse
+from app.rbac.models import Role, UserRole
 from app.sales.models import SaleOrder, SaleOrderItem
 from app.technical_tasks.models import TechnicalTask
+from app.users.models import User, UserStatus
 from app.technician_operations.models import (
     MachineWarranty,
     TechnicianGatepass,
@@ -81,6 +82,38 @@ class TechnicianOperationsRepository:
     # Master Lookups
     # -----------------------------------------------------------------------
 
+    @staticmethod
+    def _user_display_name(user: User) -> str:
+        """Return the canonical display name for a User record."""
+        return (user.display_name or user.full_name or user.username or "").strip()
+
+    async def _list_technician_users(self, *, active_only: bool = False) -> list[User]:
+        """List non-deleted Users belonging to the system ``technician`` department."""
+        conditions = [
+            User.deleted_at.is_(None),
+            Role.deleted_at.is_(None),
+            func.lower(Role.name) == "technician",
+        ]
+        if active_only:
+            conditions.extend([User.is_active.is_(True), User.status == UserStatus.ACTIVE])
+
+        stmt = (
+            select(User)
+            .join(UserRole, UserRole.user_id == User.id)
+            .join(Role, Role.id == UserRole.role_id)
+            .where(*conditions)
+            .order_by(func.coalesce(User.display_name, User.first_name, User.username).asc())
+        )
+        rows = (await self.session.execute(stmt)).scalars().all()
+        seen_ids: set[uuid.UUID] = set()
+        unique_users: list[User] = []
+        for user in rows:
+            if user.id in seen_ids:
+                continue
+            seen_ids.add(user.id)
+            unique_users.append(user)
+        return unique_users
+
     async def get_lookups(self) -> TechnicianOpsLookupsResponse:
         """Fetch master-driven dropdown options and live physical stock balances."""
         technicians_out: list[dict[str, Any]] = []
@@ -93,19 +126,14 @@ class TechnicianOperationsRepository:
         sale_orders_out: list[dict[str, Any]] = []
         serial_registry_out: list[dict[str, Any]] = []
 
-        # 1. Technicians Master
+        # 1. Technician Department Users
         try:
             async with self.session.begin_nested():
-                t_res = await self.session.execute(
-                    select(Technician)
-                    .where(Technician.deleted_at.is_(None), Technician.status == RecordStatus.ACTIVE)
-                    .order_by(Technician.name.asc())
-                )
-                for t in t_res.scalars().all():
+                for t in await self._list_technician_users(active_only=True):
                     technicians_out.append({
                         "id": str(t.id),
-                        "name": t.name,
-                        "mobile": t.mobile,
+                        "name": self._user_display_name(t),
+                        "mobile": t.phone,
                         "city": t.city,
                     })
         except Exception:
@@ -727,27 +755,27 @@ class TechnicianOperationsRepository:
         technician_name: str,
         technician_mobile: str | None = None,
     ) -> tuple[uuid.UUID | None, str, str | None]:
-        """Resolve technician ID, canonical name, and mobile from Technicians Master if present."""
+        """Resolve technician ID, canonical name, and mobile from Users in the Technician department."""
         clean_name = technician_name.strip()
         clean_mobile = technician_mobile.strip() if technician_mobile and technician_mobile.strip() else None
         try:
             async with self.session.begin_nested():
-                tech: Technician | None = None
+                tech: User | None = None
                 if technician_id is not None:
-                    tech = await self.session.get(Technician, technician_id)
-                if tech is None and clean_name:
-                    tech = (
-                        await self.session.execute(
-                            select(Technician)
-                            .where(
-                                Technician.deleted_at.is_(None),
-                                func.lower(Technician.name) == clean_name.lower(),
-                            )
-                            .limit(1)
-                        )
-                    ).scalar_one_or_none()
+                    tech = await self.session.get(User, technician_id)
+                if (tech is None or tech.deleted_at is not None) and clean_name:
+                    needle = clean_name.lower()
+                    for candidate in await self._list_technician_users(active_only=False):
+                        candidates = {
+                            (candidate.display_name or "").strip().lower(),
+                            (candidate.full_name or "").strip().lower(),
+                            (candidate.username or "").strip().lower(),
+                        }
+                        if needle in candidates:
+                            tech = candidate
+                            break
                 if tech is not None and tech.deleted_at is None:
-                    return tech.id, tech.name, clean_mobile or tech.mobile
+                    return tech.id, self._user_display_name(tech) or clean_name, clean_mobile or tech.phone
         except Exception:
             pass
         return technician_id, clean_name, clean_mobile
@@ -1301,10 +1329,13 @@ class TechnicianOperationsRepository:
         return list(res.scalars().all()), total
 
     async def get_technician_wallet_summaries(self) -> list[TechnicianWalletSummary]:
-        """Calculate live wallet cash balances across all service technicians."""
-        tech_stmt = select(Technician).where(Technician.deleted_at.is_(None)).order_by(Technician.name.asc())
-        tech_res = await self.session.execute(tech_stmt)
-        technicians = tech_res.scalars().all()
+        """Calculate live wallet cash balances across all Technician department users."""
+        technicians: list[User] = []
+        try:
+            async with self.session.begin_nested():
+                technicians = await self._list_technician_users(active_only=False)
+        except Exception:
+            technicians = []
 
         agg_stmt = (
             select(
@@ -1341,7 +1372,8 @@ class TechnicianOperationsRepository:
 
         summaries: list[TechnicianWalletSummary] = []
         for t in technicians:
-            key = t.name.strip().lower()
+            display_name = self._user_display_name(t)
+            key = display_name.lower()
             agg = agg_rows.pop(key, None)
 
             coll = float(agg.total_collected or 0.0) if agg else 0.0
@@ -1359,8 +1391,8 @@ class TechnicianOperationsRepository:
             summaries.append(
                 TechnicianWalletSummary(
                     technician_id=t.id,
-                    technician_name=t.name,
-                    technician_mobile=t.mobile,
+                    technician_name=display_name,
+                    technician_mobile=t.phone,
                     total_collected=coll,
                     total_deposited=dep,
                     total_expenses=exp,

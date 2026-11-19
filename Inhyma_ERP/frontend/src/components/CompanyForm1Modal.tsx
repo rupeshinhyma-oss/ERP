@@ -1,37 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { apiGet, apiPost } from "@/lib/api";
 
-export const DEFAULT_INDIAN_STATES = [
-  "Andhra Pradesh",
-  "Arunachal Pradesh",
-  "Assam",
-  "Bihar",
-  "Chhattisgarh",
-  "Goa",
-  "Gujarat",
-  "Haryana",
-  "Himachal Pradesh",
-  "Jharkhand",
-  "Karnataka",
-  "Kerala",
-  "Madhya Pradesh",
-  "Maharashtra",
-  "Manipur",
-  "Meghalaya",
-  "Mizoram",
-  "Nagaland",
-  "Odisha",
-  "Punjab",
-  "Rajasthan",
-  "Sikkim",
-  "Tamil Nadu",
-  "Telangana",
-  "Tripura",
-  "Uttar Pradesh",
-  "Uttarakhand",
-  "West Bengal",
-];
-
 export const GST_STATE_CODE_MAP: Record<string, string> = {
   "01": "Jammu and Kashmir",
   "02": "Himachal Pradesh",
@@ -120,13 +89,13 @@ export function CompanyForm1Modal({ isOpen, onClose, onSuccess }: CompanyForm1Mo
     (async () => {
       try {
         const res = await apiGet<any[]>("/masters/states?page_size=100&status=active");
-        if (res?.data && Array.isArray(res.data) && res.data.length > 0) {
+        if (res?.data && Array.isArray(res.data)) {
           setStatesList(res.data.map((s: any) => ({ id: String(s.id), name: s.name })));
         } else {
-          setStatesList(DEFAULT_INDIAN_STATES.map((s, idx) => ({ id: String(idx + 1), name: s })));
+          setStatesList([]);
         }
       } catch {
-        setStatesList(DEFAULT_INDIAN_STATES.map((s, idx) => ({ id: String(idx + 1), name: s })));
+        setStatesList([]);
       }
     })();
   }, [isOpen]);
@@ -277,24 +246,8 @@ export function CompanyForm1Modal({ isOpen, onClose, onSuccess }: CompanyForm1Mo
       });
       onClose();
     } catch (err: any) {
-      const detail = err?.detail || err?.message;
-      if (detail) {
-        setErrorMsg(detail);
-        return;
-      }
-      // Local fallback for unit tests with offline mock
-      onSuccess({
-        company_name: form.company_name,
-        company_type: form.company_type,
-        contact_person: form.contact_full_name,
-        contact_phone: form.contact_calling_number,
-        designation: form.contact_designation,
-        city: form.city,
-        state: resolvedStateName,
-        area: form.area,
-        district: form.district,
-      });
-      onClose();
+      const detail = err?.detail || err?.message || "Failed to create company. Please try again.";
+      setErrorMsg(String(detail));
     } finally {
       setSaving(false);
     }

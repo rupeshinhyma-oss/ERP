@@ -1,13 +1,5 @@
 """
-Seed Technical Tasks permissions:
-- technicaltask.view
-- technicaltask.create
-- technicaltask.update
-- technicaltask.approve
-- technicaltask.delete
-- technicaltask.export
-- technicaltask.bulk_action
-- technicaltask.manage
+Seed Technical Tasks permissions (`technicaltask.*`).
 
 Grants these permissions to super_admin and admin roles, and invalidates
 cached user permissions so changes take effect immediately.
@@ -28,14 +20,22 @@ from app.rbac.repository import PermissionRepository
 logger = get_logger(__name__)
 
 NEW_PERMISSIONS = [
-    ("technicaltask.view", "technicaltask", "technical-tasks", "view", "ALL", "View technical tasks, status tabs, call logs, and machine serial lookups."),
-    ("technicaltask.create", "technicaltask", "technical-tasks", "create", "ALL", "Create new technical tasks and field service tickets."),
-    ("technicaltask.update", "technicaltask", "technical-tasks", "update", "ALL", "Edit technical tasks, record call logs, complete/cancel tasks, and record payments."),
-    ("technicaltask.approve", "technicaltask", "technical-tasks", "approve", "ALL", "Approve technical tasks, allot technicians, and override service/charge details."),
-    ("technicaltask.delete", "technicaltask", "technical-tasks", "delete", "ALL", "Delete technical tasks."),
-    ("technicaltask.export", "technicaltask", "technical-tasks", "export", "ALL", "Export technical tasks to CSV."),
-    ("technicaltask.bulk_action", "technicaltask", "technical-tasks", "manage", "ALL", "Use Bulk Actions (bulk approve, bulk complete, bulk delete) in Technical Tasks."),
-    ("technicaltask.manage", "technicaltask", "technical-tasks", "manage", "ALL", "Full administrative control over technical tasks, including editing/deleting approved tasks and reopening cancelled tasks."),
+    ("technicaltask.view", "technicaltask", "technical-tasks", "view", "ALL", "View Technical Tasks module and All tab."),
+    ("technicaltask.pending.view", "technicaltask", "technical-tasks", "view", "ALL", "View the Pending status tab in Technical Tasks."),
+    ("technicaltask.approved.view", "technicaltask", "technical-tasks", "view", "ALL", "View the Approved status tab in Technical Tasks."),
+    ("technicaltask.completed.view", "technicaltask", "technical-tasks", "view", "ALL", "View the Completed status tab in Technical Tasks."),
+    ("technicaltask.cancel.view", "technicaltask", "technical-tasks", "view", "ALL", "View the Cancel status tab in Technical Tasks."),
+    ("technicaltask.create", "technicaltask", "technical-tasks", "create", "ALL", "Show + ADD NEW button and create new technical tasks."),
+    ("technicaltask.bulk_action", "technicaltask", "technical-tasks", "manage", "ALL", "Show Bulk Actions menu (bulk approve, bulk complete, bulk delete) in Technical Tasks."),
+    ("technicaltask.action.view", "technicaltask", "technical-tasks", "view", "ALL", "View the Action (3-dots) column in the Technical Tasks table."),
+    ("technicaltask.call_logs.view", "technicaltask", "technical-tasks", "view", "ALL", "View Call Logs in Action menu and access the Call & Task Logs detail page."),
+    ("technicaltask.approve", "technicaltask", "technical-tasks", "approve", "ALL", "View/use Approved action (Pending stage), allot technicians, and override service/charge details."),
+    ("technicaltask.complete", "technicaltask", "technical-tasks", "update", "ALL", "View/use Completed action (Approved stage) and bulk mark completed."),
+    ("technicaltask.cancel", "technicaltask", "technical-tasks", "update", "ALL", "View/use Cancel action (Approved stage) in Technical Tasks."),
+    ("technicaltask.reopen", "technicaltask", "technical-tasks", "approve", "ALL", "View/use Reopen / Reassign action (Cancel stage) in Technical Tasks."),
+    ("technicaltask.update", "technicaltask", "technical-tasks", "update", "ALL", "View/use Edit action in Technical Tasks and add call logs."),
+    ("technicaltask.delete", "technicaltask", "technical-tasks", "delete", "ALL", "View/use Delete action in Technical Tasks."),
+    ("technicaltask.manage", "technicaltask", "technical-tasks", "manage", "ALL", "Full administrative control over technical tasks, including all tabs, action menu items, editing/deleting approved tasks, and reopening cancelled tasks."),
 ]
 
 

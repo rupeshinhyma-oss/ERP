@@ -13,20 +13,13 @@ import type { Warehouse } from "@/types";
 const EMPTY: FormState = {
   name: "",
   address: "",
-  billing_company: "INHYMA SOLUTIONS LLP (M)",
+  billing_company: "",
   over_selling: "No",
   is_primary: "No",
   main_warehouse_id: "",
   color: "#2563EB",
   status: "active",
 };
-
-const BILLING_COMPANIES = [
-  "INHYMA SOLUTIONS LLP (M)",
-  "INHYMA SOLUTIONS LLP (G)",
-  "INHYMA SOLUTIONS LLP (MP)",
-  "INHYMA SOLUTIONS LLP",
-];
 
 function formatAddedOn(dateStr?: string | null): string {
   if (!dateStr) return "—";
@@ -50,6 +43,7 @@ function formatAddedOn(dateStr?: string | null): string {
 
 export function WarehousesPage() {
   const warehouses = useLookup<Warehouse>("/masters/warehouses", 200);
+  const billingCompanies = useLookup<{ id: string; name: string }>("/masters/billing-companies/lookup", 250);
 
   return (
     <MasterPage<Warehouse>
@@ -222,7 +216,13 @@ export function WarehousesPage() {
             error={errors?.billing_company}
             onChange={(v) => set("billing_company", v)}
           >
-            {BILLING_COMPANIES.map((company) => (
+            <option value="">Select</option>
+            {Array.from(
+              new Set([
+                ...(f.billing_company ? [f.billing_company] : []),
+                ...billingCompanies.items.map((bc) => bc.name).filter(Boolean),
+              ])
+            ).map((company) => (
               <option key={company} value={company}>
                 {company}
               </option>

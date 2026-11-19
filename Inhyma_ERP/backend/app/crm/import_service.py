@@ -224,9 +224,12 @@ class CrmImportService:
         roles = list((await self.session.execute(user_roles_stmt)).scalars().all())
         role_names = [r.name.lower() for r in roles]
 
-        is_manager = bool(
+        has_explicit_manager_role = bool(
             "department_manager" in role_names
             or any("manager" in r for r in role_names)
+        )
+        is_manager = bool(
+            has_explicit_manager_role
             or len(direct_reports) > 0
             or len(led_dept_ids) > 0
         )
@@ -236,9 +239,14 @@ class CrmImportService:
             return {actor.id}
 
         managed_dept_ids: set[uuid.UUID] = set(led_dept_ids)
-        for r in roles:
-            if r.name.lower() not in ("user", "super_admin", "admin", "department_manager", "employee"):
-                managed_dept_ids.add(r.id)
+        if has_explicit_manager_role and not managed_dept_ids:
+            for r in roles:
+                if r.name.lower() not in ("user", "super_admin", "admin", "department_manager", "employee"):
+                    managed_dept_ids.add(r.id)
+        elif has_explicit_manager_role:
+            for r in roles:
+                if "manager" in r.name.lower() and r.name.lower() != "department_manager":
+                    managed_dept_ids.add(r.id)
 
         scoped_user_ids: set[uuid.UUID] = {actor.id}
         scoped_user_ids.update(direct_reports)
@@ -912,7 +920,7 @@ class CrmImportService:
         unassigned_count = 0
         row_errors: list[dict[str, Any]] = []
         final_row_results: list[CrmImportRowPreview] = []
-        batch_companies: dict[str, tuple[uuid.UUID, str]] = {}
+        batch_companies: dict[str, tuple[uuid.UUID | None, str | None, bool]] = {}
 
         seen_in_transaction: set[str] = set()
 
@@ -955,10 +963,16 @@ class CrmImportService:
                     original_phone=row.original_phone,
                     normalized_phone=norm_phone,
                     campaign=row.campaign,
+                    priority=getattr(row, "priority", "medium") or "medium",
                     status="FILE_DUPLICATE",
                     validation_message="Repeated contact within this batch.",
                     is_valid_candidate=False,
                     matched_lead_code=row.matched_lead_code,
+                    company=row.company,
+                    company_id=row.company_id,
+                    matched_company_name=row.matched_company_name,
+                    company_action=row.company_action,
+                    company_resolution_note=row.company_resolution_note,
                 )
                 final_row_results.append(dup_row)
                 continue
@@ -1021,6 +1035,11 @@ class CrmImportService:
                         ),
                         is_valid_candidate=False,
                         matched_lead_code=existing_lead.lead_code,
+                        company=row.company,
+                        company_id=existing_lead.company_id or row.company_id,
+                        matched_company_name=existing_lead.company_name or row.matched_company_name,
+                        company_action=row.company_action or ("EXISTING" if existing_lead.company_id else "NONE"),
+                        company_resolution_note=row.company_resolution_note,
                     )
                 )
             else:
@@ -1028,12 +1047,13 @@ class CrmImportService:
                 cand_comp = getattr(row, "company", None)
                 comp_id: uuid.UUID | None = None
                 comp_name: str | None = None
+                created_new_comp: bool = False
                 if cand_comp and cand_comp.strip():
                     norm_cname = normalize_company_name(cand_comp)
                     if norm_cname in batch_companies:
-                        comp_id, comp_name = batch_companies[norm_cname]
+                        comp_id, comp_name, created_new_comp = batch_companies[norm_cname]
                     else:
-                        comp_id, comp_name, _ = await resolve_or_create_company(
+                        comp_id, comp_name, created_new_comp = await resolve_or_create_company(
                             self.session,
                             company_name=cand_comp.strip(),
                             contact_name=row.name,
@@ -1041,7 +1061,7 @@ class CrmImportService:
                             actor_id=actor.id,
                             auto_create=True,
                         )
-                        batch_companies[norm_cname] = (comp_id, comp_name)
+                        batch_companies[norm_cname] = (comp_id, comp_name, created_new_comp)
 
                 # Valid new lead creation
                 success_count += 1
@@ -1196,6 +1216,21 @@ class CrmImportService:
                 # Keep in local dict in case subsequent rows match
                 existing_crm_leads[norm_phone] = new_lead
 
+                resolved_company_action = (
+                    ("NEW" if created_new_comp else "EXISTING")
+                    if comp_id
+                    else (row.company_action or "NONE")
+                )
+                resolved_company_note = (
+                    f"New company '{comp_name}' created and linked"
+                    if created_new_comp and comp_name
+                    else (
+                        f"Existing company '{comp_name}' matched and linked"
+                        if comp_id and comp_name
+                        else row.company_resolution_note
+                    )
+                )
+
                 final_row_results.append(
                     CrmImportRowPreview(
                         row_number=row.row_number,
@@ -1203,10 +1238,16 @@ class CrmImportService:
                         original_phone=row.original_phone,
                         normalized_phone=norm_phone,
                         campaign=row.campaign,
+                        priority=row_priority,
                         status="VALID",
                         validation_message=val_msg,
                         is_valid_candidate=True,
                         matched_lead_code=new_lead.lead_code,
+                        company=row.company,
+                        company_id=comp_id,
+                        matched_company_name=comp_name,
+                        company_action=resolved_company_action,
+                        company_resolution_note=resolved_company_note,
                     )
                 )
 

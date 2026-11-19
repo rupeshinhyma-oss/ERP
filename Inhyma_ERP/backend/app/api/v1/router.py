@@ -44,7 +44,6 @@ from app.masters.company_categories.routes import router as company_categories_r
 from app.masters.company_sectors.routes import router as company_sectors_router
 from app.masters.warehouses.routes import router as warehouses_router
 from app.masters.billing_companies.routes import router as billing_companies_router
-from app.masters.technicians.routes import router as technicians_router
 from app.masters.banks.routes import router as banks_router
 from app.masters.transports.routes import router as transports_router
 from app.masters.payment_terms.routes import router as payment_terms_router
@@ -156,7 +155,6 @@ api_router.include_router(company_categories_router)
 api_router.include_router(company_sectors_router)
 api_router.include_router(warehouses_router)
 api_router.include_router(billing_companies_router)
-api_router.include_router(technicians_router)
 api_router.include_router(banks_router)
 api_router.include_router(transports_router, prefix="/masters/transports")
 api_router.include_router(transports_router, prefix="/masters/transport", include_in_schema=False)

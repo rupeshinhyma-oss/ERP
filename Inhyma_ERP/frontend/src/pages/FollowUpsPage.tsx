@@ -99,78 +99,6 @@ const INITIAL_FILTERS: FilterState = {
   monthly_import_volume: "",
 };
 
-const DEFAULT_INDIAN_STATES = [
-  "Andhra Pradesh",
-  "Arunachal Pradesh",
-  "Assam",
-  "Bihar",
-  "Chhattisgarh",
-  "Delhi",
-  "Goa",
-  "Gujarat",
-  "Haryana",
-  "Himachal Pradesh",
-  "Jharkhand",
-  "Karnataka",
-  "Kerala",
-  "Madhya Pradesh",
-  "Maharashtra",
-  "Manipur",
-  "Meghalaya",
-  "Mizoram",
-  "Nagaland",
-  "Odisha",
-  "Punjab",
-  "Rajasthan",
-  "Sikkim",
-  "Tamil Nadu",
-  "Telangana",
-  "Tripura",
-  "Uttar Pradesh",
-  "Uttarakhand",
-  "West Bengal",
-];
-
-const DEFAULT_CALL_TYPES = [
-  "Telecall",
-  "Outgoing Call",
-  "Incoming Call",
-  "Site Visit",
-  "Email Correspondence",
-  "WhatsApp Message",
-  "Video Conference",
-];
-
-const DEFAULT_MARKETING_PERSONS = [
-  "Pooja Vani",
-  "Admin",
-  "Vikram Rathod",
-  "Rupesh Malla",
-  "Sales Executive",
-];
-
-const DEFAULT_BUSINESS_TYPES = [
-  "Manufacturer",
-  "Trader",
-  "OEM",
-  "Distributor",
-  "Wholesaler",
-  "Service Provider",
-];
-
-const DEFAULT_STATUSES = [
-  "New",
-  "Existing",
-  "Hot Lead",
-  "Warm Lead",
-  "Cold",
-  "In Progress",
-  "Closed / Won",
-];
-
-const DEFAULT_GRADES = ["Grade A", "Grade B", "Grade C", "Premium"];
-const DEFAULT_POTENTIALS = ["High", "Medium", "Low", "None"];
-
 const GST_STATE_CODE_MAP: Record<string, string> = {
   "01": "Jammu and Kashmir",
   "02": "Himachal Pradesh",
@@ -253,13 +181,13 @@ function CompanyForm1Modal({ isOpen, onClose, onSuccess }: CompanyForm1ModalProp
     (async () => {
       try {
         const res = await apiGet<any[]>("/masters/states?page_size=100&status=active");
-        if (res?.data && Array.isArray(res.data) && res.data.length > 0) {
+        if (res?.data && Array.isArray(res.data)) {
           setStatesList(res.data.map((s: any) => ({ id: String(s.id), name: s.name })));
         } else {
-          setStatesList(DEFAULT_INDIAN_STATES.map((s, idx) => ({ id: String(idx + 1), name: s })));
+          setStatesList([]);
         }
       } catch {
-        setStatesList(DEFAULT_INDIAN_STATES.map((s, idx) => ({ id: String(idx + 1), name: s })));
+        setStatesList([]);
       }
     })();
   }, [isOpen]);
@@ -368,17 +296,8 @@ function CompanyForm1Modal({ isOpen, onClose, onSuccess }: CompanyForm1ModalProp
         state: saved.state || resolvedStateName,
       });
       onClose();
-    } catch {
-      // Local fallback for offline/testing
-      onSuccess({
-        company_name: form.company_name,
-        contact_person: form.contact_full_name,
-        contact_phone: form.contact_calling_number,
-        designation: form.contact_designation,
-        city: form.city,
-        state: resolvedStateName,
-      });
-      onClose();
+    } catch (err: any) {
+      setErrorMsg(err?.detail || err?.message || "Failed to create company. Please try again.");
     } finally {
       setSaving(false);
     }
@@ -981,18 +900,50 @@ export default function FollowUpsPage() {
     fetchData();
   }, [fetchData]);
 
+  // Master lookup lists for filters & call log form
+  const [masterCallTypes, setMasterCallTypes] = useState<string[]>([]);
+  const [masterStates, setMasterStates] = useState<string[]>([]);
+  const [masterMarketingPersons, setMasterMarketingPersons] = useState<string[]>([]);
+
+  useEffect(() => {
+    let active = true;
+    void Promise.all([
+      apiGet<any[]>("/masters/call-types/lookup").catch(() => null),
+      apiGet<any[]>("/masters/states?page_size=250&status=active").catch(() => null),
+      apiGet<any[]>("/companies/sales-persons").catch(() => null),
+    ]).then(([ctRes, stRes, spRes]) => {
+      if (!active) return;
+      if (ctRes?.data && Array.isArray(ctRes.data)) {
+        setMasterCallTypes(ctRes.data.map((c: any) => String(c.name || "")).filter(Boolean));
+      }
+      if (stRes?.data && Array.isArray(stRes.data)) {
+        setMasterStates(stRes.data.map((s: any) => String(s.name || "")).filter(Boolean));
+      }
+      if (spRes?.data && Array.isArray(spRes.data)) {
+        setMasterMarketingPersons(
+          spRes.data
+            .map((u: any) => String(u.display_name || u.full_name || u.username || ""))
+            .filter(Boolean)
+        );
+      }
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+
   // Dynamic filter options extraction
   const filterOptions = useMemo(() => {
-    const callTypes = new Set<string>(DEFAULT_CALL_TYPES);
-    const marketingPersons = new Set<string>(DEFAULT_MARKETING_PERSONS);
-    const businessTypes = new Set<string>(DEFAULT_BUSINESS_TYPES);
-    const states = new Set<string>(DEFAULT_INDIAN_STATES);
+    const callTypes = new Set<string>(masterCallTypes);
+    const marketingPersons = new Set<string>(masterMarketingPersons);
+    const businessTypes = new Set<string>(["B2B", "B2C"]);
+    const states = new Set<string>(masterStates);
     const districts = new Set<string>();
     const cities = new Set<string>();
-    const statuses = new Set<string>(DEFAULT_STATUSES);
+    const statuses = new Set<string>(["Existing", "New"]);
     const categories = new Set<string>();
-    const grades = new Set<string>(DEFAULT_GRADES);
-    const potentials = new Set<string>(DEFAULT_POTENTIALS);
+    const grades = new Set<string>(["A", "B", "C"]);
+    const potentials = new Set<string>(["Yes", "No"]);
     const businessCategories = new Set<string>();
 
     followUps.forEach((item) => {
@@ -1022,7 +973,7 @@ export default function FollowUpsPage() {
       potentials: Array.from(potentials).sort(),
       businessCategories: Array.from(businessCategories).sort(),
     };
-  }, [followUps]);
+  }, [followUps, masterCallTypes, masterMarketingPersons, masterStates]);
 
   // Filter & Search Logic
   const filteredItems = useMemo(() => {
@@ -1242,24 +1193,15 @@ export default function FollowUpsPage() {
 
     try {
       const res = await apiPost<FollowUpItem>("/follow-ups", formData);
-      const created = (res as any)?.data || {
-        ...formData,
-        id: `fup-${Date.now()}`,
-        added_on: new Date().toISOString().slice(0, 10),
-      };
-      setFollowUps((prev) => [created, ...prev]);
+      const created = (res as any)?.data;
+      if (created) {
+        setFollowUps((prev) => [created, ...prev]);
+      } else {
+        await fetchData();
+      }
       setIsAddDrawerOpen(false);
-    } catch {
-      // Local fallback
-      setFollowUps((prev) => [
-        {
-          ...formData,
-          id: `fup-${Date.now()}`,
-          added_on: new Date().toISOString().slice(0, 10),
-        },
-        ...prev,
-      ]);
-      setIsAddDrawerOpen(false);
+    } catch (err: any) {
+      alert(err?.message || "Failed to save follow-up call log. Please try again.");
     }
   };
 
@@ -1280,8 +1222,11 @@ export default function FollowUpsPage() {
       const idsToDelete = Array.from(selectedIds);
       try {
         await apiPost("/follow-ups/bulk-delete", { ids: idsToDelete });
-      } catch {
-        // Continue local deletion
+      } catch (err: any) {
+        if (err?.status === 403 || err?.status === 401) {
+          setDeleteConfirmTarget(null);
+          return;
+        }
       }
       setFollowUps((prev) => prev.filter((item) => !selectedIds.has(item.id)));
       setSelectedIds(new Set());
@@ -1289,8 +1234,11 @@ export default function FollowUpsPage() {
       const item = deleteConfirmTarget;
       try {
         await apiDelete(`/follow-ups/${item.id}`);
-      } catch {
-        // Continue local deletion
+      } catch (err: any) {
+        if (err?.status === 403 || err?.status === 401) {
+          setDeleteConfirmTarget(null);
+          return;
+        }
       }
       setFollowUps((prev) => prev.filter((i) => i.id !== item.id));
       setSelectedIds((prev) => {
@@ -2419,7 +2367,12 @@ export default function FollowUpsPage() {
                       value={formData.call_type}
                       onChange={(e) => setFormData((prev) => ({ ...prev, call_type: e.target.value }))}
                     >
-                      {DEFAULT_CALL_TYPES.map((t) => (
+                      {Array.from(
+                        new Set([
+                          ...(formData.call_type ? [formData.call_type] : []),
+                          ...masterCallTypes,
+                        ])
+                      ).map((t) => (
                         <option key={t} value={t}>
                           {t}
                         </option>

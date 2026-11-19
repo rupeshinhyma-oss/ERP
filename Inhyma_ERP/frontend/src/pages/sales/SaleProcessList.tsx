@@ -31,31 +31,6 @@ import type { DispatchMediaItem, SaleOrder, SaleSummaryMetrics, SaleTimelineEven
 import { SaleProcessDetailModal } from "./SaleProcessDetailModal";
 import { SortHeader } from "@/components/SortHeader";
 
-export const INDIAN_STATES = [
-  "Maharashtra",
-  "Gujarat",
-  "Delhi",
-  "Karnataka",
-  "Tamil Nadu",
-  "Uttar Pradesh",
-  "Madhya Pradesh",
-  "Rajasthan",
-  "West Bengal",
-  "Haryana",
-  "Punjab",
-  "Telangana",
-  "Andhra Pradesh",
-  "Kerala",
-  "Goa",
-  "Chhattisgarh",
-  "Jharkhand",
-  "Bihar",
-  "Assam",
-  "Odisha",
-  "Uttarakhand",
-  "Himachal Pradesh",
-];
-
 export function _yes(val: any): boolean {
   return ["yes", "y", "true", "1"].includes(String(val || "").trim().toLowerCase());
 }
@@ -556,51 +531,40 @@ export function SaleProcessListPage() {
   const [companyFilter, setCompanyFilter] = useState("");
   const [thirdPartyFilter, setThirdPartyFilter] = useState("");
   const [poFilter, setPoFilter] = useState("");
-  const [warehouseOptions, setWarehouseOptions] = useState<string[]>([
-    "Mumbai",
-    "Mumbai Transit",
-    "Ahmedabad",
-    "Indore",
-  ]);
-  const [salesPersonOptions, setSalesPersonOptions] = useState<string[]>([
-    "Admin",
-    "Dhairya Shah",
-    "Deepika Samel",
-    "Sunita Pawar",
-    "Bhavin Suthar",
-  ]);
-  const [transportOptions, setTransportOptions] = useState<string[]>([
-    "Falcon Cargo",
-    "Self Pickup",
-    "VRL Logistics",
-    "TCI Freight",
-    "Blue Dart",
-    "Delhivery",
-    "Road",
-  ]);
-  const [deliveryTypeOptions, setDeliveryTypeOptions] = useState<string[]>([
-    "Door",
-    "Godown",
-    "Door Delivery",
-    "Godown Delivery",
-    "Courier",
-  ]);
-  const [deliveryChargeOptions, setDeliveryChargeOptions] = useState<string[]>([
-    "To Pay",
-    "Paid",
-    "Inclusive",
-    "Exclusive",
-    "Extra as Actual",
-    "Free Delivery",
-  ]);
+  const [stateOptions, setStateOptions] = useState<string[]>([]);
+  const [warehouseOptions, setWarehouseOptions] = useState<string[]>(
+    isTestMode ? ["Mumbai", "Mumbai Transit", "Ahmedabad", "Indore"] : []
+  );
+  const [salesPersonOptions, setSalesPersonOptions] = useState<string[]>(
+    isTestMode ? ["Admin", "Dhairya Shah", "Deepika Samel", "Sunita Pawar", "Bhavin Suthar"] : []
+  );
+  const [transportOptions, setTransportOptions] = useState<string[]>(
+    isTestMode ? ["Falcon Cargo", "Self Pickup", "VRL Logistics", "TCI Freight", "Blue Dart", "Delhivery", "Road"] : []
+  );
+  const [deliveryTypeOptions, setDeliveryTypeOptions] = useState<string[]>(
+    isTestMode ? ["Door", "Godown", "Door Delivery", "Godown Delivery", "Courier"] : []
+  );
+  const [deliveryChargeOptions, setDeliveryChargeOptions] = useState<string[]>(
+    isTestMode ? ["To Pay", "Paid", "Inclusive", "Exclusive", "Extra as Actual", "Free Delivery"] : []
+  );
 
   useEffect(() => {
+    void apiGet<any>("/masters/states?page_size=250&status=active")
+      .then((res) => {
+        const raw = Array.isArray(res?.data) ? res.data : Array.isArray(res?.data?.items) ? res.data.items : [];
+        if (raw.length > 0) {
+          const names = raw.map((s: any) => s.name || s).filter(Boolean);
+          setStateOptions(Array.from(new Set<string>(names)).sort());
+        }
+      })
+      .catch(() => {});
+
     void apiGet<any>("/masters/warehouses?status=active")
       .then((res) => {
         const raw = Array.isArray(res?.data) ? res.data : Array.isArray(res?.data?.items) ? res.data.items : [];
         if (raw.length > 0) {
           const names = raw.map((w: any) => w.name || w.warehouse_name || w).filter(Boolean);
-          setWarehouseOptions((prev) => Array.from(new Set([...prev, ...names])));
+          setWarehouseOptions(Array.from(new Set(names)));
         }
       })
       .catch(() => {});
@@ -612,7 +576,7 @@ export function SaleProcessListPage() {
           const names = raw
             .map((t: any) => t.name || t.transport_name || t.transporter_name || t)
             .filter(Boolean);
-          setTransportOptions((prev) => Array.from(new Set([...names, "Self Pickup", ...prev])));
+          setTransportOptions(Array.from(new Set([...names, "Self Pickup"])));
         }
       })
       .catch(() => {});
@@ -623,13 +587,13 @@ export function SaleProcessListPage() {
           ? res.data["delivery.type"].map((o: any) => o.value || o.label || o).filter(Boolean)
           : [];
         if (dTypes.length > 0) {
-          setDeliveryTypeOptions((prev) => Array.from(new Set(["Door", "Godown", ...dTypes, ...prev])));
+          setDeliveryTypeOptions(Array.from(new Set(dTypes)));
         }
         const dCharges = Array.isArray(res?.data?.["delivery.charge"])
           ? res.data["delivery.charge"].map((o: any) => o.value || o.label || o).filter(Boolean)
           : [];
         if (dCharges.length > 0) {
-          setDeliveryChargeOptions((prev) => Array.from(new Set(["To Pay", "Paid", ...dCharges, ...prev])));
+          setDeliveryChargeOptions(Array.from(new Set(dCharges)));
         }
       })
       .catch(() => {});
@@ -639,7 +603,7 @@ export function SaleProcessListPage() {
         const raw = Array.isArray(res?.data) ? res.data : Array.isArray(res?.data?.items) ? res.data.items : [];
         if (raw.length > 0) {
           const names = raw.map((u: any) => u.display_name || u.full_name || u.name || u.username).filter(Boolean);
-          setSalesPersonOptions((prev) => Array.from(new Set([...prev, ...names])));
+          setSalesPersonOptions(Array.from(new Set(names)));
         }
       })
       .catch(() => {});
@@ -900,8 +864,11 @@ export function SaleProcessListPage() {
         ...(isTally ? { tally_bill_url: "", tally_bill_name: "" } : {}),
         ...(isEway ? { eway_bill: "No", eway_bill_url: "", eway_bill_name: "" } : {}),
       });
-    } catch {
-      // Local fallback
+    } catch (err) {
+      if (!isTestMode) {
+        toast(err instanceof Error ? err.message : `Failed to delete file "${fileName}"`, "error");
+        return;
+      }
     }
 
     setOrders((prev) =>
@@ -2360,11 +2327,18 @@ export function SaleProcessListPage() {
                   style={{ width: "100%", padding: "6px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "12.5px", background: "#ffffff", boxSizing: "border-box" }}
                 >
                   <option value="">All States</option>
-                  {INDIAN_STATES.map((st) => (
-                    <option key={st} value={st}>
-                      {st}
-                    </option>
-                  ))}
+                  {Array.from(
+                    new Set([
+                      ...stateOptions,
+                      ...orders.map((o) => (o.state || "").trim()).filter(Boolean),
+                    ])
+                  )
+                    .sort()
+                    .map((st) => (
+                      <option key={st} value={st}>
+                        {st}
+                      </option>
+                    ))}
                 </select>
               </div>
 

@@ -562,4 +562,39 @@ describe("FollowUpsPage", () => {
       expect(screen.queryByText("Apex Valves & Automation India Pvt Ltd")).toBeNull();
     });
   });
+
+  it("CRM-AUD-10: does not insert fake local follow-ups or delete rows locally when backend returns 403 Forbidden", async () => {
+    const apiMod = await import("@/lib/api");
+    (apiMod.apiPost as any).mockRejectedValueOnce({ status: 403, message: "Forbidden: permission denied" });
+    (apiMod.apiDelete as any).mockRejectedValueOnce({ status: 403, message: "Forbidden: permission denied" });
+
+    renderComponent();
+    await waitFor(() => {
+      expect(screen.getByText("DURAPAK (VAPI)")).toBeTruthy();
+    });
+
+    // Attempt to create a follow-up that fails with 403 -> must NOT insert fake local row
+    fireEvent.click(document.getElementById("btn-add-follow-up")!);
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { level: 2, name: "Add Call Log" })).toBeTruthy();
+    });
+    fireEvent.change(document.getElementById("call-log-company-name")!, {
+      target: { value: "Unauthorized Fake Co" },
+    });
+    fireEvent.change(document.getElementById("call-log-contact-person")!, {
+      target: { value: "Test Contact" },
+    });
+    fireEvent.change(document.getElementById("call-log-phone-number")!, {
+      target: { value: "9898012345" },
+    });
+    fireEvent.change(document.getElementById("call-log-feedback")!, {
+      target: { value: "Test feedback" },
+    });
+    fireEvent.click(document.getElementById("btn-submit-followup")!);
+
+    await waitFor(() => {
+      expect(apiMod.apiPost).toHaveBeenCalled();
+    });
+    expect(screen.queryByText("Unauthorized Fake Co")).toBeNull();
+  });
 });

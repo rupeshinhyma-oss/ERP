@@ -160,63 +160,7 @@ export function IndustrialZonesPage() {
       }
     } catch (err: any) {
       console.warn("Could not load industrial zones from API:", err);
-      // Fallback sample data if offline
-      if (zones.length === 0) {
-        setZones([
-          {
-            id: "iz-01",
-            zone_name: "Narol Vatwa Industrial Estate",
-            state: "Gujarat",
-            district: "Ahmedabad",
-            nearby_city: "Ahmedabad",
-            distance_km: 12.5,
-            num_industries: 850,
-            zone_grade: "A",
-            industry_types: "Textiles, Chemicals, Heavy Machinery",
-            potential_machine_categories: "Flow Wrap, Pouch Packing, Conveyors",
-            remarks: "Major industrial hub on Narol-Vatwa road.",
-          },
-          {
-            id: "iz-02",
-            zone_name: "GIDC Sanand Industrial Area",
-            state: "Gujarat",
-            district: "Ahmedabad",
-            nearby_city: "Ahmedabad",
-            distance_km: 25.0,
-            num_industries: 420,
-            zone_grade: "A",
-            industry_types: "Automobile, FMCG, Engineering",
-            potential_machine_categories: "Shrink Wrap, Web Sealer, Vacuum Packaging",
-            remarks: "High growth potential with multi-national factories.",
-          },
-          {
-            id: "iz-03",
-            zone_name: "Wagle Industrial Estate",
-            state: "Maharashtra",
-            district: "Thane",
-            nearby_city: "Thane",
-            distance_km: 5.0,
-            num_industries: 600,
-            zone_grade: "A",
-            industry_types: "Pharma, Food Processing, Precision Tools",
-            potential_machine_categories: "Liquid Fillers, Capping Machines, Labeling",
-            remarks: "Prime location in Thane city limits.",
-          },
-          {
-            id: "iz-04",
-            zone_name: "Pithampur Industrial Area Sector 3",
-            state: "Madhya Pradesh",
-            district: "Dhar",
-            nearby_city: "Indore",
-            distance_km: 35.0,
-            num_industries: 350,
-            zone_grade: "B",
-            industry_types: "Automotive, Fabrication, Packaging",
-            potential_machine_categories: "Carton Sealers, Strapping Machines",
-            remarks: "Key auto corridor of Central India.",
-          },
-        ]);
-      }
+      setZones([]);
     } finally {
       setLoading(false);
     }
@@ -237,24 +181,18 @@ export function IndustrialZonesPage() {
         ]);
 
         if (statesRes?.data && Array.isArray(statesRes.data)) {
-          setMasterStates(statesRes.data.map((s: { name: string }) => s.name).sort());
-        } else {
-          setMasterStates(["Gujarat", "Maharashtra", "Madhya Pradesh", "Rajasthan", "Karnataka", "Tamil Nadu", "Delhi", "Uttar Pradesh", "Haryana", "Punjab"]);
+          setMasterStates(statesRes.data.map((s: { name: string }) => s.name).filter(Boolean).sort());
         }
 
         if (districtsRes?.data && Array.isArray(districtsRes.data)) {
-          setMasterDistricts(districtsRes.data.map((d: { name: string }) => d.name).sort());
-        } else {
-          setMasterDistricts(["Ahmedabad", "Surat", "Vadodara", "Rajkot", "Thane", "Mumbai", "Pune", "Indore", "Dhar", "Bhopal"]);
+          setMasterDistricts(districtsRes.data.map((d: { name: string }) => d.name).filter(Boolean).sort());
         }
 
         if (citiesRes?.data && Array.isArray(citiesRes.data)) {
-          setMasterCities(citiesRes.data.map((c: { name: string }) => c.name).sort());
-        } else {
-          setMasterCities(["Ahmedabad", "Surat", "Vadodara", "Thane", "Mumbai", "Pune", "Indore", "Bhopal", "Nagpur", "Nashik"]);
+          setMasterCities(citiesRes.data.map((c: { name: string }) => c.name).filter(Boolean).sort());
         }
       } catch (err) {
-        // fallback defaults
+        console.warn("Could not load geography masters:", err);
       }
     }
     loadMasters();

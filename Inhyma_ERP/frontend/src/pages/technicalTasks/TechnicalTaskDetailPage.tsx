@@ -17,7 +17,7 @@
  */
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { useLocation, useNavigate, useParams } from "react-router-dom";
+import { Navigate, useLocation, useNavigate, useParams } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { DetailSkeleton } from "@/components/Skeleton";
@@ -165,6 +165,7 @@ function TechnicalTaskDetailPageContent() {
 
   const { isSuperAdmin, hasPermission } = useAuth();
   const isAdminLevel = isSuperAdmin || hasPermission("technicaltask.manage");
+  const canViewCallLogs = isAdminLevel || hasPermission("technicaltask.call_logs.view");
   const canAddCallLog =
     isAdminLevel || hasPermission("technicaltask.update") || hasPermission("technicaltask.create");
 
@@ -191,7 +192,7 @@ function TechnicalTaskDetailPageContent() {
   useBodyScrollLock(drawerOpen);
 
   const loadAll = useCallback(async () => {
-    if (!id) return;
+    if (!id || !canViewCallLogs) return;
     setLoading(true);
     setError(null);
     try {
@@ -221,7 +222,7 @@ function TechnicalTaskDetailPageContent() {
     } finally {
       setLoading(false);
     }
-  }, [id]);
+  }, [id, canViewCallLogs]);
 
   useEffect(() => {
     void loadAll();
@@ -337,6 +338,10 @@ function TechnicalTaskDetailPageContent() {
     }
     return task.machine_model;
   }, [task]);
+
+  if (!canViewCallLogs) {
+    return <Navigate to={`/403?module=${encodeURIComponent("Technical Task Call Logs")}`} replace />;
+  }
 
   return (
     <AppShell activeKey="technical-tasks">

@@ -235,7 +235,7 @@ class StockTransferCreate(BaseModel):
     from_warehouse: str = Field(..., description="Origin warehouse")
     to_warehouse: str = Field(..., description="Destination warehouse")
     total_amount: Optional[float] = Field(None, description="Grand total amount")
-    added_by: str = Field("Akshata Wadekar", description="User who recorded the transfer")
+    added_by: Optional[str] = Field(None, description="User who recorded the transfer")
     status: str = Field("Received", description="'Received' | 'Pending' | 'Confirmed' | 'Cancel'")
     remarks: Optional[str] = None
     items: List[StockTransferLineItemSchema] = Field(default_factory=list)

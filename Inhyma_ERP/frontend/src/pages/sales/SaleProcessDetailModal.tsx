@@ -274,14 +274,8 @@ export function SaleProcessDetailModal({
         toast(`Status updated to ${newStatus.replace("_", " ").toUpperCase()}`, "success");
         if (onStatusUpdated) onStatusUpdated();
       }
-    } catch {
-      // Local fallback
-      if (order) {
-        const updated = { ...order, status: newStatus, ...payloadExtra };
-        setOrder(updated);
-        toast(`Status updated to ${newStatus.replace("_", " ").toUpperCase()}`, "success");
-        if (onStatusUpdated) onStatusUpdated();
-      }
+    } catch (err: any) {
+      toast(errorMessage(err) || "Failed to update order status", "error");
     } finally {
       setUpdatingStatus(false);
     }
@@ -696,7 +690,7 @@ export function SaleProcessDetailModal({
                       Payment Terms: <strong>{paymentTerms}</strong>
                     </div>
                     <div>
-                      Sales Person: <strong>{order?.sales_person || "Dhairya Shah"}</strong>
+                      Sales Person: <strong>{order?.sales_person || "—"}</strong>
                     </div>
                     <div>
                       Created: <strong>{createdDate}</strong>

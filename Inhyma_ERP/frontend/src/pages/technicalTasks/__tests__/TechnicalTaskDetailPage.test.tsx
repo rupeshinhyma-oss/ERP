@@ -203,9 +203,9 @@ describe("TechnicalTaskDetailPage & Call Logs Navigation", () => {
     });
   });
 
-  it("hides + ADD NEW CALL LOG for view-only users without update/create permission", async () => {
+  it("hides + ADD NEW CALL LOG for call_logs.view users without update/create permission", async () => {
     authState.isSuperAdmin = false;
-    authState.perms = ["technicaltask.view"];
+    authState.perms = ["technicaltask.view", "technicaltask.call_logs.view"];
 
     render(
       <MemoryRouter initialEntries={["/technical-task/detail/7"]}>

@@ -867,25 +867,32 @@ export function CrmLeadsPage() {
   }, [historyPage, historyPageSize, selectedSalespersonId, showToast]);
 
   // Fetch Kanban board data
+  const kanbanFetchSeqRef = useRef(0);
   const fetchKanbanData = useCallback(async (pipelineId: string) => {
     if (!pipelineId) return;
+    const seq = ++kanbanFetchSeqRef.current;
     setLoadingKanban(true);
     try {
       const pipeRes = await apiGet<any>(`/api/v1/crm/pipelines/${pipelineId}`);
+      if (seq !== kanbanFetchSeqRef.current) return;
       const pipeData = pipeRes?.data || pipeRes;
       const stages: CrmStageOption[] = (pipeData?.stages || []).filter((s: CrmStageOption) => s.is_active !== false);
       stages.sort((a, b) => a.stage_order - b.stage_order);
       setKanbanStages(stages);
 
       const leadsRes = await apiGet<CrmLeadPaginationResponse>(`/api/v1/crm/leads?pipeline_id=${pipelineId}&page_size=100`);
+      if (seq !== kanbanFetchSeqRef.current) return;
       const leadsData: CrmLeadPaginationResponse = leadsRes?.data || leadsRes;
       setKanbanLeads(leadsData.items || []);
     } catch (err: any) {
+      if (seq !== kanbanFetchSeqRef.current) return;
       showToast(errorMessage(err) || "Failed to load Kanban board.", "error");
       setKanbanStages([]);
       setKanbanLeads([]);
     } finally {
-      setLoadingKanban(false);
+      if (seq === kanbanFetchSeqRef.current) {
+        setLoadingKanban(false);
+      }
     }
   }, [showToast]);
 
@@ -895,6 +902,7 @@ export function CrmLeadsPage() {
       const targetId = kanbanPipelineId || (pipelines.length > 0 ? pipelines[0].id : "");
       if (targetId && targetId !== kanbanPipelineId) {
         setKanbanPipelineId(targetId);
+        return;
       }
       if (targetId) {
         fetchKanbanData(targetId);

@@ -317,8 +317,9 @@ export function LeadsPage() {
     showToast(`Lead allotted to ${allottedTo} successfully.`, "success");
   };
 
-  // Master Lead Sources
+  // Master Lead Sources & Call Types
   const [sourceOptions, setSourceOptions] = useState<string[]>([]);
+  const [callTypeOptions, setCallTypeOptions] = useState<string[]>([]);
 
   // Fixed-choice lists come from the database (option_lists)
   const { options: optionGroups } = useOptions(LEAD_OPTION_GROUPS);
@@ -331,7 +332,7 @@ export function LeadsPage() {
   const [districtList, setDistrictList] = useState<Array<{ id: string; name: string }>>([]);
   const [cityList, setCityList] = useState<Array<{ id: string; name: string }>>([]);
 
-  // Load Lead Sources from master if available
+  // Load Lead Sources and Call Types from masters if available
   useEffect(() => {
     let active = true;
     apiGet<any[]>("/masters/lead-sources?status=active")
@@ -342,6 +343,15 @@ export function LeadsPage() {
       })
       .catch(() => {
         setSourceOptions([]);
+      });
+    apiGet<any[]>("/masters/call-types/lookup")
+      .then((res) => {
+        if (active && Array.isArray(res.data)) {
+          setCallTypeOptions(Array.from(new Set(res.data.map((item) => item.name).filter(Boolean))));
+        }
+      })
+      .catch(() => {
+        setCallTypeOptions([]);
       });
     return () => {
       active = false;
@@ -461,7 +471,7 @@ export function LeadsPage() {
       if (filtersToUse.status.trim()) params.append("lead_status", filtersToUse.status.trim());
 
       const res = await apiGet<{ items: Lead[]; total: number }>(
-        `/leads/?${params.toString()}`
+        `/leads?${params.toString()}`
       );
 
       if (res.data && Array.isArray(res.data.items)) {
@@ -593,14 +603,14 @@ export function LeadsPage() {
     return Array.from(set).sort();
   }, [leads, STATUSES]);
 
-  // 9. Call Type: extracted from distinct call_type values in leads + standards
+  // 9. Call Type: extracted from Call Types master + distinct call_type values in leads
   const extractedCallTypes = useMemo(() => {
-    const set = new Set<string>(["Telecall", "Physical Visit", "WhatsApp", "Email", "Incoming Inquiry"]);
+    const set = new Set<string>(callTypeOptions);
     leads.forEach((l) => {
       if (l.call_type && l.call_type.trim()) set.add(l.call_type.trim());
     });
     return Array.from(set).sort();
-  }, [leads]);
+  }, [leads, callTypeOptions]);
 
   // Status Tab Counts
   const tabCounts = useMemo(() => {
@@ -989,7 +999,7 @@ export function LeadsPage() {
         await apiPut(`/leads/${currentEditId}`, formData);
         showToast("Lead updated successfully.", "success");
       } else {
-        await apiPost("/leads/", formData);
+        await apiPost("/leads", formData);
         showToast("New lead created successfully.", "success");
       }
       setDrawerOpen(false);
@@ -2398,7 +2408,7 @@ export function LeadsPage() {
                     id="lead-business-type-select"
                     value={formData.business_type || "B2B"}
                     onChange={(val) => setFormData((prev) => ({ ...prev, business_type: val }))}
-                    options={["B2B", "B2C", "Manufacturer", "Trader", "OEM", "Distributor"]}
+                    options={BUSINESS_TYPES.length > 0 ? BUSINESS_TYPES : ["B2B", "B2C"]}
                     placeholder="Select"
                   />
                 </div>
@@ -2408,7 +2418,7 @@ export function LeadsPage() {
                     id="lead-call-type-select"
                     value={formData.call_type}
                     onChange={(val) => setFormData((prev) => ({ ...prev, call_type: val }))}
-                    options={["Telecall", "Physical Visit", "WhatsApp", "Email", "Incoming Inquiry"]}
+                    options={extractedCallTypes}
                     placeholder="Select Call Type"
                   />
                 </div>
