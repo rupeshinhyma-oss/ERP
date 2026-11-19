@@ -467,9 +467,18 @@ async def limited_client(test_db: AsyncSession):
         username="sales1",
         permissions={
             "technicaltask.view",
+            "technicaltask.pending.view",
+            "technicaltask.approved.view",
+            "technicaltask.completed.view",
+            "technicaltask.cancel.view",
+            "technicaltask.action.view",
+            "technicaltask.call_logs.view",
             "technicaltask.create",
             "technicaltask.update",
             "technicaltask.approve",
+            "technicaltask.complete",
+            "technicaltask.cancel",
+            "technicaltask.reopen",
             "technicaltask.delete",
             "technicaltask.bulk_action",
         },
@@ -639,17 +648,48 @@ async def test_technical_task_rbac_permissions(test_db: AsyncSession, test_clien
     seeded_codes = {row[0] for row in BOOTSTRAP_PERMISSIONS if row[1] == "technicaltask"}
     assert seeded_codes == {
         "technicaltask.view",
+        "technicaltask.pending.view",
+        "technicaltask.approved.view",
+        "technicaltask.completed.view",
+        "technicaltask.cancel.view",
         "technicaltask.create",
-        "technicaltask.update",
-        "technicaltask.approve",
-        "technicaltask.delete",
-        "technicaltask.export",
         "technicaltask.bulk_action",
+        "technicaltask.action.view",
+        "technicaltask.call_logs.view",
+        "technicaltask.approve",
+        "technicaltask.complete",
+        "technicaltask.cancel",
+        "technicaltask.reopen",
+        "technicaltask.update",
+        "technicaltask.delete",
         "technicaltask.manage",
+    }
+    seeded_payment_codes = {row[0] for row in BOOTSTRAP_PERMISSIONS if row[1] == "payment"}
+    assert seeded_payment_codes == {
+        "payment.view",
+        "payment.create",
+        "payment.update",
+        "payment.delete",
+        "payment.manage",
+    }
+    seeded_tech_ops_codes = {row[0] for row in BOOTSTRAP_PERMISSIONS if row[1] == "technician_operations"}
+    assert seeded_tech_ops_codes == {
+        "technician_operations.view",
+        "technician_operations.create",
+        "technician_operations.update",
+        "technician_operations.manage",
     }
 
     task = await _create(test_client, company_name="RBAC Corp")
     tid = task["id"]
+    chargeable_task = await _create(
+        test_client,
+        company_name="RBAC Chargeable Corp",
+        service_type="Chargeable",
+        service_charge=5000,
+        payment_terms="Advance",
+    )
+    cid = chargeable_task["id"]
 
     active_perms: set[str] = set()
     app = create_application()
@@ -674,12 +714,21 @@ async def test_technical_task_rbac_permissions(test_db: AsyncSession, test_clien
         assert (await client.delete(f"/api/v1/technical-tasks/{tid}")).status_code == 403
         assert (await client.post("/api/v1/technical-tasks/bulk-delete", json={"ids": [tid]})).status_code == 403
 
-        # 2. View-only -> 200 on read, 403 on write
+        # 2. View-only -> 200 on base list & counts, 403 on write, 403 on unpermitted stage tabs & call logs detail
         active_perms.update({"technicaltask.view"})
         assert (await client.get("/api/v1/technical-tasks")).status_code == 200
         assert (await client.get("/api/v1/technical-tasks/counts")).status_code == 200
-        assert (await client.get(f"/api/v1/technical-tasks/{tid}")).status_code == 200
+        assert (await client.get("/api/v1/technical-tasks?tab=pending")).status_code == 403
+        assert (await client.get(f"/api/v1/technical-tasks/{tid}")).status_code == 403
+        assert (await client.get(f"/api/v1/technical-tasks/{tid}/call-logs")).status_code == 403
         assert (await client.post("/api/v1/technical-tasks", json={"company_name": "X"})).status_code == 403
+
+        # 2b. Tab view & Call Logs view permissions unlock their respective reads
+        active_perms.update({"technicaltask.pending.view", "technicaltask.call_logs.view"})
+        assert (await client.get("/api/v1/technical-tasks?tab=pending")).status_code == 200
+        assert (await client.get("/api/v1/technical-tasks?tab=approved")).status_code == 403
+        assert (await client.get(f"/api/v1/technical-tasks/{tid}")).status_code == 200
+        assert (await client.get(f"/api/v1/technical-tasks/{tid}/call-logs")).status_code == 200
 
         # 3. Update without Approve -> cannot transition Pending -> Approved
         active_perms.clear()
@@ -691,7 +740,7 @@ async def test_technical_task_rbac_permissions(test_db: AsyncSession, test_clien
             )
         ).status_code == 403
 
-        # 4. Approve without Update -> can approve Pending -> Approved, cannot Complete
+        # 4. Approve without Complete/Cancel -> can approve Pending -> Approved, cannot Complete or Cancel
         active_perms.clear()
         active_perms.update({"technicaltask.view", "technicaltask.approve"})
         approve_res = await client.patch(
@@ -702,12 +751,98 @@ async def test_technical_task_rbac_permissions(test_db: AsyncSession, test_clien
         assert (
             await client.patch(f"/api/v1/technical-tasks/{tid}/status", json={"status": "Completed"})
         ).status_code == 403
+        assert (
+            await client.patch(
+                f"/api/v1/technical-tasks/{tid}/status",
+                json={"status": "Cancel", "cancel_remarks": "No permission"},
+            )
+        ).status_code == 403
+        assert (
+            await client.post(
+                f"/api/v1/technical-tasks/{tid}/reopen",
+                json={"status": "Pending"},
+            )
+        ).status_code == 403
 
-        # 5. technicaltask.manage -> full access including deleting an Approved task approved by someone else
+        # 4b. Complete & Cancel permissions unlock Completed/Cancel transitions respectively
+        active_perms.add("technicaltask.complete")
+        assert (
+            await client.patch(f"/api/v1/technical-tasks/{tid}/status", json={"status": "Completed"})
+        ).status_code == 200
+
+        # 5. technicaltask.manage -> full access to Technical Tasks, but NO access to Payments-only routes
         active_perms.clear()
         active_perms.update({"technicaltask.manage"})
         assert (await client.get("/api/v1/technical-tasks")).status_code == 200
+        assert (await client.get("/api/v1/technical-tasks/payment-summary")).status_code == 403
+        assert (
+            await client.post(
+                f"/api/v1/technical-tasks/{cid}/record-payment",
+                json={"amount": 1000, "payment_mode": "Company Acc"},
+            )
+        ).status_code == 403
         assert (await client.delete(f"/api/v1/technical-tasks/{tid}")).status_code == 200
+
+        # 6. payment.view -> Payments summary & Chargeable list only, 403 on Technical Tasks routes & mutations
+        active_perms.clear()
+        active_perms.update({"payment.view"})
+        assert (await client.get("/api/v1/technical-tasks/payment-summary")).status_code == 200
+        pay_list = await client.get("/api/v1/technical-tasks?service_type=Chargeable")
+        assert pay_list.status_code == 200
+        assert all(row["service_type"] == "Chargeable" for row in pay_list.json()["data"])
+        assert (await client.get("/api/v1/technical-tasks/counts")).status_code == 403
+        assert (await client.get(f"/api/v1/technical-tasks/{cid}")).status_code == 403
+        assert (
+            await client.post(
+                f"/api/v1/technical-tasks/{cid}/record-payment",
+                json={"amount": 1000, "payment_mode": "Company Acc"},
+            )
+        ).status_code == 403
+
+        # 7. payment.update -> can record payment, cannot mutate Technical Task fields directly
+        active_perms.clear()
+        active_perms.update({"payment.view", "payment.update"})
+        assert (
+            await client.post(
+                f"/api/v1/technical-tasks/{cid}/record-payment",
+                json={"amount": 1000, "payment_mode": "Company Acc"},
+            )
+        ).status_code == 200
+        assert (await client.patch(f"/api/v1/technical-tasks/{cid}", json={"city": "Surat"})).status_code == 403
+
+        # 8. payment.create -> can create Chargeable payment record only, not Free technical tasks
+        active_perms.clear()
+        active_perms.update({"payment.create"})
+        assert (
+            await client.post(
+                "/api/v1/technical-tasks",
+                json={
+                    "company_name": "Pay Only Free Blocked",
+                    "task_type": "In-House",
+                    "city": "Vadodara",
+                    "machine_model": "GF5000F",
+                    "task_description": "Test free task blocked",
+                    "contact_phone": "9876543210",
+                    "service_type": "Free",
+                },
+            )
+        ).status_code == 403
+        assert (
+            await client.post(
+                "/api/v1/technical-tasks",
+                json={
+                    "company_name": "Pay Only Chargeable Allowed",
+                    "task_type": "In-House",
+                    "city": "Vadodara",
+                    "machine_model": "GF5000F",
+                    "task_description": "Chargeable service task",
+                    "contact_phone": "9876543210",
+                    "service_type": "Chargeable",
+                    "service_charge": 2500,
+                    "payment_terms": "100% Against Completion",
+                },
+            )
+        ).status_code == 201
 
 
 async def test_technical_task_detail_by_number_call_logs_and_task_logs(test_client: AsyncClient):

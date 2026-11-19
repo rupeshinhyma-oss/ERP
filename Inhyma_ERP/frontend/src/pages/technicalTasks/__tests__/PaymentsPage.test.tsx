@@ -143,7 +143,7 @@ describe("PaymentsPage", () => {
     unmount();
 
     authState.isSuperAdmin = false;
-    authState.perms = ["technicaltask.view"];
+    authState.perms = ["payment.view", "technicaltask.manage"];
     try {
       render(
         <MemoryRouter>

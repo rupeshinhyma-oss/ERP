@@ -33,7 +33,6 @@ from app.masters.company_categories.models import CompanyCategory
 from app.masters.company_sectors.models import CompanySector
 from app.masters.warehouses.models import Warehouse
 from app.masters.billing_companies.models import BillingCompany
-from app.masters.technicians.models import Technician
 from app.masters.banks.models import Bank
 from app.masters.countries.models import Country
 from app.masters.states.models import State
@@ -71,7 +70,6 @@ MODEL_MAP: dict[str, tuple[Type[Any], str, str | None]] = {
     "Company Sector": (CompanySector, "name", None),
     "Warehouse": (Warehouse, "name", "billing_company"),
     "Billing Company": (BillingCompany, "name", "email"),
-    "Technician": (Technician, "name", "mobile"),
     "Bank": (Bank, "bank_name", "account_number"),
     "Country": (Country, "name", "code"),
     "State": (State, "name", "code"),

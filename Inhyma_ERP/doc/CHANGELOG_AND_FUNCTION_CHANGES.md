@@ -3,6 +3,29 @@
 **System:** Inhyma_ERP (India Distribution)  
 **Scope:** Functional updates, schema migrations, UI hardening, and bug fixes.
 
+## [Release 2026-11-18] — 3-Module RBAC Split (`w0b1c2d3e4f5`), Granular Technical Task Permissions (`x1c2d3e4f5a6`, `y1d2e3f4a5b6`), Fixed `Technician` `SYSTEM` Department (`z2a3b4c5d6e7`), and Centered Modal / Gatepass Table UI Polish
+
+### 1. Separated RBAC Across Technical Tasks, Payments & Technician Gatepass/Wallet (`w0b1c2d3e4f5`)
+- **Independent Permission Groups (`seed.py`, `permissionLabels.ts`, `nav.ts`, `App.tsx`, `routes.py`):**
+  - Split **Technical Tasks** (`technicaltask.*`), **Payments** (`payment.{view,create,update,delete,manage}`), and **Technician Gatepass & Wallet Management** (`technician_operations.{view,create,update,manage}`) into completely independent RBAC modules so `technicaltask.*` no longer unlocks `/payments` or `/technician-operations`, and `payment.*` / `technician_operations.*` no longer unlock unrelated modules.
+  - Preserved all internal cross-module integrations (e.g., Technical Task `Self collect` sync & reversal in `TechnicianWalletTransaction`, `PaymentsPage` billing/collection updates, serial lookups, and Sales Order Gatepass stock handoff) without requiring cross-module UI permissions.
+
+### 2. Granular Technical Tasks Tabs, Action Column & Stage Action Permissions (`x1c2d3e4f5a6`, `y1d2e3f4a5b6`)
+- **16-Permission Technical Tasks Matrix (`technical_tasks/routes.py`, `TechnicalTasksPage.tsx`, `TechnicalTaskDetailPage.tsx`):**
+  - Added granular permissions for `Pending`, `Approved`, `Completed`, and `Cancel` tabs (`technicaltask.{pending,approved,completed,cancel}.view`), header buttons (`technicaltask.create` `+ Add New`, `technicaltask.bulk_action` `Bulk Actions`), the `ACTION` (`⋮`) column (`technicaltask.action.view`), `Call Logs` (`technicaltask.call_logs.view`), stage actions (`technicaltask.approve`, `technicaltask.complete`, `technicaltask.cancel`, `technicaltask.reopen`), `Edit` (`technicaltask.update`), `Delete` (`technicaltask.delete`), and `Manage All` (`technicaltask.manage`).
+  - Removed obsolete `technicaltask.export` (`y1d2e3f4a5b6`) after Export was removed from the Technical Tasks module.
+
+### 3. Shift Technicians From Masters Into Fixed `Technician` `SYSTEM` Department (`z2a3b4c5d6e7`)
+- **System Role & Removal of Technicians Master (`app/rbac/{service,routes}.py`, `seed.py`, `z2a3b4c5d6e7_shift_technicians_master_to_system_department.py`):**
+  - Promoted `technician` (displayed as `Technician` with `SYSTEM` badge alongside `Admin` [`super_admin`] and `User` [`user`]) to a reserved fixed `SYSTEM` department (`RESERVED_ROLE_NAMES`). Admins assign or remove existing `User` accounts in `/rbac` (**Users in this Department**) or `/users` (**Departments**).
+  - Removed `/masters/technicians` (`Masters > Technicians` sidebar item, `Technicians.tsx`, `backend/app/masters/technicians/`, `Trash` registration, and the 7 `technician.*` Master permissions — bringing bootstrap permissions to `325` unique codes), redirected legacy URLs to `/rbac`, dropped `technicians`, and re-pointed `technician_gatepasses.technician_id` and `technician_wallet_transactions.technician_id` foreign keys to `users.id`.
+  - Added `GET /api/v1/rbac/technicians/lookup` (`get_current_user`) and updated `TechnicalTasksPage.tsx`, `TechnicalTaskService._sync_self_collect_wallet()`, and `TechnicianOperationsRepository` (`get_lookups`, `_resolve_technician`, `get_technician_wallet_summaries`) to resolve active `User` members of the `technician` department.
+- **Alembic Merge Revision (`z3b4c5d6e7f8`):** Merged `w0a1b2c3d4e5` (CRM Phase 2 integrity & isolation) and `z2a3b4c5d6e7` into single Alembic head `z3b4c5d6e7f8`.
+
+### 4. Centered Modal Single-Scroll & Gatepass Spare-Parts Table UI Fixes (`style.css`, `TechnicianOperationsPage.tsx`)
+- **Centered Dialog Modal Scrollbar Fix (`frontend/src/styles/style.css`):** Scoped `.modal-card:not(.modal-dialog-card) form` and `:not(.form-actions):not(.modal-footer)` to drawers only, and styled `.modal-dialog-card form:not(.payment-modal-form)` cleanly so centered `<Modal variant="center">` forms (such as **Record Technician Wallet Transaction**) no longer generate stacked per-field vertical scrollbars.
+- **Outward Gatepass Spare-Parts Table Layout (`frontend/src/pages/TechnicianOperationsPage.tsx` & `style.css`):** Set `tableLayout: "fixed"` with `whiteSpace: "normal"` and vertical flex stacks inside **Spare Parts to Issue** and **Reconcile Issued Parts**, added `display: block; box-sizing: border-box;` on `.form-control` and compact `.form-control-sm` sizing, preventing the catalog selector and Part Name input from overflowing horizontally into `Code & Stock`.
+
 ## [Release 2026-11-17] — Full-Stack `Cargo Overview` Module (`z9a0b1c2d3e4`), Standardized Filter-Above-Table & Export UI, and Cross-ERP `ImportPurchase` Sync Adapter
 
 ### 1. Cargo Overview Full-Stack Architecture (`app/cargo_overview/*`, `z9a0b1c2d3e4`, `CargoOverviewPage.tsx`, `cargoOverview.ts`)

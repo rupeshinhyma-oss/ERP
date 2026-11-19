@@ -374,14 +374,33 @@ BOOTSTRAP_PERMISSIONS: list[tuple[str, str, str, str, str, str]] = [
     ("task.manage", "task", "tasks", "manage", "ALL", "Full task management: edit, delete, or change status of any task."),
     ("task.delete", "task", "tasks", "delete", "ALL", "Delete tasks and recurring task schedules."),
     # Technical Tasks Module
-    ("technicaltask.view", "technicaltask", "technical-tasks", "view", "ALL", "View technical tasks, status tabs, call logs, and machine serial lookups."),
-    ("technicaltask.create", "technicaltask", "technical-tasks", "create", "ALL", "Create new technical tasks and field service tickets."),
-    ("technicaltask.update", "technicaltask", "technical-tasks", "update", "ALL", "Edit technical tasks, record call logs, complete/cancel tasks, and record payments."),
-    ("technicaltask.approve", "technicaltask", "technical-tasks", "approve", "ALL", "Approve technical tasks, allot technicians, and override service/charge details."),
-    ("technicaltask.delete", "technicaltask", "technical-tasks", "delete", "ALL", "Delete technical tasks."),
-    ("technicaltask.export", "technicaltask", "technical-tasks", "export", "ALL", "Export technical tasks to CSV."),
-    ("technicaltask.bulk_action", "technicaltask", "technical-tasks", "manage", "ALL", "Use Bulk Actions (bulk approve, bulk complete, bulk delete) in Technical Tasks."),
-    ("technicaltask.manage", "technicaltask", "technical-tasks", "manage", "ALL", "Full administrative control over technical tasks, including editing/deleting approved tasks and reopening cancelled tasks."),
+    ("technicaltask.view", "technicaltask", "technical-tasks", "view", "ALL", "View Technical Tasks module and All tab."),
+    ("technicaltask.pending.view", "technicaltask", "technical-tasks", "view", "ALL", "View the Pending status tab in Technical Tasks."),
+    ("technicaltask.approved.view", "technicaltask", "technical-tasks", "view", "ALL", "View the Approved status tab in Technical Tasks."),
+    ("technicaltask.completed.view", "technicaltask", "technical-tasks", "view", "ALL", "View the Completed status tab in Technical Tasks."),
+    ("technicaltask.cancel.view", "technicaltask", "technical-tasks", "view", "ALL", "View the Cancel status tab in Technical Tasks."),
+    ("technicaltask.create", "technicaltask", "technical-tasks", "create", "ALL", "Show + ADD NEW button and create new technical tasks."),
+    ("technicaltask.bulk_action", "technicaltask", "technical-tasks", "manage", "ALL", "Show Bulk Actions menu (bulk approve, bulk complete, bulk delete) in Technical Tasks."),
+    ("technicaltask.action.view", "technicaltask", "technical-tasks", "view", "ALL", "View the Action (3-dots) column in the Technical Tasks table."),
+    ("technicaltask.call_logs.view", "technicaltask", "technical-tasks", "view", "ALL", "View Call Logs in Action menu and access the Call & Task Logs detail page."),
+    ("technicaltask.approve", "technicaltask", "technical-tasks", "approve", "ALL", "View/use Approved action (Pending stage), allot technicians, and override service/charge details."),
+    ("technicaltask.complete", "technicaltask", "technical-tasks", "update", "ALL", "View/use Completed action (Approved stage) and bulk mark completed."),
+    ("technicaltask.cancel", "technicaltask", "technical-tasks", "update", "ALL", "View/use Cancel action (Approved stage) in Technical Tasks."),
+    ("technicaltask.reopen", "technicaltask", "technical-tasks", "approve", "ALL", "View/use Reopen / Reassign action (Cancel stage) in Technical Tasks."),
+    ("technicaltask.update", "technicaltask", "technical-tasks", "update", "ALL", "View/use Edit action in Technical Tasks and add call logs."),
+    ("technicaltask.delete", "technicaltask", "technical-tasks", "delete", "ALL", "View/use Delete action in Technical Tasks."),
+    ("technicaltask.manage", "technicaltask", "technical-tasks", "manage", "ALL", "Full administrative control over technical tasks, including all tabs, action menu items, editing/deleting approved tasks, and reopening cancelled tasks."),
+    # Payments Module (independent of Technical Tasks)
+    ("payment.view", "payment", "payments", "view", "ALL", "View Payments dashboard, KPIs, payment tabs, and payment details."),
+    ("payment.create", "payment", "payments", "create", "ALL", "Create new chargeable payment records in Payments."),
+    ("payment.update", "payment", "payments", "update", "ALL", "Record payments and upload payment receipts in Payments."),
+    ("payment.delete", "payment", "payments", "delete", "ALL", "Delete pending payment records in Payments."),
+    ("payment.manage", "payment", "payments", "manage", "ALL", "Full administrative control over Payments, including deleting records at any stage."),
+    # Technician Gatepass & Wallet Management Module (independent of Technical Tasks and Payments)
+    ("technician_operations.view", "technician_operations", "technician-operations", "view", "ALL", "View Technician Gatepass & Wallet Management (gatepasses, technician wallets, and machine warranties)."),
+    ("technician_operations.create", "technician_operations", "technician-operations", "create", "ALL", "Issue outward spare parts gatepasses, record wallet transactions, and register machine warranties."),
+    ("technician_operations.update", "technician_operations", "technician-operations", "update", "ALL", "Record spare parts returns and link Sales Orders to gatepasses."),
+    ("technician_operations.manage", "technician_operations", "technician-operations", "manage", "ALL", "Full administrative control over Technician Gatepass, Wallet & Warranty Management."),
     # Inquiries & Quotations (Sale > Inquiries)
     ("inquiry.view", "inquiry", "inquiries", "view", "ALL", "View inquiries and consignment lists."),
     ("inquiry.create", "inquiry", "inquiries", "create", "ALL", "Create new inquiries and consignments."),
@@ -427,14 +446,6 @@ BOOTSTRAP_PERMISSIONS: list[tuple[str, str, str, str, str, str]] = [
     ("billingcompany.export", "billingcompany", "masters-billing-company", "export", "ALL", "Export billing company data."),
     ("billingcompany.import", "billingcompany", "masters-billing-company", "import", "ALL", "Import billing company data."),
     ("billingcompany.bulk_action", "billingcompany", "masters-billing-company", "manage", "ALL", "Use Bulk Actions in the billing company list."),
-    # Technicians Master
-    ("technician.view", "technician", "masters-technicians", "view", "ALL", "View technicians; use search, filters, and status tabs."),
-    ("technician.create", "technician", "masters-technicians", "create", "ALL", "Create technicians."),
-    ("technician.update", "technician", "masters-technicians", "update", "ALL", "Edit and activate/deactivate technicians."),
-    ("technician.delete", "technician", "masters-technicians", "delete", "ALL", "Delete technicians."),
-    ("technician.export", "technician", "masters-technicians", "export", "ALL", "Export technician data."),
-    ("technician.import", "technician", "masters-technicians", "import", "ALL", "Import technician data."),
-    ("technician.bulk_action", "technician", "masters-technicians", "manage", "ALL", "Use Bulk Actions in the technician list."),
     # Reports & Cargo Overview
     ("report.view", "report", "reports", "view", "ALL", "View Reports & Analytics modules (Re-Order, Stock Transactions, Deleted Orders, General Reports, Financial Planning Report, Cargo Overview)."),
     ("cargo_overview.view", "cargo_overview", "reports-cargo-overview", "view", "ALL", "View the Cargo Overview list, warehouse/stage tabs, and consignment header summary."),
@@ -450,6 +461,7 @@ BOOTSTRAP_PERMISSIONS: list[tuple[str, str, str, str, str, str]] = [
 SUPER_ADMIN_ROLE_NAME = "super_admin"
 SUPER_ADMIN_DISPLAY_NAME = "Admin"
 USER_ROLE_NAME = "user"
+TECHNICIAN_ROLE_NAME = "technician"
 
 # The default role automatically assigned to every newly-created account
 # (see app.users.service.UserService.create_user). Grants read-only/basic
@@ -579,6 +591,22 @@ async def seed() -> None:
                     permission = perms_by_code.get(code) or await permission_repo.get_by_code(code)
                     if permission:
                         session.add(RolePermission(role_id=user_role.id, permission_id=permission.id))
+                await session.flush()
+
+            technician_role = await role_repo.get_by_name(TECHNICIAN_ROLE_NAME, include_deleted=True)
+            if technician_role is None:
+                technician_role = await role_repo.create(
+                    name=TECHNICIAN_ROLE_NAME,
+                    description=(
+                        "Fixed system department for field service technicians. "
+                        "Users assigned to this department appear in Technical Tasks, "
+                        "Technician Gatepasses, and Technician Wallets."
+                    ),
+                    is_system=True,
+                )
+                logger.info("Seeded role.", extra={"role_name": TECHNICIAN_ROLE_NAME})
+            elif not technician_role.is_system:
+                technician_role.is_system = True
                 await session.flush()
 
             # Idempotent top-up for Sales Manager role: ensure crm.distribution.view and crm.leads.import are granted

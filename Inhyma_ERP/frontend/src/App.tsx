@@ -95,7 +95,6 @@ import { CompanyCategoriesPage } from "@/pages/masters/CompanyCategories";
 import { CompanySectorsPage } from "@/pages/masters/CompanySectors";
 import { WarehousesPage } from "@/pages/masters/Warehouses";
 import { BillingCompaniesPage } from "@/pages/masters/BillingCompanies";
-import { TechniciansPage } from "@/pages/masters/Technicians";
 import { BanksPage } from "@/pages/masters/Banks";
 import { TransportPage } from "@/pages/masters/Transport";
 import { PaymentTermsPage } from "@/pages/masters/PaymentTerms";
@@ -472,8 +471,8 @@ export function App() {
           <Route path="/masters/billing-company" element={<BillingCompaniesPage />} />
           <Route path="/company/list" element={<Navigate to="/masters/billing-company" replace />} />
           <Route path="/company/addedit" element={<Navigate to="/masters/billing-company" replace />} />
-          <Route path="/masters/technicians" element={<TechniciansPage />} />
-          <Route path="/technician/list" element={<Navigate to="/masters/technicians" replace />} />
+          <Route path="/masters/technicians" element={<Navigate to="/rbac" replace />} />
+          <Route path="/technician/list" element={<Navigate to="/rbac" replace />} />
           <Route path="/masters/banks" element={<BanksPage />} />
           <Route path="/masters/bank" element={<Navigate to="/masters/banks" replace />} />
           <Route path="/bank/list" element={<Navigate to="/masters/banks" replace />} />

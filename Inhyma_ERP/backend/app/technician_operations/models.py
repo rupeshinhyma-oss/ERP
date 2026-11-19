@@ -10,7 +10,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database.base import GUID, Base, SoftDeleteMixin, TimestampMixin, UUIDPrimaryKeyMixin, VersionMixin
 import app.masters.products.models  # noqa: F401
-import app.masters.technicians.models  # noqa: F401
+import app.users.models  # noqa: F401
 import app.sales.models  # noqa: F401
 import app.technical_tasks.models  # noqa: F401
 
@@ -58,7 +58,7 @@ class TechnicianGatepass(Base, UUIDPrimaryKeyMixin, TimestampMixin, VersionMixin
 
     gatepass_number: Mapped[str] = mapped_column(String(50), unique=True, nullable=False, index=True)
     technician_id: Mapped[uuid.UUID | None] = mapped_column(
-        GUID(), ForeignKey("technicians.id", ondelete="SET NULL"), nullable=True, index=True
+        GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
     )
     technician_name: Mapped[str] = mapped_column(String(150), nullable=False, index=True)
     technician_mobile: Mapped[str | None] = mapped_column(String(50), nullable=True)
@@ -141,7 +141,7 @@ class TechnicianWalletTransaction(Base, UUIDPrimaryKeyMixin, TimestampMixin, Ver
 
     transaction_number: Mapped[str] = mapped_column(String(50), unique=True, nullable=False, index=True)
     technician_id: Mapped[uuid.UUID | None] = mapped_column(
-        GUID(), ForeignKey("technicians.id", ondelete="SET NULL"), nullable=True, index=True
+        GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
     )
     technician_name: Mapped[str] = mapped_column(String(150), nullable=False, index=True)
     technical_task_id: Mapped[uuid.UUID | None] = mapped_column(

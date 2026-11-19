@@ -230,10 +230,10 @@ Inhyma_ERP/
 │   │   ├── events/               # WebSocket connection manager & broadcast
 │   │   ├── feed/                 # Internal broadcast announcements & 1-to-1 employee messaging
 │   │   ├── hrms/                 # Attendance, Leave, Assets, Expenses, Site Visits, Payroll & RBAC
-│   │   ├── rbac/                 # Departments & Permissions (super_admin + user system roles)
+│   │   ├── rbac/                 # Departments & Permissions (super_admin + user + technician system roles)
 │   │   └── users/                # Unified employee & user directory + ERP_Main identity sync
-│   ├── alembic/                  # Database migrations (single-head invariant, head z7e8f9a0b1c2)
-│   ├── scripts/                  # Idempotent bootstrap seed.py (306 permissions, 2 system roles) & maintenance utilities
+│   ├── alembic/                  # Database migrations (single-head invariant, head z3b4c5d6e7f8)
+│   ├── scripts/                  # Idempotent bootstrap seed.py (325 unique permissions, 3 system roles) & maintenance utilities
 │   └── tests/                    # SQLite-isolated backend test suites (conftest.py live-DB guard)
 ├── frontend/
 │   ├── src/
@@ -479,7 +479,7 @@ During Render/Docker container boot, `python server.py` executes a four-phase in
 2. **Schema Upgrade (`alembic upgrade heads`):**
    - Executes `alembic upgrade heads` (plural), upgrading all active branch heads to current state without terminating container execution on branch divergences.
 3. **Idempotent Bootstrap Seeding (`scripts.seed`):**
-   - Provisions strictly the 2 system roles (`super_admin` displayed as `Admin` and `user` displayed as `User`), all `306` permissions (granted 100% to `super_admin`), geography, and default super-admin credentials on fresh install only—never seeding hardcoded business departments.
+   - Provisions strictly the 3 system roles (`super_admin` displayed as `Admin`, `user` displayed as `User`, and `technician` displayed as `Technician`), all `325` unique permissions (granted 100% to `super_admin`), geography, and default super-admin credentials on fresh install only—never seeding hardcoded business departments.
 4. **ASGI Process Launch (`uvicorn app.main:app`):**
    - Starts API server with DNS resilience and graceful shutdown signal handlers.
 
@@ -501,9 +501,9 @@ During Render/Docker container boot, `python server.py` executes a four-phase in
 1. **Dual-Layer In-Memory SQLite Pytest Guard (`backend/tests/conftest.py` + `app/database/engine.py`):**
    - `conftest.py` never calls `load_dotenv(..., override=True)`. Whenever `DATABASE_URL` is unset or targets `supabase.com` / `supabase.co` (unless `ALLOW_LIVE_DB_TESTS=1`), `conftest.py` forces `DATABASE_URL="sqlite+aiosqlite:///:memory:"` and `ENVIRONMENT="test"` before `app.core.config.settings` loads.
    - `get_engine()` in `app/database/engine.py` enforces a second hard runtime guard: whenever `pytest` is loaded in `sys.modules` (and `ALLOW_LIVE_DB_TESTS != "1"`), any `supabase.com` / `supabase.co` URL—even if loaded early from `.env`—is forcibly diverted to `sqlite+aiosqlite:///:memory:`.
-2. **Automatic Colleague Workstation QA Sweeper & Canonical 2-Role Bootstrap (`legacy_qa_guard.py`, `scripts/seed.py`, `z5c6d7e8f9a0`):**
+2. **Automatic Colleague Workstation QA Sweeper & Canonical 3-Role Bootstrap (`legacy_qa_guard.py`, `scripts/seed.py`, `z5c6d7e8f9a0`, `z2a3b4c5d6e7`):**
    - `app/core/legacy_qa_guard.py` (`purge_retired_qa_files()`) runs automatically on `pytest` startup and local FastAPI server startup to sweep and delete any lingering untracked/copied copies of all 45 retired synthetic-QA scripts and live-DB test modules on developer/colleague workstations after `git pull`, backed by idempotent DB cleanup migration `z5c6d7e8f9a0_purge_synthetic_pytest_artifacts.py`.
-   - `scripts/seed.py` seeds strictly two `is_system=True` roles (`super_admin` = `Admin` and `user` = `User`) and `306` granular permissions (`306/306` assigned to `super_admin`); all organizational departments are created dynamically by administrators (`is_system=False`).
+   - `scripts/seed.py` seeds strictly three `is_system=True` roles (`super_admin` = `Admin`, `user` = `User`, and `technician` = `Technician`) and `325` unique granular permissions (`325/325` assigned to `super_admin`); all other organizational departments are created dynamically by administrators (`is_system=False`).
 3. **HRMS Soft-Delete Non-Recreation (`app/hrms/service.py`, `app/hrms/leave_service.py`):**
    - `ensure_seeds()` checks total row counts (including soft-deleted records) across `HrmsLocation`, `HrmsLeaveType`, `HrmsExpenseCategory`, `HrmsHoliday`, and `HrmsLeavePlan` so user-deleted defaults never re-create on subsequent requests.
 
@@ -538,10 +538,10 @@ During Render/Docker container boot, `python server.py` executes a four-phase in
 
 ## 19. Technical Tasks Lifecycle, Granular RBAC & Technician Wallet Auto-Sync Architecture
 
-1. **8-Permission Granular RBAC Matrix (`module="technicaltask"`, `page="technical-tasks"`):**
-   - Enforces independent action permissions across `technicaltask.view`, `technicaltask.create`, `technicaltask.update`, `technicaltask.approve`, `technicaltask.delete`, `technicaltask.export`, `technicaltask.bulk_action`, and `technicaltask.manage` (`seed.py` & `seed_technical_task_permissions.py`).
-   - Synchronized end-to-end across sidebar navigation (`nav.ts` gating both `/technical-task/list` and `/payments`), WebSocket subscriptions (`app/events/channels.py`), FastAPI route dependencies (`require_any_permission`), and React button/action visibility (`TechnicalTasksPage.tsx`, `TechnicalTaskDetailPage.tsx`, `PaymentsPage.tsx`).
-   - Non-master viewers holding `technicaltask.*` permissions seamlessly populate dropdowns via authenticated `/masters/cities/lookup`, `/masters/technicians/lookup`, and `/masters/call-types/lookup` fallbacks (`Depends(get_current_user)`).
+1. **Separated 3-Module & Granular 16-Permission Technical Tasks RBAC (`w0b1c2d3e4f5`, `x1c2d3e4f5a6`, `y1d2e3f4a5b6`):**
+   - Enforces completely independent RBAC modules across **Technical Tasks** (`16` permissions: `technicaltask.{view,pending.view,approved.view,completed.view,cancel.view,create,bulk_action,action.view,call_logs.view,approve,complete,cancel,reopen,update,delete,manage}`), **Payments** (`5` permissions: `payment.{view,create,update,delete,manage}`), and **Technician Gatepass & Wallet Management** (`4` permissions: `technician_operations.{view,create,update,manage}`), with `technicaltask.export` removed and internal cross-module sync/lookups functioning without requiring sibling module permissions.
+   - Synchronized end-to-end across sidebar navigation (`nav.ts`), WebSocket subscriptions (`app/events/channels.py`), FastAPI route dependencies (`require_any_permission`), and React tab/header/menu visibility (`TechnicalTasksPage.tsx`, `TechnicalTaskDetailPage.tsx`, `PaymentsPage.tsx`, `TechnicianOperationsPage.tsx`).
+   - Technician dropdowns resolve active Users assigned to the fixed `Technician` `SYSTEM` department via `GET /api/v1/rbac/technicians/lookup` (`Depends(get_current_user)`), alongside `/masters/cities/lookup` and `/masters/call-types/lookup`.
 2. **Sequential `task_number`, Call Logs & Immutable Lifecycle Logs (`z6d7e8f9a0b1`):**
    - `technical_tasks.task_number` (`INTEGER`, indexed) assigns sequential human-readable ticket numbers (`#1`, `#2`, ...) resolved interchangeably with UUIDs via `TechnicalTaskRepository.resolve_task()`.
    - `technical_task_logs` records an immutable lifecycle audit trail (`Create Technical Task`, `Approve Technical Task`, `Complete Technical Task`, `Cancel Technical Task`, `Reopen Technical Task`, `Record Task Payment`, `Update Technical Task`) surfaced alongside technician `Telecall` / `Physical Visit` call logs on `/technical-task/detail/:id`.
