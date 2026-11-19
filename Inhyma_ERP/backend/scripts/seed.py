@@ -152,6 +152,18 @@ BOOTSTRAP_PERMISSIONS: list[tuple[str, str, str, str, str, str]] = [
     ("company.bulk_action", "company", "companies", "manage", "ALL", "Use Bulk Actions in the company list."),
     ("company.grade_edit", "company", "companies", "update", "ALL", "Edit the Grade dropdown in the company list (read-only without this)."),
     ("company.potential_edit", "company", "companies", "update", "ALL", "Edit the Potential dropdown in the company list (read-only without this)."),
+    # Agents (Contact > Agents)
+    ("agent.view", "agent", "agents", "view", "ALL", "View the agent list and details; use search and filters."),
+    ("agent.create", "agent", "agents", "create", "ALL", "Create new agents."),
+    ("agent.update", "agent", "agents", "update", "ALL", "Edit existing agents."),
+    ("agent.delete", "agent", "agents", "delete", "ALL", "Delete agents."),
+    ("agent.bulk_action", "agent", "agents", "manage", "ALL", "Bulk-delete selected agents."),
+    # Industrial Zones (Contact > Industrial Zones)
+    ("zone.view", "zone", "industrial-zones", "view", "ALL", "View industrial zones; use search and filters."),
+    ("zone.create", "zone", "industrial-zones", "create", "ALL", "Create industrial zones."),
+    ("zone.update", "zone", "industrial-zones", "update", "ALL", "Edit industrial zones."),
+    ("zone.delete", "zone", "industrial-zones", "delete", "ALL", "Delete industrial zones."),
+    ("zone.bulk_action", "zone", "industrial-zones", "manage", "ALL", "Bulk-delete selected industrial zones."),
     # Supplier Types (Configurations master; independent of the Suppliers module above)
     ("suppliertype.view", "suppliertype", "supplier-types", "view", "ALL", "View supplier types; use search, filters, and the Active/Inactive tabs."),
     ("suppliertype.create", "suppliertype", "supplier-types", "create", "ALL", "Create supplier types."),
@@ -365,13 +377,13 @@ BOOTSTRAP_PERMISSIONS: list[tuple[str, str, str, str, str, str]] = [
     ("planning.colorstatusred.edit", "planning", "planning", "update", "ALL", "Set a cell's status color to Red (Requirement), independent of planning.cell.edit."),
     ("planning.colorstatusgreen.edit", "planning", "planning", "update", "ALL", "Set a cell's status color to Green (Purchased), independent of planning.cell.edit."),
     # Standalone Task Module
-    ("task.view", "task", "tasks", "view", "ALL", "View own assigned and created tasks; access Work Management."),
+    ("task.view", "task", "tasks", "view", "ALL", "View own assigned and created tasks; access Enterprise Tasks."),
     ("task.create", "task", "tasks", "create", "ALL", "Create new standalone workforce tasks, sprints, templates, and recurring schedules."),
-    ("task.department_view", "task", "tasks", "view", "DEPARTMENT", "View all tasks belonging to user's department(s)."),
-    ("task.organization_view", "task", "tasks", "view", "ALL", "View organization-wide tasks across all departments."),
-    ("task.assign", "task", "tasks", "manage", "ALL", "Assign tasks to any user in the organization."),
+    ("task.department_view", "task", "tasks", "view", "DEPARTMENT", "View all tasks belonging to user's department(s) (read visibility for Department Managers)."),
+    ("task.all_view", "task", "tasks", "view", "ALL", "View all tasks across all departments (read-only visibility without task management rights)."),
+    ("task.assign", "task", "tasks", "manage", "ALL", "Assign tasks to users within authorized scope."),
     ("task.escalate", "task", "tasks", "action", "ALL", "Manually escalate tasks to managers or candidate users."),
-    ("task.manage", "task", "tasks", "manage", "ALL", "Full task management: edit, delete, or change status of any task."),
+    ("task.manage", "task", "tasks", "manage", "ALL", "Administrative task access: view and manage all tasks across all departments."),
     ("task.delete", "task", "tasks", "delete", "ALL", "Delete tasks and recurring task schedules."),
     # Technical Tasks Module
     ("technicaltask.view", "technicaltask", "technical-tasks", "view", "ALL", "View technical tasks, status tabs, call logs, and machine serial lookups."),
@@ -409,6 +421,7 @@ BOOTSTRAP_PERMISSIONS: list[tuple[str, str, str, str, str, str]] = [
     ("crm.leads.manage", "crm", "crm-leads", "manage", "ALL", "Full administrative control over CRM leads."),
     # Feed & Broadcast Messaging
     ("feed.view", "feed", "feed", "view", "ALL", "View accessible announcements and broadcast messages."),
+    ("feed.interact", "feed", "feed", "interact", "ALL", "React to and comment on visible feed announcements and reply in own direct message conversations."),
     ("feed.create", "feed", "feed", "create", "ALL", "Create and publish feed announcements to all or selected employees."),
     ("feed.manage", "feed", "feed", "manage", "ALL", "Full administrative management of all feed announcements, drafts, and recipients."),
     # Banks Master
@@ -486,6 +499,7 @@ USER_ROLE_PERMISSION_CODES: list[str] = [
     "task.assign",
     "task.escalate",
     "feed.view",
+    "feed.interact",
 ]
 
 
@@ -580,6 +594,18 @@ async def seed() -> None:
                     if permission:
                         session.add(RolePermission(role_id=user_role.id, permission_id=permission.id))
                 await session.flush()
+            else:
+                # Idempotent top-up: if the default `user` role grants `feed.view`,
+                # ensure `feed.interact` is also granted so employees can react, comment,
+                # and reply in their own 1:1 DMs without granting `feed.create`.
+                existing_user_codes = {link.permission.code for link in user_role.permission_links}
+                if "feed.view" in existing_user_codes and "feed.interact" not in existing_user_codes:
+                    interact_perm = perms_by_code.get("feed.interact") or await permission_repo.get_by_code(
+                        "feed.interact"
+                    )
+                    if interact_perm:
+                        await role_repo.add_permission(user_role, interact_perm)
+                        logger.info("Granted feed.interact to default user role.")
 
             # Idempotent top-up for Sales Manager role: ensure crm.distribution.view and crm.leads.import are granted
             sales_mgr_role = await role_repo.get_by_name("Sales Manager", include_deleted=False)

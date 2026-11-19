@@ -58,9 +58,10 @@ async def _record_org_action(
 @router.get("/public", summary="Get public organization branding and ERP identity")
 async def get_public_organization_branding(
     request: Request,
+    include_logo_data: bool = False,
     organization_service: OrganizationService = Depends(get_organization_service),
 ) -> dict:
-    """Public endpoint returning company_name, logo_url, logo_data, and erp_id without requiring authentication."""
+    """Public endpoint returning company_name, logo_url, and erp_id without requiring authentication."""
     try:
         organization = await organization_service.get_or_raise()
         # The logo image stored IN THE DATABASE (logo_data) is the source of truth.  The stored logo_url is only a
@@ -75,7 +76,7 @@ async def get_public_organization_branding(
                 "company_name": organization.company_name,
                 "legal_name": organization.legal_name,
                 "logo_url": logo_url,
-                "logo_data": organization.logo_data,
+                "logo_data": organization.logo_data if include_logo_data else None,
                 "erp_id": settings.ERP_INSTANCE_ID,
             },
             request_id=request.state.request_id,
@@ -108,7 +109,11 @@ async def get_organization_logo_image(
             header, encoded = organization.logo_data.split(",", 1)
             mime = header.split(";")[0].replace("data:", "") or "image/png"
             image_bytes = base64.b64decode(encoded)
-            return Response(content=image_bytes, media_type=mime, headers={"Cache-Control": "public, max-age=86400"})
+            return Response(
+                content=image_bytes,
+                media_type=mime,
+                headers={"Cache-Control": "public, max-age=86400", "Vary": "Origin"},
+            )
         except Exception:
             pass
 

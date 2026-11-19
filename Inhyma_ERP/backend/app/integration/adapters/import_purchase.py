@@ -11,7 +11,7 @@ import uuid
 from datetime import date, datetime, timezone
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common.currency import get_usd_to_inr_rate
@@ -347,17 +347,43 @@ class ImportPurchaseSyncAdapter(BaseEntitySyncAdapter):
         self, session: AsyncSession, payload: dict[str, Any]
     ) -> tuple[uuid.UUID, int] | None:
         order_no = str(payload.get("order_no") or "").strip()
+        cons_code = str(payload.get("consignment_code") or "").strip()
+        if not order_no and not cons_code:
+            return None
+
+        if cons_code:
+            by_cons = (
+                await session.execute(
+                    select(ImportPurchase)
+                    .where(
+                        ImportPurchase.deleted_at.is_(None),
+                        func.lower(ImportPurchase.consignment_no) == cons_code.lower(),
+                    )
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+            if by_cons is not None:
+                return by_cons.id, int(getattr(by_cons, "version", 1) or 1)
+
         if not order_no:
             return None
-        stmt = (
-            select(ImportPurchase)
-            .where(
-                ImportPurchase.deleted_at.is_(None),
-                ImportPurchase.remarks.ilike(f"%{order_no}%"),
+
+        marker = f"sale order {order_no.lower()}"
+        candidates = (
+            await session.execute(
+                select(ImportPurchase).where(
+                    ImportPurchase.deleted_at.is_(None),
+                    or_(
+                        func.lower(ImportPurchase.consignment_no) == order_no.lower(),
+                        ImportPurchase.remarks.ilike(f"%Sale Order {order_no}%"),
+                    ),
+                )
             )
-            .limit(1)
-        )
-        existing = (await session.execute(stmt)).scalar_one_or_none()
-        if existing is None:
-            return None
-        return existing.id, int(getattr(existing, "version", 1) or 1)
+        ).scalars().all()
+        for existing in candidates:
+            if (existing.consignment_no or "").strip().lower() == order_no.lower():
+                return existing.id, int(getattr(existing, "version", 1) or 1)
+            for line in (existing.remarks or "").splitlines():
+                if line.strip().lower().endswith(marker):
+                    return existing.id, int(getattr(existing, "version", 1) or 1)
+        return None

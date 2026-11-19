@@ -21,7 +21,13 @@ import { Auth } from "@/lib/auth";
 import { getEcosystemCookie, setEcosystemCookie } from "@/lib/ecosystemSession";
 import { useAuth, useDebouncedValue, useModalHistorySync, usePendingGuard } from "@/lib/hooks";
 import { useToast } from "@/lib/toast";
-import { friendlyPermissionLabel, groupPermissionsByModule, MODULE_NAMES } from "@/lib/permissionLabels";
+import {
+  DEPRECATED_PERMISSION_CODES,
+  filterActivePermissions,
+  friendlyPermissionLabel,
+  groupPermissionsByModule,
+  MODULE_NAMES,
+} from "@/lib/permissionLabels";
 import type {
   BulkPermissionOverrideItem,
   EffectivePermissionsBreakdown,
@@ -454,7 +460,7 @@ export function UsersPage() {
     (async () => {
       try {
         const { data } = await apiGet<Permission[]>("/rbac/permissions");
-        setAllPermissions(data || []);
+        setAllPermissions(filterActivePermissions(data || []));
       } catch {
         /* the overrides modal degrades to "no permissions found" */
       }
@@ -972,8 +978,10 @@ export function UsersPage() {
       let perms = allPermissions;
       if (!perms || perms.length === 0) {
         const permsRes = await apiGet<Permission[]>("/rbac/permissions");
-        perms = permsRes.data || [];
+        perms = filterActivePermissions(permsRes.data || []);
         setAllPermissions(perms);
+      } else {
+        perms = filterActivePermissions(perms);
       }
       const [effRes, userPermsRes] = await Promise.all([
         apiGet<EffectivePermissionsBreakdown>(`/rbac/users/${userId}/effective-permissions`),
@@ -984,10 +992,17 @@ export function UsersPage() {
       // Checked = explicit GRANT, or role-inherited and not explicitly
       // DENYed -- mirrors the backend's own override-wins-over-role
       // resolution order, so the grid opens showing exactly the effective set.
-      const overrideMap = new Map((userPermsRes.data || []).map((o) => [o.code, o.is_granted]));
-      const roleGranted = new Set(effRes.data.role_permissions || []);
+      const overrideMap = new Map(
+        (userPermsRes.data || [])
+          .filter((o) => !DEPRECATED_PERMISSION_CODES.has(o.code))
+          .map((o) => [o.code, o.is_granted])
+      );
+      const roleGranted = new Set(
+        (effRes.data.role_permissions || []).filter((c) => !DEPRECATED_PERMISSION_CODES.has(c))
+      );
       const initialChecked = new Set<string>();
       for (const code of new Set([...overrideMap.keys(), ...roleGranted])) {
+        if (DEPRECATED_PERMISSION_CODES.has(code)) continue;
         const override = overrideMap.get(code);
         const checked = override === true || (override === undefined && roleGranted.has(code));
         if (checked) initialChecked.add(code);

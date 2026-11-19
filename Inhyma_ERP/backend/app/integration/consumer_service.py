@@ -79,7 +79,7 @@ class ConsumerService:
         other event in the same poll from being processed).
         """
         url = f"{settings.ERP_MAIN_API_BASE_URL}/internal/integration/inbox"
-        headers = {"Authorization": f"Bearer {settings.FEDERATION_SERVICE_CREDENTIAL}"}
+        headers = {"Authorization": f"Bearer {settings.get_outbound_service_credential()}"}
         params = {"since": since} if since else {}
 
         try:

@@ -26,8 +26,22 @@ import { DashboardPage } from "@/pages/Dashboard";
 import { FeedPage } from "@/pages/FeedPage";
 import { ForbiddenPage } from "@/pages/Forbidden";
 
-function HrmsRouteGuard({ permission, children }: { permission: string; children: React.ReactNode }) {
-  if (!auth.hasPermission(permission)) {
+function HrmsRouteGuard({
+  permission,
+  anyPermissions,
+  children,
+}: {
+  permission?: string;
+  anyPermissions?: string[];
+  children: React.ReactNode;
+}) {
+  if (!auth.isLoggedIn()) {
+    return <ForbiddenPage />;
+  }
+  if (permission && !auth.hasPermission(permission)) {
+    return <ForbiddenPage />;
+  }
+  if (anyPermissions && anyPermissions.length > 0 && !anyPermissions.some((p) => auth.hasPermission(p))) {
     return <ForbiddenPage />;
   }
   return <>{children}</>;
@@ -181,42 +195,42 @@ export function App() {
           <Route path="/quote/:token" element={<PublicSupplierQuotePage />} />
           <Route path="/" element={<Navigate to="/dashboard" replace />} />
           <Route path="/dashboard" element={<DashboardPage />} />
-          <Route path="/feed" element={<FeedPage />} />
+          <Route path="/feed" element={<HrmsRouteGuard><FeedPage /></HrmsRouteGuard>} />
           <Route path="/403" element={<ForbiddenPage />} />
-          <Route path="/organization" element={<OrganizationPage />} />
-          <Route path="/erp-settings" element={<OrganizationPage />} />
-          <Route path="/audit" element={<AuditPage />} />
-          <Route path="/trash" element={<TrashPage />} />
-          <Route path="/profile" element={<ProfilePage />} />
-          <Route path="/users" element={<UsersPage />} />
-          <Route path="/rbac" element={<RbacPage />} />
+          <Route path="/organization" element={<HrmsRouteGuard><OrganizationPage /></HrmsRouteGuard>} />
+          <Route path="/erp-settings" element={<HrmsRouteGuard><OrganizationPage /></HrmsRouteGuard>} />
+          <Route path="/audit" element={<HrmsRouteGuard><AuditPage /></HrmsRouteGuard>} />
+          <Route path="/trash" element={<HrmsRouteGuard><TrashPage /></HrmsRouteGuard>} />
+          <Route path="/profile" element={<HrmsRouteGuard><ProfilePage /></HrmsRouteGuard>} />
+          <Route path="/users" element={<HrmsRouteGuard><UsersPage /></HrmsRouteGuard>} />
+          <Route path="/rbac" element={<HrmsRouteGuard><RbacPage /></HrmsRouteGuard>} />
           <Route path="/effective-permissions" element={<Navigate to="/rbac" replace />} />
           {/* Employee was merged into User -- /employees is now an alias for the same page. */}
-          <Route path="/employees" element={<UsersPage />} />
-          <Route path="/positions" element={<PositionsPage />} />
-          <Route path="/companies" element={<CompaniesPage />} />
-          <Route path="/companies/add" element={<CompaniesPage defaultAdd={true} />} />
-          <Route path="/companies/addedit" element={<CompaniesPage defaultAdd={true} />} />
-          <Route path="/companies/addedit/:id" element={<CompaniesPage defaultAdd={true} />} />
-          <Route path="/user/addEdit" element={<CompaniesPage defaultAdd={true} />} />
-          <Route path="/user/addedit" element={<CompaniesPage defaultAdd={true} />} />
+          <Route path="/employees" element={<HrmsRouteGuard><UsersPage /></HrmsRouteGuard>} />
+          <Route path="/positions" element={<HrmsRouteGuard><PositionsPage /></HrmsRouteGuard>} />
+          <Route path="/companies" element={<HrmsRouteGuard><CompaniesPage /></HrmsRouteGuard>} />
+          <Route path="/companies/add" element={<HrmsRouteGuard><CompaniesPage defaultAdd={true} /></HrmsRouteGuard>} />
+          <Route path="/companies/addedit" element={<HrmsRouteGuard><CompaniesPage defaultAdd={true} /></HrmsRouteGuard>} />
+          <Route path="/companies/addedit/:id" element={<HrmsRouteGuard><CompaniesPage defaultAdd={true} /></HrmsRouteGuard>} />
+          <Route path="/user/addEdit" element={<HrmsRouteGuard><CompaniesPage defaultAdd={true} /></HrmsRouteGuard>} />
+          <Route path="/user/addedit" element={<HrmsRouteGuard><CompaniesPage defaultAdd={true} /></HrmsRouteGuard>} />
 
           {/* AGENTS routes */}
-          <Route path="/agents" element={<AgentsPage />} />
+          <Route path="/agents" element={<HrmsRouteGuard permission="agent.view"><AgentsPage /></HrmsRouteGuard>} />
           <Route path="/agent/list" element={<Navigate to="/agents" replace />} />
           <Route path="/agents/list" element={<Navigate to="/agents" replace />} />
 
           {/* INDUSTRIAL ZONES routes */}
-          <Route path="/industrial/zones/list" element={<IndustrialZonesPage />} />
+          <Route path="/industrial/zones/list" element={<HrmsRouteGuard permission="zone.view"><IndustrialZonesPage /></HrmsRouteGuard>} />
           <Route path="/industrial-zones" element={<Navigate to="/industrial/zones/list" replace />} />
           <Route path="/industrial/zones" element={<Navigate to="/industrial/zones/list" replace />} />
           <Route path="/industrial-zone/list" element={<Navigate to="/industrial/zones/list" replace />} />
 
           {/* SUPPLIERS routes under /purchase/suppliers */}
-          <Route path="/purchase/suppliers" element={<SuppliersPage />} />
-          <Route path="/purchase/suppliers/add" element={<SuppliersPage defaultAdd={true} />} />
-          <Route path="/purchase/suppliers/addedit" element={<SuppliersPage defaultAdd={true} />} />
-          <Route path="/purchase/suppliers/addedit/:id" element={<SuppliersPage defaultAdd={true} />} />
+          <Route path="/purchase/suppliers" element={<HrmsRouteGuard><SuppliersPage /></HrmsRouteGuard>} />
+          <Route path="/purchase/suppliers/add" element={<HrmsRouteGuard><SuppliersPage defaultAdd={true} /></HrmsRouteGuard>} />
+          <Route path="/purchase/suppliers/addedit" element={<HrmsRouteGuard><SuppliersPage defaultAdd={true} /></HrmsRouteGuard>} />
+          <Route path="/purchase/suppliers/addedit/:id" element={<HrmsRouteGuard><SuppliersPage defaultAdd={true} /></HrmsRouteGuard>} />
           <Route path="/Purchase/suppliers" element={<Navigate to="/purchase/suppliers" replace />} />
           <Route path="/suppliers" element={<Navigate to="/purchase/suppliers" replace />} />
           <Route path="/supplier/list" element={<Navigate to="/purchase/suppliers" replace />} />
@@ -225,63 +239,63 @@ export function App() {
           <Route path="/suppliers/addedit" element={<Navigate to="/purchase/suppliers/addedit" replace />} />
 
           <Route path="/inquiries" element={<Navigate to="/proforma-invoice/list" replace />} />
-          <Route path="/proforma-invoice/list" element={<ProformaInvoicesPage />} />
-          <Route path="/proforma-invoice/add" element={<ProformaInvoicesPage defaultAdd={true} />} />
-          <Route path="/proforma-invoice/addedit" element={<ProformaInvoicesPage defaultAdd={true} />} />
-          <Route path="/proforma-invoice/addedit/:id" element={<ProformaInvoicesPage defaultAdd={true} />} />
-          <Route path="/proforma-invoice/download-proforma-invoice/:id" element={<ProformaInvoicePdfPage />} />
-          <Route path="/proforma-invoice/download-proforma-invoice" element={<ProformaInvoicePdfPage />} />
-          <Route path="/proforma-invoice/pdf/:id" element={<ProformaInvoicePdfPage />} />
-          <Route path="/proforma-invoice/pdf" element={<ProformaInvoicePdfPage />} />
+          <Route path="/proforma-invoice/list" element={<HrmsRouteGuard><ProformaInvoicesPage /></HrmsRouteGuard>} />
+          <Route path="/proforma-invoice/add" element={<HrmsRouteGuard><ProformaInvoicesPage defaultAdd={true} /></HrmsRouteGuard>} />
+          <Route path="/proforma-invoice/addedit" element={<HrmsRouteGuard><ProformaInvoicesPage defaultAdd={true} /></HrmsRouteGuard>} />
+          <Route path="/proforma-invoice/addedit/:id" element={<HrmsRouteGuard><ProformaInvoicesPage defaultAdd={true} /></HrmsRouteGuard>} />
+          <Route path="/proforma-invoice/download-proforma-invoice/:id" element={<HrmsRouteGuard><ProformaInvoicePdfPage /></HrmsRouteGuard>} />
+          <Route path="/proforma-invoice/download-proforma-invoice" element={<HrmsRouteGuard><ProformaInvoicePdfPage /></HrmsRouteGuard>} />
+          <Route path="/proforma-invoice/pdf/:id" element={<HrmsRouteGuard><ProformaInvoicePdfPage /></HrmsRouteGuard>} />
+          <Route path="/proforma-invoice/pdf" element={<HrmsRouteGuard><ProformaInvoicePdfPage /></HrmsRouteGuard>} />
           <Route path="/proforma-invoice" element={<Navigate to="/proforma-invoice/list" replace />} />
-          <Route path="/sales/process" element={<SaleProcessListPage />} />
-          <Route path="/sales/process/add" element={<SaleProcessFormPage />} />
-          <Route path="/sales/process/edit/:id" element={<SaleProcessFormPage />} />
+          <Route path="/sales/process" element={<HrmsRouteGuard><SaleProcessListPage /></HrmsRouteGuard>} />
+          <Route path="/sales/process/add" element={<HrmsRouteGuard><SaleProcessFormPage /></HrmsRouteGuard>} />
+          <Route path="/sales/process/edit/:id" element={<HrmsRouteGuard><SaleProcessFormPage /></HrmsRouteGuard>} />
           <Route path="/sale-process/list" element={<Navigate to="/sales/process" replace />} />
           <Route path="/sales-process/list" element={<Navigate to="/sales/process" replace />} />
-          <Route path="/sale-order/list" element={<SaleProcessListPage />} />
-          <Route path="/sale-order/add" element={<SaleProcessFormPage />} />
-          <Route path="/sale-order/addedit" element={<SaleProcessFormPage />} />
-          <Route path="/sale-order/addedit/:id" element={<SaleProcessFormPage />} />
-          <Route path="/sale-order/invoice/:id" element={<SalesOrderPdfPage />} />
-          <Route path="/sale-order/invoice" element={<SalesOrderPdfPage />} />
-          <Route path="/sale-order/download-sale-order/:id" element={<SalesOrderPdfPage />} />
-          <Route path="/sale-order/download-sale-order" element={<SalesOrderPdfPage />} />
-          <Route path="/sale-order/pdf/:id" element={<SalesOrderPdfPage />} />
-          <Route path="/sale-order/pdf" element={<SalesOrderPdfPage />} />
-          <Route path="/sales/process/pdf/:id" element={<SalesOrderPdfPage />} />
-          <Route path="/sales/process/pdf" element={<SalesOrderPdfPage />} />
-          <Route path="/sale-order/gatepass-pdf/:id" element={<GatePassPdfPage />} />
-          <Route path="/sale-order/gatepass-pdf" element={<GatePassPdfPage />} />
-          <Route path="/sales/gatepass-pdf/:id" element={<GatePassPdfPage />} />
-          <Route path="/sales/gatepass-pdf" element={<GatePassPdfPage />} />
+          <Route path="/sale-order/list" element={<HrmsRouteGuard><SaleProcessListPage /></HrmsRouteGuard>} />
+          <Route path="/sale-order/add" element={<HrmsRouteGuard><SaleProcessFormPage /></HrmsRouteGuard>} />
+          <Route path="/sale-order/addedit" element={<HrmsRouteGuard><SaleProcessFormPage /></HrmsRouteGuard>} />
+          <Route path="/sale-order/addedit/:id" element={<HrmsRouteGuard><SaleProcessFormPage /></HrmsRouteGuard>} />
+          <Route path="/sale-order/invoice/:id" element={<HrmsRouteGuard><SalesOrderPdfPage /></HrmsRouteGuard>} />
+          <Route path="/sale-order/invoice" element={<HrmsRouteGuard><SalesOrderPdfPage /></HrmsRouteGuard>} />
+          <Route path="/sale-order/download-sale-order/:id" element={<HrmsRouteGuard><SalesOrderPdfPage /></HrmsRouteGuard>} />
+          <Route path="/sale-order/download-sale-order" element={<HrmsRouteGuard><SalesOrderPdfPage /></HrmsRouteGuard>} />
+          <Route path="/sale-order/pdf/:id" element={<HrmsRouteGuard><SalesOrderPdfPage /></HrmsRouteGuard>} />
+          <Route path="/sale-order/pdf" element={<HrmsRouteGuard><SalesOrderPdfPage /></HrmsRouteGuard>} />
+          <Route path="/sales/process/pdf/:id" element={<HrmsRouteGuard><SalesOrderPdfPage /></HrmsRouteGuard>} />
+          <Route path="/sales/process/pdf" element={<HrmsRouteGuard><SalesOrderPdfPage /></HrmsRouteGuard>} />
+          <Route path="/sale-order/gatepass-pdf/:id" element={<HrmsRouteGuard><GatePassPdfPage /></HrmsRouteGuard>} />
+          <Route path="/sale-order/gatepass-pdf" element={<HrmsRouteGuard><GatePassPdfPage /></HrmsRouteGuard>} />
+          <Route path="/sales/gatepass-pdf/:id" element={<HrmsRouteGuard><GatePassPdfPage /></HrmsRouteGuard>} />
+          <Route path="/sales/gatepass-pdf" element={<HrmsRouteGuard><GatePassPdfPage /></HrmsRouteGuard>} />
           <Route path="/sale-order" element={<Navigate to="/sale-order/list" replace />} />
-          <Route path="/discount-payments/list" element={<DiscountPaymentsPage />} />
+          <Route path="/discount-payments/list" element={<HrmsRouteGuard anyPermissions={["saleorder.view", "saleorder.create", "saleorder.update", "saleorder.accounts", "saleorder.approve", "saleorder.delete", "proforma.approve", "crm.leads.view", "crm.leads.manage", "report.view"]}><DiscountPaymentsPage /></HrmsRouteGuard>} />
           <Route path="/discount-payments" element={<Navigate to="/discount-payments/list" replace />} />
-          <Route path="/sale-discount/list" element={<DiscountPaymentsPage />} />
+          <Route path="/sale-discount/list" element={<HrmsRouteGuard anyPermissions={["saleorder.view", "saleorder.create", "saleorder.update", "saleorder.accounts", "saleorder.approve", "saleorder.delete", "proforma.approve", "crm.leads.view", "crm.leads.manage", "report.view"]}><DiscountPaymentsPage /></HrmsRouteGuard>} />
           <Route path="/sale-discount" element={<Navigate to="/sale-discount/list" replace />} />
 
           {/* LOCAL PURCHASE routes under /purchase/localpurchase */}
-          <Route path="/purchase/localpurchase" element={<LocalPurchasePage />} />
-          <Route path="/purchase/localpurchase/add" element={<LocalPurchasePage defaultAdd={true} />} />
-          <Route path="/purchase/localpurchase/addedit" element={<LocalPurchasePage defaultAdd={true} />} />
-          <Route path="/purchase/localpurchase/addedit/:id" element={<LocalPurchasePage defaultAdd={true} />} />
+          <Route path="/purchase/localpurchase" element={<HrmsRouteGuard><LocalPurchasePage /></HrmsRouteGuard>} />
+          <Route path="/purchase/localpurchase/add" element={<HrmsRouteGuard><LocalPurchasePage defaultAdd={true} /></HrmsRouteGuard>} />
+          <Route path="/purchase/localpurchase/addedit" element={<HrmsRouteGuard><LocalPurchasePage defaultAdd={true} /></HrmsRouteGuard>} />
+          <Route path="/purchase/localpurchase/addedit/:id" element={<HrmsRouteGuard><LocalPurchasePage defaultAdd={true} /></HrmsRouteGuard>} />
           <Route path="/Purchase/localpurchase" element={<Navigate to="/purchase/localpurchase" replace />} />
           <Route path="/purchase/local-purchase" element={<Navigate to="/purchase/localpurchase" replace />} />
-          <Route path="/purchase/local-purchase/add" element={<LocalPurchasePage defaultAdd={true} />} />
-          <Route path="/purchase/local-purchase/addedit" element={<LocalPurchasePage defaultAdd={true} />} />
-          <Route path="/purchase/local-purchase/addedit/:id" element={<LocalPurchasePage defaultAdd={true} />} />
+          <Route path="/purchase/local-purchase/add" element={<HrmsRouteGuard><LocalPurchasePage defaultAdd={true} /></HrmsRouteGuard>} />
+          <Route path="/purchase/local-purchase/addedit" element={<HrmsRouteGuard><LocalPurchasePage defaultAdd={true} /></HrmsRouteGuard>} />
+          <Route path="/purchase/local-purchase/addedit/:id" element={<HrmsRouteGuard><LocalPurchasePage defaultAdd={true} /></HrmsRouteGuard>} />
           <Route path="/purchase-order/list" element={<Navigate to="/purchase/localpurchase" replace />} />
-          <Route path="/purchase-order/add" element={<LocalPurchasePage defaultAdd={true} />} />
-          <Route path="/purchase-order/addedit" element={<LocalPurchasePage defaultAdd={true} />} />
-          <Route path="/purchase-order/addedit/:id" element={<LocalPurchasePage defaultAdd={true} />} />
-          <Route path="/purchase-order/bill-file/:id" element={<LocalPurchasePdfPage />} />
-          <Route path="/purchase-order/bill-file" element={<LocalPurchasePdfPage />} />
-          <Route path="/purchase-order/pdf/:id" element={<LocalPurchasePdfPage />} />
-          <Route path="/purchase-order/pdf" element={<LocalPurchasePdfPage />} />
-          <Route path="/purchase/localpurchase/bill-file/:id" element={<LocalPurchasePdfPage />} />
-          <Route path="/purchase/localpurchase/pdf/:id" element={<LocalPurchasePdfPage />} />
-          <Route path="/purchase/bill-file/:id" element={<LocalPurchasePdfPage />} />
+          <Route path="/purchase-order/add" element={<HrmsRouteGuard><LocalPurchasePage defaultAdd={true} /></HrmsRouteGuard>} />
+          <Route path="/purchase-order/addedit" element={<HrmsRouteGuard><LocalPurchasePage defaultAdd={true} /></HrmsRouteGuard>} />
+          <Route path="/purchase-order/addedit/:id" element={<HrmsRouteGuard><LocalPurchasePage defaultAdd={true} /></HrmsRouteGuard>} />
+          <Route path="/purchase-order/bill-file/:id" element={<HrmsRouteGuard><LocalPurchasePdfPage /></HrmsRouteGuard>} />
+          <Route path="/purchase-order/bill-file" element={<HrmsRouteGuard><LocalPurchasePdfPage /></HrmsRouteGuard>} />
+          <Route path="/purchase-order/pdf/:id" element={<HrmsRouteGuard><LocalPurchasePdfPage /></HrmsRouteGuard>} />
+          <Route path="/purchase-order/pdf" element={<HrmsRouteGuard><LocalPurchasePdfPage /></HrmsRouteGuard>} />
+          <Route path="/purchase/localpurchase/bill-file/:id" element={<HrmsRouteGuard><LocalPurchasePdfPage /></HrmsRouteGuard>} />
+          <Route path="/purchase/localpurchase/pdf/:id" element={<HrmsRouteGuard><LocalPurchasePdfPage /></HrmsRouteGuard>} />
+          <Route path="/purchase/bill-file/:id" element={<HrmsRouteGuard><LocalPurchasePdfPage /></HrmsRouteGuard>} />
           <Route path="/purchase-order" element={<Navigate to="/purchase/localpurchase" replace />} />
           <Route path="/purchase/local" element={<Navigate to="/purchase/localpurchase" replace />} />
           <Route path="/purchase/local/list" element={<Navigate to="/purchase/localpurchase" replace />} />
@@ -289,78 +303,78 @@ export function App() {
           <Route path="/purchase/local/addedit" element={<Navigate to="/purchase/localpurchase/addedit" replace />} />
 
           {/* IMPORT PURCHASE routes under /purchase/importpurchase */}
-          <Route path="/purchase/importpurchase" element={<ImportPurchasePage />} />
-          <Route path="/purchase/importpurchase/add" element={<ImportPurchasePage defaultAdd={true} />} />
-          <Route path="/purchase/importpurchase/addedit" element={<ImportPurchasePage defaultAdd={true} />} />
-          <Route path="/purchase/importpurchase/addedit/:id" element={<ImportPurchasePage defaultAdd={true} />} />
+          <Route path="/purchase/importpurchase" element={<HrmsRouteGuard><ImportPurchasePage /></HrmsRouteGuard>} />
+          <Route path="/purchase/importpurchase/add" element={<HrmsRouteGuard><ImportPurchasePage defaultAdd={true} /></HrmsRouteGuard>} />
+          <Route path="/purchase/importpurchase/addedit" element={<HrmsRouteGuard><ImportPurchasePage defaultAdd={true} /></HrmsRouteGuard>} />
+          <Route path="/purchase/importpurchase/addedit/:id" element={<HrmsRouteGuard><ImportPurchasePage defaultAdd={true} /></HrmsRouteGuard>} />
           <Route path="/Purchase/importpurchase" element={<Navigate to="/purchase/importpurchase" replace />} />
           <Route path="/purchase/import-purchase" element={<Navigate to="/purchase/importpurchase" replace />} />
-          <Route path="/purchase/import-purchase/add" element={<ImportPurchasePage defaultAdd={true} />} />
-          <Route path="/purchase/import-purchase/addedit" element={<ImportPurchasePage defaultAdd={true} />} />
-          <Route path="/purchase/import-purchase/addedit/:id" element={<ImportPurchasePage defaultAdd={true} />} />
+          <Route path="/purchase/import-purchase/add" element={<HrmsRouteGuard><ImportPurchasePage defaultAdd={true} /></HrmsRouteGuard>} />
+          <Route path="/purchase/import-purchase/addedit" element={<HrmsRouteGuard><ImportPurchasePage defaultAdd={true} /></HrmsRouteGuard>} />
+          <Route path="/purchase/import-purchase/addedit/:id" element={<HrmsRouteGuard><ImportPurchasePage defaultAdd={true} /></HrmsRouteGuard>} />
           <Route path="/purchase-order/import-purchase-list" element={<Navigate to="/purchase/importpurchase" replace />} />
           <Route path="/purchase/import" element={<Navigate to="/purchase/importpurchase" replace />} />
           <Route path="/purchase/import/list" element={<Navigate to="/purchase/importpurchase" replace />} />
           <Route path="/purchase-order/import" element={<Navigate to="/purchase/importpurchase" replace />} />
           <Route path="/purchase-order/import/list" element={<Navigate to="/purchase/importpurchase" replace />} />
-          <Route path="/purchase-order/import-purchase/addedit" element={<ImportPurchasePage defaultAdd={true} />} />
-          <Route path="/purchase-order/import-purchase/addedit/:id" element={<ImportPurchasePage defaultAdd={true} />} />
-          <Route path="/purchase-order/import-purchase/add" element={<ImportPurchasePage defaultAdd={true} />} />
+          <Route path="/purchase-order/import-purchase/addedit" element={<HrmsRouteGuard><ImportPurchasePage defaultAdd={true} /></HrmsRouteGuard>} />
+          <Route path="/purchase-order/import-purchase/addedit/:id" element={<HrmsRouteGuard><ImportPurchasePage defaultAdd={true} /></HrmsRouteGuard>} />
+          <Route path="/purchase-order/import-purchase/add" element={<HrmsRouteGuard><ImportPurchasePage defaultAdd={true} /></HrmsRouteGuard>} />
           <Route path="/purchase/import/add" element={<Navigate to="/purchase/importpurchase/addedit" replace />} />
-          <Route path="/purchase-order/import-bill-file/:id" element={<ImportPurchasePdfPage />} />
-          <Route path="/purchase-order/import-bill-file" element={<ImportPurchasePdfPage />} />
-          <Route path="/purchase/importpurchase/bill-file/:id" element={<ImportPurchasePdfPage />} />
-          <Route path="/purchase/importpurchase/pdf/:id" element={<ImportPurchasePdfPage />} />
-          <Route path="/purchase/import/bill-file/:id" element={<ImportPurchasePdfPage />} />
+          <Route path="/purchase-order/import-bill-file/:id" element={<HrmsRouteGuard><ImportPurchasePdfPage /></HrmsRouteGuard>} />
+          <Route path="/purchase-order/import-bill-file" element={<HrmsRouteGuard><ImportPurchasePdfPage /></HrmsRouteGuard>} />
+          <Route path="/purchase/importpurchase/bill-file/:id" element={<HrmsRouteGuard><ImportPurchasePdfPage /></HrmsRouteGuard>} />
+          <Route path="/purchase/importpurchase/pdf/:id" element={<HrmsRouteGuard><ImportPurchasePdfPage /></HrmsRouteGuard>} />
+          <Route path="/purchase/import/bill-file/:id" element={<HrmsRouteGuard><ImportPurchasePdfPage /></HrmsRouteGuard>} />
 
           {/* REPORTS routes */}
-          <Route path="/reports/re-order" element={<ProductReorderPage />} />
-          <Route path="/product-reorder/list" element={<ProductReorderPage />} />
+          <Route path="/reports/re-order" element={<HrmsRouteGuard><ProductReorderPage /></HrmsRouteGuard>} />
+          <Route path="/product-reorder/list" element={<HrmsRouteGuard><ProductReorderPage /></HrmsRouteGuard>} />
           <Route path="/product-reorder" element={<Navigate to="/reports/re-order" replace />} />
           <Route path="/re-order" element={<Navigate to="/reports/re-order" replace />} />
 
-          <Route path="/reports/stock-transactions" element={<ProductStockPage />} />
-          <Route path="/transaction_report/list" element={<ProductStockPage />} />
-          <Route path="/transaction-report/list" element={<ProductStockPage />} />
+          <Route path="/reports/stock-transactions" element={<HrmsRouteGuard><ProductStockPage /></HrmsRouteGuard>} />
+          <Route path="/transaction_report/list" element={<HrmsRouteGuard><ProductStockPage /></HrmsRouteGuard>} />
+          <Route path="/transaction-report/list" element={<HrmsRouteGuard><ProductStockPage /></HrmsRouteGuard>} />
           <Route path="/stock-transactions" element={<Navigate to="/reports/stock-transactions" replace />} />
-          <Route path="/stock-transaction/list/:id" element={<StockTransactionDetailPage />} />
-          <Route path="/stock_transaction/list/:id" element={<StockTransactionDetailPage />} />
-          <Route path="/reports/stock-transactions/:id" element={<StockTransactionDetailPage />} />
+          <Route path="/stock-transaction/list/:id" element={<HrmsRouteGuard><StockTransactionDetailPage /></HrmsRouteGuard>} />
+          <Route path="/stock_transaction/list/:id" element={<HrmsRouteGuard><StockTransactionDetailPage /></HrmsRouteGuard>} />
+          <Route path="/reports/stock-transactions/:id" element={<HrmsRouteGuard><StockTransactionDetailPage /></HrmsRouteGuard>} />
 
           <Route path="/reports/goods-expected" element={<Navigate to="/reports/stock-transactions" replace />} />
           <Route path="/inventory/goods-expected" element={<Navigate to="/reports/stock-transactions" replace />} />
           <Route path="/goods-expected" element={<Navigate to="/reports/stock-transactions" replace />} />
 
-          <Route path="/reports/deleted-orders" element={<DeletedOrdersPage />} />
-          <Route path="/delete_order_report/list" element={<DeletedOrdersPage />} />
+          <Route path="/reports/deleted-orders" element={<HrmsRouteGuard anyPermissions={["report.view", "trash.view", "saleorder.view", "saleorder.approve", "saleorder.delete"]}><DeletedOrdersPage /></HrmsRouteGuard>} />
+          <Route path="/delete_order_report/list" element={<HrmsRouteGuard anyPermissions={["report.view", "trash.view", "saleorder.view", "saleorder.approve", "saleorder.delete"]}><DeletedOrdersPage /></HrmsRouteGuard>} />
           <Route path="/delete-order-report/list" element={<Navigate to="/reports/deleted-orders" replace />} />
           <Route path="/deleted-orders" element={<Navigate to="/reports/deleted-orders" replace />} />
 
-          <Route path="/reports/general" element={<GeneralReportsPage />} />
-          <Route path="/reports/financial-planning" element={<FinancialPlanningReportPage />} />
+          <Route path="/reports/general" element={<HrmsRouteGuard><GeneralReportsPage /></HrmsRouteGuard>} />
+          <Route path="/reports/financial-planning" element={<HrmsRouteGuard><FinancialPlanningReportPage /></HrmsRouteGuard>} />
           <Route path="/financial-planning-report" element={<Navigate to="/reports/financial-planning" replace />} />
           <Route path="/financial-planning-report/list" element={<Navigate to="/reports/financial-planning" replace />} />
           <Route path="/finance-planning-report/list" element={<Navigate to="/reports/financial-planning" replace />} />
-          <Route path="/reports/cargo-overview" element={<CargoOverviewPage />} />
-          <Route path="/reports/cargo-overview/detail/:key" element={<CargoOverviewPage />} />
+          <Route path="/reports/cargo-overview" element={<HrmsRouteGuard><CargoOverviewPage /></HrmsRouteGuard>} />
+          <Route path="/reports/cargo-overview/detail/:key" element={<HrmsRouteGuard><CargoOverviewPage /></HrmsRouteGuard>} />
           <Route path="/cargo-overview" element={<Navigate to="/reports/cargo-overview" replace />} />
-          <Route path="/cargo-overview/detail/:key" element={<CargoOverviewPage />} />
+          <Route path="/cargo-overview/detail/:key" element={<HrmsRouteGuard><CargoOverviewPage /></HrmsRouteGuard>} />
 
           <Route path="/planning" element={<Navigate to="/dashboard" replace />} />
           <Route path="/tasks/my" element={<Navigate to="/tasks?tab=my" replace />} />
-          <Route path="/tasks" element={<TasksPage />} />
+          <Route path="/tasks" element={<HrmsRouteGuard><TasksPage /></HrmsRouteGuard>} />
           <Route path="/tasks/kanban" element={<Navigate to="/tasks?tab=kanban" replace />} />
           <Route path="/tasks/calendar" element={<Navigate to="/tasks?tab=calendar" replace />} />
-          <Route path="/technical-task/list" element={<TechnicalTasksPage />} />
-          <Route path="/technical-task/detail/:id" element={<TechnicalTaskDetailPage />} />
-          <Route path="/technical-tasks/detail/:id" element={<TechnicalTaskDetailPage />} />
+          <Route path="/technical-task/list" element={<HrmsRouteGuard><TechnicalTasksPage /></HrmsRouteGuard>} />
+          <Route path="/technical-task/detail/:id" element={<HrmsRouteGuard><TechnicalTaskDetailPage /></HrmsRouteGuard>} />
+          <Route path="/technical-tasks/detail/:id" element={<HrmsRouteGuard><TechnicalTaskDetailPage /></HrmsRouteGuard>} />
           <Route path="/technical-tasks" element={<Navigate to="/technical-task/list" replace />} />
           <Route path="/technical-task/call-logs" element={<Navigate to="/reports/general?tab=call-logs" replace />} />
-          <Route path="/payments" element={<PaymentsPage />} />
+          <Route path="/payments" element={<HrmsRouteGuard><PaymentsPage /></HrmsRouteGuard>} />
           <Route path="/task-payments" element={<Navigate to="/payments" replace />} />
           <Route path="/technical-task/payments" element={<Navigate to="/payments" replace />} />
-          <Route path="/masters/technical-task-types" element={<TechnicalTaskTypesPage />} />
-          <Route path="/technician-operations" element={<TechnicianOperationsPage />} />
+          <Route path="/masters/technical-task-types" element={<HrmsRouteGuard><TechnicalTaskTypesPage /></HrmsRouteGuard>} />
+          <Route path="/technician-operations" element={<HrmsRouteGuard><TechnicianOperationsPage /></HrmsRouteGuard>} />
           <Route path="/technicians/gatepass" element={<Navigate to="/technician-operations?tab=gatepasses" replace />} />
           <Route path="/technicians/wallet" element={<Navigate to="/technician-operations?tab=wallets" replace />} />
           <Route path="/technician-gatepass/list" element={<Navigate to="/technician-operations?tab=gatepasses" replace />} />
@@ -394,109 +408,109 @@ export function App() {
           <Route path="/hrms/payroll" element={<HrmsRouteGuard permission="hrms.payroll"><PayrollPage /></HrmsRouteGuard>} />
           <Route path="/hrms/setup" element={<HrmsRouteGuard permission="hrms.setup"><SetupPage /></HrmsRouteGuard>} />
 
-          <Route path="/masters/company-list" element={<CompanyListPage />} />
-          <Route path="/masters/countries" element={<CountriesPage />} />
-          <Route path="/masters/states" element={<StatesPage />} />
-          <Route path="/masters/districts" element={<DistrictsPage />} />
-          <Route path="/masters/cities" element={<CitiesPage />} />
-          <Route path="/masters/currencies" element={<CurrenciesPage />} />
-          <Route path="/masters/uom" element={<UomPage />} />
-          <Route path="/masters/brands" element={<BrandsPage />} />
-          <Route path="/masters/supplier-types" element={<SupplierTypesPage />} />
-          <Route path="/masters/buyer-types" element={<BuyerTypesPage />} />
-          <Route path="/masters/categories" element={<CategoriesPage />} />
-          <Route path="/masters/subcategories" element={<SubCategoriesPage />} />
-          <Route path="/masters/products" element={<ProductsPage />} />
-          <Route path="/masters/price-list" element={<PriceListPage />} />
+          <Route path="/masters/company-list" element={<HrmsRouteGuard><CompanyListPage /></HrmsRouteGuard>} />
+          <Route path="/masters/countries" element={<HrmsRouteGuard><CountriesPage /></HrmsRouteGuard>} />
+          <Route path="/masters/states" element={<HrmsRouteGuard><StatesPage /></HrmsRouteGuard>} />
+          <Route path="/masters/districts" element={<HrmsRouteGuard><DistrictsPage /></HrmsRouteGuard>} />
+          <Route path="/masters/cities" element={<HrmsRouteGuard><CitiesPage /></HrmsRouteGuard>} />
+          <Route path="/masters/currencies" element={<HrmsRouteGuard><CurrenciesPage /></HrmsRouteGuard>} />
+          <Route path="/masters/uom" element={<HrmsRouteGuard><UomPage /></HrmsRouteGuard>} />
+          <Route path="/masters/brands" element={<HrmsRouteGuard><BrandsPage /></HrmsRouteGuard>} />
+          <Route path="/masters/supplier-types" element={<HrmsRouteGuard><SupplierTypesPage /></HrmsRouteGuard>} />
+          <Route path="/masters/buyer-types" element={<HrmsRouteGuard><BuyerTypesPage /></HrmsRouteGuard>} />
+          <Route path="/masters/categories" element={<HrmsRouteGuard><CategoriesPage /></HrmsRouteGuard>} />
+          <Route path="/masters/subcategories" element={<HrmsRouteGuard><SubCategoriesPage /></HrmsRouteGuard>} />
+          <Route path="/masters/products" element={<HrmsRouteGuard><ProductsPage /></HrmsRouteGuard>} />
+          <Route path="/masters/price-list" element={<HrmsRouteGuard><PriceListPage /></HrmsRouteGuard>} />
           <Route path="/price-list" element={<Navigate to="/masters/price-list" replace />} />
           <Route path="/product-prices" element={<Navigate to="/masters/price-list" replace />} />
           <Route path="/inventory/price-list" element={<Navigate to="/masters/price-list" replace />} />
           <Route path="/inventory/product-prices" element={<Navigate to="/masters/price-list" replace />} />
-          <Route path="/product/list" element={<ProductsPage />} />
+          <Route path="/product/list" element={<HrmsRouteGuard><ProductsPage /></HrmsRouteGuard>} />
           <Route path="/product" element={<Navigate to="/product/list" replace />} />
-          <Route path="/product/addEdit" element={<ProductsPage defaultAdd={true} />} />
-          <Route path="/product/addedit" element={<ProductsPage defaultAdd={true} />} />
-          <Route path="/product/add" element={<ProductsPage defaultAdd={true} />} />
-          <Route path="/product/create" element={<ProductsPage defaultAdd={true} />} />
-          <Route path="/product-stock/list" element={<ProductStockPage />} />
+          <Route path="/product/addEdit" element={<HrmsRouteGuard><ProductsPage defaultAdd={true} /></HrmsRouteGuard>} />
+          <Route path="/product/addedit" element={<HrmsRouteGuard><ProductsPage defaultAdd={true} /></HrmsRouteGuard>} />
+          <Route path="/product/add" element={<HrmsRouteGuard><ProductsPage defaultAdd={true} /></HrmsRouteGuard>} />
+          <Route path="/product/create" element={<HrmsRouteGuard><ProductsPage defaultAdd={true} /></HrmsRouteGuard>} />
+          <Route path="/product-stock/list" element={<HrmsRouteGuard><ProductStockPage /></HrmsRouteGuard>} />
           <Route path="/product-stock" element={<Navigate to="/product-stock/list" replace />} />
           <Route path="/product_stock/list" element={<Navigate to="/product-stock/list" replace />} />
           <Route path="/product_stock" element={<Navigate to="/product-stock/list" replace />} />
-          <Route path="/product-reorder/list" element={<ProductReorderPage />} />
+          <Route path="/product-reorder/list" element={<HrmsRouteGuard><ProductReorderPage /></HrmsRouteGuard>} />
           <Route path="/product-reorder" element={<Navigate to="/product-reorder/list" replace />} />
           <Route path="/product_reorder/list" element={<Navigate to="/product-reorder/list" replace />} />
           <Route path="/product_reorder" element={<Navigate to="/product-reorder/list" replace />} />
-          <Route path="/stock-adjustment" element={<StockAdjustmentPage />} />
-          <Route path="/stock-adjustment/add" element={<AddAdjustmentOrderPage />} />
-          <Route path="/adjustment/list" element={<StockAdjustmentPage />} />
-          <Route path="/adjustment/addEdit" element={<AddAdjustmentOrderPage />} />
-          <Route path="/adjustment/addedit" element={<AddAdjustmentOrderPage />} />
-          <Route path="/adjustment/add" element={<AddAdjustmentOrderPage />} />
+          <Route path="/stock-adjustment" element={<HrmsRouteGuard><StockAdjustmentPage /></HrmsRouteGuard>} />
+          <Route path="/stock-adjustment/add" element={<HrmsRouteGuard><AddAdjustmentOrderPage /></HrmsRouteGuard>} />
+          <Route path="/adjustment/list" element={<HrmsRouteGuard><StockAdjustmentPage /></HrmsRouteGuard>} />
+          <Route path="/adjustment/addEdit" element={<HrmsRouteGuard><AddAdjustmentOrderPage /></HrmsRouteGuard>} />
+          <Route path="/adjustment/addedit" element={<HrmsRouteGuard><AddAdjustmentOrderPage /></HrmsRouteGuard>} />
+          <Route path="/adjustment/add" element={<HrmsRouteGuard><AddAdjustmentOrderPage /></HrmsRouteGuard>} />
           <Route path="/adjustment" element={<Navigate to="/adjustment/list" replace />} />
-          <Route path="/adjustment/adjustment-order-pdf/:id" element={<AdjustmentOrderPdfPage />} />
-          <Route path="/stock-transfer" element={<StockTransferPage />} />
-          <Route path="/stock-transfer/list" element={<StockTransferPage />} />
-          <Route path="/transfer/list" element={<StockTransferPage />} />
-          <Route path="/transfer/addEdit" element={<AddTransferOrderPage />} />
-          <Route path="/transfer/addedit" element={<AddTransferOrderPage />} />
-          <Route path="/transfer/add" element={<AddTransferOrderPage />} />
-          <Route path="/stock-transfer/add" element={<AddTransferOrderPage />} />
-          <Route path="/stock-transfer/addEdit" element={<AddTransferOrderPage />} />
-          <Route path="/transfer/transfer-order-pdf/:id" element={<TransferOrderPdfPage />} />
-          <Route path="/transfer/transfer-order-pdf" element={<TransferOrderPdfPage />} />
-          <Route path="/transfer/transfer_order_pdf/:id" element={<TransferOrderPdfPage />} />
-          <Route path="/transfer/transfer_order_pdf" element={<TransferOrderPdfPage />} />
-          <Route path="/transfer/transfer-order_pdf/:id" element={<TransferOrderPdfPage />} />
-          <Route path="/transfer/transfer-order_pdf" element={<TransferOrderPdfPage />} />
-          <Route path="/stock-transfer/transfer-order-pdf/:id" element={<TransferOrderPdfPage />} />
-          <Route path="/stock-transfer/transfer-order-pdf" element={<TransferOrderPdfPage />} />
+          <Route path="/adjustment/adjustment-order-pdf/:id" element={<HrmsRouteGuard><AdjustmentOrderPdfPage /></HrmsRouteGuard>} />
+          <Route path="/stock-transfer" element={<HrmsRouteGuard><StockTransferPage /></HrmsRouteGuard>} />
+          <Route path="/stock-transfer/list" element={<HrmsRouteGuard><StockTransferPage /></HrmsRouteGuard>} />
+          <Route path="/transfer/list" element={<HrmsRouteGuard><StockTransferPage /></HrmsRouteGuard>} />
+          <Route path="/transfer/addEdit" element={<HrmsRouteGuard><AddTransferOrderPage /></HrmsRouteGuard>} />
+          <Route path="/transfer/addedit" element={<HrmsRouteGuard><AddTransferOrderPage /></HrmsRouteGuard>} />
+          <Route path="/transfer/add" element={<HrmsRouteGuard><AddTransferOrderPage /></HrmsRouteGuard>} />
+          <Route path="/stock-transfer/add" element={<HrmsRouteGuard><AddTransferOrderPage /></HrmsRouteGuard>} />
+          <Route path="/stock-transfer/addEdit" element={<HrmsRouteGuard><AddTransferOrderPage /></HrmsRouteGuard>} />
+          <Route path="/transfer/transfer-order-pdf/:id" element={<HrmsRouteGuard><TransferOrderPdfPage /></HrmsRouteGuard>} />
+          <Route path="/transfer/transfer-order-pdf" element={<HrmsRouteGuard><TransferOrderPdfPage /></HrmsRouteGuard>} />
+          <Route path="/transfer/transfer_order_pdf/:id" element={<HrmsRouteGuard><TransferOrderPdfPage /></HrmsRouteGuard>} />
+          <Route path="/transfer/transfer_order_pdf" element={<HrmsRouteGuard><TransferOrderPdfPage /></HrmsRouteGuard>} />
+          <Route path="/transfer/transfer-order_pdf/:id" element={<HrmsRouteGuard><TransferOrderPdfPage /></HrmsRouteGuard>} />
+          <Route path="/transfer/transfer-order_pdf" element={<HrmsRouteGuard><TransferOrderPdfPage /></HrmsRouteGuard>} />
+          <Route path="/stock-transfer/transfer-order-pdf/:id" element={<HrmsRouteGuard><TransferOrderPdfPage /></HrmsRouteGuard>} />
+          <Route path="/stock-transfer/transfer-order-pdf" element={<HrmsRouteGuard><TransferOrderPdfPage /></HrmsRouteGuard>} />
           <Route path="/transfer" element={<Navigate to="/transfer/list" replace />} />
-          <Route path="/product-gallery" element={<ProductGalleryPage />} />
+          <Route path="/product-gallery" element={<HrmsRouteGuard><ProductGalleryPage /></HrmsRouteGuard>} />
           <Route path="/product_gallery" element={<Navigate to="/product-gallery" replace />} />
 
           {/* Master modules from legacy ERP screenshot */}
-          <Route path="/masters/taxes" element={<TaxesPage />} />
+          <Route path="/masters/taxes" element={<HrmsRouteGuard><TaxesPage /></HrmsRouteGuard>} />
           <Route path="/tax/list" element={<Navigate to="/masters/taxes" replace />} />
-          <Route path="/masters/additional-charges" element={<AdditionalChargesPage />} />
+          <Route path="/masters/additional-charges" element={<HrmsRouteGuard><AdditionalChargesPage /></HrmsRouteGuard>} />
           <Route path="/additionalcharges/list" element={<Navigate to="/masters/additional-charges" replace />} />
-          <Route path="/masters/social-media" element={<SocialMediaPage />} />
+          <Route path="/masters/social-media" element={<HrmsRouteGuard><SocialMediaPage /></HrmsRouteGuard>} />
           <Route path="/social/list" element={<Navigate to="/masters/social-media" replace />} />
-          <Route path="/masters/agent-types" element={<AgentTypesPage />} />
+          <Route path="/masters/agent-types" element={<HrmsRouteGuard><AgentTypesPage /></HrmsRouteGuard>} />
           <Route path="/agent/role/list" element={<Navigate to="/masters/agent-types" replace />} />
-          <Route path="/masters/company-categories" element={<CompanyCategoriesPage />} />
+          <Route path="/masters/company-categories" element={<HrmsRouteGuard><CompanyCategoriesPage /></HrmsRouteGuard>} />
           <Route path="/company/category/list" element={<Navigate to="/masters/company-categories" replace />} />
-          <Route path="/masters/company-sectors" element={<CompanySectorsPage />} />
+          <Route path="/masters/company-sectors" element={<HrmsRouteGuard><CompanySectorsPage /></HrmsRouteGuard>} />
           <Route path="/company/sector/list" element={<Navigate to="/masters/company-sectors" replace />} />
-          <Route path="/masters/warehouses" element={<WarehousesPage />} />
+          <Route path="/masters/warehouses" element={<HrmsRouteGuard><WarehousesPage /></HrmsRouteGuard>} />
           <Route path="/warehouse/list" element={<Navigate to="/masters/warehouses" replace />} />
-          <Route path="/masters/billing-company" element={<BillingCompaniesPage />} />
+          <Route path="/masters/billing-company" element={<HrmsRouteGuard><BillingCompaniesPage /></HrmsRouteGuard>} />
           <Route path="/company/list" element={<Navigate to="/masters/billing-company" replace />} />
           <Route path="/company/addedit" element={<Navigate to="/masters/billing-company" replace />} />
-          <Route path="/masters/technicians" element={<TechniciansPage />} />
+          <Route path="/masters/technicians" element={<HrmsRouteGuard><TechniciansPage /></HrmsRouteGuard>} />
           <Route path="/technician/list" element={<Navigate to="/masters/technicians" replace />} />
-          <Route path="/masters/banks" element={<BanksPage />} />
+          <Route path="/masters/banks" element={<HrmsRouteGuard><BanksPage /></HrmsRouteGuard>} />
           <Route path="/masters/bank" element={<Navigate to="/masters/banks" replace />} />
           <Route path="/bank/list" element={<Navigate to="/masters/banks" replace />} />
-          <Route path="/masters/transport" element={<TransportPage />} />
+          <Route path="/masters/transport" element={<HrmsRouteGuard><TransportPage /></HrmsRouteGuard>} />
           <Route path="/masters/transports" element={<Navigate to="/masters/transport" replace />} />
           <Route path="/transport/list" element={<Navigate to="/masters/transport" replace />} />
-          <Route path="/masters/payment-terms" element={<PaymentTermsPage />} />
+          <Route path="/masters/payment-terms" element={<HrmsRouteGuard><PaymentTermsPage /></HrmsRouteGuard>} />
           <Route path="/masters/payment_terms" element={<Navigate to="/masters/payment-terms" replace />} />
           <Route path="/payment-terms/list" element={<Navigate to="/masters/payment-terms" replace />} />
           <Route path="/paymentterms/list" element={<Navigate to="/masters/payment-terms" replace />} />
-          <Route path="/masters/lead-sources" element={<LeadSourcesPage />} />
+          <Route path="/masters/lead-sources" element={<HrmsRouteGuard><LeadSourcesPage /></HrmsRouteGuard>} />
           <Route path="/masters/lead_sources" element={<Navigate to="/masters/lead-sources" replace />} />
           <Route path="/lead-sources/list" element={<Navigate to="/masters/lead-sources" replace />} />
           <Route path="/leadsources/list" element={<Navigate to="/masters/lead-sources" replace />} />
           <Route path="/lead_sources/list" element={<Navigate to="/masters/lead-sources" replace />} />
-          <Route path="/masters/adjustment-purpose" element={<AdjustmentPurposesPage />} />
+          <Route path="/masters/adjustment-purpose" element={<HrmsRouteGuard><AdjustmentPurposesPage /></HrmsRouteGuard>} />
           <Route path="/masters/adjustment-purposes" element={<Navigate to="/masters/adjustment-purpose" replace />} />
           <Route path="/masters/adjustment_purpose" element={<Navigate to="/masters/adjustment-purpose" replace />} />
           <Route path="/masters/adjustment_purposes" element={<Navigate to="/masters/adjustment-purpose" replace />} />
           <Route path="/adjustment_purpose/list" element={<Navigate to="/masters/adjustment-purpose" replace />} />
           <Route path="/adjustment-purpose/list" element={<Navigate to="/masters/adjustment-purpose" replace />} />
           <Route path="/adjustmentpurpose/list" element={<Navigate to="/masters/adjustment-purpose" replace />} />
-          <Route path="/masters/call-types" element={<CallTypesPage />} />
+          <Route path="/masters/call-types" element={<HrmsRouteGuard><CallTypesPage /></HrmsRouteGuard>} />
           <Route path="/masters/call_types" element={<Navigate to="/masters/call-types" replace />} />
           <Route path="/masters/call-type" element={<Navigate to="/masters/call-types" replace />} />
           <Route path="/masters/call_type" element={<Navigate to="/masters/call-types" replace />} />

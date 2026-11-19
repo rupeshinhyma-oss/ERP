@@ -51,18 +51,16 @@ def test_feed_schemas_validation():
     assert post_payload.audience_type == FeedAudienceType.ALL
     assert post_payload.recipient_ids == []
 
-    # 2. Post Create Schema with SELECTED recipients
-    rec_id = uuid.uuid4()
+    # 2. Post Create Schema with SELECTED departments
     dept_id = uuid.uuid4()
     targeted_payload = FeedPostCreate(
         title="Department Notice",
         content="Engineering update",
         audience_type=FeedAudienceType.SELECTED,
         department_ids=[dept_id],
-        recipient_ids=[rec_id],
     )
     assert targeted_payload.audience_type == FeedAudienceType.SELECTED
-    assert targeted_payload.recipient_ids == [rec_id]
+    assert targeted_payload.recipient_ids == []
     assert targeted_payload.department_ids == [dept_id]
 
     # 3. Post Update Schema
@@ -128,3 +126,48 @@ async def test_feed_service_validations():
             data=FeedPostCreate(title="Test", content="   "),
         )
     assert "content cannot be empty" in str(exc_info.value).lower()
+
+    # Individual employee targeting on announcements is rejected (use Direct Messages instead)
+    with pytest.raises(ValidationException) as exc_indiv:
+        await service.create_post(
+            actor=actor,
+            data=FeedPostCreate(
+                title="Direct Notice",
+                content="Should be a DM",
+                audience_type=FeedAudienceType.SELECTED,
+                recipient_ids=[uuid.uuid4()],
+            ),
+        )
+    assert "direct messages" in str(exc_indiv.value).lower()
+
+    # Combined department + individual targeting on announcements is rejected
+    with pytest.raises(ValidationException) as exc_combined:
+        await service.create_post(
+            actor=actor,
+            data=FeedPostCreate(
+                title="Combined Notice",
+                content="Dept plus individual",
+                audience_type=FeedAudienceType.SELECTED,
+                department_ids=[uuid.uuid4()],
+                recipient_ids=[uuid.uuid4()],
+            ),
+        )
+    assert "direct messages" in str(exc_combined.value).lower()
+
+    # Company-wide ALL announcement with department_ids is rejected
+    with pytest.raises(ValidationException) as exc_all_depts:
+        await service.create_post(
+            actor=actor,
+            data=FeedPostCreate(
+                title="Invalid ALL",
+                content="ALL should not carry department_ids",
+                audience_type=FeedAudienceType.ALL,
+                department_ids=[uuid.uuid4()],
+            ),
+        )
+    assert "department_ids" in str(exc_all_depts.value).lower()
+
+    # SELECTED announcement with no department_ids is rejected
+    with pytest.raises(ValidationException) as exc_empty_depts:
+        await service._resolve_targeted_audience(department_ids=[], recipient_ids=[])
+    assert "at least one department" in str(exc_empty_depts.value).lower()

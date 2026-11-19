@@ -119,6 +119,10 @@ class RepairService:
             d.last_error_code = None
             d.last_error_message = None
 
+        from app.integration.jobs import enqueue_dispatch
+        from app.queue.service import QueueService
+
+        await enqueue_dispatch(QueueService(self.db), outbox_event_id=event.id)
         await self.db.commit()
         logger.info("Reset outbox event and deliveries for retry.", extra={"outbox_event_id": str(outbox_event_id)})
         return True
@@ -154,6 +158,10 @@ class RepairService:
         if delivery.outbox_event:
             delivery.outbox_event.status = OutboxEventStatus.PENDING
             delivery.outbox_event.last_error = None
+            from app.integration.jobs import enqueue_dispatch
+            from app.queue.service import QueueService
+
+            await enqueue_dispatch(QueueService(self.db), outbox_event_id=delivery.outbox_event.id)
 
         await self.db.commit()
         logger.info(
@@ -192,6 +200,11 @@ class RepairService:
         res = await self.db.execute(stmt)
         deliveries = list(res.scalars().all())
 
+        from app.integration.jobs import enqueue_dispatch
+        from app.queue.service import QueueService
+
+        queue_service = QueueService(self.db)
+        scheduled_events: set[uuid.UUID] = set()
         now = _utcnow()
         for d in deliveries:
             d.status = DeliveryStatus.PENDING
@@ -204,6 +217,9 @@ class RepairService:
             if d.outbox_event:
                 d.outbox_event.status = OutboxEventStatus.PENDING
                 d.outbox_event.last_error = None
+                if d.outbox_event.id not in scheduled_events:
+                    scheduled_events.add(d.outbox_event.id)
+                    await enqueue_dispatch(queue_service, outbox_event_id=d.outbox_event.id)
 
         await self.db.commit()
         logger.info(

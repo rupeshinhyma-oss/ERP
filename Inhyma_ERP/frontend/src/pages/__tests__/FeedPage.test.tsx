@@ -331,7 +331,6 @@ describe("Feed & Broadcast Messaging — Phase 2 & 3 Frontend Tests", () => {
           audience_type: "ALL",
           status: "PUBLISHED",
           department_ids: undefined,
-          recipient_ids: undefined,
         });
         expect(mockToast).toHaveBeenCalledWith(
           "Announcement broadcast published successfully!",
@@ -383,7 +382,6 @@ describe("Feed & Broadcast Messaging — Phase 2 & 3 Frontend Tests", () => {
           audience_type: "ALL",
           status: "DRAFT",
           department_ids: undefined,
-          recipient_ids: undefined,
         });
         expect(mockToast).toHaveBeenCalledWith(
           "Draft announcement saved successfully.",
@@ -392,7 +390,7 @@ describe("Feed & Broadcast Messaging — Phase 2 & 3 Frontend Tests", () => {
       });
     });
 
-    it("hides department and employee pickers when Everyone is selected", async () => {
+    it("hides department picker when Everyone is selected and exposes only Everyone and Departments options", async () => {
       render(
         <MemoryRouter initialEntries={["/feed"]}>
           <FeedPage />
@@ -403,9 +401,18 @@ describe("Feed & Broadcast Messaging — Phase 2 & 3 Frontend Tests", () => {
         expect(screen.getByTestId("feed-composer")).toBeDefined();
       });
 
+      // Individual Employees and Combined options must NOT exist in the announcement composer
+      expect(screen.getByTestId("audience-all-btn")).toBeDefined();
+      expect(screen.getByTestId("audience-dept-btn")).toBeDefined();
+      expect(screen.queryByTestId("audience-emp-btn")).toBeNull();
+      expect(screen.queryByTestId("audience-combined-btn")).toBeNull();
+      expect(screen.queryByText("Individual Employees")).toBeNull();
+      expect(screen.queryByText("Combined")).toBeNull();
+
       // Switch to Departments mode first
       fireEvent.click(screen.getByTestId("audience-dept-btn"));
       expect(screen.getByTestId("department-picker-section")).toBeDefined();
+      expect(screen.queryByTestId("recipient-picker-section")).toBeNull();
 
       // Switch to Everyone mode
       fireEvent.click(screen.getByTestId("audience-all-btn"));
@@ -416,9 +423,9 @@ describe("Feed & Broadcast Messaging — Phase 2 & 3 Frontend Tests", () => {
   });
 
   /* -------------------------------------------------------------------------- */
-  /* 4. Selected-Employee Targeting & Recipient Picker                          */
+  /* 4. Content Validation & Announcement / DM Separation                       */
   /* -------------------------------------------------------------------------- */
-  describe("4. Selected-Employee Targeting & Recipient Management", () => {
+  describe("4. Announcement Validation & Audience Separation from Direct Messages", () => {
     it("validates empty content and prevents submission", async () => {
       render(
         <MemoryRouter initialEntries={["/feed"]}>
@@ -436,7 +443,7 @@ describe("Feed & Broadcast Messaging — Phase 2 & 3 Frontend Tests", () => {
       expect(feedApi.createPost).not.toHaveBeenCalled();
     });
 
-    it("validates empty recipients when Individual Employees audience is chosen", async () => {
+    it("does not expose Individual Employees or Combined audience controls and preserves historical recipient rendering", async () => {
       render(
         <MemoryRouter initialEntries={["/feed"]}>
           <FeedPage />
@@ -445,108 +452,18 @@ describe("Feed & Broadcast Messaging — Phase 2 & 3 Frontend Tests", () => {
 
       await waitFor(() => {
         expect(screen.getByTestId("feed-composer")).toBeDefined();
+        expect(screen.getByText("Targeted Strategy Note")).toBeDefined();
       });
 
-      fireEvent.change(screen.getByTestId("feed-composer-content"), {
-        target: { value: "Confidential message." },
-      });
+      // Composer offers only Everyone and Departments; never calls individual recipient search
+      expect(screen.queryByTestId("audience-emp-btn")).toBeNull();
+      expect(screen.queryByTestId("audience-combined-btn")).toBeNull();
+      expect(screen.queryByTestId("recipient-picker-section")).toBeNull();
+      expect(feedApi.getEligibleRecipients).not.toHaveBeenCalled();
 
-      // Switch to Individual Employees audience
-      fireEvent.click(screen.getByTestId("audience-emp-btn"));
-
-      fireEvent.click(screen.getByTestId("publish-btn"));
-
-      expect(mockToast).toHaveBeenCalledWith(
-        "Please select at least one recipient for a targeted post.",
-        "warning"
-      );
-      expect(feedApi.createPost).not.toHaveBeenCalled();
-    });
-
-    it("searches employees, adds multiple chips, removes a chip, and publishes", async () => {
-      (feedApi.createPost as any).mockResolvedValueOnce({
-        data: {
-          id: "post-sel-1",
-          author_id: "user-author-1",
-          content: "Targeted announcement.",
-          audience_type: "SELECTED",
-          status: "PUBLISHED",
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-          targeted_departments: [],
-          recipients: [{ id: "r-1", recipient_id: "emp-101" }],
-          is_author: true,
-        },
-      });
-
-      render(
-        <MemoryRouter initialEntries={["/feed"]}>
-          <FeedPage />
-        </MemoryRouter>
-      );
-
-      await waitFor(() => {
-        expect(screen.getByTestId("feed-composer")).toBeDefined();
-      });
-
-      fireEvent.change(screen.getByTestId("feed-composer-content"), {
-        target: { value: "Targeted announcement." },
-      });
-
-      // Switch to Individual Employees audience
-      fireEvent.click(screen.getByTestId("audience-emp-btn"));
-      expect(screen.getByTestId("recipient-picker-section")).toBeDefined();
-
-      // Search input triggers autocomplete dropdown
-      fireEvent.change(screen.getByTestId("recipient-search-input"), {
-        target: { value: "alice" },
-      });
-
-      await waitFor(() => {
-        expect(screen.getByTestId("recipient-dropdown")).toBeDefined();
-        expect(screen.getByText("Alice Developer")).toBeDefined();
-        expect(screen.getByText("🏢 Engineering")).toBeDefined();
-      });
-
-      // Add Alice Developer
-      fireEvent.click(screen.getByTestId("recipient-item-emp-101"));
-
-      // Add Bob Designer
-      fireEvent.change(screen.getByTestId("recipient-search-input"), {
-        target: { value: "bob" },
-      });
-      await waitFor(() => {
-        expect(screen.getByText("Bob Designer")).toBeDefined();
-        expect(screen.getByText("🏢 Design")).toBeDefined();
-      });
-      fireEvent.click(screen.getByTestId("recipient-item-emp-102"));
-
-      // Verify both chips are rendered with department meta
-      expect(screen.getByTestId("chip-emp-101")).toBeDefined();
-      expect(screen.getByTestId("chip-emp-101").textContent).toContain("Engineering");
-      expect(screen.getByTestId("chip-emp-102")).toBeDefined();
-      expect(screen.getByTestId("chip-emp-102").textContent).toContain("Design");
-
-      // Remove Bob Designer
-      const removeBobBtn = screen.getByLabelText("Remove Bob Designer");
-      fireEvent.click(removeBobBtn);
-
-      expect(screen.queryByTestId("chip-emp-102")).toBeNull();
-      expect(screen.getByTestId("chip-emp-101")).toBeDefined();
-
-      // Publish
-      fireEvent.click(screen.getByTestId("publish-btn"));
-
-      await waitFor(() => {
-        expect(feedApi.createPost).toHaveBeenCalledWith({
-          title: undefined,
-          content: "Targeted announcement.",
-          audience_type: "SELECTED",
-          status: "PUBLISHED",
-          department_ids: [],
-          recipient_ids: ["emp-101"],
-        });
-      });
+      // Historical targeted post (`samplePosts[1]`) with legacy explicit recipients still renders cleanly
+      const selectedBadges = screen.getAllByTestId("audience-selected-badge");
+      expect(selectedBadges.length).toBeGreaterThanOrEqual(1);
     });
   });
 
@@ -594,6 +511,10 @@ describe("Feed & Broadcast Messaging — Phase 2 & 3 Frontend Tests", () => {
         expect(screen.getByTestId("department-picker-section")).toBeDefined();
       });
 
+      // Summary before selecting any department
+      const summaryText = screen.getByTestId("estimated-reach-text");
+      expect(summaryText.textContent).toContain("0 departments selected");
+
       // Open department dropdown
       fireEvent.focus(screen.getByTestId("dept-search-input"));
 
@@ -615,7 +536,6 @@ describe("Feed & Broadcast Messaging — Phase 2 & 3 Frontend Tests", () => {
       expect(screen.getByTestId("dept-chip-dept-it")).toBeDefined();
 
       // Verify audience summary shows 2 departments and 13 members
-      const summaryText = screen.getByTestId("estimated-reach-text");
       expect(summaryText.textContent).toContain("13 employee(s) across 2 department(s)");
 
       // Remove IT department
@@ -638,7 +558,6 @@ describe("Feed & Broadcast Messaging — Phase 2 & 3 Frontend Tests", () => {
           audience_type: "SELECTED",
           status: "PUBLISHED",
           department_ids: ["dept-hr", "dept-it"],
-          recipient_ids: [],
         });
       });
     });
@@ -666,91 +585,6 @@ describe("Feed & Broadcast Messaging — Phase 2 & 3 Frontend Tests", () => {
         "warning"
       );
       expect(feedApi.createPost).not.toHaveBeenCalled();
-    });
-  });
-
-  /* -------------------------------------------------------------------------- */
-  /* 6. Combined Audience Targeting (Phase 3)                                    */
-  /* -------------------------------------------------------------------------- */
-  describe("6. Combined Audience Targeting (Departments + Individuals)", () => {
-    it("allows publisher to combine departments and individual employees in a single broadcast", async () => {
-      (feedApi.createPost as any).mockResolvedValueOnce({
-        data: {
-          id: "post-combined-1",
-          author_id: "user-author-1",
-          title: "Quarterly Strategy Alignment",
-          content: "HR team plus project lead Bob Designer.",
-          audience_type: "SELECTED",
-          status: "PUBLISHED",
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-          targeted_departments: [
-            { department_id: "dept-hr", name: "Human Resources", code: "HR" },
-          ],
-          recipients: [{ id: "r-2", recipient_id: "emp-102" }],
-          is_author: true,
-        },
-      });
-
-      render(
-        <MemoryRouter initialEntries={["/feed"]}>
-          <FeedPage />
-        </MemoryRouter>
-      );
-
-      await waitFor(() => {
-        expect(screen.getByTestId("feed-composer")).toBeDefined();
-      });
-
-      fireEvent.change(screen.getByTestId("feed-composer-title"), {
-        target: { value: "Quarterly Strategy Alignment" },
-      });
-      fireEvent.change(screen.getByTestId("feed-composer-content"), {
-        target: { value: "HR team plus project lead Bob Designer." },
-      });
-
-      // Switch to Combined mode
-      fireEvent.click(screen.getByTestId("audience-combined-btn"));
-
-      // Verify both picker sections are present
-      expect(screen.getByTestId("department-picker-section")).toBeDefined();
-      expect(screen.getByTestId("recipient-picker-section")).toBeDefined();
-
-      // Pick HR department
-      fireEvent.focus(screen.getByTestId("dept-search-input"));
-      await waitFor(() => {
-        expect(screen.getByTestId("dept-item-dept-hr")).toBeDefined();
-      });
-      fireEvent.click(screen.getByTestId("dept-item-dept-hr"));
-      expect(screen.getByTestId("dept-chip-dept-hr")).toBeDefined();
-
-      // Pick Bob Designer individually
-      fireEvent.change(screen.getByTestId("recipient-search-input"), {
-        target: { value: "bob" },
-      });
-      await waitFor(() => {
-        expect(screen.getByTestId("recipient-item-emp-102")).toBeDefined();
-      });
-      fireEvent.click(screen.getByTestId("recipient-item-emp-102"));
-      expect(screen.getByTestId("chip-emp-102")).toBeDefined();
-
-      // Check estimated reach
-      const summaryText = screen.getByTestId("estimated-reach-text");
-      expect(summaryText.textContent).toContain("~6 employee(s) (approx. union)");
-
-      // Publish
-      fireEvent.click(screen.getByTestId("publish-btn"));
-
-      await waitFor(() => {
-        expect(feedApi.createPost).toHaveBeenCalledWith({
-          title: "Quarterly Strategy Alignment",
-          content: "HR team plus project lead Bob Designer.",
-          audience_type: "SELECTED",
-          status: "PUBLISHED",
-          department_ids: ["dept-hr"],
-          recipient_ids: ["emp-102"],
-        });
-      });
     });
   });
 
@@ -1137,7 +971,7 @@ describe("Feed & Broadcast Messaging — Phase 2 & 3 Frontend Tests", () => {
       fireEvent.click(screen.getByTestId("audience-dept-btn"));
       expect(screen.queryByText(/and administrators/i)).toBeNull();
       expect(
-        screen.getByText(/current members of targeted departments, explicitly selected recipients, and the author/i)
+        screen.getByText(/current members of targeted departments and the author/i)
       ).toBeDefined();
 
       fireEvent.click(screen.getByTestId("audience-all-btn"));

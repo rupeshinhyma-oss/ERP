@@ -20,10 +20,18 @@ from app.agents.schemas import (
     AgentUpdate,
 )
 from app.agents.service import AgentService
-from app.auth.dependencies import CurrentUser, get_current_user
+from app.auth.service import CurrentUser
 from app.database.session import get_db_session
+from app.rbac.dependencies import require_any_permission
 
 router = APIRouter(prefix="", tags=["Agents"])
+
+_AGENT_VIEW_PERMS = ("agent.view", "agent.read", "agent.manage")
+_AGENT_DUPLICATE_CHECK_PERMS = ("agent.view", "agent.read", "agent.create", "agent.update", "agent.manage")
+_AGENT_CREATE_PERMS = ("agent.create", "agent.manage")
+_AGENT_UPDATE_PERMS = ("agent.update", "agent.manage")
+_AGENT_DELETE_PERMS = ("agent.delete", "agent.manage")
+_AGENT_BULK_DELETE_PERMS = ("agent.bulk_action", "agent.delete", "agent.manage")
 
 
 def get_service(db: AsyncSession = Depends(get_db_session)) -> AgentService:
@@ -52,6 +60,7 @@ async def list_agents(
     page: int | None = Query(default=None, ge=1),
     page_size: int | None = Query(default=None, ge=1, le=500),
     service: AgentService = Depends(get_service),
+    _current_user: CurrentUser = Depends(require_any_permission(*_AGENT_VIEW_PERMS)),
 ) -> dict:
     effective_limit = page_size if page_size is not None else (limit if limit is not None else 50)
     effective_offset = (
@@ -100,6 +109,7 @@ async def check_duplicate(
     whatsapp_number: str | None = Query(default=None),
     exclude_id: uuid.UUID | None = Query(default=None),
     service: AgentService = Depends(get_service),
+    _current_user: CurrentUser = Depends(require_any_permission(*_AGENT_DUPLICATE_CHECK_PERMS)),
 ) -> dict:
     exists, field, agent_name = await service.check_duplicate(calling_number, whatsapp_number, exclude_id)
     return {
@@ -116,6 +126,7 @@ async def check_duplicate(
 async def get_agent(
     id: uuid.UUID,
     service: AgentService = Depends(get_service),
+    _current_user: CurrentUser = Depends(require_any_permission(*_AGENT_VIEW_PERMS)),
 ) -> dict:
     agent = await service.get_agent(id)
     return {"success": True, "data": _to_dict(agent)}
@@ -125,6 +136,7 @@ async def get_agent(
 async def create_agent(
     payload: AgentCreate,
     service: AgentService = Depends(get_service),
+    _current_user: CurrentUser = Depends(require_any_permission(*_AGENT_CREATE_PERMS)),
 ) -> dict:
     agent = await service.create_agent(payload)
     return {"success": True, "data": _to_dict(agent)}
@@ -135,6 +147,7 @@ async def update_agent(
     id: uuid.UUID,
     payload: AgentUpdate,
     service: AgentService = Depends(get_service),
+    _current_user: CurrentUser = Depends(require_any_permission(*_AGENT_UPDATE_PERMS)),
 ) -> dict:
     agent = await service.update_agent(id, payload)
     return {"success": True, "data": _to_dict(agent)}
@@ -144,6 +157,7 @@ async def update_agent(
 async def delete_agent(
     id: uuid.UUID,
     service: AgentService = Depends(get_service),
+    _current_user: CurrentUser = Depends(require_any_permission(*_AGENT_DELETE_PERMS)),
 ) -> dict:
     success = await service.delete_agent(id)
     return {"success": success, "data": {"id": str(id)}}
@@ -153,6 +167,7 @@ async def delete_agent(
 async def bulk_delete_agents(
     payload: AgentBulkDeleteRequest,
     service: AgentService = Depends(get_service),
+    _current_user: CurrentUser = Depends(require_any_permission(*_AGENT_BULK_DELETE_PERMS)),
 ) -> dict:
     deleted_count = await service.bulk_delete(payload.ids)
     return {"success": True, "data": {"deleted_count": deleted_count}}

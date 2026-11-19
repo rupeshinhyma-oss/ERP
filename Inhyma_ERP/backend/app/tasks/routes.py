@@ -120,7 +120,7 @@ async def upload_file(
 @router.get("", summary="List tasks with visibility rules and filters")
 async def list_tasks(
     request: Request,
-    view: str = Query("all", description="View mode: all, my, kanban, calendar, department"),
+    view: str = Query("all", description="View mode: all, my, department, kanban, calendar"),
     department_id: uuid.UUID | None = Query(None, description="Filter by department ID"),
     status: TaskStatus | None = None,
     priority: TaskPriority | None = None,
@@ -136,12 +136,15 @@ async def list_tasks(
     search: str | None = None,
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=500),
-    current_user: CurrentUser = Depends(require_permission("task.view")),
+    current_user: CurrentUser = Depends(
+        require_any_permission("task.view", "task.department_view", "task.all_view", "task.manage")
+    ),
     service: TaskService = Depends(get_task_service),
 ) -> dict:
     items, total = await service.list_tasks(
         current_user_id=current_user.id,
         user_permissions=current_user.permissions,
+        is_super_admin=current_user.is_super_admin,
         view_mode=view,
         department_id=department_id,
         status=status,
@@ -199,7 +202,9 @@ async def get_escalate_options(
 @router.get("/labels", summary="List all task labels")
 async def list_labels(
     request: Request,
-    current_user: CurrentUser = Depends(require_permission("task.view")),
+    current_user: CurrentUser = Depends(
+        require_any_permission("task.view", "task.department_view", "task.all_view", "task.manage")
+    ),
     service: TaskService = Depends(get_task_service),
 ) -> dict:
     data = await service.list_labels()
@@ -222,10 +227,12 @@ async def create_label(
 async def list_sprints(
     request: Request,
     status: SprintStatus | None = None,
-    current_user: CurrentUser = Depends(require_permission("task.view")),
+    current_user: CurrentUser = Depends(
+        require_any_permission("task.view", "task.department_view", "task.all_view", "task.manage")
+    ),
     service: TaskService = Depends(get_task_service),
 ) -> dict:
-    data = await service.list_sprints(status=status)
+    data = await service.list_sprints(status=status, current_user=current_user)
     return build_success_response(data=[s.model_dump() for s in data], request_id=getattr(request.state, "request_id", "-"))
 
 
@@ -268,7 +275,9 @@ async def delete_sprint(
 async def list_templates(
     request: Request,
     category: str | None = None,
-    current_user: CurrentUser = Depends(require_permission("task.view")),
+    current_user: CurrentUser = Depends(
+        require_any_permission("task.view", "task.department_view", "task.all_view", "task.manage")
+    ),
     service: TaskService = Depends(get_task_service),
 ) -> dict:
     data = await service.list_templates(category=category)
@@ -313,7 +322,9 @@ async def delete_template(
 @router.get("/saved-filters", summary="List user's saved filters")
 async def list_saved_filters(
     request: Request,
-    current_user: CurrentUser = Depends(require_permission("task.view")),
+    current_user: CurrentUser = Depends(
+        require_any_permission("task.view", "task.department_view", "task.all_view", "task.manage")
+    ),
     service: TaskService = Depends(get_task_service),
 ) -> dict:
     data = await service.list_saved_filters(current_user)
@@ -371,7 +382,9 @@ async def bulk_action(
 async def get_workload(
     request: Request,
     department_id: uuid.UUID | None = None,
-    current_user: CurrentUser = Depends(require_permission("task.view")),
+    current_user: CurrentUser = Depends(
+        require_any_permission("task.view", "task.department_view", "task.all_view", "task.manage")
+    ),
     service: TaskService = Depends(get_task_service),
 ) -> dict:
     res = await service.get_workload_dashboard(department_id=department_id, current_user=current_user)
@@ -384,7 +397,9 @@ async def get_capacity(
     start_date: date = Query(...),
     end_date: date = Query(...),
     department_id: uuid.UUID | None = None,
-    current_user: CurrentUser = Depends(require_permission("task.view")),
+    current_user: CurrentUser = Depends(
+        require_any_permission("task.view", "task.department_view", "task.all_view", "task.manage")
+    ),
     service: TaskService = Depends(get_task_service),
 ) -> dict:
     res = await service.get_capacity_view(start_date=start_date, end_date=end_date, department_id=department_id, current_user=current_user)
@@ -433,10 +448,17 @@ async def list_recurring_schedules(
     department: str | None = None,
     status: str | None = None,
     frequency: str | None = None,
-    current_user: CurrentUser = Depends(require_permission("task.view")),
+    current_user: CurrentUser = Depends(
+        require_any_permission("task.view", "task.department_view", "task.all_view", "task.manage")
+    ),
     service: TaskService = Depends(get_task_service),
 ) -> dict:
-    schedules = await service.list_recurring_schedules(department=department, status=status, frequency=frequency)
+    schedules = await service.list_recurring_schedules(
+        department=department,
+        status=status,
+        frequency=frequency,
+        current_user=current_user,
+    )
     return build_success_response(data=[s.model_dump() for s in schedules], request_id=getattr(request.state, "request_id", "-"))
 
 
@@ -457,10 +479,12 @@ async def create_recurring_schedule(
 async def get_recurring_schedule(
     schedule_id: uuid.UUID,
     request: Request,
-    current_user: CurrentUser = Depends(require_permission("task.view")),
+    current_user: CurrentUser = Depends(
+        require_any_permission("task.view", "task.department_view", "task.all_view", "task.manage")
+    ),
     service: TaskService = Depends(get_task_service),
 ) -> dict:
-    schedule = await service.get_recurring_schedule(schedule_id)
+    schedule = await service.get_recurring_schedule(schedule_id, current_user=current_user)
     return build_success_response(data=schedule.model_dump(), request_id=getattr(request.state, "request_id", "-"))
 
 
@@ -540,6 +564,8 @@ async def trigger_generate_recurring_tasks(
     current_user: CurrentUser = Depends(require_any_permission("task.create", "task.manage")),
     service: TaskService = Depends(get_task_service),
 ) -> dict:
+    if schedule_id is not None:
+        await service.get_recurring_schedule(schedule_id, current_user=current_user)
     tasks = await service.generate_recurring_tasks(as_of_date=as_of_date, schedule_id=schedule_id)
     return build_success_response(
         data={"generated_count": len(tasks), "task_ids": [str(t.id) for t in tasks]},
@@ -552,10 +578,16 @@ async def list_recurring_task_instances(
     request: Request,
     schedule_id: uuid.UUID | None = None,
     history_only: bool = False,
-    current_user: CurrentUser = Depends(require_permission("task.view")),
+    current_user: CurrentUser = Depends(
+        require_any_permission("task.view", "task.department_view", "task.all_view", "task.manage")
+    ),
     service: TaskService = Depends(get_task_service),
 ) -> dict:
-    instances = await service.list_recurring_instances(schedule_id=schedule_id, history_only=history_only)
+    instances = await service.list_recurring_instances(
+        schedule_id=schedule_id,
+        history_only=history_only,
+        current_user=current_user,
+    )
     return build_success_response(data=[i.model_dump() for i in instances], request_id=getattr(request.state, "request_id", "-"))
 
 
@@ -576,7 +608,9 @@ async def check_recurring_reminders(
 @router.get("/departments", summary="List accessible departments based on user role and assignments")
 async def list_task_departments(
     request: Request,
-    current_user: CurrentUser = Depends(require_permission("task.view")),
+    current_user: CurrentUser = Depends(
+        require_any_permission("task.view", "task.department_view", "task.all_view", "task.manage")
+    ),
     service: TaskService = Depends(get_task_service),
 ) -> dict:
     data = await service.list_task_departments(current_user)
@@ -589,7 +623,9 @@ async def list_task_departments(
 @router.get("/assignees", summary="List assignable users scoped to user department authority")
 async def list_task_assignees(
     request: Request,
-    current_user: CurrentUser = Depends(require_permission("task.view")),
+    current_user: CurrentUser = Depends(
+        require_any_permission("task.view", "task.department_view", "task.all_view", "task.manage")
+    ),
     service: TaskService = Depends(get_task_service),
 ) -> dict:
     data = await service.list_task_assignees(current_user)
@@ -603,7 +639,9 @@ async def list_task_assignees(
 async def get_task_by_id(
     id: uuid.UUID,
     request: Request,
-    current_user: CurrentUser = Depends(require_permission("task.view")),
+    current_user: CurrentUser = Depends(
+        require_any_permission("task.view", "task.department_view", "task.all_view", "task.manage")
+    ),
     service: TaskService = Depends(get_task_service),
 ) -> dict:
     task = await service.get_task(id, current_user=current_user)
@@ -771,7 +809,9 @@ async def escalate_task(
 async def get_task_timeline(
     id: uuid.UUID,
     request: Request,
-    current_user: CurrentUser = Depends(require_permission("task.view")),
+    current_user: CurrentUser = Depends(
+        require_any_permission("task.view", "task.department_view", "task.all_view", "task.manage")
+    ),
     service: TaskService = Depends(get_task_service),
 ) -> dict:
     events = await service.get_task_timeline(id, current_user=current_user)

@@ -68,6 +68,52 @@ async def readiness(
     return payload
 
 
+async def _is_authorized_diagnostics_caller(request: Request, db: AsyncSession | None = None) -> bool:
+    """
+    Return True if the request presents a valid service credential OR an Admin/SuperAdmin JWT.
+    Allows anonymous uptime monitors to receive minimal health status while preserving full
+    diagnostics for authorized operators.
+    """
+    import hmac
+
+    from app.core.config import settings
+
+    auth_header = (request.headers.get("Authorization") or "").strip()
+    if not auth_header.startswith("Bearer "):
+        return False
+    token = auth_header[7:].strip()
+    if not token:
+        return False
+
+    token_bytes = token.encode("utf-8")
+    for expected in settings.get_expected_erp_main_credentials():
+        if hmac.compare_digest(token_bytes, expected.encode("utf-8")):
+            return True
+
+    if db is not None:
+        try:
+            from app.auth.dependencies import build_auth_service
+
+            auth_svc = build_auth_service(db)
+            user = await auth_svc.verify_access_token(token)
+            if user.is_super_admin or "organization.manage" in user.permissions or "audit.view" in user.permissions:
+                return True
+        except Exception:
+            return False
+    else:
+        try:
+            from app.auth.security import TokenType, decode_token
+
+            claims = decode_token(token, expected_type=TokenType.ACCESS)
+            perms = set(claims.get("perms") or [])
+            if "*" in perms or "organization.manage" in perms or "audit.view" in perms:
+                return True
+        except Exception:
+            return False
+
+    return False
+
+
 @router.get("/integration", summary="Cross-ERP integration health probe (Phase 8F)")
 async def integration_health(
     request: Request,
@@ -75,7 +121,7 @@ async def integration_health(
 ) -> dict:
     """
     Integration subsystem health probe (Phase 8F Section 22).
-    A remote peer being unavailable degrades integration health, but does NOT make local ERP dead.
+    Returns minimal status publicly and detailed circuit/queue diagnostics to authorized operators.
     """
     from sqlalchemy import func, select
 
@@ -99,6 +145,12 @@ async def integration_health(
     if has_open_circuit or dead_letters > 10:
         overall_status = "degraded"
 
+    if not await _is_authorized_diagnostics_caller(request, db=db):
+        return build_success_response(
+            data={"status": overall_status, "liveness": "healthy"},
+            request_id=getattr(request.state, "request_id", "-"),
+        )
+
     data = {
         "status": overall_status,
         "liveness": "healthy",
@@ -115,10 +167,13 @@ async def integration_health(
 
 
 @router.get("/federation", summary="Cross-ERP sign-in diagnostics (no secrets)")
-async def federation_health(request: Request) -> dict:
+async def federation_health(
+    request: Request,
+    db: AsyncSession = Depends(get_db_session),
+) -> dict:
     """
-    Shows whether this ERP can reach ERP_Main for SSO, which URL it uses, and the reason for the latest failure.
-    Probes ERP_Main live (short timeout).  Never returns credentials.
+    Reports SSO readiness minimally to public callers and full live probe diagnostics to authorized operators.
+    Never returns credentials.
     """
     import time as _time
 
@@ -126,6 +181,16 @@ async def federation_health(request: Request) -> dict:
 
     from app.core.config import settings
     from app.federation.erp_main_client import VERIFY_DIAGNOSTICS, _client_for_erp_main, erp_main_api_base_urls
+
+    problems = settings.federation_config_problems()
+    if not await _is_authorized_diagnostics_caller(request, db=db):
+        return build_success_response(
+            data={
+                "status": "healthy" if not problems else "degraded",
+                "sso_enabled": settings.INHYMA_SSO_ENABLED,
+            },
+            request_id=getattr(request.state, "request_id", "-"),
+        )
 
     probes = []
     for base in erp_main_api_base_urls():
@@ -141,8 +206,8 @@ async def federation_health(request: Request) -> dict:
         "erp_key": settings.ERP_KEY,
         "central_verification_required": settings.SSO_HANDOVER_REQUIRE_CENTRAL_VERIFICATION,
         "service_credential_configured": bool(settings.get_expected_erp_main_credentials()),
-        "config_problems": settings.federation_config_problems(),
+        "config_problems": problems,
         "erp_main_probes": probes,
         "last_session_verification": dict(VERIFY_DIAGNOSTICS),
     }
-    return build_success_response(data=data, request_id=request.state.request_id)
+    return build_success_response(data=data, request_id=getattr(request.state, "request_id", "-"))

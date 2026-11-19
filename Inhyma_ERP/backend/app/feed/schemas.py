@@ -80,13 +80,14 @@ class FeedPostCreate(BaseModel):
     )
     audience_type: FeedAudienceType = Field(
         default=FeedAudienceType.ALL,
-        description="'ALL' for company-wide, 'SELECTED' for specific departments/employees",
+        description="'ALL' for company-wide, 'SELECTED' for department-targeted announcements",
     )
     department_ids: list[uuid.UUID] = Field(
         default_factory=list, description="Target department role IDs"
     )
     recipient_ids: list[uuid.UUID] = Field(
-        default_factory=list, description="Explicit target recipient user IDs"
+        default_factory=list,
+        description="Deprecated for announcements; non-empty values are rejected (use Direct Messages).",
     )
     status: FeedPostStatus = Field(
         default=FeedPostStatus.PUBLISHED, description="'DRAFT' or 'PUBLISHED'"

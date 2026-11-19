@@ -43,7 +43,7 @@ import type {
 } from "@/types/tasks";
 
 export interface TaskQueryParams {
-  view?: "all" | "my" | "kanban" | "calendar" | "department" | "organization";
+  view?: "all" | "my" | "kanban" | "calendar" | "department";
   status?: TaskStatus;
   priority?: TaskPriority;
   issue_type?: IssueType | string;

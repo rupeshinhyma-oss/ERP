@@ -10,7 +10,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.dependencies import CurrentUser, get_current_user
+from app.auth.service import CurrentUser
 from app.database.session import get_db_session
 from app.industrial_zones.models import IndustrialZone
 from app.industrial_zones.repository import IndustrialZoneRepository
@@ -21,8 +21,16 @@ from app.industrial_zones.schemas import (
     IndustrialZoneUpdate,
 )
 from app.industrial_zones.service import IndustrialZoneService
+from app.rbac.dependencies import require_any_permission
 
 router = APIRouter(prefix="", tags=["Industrial Zones"])
+
+_ZONE_VIEW_PERMS = ("zone.view", "zone.read", "zone.manage")
+_ZONE_CHECK_NAME_PERMS = ("zone.view", "zone.read", "zone.create", "zone.update", "zone.manage")
+_ZONE_CREATE_PERMS = ("zone.create", "zone.manage")
+_ZONE_UPDATE_PERMS = ("zone.update", "zone.manage")
+_ZONE_DELETE_PERMS = ("zone.delete", "zone.manage")
+_ZONE_BULK_DELETE_PERMS = ("zone.bulk_action", "zone.delete", "zone.manage")
 
 
 def get_service(db: AsyncSession = Depends(get_db_session)) -> IndustrialZoneService:
@@ -49,6 +57,7 @@ async def list_industrial_zones(
     page: int | None = Query(default=None, ge=1),
     page_size: int | None = Query(default=None, ge=1, le=500),
     service: IndustrialZoneService = Depends(get_service),
+    _current_user: CurrentUser = Depends(require_any_permission(*_ZONE_VIEW_PERMS)),
 ) -> dict:
     effective_limit = page_size if page_size is not None else (limit if limit is not None else 50)
     effective_offset = (
@@ -94,6 +103,7 @@ async def check_zone_name(
     name: str = Query(..., min_length=1),
     exclude_id: uuid.UUID | None = Query(default=None),
     service: IndustrialZoneService = Depends(get_service),
+    _current_user: CurrentUser = Depends(require_any_permission(*_ZONE_CHECK_NAME_PERMS)),
 ) -> dict:
     exists = await service.check_name_exists(name, exclude_id)
     return {"success": True, "data": {"exists": exists}}
@@ -103,6 +113,7 @@ async def check_zone_name(
 async def get_industrial_zone(
     id: uuid.UUID,
     service: IndustrialZoneService = Depends(get_service),
+    _current_user: CurrentUser = Depends(require_any_permission(*_ZONE_VIEW_PERMS)),
 ) -> dict:
     zone = await service.get_zone(id)
     return {"success": True, "data": _to_dict(zone)}
@@ -112,6 +123,7 @@ async def get_industrial_zone(
 async def create_industrial_zone(
     payload: IndustrialZoneCreate,
     service: IndustrialZoneService = Depends(get_service),
+    _current_user: CurrentUser = Depends(require_any_permission(*_ZONE_CREATE_PERMS)),
 ) -> dict:
     zone = await service.create_zone(payload)
     return {"success": True, "data": _to_dict(zone)}
@@ -122,6 +134,7 @@ async def update_industrial_zone(
     id: uuid.UUID,
     payload: IndustrialZoneUpdate,
     service: IndustrialZoneService = Depends(get_service),
+    _current_user: CurrentUser = Depends(require_any_permission(*_ZONE_UPDATE_PERMS)),
 ) -> dict:
     zone = await service.update_zone(id, payload)
     return {"success": True, "data": _to_dict(zone)}
@@ -131,6 +144,7 @@ async def update_industrial_zone(
 async def delete_industrial_zone(
     id: uuid.UUID,
     service: IndustrialZoneService = Depends(get_service),
+    _current_user: CurrentUser = Depends(require_any_permission(*_ZONE_DELETE_PERMS)),
 ) -> dict:
     success = await service.delete_zone(id)
     return {"success": success, "data": {"id": str(id)}}
@@ -140,6 +154,7 @@ async def delete_industrial_zone(
 async def bulk_delete_industrial_zones(
     payload: IndustrialZoneBulkDeleteRequest,
     service: IndustrialZoneService = Depends(get_service),
+    _current_user: CurrentUser = Depends(require_any_permission(*_ZONE_BULK_DELETE_PERMS)),
 ) -> dict:
     deleted_count = await service.bulk_delete(payload.ids)
     return {"success": True, "data": {"deleted_count": deleted_count}}

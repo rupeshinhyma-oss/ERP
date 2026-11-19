@@ -78,8 +78,8 @@ const FULL_CODE_LABELS: Record<string, string> = {
   "buyer.clientgrade": "Client Grade",
   "task.view": "View Tasks",
   "task.create": "Create Tasks",
-  "task.department_view": "Department View",
-  "task.organization_view": "Organization View",
+  "task.department_view": "Department Tasks View",
+  "task.all_view": "All Tasks View (Read-Only)",
   "task.assign": "Assign Tasks",
   "task.escalate": "Escalate Tasks",
   "task.manage": "Manage All Tasks",
@@ -103,9 +103,20 @@ export function friendlyPermissionLabel(code: string): string {
   return ACTION_LABELS[action] || parts.slice(1).join(" ") || code;
 }
 
+/**
+ * Obsolete permission codes kept out of permission catalogs, UI override panels,
+ * and group selectors without destructively deleting legacy DB rows.
+ */
+export const DEPRECATED_PERMISSION_CODES = new Set<string>(["task.organization_view"]);
+
+export function filterActivePermissions(permissions: Permission[]): Permission[] {
+  return permissions.filter((p) => !DEPRECATED_PERMISSION_CODES.has(p.code));
+}
+
 export function groupPermissionsByModule(permissions: Permission[]): Record<string, Permission[]> {
   const groups: Record<string, Permission[]> = {};
   for (const p of permissions) {
+    if (DEPRECATED_PERMISSION_CODES.has(p.code)) continue;
     const modKey = p.module || p.code.split(".")[0];
     if (!groups[modKey]) groups[modKey] = [];
     groups[modKey].push(p);

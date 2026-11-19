@@ -3,14 +3,18 @@ Feed Module RBAC & Permission Helpers.
 
 Enforces the Feed permission contract using the existing ERP RBAC tables
 (``Permission``, ``RolePermission``, ``UserPermission``) and ``CurrentUser``:
-- ``feed.view``   : View Feed page, posts, comments, readership (own), and DMs.
-                    (``feed.manage`` satisfies ``feed.view`` unless ``deny:feed.view`` is set,
-                    matching ``frontend/src/lib/auth.ts``.)
-- ``feed.create`` : Create/edit own posts, comments, reactions, DMs, and query eligible
-                    audience recipients/departments.
-- ``feed.manage`` : Moderate (delete) other users' visible published posts and comments.
-- ``deny:feed.*`` : Explicit per-user deny overrides ALWAYS take precedence over role grants,
-                    wildcards, and administrator flags.
+- ``feed.view``     : View Feed page, posts, comments, readership (own), and DMs.
+                      (``feed.manage`` satisfies ``feed.view`` unless ``deny:feed.view`` is set,
+                      matching ``frontend/src/lib/auth.ts``.)
+- ``feed.interact`` : React to and comment on authorized visible posts, edit/delete own
+                      comments, and reply/edit/delete own messages within authorized 1:1 DM
+                      conversations. (``feed.create`` satisfies ``feed.interact`` unless
+                      ``deny:feed.interact`` is set.)
+- ``feed.create``   : Create/edit own announcements, query eligible audience recipients/
+                      departments, and initiate new 1:1 DM conversations.
+- ``feed.manage``   : Moderate (delete) other users' visible published posts and comments.
+- ``deny:feed.*``   : Explicit per-user deny overrides ALWAYS take precedence over role grants,
+                      wildcards, and administrator flags.
 """
 
 from __future__ import annotations
@@ -29,7 +33,7 @@ from app.core.exceptions import ForbiddenException
 from app.database.session import get_db_session
 from app.rbac.models import Permission, UserPermission
 
-FEED_PERMISSION_CODES: tuple[str, ...] = ("feed.view", "feed.create", "feed.manage")
+FEED_PERMISSION_CODES: tuple[str, ...] = ("feed.view", "feed.interact", "feed.create", "feed.manage")
 
 
 def extract_raw_permissions(actor: CurrentUser) -> set[str]:
@@ -92,6 +96,10 @@ def evaluate_feed_permission(
         if "feed.manage" not in explicit_denies and (
             "feed.manage" in raw_perms or "feed.read" in raw_perms
         ):
+            return True
+
+    if required_code == "feed.interact":
+        if "feed.create" not in explicit_denies and "feed.create" in raw_perms:
             return True
 
     return False

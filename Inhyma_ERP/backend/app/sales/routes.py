@@ -21,11 +21,12 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.auth.dependencies import get_auth_service, get_current_user
-from app.auth.service import AuthService, CurrentUser
-from app.core.exceptions import BadRequestException, ConflictException
+from app.auth.dependencies import get_current_user
+from app.auth.service import CurrentUser
+from app.core.exceptions import AppException, BadRequestException, ConflictException, NotFoundException
 from app.core.responses import build_success_response
 from app.database.session import get_db_session
+from app.rbac.dependencies import require_any_permission
 from app.sales.models import (
     DiscountPayment,
     ProformaInvoice,
@@ -827,6 +828,39 @@ async def _load_discount_enrichment_maps(
     return so_map, comp_map, gp_map
 
 
+_DISCOUNT_PAYMENT_VIEW_PERMS = (
+    "saleorder.view",
+    "saleorder.create",
+    "saleorder.update",
+    "saleorder.accounts",
+    "saleorder.approve",
+    "saleorder.delete",
+    "proforma.approve",
+    "crm.leads.view",
+    "crm.leads.manage",
+    "report.view",
+)
+_DISCOUNT_PAYMENT_WRITE_PERMS = (
+    "saleorder.create",
+    "saleorder.update",
+    "saleorder.accounts",
+    "saleorder.approve",
+    "proforma.approve",
+    "crm.leads.manage",
+)
+_DELETED_ORDERS_VIEW_PERMS = (
+    "report.view",
+    "trash.view",
+    "saleorder.view",
+    "saleorder.approve",
+    "saleorder.delete",
+)
+_DELETED_ORDERS_RESTORE_PERMS = (
+    "saleorder.approve",
+    "saleorder.delete",
+)
+
+
 @router.get("/sales/discount-payments", summary="List discount payments")
 async def list_discount_payments(
     request: Request,
@@ -837,6 +871,7 @@ async def list_discount_payments(
     skip: int = Query(0, ge=0),
     limit: int = Query(500, ge=1, le=2000),
     db: AsyncSession = Depends(get_db_session),
+    _current_user: CurrentUser = Depends(require_any_permission(*_DISCOUNT_PAYMENT_VIEW_PERMS)),
 ) -> dict:
     """Return list of discount payment records, auto-synchronized with Sales Orders."""
     req_id = getattr(request.state, "request_id", "-")
@@ -925,6 +960,8 @@ async def list_discount_payments(
             meta={"total": total, "skip": skip, "limit": limit},
             request_id=req_id,
         )
+    except (HTTPException, AppException):
+        raise
     except Exception:
         return build_success_response(
             data={"items": []},
@@ -938,7 +975,7 @@ async def create_discount_payment(
     payload: DiscountPaymentCreate,
     request: Request,
     db: AsyncSession = Depends(get_db_session),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_any_permission(*_DISCOUNT_PAYMENT_WRITE_PERMS)),
 ) -> dict:
     """Create a new discount payment authorization record."""
     from app.sales.service import IST, _format_ist_timeline_dt
@@ -992,7 +1029,7 @@ async def update_discount_payment_settlement(
     payload: dict,
     request: Request,
     db: AsyncSession = Depends(get_db_session),
-    auth_service: AuthService = Depends(get_auth_service),
+    current_user: CurrentUser = Depends(require_any_permission(*_DISCOUNT_PAYMENT_WRITE_PERMS)),
 ) -> dict:
     """Record a partial or full discount adjustment installment on a discount record."""
     from app.sales.service import IST, SaleService, _format_ddmmyyyy
@@ -1044,23 +1081,13 @@ async def update_discount_payment_settlement(
         )
 
     # Resolve logged-in user display name ("Adjustment By" in List Payments modal)
-    actor_name: str | None = None
-    auth_header = request.headers.get("authorization") or ""
-    if auth_header.lower().startswith("bearer "):
-        raw_token = auth_header.split(" ", 1)[1].strip()
-        if raw_token:
-            try:
-                curr_user = await auth_service.verify_access_token(raw_token)
-                actor_name = await SaleService(db)._resolve_actor_name(curr_user)
-            except Exception:
-                actor_name = None
-    if not actor_name:
-        actor_name = (
-            str(payload.get("adjusted_by") or "").strip()
-            or rec.sales_person
-            or rec.created_by
-            or "Admin"
-        )
+    fallback_actor = (
+        str(payload.get("adjusted_by") or "").strip()
+        or rec.sales_person
+        or rec.created_by
+        or "Admin"
+    )
+    actor_name = await SaleService(db)._resolve_actor_name(current_user, fallback=fallback_actor)
 
     settle_date_str = (
         _format_ddmmyyyy(payload.get("settle_date"))
@@ -1137,6 +1164,7 @@ async def list_deleted_orders(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
     db: AsyncSession = Depends(get_db_session),
+    _current_user: CurrentUser = Depends(require_any_permission(*_DELETED_ORDERS_VIEW_PERMS)),
 ) -> dict:
     """Return deleted orders matching filters."""
     req_id = getattr(request.state, "request_id", "-")
@@ -1205,32 +1233,39 @@ async def restore_deleted_order(
     order_id: str,
     request: Request,
     db: AsyncSession = Depends(get_db_session),
+    _current_user: CurrentUser = Depends(require_any_permission(*_DELETED_ORDERS_RESTORE_PERMS)),
 ) -> dict:
     req_id = getattr(request.state, "request_id", "-")
     from app.sales.models import SaleOrder
-    import uuid
 
-    # Try UUID parse
-    found = False
+    order = None
     try:
         u_id = uuid.UUID(order_id)
         stmt = select(SaleOrder).where(SaleOrder.id == u_id)
         order = (await db.execute(stmt)).scalars().first()
-        if order:
-            order.deleted_at = None
-            await db.flush()
-            found = True
     except (ValueError, TypeError):
         pass
 
-    if not found:
-        # Also check by order_no
+    if order is None:
         stmt = select(SaleOrder).where(SaleOrder.order_no == order_id)
         order = (await db.execute(stmt)).scalars().first()
-        if order:
-            order.deleted_at = None
+
+    if order is None:
+        raise NotFoundException("Deleted order not found.")
+
+    order.deleted_at = None
+    await db.flush()
+
+    try:
+        async with db.begin_nested():
+            dp_rows = (
+                await db.execute(select(DiscountPayment).where(DiscountPayment.order_ref == order.order_no))
+            ).scalars().all()
+            for dp in dp_rows:
+                dp.deleted_at = None
             await db.flush()
-            found = True
+    except Exception:
+        pass
 
     return build_success_response(
         data={"id": order_id, "restored": True},

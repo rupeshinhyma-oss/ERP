@@ -5,11 +5,10 @@ import { errorMessage } from "@/lib/api";
 import {
   MAX_FEED_POST_CONTENT_LENGTH,
   type EligibleDepartment,
-  type EligibleRecipient,
   type FeedPostStatus,
 } from "@/types/feed";
 
-type ComposerAudienceMode = "ALL" | "DEPARTMENTS" | "EMPLOYEES" | "COMBINED";
+type ComposerAudienceMode = "ALL" | "DEPARTMENTS";
 
 interface FeedComposerProps {
   currentUserName?: string;
@@ -35,14 +34,6 @@ export function FeedComposer({
   const [deptDropdownOpen, setDeptDropdownOpen] = useState(false);
   const deptContainerRef = useRef<HTMLDivElement>(null);
 
-  // Individual employee targeting state (real ERP workforce directory)
-  const [selectedRecipients, setSelectedRecipients] = useState<EligibleRecipient[]>([]);
-  const [empSearchQuery, setEmpSearchQuery] = useState("");
-  const [empSearchResults, setEmpSearchResults] = useState<EligibleRecipient[]>([]);
-  const [empSearching, setEmpSearching] = useState(false);
-  const [empDropdownOpen, setEmpDropdownOpen] = useState(false);
-  const empContainerRef = useRef<HTMLDivElement>(null);
-
   // Submission state
   const [submitting, setSubmitting] = useState(false);
 
@@ -65,36 +56,7 @@ export function FeedComposer({
     };
   }, []);
 
-  // Debounced search for eligible individual ERP employees
-  useEffect(() => {
-    if (audienceMode === "ALL" || audienceMode === "DEPARTMENTS") {
-      setEmpDropdownOpen(false);
-      return;
-    }
-
-    let active = true;
-    const timer = setTimeout(async () => {
-      setEmpSearching(true);
-      try {
-        const res = await feedApi.getEligibleRecipients(empSearchQuery.trim());
-        if (active) {
-          setEmpSearchResults(res.data || []);
-          setEmpDropdownOpen(true);
-        }
-      } catch (err) {
-        if (active) setEmpSearchResults([]);
-      } finally {
-        if (active) setEmpSearching(false);
-      }
-    }, 200);
-
-    return () => {
-      active = false;
-      clearTimeout(timer);
-    };
-  }, [empSearchQuery, audienceMode]);
-
-  // Click outside listener for dropdowns
+  // Click outside listener for department dropdown
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
       if (
@@ -102,12 +64,6 @@ export function FeedComposer({
         !deptContainerRef.current.contains(e.target as Node)
       ) {
         setDeptDropdownOpen(false);
-      }
-      if (
-        empContainerRef.current &&
-        !empContainerRef.current.contains(e.target as Node)
-      ) {
-        setEmpDropdownOpen(false);
       }
     }
     document.addEventListener("mousedown", handleClickOutside);
@@ -127,37 +83,16 @@ export function FeedComposer({
     setSelectedDepartments((prev) => prev.filter((d) => d.id !== deptId));
   };
 
-  // Employee handling
-  const handleAddRecipient = (emp: EligibleRecipient) => {
-    if (!selectedRecipients.some((r) => r.id === emp.id)) {
-      setSelectedRecipients((prev) => [...prev, emp]);
-    }
-    setEmpSearchQuery("");
-    setEmpDropdownOpen(false);
-  };
-
-  const handleRemoveRecipient = (empId: string) => {
-    setSelectedRecipients((prev) => prev.filter((r) => r.id !== empId));
-  };
-
   // Estimated reach calculation based on real backend member counts
   const estimatedReach = useMemo(() => {
     if (audienceMode === "ALL") return "All company employees";
 
-    const deptMemberSum = selectedDepartments.reduce((acc, d) => acc + (d.member_count || 0), 0);
-    const individualCount = selectedRecipients.length;
-
-    if (selectedDepartments.length > 0 && selectedRecipients.length > 0) {
-      return `~${deptMemberSum + individualCount} employee(s) (approx. union)`;
-    }
     if (selectedDepartments.length > 0) {
+      const deptMemberSum = selectedDepartments.reduce((acc, d) => acc + (d.member_count || 0), 0);
       return `${deptMemberSum} employee(s) across ${selectedDepartments.length} department(s)`;
     }
-    if (selectedRecipients.length > 0) {
-      return `${individualCount} selected employee(s)`;
-    }
-    return "0 recipients selected";
-  }, [audienceMode, selectedDepartments, selectedRecipients]);
+    return "0 departments selected";
+  }, [audienceMode, selectedDepartments]);
 
   const filteredDepartments = useMemo(() => {
     if (!deptSearchQuery.trim()) return departmentsList;
@@ -183,22 +118,9 @@ export function FeedComposer({
       return;
     }
 
-    if (audienceMode !== "ALL") {
-      if (audienceMode === "DEPARTMENTS" && selectedDepartments.length === 0) {
-        showToast("Please select at least one department for a targeted post.", "warning");
-        return;
-      }
-      if (audienceMode === "EMPLOYEES" && selectedRecipients.length === 0) {
-        showToast("Please select at least one recipient for a targeted post.", "warning");
-        return;
-      }
-      if (selectedDepartments.length === 0 && selectedRecipients.length === 0) {
-        showToast(
-          "Please select at least one department or recipient employee.",
-          "warning"
-        );
-        return;
-      }
+    if (audienceMode === "DEPARTMENTS" && selectedDepartments.length === 0) {
+      showToast("Please select at least one department for a targeted post.", "warning");
+      return;
     }
 
     setSubmitting(true);
@@ -210,7 +132,6 @@ export function FeedComposer({
         audience_type: isAll ? "ALL" : "SELECTED",
         status: targetStatus,
         department_ids: !isAll ? selectedDepartments.map((d) => d.id) : undefined,
-        recipient_ids: !isAll ? selectedRecipients.map((r) => r.id) : undefined,
       });
 
       showToast(
@@ -225,9 +146,7 @@ export function FeedComposer({
       setContent("");
       setAudienceMode("ALL");
       setSelectedDepartments([]);
-      setSelectedRecipients([]);
       setDeptSearchQuery("");
-      setEmpSearchQuery("");
       onPostCreated();
     } catch (err) {
       showToast(errorMessage(err) || "Failed to publish announcement.", "error");
@@ -296,7 +215,6 @@ export function FeedComposer({
               onClick={() => {
                 setAudienceMode("ALL");
                 setSelectedDepartments([]);
-                setSelectedRecipients([]);
               }}
               disabled={submitting}
               data-testid="audience-all-btn"
@@ -315,28 +233,6 @@ export function FeedComposer({
               <span>🏢</span>
               <span>Departments</span>
             </button>
-
-            <button
-              type="button"
-              className={`feed-audience-option-btn ${audienceMode === "EMPLOYEES" ? "active" : ""}`}
-              onClick={() => setAudienceMode("EMPLOYEES")}
-              disabled={submitting}
-              data-testid="audience-emp-btn"
-            >
-              <span>👤</span>
-              <span>Individual Employees</span>
-            </button>
-
-            <button
-              type="button"
-              className={`feed-audience-option-btn ${audienceMode === "COMBINED" ? "active" : ""}`}
-              onClick={() => setAudienceMode("COMBINED")}
-              disabled={submitting}
-              data-testid="audience-combined-btn"
-            >
-              <span>🔀</span>
-              <span>Combined</span>
-            </button>
           </div>
         </div>
 
@@ -350,13 +246,11 @@ export function FeedComposer({
           </div>
         )}
 
-        {/* 2. Departments Picker (Visible in DEPARTMENTS and COMBINED modes) */}
-        {(audienceMode === "DEPARTMENTS" || audienceMode === "COMBINED") && (
+        {/* 2. Departments Picker */}
+        {audienceMode === "DEPARTMENTS" && (
           <div className="feed-recipient-picker" ref={deptContainerRef} data-testid="department-picker-section">
             <div className="feed-picker-header">
-              <span className="feed-picker-title">
-                {audienceMode === "COMBINED" ? "1. Select Departments" : "Target Departments"}:
-              </span>
+              <span className="feed-picker-title">Target Departments:</span>
               {selectedDepartments.length > 0 && (
                 <span className="feed-picker-count">
                   {selectedDepartments.length} department{selectedDepartments.length === 1 ? "" : "s"} selected
@@ -438,108 +332,7 @@ export function FeedComposer({
           </div>
         )}
 
-        {/* 3. Individual Employees Picker (Visible in EMPLOYEES and COMBINED modes) */}
-        {(audienceMode === "EMPLOYEES" || audienceMode === "COMBINED") && (
-          <div className="feed-recipient-picker" ref={empContainerRef} data-testid="recipient-picker-section">
-            <div className="feed-picker-header">
-              <span className="feed-picker-title">
-                {audienceMode === "COMBINED" ? "2. Select Individual Employees" : "Target Individual Employees"}:
-              </span>
-              {selectedRecipients.length > 0 && (
-                <span className="feed-picker-count">
-                  {selectedRecipients.length} employee{selectedRecipients.length === 1 ? "" : "s"} selected
-                </span>
-              )}
-            </div>
-
-            <div className="feed-recipient-search-wrap">
-              <input
-                type="text"
-                className="feed-recipient-search-input"
-                placeholder="Search real employee directory by name or code (e.g. EMP-001)..."
-                value={empSearchQuery}
-                onChange={(e) => setEmpSearchQuery(e.target.value)}
-                onFocus={() => {
-                  if (empSearchResults.length > 0) setEmpDropdownOpen(true);
-                }}
-                disabled={submitting}
-                data-testid="recipient-search-input"
-              />
-
-              {empDropdownOpen && (
-                <div className="feed-recipient-dropdown" data-testid="recipient-dropdown">
-                  {empSearching ? (
-                    <div className="feed-dropdown-empty">
-                      Searching ERP directory...
-                    </div>
-                  ) : empSearchResults.length === 0 ? (
-                    <div className="feed-dropdown-empty">
-                      No matching active employees found.
-                    </div>
-                  ) : (
-                    empSearchResults.map((emp) => {
-                      const isAlreadySelected = selectedRecipients.some((r) => r.id === emp.id);
-                      return (
-                        <div
-                          key={emp.id}
-                          className={`feed-recipient-item ${isAlreadySelected ? "feed-recipient-item-selected" : ""}`}
-                          onClick={() => {
-                            if (!isAlreadySelected) handleAddRecipient(emp);
-                          }}
-                          data-testid={`recipient-item-${emp.id}`}
-                        >
-                          <div className="feed-item-info">
-                            <span className="feed-item-name">{emp.display_name}</span>
-                            {emp.employee_code && (
-                              <span className="feed-item-code">({emp.employee_code})</span>
-                            )}
-                            {emp.department_name && (
-                              <span className="feed-item-dept-tag">
-                                🏢 {emp.department_name}
-                              </span>
-                            )}
-                          </div>
-                          <span className="feed-item-action">
-                            {isAlreadySelected ? "Added" : "+ Add"}
-                          </span>
-                        </div>
-                      );
-                    })
-                  )}
-                </div>
-              )}
-            </div>
-
-            {/* Employee Chips */}
-            {selectedRecipients.length > 0 && (
-              <div className="feed-recipient-chips-container" data-testid="recipient-chips-container">
-                {selectedRecipients.map((emp) => (
-                  <div key={emp.id} className="feed-recipient-chip" data-testid={`chip-${emp.id}`}>
-                    <span>👤 {emp.display_name}</span>
-                    {emp.department_name && (
-                      <span className="feed-chip-dept">• {emp.department_name}</span>
-                    )}
-                    {emp.employee_code && (
-                      <span className="feed-chip-code">({emp.employee_code})</span>
-                    )}
-                    <button
-                      type="button"
-                      className="feed-recipient-chip-remove"
-                      onClick={() => handleRemoveRecipient(emp.id)}
-                      disabled={submitting}
-                      title={`Remove ${emp.display_name}`}
-                      aria-label={`Remove ${emp.display_name}`}
-                    >
-                      ×
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* 4. Streamlined Audience Summary Strip */}
+        {/* 3. Streamlined Audience Summary Strip */}
         <div className="feed-audience-summary-card" data-testid="audience-summary-card">
           <div className="feed-summary-row">
             <span className="feed-summary-label">Target Audience:</span>
@@ -547,9 +340,9 @@ export function FeedComposer({
               {estimatedReach}
             </span>
           </div>
-          {audienceMode !== "ALL" && (
+          {audienceMode === "DEPARTMENTS" && (
             <div className="feed-summary-subnote">
-              🔒 Visible only to current members of targeted departments, explicitly selected recipients, and the author.
+              🔒 Visible only to current members of targeted departments and the author.
             </div>
           )}
         </div>

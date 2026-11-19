@@ -26,8 +26,15 @@ export function FeedPage() {
   const showToast = useToast();
 
   // Enforce Feed RBAC permission contract (matching backend routes & AppShell)
+  const rawPerms = Array.isArray(profile?.permissions) ? profile.permissions : [];
+  const isInteractDenied =
+    rawPerms.includes("deny:feed.interact") || rawPerms.includes("block:feed.interact");
   const canView = Boolean(profile?.id) && hasPermission("feed.view");
   const canCreate = canView && hasPermission("feed.create");
+  const canInteract =
+    canView &&
+    !isInteractDenied &&
+    (hasPermission("feed.interact") || hasPermission("feed.create"));
   const canManage = canView && hasPermission("feed.manage");
 
   // Unread DM badge state
@@ -402,6 +409,7 @@ export function FeedPage() {
               currentUserId={profile?.id}
               initialConversationId={targetConversationId}
               canCreateMessage={canCreate}
+              canReplyMessage={canInteract}
               onConversationSelect={handleConversationSelect}
               onUnreadCountChange={setDmUnreadCount}
             />
@@ -529,7 +537,7 @@ export function FeedPage() {
                         isHighlighted={post.id === highlightedPostId}
                         canEdit={userCanEdit}
                         canDelete={userCanDelete}
-                        canInteract={canCreate}
+                        canInteract={canInteract}
                         onEdit={(p) => setEditingPost(p)}
                         onDelete={(p) => setDeletingPost(p)}
                       />
