@@ -67,21 +67,11 @@ def generate_rfq_token(
 def decode_rfq_token(token: str) -> dict[str, Any]:
     """Decode and validate a supplier RFQ token with signature, audience, and expiry verification."""
     clean_token = token.strip()
-    # Compact slug fallback: rfq_hex_supplier_hex
-    if "_" in clean_token and not clean_token.startswith("ey"):
-        parts = clean_token.split("_")
-        if len(parts) == 2:
-            try:
-                rfq_uuid = uuid.UUID(parts[0])
-                supplier_uuid = uuid.UUID(parts[1])
-                return {
-                    "sub": RFQ_TOKEN_PURPOSE,
-                    "rfq_id": str(rfq_uuid),
-                    "supplier_id": str(supplier_uuid),
-                    "item_id": None,
-                }
-            except Exception:
-                pass
+    if not clean_token:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or forged quotation link token.",
+        )
 
     try:
         payload = jwt.decode(
@@ -102,6 +92,11 @@ def decode_rfq_token(token: str) -> dict[str, Any]:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Invalid quotation link token purpose.",
             )
+        # Validate UUID claims structurally before touching the database
+        uuid.UUID(str(payload["rfq_id"]))
+        uuid.UUID(str(payload["supplier_id"]))
+        if payload.get("item_id") is not None:
+            uuid.UUID(str(payload["item_id"]))
         return payload
     except jwt.ExpiredSignatureError:
         raise HTTPException(
@@ -123,7 +118,7 @@ def decode_rfq_token(token: str) -> dict[str, Any]:
     except Exception:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid quotation link token.",
+            detail="Invalid or forged quotation link token.",
         )
 
 
@@ -134,6 +129,22 @@ class PublicSupplierQuoteSubmit(BaseModel):
     expected_receiving_date: str | None = Field(default=None, description="Expected delivery date or lead time")
     terms_and_conditions: str | None = Field(default=None, description="Payment terms, warranty, MOQ, etc.")
     remarks: str | None = Field(default=None, description="Additional notes or specifications")
+
+
+def _verify_rfq_supplier_scope(rfq: RFQ, supplier_id: uuid.UUID, token_item_id: str | None) -> None:
+    """Ensure the token's supplier and optional item_id match the persisted RFQ authorization scope."""
+    if token_item_id and str(rfq.inquiry_item_id) != str(token_item_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Token item scope does not match this Request for Quotation.",
+        )
+    if rfq.supplier_type == "selected" and isinstance(rfq.supplier_ids, list) and len(rfq.supplier_ids) > 0:
+        allowed_ids = {str(s).strip().lower() for s in rfq.supplier_ids if s}
+        if str(supplier_id).lower() not in allowed_ids:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Supplier is not authorized for this Request for Quotation.",
+            )
 
 
 @router.get("/{token}")
@@ -153,6 +164,7 @@ async def get_public_rfq_details(
     rfq = (await db.execute(rfq_stmt)).scalar_one_or_none()
     if not rfq:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Request for Quotation not found or expired.")
+    _verify_rfq_supplier_scope(rfq, supplier_id, token_data.get("item_id"))
 
     item_id = rfq.inquiry_item_id
 
@@ -251,10 +263,11 @@ async def submit_public_rfq_quotation(
     supplier_id = uuid.UUID(token_data["supplier_id"])
 
     # Load RFQ to get item_id and creator user_id
-    rfq_stmt = select(RFQ).where(RFQ.id == rfq_id)
+    rfq_stmt = select(RFQ).where(RFQ.id == rfq_id, RFQ.deleted_at.is_(None))
     rfq = (await db.execute(rfq_stmt)).scalar_one_or_none()
     if not rfq:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Request for Quotation not found.")
+    _verify_rfq_supplier_scope(rfq, supplier_id, token_data.get("item_id"))
 
     item_id = rfq.inquiry_item_id
     creator_id = rfq.created_by

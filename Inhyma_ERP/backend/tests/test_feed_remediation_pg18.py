@@ -279,7 +279,48 @@ async def test_phase1_department_privacy_and_historical_migration(pg_feed_env):
         "unrel", roles=[dept_ops], grants=["feed.view", "feed.create"]
     )
 
-    # Create post targeting dept_sales + explicit recipient u_explicit
+    # 0. Unsupported individual-employee, combined, and unknown audience modes are rejected (422)
+    assert (
+        await client.post(
+            "/api/v1/feed/posts",
+            json={
+                "title": f"Unsupported Individual {tag}",
+                "content": "Must use Direct Messages",
+                "audience_type": "SELECTED",
+                "recipient_ids": [str(u_explicit.id)],
+            },
+            headers=h_author,
+        )
+    ).status_code == 422
+    assert (
+        await client.post(
+            "/api/v1/feed/posts",
+            json={
+                "title": f"Unsupported Combined {tag}",
+                "content": "Combined mode removed",
+                "audience_type": "SELECTED",
+                "department_ids": [str(dept_sales.id)],
+                "recipient_ids": [str(u_explicit.id)],
+            },
+            headers=h_author,
+        )
+    ).status_code == 422
+    assert (
+        await client.post(
+            "/api/v1/feed/posts",
+            json={"content": "Bad enum", "audience_type": "EMPLOYEES"},
+            headers=h_author,
+        )
+    ).status_code == 422
+    assert (
+        await client.post(
+            "/api/v1/feed/posts",
+            json={"content": "Bad enum", "audience_type": "COMBINED"},
+            headers=h_author,
+        )
+    ).status_code == 422
+
+    # Create department-targeted post for dept_sales
     r_create = await client.post(
         "/api/v1/feed/posts",
         json={
@@ -288,7 +329,6 @@ async def test_phase1_department_privacy_and_historical_migration(pg_feed_env):
             "audience_type": "SELECTED",
             "status": "PUBLISHED",
             "department_ids": [str(dept_sales.id)],
-            "recipient_ids": [str(u_explicit.id)],
         },
         headers=h_author,
     )
@@ -296,15 +336,36 @@ async def test_phase1_department_privacy_and_historical_migration(pg_feed_env):
     post_id = r_create.json()["data"]["id"]
     pg_feed_env["created_post_ids"].append(uuid.UUID(post_id))
 
-    # Verify DB stored ONLY u_explicit in feed_post_recipients (NOT u_dept_member!)
+    # Verify new department post stores 0 explicit rows, then seed a historical explicit
+    # recipient row (`is_explicit=True`) to prove legacy announcements remain supported
     async with SF() as db:
-        rec_rows = (
+        initial_recs = (
             await db.execute(
                 select(FeedPostRecipient).where(FeedPostRecipient.post_id == uuid.UUID(post_id))
             )
         ).scalars().all()
-        assert [r.recipient_id for r in rec_rows] == [u_explicit.id]
-        assert all(r.is_explicit is True for r in rec_rows)
+        assert initial_recs == []
+        db.add(FeedPostRecipient(post_id=uuid.UUID(post_id), recipient_id=u_explicit.id, is_explicit=True))
+        await db.commit()
+
+    # Verify historical announcement renders explicit recipient for author and preserves title/content editing
+    r_author_view = await client.get(f"/api/v1/feed/posts/{post_id}", headers=h_author)
+    assert r_author_view.status_code == 200
+    assert [r["recipient_id"] for r in r_author_view.json()["data"]["recipients"]] == [str(u_explicit.id)]
+    assert (
+        await client.patch(
+            f"/api/v1/feed/posts/{post_id}",
+            json={"title": f"Confidential Sales Plan Updated {tag}"},
+            headers=h_author,
+        )
+    ).status_code == 200
+    assert (
+        await client.patch(
+            f"/api/v1/feed/posts/{post_id}",
+            json={"recipient_ids": [str(u_unrelated.id)]},
+            headers=h_author,
+        )
+    ).status_code == 422
 
     # 1. Current department member & explicit recipient can view; unrelated employee blocked
     assert (await client.get(f"/api/v1/feed/posts/{post_id}", headers=h_dept_member)).status_code == 200
@@ -648,7 +709,7 @@ async def test_phases_3_8_9_pagination_eligibility_and_validation(pg_feed_env):
             "title": f"Unicode {tag}",
             "content": unicode_body,
             "audience_type": "SELECTED",
-            "recipient_ids": [str(u_active.id)],
+            "department_ids": [str(dept.id)],
         },
         headers=h_author,
     )
@@ -662,7 +723,7 @@ async def test_phases_3_8_9_pagination_eligibility_and_validation(pg_feed_env):
             "title": f"ExactMax {tag}",
             "content": "M" * MAX_FEED_POST_CONTENT_LENGTH,
             "audience_type": "SELECTED",
-            "recipient_ids": [str(u_active.id)],
+            "department_ids": [str(dept.id)],
         },
         headers=h_author,
     )
@@ -677,7 +738,7 @@ async def test_phases_3_8_9_pagination_eligibility_and_validation(pg_feed_env):
                 "title": f"PagItem {idx:02d} {tag}",
                 "content": f"Body {idx} {tag}",
                 "audience_type": "SELECTED",
-                "recipient_ids": [str(u_active.id)],
+                "department_ids": [str(dept.id)],
             },
             headers=h_author,
         )
@@ -726,10 +787,11 @@ async def test_phases_4_and_5_dm_uniqueness_duplicate_consolidation_and_soft_del
     tag = pg_feed_env["tag"]
     sa_role = pg_feed_env["super_admin_role"]
     dept = await pg_feed_env["make_department"]("dmdept", role_perms=["feed.view", "feed.create"])
+    dept_c = await pg_feed_env["make_department"]("dmdeptc", role_perms=["feed.view", "feed.create"])
 
     u_a, _, h_a = await pg_feed_env["make_user"]("dma", roles=[dept])
     u_b, _, h_b = await pg_feed_env["make_user"]("dmb", roles=[dept])
-    u_c, _, h_c = await pg_feed_env["make_user"]("dmc", roles=[dept])
+    u_c, _, h_c = await pg_feed_env["make_user"]("dmc", roles=[dept_c])
     _, _, h_admin = await pg_feed_env["make_user"]("dmadmin", roles=[sa_role])
 
     # 1. Repeated creation from both directions returns identical canonical conversation
@@ -779,7 +841,7 @@ async def test_phases_4_and_5_dm_uniqueness_duplicate_consolidation_and_soft_del
             "content": f"ACQUISITION VALUATION 99 CRORES {tag}",
             "audience_type": "SELECTED",
             "status": "PUBLISHED",
-            "recipient_ids": [str(u_b.id), str(u_c.id)],
+            "department_ids": [str(dept.id), str(dept_c.id)],
         },
         headers=h_a,
     )
@@ -794,11 +856,11 @@ async def test_phases_4_and_5_dm_uniqueness_duplicate_consolidation_and_soft_del
         )
     ).json()["data"]["id"]
 
-    # Shrink audience to ONLY u_c (revoking u_b): u_b's notification is redacted AND u_b cannot PATCH/DELETE comment!
+    # Shrink audience to ONLY dept_c (revoking dept / u_b): u_b's notification is redacted AND u_b cannot PATCH/DELETE comment!
     assert (
         await client.patch(
             f"/api/v1/feed/posts/{sec_id}",
-            json={"recipient_ids": [str(u_c.id)]},
+            json={"department_ids": [str(dept_c.id)]},
             headers=h_a,
         )
     ).status_code == 200

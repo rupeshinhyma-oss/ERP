@@ -14,6 +14,7 @@ export interface NavSubItem {
   path: string;
   icon?: IconKey;
   permission?: string;
+  anyPermissions?: string[];
   superAdminOnly?: boolean;
 }
 
@@ -23,6 +24,7 @@ export interface NavItem {
   path?: string;
   icon: IconKey;
   permission?: string;
+  anyPermissions?: string[];
   superAdminOnly?: boolean;
   children?: NavSubItem[];
 }
@@ -83,7 +85,24 @@ export const NAV_SECTIONS: NavSection[] = [
     items: [
       { key: "proforma", label: "Proforma", path: "/proforma-invoice/list", icon: "fileText" },
       { key: "sales-process", label: "Sales Process", path: "/sales/process", icon: "shoppingCart" },
-      { key: "discount-payments", label: "Discount Payments", path: "/discount-payments/list", icon: "creditCard" },
+      {
+        key: "discount-payments",
+        label: "Discount Payments",
+        path: "/discount-payments/list",
+        icon: "creditCard",
+        anyPermissions: [
+          "saleorder.view",
+          "saleorder.create",
+          "saleorder.update",
+          "saleorder.accounts",
+          "saleorder.approve",
+          "saleorder.delete",
+          "proforma.approve",
+          "crm.leads.view",
+          "crm.leads.manage",
+          "report.view",
+        ],
+      },
     ],
   },
   {

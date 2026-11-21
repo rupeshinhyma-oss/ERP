@@ -150,7 +150,6 @@ export interface FeedPostCreatePayload {
   audience_type: FeedAudienceType;
   status?: FeedPostStatus;
   department_ids?: string[];
-  recipient_ids?: string[];
 }
 
 export interface FeedPostUpdatePayload {
@@ -159,7 +158,6 @@ export interface FeedPostUpdatePayload {
   audience_type?: FeedAudienceType;
   status?: FeedPostStatus;
   department_ids?: string[];
-  recipient_ids?: string[];
 }
 
 export interface ConversationParticipant {

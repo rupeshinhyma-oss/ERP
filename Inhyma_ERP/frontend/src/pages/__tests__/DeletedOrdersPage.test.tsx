@@ -172,5 +172,32 @@ describe("DeletedOrdersPage", () => {
       expect(screen.queryByText("SO-MP/26-27/0618")).toBeNull();
     });
   });
+
+  it("BUG-001: does not locally remove deleted order row when restore API rejects with 403 Forbidden", async () => {
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    vi.spyOn(window, "alert").mockImplementation(() => {});
+    vi.spyOn(DeletedOrdersApi, "restoreDeletedOrder").mockRejectedValueOnce({
+      status: 403,
+      message: "You do not have permission to perform this action.",
+    });
+
+    await renderComponent();
+
+    const timelineButtons = screen.getAllByRole("button", { name: "Timeline" });
+    fireEvent.click(timelineButtons[0]);
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /Restore Order/i })).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /Restore Order/i }));
+
+    await waitFor(() => {
+      expect(DeletedOrdersApi.restoreDeletedOrder).toHaveBeenCalledWith("del-1");
+    });
+
+    // Order must remain in the table when backend authorization rejects restore
+    expect(screen.getByText("SO-MP/26-27/0618")).toBeTruthy();
+  });
 });
 

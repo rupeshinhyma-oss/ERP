@@ -469,7 +469,16 @@ def create_application() -> FastAPI:
         if ext == "pdf":
             media_type = "application/pdf"
 
-        return FileResponse(target, media_type=media_type, content_disposition_type="inline")
+        return FileResponse(
+            target,
+            media_type=media_type,
+            content_disposition_type="inline",
+            headers={
+                "Cache-Control": "private, no-store",
+                "Referrer-Policy": "no-referrer",
+                "X-Content-Type-Options": "nosniff",
+            },
+        )
 
     # Public static uploads for product images, supplier media, branding logos, and expense receipts
     (uploads_dir / "expenses").mkdir(parents=True, exist_ok=True)

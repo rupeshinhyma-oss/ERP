@@ -219,7 +219,7 @@ export async function fetchOrganizationProfile(): Promise<Organization | null> {
     if (data) {
       setCachedOrganizationProfile(data);
       if (data.company_name) setBrandName(data.company_name);
-      const logo = data.logo_data || data.logo_url || null;
+      const logo = data.logo_url || data.logo_data || null;
       if (logo) setBrandLogo(logo);
       return data;
     }
@@ -229,7 +229,7 @@ export async function fetchOrganizationProfile(): Promise<Organization | null> {
       if (data) {
         setCachedOrganizationProfile(data);
         if (data.company_name) setBrandName(data.company_name);
-        const logo = data.logo_data || data.logo_url || null;
+        const logo = data.logo_url || data.logo_data || null;
         if (logo) setBrandLogo(logo);
         return data;
       }
@@ -246,7 +246,7 @@ export async function resolveBrandInfo(): Promise<{ name: string; logoUrl: strin
     if (profile) {
       return {
         name: profile.company_name?.trim() || getCachedBrandName(),
-        logoUrl: profile.logo_data || profile.logo_url || getCachedBrandLogo(),
+        logoUrl: profile.logo_url || profile.logo_data || getCachedBrandLogo(),
       };
     }
   } catch {

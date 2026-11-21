@@ -441,10 +441,8 @@ export function DeletedOrdersPage({ defaultFilterOpen = false }: { defaultFilter
       await DeletedOrdersApi.restoreDeletedOrder(order.id || order.order_no);
       setItems((prev) => prev.filter((o) => o.id !== order.id && o.order_no !== order.order_no));
       setTimelineOrder(null);
-    } catch (err) {
-      console.warn("Using local state restore for order:", err);
-      setItems((prev) => prev.filter((o) => o.id !== order.id && o.order_no !== order.order_no));
-      setTimelineOrder(null);
+    } catch (err: any) {
+      window.alert(err?.message || "Failed to restore order.");
     }
   };
 

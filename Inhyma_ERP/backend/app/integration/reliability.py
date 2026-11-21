@@ -120,9 +120,15 @@ class PeerCircuitBreakerService:
 
     FAILURE_THRESHOLD: int = 5
     COOLDOWN_SECONDS: int = 30
+    CIRCUIT_TRIP_STATUS_CODES: set[int] = {401, 403, 408, 425, 429}
 
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
+
+    @classmethod
+    def should_trip_on_status(cls, status_code: int) -> bool:
+        """Return True if an HTTP status reflects peer/channel unavailability rather than single-message validation."""
+        return status_code >= 500 or status_code in cls.CIRCUIT_TRIP_STATUS_CODES
 
     async def get_or_create(self, peer_id: str) -> PeerHealthState:
         """Fetch or initialize the circuit state for peer_id."""
@@ -153,11 +159,17 @@ class PeerCircuitBreakerService:
             return True, "CLOSED"
 
         if state.circuit_state == "OPEN":
-            if state.cooldown_until and now >= state.cooldown_until:
-                state.circuit_state = "HALF_OPEN"
-                await self.db.flush()
-                logger.info("Circuit breaker for peer '%s' transitioned to HALF_OPEN (probe allowed).", peer_id)
-                return True, "HALF_OPEN"
+            if state.cooldown_until is not None:
+                cooldown_ts = (
+                    state.cooldown_until
+                    if state.cooldown_until.tzinfo is not None
+                    else state.cooldown_until.replace(tzinfo=timezone.utc)
+                )
+                if now >= cooldown_ts:
+                    state.circuit_state = "HALF_OPEN"
+                    await self.db.flush()
+                    logger.info("Circuit breaker for peer '%s' transitioned to HALF_OPEN (probe allowed).", peer_id)
+                    return True, "HALF_OPEN"
             return False, "OPEN_COOLDOWN"
 
         if state.circuit_state == "HALF_OPEN":
@@ -176,13 +188,14 @@ class PeerCircuitBreakerService:
         await self.db.flush()
 
     async def record_failure(self, peer_id: str, error_code: str = "") -> None:
-        """Record a delivery failure: trips circuit to OPEN if threshold exceeded."""
+        """Record a delivery failure: trips circuit to OPEN if threshold exceeded or probe failed in HALF_OPEN."""
         state = await self.get_or_create(peer_id)
+        was_half_open = state.circuit_state == "HALF_OPEN"
         state.consecutive_failures += 1
         state.consecutive_successes = 0
         state.last_failure_at = _utcnow()
 
-        if state.consecutive_failures >= self.FAILURE_THRESHOLD:
+        if was_half_open or state.consecutive_failures >= self.FAILURE_THRESHOLD:
             state.circuit_state = "OPEN"
             state.cooldown_until = _utcnow() + timedelta(seconds=self.COOLDOWN_SECONDS)
             logger.warning(
@@ -194,7 +207,22 @@ class PeerCircuitBreakerService:
         await self.db.flush()
 
     async def list_all_states(self) -> list[PeerHealthState]:
-        """List all peer health states for operational inspection."""
+        """List all peer health states, advancing expired OPEN cooldowns to HALF_OPEN."""
         stmt = select(PeerHealthState).order_by(PeerHealthState.peer_id.asc())
         res = await self.db.execute(stmt)
-        return list(res.scalars().all())
+        states = list(res.scalars().all())
+        now = _utcnow()
+        updated = False
+        for state in states:
+            if state.circuit_state == "OPEN" and state.cooldown_until is not None:
+                cooldown_ts = (
+                    state.cooldown_until
+                    if state.cooldown_until.tzinfo is not None
+                    else state.cooldown_until.replace(tzinfo=timezone.utc)
+                )
+                if now >= cooldown_ts:
+                    state.circuit_state = "HALF_OPEN"
+                    updated = True
+        if updated:
+            await self.db.flush()
+        return states

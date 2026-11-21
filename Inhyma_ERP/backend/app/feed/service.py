@@ -344,82 +344,67 @@ class FeedService:
     async def _resolve_targeted_audience(
         self,
         department_ids: Sequence[uuid.UUID] | None,
-        recipient_ids: Sequence[uuid.UUID] | None,
+        recipient_ids: Sequence[uuid.UUID] | None = None,
     ) -> tuple[list[Role], list[User], list[User]]:
         """
-        Validate targeted departments and explicitly selected employees separately.
+        Validate targeted departments for announcements.
 
-        Returns ``(validated_departments, explicit_users, union_eligible_users)``.
-        Only ``explicit_users`` are persisted in ``feed_post_recipients`` (`is_explicit=True`).
+        Individual employee targeting (`recipient_ids`) is rejected for new/updated
+        announcements because 1:1 communication belongs in Direct Messages.
+        Historical announcements with `feed_post_recipients` remain readable/renderable.
+        Returns ``(validated_departments, [], eligible_dept_users)``.
         """
         dept_ids_clean = [d for d in (department_ids or []) if d is not None]
         rec_ids_clean = [r for r in (recipient_ids or []) if r is not None]
 
-        if not dept_ids_clean and not rec_ids_clean:
+        if rec_ids_clean:
             raise ValidationException(
-                "Selected audience posts must specify at least one department or recipient employee."
+                "Individual employee targeting is not supported for announcements. "
+                "Use Direct Messages for individual communication, or target Everyone or Departments."
+            )
+
+        if not dept_ids_clean:
+            raise ValidationException(
+                "Department-targeted announcements must specify at least one department."
             )
 
         validated_departments: list[Role] = []
         dept_users: list[User] = []
-        if dept_ids_clean:
-            unique_dept_ids = list(dict.fromkeys(dept_ids_clean))
-            dept_stmt = select(Role).where(
-                Role.id.in_(unique_dept_ids),
-                Role.deleted_at.is_(None),
-                Role.is_system.is_(False),
+        unique_dept_ids = list(dict.fromkeys(dept_ids_clean))
+        dept_stmt = select(Role).where(
+            Role.id.in_(unique_dept_ids),
+            Role.deleted_at.is_(None),
+            Role.is_system.is_(False),
+        )
+        dept_res = await self.session.execute(dept_stmt)
+        found_depts = list(dept_res.scalars().all())
+        found_dept_ids = {d.id for d in found_depts}
+        missing_depts = [str(did) for did in unique_dept_ids if did not in found_dept_ids]
+        if missing_depts:
+            raise ValidationException(
+                f"The following department IDs are invalid, system-only, or do not exist: {', '.join(missing_depts)}"
             )
-            dept_res = await self.session.execute(dept_stmt)
-            found_depts = list(dept_res.scalars().all())
-            found_dept_ids = {d.id for d in found_depts}
-            missing_depts = [str(did) for did in unique_dept_ids if did not in found_dept_ids]
-            if missing_depts:
-                raise ValidationException(
-                    f"The following department IDs are invalid, system-only, or do not exist: {', '.join(missing_depts)}"
-                )
-            validated_departments = found_depts
+        validated_departments = found_depts
 
-            user_stmt = (
-                select(User)
-                .join(UserRole, UserRole.user_id == User.id)
-                .where(
-                    UserRole.role_id.in_(unique_dept_ids),
-                    *self._active_user_role_clauses(),
-                    *self._eligible_user_clauses(),
-                )
-                .distinct()
-            )
-            user_res = await self.session.execute(user_stmt)
-            dept_users = list(user_res.scalars().all())
-
-        validated_indiv_users: list[User] = []
-        if rec_ids_clean:
-            unique_rec_ids = list(dict.fromkeys(rec_ids_clean))
-            rec_stmt = select(User).where(
-                User.id.in_(unique_rec_ids),
+        user_stmt = (
+            select(User)
+            .join(UserRole, UserRole.user_id == User.id)
+            .where(
+                UserRole.role_id.in_(unique_dept_ids),
+                *self._active_user_role_clauses(),
                 *self._eligible_user_clauses(),
             )
-            rec_res = await self.session.execute(rec_stmt)
-            found_rec_users = list(rec_res.scalars().all())
-            found_rec_ids = {u.id for u in found_rec_users}
-            missing_recs = [str(uid) for uid in unique_rec_ids if uid not in found_rec_ids]
-            if missing_recs:
-                raise ValidationException(
-                    f"The following recipient IDs are invalid, inactive, lack ERP login access, or do not exist: {', '.join(missing_recs)}"
-                )
-            validated_indiv_users = found_rec_users
+            .distinct()
+        )
+        user_res = await self.session.execute(user_stmt)
+        dept_users = list(user_res.scalars().all())
 
-        union_dict: dict[uuid.UUID, User] = {u.id: u for u in dept_users}
-        for u in validated_indiv_users:
-            union_dict[u.id] = u
-
-        union_users = list(union_dict.values())
-        if not union_users:
+        if not dept_users:
             raise ValidationException(
                 "The selected audience resolves to zero active eligible employees with login access."
             )
 
-        return validated_departments, validated_indiv_users, union_users
+        return validated_departments, [], dept_users
 
     # ==========================================================================
     # Presentation & Metadata Builders
@@ -451,8 +436,10 @@ class FeedService:
         if comment.deleted_at is not None:
             return False
         if comment.author_id == actor.id:
-            return evaluate_feed_permission(raw_perms, denies, "feed.create") or evaluate_feed_permission(
-                raw_perms, denies, "feed.manage"
+            return (
+                evaluate_feed_permission(raw_perms, denies, "feed.interact")
+                or evaluate_feed_permission(raw_perms, denies, "feed.create")
+                or evaluate_feed_permission(raw_perms, denies, "feed.manage")
             )
         return evaluate_feed_permission(raw_perms, denies, "feed.manage")
 
@@ -830,6 +817,12 @@ class FeedService:
                 f"Post content must not exceed {MAX_FEED_POST_CONTENT_LENGTH:,} characters."
             )
 
+        if data.recipient_ids:
+            raise ValidationException(
+                "Individual employee targeting is not supported for announcements. "
+                "Use Direct Messages for individual communication, or target Everyone or Departments."
+            )
+
         await self._require_permission(actor, "feed.create")
 
         now_utc = datetime.now(timezone.utc)
@@ -839,6 +832,10 @@ class FeedService:
             if isinstance(data.audience_type, FeedAudienceType)
             else data.audience_type
         )
+        if audience_type == FeedAudienceType.ALL.value and data.department_ids:
+            raise ValidationException(
+                "Company-wide ('ALL') announcements must not include department_ids."
+            )
         published_at = now_utc if post_status == FeedPostStatus.PUBLISHED.value else None
 
         post = FeedPost(
@@ -853,20 +850,12 @@ class FeedService:
         await self.session.flush()
 
         if audience_type == FeedAudienceType.SELECTED.value:
-            validated_depts, explicit_users, _ = await self._resolve_targeted_audience(
+            validated_depts, _, _ = await self._resolve_targeted_audience(
                 department_ids=data.department_ids,
                 recipient_ids=data.recipient_ids,
             )
             for dept in validated_depts:
                 self.session.add(FeedPostDepartment(post_id=post.id, department_id=dept.id))
-            for recipient in explicit_users:
-                self.session.add(
-                    FeedPostRecipient(
-                        post_id=post.id,
-                        recipient_id=recipient.id,
-                        is_explicit=True,
-                    )
-                )
             await self.session.flush()
 
         await self.session.commit()
@@ -1025,6 +1014,12 @@ class FeedService:
                     f"Post content must not exceed {MAX_FEED_POST_CONTENT_LENGTH:,} characters."
                 )
 
+        if data.recipient_ids:
+            raise ValidationException(
+                "Individual employee targeting is not supported for announcements. "
+                "Use Direct Messages for individual communication, or target Everyone or Departments."
+            )
+
         await self._require_permission(actor, "feed.create")
 
         stmt = (
@@ -1071,6 +1066,10 @@ class FeedService:
             audience_modified = True
 
         if target_audience == FeedAudienceType.ALL.value:
+            if data.department_ids:
+                raise ValidationException(
+                    "Company-wide ('ALL') announcements must not include department_ids."
+                )
             if prev_audience != FeedAudienceType.ALL.value or data.department_ids is not None or data.recipient_ids is not None:
                 await self.session.execute(
                     delete(FeedPostRecipient).where(FeedPostRecipient.post_id == post.id)
@@ -1080,10 +1079,8 @@ class FeedService:
                 )
         elif (
             data.department_ids is not None
-            or data.recipient_ids is not None
             or (
                 data.audience_type == FeedAudienceType.SELECTED
-                and not any(getattr(r, "is_explicit", True) for r in post.recipients)
                 and not post.targeted_departments
             )
         ):
@@ -1093,15 +1090,10 @@ class FeedService:
                 if data.department_ids is not None
                 else [d.department_id for d in post.targeted_departments]
             )
-            recs_to_resolve = (
-                data.recipient_ids
-                if data.recipient_ids is not None
-                else [r.recipient_id for r in post.recipients if getattr(r, "is_explicit", True)]
-            )
 
-            validated_depts, explicit_users, _ = await self._resolve_targeted_audience(
+            validated_depts, _, _ = await self._resolve_targeted_audience(
                 department_ids=depts_to_resolve,
-                recipient_ids=recs_to_resolve,
+                recipient_ids=[],
             )
 
             await self.session.execute(
@@ -1113,10 +1105,6 @@ class FeedService:
 
             for dept in validated_depts:
                 self.session.add(FeedPostDepartment(post_id=post.id, department_id=dept.id))
-            for rec in explicit_users:
-                self.session.add(
-                    FeedPostRecipient(post_id=post.id, recipient_id=rec.id, is_explicit=True)
-                )
             await self.session.flush()
 
         post.updated_at = now_utc
@@ -1318,7 +1306,7 @@ class FeedService:
                 f"Comment content must not exceed {MAX_FEED_COMMENT_LENGTH:,} characters."
             )
 
-        await self._require_permission(actor, "feed.create")
+        await self._require_permission(actor, "feed.interact")
         raw_perms, denies = await self._get_actor_rbac(actor)
 
         stmt = (
@@ -1428,7 +1416,7 @@ class FeedService:
                 f"Comment content must not exceed {MAX_FEED_COMMENT_LENGTH:,} characters."
             )
 
-        await self._require_permission(actor, "feed.create")
+        await self._require_permission(actor, "feed.interact")
         raw_perms, denies = await self._get_actor_rbac(actor)
 
         post_stmt = (
@@ -1474,10 +1462,11 @@ class FeedService:
     ) -> None:
         """
         Soft-delete a comment after revalidating parent post state/visibility.
-        Authorized for the comment author (`feed.create` or `feed.manage`) or a
-        Feed moderator (`feed.manage`), matching `FeedCommentRead.can_delete`.
+        Authorized for the comment author (`feed.interact`, `feed.create`, or
+        `feed.manage`) or a Feed moderator (`feed.manage`), matching
+        `FeedCommentRead.can_delete`.
         """
-        await self._require_any_permission(actor, "feed.create", "feed.manage")
+        await self._require_any_permission(actor, "feed.interact", "feed.create", "feed.manage")
         raw_perms, denies = await self._get_actor_rbac(actor)
 
         post_stmt = (
@@ -1539,7 +1528,7 @@ class FeedService:
                 f"Invalid reaction type '{data.reaction_type}'. Must be LIKE, CELEBRATE, or SUPPORT."
             )
 
-        await self._require_permission(actor, "feed.create")
+        await self._require_permission(actor, "feed.interact")
 
         stmt = (
             select(FeedPost)
@@ -2087,7 +2076,7 @@ class FeedService:
                 f"Message content must not exceed {MAX_DIRECT_MESSAGE_LENGTH:,} characters."
             )
 
-        await self._require_permission(actor, "feed.create")
+        await self._require_permission(actor, "feed.interact")
 
         conv_stmt = (
             select(FeedConversation)
@@ -2221,7 +2210,7 @@ class FeedService:
                 f"Message content must not exceed {MAX_DIRECT_MESSAGE_LENGTH:,} characters."
             )
 
-        await self._require_permission(actor, "feed.create")
+        await self._require_permission(actor, "feed.interact")
 
         stmt = (
             select(FeedDirectMessage)
@@ -2268,10 +2257,7 @@ class FeedService:
         `conversation.last_message_preview` and participant unread counters so
         deleted message plaintext never lingers in conversation summaries.
         """
-        await self._require_any_permission(actor, "feed.create", "feed.view")
-        _, denies = await self._get_actor_rbac(actor)
-        if "feed.create" in denies:
-            raise ForbiddenException("Permission denied. Direct message modification is restricted.")
+        await self._require_permission(actor, "feed.interact")
 
         stmt = select(FeedDirectMessage).where(
             FeedDirectMessage.id == message_id,

@@ -1,9 +1,9 @@
 """
 Feed and Broadcast Messaging API Routes.
 
-Enforces authentication and Feed RBAC permissions (`feed.view`, `feed.create`,
-`feed.manage`, with strict `deny:feed.*` override precedence) across all
-announcement, interaction, audience-lookup, and 1:1 direct-messaging endpoints.
+Enforces authentication and Feed RBAC permissions (`feed.view`, `feed.interact`,
+`feed.create`, `feed.manage`, with strict `deny:feed.*` override precedence) across
+all announcement, interaction, audience-lookup, and 1:1 direct-messaging endpoints.
 """
 
 from __future__ import annotations
@@ -162,7 +162,7 @@ async def add_post_comment(
     post_id: uuid.UUID,
     payload: FeedCommentCreate,
     service: FeedService = Depends(get_feed_service),
-    current_user: CurrentUser = Depends(require_feed_permission("feed.create")),
+    current_user: CurrentUser = Depends(require_feed_permission("feed.interact")),
 ) -> dict:
     comment = await service.add_comment(actor=current_user, post_id=post_id, data=payload)
     return build_success_response(
@@ -197,7 +197,7 @@ async def update_post_comment(
     comment_id: uuid.UUID,
     payload: FeedCommentUpdate,
     service: FeedService = Depends(get_feed_service),
-    current_user: CurrentUser = Depends(require_feed_permission("feed.create")),
+    current_user: CurrentUser = Depends(require_feed_permission("feed.interact")),
 ) -> dict:
     updated = await service.update_comment(
         actor=current_user, post_id=post_id, comment_id=comment_id, data=payload
@@ -215,7 +215,9 @@ async def delete_post_comment(
     post_id: uuid.UUID,
     comment_id: uuid.UUID,
     service: FeedService = Depends(get_feed_service),
-    current_user: CurrentUser = Depends(require_feed_any_permission("feed.create", "feed.manage")),
+    current_user: CurrentUser = Depends(
+        require_feed_any_permission("feed.interact", "feed.create", "feed.manage")
+    ),
 ) -> dict:
     await service.delete_comment(actor=current_user, post_id=post_id, comment_id=comment_id)
     return build_success_response(
@@ -234,7 +236,7 @@ async def toggle_post_reaction(
     post_id: uuid.UUID,
     payload: FeedReactionToggle,
     service: FeedService = Depends(get_feed_service),
-    current_user: CurrentUser = Depends(require_feed_permission("feed.create")),
+    current_user: CurrentUser = Depends(require_feed_permission("feed.interact")),
 ) -> dict:
     summary = await service.toggle_reaction(actor=current_user, post_id=post_id, data=payload)
     return build_success_response(
@@ -373,7 +375,7 @@ async def send_conversation_message(
     conversation_id: uuid.UUID,
     payload: DirectMessageCreate,
     service: FeedService = Depends(get_feed_service),
-    current_user: CurrentUser = Depends(require_feed_permission("feed.create")),
+    current_user: CurrentUser = Depends(require_feed_permission("feed.interact")),
 ) -> dict:
     message = await service.send_message(
         actor=current_user, conversation_id=conversation_id, data=payload
@@ -391,7 +393,7 @@ async def update_direct_message(
     message_id: uuid.UUID,
     payload: DirectMessageUpdate,
     service: FeedService = Depends(get_feed_service),
-    current_user: CurrentUser = Depends(require_feed_permission("feed.create")),
+    current_user: CurrentUser = Depends(require_feed_permission("feed.interact")),
 ) -> dict:
     updated = await service.update_message(
         actor=current_user, message_id=message_id, data=payload
@@ -408,7 +410,7 @@ async def delete_direct_message(
     request: Request,
     message_id: uuid.UUID,
     service: FeedService = Depends(get_feed_service),
-    current_user: CurrentUser = Depends(require_feed_any_permission("feed.create", "feed.view")),
+    current_user: CurrentUser = Depends(require_feed_permission("feed.interact")),
 ) -> dict:
     await service.delete_message(actor=current_user, message_id=message_id)
     return build_success_response(

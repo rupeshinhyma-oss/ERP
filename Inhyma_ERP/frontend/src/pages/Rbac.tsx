@@ -30,6 +30,8 @@ import type {
 } from "@/types";
 
 import {
+  DEPRECATED_PERMISSION_CODES,
+  filterActivePermissions,
   friendlyPermissionLabel,
   groupPermissionsByModule,
   MODULE_NAMES,
@@ -223,7 +225,7 @@ export function RbacPage() {
     (async () => {
       try {
         const permsRes = await apiGet<Permission[]>("/rbac/permissions");
-        setAllPermissions(permsRes.data || []);
+        setAllPermissions(filterActivePermissions(permsRes.data || []));
         await Promise.all([loadRoles(), loadUsers()]);
       } catch (err) {
         setError(err);
@@ -459,8 +461,10 @@ export function RbacPage() {
       let perms = allPermissions;
       if (!perms || perms.length === 0) {
         const permsRes = await apiGet<Permission[]>("/rbac/permissions");
-        perms = permsRes.data || [];
+        perms = filterActivePermissions(permsRes.data || []);
         setAllPermissions(perms);
+      } else {
+        perms = filterActivePermissions(perms);
       }
       const [effRes, userPermsRes] = await Promise.all([
         apiGet<EffectivePermissionsBreakdown>(`/rbac/users/${userId}/effective-permissions`),
@@ -468,10 +472,17 @@ export function RbacPage() {
       ]);
       setOverridesBreakdown(effRes.data);
 
-      const overrideMap = new Map((userPermsRes.data || []).map((o) => [o.code, o.is_granted]));
-      const roleGranted = new Set(effRes.data.role_permissions || []);
+      const overrideMap = new Map(
+        (userPermsRes.data || [])
+          .filter((o) => !DEPRECATED_PERMISSION_CODES.has(o.code))
+          .map((o) => [o.code, o.is_granted])
+      );
+      const roleGranted = new Set(
+        (effRes.data.role_permissions || []).filter((c) => !DEPRECATED_PERMISSION_CODES.has(c))
+      );
       const initialChecked = new Set<string>();
       for (const code of new Set([...overrideMap.keys(), ...roleGranted])) {
+        if (DEPRECATED_PERMISSION_CODES.has(code)) continue;
         const override = overrideMap.get(code);
         const checked = override === true || (override === undefined && roleGranted.has(code));
         if (checked) initialChecked.add(code);

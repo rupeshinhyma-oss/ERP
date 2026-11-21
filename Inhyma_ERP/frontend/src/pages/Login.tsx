@@ -78,6 +78,11 @@ export function LoginPage() {
     }
   });
   const [brandLogo, setBrandLogoState] = useState<string | null>(() => getCachedBrandLogo());
+  const [forgotOpen, setForgotOpen] = useState(false);
+  const [forgotIdentifier, setForgotIdentifier] = useState("");
+  const [forgotSubmitting, setForgotSubmitting] = useState(false);
+  const [forgotMessage, setForgotMessage] = useState<string | null>(null);
+  const [forgotError, setForgotError] = useState<unknown>(null);
   const identifierRef = useRef<HTMLInputElement>(null);
   const noticeProtectedUntilRef = useRef<number>(0);
 
@@ -301,6 +306,30 @@ export function LoginPage() {
     }
   }
 
+  async function handleForgotSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    const cleanId = forgotIdentifier.trim();
+    if (!cleanId) {
+      setForgotError(new Error("Please enter your username or email."));
+      return;
+    }
+    setForgotSubmitting(true);
+    setForgotError(null);
+    try {
+      const res = await apiPost<{ message?: string }>("/auth/forgot-password", {
+        identifier: cleanId,
+      });
+      setForgotMessage(
+        res?.data?.message ||
+          "If an account matches that username or email, an administrator has been notified to reset your password."
+      );
+    } catch (err) {
+      setForgotError(err);
+    } finally {
+      setForgotSubmitting(false);
+    }
+  }
+
   return (
     <div style={{ minHeight: "100vh", width: "100%", background: "#f8fafc", display: "flex", flexDirection: "column" }}>
       {/* Top Header Logo */}
@@ -309,6 +338,7 @@ export function LoginPage() {
           <img
             src={resolveImageUrl(brandLogo) || "/logo.png"}
             alt={`${brand || "ERP"} Logo`}
+            crossOrigin="anonymous"
             onError={(e) => {
               if (e.currentTarget.src !== window.location.origin + "/logo.png") {
                 e.currentTarget.src = "/logo.png";
@@ -320,11 +350,11 @@ export function LoginPage() {
       </header>
 
       {/* Main Login Content */}
-      <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", padding: "40px 60px" }}>
-        <div style={{ width: "100%", maxWidth: "1350px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: "160px", flexWrap: "wrap" }}>
+      <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", padding: "clamp(24px, 5vw, 40px) clamp(20px, 5vw, 60px)", boxSizing: "border-box" }}>
+        <div style={{ width: "100%", maxWidth: "1350px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: "clamp(32px, 8vw, 160px)", flexWrap: "wrap" }}>
 
           {/* Left Illustration Pane */}
-          <div style={{ flex: 1, minWidth: "320px", display: "flex", justifyContent: "center" }}>
+          <div style={{ flex: 1, minWidth: "min(320px, 100%)", display: "flex", justifyContent: "center" }}>
             <LoginIllustration />
           </div>
 
@@ -362,10 +392,13 @@ export function LoginPage() {
                     Password
                   </label>
                   <a
-                    href="#"
+                    href="#forgot-password"
                     onClick={(e) => {
                       e.preventDefault();
-                      alert("Please contact your system administrator to reset your password.");
+                      setForgotIdentifier(identifier.trim());
+                      setForgotMessage(null);
+                      setForgotError(null);
+                      setForgotOpen(true);
                     }}
                     style={{ fontSize: "12px", color: "#0061f2", fontWeight: 600, textDecoration: "none" }}
                   >
@@ -451,8 +484,143 @@ export function LoginPage() {
         </div>
       </div>
 
+      {forgotOpen && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Reset Password"
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(15, 23, 42, 0.45)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: "16px",
+            zIndex: 9999,
+          }}
+        >
+          <div
+            style={{
+              width: "100%",
+              maxWidth: "400px",
+              background: "#ffffff",
+              borderRadius: "10px",
+              border: "1px solid #e2e8f0",
+              padding: "24px",
+              boxShadow: "0 20px 40px rgba(15,23,42,0.18)",
+            }}
+          >
+            <h3 style={{ margin: "0 0 6px", fontSize: "18px", fontWeight: 700, color: "#1e293b" }}>
+              Reset Password
+            </h3>
+            <p style={{ margin: "0 0 16px", fontSize: "13px", color: "#64748b", lineHeight: 1.5 }}>
+              Enter your username or email to notify your administrator for a password reset.
+            </p>
+            <ErrorBanner error={forgotError} />
+            {forgotMessage ? (
+              <div
+                role="status"
+                style={{
+                  padding: "12px 14px",
+                  borderRadius: "8px",
+                  background: "#f0fdf4",
+                  border: "1px solid #bbf7d0",
+                  color: "#166534",
+                  fontSize: "13px",
+                  lineHeight: 1.5,
+                  marginBottom: "16px",
+                }}
+              >
+                {forgotMessage}
+              </div>
+            ) : (
+              <form onSubmit={handleForgotSubmit}>
+                <label
+                  htmlFor="forgot-identifier"
+                  style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginBottom: "6px" }}
+                >
+                  Username or Email
+                </label>
+                <input
+                  id="forgot-identifier"
+                  type="text"
+                  required
+                  value={forgotIdentifier}
+                  onChange={(e) => setForgotIdentifier(e.target.value)}
+                  placeholder="Enter username or email"
+                  style={{
+                    width: "100%",
+                    padding: "10px 12px",
+                    fontSize: "14px",
+                    borderRadius: "6px",
+                    border: "1px solid #cbd5e1",
+                    boxSizing: "border-box",
+                    marginBottom: "16px",
+                  }}
+                />
+                <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px" }}>
+                  <button
+                    type="button"
+                    onClick={() => setForgotOpen(false)}
+                    style={{
+                      padding: "8px 14px",
+                      fontSize: "13px",
+                      fontWeight: 600,
+                      borderRadius: "6px",
+                      border: "1px solid #cbd5e1",
+                      background: "#ffffff",
+                      color: "#475569",
+                      cursor: "pointer",
+                    }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={forgotSubmitting}
+                    style={{
+                      padding: "8px 16px",
+                      fontSize: "13px",
+                      fontWeight: 700,
+                      borderRadius: "6px",
+                      border: "none",
+                      background: "#003399",
+                      color: "#ffffff",
+                      cursor: forgotSubmitting ? "wait" : "pointer",
+                    }}
+                  >
+                    {forgotSubmitting ? "Submitting..." : "Send Reset Request"}
+                  </button>
+                </div>
+              </form>
+            )}
+            {forgotMessage && (
+              <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                <button
+                  type="button"
+                  onClick={() => setForgotOpen(false)}
+                  style={{
+                    padding: "8px 16px",
+                    fontSize: "13px",
+                    fontWeight: 700,
+                    borderRadius: "6px",
+                    border: "none",
+                    background: "#003399",
+                    color: "#ffffff",
+                    cursor: "pointer",
+                  }}
+                >
+                  Done
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Footer */}
-      <footer style={{ padding: "16px 40px", borderTop: "1px solid #e2e8f0", background: "#ffffff", fontSize: "12px", color: "#64748b", textTransform: "uppercase" }}>
+      <footer style={{ padding: "16px clamp(20px, 5vw, 40px)", borderTop: "1px solid #e2e8f0", background: "#ffffff", fontSize: "12px", color: "#64748b", textTransform: "uppercase" }}>
         © 2026 CREATED BY <span style={{ fontWeight: 700, color: "#0061f2" }}>INHYMA</span>
       </footer>
     </div>

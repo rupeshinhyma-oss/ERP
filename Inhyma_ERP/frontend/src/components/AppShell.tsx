@@ -732,6 +732,9 @@ function Sidebar({
             if (item.children) {
               const visibleChildren = item.children.filter((child) => {
                 if (child.superAdminOnly && !isSuperAdmin) return false;
+                if (child.anyPermissions && child.anyPermissions.length > 0 && !child.anyPermissions.some((p) => hasPermission(p))) {
+                  return false;
+                }
                 return !child.permission || hasPermission(child.permission);
               });
               return { ...item, children: visibleChildren };
@@ -741,6 +744,9 @@ function Sidebar({
           .filter((item) => {
             if (item.children) return item.children.length > 0;
             if (item.superAdminOnly && !isSuperAdmin) return false;
+            if (item.anyPermissions && item.anyPermissions.length > 0 && !item.anyPermissions.some((p) => hasPermission(p))) {
+              return false;
+            }
             return !item.permission || hasPermission(item.permission);
           }),
       })).filter((section) => section.items.length > 0),
@@ -845,6 +851,7 @@ function Sidebar({
             <img
               src={resolveImageUrl(brandLogo) || "/logo.png"}
               alt={`${brandName || "ERP"} Logo`}
+              crossOrigin="anonymous"
               onError={(e) => {
                 if (e.currentTarget.src !== window.location.origin + "/logo.png") {
                   e.currentTarget.src = "/logo.png";
@@ -1462,7 +1469,9 @@ export function AppShell({ activeKey, children, pageClassName }: AppShellProps) 
   if (navItem && activeKey !== "403") {
     const deniedBySuperAdmin = navItem.superAdminOnly && !isSuperAdmin;
     const deniedByPermission = navItem.permission && !hasPermission(navItem.permission);
-    if (deniedBySuperAdmin || deniedByPermission) {
+    const deniedByAnyPermissions =
+      navItem.anyPermissions && navItem.anyPermissions.length > 0 && !navItem.anyPermissions.some((p) => hasPermission(p));
+    if (deniedBySuperAdmin || deniedByPermission || deniedByAnyPermissions) {
       const moduleName = PAGE_TITLES[activeKey] || activeKey;
       return <Navigate to={`/403?module=${encodeURIComponent(moduleName)}`} replace />;
     }

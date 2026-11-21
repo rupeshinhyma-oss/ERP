@@ -21,9 +21,15 @@ import uuid
 from sqlalchemy.exc import IntegrityError
 
 from app.cache.base import CacheBackend
-from app.core.exceptions import ConflictException, ForbiddenException, NotFoundException
+from app.core.exceptions import (
+    ConflictException,
+    ForbiddenException,
+    NotFoundException,
+    ValidationException,
+)
 from app.rbac.models import Permission, Role, UserPermission
 from app.rbac.repository import (
+    DEPRECATED_PERMISSION_CODES,
     PermissionRepository,
     RoleRepository,
     UserPermissionRepository,
@@ -152,11 +158,22 @@ class RBACService:
         return result
 
     async def get_permission_codes_for_role(self, role_id: uuid.UUID) -> list[str]:
-        """List the permission codes granted to a single role."""
+        """List the active (non-deprecated) permission codes granted to a single role."""
         role = await self.role_repository.get_with_permissions(role_id)
         if role is None:
             raise NotFoundException(self.role_not_found_message)
-        return sorted(link.permission.code for link in role.permission_links)
+        return sorted(
+            link.permission.code
+            for link in role.permission_links
+            if link.permission.code not in DEPRECATED_PERMISSION_CODES
+        )
+
+    @staticmethod
+    def _assert_permission_not_deprecated(permission_code: str) -> None:
+        if permission_code in DEPRECATED_PERMISSION_CODES:
+            raise ValidationException(
+                f"Permission {permission_code!r} is obsolete and can no longer be granted."
+            )
 
     # --- Role management ------------------------------------------------------------
     async def create_role(
@@ -195,6 +212,7 @@ class RBACService:
         # behind with only some of its intended permissions granted.
         resolved_permissions: list[Permission] = []
         for perm_code in permission_codes:
+            self._assert_permission_not_deprecated(perm_code)
             permission = await self.permission_repository.get_by_code(perm_code)
             if permission is None:
                 raise NotFoundException(f"Unknown permission code: {perm_code!r}.")
@@ -403,6 +421,7 @@ class RBACService:
             if not any(r.name == "super_admin" for r in roles):
                 raise ForbiddenException("Only Super Administrators can modify Super Administrator permissions.")
         permission = await self.get_permission_or_raise(permission_id)
+        self._assert_permission_not_deprecated(permission.code)
         await self.role_repository.add_permission(role, permission)
         await self.invalidate_user_permissions_cache()
 
@@ -425,7 +444,9 @@ class RBACService:
     async def assign_user_permission(
         self, user_id: uuid.UUID, permission_id: uuid.UUID, is_granted: bool = True, granted_by: uuid.UUID | None = None
     ) -> UserPermission:
-        await self.get_permission_or_raise(permission_id)
+        permission = await self.get_permission_or_raise(permission_id)
+        if is_granted:
+            self._assert_permission_not_deprecated(permission.code)
         link = await self.user_permission_repository.add_permission(user_id, permission_id, is_granted, granted_by)
         await self.invalidate_user_permissions_cache(user_id)
         return link
@@ -443,8 +464,10 @@ class RBACService:
         granted_by: uuid.UUID | None = None,
     ) -> int:
         """Replace all direct permission overrides for a user with the provided list."""
-        for perm_id, _ in overrides:
-            await self.get_permission_or_raise(perm_id)
+        for perm_id, is_granted in overrides:
+            permission = await self.get_permission_or_raise(perm_id)
+            if is_granted:
+                self._assert_permission_not_deprecated(permission.code)
         await self.user_permission_repository.set_user_permissions_bulk(
             user_id, overrides=overrides, granted_by=granted_by
         )
@@ -465,16 +488,24 @@ class RBACService:
         target_id: uuid.UUID,
         cloned_by: uuid.UUID | None = None,
     ) -> int:
-        """Clone all permission links from a source entity (role, user) to a target entity."""
+        """Clone all active (non-deprecated) permission links from a source entity (role, user) to a target entity."""
         source_perm_ids: list[uuid.UUID] = []
         if source_type == "role":
             role = await self.role_repository.get_with_permissions(source_id)
             if not role:
                 raise NotFoundException("Source role not found.")
-            source_perm_ids = [link.permission_id for link in role.permission_links]
+            source_perm_ids = [
+                link.permission_id
+                for link in role.permission_links
+                if link.permission.code not in DEPRECATED_PERMISSION_CODES
+            ]
         elif source_type == "user":
             links = await self.user_permission_repository.list_for_user(source_id)
-            source_perm_ids = [link.permission_id for link in links if link.is_granted]
+            source_perm_ids = [
+                link.permission_id
+                for link in links
+                if link.is_granted and link.permission.code not in DEPRECATED_PERMISSION_CODES
+            ]
         else:
             raise ConflictException("Invalid source_type. Expected: 'role' or 'user'.")
 
@@ -483,13 +514,15 @@ class RBACService:
             role = await self.get_role_or_raise(target_id)
             for perm_id in source_perm_ids:
                 perm = await self.permission_repository.get_by_id(perm_id)
-                if perm:
+                if perm and perm.code not in DEPRECATED_PERMISSION_CODES:
                     await self.role_repository.add_permission(role, perm)
                     cloned_count += 1
         elif target_type == "user":
             for perm_id in source_perm_ids:
-                await self.user_permission_repository.add_permission(target_id, perm_id, is_granted=True, granted_by=cloned_by)
-                cloned_count += 1
+                perm = await self.permission_repository.get_by_id(perm_id)
+                if perm and perm.code not in DEPRECATED_PERMISSION_CODES:
+                    await self.user_permission_repository.add_permission(target_id, perm_id, is_granted=True, granted_by=cloned_by)
+                    cloned_count += 1
         else:
             raise ConflictException("Invalid target_type. Expected: 'role' or 'user'.")
 

@@ -375,14 +375,47 @@ class Settings(BaseSettings):
             creds.append(self.ERP_MAIN_SERVICE_CREDENTIAL)
         if self.ERP_MAIN_SERVICE_CREDENTIAL_PREVIOUS and "CHANGE-ME" not in self.ERP_MAIN_SERVICE_CREDENTIAL_PREVIOUS:
             creds.append(self.ERP_MAIN_SERVICE_CREDENTIAL_PREVIOUS)
-        # Fallback to FEDERATION_SERVICE_CREDENTIAL if ERP_MAIN_SERVICE_CREDENTIAL not set
-        if not creds and self.FEDERATION_SERVICE_CREDENTIAL and "CHANGE-ME" not in self.FEDERATION_SERVICE_CREDENTIAL:
+        if (
+            self.FEDERATION_SERVICE_CREDENTIAL
+            and "CHANGE-ME" not in self.FEDERATION_SERVICE_CREDENTIAL
+            and self.FEDERATION_SERVICE_CREDENTIAL not in creds
+        ):
             creds.append(self.FEDERATION_SERVICE_CREDENTIAL)
         for p in self.PEER_SERVICE_CREDENTIALS.split(","):
             p_clean = p.strip()
             if p_clean and "CHANGE-ME" not in p_clean and p_clean not in creds:
                 creds.append(p_clean)
         return creds
+
+    def get_outbound_service_credential(self) -> str:
+        """Resolve the active non-placeholder service credential matching peer/ERP_Main auth priority."""
+        if self.ERP_MAIN_SERVICE_CREDENTIAL and "CHANGE-ME" not in self.ERP_MAIN_SERVICE_CREDENTIAL:
+            return self.ERP_MAIN_SERVICE_CREDENTIAL
+        if self.FEDERATION_SERVICE_CREDENTIAL and "CHANGE-ME" not in self.FEDERATION_SERVICE_CREDENTIAL:
+            return self.FEDERATION_SERVICE_CREDENTIAL
+        expected = self.get_expected_erp_main_credentials()
+        if expected:
+            return expected[0]
+        return self.FEDERATION_SERVICE_CREDENTIAL
+
+    INTEGRATION_DELIVERY_TIMEOUT_SECONDS: float = Field(
+        default=20.0,
+        description="Read timeout in seconds for outbound cross-ERP event deliveries.",
+    )
+
+    # Inbound Quotation Webhook Security (BUG-008)
+    INBOUND_WEBHOOK_SECRET: str = Field(
+        default="",
+        description="Environment-configured HMAC-SHA256 secret for POST /api/v1/inquiries/inbound-webhook.",
+    )
+    INBOUND_WEBHOOK_REQUIRE_SIGNATURE: bool = Field(
+        default=True,
+        description="Enforce HMAC signature verification on inbound quotation webhooks. Set False only temporarily during sender migration.",
+    )
+    INBOUND_WEBHOOK_MAX_SKEW_SECONDS: int = Field(
+        default=300,
+        description="Maximum allowed timestamp age/skew in seconds for inbound webhook replay protection.",
+    )
 
     ERP_MAIN_URL: str = Field(
         default="",

@@ -143,15 +143,27 @@ async def poll_integration_inbox(payload: dict) -> None:
     (Section 56: "When the target becomes available... events must
     resume" -- the loop must keep running through an outage, not stop).
     """
+    from app.core.config import settings
+
     session_factory = get_sessionmaker()
     async with session_factory() as session:
-        service = ConsumerService(ProcessedEventRepository(session))
+        if (settings.ERP_MAIN_API_BASE_URL or "").strip():
+            service = ConsumerService(ProcessedEventRepository(session))
+            try:
+                await service.poll_and_process()
+            except ConsumerPollError as exc:
+                # Logged, not raised -- see docstring: the loop must survive an outage.
+                logger.warning("Integration inbox poll failed: %s", exc)
+            await session.commit()
+
         try:
-            await service.poll_and_process()
-        except ConsumerPollError as exc:
-            # Logged, not raised -- see docstring: the loop must survive an outage.
-            logger.warning("Integration inbox poll failed: %s", exc)
-        await session.commit()
+            outbox_repo = IntegrationOutboxRepository(session)
+            await outbox_repo.recover_stuck_deliveries(older_than_seconds=120)
+            await IntegrationService(outbox_repo).drain_batch(worker_id="inbox-poll-drain", batch_size=10)
+            await session.commit()
+        except Exception as exc:  # noqa: BLE001
+            await session.rollback()
+            logger.warning("Integration outbox periodic drain failed: %s", exc)
 
         queue_service = QueueService(session)
         await enqueue_poll(

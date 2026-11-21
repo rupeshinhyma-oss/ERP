@@ -32,6 +32,28 @@ class IndustrialZoneRepository(BaseRepository[IndustrialZone]):
     def __init__(self, session: AsyncSession) -> None:
         super().__init__(session, IndustrialZone)
 
+    async def create(self, data: dict[str, Any] | None = None, **field_values: Any) -> IndustrialZone:
+        instance = await super().create(**(data or {}), **field_values)
+        await self.session.refresh(instance)
+        return instance
+
+    async def update(
+        self,
+        instance: IndustrialZone,
+        data: dict[str, Any] | int | None = None,
+        **field_values: Any,
+    ) -> IndustrialZone:
+        if isinstance(data, dict):
+            updated = await super().update(instance, **data, **field_values)
+        else:
+            updated = await super().update(instance, expected_version=data, **field_values)
+        await self.session.refresh(updated)
+        return updated
+
+    async def soft_delete(self, instance: IndustrialZone) -> bool:
+        await super().delete(instance)
+        return True
+
     async def list_zones(
         self,
         *,

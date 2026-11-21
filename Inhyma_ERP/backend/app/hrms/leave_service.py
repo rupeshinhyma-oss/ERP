@@ -19,7 +19,7 @@ from datetime import date, datetime, timedelta, timezone
 from typing import List, Optional
 
 from fastapi import HTTPException, status
-from sqlalchemy import func, select, or_, and_, not_
+from sqlalchemy import func, select, or_, and_, not_, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -1590,6 +1590,31 @@ class HrmsLeaveService:
     # -----------------------------------------------------------------------
     # Leave Requests & Approvals
     # -----------------------------------------------------------------------
+    async def _acquire_employee_leave_lock_and_recheck_overlap(
+        self, employee_id: uuid.UUID, overlap_stmt
+    ) -> None:
+        """
+        Acquire a per-employee PostgreSQL transaction-scoped advisory lock and
+        re-verify bounded overlap existence so concurrent leave submissions for
+        the same employee cannot bypass overlap validation. No-op on non-PG
+        engines or mocked sessions.
+        """
+        if not isinstance(self.db, AsyncSession):
+            return
+        bind = self.db.get_bind()
+        if bind is None or bind.dialect.name != "postgresql":
+            return
+        await self.db.execute(
+            text("SELECT pg_advisory_xact_lock(hashtext(:lock_key))"),
+            {"lock_key": f"hrms_leave_req:{employee_id}"},
+        )
+        locked_overlap = await self.db.execute(overlap_stmt)
+        if locked_overlap.scalar_one_or_none() is not None:
+            raise HTTPException(
+                status_code=400,
+                detail="You already have an overlapping leave request covering part of this period.",
+            )
+
     async def create_leave_request(
         self, employee_id: uuid.UUID, payload: LeaveRequestCreate, user_id: uuid.UUID
     ) -> LeaveRequestRead:
@@ -1605,16 +1630,20 @@ class HrmsLeaveService:
                 detail="This leave type is not currently available under your active leave plan.",
             )
 
-        # Overlapping leave validation
-        overlap_res = await self.db.execute(
-            select(HrmsLeaveRequest).where(
+        # Overlapping leave validation (bounded to 1 row so multiple overlapping
+        # PENDING/APPROVED requests return 400 instead of MultipleResultsFound 500)
+        overlap_stmt = (
+            select(HrmsLeaveRequest.id)
+            .where(
                 HrmsLeaveRequest.employee_id == employee_id,
                 HrmsLeaveRequest.status.in_(["PENDING", "APPROVED"]),
                 HrmsLeaveRequest.from_date <= payload.to_date,
                 HrmsLeaveRequest.to_date >= payload.from_date,
             )
+            .limit(1)
         )
-        if overlap_res.scalar_one_or_none():
+        overlap_res = await self.db.execute(overlap_stmt)
+        if overlap_res.scalar_one_or_none() is not None:
             raise HTTPException(
                 status_code=400,
                 detail="You already have an overlapping leave request covering part of this period.",
@@ -1656,6 +1685,11 @@ class HrmsLeaveService:
                     detail=f"No leave balance record found for {lt.name}.",
                 )
 
+            # Serialize concurrent submissions per employee on PostgreSQL inside the
+            # final transaction (after any balance-init commit) so overlapping leave
+            # requests cannot race past validation.
+            await self._acquire_employee_leave_lock_and_recheck_overlap(employee_id, overlap_stmt)
+
             # Serialize reservation: acquire an exclusive row lock on HrmsEmployeeLeaveBalance
             # inside the current transaction before summing pending requests and inserting the request.
             lock_stmt = (
@@ -1693,6 +1727,8 @@ class HrmsLeaveService:
                     status_code=400,
                     detail=f"Insufficient {lt.name} balance. Available: {avail_disp} days (including pending requests).",
                 )
+        else:
+            await self._acquire_employee_leave_lock_and_recheck_overlap(employee_id, overlap_stmt)
 
         req = HrmsLeaveRequest(
             employee_id=employee_id,

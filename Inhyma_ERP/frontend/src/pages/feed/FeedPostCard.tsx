@@ -485,7 +485,7 @@ export function FeedPostCard({
               className={`feed-reaction-btn ${reactionUser === "LIKE" ? "feed-reaction-active" : ""}`}
               onClick={() => handleReaction("LIKE")}
               disabled={!canInteract || isReacting}
-              title={canInteract ? "Like" : "Requires feed.create permission to react"}
+              title={canInteract ? "Like" : "Requires feed.interact permission to react"}
               data-testid={`reaction-like-${post.id}`}
             >
               <span>👍</span>
@@ -502,7 +502,7 @@ export function FeedPostCard({
               className={`feed-reaction-btn ${reactionUser === "CELEBRATE" ? "feed-reaction-active" : ""}`}
               onClick={() => handleReaction("CELEBRATE")}
               disabled={!canInteract || isReacting}
-              title={canInteract ? "Celebrate" : "Requires feed.create permission to react"}
+              title={canInteract ? "Celebrate" : "Requires feed.interact permission to react"}
               data-testid={`reaction-celebrate-${post.id}`}
             >
               <span>🎉</span>
@@ -519,7 +519,7 @@ export function FeedPostCard({
               className={`feed-reaction-btn ${reactionUser === "SUPPORT" ? "feed-reaction-active" : ""}`}
               onClick={() => handleReaction("SUPPORT")}
               disabled={!canInteract || isReacting}
-              title={canInteract ? "Support" : "Requires feed.create permission to react"}
+              title={canInteract ? "Support" : "Requires feed.interact permission to react"}
               data-testid={`reaction-support-${post.id}`}
             >
               <span>❤️</span>

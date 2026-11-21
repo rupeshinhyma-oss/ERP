@@ -14,6 +14,7 @@ interface FeedDirectMessagesProps {
   currentUserId?: string;
   initialConversationId?: string | null;
   canCreateMessage?: boolean;
+  canReplyMessage?: boolean;
   onConversationSelect?: (conversationId: string | null) => void;
   onUnreadCountChange?: (count: number) => void;
 }
@@ -22,9 +23,11 @@ export function FeedDirectMessages({
   currentUserId,
   initialConversationId,
   canCreateMessage = true,
+  canReplyMessage,
   onConversationSelect,
   onUnreadCountChange,
 }: FeedDirectMessagesProps) {
+  const canReply = canReplyMessage ?? canCreateMessage;
   const showToast = useToast();
   const showToastRef = useRef(showToast);
   showToastRef.current = showToast;
@@ -249,7 +252,7 @@ export function FeedDirectMessages({
   // Send message
   const handleSendMessage = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    if (!canCreateMessage) return;
+    if (!canReply) return;
     const content = newMessageText.trim();
     if (!content || !selectedConvId || sendingMessage) return;
     if (newMessageText.length > MAX_DIRECT_MESSAGE_LENGTH) {
@@ -649,7 +652,7 @@ export function FeedDirectMessages({
                           )}
                         </div>
 
-                        {isOwn && !isEditingThis && canCreateMessage && (
+                        {isOwn && !isEditingThis && canReply && (
                           <div className="feed-dm-msg-actions">
                             <button
                               type="button"
@@ -681,7 +684,7 @@ export function FeedDirectMessages({
             </div>
 
             {/* Chat Composer Footer */}
-            {canCreateMessage && (
+            {canReply && (
               <form onSubmit={handleSendMessage} className="feed-dm-chat-footer">
                 <textarea
                   ref={messageInputRef}

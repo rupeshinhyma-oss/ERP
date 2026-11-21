@@ -21,8 +21,8 @@ from app.events.channels import module_channel, user_channel
 from app.events.dispatcher import EventDispatcher
 from app.events.models import Event
 from app.notifications.service import NotificationService
-from app.org_structure.models import DepartmentLeadershipAssignment, EmployeeReportingRelationship
-from app.rbac.models import Role, UserRole
+from app.org_structure.models import DepartmentLeadershipAssignment, EmployeeReportingRelationship, OrgRecordStatus
+from app.rbac.models import Role, RoleAssignmentStatus, UserRole
 from app.tasks.models import (
     ApprovalStatus,
     DependencyType,
@@ -56,7 +56,11 @@ from app.tasks.recurring_calculator import (
     calculate_preview_details,
     calculate_upcoming_occurrences,
 )
-from app.tasks.repository import TaskRepository
+from app.tasks.repository import (
+    TaskRepository,
+    can_view_all_tasks,
+    is_task_admin_manager,
+)
 from app.tasks.schemas import (
     CapacityDayAllocation,
     CapacityViewResponse,
@@ -117,23 +121,79 @@ class TaskService:
         self.dispatcher = dispatcher or EventDispatcher()
 
     # --- Helpers ---
+    def _can_view_all_tasks(self, current_user: Any) -> bool:
+        """
+        Return True for actors with all-department Enterprise Tasks READ visibility:
+        - Admin (`is_super_admin` / `super_admin` / `*`),
+        - Admin-approved read-only viewer (`task.all_view`), or
+        - Task Manager (`task.manage`).
+        Obsolete `task.organization_view` is intentionally ignored.
+        """
+        if current_user is None:
+            return False
+        user_perms = set(getattr(current_user, "permissions", []) or [])
+        is_super = bool(
+            getattr(current_user, "is_super_admin", False)
+            or getattr(current_user, "is_superuser", False)
+            or getattr(current_user, "role", "") == "super_admin"
+        )
+        return can_view_all_tasks(user_perms, is_super_admin=is_super)
+
+    def _is_task_admin_manager(self, current_user: Any) -> bool:
+        """
+        Return True ONLY for actors with administrative task MUTATION privileges:
+        - Admin (`is_super_admin` / `super_admin` / `*`), or
+        - Explicit `task.manage`.
+        Read-only visibility (`task.all_view`, `task.department_view`) and obsolete
+        `task.organization_view` NEVER grant administrative mutation privileges.
+        """
+        if current_user is None:
+            return False
+        user_perms = set(getattr(current_user, "permissions", []) or [])
+        is_super = bool(
+            getattr(current_user, "is_super_admin", False)
+            or getattr(current_user, "is_superuser", False)
+            or getattr(current_user, "role", "") == "super_admin"
+        )
+        return is_task_admin_manager(user_perms, is_super_admin=is_super)
+
+    async def _resolve_user_department_scope_ids(self, current_user: Any) -> set[uuid.UUID]:
+        """
+        Resolve department IDs for which a non-admin user has department-wide task visibility:
+        - Active DepartmentLeadershipAssignment -> managed department(s).
+        - Explicit `task.department_view` permission -> user's assigned department(s).
+        - Plain Employee -> empty set (My Tasks only).
+        """
+        actor_id = getattr(current_user, "id", None)
+        if not actor_id:
+            return set()
+        user_perms = set(getattr(current_user, "permissions", []) or [])
+        managed_raw = await self.repository.get_user_managed_department_ids(actor_id)
+        managed = set(managed_raw) if isinstance(managed_raw, (set, list, tuple)) else set()
+        if managed:
+            return managed
+        if "task.department_view" in user_perms:
+            if hasattr(self.repository, "get_user_assigned_department_ids"):
+                assigned_raw = await self.repository.get_user_assigned_department_ids(actor_id)
+                if isinstance(assigned_raw, (set, list, tuple)) and assigned_raw:
+                    return set(assigned_raw)
+            permitted_raw = await self.repository.get_user_permitted_department_ids(actor_id)
+            if isinstance(permitted_raw, (set, list, tuple)):
+                return set(permitted_raw)
+        return set()
+
     async def _assert_can_mutate_task(self, task: Task, current_user: Any, action: str = "update") -> None:
         """
-        Enforce strict Object-Level Authorization (BUG-01 & BUG-02).
+        Enforce strict Object-Level Authorization for task mutations.
+        Viewing permissions (`task.view`, `task.department_view`, `task.all_view`)
+        NEVER grant mutation access to unrelated tasks.
         Allowed actors:
-          - Super Admin / explicit task.manage / task.organization_view
+          - Admin (`is_super_admin` / `super_admin` / `*`) or administrative `task.manage`
           - Creator (for update or delete)
           - Assignees (for update/assign/dependency/subtasks; delete restricted)
-          - Department Manager of creator or any assignee
+          - Active Department Manager of creator or any assignee
         """
-        user_perms = set(getattr(current_user, "permissions", []))
-        is_super_admin = (
-            "super_admin" in user_perms
-            or "task.organization_view" in user_perms
-            or "task.manage" in user_perms
-            or "*" in user_perms
-        )
-        if is_super_admin:
+        if self._is_task_admin_manager(current_user):
             return
 
         actor_id = getattr(current_user, "id", None)
@@ -149,18 +209,22 @@ class TaskService:
         if is_assignee and action != "delete":
             return
 
-        # Department Manager check: verify if current_user is manager for creator's or assignees' departments
+        # Active Department Manager check: verify current_user actively manages creator's or assignees' department(s)
         target_user_ids = {task.created_by} if task.created_by else set()
         for a in getattr(task, "assignees", []):
             if getattr(a, "user_id", None):
                 target_user_ids.add(a.user_id)
 
         if target_user_ids:
-            dept_subq = select(UserRole.role_id).where(UserRole.user_id.in_(target_user_ids))
+            dept_subq = select(UserRole.role_id).where(
+                UserRole.user_id.in_(target_user_ids),
+                or_(UserRole.status == RoleAssignmentStatus.ACTIVE, UserRole.status.is_(None)),
+            )
             mgr_stmt = (
                 select(DepartmentLeadershipAssignment.id)
                 .where(
                     DepartmentLeadershipAssignment.employee_id == actor_id,
+                    DepartmentLeadershipAssignment.status == OrgRecordStatus.ACTIVE,
                     DepartmentLeadershipAssignment.department_id.in_(dept_subq),
                 )
                 .limit(1)
@@ -168,10 +232,6 @@ class TaskService:
             res = await self.repository.session.execute(mgr_stmt)
             if res.scalar_one_or_none():
                 return
-
-        # If action is delete and user has explicit task.delete
-        if action == "delete" and "task.delete" in user_perms and task.created_by == actor_id:
-            return
 
         raise ForbiddenException(f"You do not have permission to {action} this task.")
 
@@ -199,23 +259,17 @@ class TaskService:
 
     async def _assert_can_view_task(self, task: Task, current_user: Any) -> None:
         """
-        Enforce strict Read Authorization.
+        Enforce strict Read Authorization across all Enterprise Tasks endpoints.
         Allowed viewers:
-          - Super Admin / explicit task.manage / task.organization_view
-          - Creator of the task
+          - Admin (`is_super_admin` / `super_admin` / `*`), Admin-approved (`task.all_view`),
+            or administrative task manager (`task.manage`)
+          - Creator or designated Approver of the task
           - Assignees and Watchers on the task
-          - Department Manager of creator or any assignee
-          - Members of the same department as creator or assignees if user has task.department_view
+          - Department Manager (active DepartmentLeadershipAssignment or explicit `task.department_view`)
+            for tasks belonging to their own/managed department(s)
+        Plain Employees (only `task.view`) can NEVER view other employees' or department tasks.
         """
-        user_perms = set(getattr(current_user, "permissions", []))
-        is_super_admin = (
-            getattr(current_user, "is_super_admin", False)
-            or "super_admin" in user_perms
-            or "task.organization_view" in user_perms
-            or "task.manage" in user_perms
-            or "*" in user_perms
-        )
-        if is_super_admin:
+        if self._can_view_all_tasks(current_user):
             return
 
         actor_id = getattr(current_user, "id", None)
@@ -232,25 +286,28 @@ class TaskService:
         if is_participant:
             return
 
-        # Check if actor is an authorized department manager for this task's department
+        # Department-level visibility (Department Managers only — active leadership or `task.department_view`)
+        dept_scope_ids = await self._resolve_user_department_scope_ids(current_user)
         task_dept_id, _ = await self._resolve_task_department(task.id)
-        if task_dept_id:
-            managed_depts = await self.repository.get_user_managed_department_ids(actor_id)
-            if task_dept_id in managed_depts:
-                return
+        if task_dept_id and task_dept_id in dept_scope_ids:
+            return
 
-        # Target participants: creator + assignees
+        # Check whether any task participant (creator / assignees) belongs to an authorized department
         target_user_ids = {task.created_by} if task.created_by else set()
         for a in getattr(task, "assignees", []):
             if getattr(a, "user_id", None):
                 target_user_ids.add(a.user_id)
 
         if target_user_ids:
-            dept_subq = select(UserRole.role_id).where(UserRole.user_id.in_(target_user_ids))
+            dept_subq = select(UserRole.role_id).where(
+                UserRole.user_id.in_(target_user_ids),
+                or_(UserRole.status == RoleAssignmentStatus.ACTIVE, UserRole.status.is_(None)),
+            )
             mgr_stmt = (
                 select(DepartmentLeadershipAssignment.id)
                 .where(
                     DepartmentLeadershipAssignment.employee_id == actor_id,
+                    DepartmentLeadershipAssignment.status == OrgRecordStatus.ACTIVE,
                     DepartmentLeadershipAssignment.department_id.in_(dept_subq),
                 )
                 .limit(1)
@@ -258,6 +315,34 @@ class TaskService:
             res = await self.repository.session.execute(mgr_stmt)
             if res.scalar_one_or_none():
                 return
+
+            if dept_scope_ids:
+                # Also allow if participant is an active member or active leader in actor's scoped department(s)
+                scoped_member_stmt = (
+                    select(UserRole.id)
+                    .where(
+                        UserRole.user_id.in_(target_user_ids),
+                        UserRole.role_id.in_(dept_scope_ids),
+                        or_(UserRole.status == RoleAssignmentStatus.ACTIVE, UserRole.status.is_(None)),
+                    )
+                    .limit(1)
+                )
+                member_res = await self.repository.session.execute(scoped_member_stmt)
+                if member_res.scalar_one_or_none():
+                    return
+
+                scoped_leader_stmt = (
+                    select(DepartmentLeadershipAssignment.id)
+                    .where(
+                        DepartmentLeadershipAssignment.employee_id.in_(target_user_ids),
+                        DepartmentLeadershipAssignment.department_id.in_(dept_scope_ids),
+                        DepartmentLeadershipAssignment.status == OrgRecordStatus.ACTIVE,
+                    )
+                    .limit(1)
+                )
+                leader_res = await self.repository.session.execute(scoped_leader_stmt)
+                if leader_res.scalar_one_or_none():
+                    return
 
         raise ForbiddenException("You do not have permission to view this task.")
 
@@ -391,6 +476,7 @@ class TaskService:
         *,
         current_user_id: uuid.UUID,
         user_permissions: set[str],
+        is_super_admin: bool = False,
         view_mode: str = "all",
         department_id: uuid.UUID | None = None,
         department_ids: list[uuid.UUID] | None = None,
@@ -412,6 +498,7 @@ class TaskService:
         tasks, total = await self.repository.list_tasks(
             current_user_id=current_user_id,
             user_permissions=user_permissions,
+            is_super_admin=is_super_admin,
             view_mode=view_mode,
             department_id=department_id,
             department_ids=department_ids,
@@ -479,6 +566,7 @@ class TaskService:
             parent = await self.repository.get_by_id(payload.parent_task_id)
             if not parent:
                 raise ValidationException("Specified parent task does not exist.")
+            await self._assert_can_view_task(parent, current_user)
 
         if payload.sprint_id:
             sprint = await self.repository.get_sprint_by_id(payload.sprint_id)
@@ -681,6 +769,7 @@ class TaskService:
             parent = await self.repository.get_by_id(payload.parent_task_id)
             if not parent:
                 raise ValidationException("Specified parent task does not exist.")
+            await self._assert_can_view_task(parent, current_user)
 
         if payload.sprint_id is not None:
             sprint = await self.repository.get_sprint_by_id(payload.sprint_id)
@@ -1006,20 +1095,16 @@ class TaskService:
         task = await self.get_task(task_id, current_user=current_user)
         await self._assert_can_mutate_task(task, current_user, action="assign users to")
 
-        user_perms = set(getattr(current_user, "permissions", []))
-        is_super = (
-            getattr(current_user, "is_super_admin", False)
-            or "super_admin" in user_perms
-            or "task.manage" in user_perms
-            or "*" in user_perms
-        )
-        if not is_super and user_ids:
+        if not self._is_task_admin_manager(current_user) and user_ids:
             managed_depts = await self.repository.get_user_managed_department_ids(current_user.id)
             if managed_depts:
-                dept_users_subq = select(UserRole.user_id).where(UserRole.role_id.in_(managed_depts))
+                dept_users_subq = select(UserRole.user_id).where(
+                    UserRole.role_id.in_(managed_depts),
+                    or_(UserRole.status == RoleAssignmentStatus.ACTIVE, UserRole.status.is_(None)),
+                )
                 lead_users_subq = select(DepartmentLeadershipAssignment.employee_id).where(
                     DepartmentLeadershipAssignment.department_id.in_(managed_depts),
-                    DepartmentLeadershipAssignment.status == "ACTIVE",
+                    DepartmentLeadershipAssignment.status == OrgRecordStatus.ACTIVE,
                 )
                 allowed_res = await self.repository.session.execute(dept_users_subq.union(lead_users_subq))
                 allowed_uids = set(allowed_res.scalars().all()) | {current_user.id}
@@ -1027,7 +1112,10 @@ class TaskService:
                     raise ForbiddenException("Cannot assign users outside your managed department(s).")
             else:
                 assigned_depts = await self.repository.get_user_assigned_department_ids(current_user.id)
-                dept_users_subq = select(UserRole.user_id).where(UserRole.role_id.in_(assigned_depts))
+                dept_users_subq = select(UserRole.user_id).where(
+                    UserRole.role_id.in_(assigned_depts),
+                    or_(UserRole.status == RoleAssignmentStatus.ACTIVE, UserRole.status.is_(None)),
+                )
                 allowed_res = await self.repository.session.execute(dept_users_subq)
                 allowed_uids = set(allowed_res.scalars().all()) | {current_user.id}
                 if set(user_ids) - allowed_uids:
@@ -1257,16 +1345,7 @@ class TaskService:
         if not attachment:
             raise NotFoundException(f"Attachment with ID {attachment_id} not found.")
         task = await self.get_task(attachment.task_id, current_user=current_user)
-        user_perms = set(getattr(current_user, "permissions", []))
-        is_super = (
-            getattr(current_user, "is_super_admin", False)
-            or getattr(current_user, "is_superuser", False)
-            or getattr(current_user, "role", "") == "super_admin"
-            or "super_admin" in user_perms
-            or "*" in user_perms
-            or "task.manage" in user_perms
-        )
-        if not is_super:
+        if not self._is_task_admin_manager(current_user):
             await self._assert_can_mutate_task(task, current_user, action="delete attachment from")
             if attachment.uploaded_by != current_user.id:
                 is_creator = task.created_by == current_user.id
@@ -1371,16 +1450,7 @@ class TaskService:
         if not vn:
             raise NotFoundException(f"Voice note with ID {voice_note_id} not found.")
         task = await self.get_task(vn.task_id, current_user=current_user)
-        user_perms = set(getattr(current_user, "permissions", []))
-        is_super = (
-            getattr(current_user, "is_super_admin", False)
-            or getattr(current_user, "is_superuser", False)
-            or getattr(current_user, "role", "") == "super_admin"
-            or "super_admin" in user_perms
-            or "*" in user_perms
-            or "task.manage" in user_perms
-        )
-        if not is_super:
+        if not self._is_task_admin_manager(current_user):
             await self._assert_can_mutate_task(task, current_user, action="delete voice note from")
             uploaded_by = getattr(vn, "uploaded_by", None) or getattr(vn, "created_by", None)
             if uploaded_by != current_user.id:
@@ -2046,13 +2116,14 @@ class TaskService:
         if not comment:
             raise NotFoundException(f"Comment with ID {comment_id} not found.")
 
+        # Enforce read authorization on parent task BEFORE mutating reactions
+        task = await self.get_task(comment.task_id, current_user=current_user)
         added = await self.repository.toggle_reaction(
             user_id=current_user.id,
             emoji=emoji,
             comment_id=comment.id,
         )
         await self.repository.session.commit()
-        task = await self.get_task(comment.task_id, current_user=current_user)
         await self._broadcast_task_event(
             "TASK_REACTION",
             task,
@@ -2070,7 +2141,7 @@ class TaskService:
     ) -> TaskDependency:
         task = await self.get_task(task_id, current_user=current_user)
         await self._assert_can_mutate_task(task, current_user, action="add dependency to")
-        dep_task = await self.repository.get_task_by_id(payload.depends_on_task_id)
+        dep_task = await self.get_task(payload.depends_on_task_id, current_user=current_user)
         if not dep_task:
             raise NotFoundException(f"Target task with ID {payload.depends_on_task_id} not found.")
 
@@ -2354,7 +2425,8 @@ class TaskService:
                 failed_ids.append(tid)
                 continue
             try:
-                await self._assert_can_mutate_task(task, current_user, action=f"bulk {payload.action.lower()}")
+                mutate_action = "delete" if payload.action == "DELETE" else f"bulk {payload.action.lower()}"
+                await self._assert_can_mutate_task(task, current_user, action=mutate_action)
                 authorized_task_ids.append(tid)
             except ForbiddenException:
                 failed_ids.append(tid)
@@ -2433,12 +2505,41 @@ class TaskService:
         return TaskLabelRead.model_validate(label)
 
     # --- Sprints ---
-    async def list_sprints(self, status: SprintStatus | None = None) -> list[TaskSprintRead]:
+    async def list_sprints(
+        self,
+        status: SprintStatus | None = None,
+        current_user: Any | None = None,
+    ) -> list[TaskSprintRead]:
         sprints = await self.repository.list_sprints(status=status)
+        can_view_all = current_user is None or self._can_view_all_tasks(current_user)
+        scoped_dept_users: set[uuid.UUID] | None = None
+        actor_id = getattr(current_user, "id", None) if current_user is not None else None
+        if not can_view_all and actor_id is not None:
+            dept_scope_ids = await self._resolve_user_department_scope_ids(current_user)
+            if dept_scope_ids:
+                scoped_dept_users = (await self.repository.get_department_user_ids(dept_scope_ids)) | {actor_id}
+
         result = []
         for s in sprints:
-            t_count = len(getattr(s, "tasks", []))
-            comp_count = sum(1 for t in getattr(s, "tasks", []) if getattr(t, "status", None) == "DONE" or getattr(getattr(t, "status", None), "value", None) == "DONE")
+            raw_tasks = [t for t in getattr(s, "tasks", []) if getattr(t, "deleted_at", None) is None]
+            if can_view_all or actor_id is None:
+                visible_tasks = raw_tasks
+            elif scoped_dept_users is not None:
+                visible_tasks = [
+                    t for t in raw_tasks
+                    if t.created_by in scoped_dept_users
+                    or getattr(t, "approver_id", None) in scoped_dept_users
+                    or any(getattr(a, "user_id", None) in scoped_dept_users for a in (getattr(t, "assignees", []) or []))
+                ]
+            else:
+                visible_tasks = [
+                    t for t in raw_tasks
+                    if t.created_by == actor_id
+                    or getattr(t, "approver_id", None) == actor_id
+                    or any(getattr(a, "user_id", None) == actor_id for a in (getattr(t, "assignees", []) or []))
+                ]
+            t_count = len(visible_tasks)
+            comp_count = sum(1 for t in visible_tasks if getattr(t, "status", None) == "DONE" or getattr(getattr(t, "status", None), "value", None) == "DONE")
             st_val = getattr(s, "status", "FUTURE")
             read_obj = TaskSprintRead(
                 id=s.id,
@@ -2569,20 +2670,27 @@ class TaskService:
         current_user: Any | None = None,
     ) -> WorkloadDashboardResponse:
         target_dept_id = department_id
-        if current_user is not None:
-            is_super = getattr(current_user, "is_superuser", False) or getattr(current_user, "role", "") == "super_admin"
-            user_perms = getattr(current_user, "permissions", set()) or set()
-            if not is_super and "task.organization_view" not in user_perms:
-                permitted_depts = await self.repository.get_user_permitted_department_ids(current_user.id)
-                if not permitted_depts:
-                    return WorkloadDashboardResponse(users=[], total_tasks=0)
-                if department_id:
-                    if department_id not in permitted_depts:
+        target_dept_ids: set[uuid.UUID] | None = None
+        target_user_id: uuid.UUID | None = None
+        if current_user is not None and not self._can_view_all_tasks(current_user):
+            dept_scope_ids = await self._resolve_user_department_scope_ids(current_user)
+            if not dept_scope_ids:
+                # Plain Employee: strictly own workload only; cannot access department workload
+                if department_id is not None:
+                    raise ForbiddenException("You do not have permission to view workload for this department.")
+                target_user_id = current_user.id
+            else:
+                if department_id is not None:
+                    if department_id not in dept_scope_ids:
                         raise ForbiddenException("You do not have permission to view workload for this department.")
+                    target_dept_id = department_id
                 else:
-                    primary_dept = await self.repository.get_user_primary_department_id(current_user.id)
-                    target_dept_id = primary_dept if (primary_dept and primary_dept in permitted_depts) else sorted(permitted_depts)[0]
-        data = await self.repository.get_team_workload(department_id=target_dept_id)
+                    target_dept_ids = dept_scope_ids
+        data = await self.repository.get_team_workload(
+            department_id=target_dept_id,
+            department_ids=target_dept_ids,
+            user_id=target_user_id,
+        )
         users = [UserWorkloadSummary.model_validate(d) for d in data]
         total_tasks = sum(u.open_tasks_count + u.in_progress_tasks_count + u.completed_tasks_count for u in users)
         return WorkloadDashboardResponse(users=users, total_tasks=total_tasks)
@@ -2595,20 +2703,29 @@ class TaskService:
         current_user: Any | None = None,
     ) -> CapacityViewResponse:
         target_dept_id = department_id
-        if current_user is not None:
-            is_super = getattr(current_user, "is_superuser", False) or getattr(current_user, "role", "") == "super_admin"
-            user_perms = getattr(current_user, "permissions", set()) or set()
-            if not is_super and "task.organization_view" not in user_perms:
-                permitted_depts = await self.repository.get_user_permitted_department_ids(current_user.id)
-                if not permitted_depts:
-                    return CapacityViewResponse(users=[], start_date=start_date, end_date=end_date)
-                if department_id:
-                    if department_id not in permitted_depts:
+        target_dept_ids: set[uuid.UUID] | None = None
+        target_user_id: uuid.UUID | None = None
+        if current_user is not None and not self._can_view_all_tasks(current_user):
+            dept_scope_ids = await self._resolve_user_department_scope_ids(current_user)
+            if not dept_scope_ids:
+                # Plain Employee: strictly own capacity only; cannot access department capacity
+                if department_id is not None:
+                    raise ForbiddenException("You do not have permission to view capacity for this department.")
+                target_user_id = current_user.id
+            else:
+                if department_id is not None:
+                    if department_id not in dept_scope_ids:
                         raise ForbiddenException("You do not have permission to view capacity for this department.")
+                    target_dept_id = department_id
                 else:
-                    primary_dept = await self.repository.get_user_primary_department_id(current_user.id)
-                    target_dept_id = primary_dept if (primary_dept and primary_dept in permitted_depts) else sorted(permitted_depts)[0]
-        data = await self.repository.get_capacity_grid(start_date=start_date, end_date=end_date, department_id=target_dept_id)
+                    target_dept_ids = dept_scope_ids
+        data = await self.repository.get_capacity_grid(
+            start_date=start_date,
+            end_date=end_date,
+            department_id=target_dept_id,
+            department_ids=target_dept_ids,
+            user_id=target_user_id,
+        )
         users = []
         for d in data:
             allocs = [CapacityDayAllocation(date=a["date"], task_ids=a["task_ids"], task_count=a["task_count"]) for a in d["allocations"]]
@@ -2712,10 +2829,72 @@ class TaskService:
         )
         return TaskRecurringScheduleRead.model_validate(created)
 
-    async def get_recurring_schedule(self, schedule_id: uuid.UUID) -> TaskRecurringScheduleRead:
+    async def _assert_can_access_recurring_schedule(
+        self,
+        schedule: TaskRecurringSchedule,
+        current_user: Any | None,
+        *,
+        for_mutation: bool = False,
+    ) -> None:
+        """
+        Enforce role-based visibility and mutation boundaries on recurring schedules:
+        - Admin / Task Manager (`task.manage`): full read & mutation access.
+        - Admin-approved read viewer (`task.all_view`): read access across all departments;
+          cannot mutate schedules they do not own/manage.
+        - Department Manager: read access to own/managed department schedules; mutation
+          allowed if creator, assigned manager, or active leader of the schedule's department.
+        - Plain Employee: read access ONLY to schedules assigned to / created by / managed by self;
+          mutation allowed only if creator.
+        """
+        if current_user is None:
+            return
+        if for_mutation:
+            if self._is_task_admin_manager(current_user):
+                return
+        elif self._can_view_all_tasks(current_user):
+            return
+
+        actor_id = getattr(current_user, "id", None)
+        if not actor_id:
+            raise ForbiddenException("You do not have permission to access this recurring schedule.")
+
+        if schedule.created_by == actor_id:
+            return
+        if not for_mutation and (schedule.assignee_id == actor_id or schedule.manager_id == actor_id):
+            return
+        if for_mutation and schedule.manager_id == actor_id:
+            return
+
+        if for_mutation:
+            # Mutations require active department leadership (read-only `task.department_view` cannot mutate)
+            dept_ids = await self.repository.get_user_managed_department_ids(actor_id)
+        else:
+            dept_ids = await self._resolve_user_department_scope_ids(current_user)
+
+        if dept_ids:
+            dept_names = await self.repository.get_department_names_by_ids(dept_ids)
+            if schedule.department and schedule.department.strip().lower() in dept_names:
+                return
+            dept_users = await self.repository.get_department_user_ids(dept_ids)
+            if (
+                (schedule.assignee_id and schedule.assignee_id in dept_users)
+                or (schedule.manager_id and schedule.manager_id in dept_users)
+                or (schedule.created_by and schedule.created_by in dept_users)
+            ):
+                return
+
+        action_label = "modify" if for_mutation else "view"
+        raise ForbiddenException(f"You do not have permission to {action_label} this recurring schedule.")
+
+    async def get_recurring_schedule(
+        self,
+        schedule_id: uuid.UUID,
+        current_user: Any | None = None,
+    ) -> TaskRecurringScheduleRead:
         schedule = await self.repository.get_recurring_schedule(schedule_id)
         if not schedule:
             raise NotFoundException(f"Recurring task schedule {schedule_id} not found.")
+        await self._assert_can_access_recurring_schedule(schedule, current_user, for_mutation=False)
         return TaskRecurringScheduleRead.model_validate(schedule)
 
     async def list_recurring_schedules(
@@ -2723,9 +2902,32 @@ class TaskService:
         department: str | None = None,
         status: str | None = None,
         frequency: str | None = None,
+        current_user: Any | None = None,
     ) -> list[TaskRecurringScheduleRead]:
+        scoped_user_id: uuid.UUID | None = None
+        scoped_dept_users: set[uuid.UUID] | None = None
+        scoped_dept_names: set[str] | None = None
+
+        if current_user is not None and not self._can_view_all_tasks(current_user):
+            dept_scope_ids = await self._resolve_user_department_scope_ids(current_user)
+            if dept_scope_ids:
+                scoped_user_id = current_user.id
+                scoped_dept_users = await self.repository.get_department_user_ids(dept_scope_ids)
+                scoped_dept_names = await self.repository.get_department_names_by_ids(dept_scope_ids)
+                if department and department.strip().lower() not in scoped_dept_names:
+                    raise ForbiddenException("You do not have permission to view recurring schedules for this department.")
+            else:
+                if department:
+                    raise ForbiddenException("You do not have permission to filter recurring schedules by department.")
+                scoped_user_id = current_user.id
+
         schedules = await self.repository.list_recurring_schedules(
-            department=department, status=status, frequency=frequency
+            department=department,
+            status=status,
+            frequency=frequency,
+            scoped_user_id=scoped_user_id,
+            scoped_department_user_ids=scoped_dept_users,
+            scoped_department_names=scoped_dept_names,
         )
         return [TaskRecurringScheduleRead.model_validate(s) for s in schedules]
 
@@ -2738,6 +2940,7 @@ class TaskService:
         schedule = await self.repository.get_recurring_schedule(schedule_id)
         if not schedule:
             raise NotFoundException(f"Recurring task schedule {schedule_id} not found.")
+        await self._assert_can_access_recurring_schedule(schedule, current_user, for_mutation=True)
 
         new_freq = payload.frequency.value if payload.frequency and hasattr(payload.frequency, "value") else (str(payload.frequency) if payload.frequency else schedule.frequency)
         new_config = payload.recurrence_config if payload.recurrence_config is not None else schedule.recurrence_config
@@ -2817,6 +3020,7 @@ class TaskService:
         schedule = await self.repository.get_recurring_schedule(schedule_id)
         if not schedule:
             raise NotFoundException(f"Recurring task schedule {schedule_id} not found.")
+        await self._assert_can_access_recurring_schedule(schedule, current_user, for_mutation=True)
         if schedule.status == "ARCHIVED":
             raise ValidationException("Cannot pause an archived recurring schedule. Please restore the schedule first.")
         if schedule.status == "PAUSED":
@@ -2843,6 +3047,7 @@ class TaskService:
         schedule = await self.repository.get_recurring_schedule(schedule_id)
         if not schedule:
             raise NotFoundException(f"Recurring task schedule {schedule_id} not found.")
+        await self._assert_can_access_recurring_schedule(schedule, current_user, for_mutation=True)
         if schedule.status == "ARCHIVED":
             raise ValidationException("Cannot resume an archived recurring schedule directly. Please unarchive / restore the schedule first.")
         if schedule.status == "ACTIVE":
@@ -2876,6 +3081,7 @@ class TaskService:
         schedule = await self.repository.get_recurring_schedule(schedule_id)
         if not schedule:
             raise NotFoundException(f"Recurring task schedule {schedule_id} not found.")
+        await self._assert_can_access_recurring_schedule(schedule, current_user, for_mutation=True)
         if schedule.status == "ARCHIVED":
             return TaskRecurringScheduleRead.model_validate(schedule)
 
@@ -2904,6 +3110,7 @@ class TaskService:
         schedule = await self.repository.get_recurring_schedule(schedule_id)
         if not schedule:
             raise NotFoundException(f"Recurring task schedule {schedule_id} not found.")
+        await self._assert_can_access_recurring_schedule(schedule, current_user, for_mutation=True)
         if schedule.status != "ARCHIVED":
             return TaskRecurringScheduleRead.model_validate(schedule)
 
@@ -2949,6 +3156,7 @@ class TaskService:
         schedule = await self.repository.get_recurring_schedule(schedule_id)
         if not schedule:
             raise NotFoundException(f"Recurring task schedule {schedule_id} not found.")
+        await self._assert_can_access_recurring_schedule(schedule, current_user, for_mutation=True)
         schedule.deleted_at = datetime.now(timezone.utc)
         schedule.deleted_by = current_user.id
         await self.repository.session.commit()
@@ -3108,10 +3316,29 @@ class TaskService:
         return generated_tasks
 
     async def list_recurring_instances(
-        self, schedule_id: uuid.UUID | None = None, history_only: bool = False
+        self,
+        schedule_id: uuid.UUID | None = None,
+        history_only: bool = False,
+        current_user: Any | None = None,
     ) -> list[TaskSummaryRead]:
+        scoped_user_id: uuid.UUID | None = None
+        scoped_dept_users: set[uuid.UUID] | None = None
+        if current_user is not None and not self._can_view_all_tasks(current_user):
+            if schedule_id is not None:
+                sch = await self.repository.get_recurring_schedule(schedule_id)
+                if not sch:
+                    raise NotFoundException(f"Recurring task schedule {schedule_id} not found.")
+                await self._assert_can_access_recurring_schedule(sch, current_user, for_mutation=False)
+            dept_scope_ids = await self._resolve_user_department_scope_ids(current_user)
+            scoped_user_id = current_user.id
+            if dept_scope_ids:
+                scoped_dept_users = await self.repository.get_department_user_ids(dept_scope_ids)
+
         instances = await self.repository.list_recurring_instances(
-            schedule_id=schedule_id, history_only=history_only
+            schedule_id=schedule_id,
+            history_only=history_only,
+            scoped_user_id=scoped_user_id,
+            scoped_department_user_ids=scoped_dept_users,
         )
         return [TaskSummaryRead.model_validate(t) for t in instances]
 
@@ -3241,21 +3468,18 @@ class TaskService:
 
     async def list_task_departments(self, current_user: Any) -> list[TaskDepartmentRead]:
         """
-        Return authoritative accessible departments.
-        - Super Admin: All departments (is_managed=True).
-        - Department Manager: Only departments they are authorized to manage (is_managed=True).
-        - Employee: Only department(s) they are assigned to (is_managed=False).
+        Return authoritative accessible departments for Enterprise Tasks:
+        - Admin, Admin-approved (`task.all_view`), or Task Manager (`task.manage`):
+          All active non-system departments (`is_managed=True`).
+        - Department Manager (active leadership or `task.department_view`): Only own/managed department(s) (`is_managed=True`).
+        - Employee: Empty list (My Tasks only; no department-wide scope).
         """
-        user_perms = set(getattr(current_user, "permissions", []))
-        is_super = (
-            getattr(current_user, "is_super_admin", False)
-            or "super_admin" in user_perms
-            or "task.organization_view" in user_perms
-            or "*" in user_perms
-        )
-
-        if is_super:
-            stmt = select(Role).where(Role.name.notin_(["super_admin", "user"])).order_by(Role.name)
+        if self._can_view_all_tasks(current_user):
+            stmt = (
+                select(Role)
+                .where(Role.name.notin_(["super_admin", "user"]), Role.deleted_at.is_(None))
+                .order_by(Role.name)
+            )
             res = await self.repository.session.execute(stmt)
             roles = res.scalars().all()
             return [
@@ -3263,23 +3487,17 @@ class TaskService:
                 for r in roles
             ]
 
-        managed_dept_ids = await self.repository.get_user_managed_department_ids(current_user.id)
-        if managed_dept_ids:
-            stmt = select(Role).where(Role.id.in_(managed_dept_ids)).order_by(Role.name)
+        dept_scope_ids = await self._resolve_user_department_scope_ids(current_user)
+        if dept_scope_ids:
+            stmt = (
+                select(Role)
+                .where(Role.id.in_(dept_scope_ids), Role.deleted_at.is_(None))
+                .order_by(Role.name)
+            )
             res = await self.repository.session.execute(stmt)
             roles = res.scalars().all()
             return [
                 TaskDepartmentRead(id=r.id, name=r.name, code=r.code, is_managed=True)
-                for r in roles
-            ]
-
-        assigned_dept_ids = await self.repository.get_user_assigned_department_ids(current_user.id)
-        if assigned_dept_ids:
-            stmt = select(Role).where(Role.id.in_(assigned_dept_ids)).order_by(Role.name)
-            res = await self.repository.session.execute(stmt)
-            roles = res.scalars().all()
-            return [
-                TaskDepartmentRead(id=r.id, name=r.name, code=r.code, is_managed=False)
                 for r in roles
             ]
 
@@ -3287,20 +3505,14 @@ class TaskService:
 
     async def list_task_assignees(self, current_user: Any) -> list[TaskAssigneeOptionRead]:
         """
-        Return assignable users scoped strictly to the user's authority.
-        - Super Admin: all active users.
-        - Department Manager: users in their managed department(s) + themselves.
-        - Employee: users in their assigned department(s) + themselves.
+        Return assignable users scoped strictly to the user's authority:
+        - Admin, Admin-approved (`task.all_view`), or Task Manager (`task.manage`): all active users.
+        - Department Manager: active users in their authorized department(s) + themselves.
+        - Employee with `task.create` or `task.assign`: active users in their assigned department(s) + themselves.
+        - Read-only Employee: only themselves.
         """
-        user_perms = set(getattr(current_user, "permissions", []))
-        is_super = (
-            getattr(current_user, "is_super_admin", False)
-            or "super_admin" in user_perms
-            or "task.organization_view" in user_perms
-            or "*" in user_perms
-        )
-
-        if is_super:
+        user_perms = set(getattr(current_user, "permissions", []) or [])
+        if self._can_view_all_tasks(current_user):
             stmt = (
                 select(User)
                 .where(User.deleted_at.is_(None), User.is_active.is_(True))
@@ -3309,20 +3521,18 @@ class TaskService:
             res = await self.repository.session.execute(stmt)
             users = res.scalars().all()
         else:
-            managed_dept_ids = await self.repository.get_user_managed_department_ids(current_user.id)
-            if managed_dept_ids:
-                dept_ids = managed_dept_ids
+            dept_scope_ids = await self._resolve_user_department_scope_ids(current_user)
+            if dept_scope_ids:
+                allowed_uids = (await self.repository.get_department_user_ids(dept_scope_ids)) | {current_user.id}
+            elif "task.create" in user_perms or "task.assign" in user_perms:
+                assigned_dept_ids = await self.repository.get_user_assigned_department_ids(current_user.id)
+                allowed_uids = (
+                    (await self.repository.get_department_user_ids(assigned_dept_ids))
+                    if assigned_dept_ids
+                    else set()
+                ) | {current_user.id}
             else:
-                dept_ids = await self.repository.get_user_assigned_department_ids(current_user.id)
-
-            dept_users_subq = select(UserRole.user_id).where(UserRole.role_id.in_(dept_ids))
-            lead_users_subq = select(DepartmentLeadershipAssignment.employee_id).where(
-                DepartmentLeadershipAssignment.department_id.in_(dept_ids),
-                DepartmentLeadershipAssignment.status == "ACTIVE",
-            )
-            all_uids_stmt = dept_users_subq.union(lead_users_subq)
-            all_uids_res = await self.repository.session.execute(all_uids_stmt)
-            allowed_uids = set(all_uids_res.scalars().all()) | {current_user.id}
+                allowed_uids = {current_user.id}
 
             stmt = (
                 select(User)

@@ -27,6 +27,11 @@ from app.rbac.models import (
     UserRole,
 )
 
+# Obsolete permission codes retained non-destructively in existing databases
+# (no destructive deletion/migration), but excluded from permission catalogs,
+# effective-permission resolution, UI override panels, and new grants.
+DEPRECATED_PERMISSION_CODES: frozenset[str] = frozenset({"task.organization_view"})
+
 
 class PermissionRepository(BaseRepository[Permission]):
     """Repository for permission rows."""
@@ -42,8 +47,12 @@ class PermissionRepository(BaseRepository[Permission]):
         return result.scalar_one_or_none()
 
     async def list_all(self) -> list[Permission]:
-        """Return every permission, ordered by module then code."""
-        stmt = select(Permission).order_by(Permission.module, Permission.code)
+        """Return every active (non-deprecated) permission, ordered by module then code."""
+        stmt = (
+            select(Permission)
+            .where(Permission.code.notin_(DEPRECATED_PERMISSION_CODES))
+            .order_by(Permission.module, Permission.code)
+        )
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 
@@ -281,7 +290,9 @@ class RoleRepository(BaseRepository[Role]):
             )
         )
         if (await self.session.execute(stmt_super_admin)).scalars().first() is not None:
-            all_perms_stmt = select(Permission.code)
+            all_perms_stmt = select(Permission.code).where(
+                Permission.code.notin_(DEPRECATED_PERMISSION_CODES)
+            )
             res = await self.session.execute(all_perms_stmt)
             perms = set(res.scalars().all())
             perms.add("*")
@@ -293,7 +304,12 @@ class RoleRepository(BaseRepository[Role]):
             .join(RolePermission, RolePermission.permission_id == Permission.id)
             .join(UserRole, UserRole.role_id == RolePermission.role_id)
             .join(Role, Role.id == RolePermission.role_id)
-            .where(UserRole.user_id == user_id, Role.deleted_at.is_(None), assignment_in_effect)
+            .where(
+                UserRole.user_id == user_id,
+                Role.deleted_at.is_(None),
+                assignment_in_effect,
+                Permission.code.notin_(DEPRECATED_PERMISSION_CODES),
+            )
             .distinct()
         )
         role_perms = set((await self.session.execute(stmt_roles)).scalars().all())
@@ -302,7 +318,10 @@ class RoleRepository(BaseRepository[Role]):
         stmt_user_perms = (
             select(Permission.code, UserPermission.is_granted)
             .join(UserPermission, UserPermission.permission_id == Permission.id)
-            .where(UserPermission.user_id == user_id)
+            .where(
+                UserPermission.user_id == user_id,
+                Permission.code.notin_(DEPRECATED_PERMISSION_CODES),
+            )
         )
         user_perm_rows = (await self.session.execute(stmt_user_perms)).all()
 
@@ -352,7 +371,12 @@ class RoleRepository(BaseRepository[Role]):
             .join(RolePermission, RolePermission.permission_id == Permission.id)
             .join(UserRole, UserRole.role_id == RolePermission.role_id)
             .join(Role, Role.id == UserRole.role_id)
-            .where(UserRole.user_id == user_id, Role.deleted_at.is_(None), assignment_in_effect)
+            .where(
+                UserRole.user_id == user_id,
+                Role.deleted_at.is_(None),
+                assignment_in_effect,
+                Permission.code.notin_(DEPRECATED_PERMISSION_CODES),
+            )
         )
         role_name_map: dict[str, list[str]] = {}
         for code, rname in (await self.session.execute(stmt_roles_with_names)).all():
@@ -369,7 +393,10 @@ class RoleRepository(BaseRepository[Role]):
         stmt_user_perms = (
             select(Permission.code, UserPermission.is_granted)
             .join(UserPermission, UserPermission.permission_id == Permission.id)
-            .where(UserPermission.user_id == user_id)
+            .where(
+                UserPermission.user_id == user_id,
+                Permission.code.notin_(DEPRECATED_PERMISSION_CODES),
+            )
         )
         user_perm_rows = (await self.session.execute(stmt_user_perms)).all()
 
@@ -479,7 +506,11 @@ class UserPermissionRepository(BaseRepository[UserPermission]):
     async def list_for_user(self, user_id: uuid.UUID) -> list[UserPermission]:
         stmt = (
             select(UserPermission)
-            .where(UserPermission.user_id == user_id)
+            .join(Permission, UserPermission.permission_id == Permission.id)
+            .where(
+                UserPermission.user_id == user_id,
+                Permission.code.notin_(DEPRECATED_PERMISSION_CODES),
+            )
             .options(selectinload(UserPermission.permission))
         )
         result = await self.session.execute(stmt)

@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
+import { API_BASE } from "@/lib/api";
 
 interface RFQDetails {
   item_id: string;
@@ -69,14 +70,22 @@ export default function PublicSupplierQuotePage() {
     }
 
     let isMounted = true;
-    const apiUrl = import.meta.env.VITE_API_BASE_URL || "/api/v1";
 
-    fetch(`${apiUrl}/public/rfq/${token}`)
-      .then((res) => {
+    fetch(`${API_BASE}/public/rfq/${encodeURIComponent(token)}`)
+      .then(async (res) => {
+        const contentType = res.headers.get("content-type") || "";
+        const json = contentType.includes("application/json") ? await res.json().catch(() => null) : null;
         if (!res.ok) {
-          throw new Error(res.status === 410 ? "This RFQ link has expired." : "RFQ link not found or invalid.");
+          throw new Error(
+            res.status === 410
+              ? "This RFQ link has expired."
+              : json?.message || json?.detail || "RFQ link not found or invalid."
+          );
         }
-        return res.json();
+        if (!json) {
+          throw new Error("Could not parse RFQ details.");
+        }
+        return json;
       })
       .then((json) => {
         if (!isMounted) return;
@@ -113,10 +122,9 @@ export default function PublicSupplierQuotePage() {
     }
 
     setSubmitting(true);
-    const apiUrl = import.meta.env.VITE_API_BASE_URL || "/api/v1";
 
     try {
-      const res = await fetch(`${apiUrl}/public/rfq/${token}/submit`, {
+      const res = await fetch(`${API_BASE}/public/rfq/${encodeURIComponent(token!)}/submit`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -129,9 +137,10 @@ export default function PublicSupplierQuotePage() {
         }),
       });
 
-      const json = await res.json();
-      if (!res.ok) {
-        throw new Error(json.message || json.detail || "Failed to submit quotation.");
+      const contentType = res.headers.get("content-type") || "";
+      const json = contentType.includes("application/json") ? await res.json().catch(() => null) : null;
+      if (!res.ok || !json) {
+        throw new Error(json?.message || json?.detail || "Failed to submit quotation.");
       }
 
       setSubmittedData(json.data);

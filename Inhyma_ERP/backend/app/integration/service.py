@@ -158,7 +158,7 @@ class IntegrationService:
 
         destination_url = self._resolve_target_url(delivery.target_erp)
         headers = {
-            "Authorization": f"Bearer {settings.FEDERATION_SERVICE_CREDENTIAL}",
+            "Authorization": f"Bearer {settings.get_outbound_service_credential()}",
             "X-Correlation-ID": str(event.correlation_id),
             "Content-Type": "application/json",
         }
@@ -184,7 +184,8 @@ class IntegrationService:
 
         start_time = datetime.now(timezone.utc)
         try:
-            timeout_config = httpx.Timeout(15.0, connect=5.0, read=10.0)
+            read_timeout = max(10.0, float(getattr(settings, "INTEGRATION_DELIVERY_TIMEOUT_SECONDS", 20.0)))
+            timeout_config = httpx.Timeout(read_timeout + 5.0, connect=10.0, read=read_timeout)
             async with httpx.AsyncClient(timeout=timeout_config) as http_client:
                 response = await http_client.post(destination_url, headers=headers, json=envelope)
 
@@ -214,7 +215,8 @@ class IntegrationService:
                 backoff_sec = DeliveryRetryPolicy.calculate_backoff(delivery.attempt_count + 1)
                 next_attempt = _utcnow() + timedelta(seconds=backoff_sec) if is_retriable else None
 
-                await circuit_service.record_failure(delivery.target_erp, f"HTTP_{status_code}")
+                if PeerCircuitBreakerService.should_trip_on_status(status_code):
+                    await circuit_service.record_failure(delivery.target_erp, f"HTTP_{status_code}")
                 await self.repository.mark_delivery_failure(
                     delivery_id,
                     retryable=is_retriable,

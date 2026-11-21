@@ -28,16 +28,16 @@ import { RecurringTasksTab } from "./RecurringTasksTab";
 import { getTaskIdFromSearchParams } from "@/lib/tasksDeepLink";
 
 export type TabKey =
+  | "all"
   | "my"
   | "department"
-  | "organization"
   | "backlog"
   | "kanban"
   | "calendar"
   | "gantt"
   | "recurring";
 
-export type ScopeViewKey = "my" | "department" | "organization";
+export type ScopeViewKey = "all" | "my" | "department";
 
 export const DEPARTMENT_COLORS: Record<string, { bg: string; text: string; border: string }> = {
   Frontend: { bg: "#eff6ff", text: "#1d4ed8", border: "#bfdbfe" },
@@ -129,40 +129,56 @@ const KANBAN_COLUMNS: { key: TaskStatus; label: string; color: string; bg: strin
   { key: "DONE", label: "Completed", color: "#16a34a", bg: "#f0fdf4" },
 ];
 
-export type ScopeKey = "OWN" | "SELECTED_DEPT" | "MULTI_DEPT" | "ENTIRE_ORG";
-
 export const TasksPage: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const { hasPermission, isSuperAdmin, profile } = useAuth();
 
-  // Tab state synced with URL ?tab=...
-  const tabParam = (searchParams.get("tab") as TabKey) || "my";
-  const [activeTab, setActiveTab] = useState<TabKey>(tabParam);
+  // Authoritative role-based task visibility flags
+  // Admin (`isSuperAdmin`), Admin-approved read-only viewers (`task.all_view`),
+  // and administrative task managers (`task.manage`) can view all tasks across departments.
+  // Note: `task.all_view` grants read visibility ONLY and never grants `task.manage` privileges.
+  const canViewAllTasks =
+    isSuperAdmin || hasPermission("task.all_view") || hasPermission("task.manage");
+  const defaultScopeView: ScopeViewKey = canViewAllTasks ? "all" : "my";
 
-  // Permission-Based Scope View state: 'my' | 'department' | 'organization'
-  const initialScopeView: ScopeViewKey =
-    tabParam === "department"
-      ? "department"
-      : tabParam === "organization"
-      ? "organization"
-      : "my";
-  const [scopeView, setScopeView] = useState<ScopeViewKey>(initialScopeView);
-
-  // RBAC Permission Scope State
-  const [_scope, setScope] = useState<ScopeKey>(
-    initialScopeView === "organization"
-      ? "ENTIRE_ORG"
-      : initialScopeView === "department"
-      ? "SELECTED_DEPT"
-      : "OWN"
-  );
-  const [departmentFilter, setDepartmentFilter] = useState<string>(() => {
-    if (initialScopeView === "department") {
-      return (profile as any)?.department || (profile as any)?.position_name || (isSuperAdmin ? "Management" : "");
+  // Tab state synced with URL ?tab=... (legacy ?tab=organization normalized to default allowed tab)
+  const rawTabParam = searchParams.get("tab");
+  const initialTab: TabKey = (() => {
+    if (!rawTabParam || rawTabParam === "organization") {
+      return defaultScopeView;
     }
-    return "";
-  });
-  const [collapsedDepts, setCollapsedDepts] = useState<Set<string>>(new Set());
+    if (
+      rawTabParam === "all" ||
+      rawTabParam === "my" ||
+      rawTabParam === "department" ||
+      rawTabParam === "backlog" ||
+      rawTabParam === "kanban" ||
+      rawTabParam === "calendar" ||
+      rawTabParam === "gantt" ||
+      rawTabParam === "recurring"
+    ) {
+      if (rawTabParam === "all" && !canViewAllTasks) return "my";
+      return rawTabParam;
+    }
+    return defaultScopeView;
+  })();
+
+  const [activeTab, setActiveTab] = useState<TabKey>(initialTab);
+
+  // Role-based Scope View state:
+  // - Admin / Admin-approved: 'all' | 'my'
+  // - Department Manager: 'my' | 'department'
+  // - Employee: 'my' only
+  const initialScopeView: ScopeViewKey =
+    initialTab === "department"
+      ? "department"
+      : initialTab === "all"
+      ? "all"
+      : initialTab === "my"
+      ? "my"
+      : defaultScopeView;
+  const [scopeView, setScopeView] = useState<ScopeViewKey>(initialScopeView);
+  const [departmentFilter, setDepartmentFilter] = useState<string>("");
 
   // Kanban Drag-and-Drop state
   const [draggingTaskId, setDraggingTaskId] = useState<string | null>(null);
@@ -225,193 +241,146 @@ export const TasksPage: React.FC = () => {
     }
   }, [searchParams]);
 
-  // Users for filter dropdowns
+  // Users & authorized departments for filter dropdowns
   const [availableUsers, setAvailableUsers] = useState<AvailableUser[]>([]);
   const [taskDepartments, setTaskDepartments] = useState<TaskDepartment[]>([]);
   const availableUsersRef = React.useRef(availableUsers);
+  const taskDepartmentsRef = React.useRef(taskDepartments);
   useEffect(() => {
     availableUsersRef.current = availableUsers;
   }, [availableUsers]);
+  useEffect(() => {
+    taskDepartmentsRef.current = taskDepartments;
+  }, [taskDepartments]);
 
   // Calendar specific state
   const [calendarDate, setCalendarDate] = useState(() => new Date());
 
-  // Authoritative role & scope determination from database leadership/department records
+  // Authoritative role & scope determination:
+  // - Admin (`isSuperAdmin`) & Admin-approved (`task.manage`): all tasks across all departments
+  // - Department Manager (active leadership via `/tasks/departments` or `task.department_view`): My Tasks + Department
+  // - Employee (`task.view` only): My Tasks only
   const isDeptManager = React.useMemo(() => {
+    if (canViewAllTasks) return false;
     return Boolean(
       taskDepartments.some((d) => d.is_managed) ||
-      hasPermission("task.manage")
+      hasPermission("task.department_view")
     );
-  }, [taskDepartments, hasPermission]);
+  }, [canViewAllTasks, taskDepartments, hasPermission]);
 
-  const canViewDept = isSuperAdmin || isDeptManager;
-  const canViewOrg = isSuperAdmin || hasPermission("task.organization_view");
-
-  // Resolve user's own primary/managed department
-  const userDepartment = React.useMemo(() => {
-    if (taskDepartments.length > 0) {
-      const managed = taskDepartments.find((d) => d.is_managed);
-      if (managed) return managed.name;
-      return taskDepartments[0].name;
-    }
-    const INVALID_DEPTS = new Set(["staff", "super_admin", "admin", "user", "general"]);
-    if (profile?.id && availableUsers.length > 0) {
-      const matched = availableUsers.find((u) => u.id === profile.id);
-      if (matched?.department && !INVALID_DEPTS.has(matched.department.toLowerCase())) {
-        return matched.department;
-      }
-    }
-    return isSuperAdmin ? "Management" : "";
-  }, [taskDepartments, profile, availableUsers, isSuperAdmin]);
+  const canViewDept = isDeptManager;
 
   // Allowed view options in View Switcher:
-  // Super Admin -> My, Department, Organization
-  // Department Manager -> My, Department
-  // Employee -> My only (never gets Department view)
+  // Admin / Admin-approved -> All Tasks, My Tasks (no Organization selector)
+  // Department Manager -> My Tasks, Department
+  // Employee -> My Tasks only (switcher hidden)
   const allowedViews: ScopeViewKey[] = React.useMemo(() => {
-    if (isSuperAdmin) {
-      return ["my", "department", "organization"];
+    if (canViewAllTasks) {
+      return ["all", "my"];
     }
     if (isDeptManager) {
       return ["my", "department"];
     }
     return ["my"];
-  }, [isSuperAdmin, isDeptManager]);
+  }, [canViewAllTasks, isDeptManager]);
 
-  // Role display label in Permission Banner
-  const roleDisplayName = React.useMemo(() => {
-    if (isSuperAdmin) return "Super Administrator";
-    if (isDeptManager) return "Department Manager";
-    return "Employee";
-  }, [isSuperAdmin, isDeptManager]);
-
-  // Access scope display in Permission Banner
-  const accessScopeDisplayName = React.useMemo(() => {
-    if (isSuperAdmin || canViewOrg) return "All Organization Tasks";
-    if (isDeptManager) {
-      const managedNames = taskDepartments.filter((d) => d.is_managed).map((d) => d.name);
-      return managedNames.length > 0 ? `Department Tasks (${managedNames.join(", ")})` : "Department Tasks";
-    }
-    return "Personal Tasks Only";
-  }, [isSuperAdmin, canViewOrg, isDeptManager, taskDepartments]);
-
-  // Derived list of unique departments from authoritative DB records
+  // Derived list of authorized departments from authoritative backend endpoint
   const departmentsList = React.useMemo(() => {
-    if (taskDepartments.length > 0) {
-      return taskDepartments.map((d) => d.name).sort();
-    }
-    const depts = new Set<string>();
-    const INVALID_DEPTS = new Set(["staff", "super_admin", "admin", "user", "general"]);
-    availableUsers.forEach((u) => {
-      if (u.department && !INVALID_DEPTS.has(u.department.toLowerCase())) {
-        depts.add(u.department);
-      }
-    });
-    return Array.from(depts).sort();
-  }, [taskDepartments, availableUsers]);
+    return taskDepartments.map((d) => d.name).sort();
+  }, [taskDepartments]);
 
-  // Default department filter on initial load
-  const hasInitializedDept = React.useRef(false);
+  const handleTabChange = useCallback(
+    (nextTab: TabKey) => {
+      let resolvedTab = nextTab;
+      if (resolvedTab === "department" && !canViewDept) {
+        resolvedTab = canViewAllTasks ? "all" : "my";
+      }
+      if (resolvedTab === "all" && !canViewAllTasks) {
+        resolvedTab = "my";
+      }
+      setActiveTab(resolvedTab);
+      if (resolvedTab === "my") {
+        setScopeView("my");
+        setDepartmentFilter("");
+        setAssigneeFilter("");
+      } else if (resolvedTab === "department") {
+        setScopeView("department");
+        setDepartmentFilter("");
+      } else if (resolvedTab === "all") {
+        setScopeView("all");
+      }
+      setSearchParams((prev) => {
+        const next = new URLSearchParams(prev);
+        next.set("tab", resolvedTab);
+        return next;
+      });
+      setPage(1);
+    },
+    [canViewDept, canViewAllTasks, setSearchParams]
+  );
+
+  // Sync tab with URL and enforce role-based gating (also redirects legacy ?tab=organization)
   useEffect(() => {
-    if (!hasInitializedDept.current && departmentsList.length > 0 && (scopeView === "department" || activeTab === "department")) {
-      hasInitializedDept.current = true;
-      if (!departmentFilter) {
-        if (userDepartment && departmentsList.includes(userDepartment)) {
-          setDepartmentFilter(userDepartment);
-        } else if (departmentsList.length > 0) {
-          setDepartmentFilter(departmentsList[0]);
-        }
-      }
-    }
-  }, [userDepartment, departmentsList, scopeView, activeTab, departmentFilter]);
+    const raw = searchParams.get("tab");
+    if (!raw) return;
 
-  // Sync tab with URL and enforce permission gating
-  useEffect(() => {
-    const t = searchParams.get("tab") as TabKey;
-    if (t) {
-      if (t === "department" && !canViewDept) {
-        handleTabChange("my");
-      } else if (t === "organization" && !canViewOrg) {
-        handleTabChange("my");
-      } else if (
-        [
-          "my",
-          "department",
-          "organization",
-          "backlog",
-          "kanban",
-          "calendar",
-          "gantt",
-          "recurring",
-        ].includes(t)
-      ) {
-        setActiveTab(t);
-        if (t === "my") {
-          setScope("OWN");
-          setScopeView("my");
-        } else if (t === "department") {
-          setScope("SELECTED_DEPT");
-          setScopeView("department");
-        } else if (t === "organization") {
-          setScope("ENTIRE_ORG");
-          setScopeView("organization");
-        }
-      } else {
+    if (raw === "organization") {
+      handleTabChange(canViewAllTasks ? "all" : "my");
+      return;
+    }
+    if (raw === "all" && !canViewAllTasks) {
+      handleTabChange("my");
+      return;
+    }
+    if (raw === "department" && !canViewDept) {
+      // Wait for department metadata before redirecting a manager loading ?tab=department directly
+      if (canViewAllTasks) {
+        handleTabChange("all");
+      } else if (taskDepartments.length > 0 || !hasPermission("task.view")) {
         handleTabChange("my");
       }
+      return;
     }
-  }, [searchParams, canViewDept, canViewOrg]);
-
-  const handleTabChange = (nextTab: TabKey) => {
-    if (nextTab === "department" && !canViewDept) {
-      nextTab = "my";
+    if (
+      ["all", "my", "department", "backlog", "kanban", "calendar", "gantt", "recurring"].includes(
+        raw
+      )
+    ) {
+      const validTab = raw as TabKey;
+      setActiveTab(validTab);
+      if (validTab === "my") {
+        setScopeView("my");
+        setDepartmentFilter("");
+        setAssigneeFilter("");
+      } else if (validTab === "department") {
+        setScopeView("department");
+        setDepartmentFilter("");
+      } else if (validTab === "all") {
+        setScopeView("all");
+      }
+    } else {
+      handleTabChange(canViewAllTasks ? "all" : "my");
     }
-    if (nextTab === "organization" && !canViewOrg) {
-      nextTab = "my";
-    }
-    setActiveTab(nextTab);
-    if (nextTab === "my") {
-      setScope("OWN");
-      setScopeView("my");
-    } else if (nextTab === "department") {
-      setScope("SELECTED_DEPT");
-      setScopeView("department");
-    } else if (nextTab === "organization") {
-      setScope("ENTIRE_ORG");
-      setScopeView("organization");
-    }
-    setSearchParams((prev) => {
-      prev.set("tab", nextTab);
-      return prev;
-    });
-    setPage(1);
-  };
+  }, [searchParams, canViewDept, canViewAllTasks, taskDepartments.length, hasPermission, handleTabChange]);
 
   const handleSelectScopeView = (nextScope: ScopeViewKey) => {
     if (!allowedViews.includes(nextScope)) return;
     setScopeView(nextScope);
 
     if (nextScope === "my") {
-      setScope("OWN");
-      if (activeTab === "department" || activeTab === "organization") {
+      setDepartmentFilter("");
+      setAssigneeFilter("");
+      if (activeTab === "department" || activeTab === "all") {
         handleTabChange("my");
       }
     } else if (nextScope === "department") {
-      setScope("SELECTED_DEPT");
-      if (!departmentFilter) {
-        if (userDepartment && departmentsList.includes(userDepartment)) {
-          setDepartmentFilter(userDepartment);
-        } else if (departmentsList.length > 0) {
-          setDepartmentFilter(departmentsList[0]);
-        }
-      }
-      if (activeTab === "my" || activeTab === "organization") {
+      setDepartmentFilter("");
+      if (activeTab === "my" || activeTab === "all") {
         handleTabChange("department");
       }
-    } else if (nextScope === "organization") {
-      setScope("ENTIRE_ORG");
+    } else if (nextScope === "all") {
       if (activeTab === "my" || activeTab === "department") {
-        handleTabChange("organization");
+        handleTabChange("all");
       }
     }
     setPage(1);
@@ -465,7 +434,7 @@ export const TasksPage: React.FC = () => {
       .catch((err) => console.error("Failed to load task metadata", err));
   }, []);
 
-  // Fetch tasks according to current tab, scopeView & filters
+  // Fetch tasks according to current tab, scopeView & filters (authoritatively enforced by backend)
   const fetchTasks = useCallback(async (silent = false) => {
     try {
       if (!silent) {
@@ -473,44 +442,49 @@ export const TasksPage: React.FC = () => {
       }
       setError(null);
 
-      // Determine backend view mode
-      let viewMode: "all" | "my" | "department" | "kanban" | "calendar" = "all";
-      if (scopeView === "my") viewMode = "my";
-      else if (scopeView === "department" || activeTab === "department") {
-        viewMode = isSuperAdmin || canViewOrg || canViewDept ? "all" : "department";
+      // Authoritative backend view mode (preserves scope across Backlog, Kanban, Calendar, Gantt)
+      let viewMode: "all" | "my" | "department" = "my";
+      if (scopeView === "my") {
+        viewMode = "my";
+      } else if (scopeView === "department") {
+        viewMode = "department";
       } else {
-        viewMode = "all";
+        viewMode = canViewAllTasks ? "all" : "my";
       }
 
-      if (activeTab === "kanban") viewMode = "kanban";
-      else if (activeTab === "calendar") viewMode = "calendar";
+      // Only apply department filter in authoritative All Tasks scope for Admin / Admin-approved (`task.all_view` / `task.manage`)
+      const activeDepartmentFilter = viewMode === "all" && canViewAllTasks ? departmentFilter : "";
+      const activeAssigneeFilter = viewMode !== "my" ? assigneeFilter : "";
+
+      // Resolve selected department filter name to its authoritative UUID for backend filtering
+      const matchedDept = activeDepartmentFilter
+        ? taskDepartmentsRef.current.find(
+            (d) => d.name.toLowerCase() === activeDepartmentFilter.toLowerCase()
+          )
+        : undefined;
 
       const limit =
         activeTab === "kanban" ||
         activeTab === "calendar" ||
-        activeTab === "gantt" ||
-        scopeView === "organization" ||
-        scopeView === "department" ||
-        activeTab === "department" ||
-        Boolean(departmentFilter)
+        activeTab === "gantt"
           ? 250
           : pageSize;
 
       const res = await tasksApi.getTasks({
         view: viewMode,
+        department_id: matchedDept?.id,
         search: searchQuery.trim() || undefined,
         status: statusFilter || undefined,
         priority: priorityFilter || undefined,
         issue_type: issueTypeFilter || undefined,
         label_id: labelFilter || undefined,
         is_backlog: activeTab === "backlog" ? true : undefined,
-        assignee_id: assigneeFilter || undefined,
+        assignee_id: activeAssigneeFilter || undefined,
         due_date_to: dueDateFilter || undefined,
         page:
           activeTab === "kanban" ||
           activeTab === "calendar" ||
-          activeTab === "gantt" ||
-          scopeView === "organization"
+          activeTab === "gantt"
             ? 1
             : page,
         page_size: limit,
@@ -518,21 +492,11 @@ export const TasksPage: React.FC = () => {
 
       let filteredItems = res.items;
 
-      // Ensure scope view constraints
-      if (scopeView === "my" && profile?.id) {
-        filteredItems = filteredItems.filter((t) => {
-          return (
-            t.created_by === profile.id ||
-            t.assignees.some((a) => a.user_id === profile.id)
-          );
-        });
-      }
-
-      // Department filter
-      if (departmentFilter) {
+      // Fallback client-side department refinement only if department UUID metadata wasn't resolved yet
+      if (activeDepartmentFilter && !matchedDept?.id) {
         filteredItems = filteredItems.filter((t) => {
           const taskDept = getTaskDepartment(t, availableUsersRef.current);
-          return taskDept.toLowerCase() === departmentFilter.toLowerCase();
+          return taskDept.toLowerCase() === activeDepartmentFilter.toLowerCase();
         });
       }
 
@@ -548,7 +512,11 @@ export const TasksPage: React.FC = () => {
       }
 
       setTasks(filteredItems);
-      setTotalCount(departmentFilter ? filteredItems.length : res.total);
+      setTotalCount(
+        quickFilter !== "all" || (activeDepartmentFilter && !matchedDept?.id)
+          ? filteredItems.length
+          : res.total
+      );
     } catch (err: unknown) {
       console.error("Failed to fetch tasks", err);
       setError(err);
@@ -560,6 +528,7 @@ export const TasksPage: React.FC = () => {
   }, [
     activeTab,
     scopeView,
+    canViewAllTasks,
     searchQuery,
     statusFilter,
     priorityFilter,
@@ -568,7 +537,6 @@ export const TasksPage: React.FC = () => {
     assigneeFilter,
     dueDateFilter,
     departmentFilter,
-    profile?.id,
     quickFilter,
     todayStr,
     weekRange,
@@ -769,58 +737,14 @@ export const TasksPage: React.FC = () => {
 
   // Active view determination
   const isTableActive =
+    activeTab === "all" ||
     activeTab === "my" ||
     activeTab === "department" ||
-    activeTab === "backlog" ||
-    activeTab === "organization";
+    activeTab === "backlog";
 
   const isKanbanActive = activeTab === "kanban";
 
   const isCalendarActive = activeTab === "calendar";
-
-  // Group tasks by department for Organization View
-  const tasksByDepartment = React.useMemo(() => {
-    const map = new Map<string, TaskSummary[]>();
-
-    departmentsList.forEach((d) => {
-      map.set(d, []);
-    });
-
-    tasks.forEach((t) => {
-      const d = getTaskDepartment(t, availableUsers);
-      if (!map.has(d)) {
-        map.set(d, []);
-      }
-      map.get(d)!.push(t);
-    });
-
-    const result: { department: string; tasks: TaskSummary[] }[] = [];
-    map.forEach((taskList, deptName) => {
-      if (taskList.length > 0) {
-        result.push({ department: deptName, tasks: taskList });
-      }
-    });
-
-    result.sort((a, b) => a.department.localeCompare(b.department));
-    return result;
-  }, [tasks, departmentsList, availableUsers]);
-
-  const toggleDeptCollapse = (dept: string) => {
-    setCollapsedDepts((prev) => {
-      const next = new Set(prev);
-      if (next.has(dept)) next.delete(dept);
-      else next.add(dept);
-      return next;
-    });
-  };
-
-  const handleExpandAllDepts = () => {
-    setCollapsedDepts(new Set());
-  };
-
-  const handleCollapseAllDepts = () => {
-    setCollapsedDepts(new Set(tasksByDepartment.map((g) => g.department)));
-  };
 
   const handleQuickViewClick = (
     filterType: "all" | "overdue" | "due_today" | "due_this_week"
@@ -844,7 +768,33 @@ export const TasksPage: React.FC = () => {
     }
   };
 
-  const renderEmptyState = (viewType: "my" | "department" | "organization") => {
+  const hasTaskAccess =
+    hasPermission("task.view") ||
+    hasPermission("task.department_view") ||
+    hasPermission("task.all_view") ||
+    hasPermission("task.manage") ||
+    isSuperAdmin;
+  const canManageTasks = hasPermission("task.manage") || isSuperAdmin;
+  const canCreateTasks = hasPermission("task.create") || hasPermission("task.manage") || isSuperAdmin;
+  const canAssignTasks = hasPermission("task.assign") || hasPermission("task.manage") || isSuperAdmin;
+  const canEscalateTasks = hasPermission("task.escalate") || hasPermission("task.manage") || isSuperAdmin;
+  const canDeleteTasks = hasPermission("task.delete") || hasPermission("task.manage") || isSuperAdmin;
+  const canManageBulk = hasPermission("task.create") || hasPermission("task.manage") || isSuperAdmin;
+
+  // Authoritative conditional filter visibility (rendered in DOM only when permitted for the active scope):
+  // - Employee (My Tasks only): NO Department filter, NO Assignee filter.
+  // - Department Manager: My Tasks -> NO Department filter; Department -> automatically scoped to managed department (NO Department filter).
+  // - Admin / Admin-approved (`task.all_view` or `task.manage`): My Tasks -> NO Department filter; All Tasks -> Department filter available.
+  const showDepartmentFilter = scopeView === "all" && canViewAllTasks;
+  const showAssigneeFilter = scopeView !== "my" && (canViewAllTasks || isDeptManager);
+
+  const canMutateRowTask = (t: TaskSummary) =>
+    canManageTasks ||
+    isDeptManager ||
+    t.created_by === profile?.id ||
+    (t.assignees || []).some((a) => a.user_id === profile?.id);
+
+  const renderEmptyState = (viewType: ScopeViewKey) => {
     let title = "No tasks found matching your filters.";
     let description = "Try changing filters or create a new task.";
     let icon = "📋";
@@ -854,13 +804,13 @@ export const TasksPage: React.FC = () => {
       description = "No tasks assigned to you with the current filters.";
       icon = "🎉";
     } else if (viewType === "department") {
-      title = `No tasks in ${departmentFilter || "this department"}.`;
+      title = `No tasks in ${departmentFilter || "your department"}.`;
       description = "Try changing filters or create a new task.";
       icon = "🏛️";
-    } else if (viewType === "organization") {
-      title = "No organization tasks match these filters.";
+    } else if (viewType === "all") {
+      title = "No tasks match these filters.";
       description = "Try changing filters or create a new task.";
-      icon = "🏢";
+      icon = "📋";
     }
 
     return (
@@ -888,23 +838,25 @@ export const TasksPage: React.FC = () => {
         >
           {description}
         </p>
-        <button
-          type="button"
-          className="btn btn-primary"
-          onClick={() => {
-            setCreateTaskDates({});
-            setIsCreateOpen(true);
-          }}
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: "6px",
-            fontWeight: 600,
-            padding: "8px 16px",
-          }}
-        >
-          + New Task
-        </button>
+        {canCreateTasks && (
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={() => {
+              setCreateTaskDates({});
+              setIsCreateOpen(true);
+            }}
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "6px",
+              fontWeight: 600,
+              padding: "8px 16px",
+            }}
+          >
+            + New Task
+          </button>
+        )}
       </div>
     );
   };
@@ -1301,22 +1253,24 @@ export const TasksPage: React.FC = () => {
                 </td>
                 <td style={{ padding: "12px 14px", textAlign: "right" }} onClick={(e) => e.stopPropagation()}>
                   <div style={{ display: "inline-flex", gap: "5px", alignItems: "center" }}>
-                    <button
-                      type="button"
-                      className="btn btn-small"
-                      onClick={(e) => handleAssignMe(e, t.id)}
-                      title="Assign to Me"
-                      style={{
-                        padding: "3px 6px",
-                        fontSize: "11px",
-                        color: "#2563eb",
-                        background: "#eff6ff",
-                        border: "1px solid #bfdbfe",
-                      }}
-                    >
-                      +Me
-                    </button>
-                    {t.status !== "DONE" && (
+                    {canAssignTasks && (
+                      <button
+                        type="button"
+                        className="btn btn-small"
+                        onClick={(e) => handleAssignMe(e, t.id)}
+                        title="Assign to Me"
+                        style={{
+                          padding: "3px 6px",
+                          fontSize: "11px",
+                          color: "#2563eb",
+                          background: "#eff6ff",
+                          border: "1px solid #bfdbfe",
+                        }}
+                      >
+                        +Me
+                      </button>
+                    )}
+                    {t.status !== "DONE" && canMutateRowTask(t) && (
                       <button
                         type="button"
                         className="btn btn-small"
@@ -1333,21 +1287,23 @@ export const TasksPage: React.FC = () => {
                         ✓
                       </button>
                     )}
-                    <button
-                      type="button"
-                      className="btn btn-small"
-                      onClick={(e) => handleDuplicate(e, t.id)}
-                      title="Duplicate Task"
-                      style={{
-                        padding: "3px 6px",
-                        fontSize: "11px",
-                        color: "#475569",
-                        background: "#f8fafc",
-                        border: "1px solid #cbd5e1",
-                      }}
-                    >
-                      📄
-                    </button>
+                    {canCreateTasks && (
+                      <button
+                        type="button"
+                        className="btn btn-small"
+                        onClick={(e) => handleDuplicate(e, t.id)}
+                        title="Duplicate Task"
+                        style={{
+                          padding: "3px 6px",
+                          fontSize: "11px",
+                          color: "#475569",
+                          background: "#f8fafc",
+                          border: "1px solid #cbd5e1",
+                        }}
+                      >
+                        📄
+                      </button>
+                    )}
                     <button
                       type="button"
                       className="btn btn-small"
@@ -1357,29 +1313,33 @@ export const TasksPage: React.FC = () => {
                     >
                       👁️
                     </button>
-                    <button
-                      type="button"
-                      className="btn btn-small"
-                      onClick={(e) => handleOpenEscalate(e, t)}
-                      title="Escalate Task"
-                      style={{
-                        padding: "3px 6px",
-                        fontSize: "11px",
-                        color: "#b91c1c",
-                        background: "#fef2f2",
-                      }}
-                    >
-                      ⚡
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn-small"
-                      onClick={(e) => handleDeleteTask(e, t)}
-                      title="Delete Task"
-                      style={{ padding: "3px 6px", fontSize: "11px", color: "#ef4444" }}
-                    >
-                      🗑️
-                    </button>
+                    {canEscalateTasks && (
+                      <button
+                        type="button"
+                        className="btn btn-small"
+                        onClick={(e) => handleOpenEscalate(e, t)}
+                        title="Escalate Task"
+                        style={{
+                          padding: "3px 6px",
+                          fontSize: "11px",
+                          color: "#b91c1c",
+                          background: "#fef2f2",
+                        }}
+                      >
+                        ⚡
+                      </button>
+                    )}
+                    {(canDeleteTasks || t.created_by === profile?.id) && (
+                      <button
+                        type="button"
+                        className="btn btn-small"
+                        onClick={(e) => handleDeleteTask(e, t)}
+                        title="Delete Task"
+                        style={{ padding: "3px 6px", fontSize: "11px", color: "#ef4444" }}
+                      >
+                        🗑️
+                      </button>
+                    )}
                   </div>
                 </td>
               </tr>
@@ -1389,10 +1349,6 @@ export const TasksPage: React.FC = () => {
       </table>
     );
   };
-
-  const hasTaskAccess = hasPermission("task.view") || isSuperAdmin;
-  const canCreateTasks = hasPermission("task.create") || hasPermission("task.manage") || isSuperAdmin;
-  const canManageBulk = hasPermission("task.create") || hasPermission("task.manage") || isSuperAdmin;
 
   if (!hasTaskAccess) {
     return (
@@ -1417,8 +1373,87 @@ export const TasksPage: React.FC = () => {
       <main className="page">
         {/* Page Header */}
         <div className="page-header">
-          <div>
+          <div style={{ display: "flex", alignItems: "center", gap: "14px", flexWrap: "wrap" }}>
             <h1 style={{ margin: 0, fontSize: "20px", fontWeight: 700, color: "#1e293b" }}>Tasks</h1>
+            {allowedViews.length > 1 && (
+              <div
+                data-testid="tasks-scope-switcher"
+                style={{
+                  display: "inline-flex",
+                  background: "#f1f5f9",
+                  borderRadius: "8px",
+                  padding: "3px",
+                  border: "1px solid #e2e8f0",
+                  gap: "2px",
+                }}
+              >
+                {allowedViews.includes("all") && (
+                  <button
+                    type="button"
+                    data-testid="scope-all-btn"
+                    onClick={() => handleSelectScopeView("all")}
+                    style={{
+                      padding: "5px 12px",
+                      borderRadius: "6px",
+                      border: "none",
+                      fontSize: "12.5px",
+                      fontWeight: scopeView === "all" ? 700 : 500,
+                      color: scopeView === "all" ? "#0f172a" : "#64748b",
+                      background: scopeView === "all" ? "#ffffff" : "transparent",
+                      boxShadow: scopeView === "all" ? "0 1px 3px rgba(0,0,0,0.08)" : "none",
+                      cursor: "pointer",
+                      transition: "all 0.15s ease",
+                    }}
+                  >
+                    📋 All Tasks
+                  </button>
+                )}
+
+                {allowedViews.includes("my") && (
+                  <button
+                    type="button"
+                    data-testid="scope-my-btn"
+                    onClick={() => handleSelectScopeView("my")}
+                    style={{
+                      padding: "5px 12px",
+                      borderRadius: "6px",
+                      border: "none",
+                      fontSize: "12.5px",
+                      fontWeight: scopeView === "my" ? 700 : 500,
+                      color: scopeView === "my" ? "#0f172a" : "#64748b",
+                      background: scopeView === "my" ? "#ffffff" : "transparent",
+                      boxShadow: scopeView === "my" ? "0 1px 3px rgba(0,0,0,0.08)" : "none",
+                      cursor: "pointer",
+                      transition: "all 0.15s ease",
+                    }}
+                  >
+                    👤 My Tasks
+                  </button>
+                )}
+
+                {allowedViews.includes("department") && (
+                  <button
+                    type="button"
+                    data-testid="scope-dept-btn"
+                    onClick={() => handleSelectScopeView("department")}
+                    style={{
+                      padding: "5px 12px",
+                      borderRadius: "6px",
+                      border: "none",
+                      fontSize: "12.5px",
+                      fontWeight: scopeView === "department" ? 700 : 500,
+                      color: scopeView === "department" ? "#0f172a" : "#64748b",
+                      background: scopeView === "department" ? "#ffffff" : "transparent",
+                      boxShadow: scopeView === "department" ? "0 1px 3px rgba(0,0,0,0.08)" : "none",
+                      cursor: "pointer",
+                      transition: "all 0.15s ease",
+                    }}
+                  >
+                    🏛️ Department
+                  </button>
+                )}
+              </div>
+            )}
           </div>
           {canCreateTasks && (
             <div className="page-header-actions">
@@ -1437,183 +1472,6 @@ export const TasksPage: React.FC = () => {
         </div>
 
         <Banner error={error} />
-
-        {/* ERP Permission Scope & Segmented View Switcher */}
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            gap: "16px",
-            background: "#ffffff",
-            border: "1px solid #e2e8f0",
-            borderRadius: "10px",
-            padding: "12px 20px",
-            marginBottom: "16px",
-            flexWrap: "wrap",
-            boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
-          }}
-        >
-          {/* Left: Permission Scope & Role Info */}
-          <div style={{ display: "flex", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-              <span style={{ fontSize: "12px", fontWeight: 700, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.5px" }}>
-                🛡️ Permission Scope:
-              </span>
-              <span
-                style={{
-                  fontSize: "12.5px",
-                  fontWeight: 700,
-                  padding: "4px 12px",
-                  borderRadius: "14px",
-                  background: isSuperAdmin
-                    ? "#faf5ff"
-                    : canViewOrg
-                    ? "#eff6ff"
-                    : canViewDept
-                    ? "#f0fdf4"
-                    : "#f8fafc",
-                  color: isSuperAdmin
-                    ? "#6b21a8"
-                    : canViewOrg
-                    ? "#1d4ed8"
-                    : canViewDept
-                    ? "#15803d"
-                    : "#475569",
-                  border: "1px solid",
-                  borderColor: isSuperAdmin
-                    ? "#e9d5ff"
-                    : canViewOrg
-                    ? "#bfdbfe"
-                    : canViewDept
-                    ? "#bbf7d0"
-                    : "#cbd5e1",
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: "6px",
-                }}
-              >
-                <span>{roleDisplayName}</span>
-                <span style={{ opacity: 0.6 }}>•</span>
-                <span style={{ fontWeight: 600 }}>{accessScopeDisplayName}</span>
-              </span>
-            </div>
-          </div>
-
-          {/* Right: Segmented View Switcher & Department Picker */}
-          <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
-            <span style={{ fontSize: "12px", fontWeight: 700, color: "#64748b" }}>
-              View Scope:
-            </span>
-
-            {/* Segmented Control */}
-            <div
-              style={{
-                display: "inline-flex",
-                background: "#f1f5f9",
-                borderRadius: "8px",
-                padding: "3px",
-                border: "1px solid #e2e8f0",
-                gap: "2px",
-              }}
-            >
-              {allowedViews.includes("my") && (
-                <button
-                  type="button"
-                  onClick={() => handleSelectScopeView("my")}
-                  style={{
-                    padding: "6px 14px",
-                    borderRadius: "6px",
-                    border: "none",
-                    fontSize: "12.5px",
-                    fontWeight: scopeView === "my" ? 700 : 500,
-                    color: scopeView === "my" ? "#0f172a" : "#64748b",
-                    background: scopeView === "my" ? "#ffffff" : "transparent",
-                    boxShadow: scopeView === "my" ? "0 1px 3px rgba(0,0,0,0.08)" : "none",
-                    cursor: "pointer",
-                    transition: "all 0.15s ease",
-                  }}
-                >
-                  👤 My Tasks
-                </button>
-              )}
-
-              {allowedViews.includes("department") && (
-                <button
-                  type="button"
-                  onClick={() => handleSelectScopeView("department")}
-                  style={{
-                    padding: "6px 14px",
-                    borderRadius: "6px",
-                    border: "none",
-                    fontSize: "12.5px",
-                    fontWeight: scopeView === "department" ? 700 : 500,
-                    color: scopeView === "department" ? "#0f172a" : "#64748b",
-                    background: scopeView === "department" ? "#ffffff" : "transparent",
-                    boxShadow: scopeView === "department" ? "0 1px 3px rgba(0,0,0,0.08)" : "none",
-                    cursor: "pointer",
-                    transition: "all 0.15s ease",
-                  }}
-                >
-                  🏛️ Department
-                </button>
-              )}
-
-              {allowedViews.includes("organization") && (
-                <button
-                  type="button"
-                  onClick={() => handleSelectScopeView("organization")}
-                  style={{
-                    padding: "6px 14px",
-                    borderRadius: "6px",
-                    border: "none",
-                    fontSize: "12.5px",
-                    fontWeight: scopeView === "organization" ? 700 : 500,
-                    color: scopeView === "organization" ? "#0f172a" : "#64748b",
-                    background: scopeView === "organization" ? "#ffffff" : "transparent",
-                    boxShadow: scopeView === "organization" ? "0 1px 3px rgba(0,0,0,0.08)" : "none",
-                    cursor: "pointer",
-                    transition: "all 0.15s ease",
-                  }}
-                >
-                  🏢 Organization
-                </button>
-              )}
-            </div>
-
-            {/* Department Dropdown (Active when in Department view, showing only authorized departments) */}
-            {(scopeView === "department" || activeTab === "department") && departmentsList.length > 0 && (
-              <div style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>
-                <span style={{ fontSize: "12px", color: "#64748b", fontWeight: 600 }}>Dept:</span>
-                <select
-                  value={departmentFilter}
-                  onChange={(e) => {
-                    setDepartmentFilter(e.target.value);
-                    setPage(1);
-                  }}
-                  style={{
-                    padding: "6px 10px",
-                    border: "1px solid #bfdbfe",
-                    borderRadius: "6px",
-                    fontSize: "12.5px",
-                    background: "#eff6ff",
-                    color: "#1e40af",
-                    fontWeight: 600,
-                    cursor: "pointer",
-                  }}
-                  title="Switch Active Department"
-                >
-                  {isSuperAdmin && <option value="">All Departments</option>}
-                  {departmentsList.map((d) => (
-                    <option key={d} value={d}>
-                      {d} {d === userDepartment ? "(Yours)" : ""}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            )}
-          </div>
-        </div>
 
         {/* Quick Views Bar */}
         <div
@@ -1790,9 +1648,10 @@ export const TasksPage: React.FC = () => {
               />
             </div>
 
-            {/* Department Filter (Universal Department Picker - only for Super Admin or multi-department Managers) */}
-            {(isSuperAdmin || (isDeptManager && departmentsList.length > 1)) && (
+            {/* Department Filter (conditionally rendered ONLY in All Tasks scope for Admin / Admin-approved `task.all_view` or `task.manage`) */}
+            {showDepartmentFilter && (
               <select
+                data-testid="tasks-dept-filter"
                 value={departmentFilter}
                 onChange={(e) => {
                   setDepartmentFilter(e.target.value);
@@ -1887,21 +1746,24 @@ export const TasksPage: React.FC = () => {
               </select>
             )}
 
-            <select
-              value={assigneeFilter}
-              onChange={(e) => {
-                setAssigneeFilter(e.target.value);
-                setPage(1);
-              }}
-              style={{ padding: "8px 10px", border: "1px solid #cbd5e1", borderRadius: "6px", fontSize: "13px", maxWidth: "180px" }}
-            >
-              <option value="">All Assignees</option>
-              {availableUsers.map((u) => (
-                <option key={u.id} value={u.id}>
-                  {u.full_name} {u.department ? `(${u.department})` : ""}
-                </option>
-              ))}
-            </select>
+            {showAssigneeFilter && (
+              <select
+                data-testid="tasks-assignee-filter"
+                value={assigneeFilter}
+                onChange={(e) => {
+                  setAssigneeFilter(e.target.value);
+                  setPage(1);
+                }}
+                style={{ padding: "8px 10px", border: "1px solid #cbd5e1", borderRadius: "6px", fontSize: "13px", maxWidth: "180px" }}
+              >
+                <option value="">All Assignees</option>
+                {availableUsers.map((u) => (
+                  <option key={u.id} value={u.id}>
+                    {u.full_name} {u.department ? `(${u.department})` : ""}
+                  </option>
+                ))}
+              </select>
+            )}
 
             <input
               type="date"
@@ -1948,6 +1810,7 @@ export const TasksPage: React.FC = () => {
 
           {/* Navigation Tabs Bar */}
           <div
+            data-testid="tasks-nav-tabs"
             style={{
               display: "flex",
               gap: "4px",
@@ -1957,8 +1820,31 @@ export const TasksPage: React.FC = () => {
               overflowX: "auto",
             }}
           >
+            {canViewAllTasks && (
+              <button
+                type="button"
+                data-testid="tasks-tab-all"
+                onClick={() => handleTabChange("all")}
+                style={{
+                  padding: "10px 16px",
+                  fontWeight: 600,
+                  fontSize: "13.5px",
+                  background: "none",
+                  border: "none",
+                  borderBottom: activeTab === "all" ? "2px solid #2563eb" : "2px solid transparent",
+                  marginBottom: "-2px",
+                  cursor: "pointer",
+                  color: activeTab === "all" ? "#2563eb" : "#64748b",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                📋 All Tasks
+              </button>
+            )}
+
             <button
               type="button"
+              data-testid="tasks-tab-my"
               onClick={() => handleTabChange("my")}
               style={{
                 padding: "10px 16px",
@@ -1979,6 +1865,7 @@ export const TasksPage: React.FC = () => {
             {canViewDept && (
               <button
                 type="button"
+                data-testid="tasks-tab-department"
                 onClick={() => handleTabChange("department")}
                 style={{
                   padding: "10px 16px",
@@ -1997,29 +1884,9 @@ export const TasksPage: React.FC = () => {
               </button>
             )}
 
-            {canViewOrg && (
-              <button
-                type="button"
-                onClick={() => handleTabChange("organization")}
-                style={{
-                  padding: "10px 16px",
-                  fontWeight: 600,
-                  fontSize: "13.5px",
-                  background: "none",
-                  border: "none",
-                  borderBottom: activeTab === "organization" ? "2px solid #2563eb" : "2px solid transparent",
-                  marginBottom: "-2px",
-                  cursor: "pointer",
-                  color: activeTab === "organization" ? "#2563eb" : "#64748b",
-                  whiteSpace: "nowrap",
-                }}
-              >
-                🏢 Organization
-              </button>
-            )}
-
             <button
               type="button"
+              data-testid="tasks-tab-backlog"
               onClick={() => handleTabChange("backlog")}
               style={{
                 padding: "10px 16px",
@@ -2039,6 +1906,7 @@ export const TasksPage: React.FC = () => {
 
             <button
               type="button"
+              data-testid="tasks-tab-kanban"
               onClick={() => handleTabChange("kanban")}
               style={{
                 padding: "10px 16px",
@@ -2058,6 +1926,7 @@ export const TasksPage: React.FC = () => {
 
             <button
               type="button"
+              data-testid="tasks-tab-calendar"
               onClick={() => handleTabChange("calendar")}
               style={{
                 padding: "10px 16px",
@@ -2077,6 +1946,7 @@ export const TasksPage: React.FC = () => {
 
             <button
               type="button"
+              data-testid="tasks-tab-gantt"
               onClick={() => handleTabChange("gantt")}
               style={{
                 padding: "10px 16px",
@@ -2096,6 +1966,7 @@ export const TasksPage: React.FC = () => {
 
             <button
               type="button"
+              data-testid="tasks-tab-recurring"
               onClick={() => handleTabChange("recurring")}
               style={{
                 padding: "10px 16px",
@@ -2114,138 +1985,11 @@ export const TasksPage: React.FC = () => {
             </button>
           </div>
 
-          {/* TAB CONTENT: Table Views (My Tasks, Department List, Organization, Backlog) */}
+          {/* TAB CONTENT: Table Views (All Tasks, My Tasks, Department, Backlog) */}
           {isTableActive ? (
             <div>
               {loading && tasks.length === 0 ? (
                 <TasksTableSkeletonRows count={pageSize > 10 ? 8 : pageSize} />
-              ) : scopeView === "organization" ? (
-                /* Organization View: Grouped by Department with Collapsible Accordions */
-                <div>
-                  {/* Organization Header Bar */}
-                  <div
-                    style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "center",
-                      padding: "12px 18px",
-                      background: "#f8fafc",
-                      borderBottom: "1px solid #e2e8f0",
-                      flexWrap: "wrap",
-                      gap: "8px",
-                    }}
-                  >
-                    <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                      <span style={{ fontWeight: 700, fontSize: "14px", color: "#0f172a" }}>
-                        🏢 Enterprise Organization Overview
-                      </span>
-                      <span
-                        style={{
-                          background: "#e0f2fe",
-                          color: "#0369a1",
-                          padding: "2px 8px",
-                          borderRadius: "12px",
-                          fontSize: "11.5px",
-                          fontWeight: 700,
-                        }}
-                      >
-                        {tasks.length} total tasks across {tasksByDepartment.length} departments
-                      </span>
-                    </div>
-                    <div style={{ display: "flex", gap: "6px" }}>
-                      <button
-                        type="button"
-                        className="btn btn-secondary btn-small"
-                        onClick={handleExpandAllDepts}
-                        style={{ fontSize: "11.5px", padding: "4px 10px" }}
-                      >
-                        ▼ Expand All
-                      </button>
-                      <button
-                        type="button"
-                        className="btn btn-secondary btn-small"
-                        onClick={handleCollapseAllDepts}
-                        style={{ fontSize: "11.5px", padding: "4px 10px" }}
-                      >
-                        ▶ Collapse All
-                      </button>
-                    </div>
-                  </div>
-
-                  {tasksByDepartment.length === 0 ? (
-                    renderEmptyState("organization")
-                  ) : (
-                    <div style={{ padding: "16px", display: "flex", flexDirection: "column", gap: "14px" }}>
-                      {tasksByDepartment.map((group) => {
-                        const isCollapsed = collapsedDepts.has(group.department);
-                        const colors = getDepartmentColor(group.department);
-
-                        return (
-                          <div
-                            key={group.department}
-                            style={{
-                              border: "1px solid #e2e8f0",
-                              borderRadius: "8px",
-                              overflow: "hidden",
-                              background: "#ffffff",
-                              boxShadow: "0 1px 2px rgba(0,0,0,0.03)",
-                            }}
-                          >
-                            {/* Department Accordion Header */}
-                            <div
-                              onClick={() => toggleDeptCollapse(group.department)}
-                              style={{
-                                display: "flex",
-                                justifyContent: "space-between",
-                                alignItems: "center",
-                                padding: "10px 16px",
-                                background: isCollapsed ? "#ffffff" : "#f8fafc",
-                                borderBottom: isCollapsed ? "none" : "1px solid #e2e8f0",
-                                cursor: "pointer",
-                                userSelect: "none",
-                                transition: "background 0.15s ease",
-                              }}
-                            >
-                              <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                                <span style={{ fontSize: "13px", color: "#64748b" }}>
-                                  {isCollapsed ? "▶" : "▼"}
-                                </span>
-                                <DepartmentBadge department={group.department} />
-                                <span style={{ fontWeight: 700, fontSize: "13.5px", color: "#0f172a" }}>
-                                  {group.department}
-                                </span>
-                                <span
-                                  style={{
-                                    background: colors.bg,
-                                    color: colors.text,
-                                    border: `1px solid ${colors.border}`,
-                                    padding: "1px 7px",
-                                    borderRadius: "10px",
-                                    fontSize: "11px",
-                                    fontWeight: 700,
-                                  }}
-                                >
-                                  {group.tasks.length} task{group.tasks.length !== 1 ? "s" : ""}
-                                </span>
-                              </div>
-
-                              <span style={{ fontSize: "12px", color: "#64748b", fontWeight: 500 }}>
-                                {isCollapsed ? "Click to view tasks" : "Click to collapse"}
-                              </span>
-                            </div>
-
-                            {/* Department Tasks Table */}
-                            {!isCollapsed && (
-                              <div className="table-scroll" style={{ overflowX: "auto" }}>
-                                {renderTableMarkup(group.tasks)}
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
               ) : tasks.length === 0 ? (
                 renderEmptyState(scopeView)
               ) : (
@@ -2354,11 +2098,16 @@ export const TasksPage: React.FC = () => {
                                 ? 100
                                 : 0;
 
+                            const canDragTask = canMutateRowTask(t);
                             return (
                               <div
                                 key={t.id}
-                                draggable
+                                draggable={canDragTask}
                                 onDragStart={(e) => {
+                                  if (!canDragTask) {
+                                    e.preventDefault();
+                                    return;
+                                  }
                                   e.dataTransfer.setData("text/plain", t.id);
                                   e.dataTransfer.effectAllowed = "move";
                                   setDraggingTaskId(t.id);
@@ -2675,12 +2424,12 @@ export const TasksPage: React.FC = () => {
                         ) {
                           return;
                         }
-                        if (cell.dateKey) {
+                        if (cell.dateKey && canCreateTasks) {
                           setCreateTaskDates({ start: cell.dateKey, due: cell.dateKey });
                           setIsCreateOpen(true);
                         }
                       }}
-                      title={cell.dateKey ? `Click to create task for ${cell.dateKey}` : ""}
+                      title={cell.dateKey && canCreateTasks ? `Click to create task for ${cell.dateKey}` : ""}
                     >
                       {/* Day Number and Today Badge */}
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "2px" }}>
@@ -2884,7 +2633,7 @@ export const TasksPage: React.FC = () => {
               tasks={tasks}
               onSelectTask={(id) => setSelectedTaskId(id)}
               availableUsers={availableUsers}
-              colorByDepartment={scopeView === "organization"}
+              colorByDepartment={scopeView === "all"}
             />
           ) : activeTab === "recurring" ? (
             <div style={{ padding: "16px" }}>

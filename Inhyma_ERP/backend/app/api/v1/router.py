@@ -220,20 +220,3 @@ from app.feed.routes import router as feed_router  # noqa: E402
 api_router.include_router(durable_events_router)
 api_router.include_router(backup_router)
 api_router.include_router(feed_router)
-
-
-@api_router.get("/organizations/public", summary="Get public organization info for login page")
-async def get_public_org_info(
-    request: Request,
-    organization_service: OrganizationService = Depends(get_organization_service),
-) -> dict:
-    try:
-        org = await organization_service.repository.get_singleton()
-    except Exception:
-        org = None
-    name = (org.company_name.strip() if org and org.company_name else "Inhyma")
-    logo = (org.logo_url or org.logo_data) if org else None
-    return build_success_response(
-        data={"id": str(org.id) if org else "default", "name": name, "company_name": name, "logo_url": logo, "logo_data": org.logo_data if org else None},
-        request_id=getattr(request.state, "request_id", "-"),
-    )
