@@ -11,6 +11,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
 import { ItemPopoverCell, TextPopoverCell } from "@/components/ItemPopoverCell";
+import { SearchableDropdown, type DropdownOption } from "@/components/SearchableDropdown";
 import { DetailSkeleton } from "@/components/Skeleton";
 import { apiDelete, apiGet, apiPatch, apiPost, downloadExport, errorMessage } from "@/lib/api";
 import { Auth } from "@/lib/auth";
@@ -28,7 +29,7 @@ import type {
 
 type ActiveSection = "local_purchase" | "sale_order";
 
-const PAYMENT_MODES = [
+const DEFAULT_PAYMENT_MODES = [
   "RMB A/C",
   "USD Transaction A/C",
   "USD Capital A/C",
@@ -177,6 +178,11 @@ export function FinancialReportPage() {
   const [dateTo, setDateTo] = useState("");
   const [pageSize, setPageSize] = useState<number>(50);
   const [currentPage, setCurrentPage] = useState<number>(1);
+  const partyLookupCacheRef = useRef<{
+    suppliers: Array<{ company_name?: string; brand_description?: string; supplier_type?: string }>;
+    buyers: Array<{ company_name?: string; name?: string }>;
+  } | null>(null);
+  const consignmentLookupCacheRef = useRef<string[] | null>(null);
 
   // Data state (initialized from module-level cache for 0ms instant paint)
   const [report, setReport] = useState<FinanceReportResponse | null>(cachedFinanceReport);
@@ -196,6 +202,7 @@ export function FinancialReportPage() {
   const [payDate, setPayDate] = useState<string>(() => new Date().toISOString().slice(0, 10));
   const [payCurrency, setPayCurrency] = useState<string>("RMB");
   const [payMode, setPayMode] = useState<string>("RMB A/C");
+  const [paymentModes, setPaymentModes] = useState<string[]>(DEFAULT_PAYMENT_MODES);
   const [payBankCharges, setPayBankCharges] = useState<string>("0");
   const [payRefNo, setPayRefNo] = useState<string>("");
   const [payNextDueDate, setPayNextDueDate] = useState<string>("");
@@ -262,6 +269,26 @@ export function FinancialReportPage() {
     void fetchReport({ silent: Boolean(cachedFinanceReport) });
   }, [fetchReport]);
 
+  // Fetch active Payment Modes / Bank Accounts from Masters
+  useEffect(() => {
+    let cancelled = false;
+    apiGet<Array<{ name: string; status?: string }>>("/masters/payment-modes?status=active&page_size=200")
+      .then((res) => {
+        if (cancelled) return;
+        const list = Array.isArray(res.data) ? res.data : [];
+        const names = list.map((m) => (m.name || "").trim()).filter(Boolean);
+        if (names.length > 0) {
+          setPaymentModes(names);
+        }
+      })
+      .catch(() => {
+        /* fallback to DEFAULT_PAYMENT_MODES */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   // Sync URL query params for section/stage
   const handleSectionChange = (sec: ActiveSection) => {
     setActiveSection(sec);
@@ -290,6 +317,139 @@ export function FinancialReportPage() {
     setDateTo("");
     setCurrentPage(1);
   };
+
+  const fetchPartyOptions = useCallback(
+    async (term: string): Promise<DropdownOption[]> => {
+      if (!partyLookupCacheRef.current) {
+        try {
+          const [supRes, buyRes] = await Promise.all([
+            apiGet<any>("/suppliers/lookup"),
+            apiGet<any>("/buyers?page_size=200"),
+          ]);
+          const suppliers = Array.isArray(supRes.data)
+            ? supRes.data
+            : supRes.data?.items || supRes.data?.data || [];
+          const buyers = Array.isArray(buyRes.data)
+            ? buyRes.data
+            : buyRes.data?.items || buyRes.data?.data || [];
+          partyLookupCacheRef.current = { suppliers, buyers };
+        } catch {
+          partyLookupCacheRef.current = { suppliers: [], buyers: [] };
+        }
+      }
+
+      const { suppliers, buyers } = partyLookupCacheRef.current;
+      const q = term.trim().toLowerCase();
+
+      const seenSuppliers = new Set<string>();
+      const supplierOptions: DropdownOption[] = [];
+      for (const s of suppliers) {
+        const name = (s.company_name || "").trim();
+        if (!name || seenSuppliers.has(name.toLowerCase())) continue;
+        seenSuppliers.add(name.toLowerCase());
+        const brand = (s.brand_description || "").trim();
+        const stype = (s.supplier_type || "").trim();
+        const sublabel = brand && brand.toLowerCase() !== name.toLowerCase() ? brand : stype || undefined;
+        if (
+          !q ||
+          name.toLowerCase().includes(q) ||
+          brand.toLowerCase().includes(q) ||
+          stype.toLowerCase().includes(q)
+        ) {
+          supplierOptions.push({
+            value: name,
+            label: name,
+            sublabel,
+            group: "Suppliers",
+          });
+        }
+      }
+      for (const lp of report?.local_purchases ?? []) {
+        const name = (lp.supplier_name || "").trim();
+        if (!name || seenSuppliers.has(name.toLowerCase())) continue;
+        seenSuppliers.add(name.toLowerCase());
+        if (!q || name.toLowerCase().includes(q)) {
+          supplierOptions.push({
+            value: name,
+            label: name,
+            group: "Suppliers",
+          });
+        }
+      }
+      supplierOptions.sort((a, b) => a.label.localeCompare(b.label));
+
+      const seenBuyers = new Set<string>();
+      const buyerOptions: DropdownOption[] = [];
+      for (const b of buyers) {
+        const name = (b.company_name || b.name || "").trim();
+        if (!name || seenBuyers.has(name.toLowerCase())) continue;
+        seenBuyers.add(name.toLowerCase());
+        if (!q || name.toLowerCase().includes(q)) {
+          buyerOptions.push({
+            value: name,
+            label: name,
+            group: "Buyers",
+          });
+        }
+      }
+      for (const so of report?.sale_orders ?? []) {
+        const name = (so.buyer_name || "").trim();
+        if (!name || seenBuyers.has(name.toLowerCase())) continue;
+        seenBuyers.add(name.toLowerCase());
+        if (!q || name.toLowerCase().includes(q)) {
+          buyerOptions.push({
+            value: name,
+            label: name,
+            group: "Buyers",
+          });
+        }
+      }
+      buyerOptions.sort((a, b) => a.label.localeCompare(b.label));
+
+      return [...supplierOptions, ...buyerOptions];
+    },
+    [report?.local_purchases, report?.sale_orders]
+  );
+
+  const fetchConsignmentOptions = useCallback(
+    async (term: string): Promise<DropdownOption[]> => {
+      if (!consignmentLookupCacheRef.current) {
+        try {
+          const res = await apiGet<any>("/inquiries/consignment-codes");
+          const items = Array.isArray(res.data) ? res.data : res.data?.items || res.data?.data || [];
+          consignmentLookupCacheRef.current = items
+            .map((c: any) => (typeof c === "string" ? c : c?.code || "").trim())
+            .filter(Boolean);
+        } catch {
+          consignmentLookupCacheRef.current = [];
+        }
+      }
+
+      const seen = new Set<string>();
+      const allCodes: string[] = [];
+      const addCode = (raw?: string | null) => {
+        const code = (raw || "").trim();
+        if (!code) return;
+        const key = code.toLowerCase();
+        if (seen.has(key)) return;
+        seen.add(key);
+        allCodes.push(code);
+      };
+
+      for (const c of consignmentLookupCacheRef.current ?? []) addCode(c);
+      for (const lp of report?.local_purchases ?? []) addCode(lp.consignment_code);
+      for (const so of report?.sale_orders ?? []) addCode(so.consignment_code);
+
+      allCodes.sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }));
+
+      const q = term.trim().toLowerCase();
+      return (q ? allCodes.filter((c) => c.toLowerCase().includes(q)) : allCodes).map((code) => ({
+        value: code,
+        label: code,
+      }));
+    },
+    [report?.local_purchases, report?.sale_orders]
+  );
 
   // Client-side search & stage filtering for instant response
   const filteredLocalPurchases = useMemo(() => {
@@ -862,12 +1022,15 @@ export function FinancialReportPage() {
                 >
                   Party (Supplier / Buyer)
                 </label>
-                <input
-                  type="text"
-                  value={partyFilter}
-                  onChange={(e) => setPartyFilter(e.target.value)}
-                  placeholder="Filter by supplier or buyer..."
-                  style={{
+                <SearchableDropdown
+                  value={partyFilter || null}
+                  onChange={(val) => {
+                    setPartyFilter(val ?? "");
+                    setCurrentPage(1);
+                  }}
+                  placeholder="Select or search supplier / buyer..."
+                  fetchOptions={fetchPartyOptions}
+                  inputStyle={{
                     width: "100%",
                     padding: "7px 10px",
                     borderRadius: 6,
@@ -882,12 +1045,15 @@ export function FinancialReportPage() {
                 >
                   Consignment Code
                 </label>
-                <input
-                  type="text"
-                  value={consignmentFilter}
-                  onChange={(e) => setConsignmentFilter(e.target.value)}
-                  placeholder="e.g. MUM 48, EXP 34..."
-                  style={{
+                <SearchableDropdown
+                  value={consignmentFilter || null}
+                  onChange={(val) => {
+                    setConsignmentFilter(val ?? "");
+                    setCurrentPage(1);
+                  }}
+                  placeholder="Select or search consignment (e.g. MUM 48)..."
+                  fetchOptions={fetchConsignmentOptions}
+                  inputStyle={{
                     width: "100%",
                     padding: "7px 10px",
                     borderRadius: 6,
@@ -2247,7 +2413,7 @@ export function FinancialReportPage() {
                     onChange={(e) => setPayMode(e.target.value)}
                     style={inputStyle}
                   >
-                    {PAYMENT_MODES.map((m) => (
+                    {paymentModes.map((m) => (
                       <option key={m} value={m}>
                         {m}
                       </option>

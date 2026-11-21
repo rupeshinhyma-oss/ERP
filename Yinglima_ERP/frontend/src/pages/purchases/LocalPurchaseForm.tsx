@@ -19,6 +19,7 @@ import { apiGet, apiPatch, apiPost, apiPostMultipart, errorMessage } from "@/lib
 import { useLookup } from "@/lib/lookups";
 import { useToast } from "@/lib/toast";
 import { SearchableDropdown } from "@/components/SearchableDropdown";
+import { SelectField } from "@/components/fields";
 import { ProductTradeHistoryDrawer } from "@/components/ProductTradeHistoryDrawer";
 import { DetailSkeleton, InlineTextSkeleton } from "@/components/Skeleton";
 import type {
@@ -1722,13 +1723,13 @@ export function LocalPurchaseFormPage() {
                     </span>
                   )}
                 </label>
-                <select
+                <SelectField
                   value={planningColumnId}
-                  onChange={(e) => handleSelectConsignment(e.target.value)}
+                  onChange={(val) => handleSelectConsignment(val)}
                   disabled={!branchId || !matchingSheet || availableConsignments.length === 0}
                   required
-                  style={{
-                    width: "100%",
+                  hasError={Boolean(errors.consignment_code)}
+                  triggerStyle={{
                     padding: "8px 10px",
                     borderRadius: "6px",
                     border: errors.consignment_code ? "1.5px solid #ef4444" : "1.5px solid #94a3b8",
@@ -1738,7 +1739,6 @@ export function LocalPurchaseFormPage() {
                     color: (!branchId || !matchingSheet) ? "#94a3b8" : "#0f172a",
                     fontWeight: 600,
                     boxSizing: "border-box",
-                    cursor: (!branchId || !matchingSheet) ? "not-allowed" : "pointer",
                   }}
                 >
                   <option value="">
@@ -1755,7 +1755,7 @@ export function LocalPurchaseFormPage() {
                       {c.consignment_code} ({c.planned_items_count} planned items)
                     </option>
                   ))}
-                </select>
+                </SelectField>
                 {errors.consignment_code ? (
                   <div style={{ color: "#dc2626", fontSize: "11.5px", fontWeight: 600, marginTop: "4px", display: "flex", alignItems: "center", gap: "4px" }}>
                     <span>▲</span> {errors.consignment_code}

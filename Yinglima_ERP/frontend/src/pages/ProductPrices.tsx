@@ -13,6 +13,7 @@ import { Pagination } from "@/components/Pagination";
 import { SideDrawer, DetailFieldGrid } from "@/components/SideDrawer";
 import { Banner, Modal } from "@/components/ui";
 import { SearchableDropdown, SearchableFilterDropdown } from "@/components/SearchableDropdown";
+import { SelectField } from "@/components/fields";
 import { ProductTradeHistoryDrawer } from "@/components/ProductTradeHistoryDrawer";
 import { DetailSkeleton, InlineListSkeleton, TableSkeletonRows } from "@/components/Skeleton";
 import { apiDelete, apiGet, apiPatch, apiPost, apiPut, API_ORIGIN, downloadExport, toQueryString } from "@/lib/api";
@@ -2487,21 +2488,21 @@ export function ProductPricesPage() {
                                   </span>
 
                                   {/* Select Supplier */}
-                                  <select
+                                  <SelectField
                                     value={subTableSupplierId[row.product_id] || ""}
-                                    onChange={(e) =>
+                                    onChange={(val) =>
                                       setSubTableSupplierId((prev) => ({
                                         ...prev,
-                                        [row.product_id]: e.target.value,
+                                        [row.product_id]: val,
                                       }))
                                     }
-                                    style={{
+                                    style={{ minWidth: "200px" }}
+                                    triggerStyle={{
                                       padding: "6px 10px",
                                       borderRadius: "4px",
                                       border: "1px solid #cbd5e1",
                                       fontSize: "12.5px",
                                       background: "#fff",
-                                      minWidth: "180px",
                                     }}
                                   >
                                     <option value="">Select Supplier...</option>
@@ -2510,7 +2511,7 @@ export function ProductPricesPage() {
                                         {s.company_name}
                                       </option>
                                     ))}
-                                  </select>
+                                  </SelectField>
 
                                   {/* Price */}
                                   <input

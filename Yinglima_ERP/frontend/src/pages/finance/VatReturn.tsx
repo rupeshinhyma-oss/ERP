@@ -17,6 +17,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
+import { ActionDropdown, type ActionDropdownEntry } from "@/components/ActionDropdown";
 import { AppShell } from "@/components/AppShell";
 import { TableSkeletonRows } from "@/components/Skeleton";
 import {
@@ -136,8 +137,6 @@ export function VatReturnPage() {
   const [importingFile, setImportingFile] = useState<boolean>(false);
   const [exportingFile, setExportingFile] = useState<boolean>(false);
 
-  const [openMenuKey, setOpenMenuKey] = useState<string | null>(null);
-
   // Modals
   const [breakdownRowKey, setBreakdownRowKey] = useState<string | null>(null);
   const [breakdownDraft, setBreakdownDraft] = useState<VatReturnBreakdownItem[]>([]);
@@ -199,7 +198,6 @@ export function VatReturnPage() {
       if (impExpRef.current && !impExpRef.current.contains(e.target as Node)) {
         setImpExpOpen(false);
       }
-      setOpenMenuKey(null);
     };
     document.addEventListener("click", handleDocClick);
     return () => document.removeEventListener("click", handleDocClick);
@@ -1241,7 +1239,7 @@ export function VatReturnPage() {
           </div>
 
           {/* Table 1: VAT Return Summary Ledger */}
-          <div style={{ width: "100%", overflowX: "auto", paddingBottom: openMenuKey ? 185 : 0 }}>
+          <div style={{ width: "100%", overflowX: "auto" }}>
             <table
               style={{
                 width: "100%",
@@ -1262,8 +1260,8 @@ export function VatReturnPage() {
                 <col style={{ width: "7.5%" }} />
                 <col style={{ width: "7%" }} />
                 <col style={{ width: "7%" }} />
-                <col style={{ width: "12.5%" }} />
-                <col style={{ width: "3.5%" }} />
+                <col style={{ width: "11%" }} />
+                <col style={{ width: "5%" }} />
               </colgroup>
               <thead>
                 <tr style={{ background: "#f8fafc", borderBottom: "1px solid #e2e8f0" }}>
@@ -1301,7 +1299,7 @@ export function VatReturnPage() {
                     REMARKS
                   </th>
                   <th style={{ padding: "8px 4px", textAlign: "center", fontWeight: 700, color: "#475569", whiteSpace: "nowrap" }}>
-                    ACT
+                    ACTION
                   </th>
                 </tr>
               </thead>
@@ -1466,137 +1464,39 @@ export function VatReturnPage() {
                       </td>
 
                       {/* 3-DOT ACTION MENU */}
-                      <td style={{ padding: "8px 4px", textAlign: "center", verticalAlign: "top", position: "relative", whiteSpace: "nowrap" }}>
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setOpenMenuKey((k) => (k === row.record_key ? null : row.record_key));
-                          }}
-                          style={{
-                            background: "#f8fafc",
-                            border: "1px solid #cbd5e1",
-                            borderRadius: 6,
-                            width: 28,
-                            height: 26,
-                            cursor: "pointer",
-                            fontWeight: 800,
-                            color: "#334155",
-                          }}
-                        >
-                          ⋮
-                        </button>
-
-                        {openMenuKey === row.record_key && (
-                          <div
-                            onClick={(e) => e.stopPropagation()}
-                            style={{
-                              position: "absolute",
-                              right: 8,
-                              top: 34,
-                              background: "#ffffff",
-                              border: "1px solid #e2e8f0",
-                              borderRadius: 8,
-                              boxShadow: "0 10px 25px rgba(15,23,42,0.14)",
-                              minWidth: 235,
-                              zIndex: 60,
-                              padding: 6,
-                              textAlign: "left",
-                            }}
-                          >
-                            {canManageVatReceipt && (
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setOpenMenuKey(null);
-                                  openReceiptModal(row);
-                                }}
-                                style={{
-                                  width: "100%",
-                                  textAlign: "left",
-                                  padding: "8px 10px",
-                                  fontSize: 12.5,
-                                  fontWeight: 600,
-                                  color: "#0f172a",
-                                  background: "transparent",
-                                  border: "none",
-                                  borderRadius: 6,
-                                  cursor: "pointer",
-                                }}
-                              >
-                                💳 Record VAT Receipt (Full / Partial)
-                              </button>
-                            )}
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setOpenMenuKey(null);
-                                openBreakdownModal(row);
-                              }}
-                              style={{
-                                width: "100%",
-                                textAlign: "left",
-                                padding: "8px 10px",
-                                fontSize: 12.5,
-                                fontWeight: 600,
-                                color: "#2563eb",
-                                background: "transparent",
-                                border: "none",
-                                borderRadius: 6,
-                                cursor: "pointer",
-                              }}
-                            >
-                              📋 Product & Supplier VAT Breakdown
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setOpenMenuKey(null);
-                                setHistoryModalRowKey(row.record_key);
-                              }}
-                              style={{
-                                width: "100%",
-                                textAlign: "left",
-                                padding: "8px 10px",
-                                fontSize: 12.5,
-                                fontWeight: 600,
-                                color: "#0f172a",
-                                background: "transparent",
-                                border: "none",
-                                borderRadius: 6,
-                                cursor: "pointer",
-                              }}
-                            >
-                              📜 Receipt History ({row.receipts_count})
-                            </button>
-                            {canUpdateVatReturn && (
-                              <>
-                                <div style={{ height: 1, background: "#f1f5f9", margin: "4px 0" }} />
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setOpenMenuKey(null);
-                                    openEditMetaModal(row);
-                                  }}
-                                  style={{
-                                    width: "100%",
-                                    textAlign: "left",
-                                    padding: "8px 10px",
-                                    fontSize: 12.5,
-                                    fontWeight: 600,
-                                    color: "#475569",
-                                    background: "transparent",
-                                    border: "none",
-                                    borderRadius: 6,
-                                    cursor: "pointer",
-                                  }}
-                                >
-                                  ✏️ Edit Filing Date / Status / Remarks
-                                </button>
-                              </>
-                            )}
-                          </div>
-                        )}
+                      <td style={{ padding: "8px 4px", textAlign: "center", verticalAlign: "top", whiteSpace: "nowrap" }}>
+                        <ActionDropdown
+                          iconOnly
+                          items={((): ActionDropdownEntry[] => {
+                            const items: ActionDropdownEntry[] = [];
+                            if (canManageVatReceipt) {
+                              items.push({
+                                key: "receipt",
+                                label: "💳 Record VAT Receipt (Full / Partial)",
+                                onClick: () => openReceiptModal(row),
+                              });
+                            }
+                            items.push({
+                              key: "breakdown",
+                              label: "📋 Product & Supplier VAT Breakdown",
+                              onClick: () => openBreakdownModal(row),
+                            });
+                            items.push({
+                              key: "history",
+                              label: `📜 Receipt History (${row.receipts_count})`,
+                              onClick: () => setHistoryModalRowKey(row.record_key),
+                            });
+                            if (canUpdateVatReturn) {
+                              items.push("divider");
+                              items.push({
+                                key: "edit-meta",
+                                label: "✏️ Edit Filing Date / Status / Remarks",
+                                onClick: () => openEditMetaModal(row),
+                              });
+                            }
+                            return items;
+                          })()}
+                        />
                       </td>
                     </tr>
                   ))

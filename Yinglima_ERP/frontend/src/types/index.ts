@@ -148,6 +148,14 @@ export interface SupplierType extends MasterRecord {
   description?: string | null;
 }
 
+export interface PaymentMode extends MasterRecord {
+  name: string;
+  code: string;
+  account_type?: string | null;
+  currency_code?: string | null;
+  description?: string | null;
+}
+
 export interface CompanyBranch {
   id: string;
   name: string;

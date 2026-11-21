@@ -1404,15 +1404,19 @@ export function SelectField({
   children,
   hint,
   style,
+  triggerStyle,
   disabled = false,
   hasError = false,
   errorMessage,
   error,
-}: BaseFieldProps & {
+}: Omit<BaseFieldProps, "id" | "label"> & {
+  id?: string;
+  label?: ReactNode;
   value: string;
   onChange: (value: string) => void;
   required?: boolean;
   disabled?: boolean;
+  triggerStyle?: React.CSSProperties;
   children: ReactNode;
 }) {
   const isErr = Boolean(hasError || errorMessage || error);
@@ -1501,8 +1505,8 @@ export function SelectField({
   };
 
   return (
-    <div className="field" style={{ ...style, position: "relative" }} ref={containerRef}>
-      <label htmlFor={id}>{renderLabel(label)}</label>
+    <div className={label ? "field" : undefined} style={{ ...style, position: "relative" }} ref={containerRef}>
+      {label ? <label htmlFor={id}>{renderLabel(label)}</label> : null}
 
       <div
         id={id}
@@ -1529,6 +1533,7 @@ export function SelectField({
           alignItems: "center",
           justifyContent: "space-between",
           userSelect: "none",
+          ...triggerStyle,
         }}
       >
         <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
