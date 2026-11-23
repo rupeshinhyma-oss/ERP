@@ -16,11 +16,12 @@ import { Banner, Modal, TableMessageRow } from "@/components/ui";
 import { Pagination } from "@/components/Pagination";
 import { SortHeader } from "@/components/SortHeader";
 import { SelectField, TextField } from "@/components/fields";
-import { apiDelete, apiGet, apiPatch, apiPost, apiPut, toQueryString } from "@/lib/api";
+import { apiDelete, apiGet, apiPatch, apiPost, errorMessage, toQueryString } from "@/lib/api";
 import { Auth } from "@/lib/auth";
 import { getEcosystemCookie, setEcosystemCookie } from "@/lib/ecosystemSession";
 import { useAuth, useDebouncedValue, useModalHistorySync, usePendingGuard } from "@/lib/hooks";
 import { useToast } from "@/lib/toast";
+import { syncUserPermissionOverrides, type AutoSaveStatus } from "@/lib/rbacOverrides";
 import {
   DEPRECATED_PERMISSION_CODES,
   filterActivePermissions,
@@ -29,7 +30,6 @@ import {
   MODULE_NAMES,
 } from "@/lib/permissionLabels";
 import type {
-  BulkPermissionOverrideItem,
   EffectivePermissionsBreakdown,
   ItemsPage,
   Permission,
@@ -424,7 +424,12 @@ export function UsersPage() {
   const [overridesChecked, setOverridesChecked] = useState<Set<string>>(new Set());
   const [overridesSearch, setOverridesSearch] = useState("");
   const [overridesLoading, setOverridesLoading] = useState(false);
-  const [overridesSaving, setOverridesSaving] = useState(false);
+  const [overridesSaveStatus, setOverridesSaveStatus] = useState<AutoSaveStatus>("idle");
+
+  const overridesCheckedRef = useRef<Set<string>>(new Set());
+  const overridesUserIdRef = useRef<string | null>(null);
+  const overridesQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const overridesInFlightRef = useRef<number>(0);
 
   // Row checkboxes + select-all -- no bulk action reads this selection yet,
   // matching the source's chrome-only checkbox column.
@@ -968,48 +973,53 @@ export function UsersPage() {
     });
   }
 
+  async function reloadOverridesState(userId: string) {
+    const [effRes, userPermsRes] = await Promise.all([
+      apiGet<EffectivePermissionsBreakdown>(`/rbac/users/${userId}/effective-permissions`),
+      apiGet<UserPermissionOverride[]>(`/rbac/users/${userId}/permissions`),
+    ]);
+    if (overridesUserIdRef.current !== userId) return;
+    setOverridesBreakdown(effRes.data);
+
+    // Checked = explicit GRANT, or role-inherited and not explicitly
+    // DENYed -- mirrors the backend's own override-wins-over-role
+    // resolution order, so the grid opens showing exactly the effective set.
+    const overrideMap = new Map(
+      (userPermsRes.data || [])
+        .filter((o) => !DEPRECATED_PERMISSION_CODES.has(o.code))
+        .map((o) => [o.code, o.is_granted])
+    );
+    const roleGranted = new Set(
+      (effRes.data.role_permissions || []).filter((c) => !DEPRECATED_PERMISSION_CODES.has(c))
+    );
+    const initialChecked = new Set<string>();
+    for (const code of new Set([...overrideMap.keys(), ...roleGranted])) {
+      if (DEPRECATED_PERMISSION_CODES.has(code)) continue;
+      const override = overrideMap.get(code);
+      const checked = override === true || (override === undefined && roleGranted.has(code));
+      if (checked) initialChecked.add(code);
+    }
+    overridesCheckedRef.current = initialChecked;
+    setOverridesChecked(initialChecked);
+  }
+
   /** Open the checkbox-grid permission-overrides modal for one user. */
   async function openUserOverridesModal(userId: string, userLabel: string) {
+    overridesUserIdRef.current = userId;
+    overridesCheckedRef.current = new Set();
     setOverridesUserId(userId);
     setOverridesUsername(userLabel);
     setOverridesSearch("");
     setOverridesLoading(true);
+    setOverridesSaveStatus("idle");
     setOverridesBreakdown(null);
     setOverridesChecked(new Set());
     try {
-      let perms = allPermissions;
-      if (!perms || perms.length === 0) {
+      if (!allPermissions || allPermissions.length === 0) {
         const permsRes = await apiGet<Permission[]>("/rbac/permissions");
-        perms = filterActivePermissions(permsRes.data || []);
-        setAllPermissions(perms);
-      } else {
-        perms = filterActivePermissions(perms);
+        setAllPermissions(filterActivePermissions(permsRes.data || []));
       }
-      const [effRes, userPermsRes] = await Promise.all([
-        apiGet<EffectivePermissionsBreakdown>(`/rbac/users/${userId}/effective-permissions`),
-        apiGet<UserPermissionOverride[]>(`/rbac/users/${userId}/permissions`),
-      ]);
-      setOverridesBreakdown(effRes.data);
-
-      // Checked = explicit GRANT, or role-inherited and not explicitly
-      // DENYed -- mirrors the backend's own override-wins-over-role
-      // resolution order, so the grid opens showing exactly the effective set.
-      const overrideMap = new Map(
-        (userPermsRes.data || [])
-          .filter((o) => !DEPRECATED_PERMISSION_CODES.has(o.code))
-          .map((o) => [o.code, o.is_granted])
-      );
-      const roleGranted = new Set(
-        (effRes.data.role_permissions || []).filter((c) => !DEPRECATED_PERMISSION_CODES.has(c))
-      );
-      const initialChecked = new Set<string>();
-      for (const code of new Set([...overrideMap.keys(), ...roleGranted])) {
-        if (DEPRECATED_PERMISSION_CODES.has(code)) continue;
-        const override = overrideMap.get(code);
-        const checked = override === true || (override === undefined && roleGranted.has(code));
-        if (checked) initialChecked.add(code);
-      }
-      setOverridesChecked(initialChecked);
+      await reloadOverridesState(userId);
     } catch (err) {
       setError(err);
     } finally {
@@ -1017,30 +1027,41 @@ export function UsersPage() {
     }
   }
 
-  /** Bulk-diff save: see handleSaveUserOverrides in Rbac.tsx for the same logic, explained in detail there. */
-  async function handleSaveUserOverrides() {
-    if (!overridesUserId || !overridesBreakdown) return;
-    setOverridesSaving(true);
-    try {
-      const roleGranted = new Set(overridesBreakdown.role_permissions || []);
-      const overrides: BulkPermissionOverrideItem[] = [];
-      for (const p of allPermissions) {
-        const checked = overridesChecked.has(p.code);
-        const isRoleGranted = roleGranted.has(p.code);
-        if (checked && !isRoleGranted) {
-          overrides.push({ permission_id: p.id, is_granted: true });
-        } else if (!checked && isRoleGranted) {
-          overrides.push({ permission_id: p.id, is_granted: false });
+  /** Optimistically update overrides and persist immediately without a Save button. */
+  function applyOverridesUpdate(nextChecked: Set<string>) {
+    overridesCheckedRef.current = nextChecked;
+    setOverridesChecked(nextChecked);
+
+    const targetUserId = overridesUserIdRef.current;
+    const breakdown = overridesBreakdown;
+    if (!targetUserId || !breakdown) return;
+
+    overridesInFlightRef.current += 1;
+    setOverridesSaveStatus("saving");
+    const rolePerms = breakdown.role_permissions || [];
+    const permsSnapshot = allPermissions;
+    overridesQueueRef.current = overridesQueueRef.current
+      .catch(() => {})
+      .then(async () => {
+        let failed = false;
+        try {
+          await syncUserPermissionOverrides(targetUserId, permsSnapshot, nextChecked, rolePerms);
+        } catch (err) {
+          failed = true;
+          showToast(errorMessage(err) || "Failed to update permission override.", "error");
+          setError(err);
+          try {
+            await reloadOverridesState(targetUserId);
+          } catch {
+            // Keep surfaced error
+          }
+        } finally {
+          overridesInFlightRef.current = Math.max(0, overridesInFlightRef.current - 1);
+          if (overridesInFlightRef.current === 0 && overridesUserIdRef.current === targetUserId) {
+            setOverridesSaveStatus(failed ? "error" : "saved");
+          }
         }
-      }
-      await apiPut(`/rbac/users/${overridesUserId}/permissions/bulk`, { overrides });
-      showToast("Permissions updated for user.", "success");
-      setOverridesUserId(null);
-    } catch (err) {
-      setError(err);
-    } finally {
-      setOverridesSaving(false);
-    }
+      });
   }
 
   const canManage = hasPermission("user.action") || isSuperAdmin;
@@ -2237,7 +2258,10 @@ export function UsersPage() {
       <Modal
         open={Boolean(overridesUserId)}
         title={`🔑 Manage Permission Overrides — ${overridesUsername}`}
-        onClose={() => setOverridesUserId(null)}
+        onClose={() => {
+          overridesUserIdRef.current = null;
+          setOverridesUserId(null);
+        }}
         cardStyle={{ maxWidth: "820px", width: "100%", height: "100vh", maxHeight: "100vh", display: "flex", flexDirection: "column", padding: 0 }}
       >
         {overridesLoading || !overridesBreakdown ? (
@@ -2333,7 +2357,7 @@ export function UsersPage() {
                     type="button"
                     className="btn btn-small"
                     style={{ background: "#dcfce7", color: "#166534", border: "1px solid #bbf7d0", fontWeight: 600 }}
-                    onClick={() => setOverridesChecked(new Set(allPermissions.map((p) => p.code)))}
+                    onClick={() => applyOverridesUpdate(new Set(allPermissions.map((p) => p.code)))}
                   >
                     🟢 Grant All
                   </button>
@@ -2341,7 +2365,7 @@ export function UsersPage() {
                     type="button"
                     className="btn btn-small"
                     style={{ background: "#fee2e2", color: "#991b1b", border: "1px solid #fca5a5", fontWeight: 600 }}
-                    onClick={() => setOverridesChecked(new Set())}
+                    onClick={() => applyOverridesUpdate(new Set())}
                   >
                     🔴 Deny All
                   </button>
@@ -2350,7 +2374,7 @@ export function UsersPage() {
                     className="btn btn-small"
                     style={{ background: "#f1f5f9", color: "#475569", border: "1px solid #cbd5e1", fontWeight: 600 }}
                     onClick={() => {
-                      setOverridesChecked(new Set(overridesBreakdown.role_permissions || []));
+                      applyOverridesUpdate(new Set(overridesBreakdown.role_permissions || []));
                     }}
                   >
                     🔄 Reset to Departments
@@ -2414,14 +2438,12 @@ export function UsersPage() {
                           type="button"
                           className="toggle-btn"
                           onClick={() => {
-                            setOverridesChecked((prev) => {
-                              const next = new Set(prev);
-                              items.forEach((p) => {
-                                if (allCheckedInMod) next.delete(p.code);
-                                else next.add(p.code);
-                              });
-                              return next;
+                            const next = new Set(overridesCheckedRef.current);
+                            items.forEach((p) => {
+                              if (allCheckedInMod) next.delete(p.code);
+                              else next.add(p.code);
                             });
+                            applyOverridesUpdate(next);
                           }}
                         >
                           {allCheckedInMod ? "Deselect Group" : "Select Group"}
@@ -2455,12 +2477,10 @@ export function UsersPage() {
                                 type="checkbox"
                                 checked={checked}
                                 onChange={() => {
-                                  setOverridesChecked((prev) => {
-                                    const next = new Set(prev);
-                                    if (next.has(p.code)) next.delete(p.code);
-                                    else next.add(p.code);
-                                    return next;
-                                  });
+                                  const next = new Set(overridesCheckedRef.current);
+                                  if (next.has(p.code)) next.delete(p.code);
+                                  else next.add(p.code);
+                                  applyOverridesUpdate(next);
                                 }}
                               />
                               <div style={{ flex: 1, minWidth: 0 }}>
@@ -2545,17 +2565,44 @@ export function UsersPage() {
                       </span>
                     )}
                   </div>
-                  <div style={{ display: "flex", gap: 12 }}>
-                    <button type="button" className="btn" onClick={() => setOverridesUserId(null)}>
-                      Cancel
-                    </button>
+                  <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+                    <span
+                      style={{
+                        fontSize: "12px",
+                        fontWeight: 600,
+                        padding: "4px 10px",
+                        borderRadius: "12px",
+                        background:
+                          overridesSaveStatus === "saving"
+                            ? "#fef3c7"
+                            : overridesSaveStatus === "error"
+                              ? "#fee2e2"
+                              : "#dcfce7",
+                        color:
+                          overridesSaveStatus === "saving"
+                            ? "#92400e"
+                            : overridesSaveStatus === "error"
+                              ? "#991b1b"
+                              : "#166534",
+                      }}
+                    >
+                      {overridesSaveStatus === "saving"
+                        ? "Saving..."
+                        : overridesSaveStatus === "error"
+                          ? "Save failed"
+                          : overridesSaveStatus === "saved"
+                            ? "Auto-saved"
+                            : "Auto-saves on change"}
+                    </span>
                     <button
                       type="button"
                       className="btn btn-primary"
-                      disabled={overridesSaving}
-                      onClick={() => void handleSaveUserOverrides()}
+                      onClick={() => {
+                        overridesUserIdRef.current = null;
+                        setOverridesUserId(null);
+                      }}
                     >
-                      {overridesSaving ? "Saving..." : "Save Permission Overrides"}
+                      Done
                     </button>
                   </div>
                 </div>

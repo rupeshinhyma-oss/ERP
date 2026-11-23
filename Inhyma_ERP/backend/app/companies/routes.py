@@ -183,7 +183,7 @@ async def create_company(
     payload: CompanyCreate,
     request: Request,
     service: CompanyService = Depends(get_company_service),
-    current_user: CurrentUser = Depends(require_any_permission("company.create", "supplier.create")),
+    current_user: CurrentUser = Depends(require_any_permission("company.create", "company.quick_add", "company.manage")),
     audit_service: AuditService = Depends(get_audit_service),
     db: AsyncSession = Depends(get_db_session),
     dispatcher: EventDispatcher = Depends(get_event_dispatcher),
@@ -220,7 +220,7 @@ async def list_companies(
     sub_category_id: str | None = None,
     product_id: str | None = None,
     service: CompanyService = Depends(get_company_service),
-    _current_user: CurrentUser = Depends(require_any_permission("company.view", "supplier.view")),
+    _current_user: CurrentUser = Depends(require_any_permission("company.view", "company.manage")),
 ) -> dict:
     """List companies with search/sort/filter/pagination."""
     cat_uuid: uuid.UUID | None = None
@@ -275,7 +275,7 @@ async def export_companies(
     request: Request,
     format: str = "csv",
     service: CompanyService = Depends(get_company_service),
-    current_user: CurrentUser = Depends(require_any_permission("company.export", "supplier.export")),
+    current_user: CurrentUser = Depends(require_any_permission("company.export", "company.manage")),
     audit_service: AuditService = Depends(get_audit_service),
 ) -> Response:
     """Export every company as a CSV or XLSX file."""
@@ -307,7 +307,7 @@ async def import_companies(
     file: UploadFile = File(...),
     update_existing: bool = Query(False, description="Update existing records matching company name or GST number instead of skipping"),
     service: CompanyService = Depends(get_company_service),
-    current_user: CurrentUser = Depends(require_any_permission("company.create", "supplier.create")),
+    current_user: CurrentUser = Depends(require_any_permission("company.import", "company.manage")),
     audit_service: AuditService = Depends(get_audit_service),
 ) -> dict:
     """Import companies from an uploaded CSV/XLSX file, validating every row."""
@@ -336,7 +336,7 @@ async def import_companies(
 @router.post("/upload-media", summary="Upload visit photo or video")
 async def upload_company_media(
     file: UploadFile = File(...),
-    _current_user: CurrentUser = Depends(require_any_permission("company.create", "supplier.create")),
+    _current_user: CurrentUser = Depends(require_any_permission("company.create", "company.quick_add", "company.update", "company.manage")),
 ) -> dict:
     """Upload a company visit photo/video."""
     content = await file.read()
@@ -354,7 +354,20 @@ async def upload_company_media(
 async def list_sales_persons(
     request: Request,
     db: AsyncSession = Depends(get_db_session),
-    _current_user: CurrentUser = Depends(require_any_permission("company.view", "company.create", "supplier.view", "supplier.create")),
+    _current_user: CurrentUser = Depends(
+        require_any_permission(
+            "company.view",
+            "company.create",
+            "company.quick_add",
+            "company.update",
+            "company.manage",
+            "supplier.view",
+            "supplier.create",
+            "crm.leads.view",
+            "crm.leads.create",
+            "crm.leads.manage",
+        )
+    ),
 ) -> dict:
     """Return active users for sales person selection."""
     from app.users.models import User, UserStatus
@@ -388,6 +401,9 @@ async def lookup_companies(
         require_any_permission(
             "company.view",
             "company.create",
+            "company.quick_add",
+            "company.update",
+            "company.manage",
             "supplier.view",
             "supplier.create",
             "crm.leads.view",
@@ -466,7 +482,20 @@ async def check_contact_number(
     exclude_id: uuid.UUID | None = Query(default=None),
     exclude_contact_id: uuid.UUID | None = Query(default=None),
     service: CompanyService = Depends(get_company_service),
-    _current_user: CurrentUser = Depends(require_any_permission("company.view", "company.create", "supplier.view", "supplier.create")),
+    _current_user: CurrentUser = Depends(
+        require_any_permission(
+            "company.view",
+            "company.create",
+            "company.quick_add",
+            "company.update",
+            "company.manage",
+            "supplier.view",
+            "supplier.create",
+            "crm.leads.view",
+            "crm.leads.create",
+            "crm.leads.manage",
+        )
+    ),
 ) -> dict:
     """Return whether a direct contact number already exists and which company holds it."""
     comp = await service.repository.get_company_by_calling_number(
@@ -487,7 +516,7 @@ async def get_company(
     company_id: uuid.UUID,
     request: Request,
     service: CompanyService = Depends(get_company_service),
-    _current_user: CurrentUser = Depends(require_any_permission("company.view", "supplier.view")),
+    _current_user: CurrentUser = Depends(require_any_permission("company.view", "company.update", "company.manage")),
 ) -> dict:
     """Fetch a single company profile by ID."""
     company = await service.get_by_id_or_raise(company_id)
@@ -501,7 +530,7 @@ async def update_company(
     payload: CompanyUpdate,
     request: Request,
     service: CompanyService = Depends(get_company_service),
-    current_user: CurrentUser = Depends(require_any_permission("company.update", "supplier.update")),
+    current_user: CurrentUser = Depends(require_any_permission("company.update", "company.manage")),
     audit_service: AuditService = Depends(get_audit_service),
     db: AsyncSession = Depends(get_db_session),
     dispatcher: EventDispatcher = Depends(get_event_dispatcher),
@@ -537,7 +566,7 @@ async def update_company_grade(
     payload: CompanyGradeUpdate,
     request: Request,
     service: CompanyService = Depends(get_company_service),
-    current_user: CurrentUser = Depends(require_any_permission("company.grade_edit", "supplier.grade_edit", "company.update", "supplier.update")),
+    current_user: CurrentUser = Depends(require_any_permission("company.grade_edit", "company.manage")),
     audit_service: AuditService = Depends(get_audit_service),
     db: AsyncSession = Depends(get_db_session),
     dispatcher: EventDispatcher = Depends(get_event_dispatcher),
@@ -572,7 +601,7 @@ async def update_company_potential(
     payload: CompanyPotentialUpdate,
     request: Request,
     service: CompanyService = Depends(get_company_service),
-    current_user: CurrentUser = Depends(require_any_permission("company.potential_edit", "supplier.potential_edit", "company.update", "supplier.update")),
+    current_user: CurrentUser = Depends(require_any_permission("company.potential_edit", "company.manage")),
     audit_service: AuditService = Depends(get_audit_service),
     db: AsyncSession = Depends(get_db_session),
     dispatcher: EventDispatcher = Depends(get_event_dispatcher),
@@ -606,7 +635,7 @@ async def activate_company(
     company_id: uuid.UUID,
     request: Request,
     service: CompanyService = Depends(get_company_service),
-    current_user: CurrentUser = Depends(require_any_permission("company.update", "supplier.update")),
+    current_user: CurrentUser = Depends(require_any_permission("company.update", "company.bulk_action", "company.manage")),
     audit_service: AuditService = Depends(get_audit_service),
     db: AsyncSession = Depends(get_db_session),
     dispatcher: EventDispatcher = Depends(get_event_dispatcher),
@@ -639,7 +668,7 @@ async def deactivate_company(
     company_id: uuid.UUID,
     request: Request,
     service: CompanyService = Depends(get_company_service),
-    current_user: CurrentUser = Depends(require_any_permission("company.update", "supplier.update")),
+    current_user: CurrentUser = Depends(require_any_permission("company.update", "company.bulk_action", "company.manage")),
     audit_service: AuditService = Depends(get_audit_service),
     db: AsyncSession = Depends(get_db_session),
     dispatcher: EventDispatcher = Depends(get_event_dispatcher),
@@ -672,7 +701,7 @@ async def delete_company(
     company_id: uuid.UUID,
     request: Request,
     service: CompanyService = Depends(get_company_service),
-    current_user: CurrentUser = Depends(require_any_permission("company.delete", "supplier.delete")),
+    current_user: CurrentUser = Depends(require_any_permission("company.delete", "company.manage")),
     audit_service: AuditService = Depends(get_audit_service),
     db: AsyncSession = Depends(get_db_session),
     dispatcher: EventDispatcher = Depends(get_event_dispatcher),
@@ -714,7 +743,7 @@ async def create_company_contact(
     payload: CompanyContactCreate,
     request: Request,
     service: CompanyService = Depends(get_company_service),
-    current_user: CurrentUser = Depends(require_any_permission("company.update", "supplier.update")),
+    current_user: CurrentUser = Depends(require_any_permission("company.update", "company.manage")),
     audit_service: AuditService = Depends(get_audit_service),
 ) -> dict:
     """Add a contact person to a company."""
@@ -737,7 +766,7 @@ async def list_company_contacts(
     company_id: uuid.UUID,
     request: Request,
     service: CompanyService = Depends(get_company_service),
-    _current_user: CurrentUser = Depends(require_any_permission("company.view", "supplier.view")),
+    _current_user: CurrentUser = Depends(require_any_permission("company.view", "company.update", "company.manage")),
 ) -> dict:
     """List every contact person for a company."""
     await service.get_by_id_or_raise(company_id)
@@ -753,7 +782,7 @@ async def update_company_contact(
     payload: CompanyContactUpdate,
     request: Request,
     service: CompanyService = Depends(get_company_service),
-    current_user: CurrentUser = Depends(require_any_permission("company.update", "supplier.update")),
+    current_user: CurrentUser = Depends(require_any_permission("company.update", "company.manage")),
     audit_service: AuditService = Depends(get_audit_service),
 ) -> dict:
     """Update an existing contact person."""
@@ -777,7 +806,7 @@ async def delete_company_contact(
     contact_id: uuid.UUID,
     request: Request,
     service: CompanyService = Depends(get_company_service),
-    current_user: CurrentUser = Depends(require_any_permission("company.update", "supplier.update")),
+    current_user: CurrentUser = Depends(require_any_permission("company.update", "company.manage")),
     audit_service: AuditService = Depends(get_audit_service),
 ) -> dict:
     """Remove a contact person from a company."""

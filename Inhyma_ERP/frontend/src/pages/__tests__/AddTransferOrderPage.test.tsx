@@ -13,6 +13,18 @@ vi.mock("@/components/AppShell", () => ({
   ),
 }));
 
+vi.mock("@/lib/hooks", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/hooks")>();
+  return {
+    ...actual,
+    useAuth: () => ({
+      profile: { id: "u1", username: "admin", full_name: "Admin User", permissions: [] },
+      isSuperAdmin: true,
+      hasPermission: () => true,
+    }),
+  };
+});
+
 // Mock InventoryApi & apiGet
 vi.mock("@/lib/api", () => ({
   apiGet: vi.fn().mockImplementation((url: string) => {

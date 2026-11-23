@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
 import { SideDrawer, DetailFieldGrid } from "@/components/SideDrawer";
@@ -343,11 +344,57 @@ export function StockTransferPage({
   initialLoading = import.meta.env.MODE !== "test",
 }: StockTransferPageProps = {}) {
   const navigate = useNavigate();
-  const { profile } = useAuth();
+  const { profile, isSuperAdmin, hasPermission } = useAuth();
+  const canManage = isSuperAdmin || hasPermission("stock_transfer.manage");
+  const canView = canManage || hasPermission("stock_transfer.view");
+  const canViewPendingTab = canManage || hasPermission("stock_transfer.pending.view");
+  const canViewConfirmedTab = canManage || hasPermission("stock_transfer.confirmed.view");
+  const canViewReceivedTab = canManage || hasPermission("stock_transfer.received.view");
+  const canViewCancelTab = canManage || hasPermission("stock_transfer.cancel.view");
+  const canCreate = canManage || hasPermission("stock_transfer.create");
+  const canExport = canManage || hasPermission("stock_transfer.export");
+  const canBulkAction = canManage || hasPermission("stock_transfer.bulk_action");
+  const canStagePending = canManage || hasPermission("stock_transfer.pending");
+  const canStageConfirmed = canManage || hasPermission("stock_transfer.confirmed");
+  const canStageReceived = canManage || hasPermission("stock_transfer.received");
+  const canCancel = canManage || hasPermission("stock_transfer.cancel");
+  const canDownload = canManage || hasPermission("stock_transfer.download");
+  const canAnyRowAction =
+    canView || canStagePending || canStageConfirmed || canStageReceived || canCancel || canDownload;
+
+  const isTabPermitted = useCallback(
+    (tab: "All" | "Pending" | "Confirmed" | "Received" | "Cancel") => {
+      switch (tab) {
+        case "All":
+          return canView;
+        case "Pending":
+          return canViewPendingTab;
+        case "Confirmed":
+          return canViewConfirmedTab;
+        case "Received":
+          return canViewReceivedTab;
+        case "Cancel":
+          return canViewCancelTab;
+      }
+    },
+    [canView, canViewPendingTab, canViewConfirmedTab, canViewReceivedTab, canViewCancelTab]
+  );
+
   const isTestMode = import.meta.env.MODE === "test";
   const [loading, setLoading] = useState<boolean>(initialLoading);
   const [items, setItems] = useState<StockTransferItem[]>(isTestMode ? INITIAL_TRANSFERS : []);
   const [activeTab, setActiveTab] = useState<"All" | "Pending" | "Confirmed" | "Received" | "Cancel">("All");
+
+  useEffect(() => {
+    if (!isTabPermitted(activeTab)) {
+      const fallback = (["All", "Pending", "Confirmed", "Received", "Cancel"] as const).find(
+        (t) => isTabPermitted(t)
+      );
+      if (fallback) {
+        setActiveTab(fallback);
+      }
+    }
+  }, [activeTab, isTabPermitted]);
   const [tabCounts, setTabCounts] = useState({
     all: isTestMode ? 46 : 0,
     pending: 0,
@@ -379,7 +426,15 @@ export function StockTransferPage({
   };
 
   // Dynamic Column Freezing removed per user request
-  const displayOrder = useMemo(() => Array.from({ length: 9 }, (_, i) => i), []);
+  const displayOrder = useMemo(
+    () =>
+      Array.from({ length: 9 }, (_, i) => i).filter((colIdx) => {
+        if (colIdx === 0 && !canBulkAction) return false;
+        if (colIdx === 8 && !canAnyRowAction) return false;
+        return true;
+      }),
+    [canBulkAction, canAnyRowAction]
+  );
 
   useEffect(() => {
     try {
@@ -407,8 +462,15 @@ export function StockTransferPage({
   // Active drawer item
   const [activeItem, setActiveItem] = useState<StockTransferItem | null>(null);
 
-  // Action menu opened ID
+  // Action menu opened ID & viewport-aware portal position
   const [openActionMenuId, setOpenActionMenuId] = useState<string | null>(null);
+  const [actionMenuPos, setActionMenuPos] = useState<{
+    top?: number;
+    bottom?: number;
+    right: number;
+    openUpward: boolean;
+  } | null>(null);
+  const actionMenuRef = useRef<HTMLDivElement>(null);
 
   // Add new modal state
   const [warehouseOptions, setWarehouseOptions] = useState<string[]>([]);
@@ -447,17 +509,27 @@ export function StockTransferPage({
     };
   }, []);
 
-  // Close menus on outside click
+  // Close menus on outside click or scroll
   useEffect(() => {
     function handleDocClick(e: MouseEvent) {
+      if (actionMenuRef.current && actionMenuRef.current.contains(e.target as Node)) {
+        return;
+      }
       setOpenActionMenuId(null);
+      setActionMenuPos(null);
       if (bulkMenuRef.current && !bulkMenuRef.current.contains(e.target as Node)) {
         setBulkMenuOpen(false);
       }
     }
+    function handleScroll() {
+      setOpenActionMenuId(null);
+      setActionMenuPos(null);
+    }
     document.addEventListener("mousedown", handleDocClick);
+    window.addEventListener("scroll", handleScroll, true);
     return () => {
       document.removeEventListener("mousedown", handleDocClick);
+      window.removeEventListener("scroll", handleScroll, true);
     };
   }, []);
 
@@ -483,7 +555,7 @@ export function StockTransferPage({
   };
 
   const handleBulkCancel = () => {
-    if (selectedIds.length === 0) return;
+    if (!canCancel || selectedIds.length === 0) return;
     setItems((prev) =>
       prev.map((t) => (selectedIds.includes(t.id) ? { ...t, status: "Cancel" } : t))
     );
@@ -497,7 +569,7 @@ export function StockTransferPage({
   };
 
   const handleBulkExport = () => {
-    if (selectedIds.length === 0) return;
+    if (!canExport || selectedIds.length === 0) return;
     const exportTargets = items.filter((i) => selectedIds.includes(i.id));
     const csvHeader = "Transfer No,Date,From Warehouse,To Warehouse,Total Amount,Added By,Status\n";
     const csvRows = exportTargets
@@ -517,6 +589,7 @@ export function StockTransferPage({
   };
 
   const handleExportAllCsv = () => {
+    if (!canExport) return;
     const csvHeader = "Transfer No,Date,From Warehouse,To Warehouse,Total Amount,Added By,Status\n";
     const csvRows = items
       .map(
@@ -580,8 +653,33 @@ export function StockTransferPage({
     return cleanup;
   }, [loadTransfers]);
 
+  // Handle Stage transitions (Pending <-> Confirmed)
+  const handleStageTransition = useCallback(async (item: StockTransferItem, nextStatus: "Pending" | "Confirmed") => {
+    if ((nextStatus === "Pending" && !canStagePending) || (nextStatus === "Confirmed" && !canStageConfirmed)) return;
+    try {
+      await InventoryApi.updateStockTransferStatus(item.id, nextStatus);
+      const oldLower = item.status.toLowerCase();
+      const newLower = nextStatus.toLowerCase();
+      setItems((prev) =>
+        prev.map((t) => (t.id === item.id ? { ...t, status: nextStatus } : t))
+      );
+      setTabCounts((prev) => ({
+        ...prev,
+        pending: Math.max(0, prev.pending - (oldLower === "pending" ? 1 : 0)) + (newLower === "pending" ? 1 : 0),
+        confirmed: Math.max(0, prev.confirmed - (oldLower === "confirmed" ? 1 : 0)) + (newLower === "confirmed" ? 1 : 0),
+      }));
+      if (activeItem && activeItem.id === item.id) {
+        setActiveItem((prev) => (prev ? { ...prev, status: nextStatus } : null));
+      }
+    } catch (e: any) {
+      const msg = e?.data?.detail || e?.message || `Failed to update status to ${nextStatus}`;
+      alert(`Cannot update transfer stage: ${msg}`);
+    }
+  }, [activeItem, canStagePending, canStageConfirmed]);
+
   // Handle Receive into Main Warehouse (Point 69)
   const handleReceiveToMain = useCallback(async (item: StockTransferItem) => {
+    if (!canStageReceived) return;
     try {
       await InventoryApi.receiveStockTransferToMain(item.id);
       const cleanDestWh = item.to_warehouse.replace(/\s*Transit/i, "");
@@ -604,10 +702,11 @@ export function StockTransferPage({
     } catch (err: any) {
       console.warn("Failed to receive transfer in main warehouse:", err);
     }
-  }, [activeItem]);
+  }, [activeItem, canStageReceived]);
 
   // Handle Cancel action with Downstream Sales check (Point 103)
   const handleCancelTransfer = useCallback((item: StockTransferItem) => {
+    if (!canCancel) return;
     setItems((prev) =>
       prev.map((t) => (t.id === item.id ? { ...t, status: "Cancel" } : t))
     );
@@ -622,13 +721,14 @@ export function StockTransferPage({
       alert(`Cannot Cancel Transfer: ${msg}`);
       console.warn("Failed to update status in DB:", e);
     });
-  }, []);
+  }, [canCancel]);
 
   // Handle Download Transfer Order PDF matching legacy ERP
   const handleDownload = useCallback((item: StockTransferItem) => {
+    if (!canDownload) return;
     const trfId = item.sr_no || item.id.replace(/\D/g, "") || "52";
     window.open(`/transfer/transfer-order-pdf/${trfId}`, "_blank");
-  }, []);
+  }, [canDownload]);
 
   // Reset all filters
   const handleResetFilters = useCallback(() => {
@@ -650,6 +750,7 @@ export function StockTransferPage({
   // Handle Add New Submission
   const handleCreateTransfer = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!canCreate) return;
     if (newFromWh === newToWh) {
       alert("Origin and destination warehouse cannot be the same.");
       return;
@@ -879,6 +980,7 @@ export function StockTransferPage({
             </button>
 
             {/* + ADD NEW Button */}
+            {canCreate && (
             <button
               type="button"
               className="btn btn-add-new transfer-btn-add"
@@ -897,8 +999,10 @@ export function StockTransferPage({
             >
               + ADD NEW
             </button>
+            )}
 
             {/* Export Button (matches Companies & Product Stock golden-amber theme) */}
+            {canExport && (
             <button
               type="button"
               className="btn btn-imp-exp"
@@ -930,8 +1034,10 @@ export function StockTransferPage({
               </svg>
               <span>Export</span>
             </button>
+            )}
 
             {/* Bulk Actions Dropdown */}
+            {canBulkAction && (
             <div ref={bulkMenuRef} style={{ position: "relative", display: "inline-block" }}>
               <button
                 type="button"
@@ -976,6 +1082,7 @@ export function StockTransferPage({
                     </div>
                   ) : (
                     <>
+                      {canCancel && (
                       <button
                         type="button"
                         onClick={handleBulkCancel}
@@ -996,6 +1103,8 @@ export function StockTransferPage({
                       >
                         ✕ Bulk Cancel ({selectedIds.length})
                       </button>
+                      )}
+                      {canExport && (
                       <button
                         type="button"
                         onClick={handleBulkExport}
@@ -1017,11 +1126,18 @@ export function StockTransferPage({
                       >
                         📥 Export Selected ({selectedIds.length})
                       </button>
+                      )}
+                      {!canCancel && !canExport && (
+                        <div style={{ padding: "10px 14px", fontSize: "12.5px", color: "#64748b", fontStyle: "italic" }}>
+                          No bulk actions permitted
+                        </div>
+                      )}
                     </>
                   )}
                 </div>
               )}
             </div>
+            )}
           </div>
         </div>
 
@@ -1143,6 +1259,7 @@ export function StockTransferPage({
               marginBottom: 0,
             }}
           >
+            {canView && (
             <button
               type="button"
               data-testid="tab-All"
@@ -1161,6 +1278,8 @@ export function StockTransferPage({
             >
               All ({tabCounts.all})
             </button>
+            )}
+            {canViewPendingTab && (
             <button
               type="button"
               data-testid="tab-Pending"
@@ -1179,6 +1298,8 @@ export function StockTransferPage({
             >
               Pending ({tabCounts.pending})
             </button>
+            )}
+            {canViewConfirmedTab && (
             <button
               type="button"
               data-testid="tab-Confirmed"
@@ -1197,6 +1318,8 @@ export function StockTransferPage({
             >
               Confirmed ({tabCounts.confirmed})
             </button>
+            )}
+            {canViewReceivedTab && (
             <button
               type="button"
               data-testid="tab-Received"
@@ -1215,6 +1338,8 @@ export function StockTransferPage({
             >
               Received ({tabCounts.received})
             </button>
+            )}
+            {canViewCancelTab && (
             <button
               type="button"
               data-testid="tab-Cancel"
@@ -1233,6 +1358,7 @@ export function StockTransferPage({
             >
               Cancel ({tabCounts.cancel})
             </button>
+            )}
           </div>
 
           {/* Control Bar: Items per page, Freeze Columns button, and Search */}
@@ -1413,11 +1539,11 @@ export function StockTransferPage({
                     </td>
                   </tr>
                 ) : (
-                  paginatedItems.map((item, rowIdx) => (
+                  paginatedItems.map((item) => (
                     <tr
                       key={item.id}
                       style={{ cursor: "pointer", transition: "background-color 0.15s ease" }}
-                      onClick={() => setActiveItem(item)}
+                      onClick={() => { if (canView) setActiveItem(item); }}
                       onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#f0f7ff")}
                       onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "transparent")}
                     >
@@ -1465,7 +1591,7 @@ export function StockTransferPage({
                                   onClick={(e) => {
                                     e.preventDefault();
                                     e.stopPropagation();
-                                    setActiveItem(item);
+                                    if (canView) setActiveItem(item);
                                   }}
                                   style={{ color: "#0061f2", fontWeight: 600, textDecoration: "none" }}
                                 >
@@ -1573,78 +1699,28 @@ export function StockTransferPage({
                                   title="Actions"
                                   aria-label="Actions"
                                   aria-expanded={openActionMenuId === item.id}
+                                  onMouseDown={(e) => e.stopPropagation()}
                                   onClick={(e) => {
                                     e.stopPropagation();
-                                    setOpenActionMenuId((prev) => (prev === item.id ? null : item.id));
+                                    if (openActionMenuId === item.id) {
+                                      setOpenActionMenuId(null);
+                                      setActionMenuPos(null);
+                                      return;
+                                    }
+                                    const rect = e.currentTarget.getBoundingClientRect();
+                                    const spaceBelow = window.innerHeight - rect.bottom;
+                                    const openUpward = spaceBelow < 210 && rect.top > spaceBelow;
+                                    setActionMenuPos({
+                                      openUpward,
+                                      top: openUpward ? undefined : rect.bottom + 4,
+                                      bottom: openUpward ? Math.max(8, window.innerHeight - rect.top + 4) : undefined,
+                                      right: Math.max(8, window.innerWidth - rect.right),
+                                    });
+                                    setOpenActionMenuId(item.id);
                                   }}
                                 >
                                   ⋮
                                 </button>
-
-                                {openActionMenuId === item.id && (() => {
-                                  const openUpward = (rowIdx > 0 && paginatedItems.length <= 3) || (paginatedItems.length >= 4 && rowIdx >= paginatedItems.length - 2);
-                                  return (
-                                  <div
-                                    className={`transfer-action-menu ${openUpward ? "open-upward" : ""}`}
-                                    data-testid="action-popup-menu"
-                                    style={openUpward ? { top: "auto", bottom: "40px", boxShadow: "0 -10px 15px -3px rgba(0, 0, 0, 0.1), 0 -4px 6px -2px rgba(0, 0, 0, 0.05)" } : undefined}
-                                  >
-                                    <button
-                                      type="button"
-                                      className="transfer-action-item"
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        setActiveItem(item);
-                                        setOpenActionMenuId(null);
-                                      }}
-                                    >
-                                      <span>👁️</span>
-                                      <span>View</span>
-                                    </button>
-                                    {item.status !== "Received" && item.status !== "Cancel" && (
-                                      <button
-                                        type="button"
-                                        className="transfer-action-item"
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          handleReceiveToMain(item);
-                                          setOpenActionMenuId(null);
-                                        }}
-                                        style={{ color: "#059669", fontWeight: 600 }}
-                                      >
-                                        <span>📥</span>
-                                        <span>Receive in Main WH</span>
-                                      </button>
-                                    )}
-                                    {item.status !== "Cancel" && (
-                                      <button
-                                        type="button"
-                                        className="transfer-action-item"
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          handleCancelTransfer(item);
-                                          setOpenActionMenuId(null);
-                                        }}
-                                      >
-                                        <span>✕</span>
-                                        <span>Cancel</span>
-                                      </button>
-                                    )}
-                                    <button
-                                      type="button"
-                                      className="transfer-action-item"
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        handleDownload(item);
-                                        setOpenActionMenuId(null);
-                                      }}
-                                    >
-                                      <span>📥</span>
-                                      <span>Download</span>
-                                    </button>
-                                  </div>
-                                  );
-                                })()}
                               </td>
                             );
                           default:
@@ -1681,7 +1757,7 @@ export function StockTransferPage({
         >
           {activeItem && (
             <div>
-              {activeItem.status !== "Received" && activeItem.status !== "Cancel" && (
+              {canStageReceived && activeItem.status !== "Received" && activeItem.status !== "Cancel" && (
                 <div style={{ marginBottom: "20px", padding: "12px 18px", background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: "8px", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "12px" }}>
                   <div>
                     <div style={{ fontWeight: 700, color: "#166534", fontSize: "13.5px" }}>📦 Transfer is currently In-Transit</div>
@@ -1757,7 +1833,7 @@ export function StockTransferPage({
         </SideDrawer>
 
         {/* Add New Modal */}
-        {showAddModal && (
+        {canCreate && showAddModal && (
           <div
             style={{
               position: "fixed",
@@ -1884,6 +1960,127 @@ export function StockTransferPage({
             </div>
           </div>
         )}
+        {/* Portaled Row Action Menu (prevents clipping by table scroll container or sticky headers) */}
+        {(() => {
+          const actionItem = openActionMenuId
+            ? paginatedItems.find((t) => t.id === openActionMenuId) || items.find((t) => t.id === openActionMenuId)
+            : null;
+          if (!actionItem || !actionMenuPos) return null;
+          return createPortal(
+            <div
+              ref={actionMenuRef}
+              className={`transfer-action-menu ${actionMenuPos.openUpward ? "open-upward" : ""}`}
+              data-testid="action-popup-menu"
+              onMouseDown={(e) => e.stopPropagation()}
+              style={{
+                position: "fixed",
+                top: actionMenuPos.openUpward ? "auto" : `${actionMenuPos.top}px`,
+                bottom: actionMenuPos.openUpward ? `${actionMenuPos.bottom}px` : "auto",
+                right: `${actionMenuPos.right}px`,
+                zIndex: 9999,
+                minWidth: "155px",
+                boxShadow: actionMenuPos.openUpward
+                  ? "0 -10px 25px rgba(15, 23, 42, 0.14)"
+                  : "0 10px 25px rgba(15, 23, 42, 0.14)",
+              }}
+            >
+              {canView && (
+                <button
+                  type="button"
+                  className="transfer-action-item"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setActiveItem(actionItem);
+                    setOpenActionMenuId(null);
+                    setActionMenuPos(null);
+                  }}
+                >
+                  <span>👁️</span>
+                  <span>View</span>
+                </button>
+              )}
+              {canStagePending && actionItem.status !== "Pending" && actionItem.status !== "Received" && actionItem.status !== "Cancel" && (
+                <button
+                  type="button"
+                  className="transfer-action-item"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleStageTransition(actionItem, "Pending");
+                    setOpenActionMenuId(null);
+                    setActionMenuPos(null);
+                  }}
+                  style={{ color: "#d97706", fontWeight: 600 }}
+                >
+                  <span>🕒</span>
+                  <span>Move to Pending</span>
+                </button>
+              )}
+              {canStageConfirmed && actionItem.status === "Pending" && (
+                <button
+                  type="button"
+                  className="transfer-action-item"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleStageTransition(actionItem, "Confirmed");
+                    setOpenActionMenuId(null);
+                    setActionMenuPos(null);
+                  }}
+                  style={{ color: "#0284c7", fontWeight: 600 }}
+                >
+                  <span>✅</span>
+                  <span>Confirm</span>
+                </button>
+              )}
+              {canStageReceived && actionItem.status !== "Received" && actionItem.status !== "Cancel" && (
+                <button
+                  type="button"
+                  className="transfer-action-item"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleReceiveToMain(actionItem);
+                    setOpenActionMenuId(null);
+                    setActionMenuPos(null);
+                  }}
+                  style={{ color: "#059669", fontWeight: 600 }}
+                >
+                  <span>📥</span>
+                  <span>Receive in Main WH</span>
+                </button>
+              )}
+              {canCancel && actionItem.status !== "Cancel" && (
+                <button
+                  type="button"
+                  className="transfer-action-item"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleCancelTransfer(actionItem);
+                    setOpenActionMenuId(null);
+                    setActionMenuPos(null);
+                  }}
+                >
+                  <span>✕</span>
+                  <span>Cancel</span>
+                </button>
+              )}
+              {canDownload && (
+                <button
+                  type="button"
+                  className="transfer-action-item"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleDownload(actionItem);
+                    setOpenActionMenuId(null);
+                    setActionMenuPos(null);
+                  }}
+                >
+                  <span>📥</span>
+                  <span>Download</span>
+                </button>
+              )}
+            </div>,
+            document.body
+          );
+        })()}
       </main>
     </AppShell>
   );

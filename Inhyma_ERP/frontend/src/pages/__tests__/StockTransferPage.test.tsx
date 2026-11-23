@@ -21,6 +21,27 @@ vi.mock("@/components/AppShell", () => ({
   ),
 }));
 
+// Mock useAuth for granular Stock Transfer RBAC tests while preserving other hooks (e.g. useBodyScrollLock)
+let mockIsSuperAdmin = true;
+let mockPermissions = new Set<string>();
+vi.mock("@/lib/hooks", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/hooks")>();
+  return {
+    ...actual,
+    useAuth: () => ({
+      profile: {
+        id: "u-test",
+        username: "admin",
+        full_name: "Admin User",
+        permissions: Array.from(mockPermissions),
+      },
+      isSuperAdmin: mockIsSuperAdmin,
+      hasPermission: (code: string) =>
+        mockIsSuperAdmin || mockPermissions.has("stock_transfer.manage") || mockPermissions.has(code),
+    }),
+  };
+});
+
 // Mock InventoryApi & apiGet
 vi.mock("@/lib/api", () => ({
   apiGet: vi.fn().mockImplementation((url: string) => {
@@ -112,6 +133,8 @@ describe("StockTransferPage", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mockIsSuperAdmin = true;
+    mockPermissions = new Set();
   });
 
   it("renders page header, action buttons and active sidebar key", () => {
@@ -422,6 +445,132 @@ describe("StockTransferPage", () => {
     await waitFor(() => {
       expect(screen.getByText("Stock Transfer Details")).toBeTruthy();
     });
+  });
+
+  it("gates + ADD NEW, Export, Bulk Actions, stage tabs, and Action items for stock_transfer.view only", () => {
+    mockIsSuperAdmin = false;
+    mockPermissions = new Set(["stock_transfer.view"]);
+
+    render(
+      <BrowserRouter>
+        <StockTransferPage initialLoading={false} />
+      </BrowserRouter>
+    );
+
+    expect(screen.getByTestId("tab-All")).toBeTruthy();
+    expect(screen.queryByTestId("tab-Pending")).toBeNull();
+    expect(screen.queryByTestId("tab-Confirmed")).toBeNull();
+    expect(screen.queryByTestId("tab-Received")).toBeNull();
+    expect(screen.queryByTestId("tab-Cancel")).toBeNull();
+
+    expect(screen.queryByRole("button", { name: /\+ ADD NEW/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Export$/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Bulk Actions/i })).toBeNull();
+    expect(screen.queryByLabelText("Select All")).toBeNull();
+
+    const actionButtons = screen.getAllByTitle("Actions");
+    fireEvent.click(actionButtons[0]);
+    expect(screen.getByText("View")).toBeTruthy();
+    expect(screen.queryByText("Cancel")).toBeNull();
+    expect(screen.queryByText("Download")).toBeNull();
+  });
+
+  it("auto-selects permitted stage tab when only stage view permission is granted and hides Action column when no row action is permitted", () => {
+    mockIsSuperAdmin = false;
+    mockPermissions = new Set(["stock_transfer.pending.view"]);
+
+    render(
+      <BrowserRouter>
+        <StockTransferPage initialLoading={false} />
+      </BrowserRouter>
+    );
+
+    expect(screen.queryByTestId("tab-All")).toBeNull();
+    const pendingTab = screen.getByTestId("tab-Pending");
+    expect(pendingTab.className).toContain("active");
+    expect(screen.queryByTestId("tab-Confirmed")).toBeNull();
+    expect(screen.queryByText(/^Action$/i)).toBeNull();
+  });
+
+  it("shows Bulk Actions, Export Selected / Bulk Cancel, and stage action controls according to granular permissions", async () => {
+    mockIsSuperAdmin = false;
+    mockPermissions = new Set([
+      "stock_transfer.view",
+      "stock_transfer.bulk_action",
+      "stock_transfer.export",
+      "stock_transfer.cancel",
+      "stock_transfer.download",
+    ]);
+
+    render(
+      <BrowserRouter>
+        <StockTransferPage initialLoading={false} />
+      </BrowserRouter>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("18-09-2026 04:37 PM")).toBeTruthy();
+    });
+
+    expect(screen.queryByRole("button", { name: /\+ ADD NEW/i })).toBeNull();
+    expect(screen.getByRole("button", { name: /^Export$/i })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /^Bulk Actions ▾$/i })).toBeTruthy();
+
+    fireEvent.click(screen.getByLabelText("Select All"));
+    fireEvent.click(screen.getByRole("button", { name: /Bulk Actions \(1\) ▾/i }));
+    expect(screen.getByText(/Bulk Cancel \(1\)/i)).toBeTruthy();
+    expect(screen.getByText(/Export Selected \(1\)/i)).toBeTruthy();
+
+    fireEvent.click(screen.getAllByTitle("Actions")[0]);
+    expect(screen.getByText("View")).toBeTruthy();
+    expect(screen.getByText("Cancel")).toBeTruthy();
+    expect(screen.getByText("Download")).toBeTruthy();
+  });
+
+  it("renders action menu via document.body portal and opens downward when viewport space below is sufficient, flipping upward only near bottom edge", async () => {
+    render(
+      <BrowserRouter>
+        <StockTransferPage initialLoading={false} />
+      </BrowserRouter>
+    );
+
+    const actionBtn = screen.getAllByTitle("Actions")[0];
+    vi.spyOn(actionBtn, "getBoundingClientRect").mockReturnValue({
+      top: 220,
+      bottom: 248,
+      left: 1100,
+      right: 1128,
+      width: 28,
+      height: 28,
+      x: 1100,
+      y: 220,
+      toJSON: () => {},
+    });
+
+    fireEvent.click(actionBtn);
+    const downwardMenu = screen.getByTestId("action-popup-menu");
+    expect(downwardMenu.parentElement).toBe(document.body);
+    expect(downwardMenu.className).not.toContain("open-upward");
+    expect(downwardMenu.style.position).toBe("fixed");
+    expect(downwardMenu.style.top).toBe("252px");
+
+    // Re-open with tight space below (near bottom of viewport)
+    fireEvent.click(actionBtn);
+    vi.spyOn(actionBtn, "getBoundingClientRect").mockReturnValue({
+      top: window.innerHeight - 60,
+      bottom: window.innerHeight - 32,
+      left: 1100,
+      right: 1128,
+      width: 28,
+      height: 28,
+      x: 1100,
+      y: window.innerHeight - 60,
+      toJSON: () => {},
+    });
+    fireEvent.click(actionBtn);
+    const upwardMenu = screen.getByTestId("action-popup-menu");
+    expect(upwardMenu.className).toContain("open-upward");
+    expect(upwardMenu.style.bottom).toBe("64px");
   });
 });
 

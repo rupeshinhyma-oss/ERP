@@ -537,15 +537,30 @@ class AuthService:
         live_permissions = await self.get_user_effective_permissions(user_id)
         jwt_perms = set(payload.get("perms") or [])
 
-        # In testing/ad-hoc scenarios where users are provisioned without DB role rows, fallback to JWT perms
-        if not live_permissions and jwt_perms:
-            live_permissions = jwt_perms
+        # Only allow non-admin JWT perm fallback for pure ad-hoc tokens when the user has
+        # zero RBAC rows in the database (never resurrect revoked/empty permissions for DB users).
+        if not live_permissions and jwt_perms and "*" not in jwt_perms:
+            from sqlalchemy import select as sa_select
+            from sqlalchemy.ext.asyncio import AsyncSession as SAAsyncSession
+            from app.rbac.models import UserPermission, UserRole
+
+            session = getattr(self.role_repository, "session", None)
+            has_db_rbac = False
+            if isinstance(session, SAAsyncSession):
+                ur_hit = (
+                    await session.execute(sa_select(UserRole.id).where(UserRole.user_id == user_id).limit(1))
+                ).scalar_one_or_none()
+                up_hit = (
+                    await session.execute(sa_select(UserPermission.id).where(UserPermission.user_id == user_id).limit(1))
+                ).scalar_one_or_none()
+                has_db_rbac = ur_hit is not None or up_hit is not None
+            if not has_db_rbac:
+                live_permissions = jwt_perms
 
         is_super = (
             user.username == settings.BOOTSTRAP_ADMIN_USERNAME
             or user.username == "admin"
             or "*" in live_permissions
-            or "*" in jwt_perms
             or await self._is_user_super_admin(user.id)
         )
 

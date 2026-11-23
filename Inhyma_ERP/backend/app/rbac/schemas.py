@@ -86,6 +86,12 @@ class GrantPermissionRequest(BaseModel):
     permission_id: uuid.UUID
 
 
+class BulkRolePermissionsRequest(BaseModel):
+    """Payload to replace all direct permissions granted to a role/department."""
+
+    permission_ids: list[uuid.UUID] = Field(default_factory=list)
+
+
 class BulkPermissionOverrideItem(BaseModel):
     """A single permission override item in a bulk update."""
 

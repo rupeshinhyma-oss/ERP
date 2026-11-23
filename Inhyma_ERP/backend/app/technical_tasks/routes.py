@@ -146,6 +146,16 @@ async def list_technical_tasks(
         req_tab_perm = tab_perm_map.get(effective_tab.strip().lower())
         if req_tab_perm and req_tab_perm not in current_user.permissions:
             raise ForbiddenException(f"Viewing the '{effective_tab}' tab requires the '{req_tab_perm}' permission.")
+    if (
+        payment_collected
+        and payment_collected.strip()
+        and not _has_any_perm(current_user, "technicaltask.view", "technicaltask.manage", "payment.manage")
+    ):
+        pc_norm = payment_collected.strip().lower()
+        if pc_norm in ("no", "pending", "false") and "payment.pending.view" not in current_user.permissions:
+            raise ForbiddenException("Viewing the 'Pending' tab in Payments requires the 'payment.pending.view' permission.")
+        if pc_norm in ("yes", "paid", "collected", "true", "completed") and "payment.completed.view" not in current_user.permissions:
+            raise ForbiddenException("Viewing the 'Completed' tab in Payments requires the 'payment.completed.view' permission.")
     effective_limit = page_size if page_size is not None else (limit if limit is not None else 50)
     effective_offset = (
         ((page - 1) * effective_limit) if page is not None else (offset if offset is not None else 0)

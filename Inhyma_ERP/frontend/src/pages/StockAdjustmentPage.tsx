@@ -10,6 +10,7 @@ import { ClientNameAutocomplete } from "@/components/ClientNameAutocomplete";
 import type { PaginationMeta } from "@/types";
 import { generateStockAdjustmentPdf } from "@/lib/stockAdjustmentPdf";
 import { InventoryApi } from "@/lib/api";
+import { useAuth } from "@/lib/hooks";
 import "@/styles/stockAdjustment.css";
 
 export interface StockAdjustmentLineItem {
@@ -371,6 +372,13 @@ export function StockAdjustmentPage({
   initialLoading = import.meta.env.MODE !== "test",
 }: StockAdjustmentPageProps = {}) {
   const navigate = useNavigate();
+  const { hasPermission } = useAuth();
+  const canManageAll = hasPermission("stock_adjustment.manage");
+  const canCreateAdjustment = canManageAll || hasPermission("stock_adjustment.create");
+  const canExportAdjustment = canManageAll || hasPermission("stock_adjustment.export");
+  const canDeleteAdjustment = canManageAll || hasPermission("stock_adjustment.delete");
+  const canDownloadAdjustment = canManageAll || hasPermission("stock_adjustment.download");
+  const canShowActionColumn = canDeleteAdjustment || canDownloadAdjustment;
   const isTestMode = import.meta.env.MODE === "test";
   const [loading, setLoading] = useState<boolean>(initialLoading);
   // Real records only: in the app the list comes from the server, never from browser storage (records kept there
@@ -484,6 +492,7 @@ export function StockAdjustmentPage({
   // were already used) the row stays and the reason is shown.
   const handleDeleteItem = useCallback(
     async (id: string) => {
+      if (!canDeleteAdjustment) return;
       if (!isTestMode && !window.confirm("Delete this adjustment? Its stock effect will be reversed.")) return;
       try {
         await InventoryApi.deleteStockAdjustment(id);
@@ -492,13 +501,17 @@ export function StockAdjustmentPage({
         window.alert(err?.message || "Could not delete the adjustment.");
       }
     },
-    [isTestMode]
+    [canDeleteAdjustment, isTestMode]
   );
 
   // Handle item download: creates PDF document matching template
-  const handleDownloadItem = useCallback((item: StockAdjustmentItem) => {
-    generateStockAdjustmentPdf(item, { saveFile: true, openInNewTab: true });
-  }, []);
+  const handleDownloadItem = useCallback(
+    (item: StockAdjustmentItem) => {
+      if (!canDownloadAdjustment) return;
+      generateStockAdjustmentPdf(item, { saveFile: true, openInNewTab: true });
+    },
+    [canDownloadAdjustment]
+  );
 
   // Add New Adjustment modal state
   const [showAddModal, setShowAddModal] = useState(false);
@@ -755,110 +768,115 @@ export function StockAdjustmentPage({
             </button>
 
             {/* Add New Button with dropdown */}
-            <div style={{ position: "relative" }}>
+            {canCreateAdjustment && (
+              <div style={{ position: "relative" }}>
+                <button
+                  type="button"
+                  className="btn btn-add-new adjustment-btn-add"
+                  style={{
+                    background: "#0284c7",
+                    color: "#ffffff",
+                    padding: "8px 18px",
+                    borderRadius: "6px",
+                    fontWeight: 700,
+                    fontSize: "13.5px",
+                    border: "none",
+                    cursor: "pointer",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "6px",
+                    boxShadow: "0 2px 4px rgba(2, 132, 199, 0.25)",
+                  }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setShowAddMenu((prev) => !prev);
+                  }}
+                >
+                  + Add New
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="6 9 12 15 18 9" />
+                  </svg>
+                </button>
+
+                {showAddMenu && (
+                  <div className="add-menu-dropdown" onClick={(e) => e.stopPropagation()}>
+                    <button
+                      type="button"
+                      className="add-menu-item"
+                      onClick={() => {
+                        setShowAddMenu(false);
+                        navigate("/adjustment/addEdit?type=Addition");
+                      }}
+                    >
+                      <span className="badge-stock-in" style={{ padding: "1px 6px", fontSize: "10px" }}>IN</span>
+                      Stock IN Adjustment
+                    </button>
+                    <button
+                      type="button"
+                      className="add-menu-item"
+                      onClick={() => {
+                        setShowAddMenu(false);
+                        navigate("/adjustment/addEdit?type=Deduction");
+                      }}
+                    >
+                      <span className="badge-stock-out" style={{ padding: "1px 6px", fontSize: "10px" }}>OUT</span>
+                      Stock OUT Adjustment
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Export Button (matches Companies & Product Stock golden-amber theme) */}
+            {canExportAdjustment && (
               <button
                 type="button"
-                className="btn btn-add-new adjustment-btn-add"
+                className="btn btn-imp-exp"
+                title="Export stock adjustments"
                 style={{
-                  background: "#0284c7",
-                  color: "#ffffff",
-                  padding: "8px 18px",
-                  borderRadius: "6px",
-                  fontWeight: 700,
-                  fontSize: "13.5px",
                   border: "none",
                   cursor: "pointer",
                   display: "inline-flex",
                   alignItems: "center",
                   gap: "6px",
-                  boxShadow: "0 2px 4px rgba(2, 132, 199, 0.25)",
+                  boxShadow: "0 1px 2px rgba(0, 0, 0, 0.05)",
                 }}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setShowAddMenu((prev) => !prev);
+                onClick={() => {
+                  if (!canExportAdjustment) return;
+                  const csvHeader = "Adjustment No,Date,Warehouse,Type,Purpose,Total Amount,Created By\n";
+                  const csvRows = filteredItems
+                    .map(
+                      (i) =>
+                        `"${i.adjustment_no || i.id}","${i.adjustment_date}","${i.warehouse}","${i.type}","${i.purpose}",${i.total_amount},"${i.created_by}"`
+                    )
+                    .join("\n");
+                  const blob = new Blob([csvHeader + csvRows], { type: "text/csv;charset=utf-8;" });
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement("a");
+                  a.href = url;
+                  a.download = "stock_adjustments.csv";
+                  a.click();
+                  URL.revokeObjectURL(url);
                 }}
               >
-                + Add New
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                  <polyline points="6 9 12 15 18 9" />
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                  <polyline points="7 10 12 15 17 10" />
+                  <line x1="12" y1="15" x2="12" y2="3" />
                 </svg>
+                <span>Export</span>
               </button>
-
-              {showAddMenu && (
-                <div className="add-menu-dropdown" onClick={(e) => e.stopPropagation()}>
-                  <button
-                    type="button"
-                    className="add-menu-item"
-                    onClick={() => {
-                      setShowAddMenu(false);
-                      navigate("/adjustment/addEdit?type=Addition");
-                    }}
-                  >
-                    <span className="badge-stock-in" style={{ padding: "1px 6px", fontSize: "10px" }}>IN</span>
-                    Stock IN Adjustment
-                  </button>
-                  <button
-                    type="button"
-                    className="add-menu-item"
-                    onClick={() => {
-                      setShowAddMenu(false);
-                      navigate("/adjustment/addEdit?type=Deduction");
-                    }}
-                  >
-                    <span className="badge-stock-out" style={{ padding: "1px 6px", fontSize: "10px" }}>OUT</span>
-                    Stock OUT Adjustment
-                  </button>
-                </div>
-              )}
-            </div>
-
-            {/* Export Button (matches Companies & Product Stock golden-amber theme) */}
-            <button
-              type="button"
-              className="btn btn-imp-exp"
-              title="Export stock adjustments"
-              style={{
-                border: "none",
-                cursor: "pointer",
-                display: "inline-flex",
-                alignItems: "center",
-                gap: "6px",
-                boxShadow: "0 1px 2px rgba(0, 0, 0, 0.05)",
-              }}
-              onClick={() => {
-                const csvHeader = "Adjustment No,Date,Warehouse,Type,Purpose,Total Amount,Created By\n";
-                const csvRows = filteredItems
-                  .map(
-                    (i) =>
-                      `"${i.adjustment_no || i.id}","${i.adjustment_date}","${i.warehouse}","${i.type}","${i.purpose}",${i.total_amount},"${i.created_by}"`
-                  )
-                  .join("\n");
-                const blob = new Blob([csvHeader + csvRows], { type: "text/csv;charset=utf-8;" });
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement("a");
-                a.href = url;
-                a.download = "stock_adjustments.csv";
-                a.click();
-                URL.revokeObjectURL(url);
-              }}
-            >
-              <svg
-                width="14"
-                height="14"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2.2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                aria-hidden="true"
-              >
-                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                <polyline points="7 10 12 15 17 10" />
-                <line x1="12" y1="15" x2="12" y2="3" />
-              </svg>
-              <span>Export</span>
-            </button>
+            )}
           </div>
         </div>
 
@@ -1044,9 +1062,11 @@ export function StockAdjustmentPage({
                   <th>
                     <SortHeader label="Created By" isSorted={sortColIndex === 6} sortDirection={sortDirection} onSort={() => handleHeaderSort(6)} />
                   </th>
-                  <th style={{ textAlign: "center", width: "60px" }}>
-                    <span>Action</span>
-                  </th>
+                  {canShowActionColumn && (
+                    <th style={{ textAlign: "center", width: "60px" }}>
+                      <span>Action</span>
+                    </th>
+                  )}
                 </tr>
               </thead>
               <tbody>
@@ -1054,7 +1074,7 @@ export function StockAdjustmentPage({
                   <StockAdjustmentSkeletonRows count={perPage > 10 ? 8 : perPage} />
                 ) : filteredItems.length === 0 ? (
                   <tr>
-                    <td colSpan={8} style={{ textAlign: "center", padding: "32px", color: "#64748b" }}>
+                    <td colSpan={canShowActionColumn ? 8 : 7} style={{ textAlign: "center", padding: "32px", color: "#64748b" }}>
                       No Data
                     </td>
                   </tr>
@@ -1098,64 +1118,70 @@ export function StockAdjustmentPage({
                         {formatIndianCurrency(item.total_amount)}
                       </td>
                       <td>{item.created_by}</td>
-                      <td className="adjustment-action-cell" style={{ position: "relative", zIndex: openActionMenuId === item.id ? 50 : 1 }} onClick={(e) => e.stopPropagation()}>
-                        <button
-                          type="button"
-                          className={`adjustment-action-btn ${openActionMenuId === item.id ? "active" : ""}`}
-                          title="Actions"
-                          aria-label="Actions"
-                          aria-expanded={openActionMenuId === item.id}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setOpenActionMenuId((prev) => (prev === item.id ? null : item.id));
-                          }}
-                        >
-                          ⋮
-                        </button>
-
-                        {openActionMenuId === item.id && (() => {
-                          const openUpward = (idx > 0 && paginatedItems.length <= 3) || (paginatedItems.length >= 4 && idx >= paginatedItems.length - 2);
-                          return (
-                          <div
-                            className={`adjustment-action-menu ${openUpward ? "open-upward" : ""}`}
-                            data-testid={`action-menu-${item.id}`}
-                            style={openUpward ? { top: "auto", bottom: "calc(100% + 2px)", boxShadow: "0 -10px 15px -3px rgba(0, 0, 0, 0.1), 0 -4px 6px -2px rgba(0, 0, 0, 0.05)" } : undefined}
+                      {canShowActionColumn && (
+                        <td className="adjustment-action-cell" style={{ position: "relative", zIndex: openActionMenuId === item.id ? 50 : 1 }} onClick={(e) => e.stopPropagation()}>
+                          <button
+                            type="button"
+                            className={`adjustment-action-btn ${openActionMenuId === item.id ? "active" : ""}`}
+                            title="Actions"
+                            aria-label="Actions"
+                            aria-expanded={openActionMenuId === item.id}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setOpenActionMenuId((prev) => (prev === item.id ? null : item.id));
+                            }}
                           >
-                            <button
-                              type="button"
-                              className="adjustment-action-item"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleDeleteItem(item.id);
-                                setOpenActionMenuId(null);
-                              }}
+                            ⋮
+                          </button>
+
+                          {openActionMenuId === item.id && (() => {
+                            const openUpward = (idx > 0 && paginatedItems.length <= 3) || (paginatedItems.length >= 4 && idx >= paginatedItems.length - 2);
+                            return (
+                            <div
+                              className={`adjustment-action-menu ${openUpward ? "open-upward" : ""}`}
+                              data-testid={`action-menu-${item.id}`}
+                              style={openUpward ? { top: "auto", bottom: "calc(100% + 2px)", boxShadow: "0 -10px 15px -3px rgba(0, 0, 0, 0.1), 0 -4px 6px -2px rgba(0, 0, 0, 0.05)" } : undefined}
                             >
-                              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                <polyline points="3 6 5 6 21 6" />
-                                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-                              </svg>
-                              <span>Delete</span>
-                            </button>
-                            <button
-                              type="button"
-                              className="adjustment-action-item"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleDownloadItem(item);
-                                setOpenActionMenuId(null);
-                              }}
-                            >
-                              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                                <polyline points="7 10 12 15 17 10" />
-                                <line x1="12" y1="15" x2="12" y2="3" />
-                              </svg>
-                              <span>Download</span>
-                            </button>
-                          </div>
-                          );
-                        })()}
-                      </td>
+                              {canDeleteAdjustment && (
+                                <button
+                                  type="button"
+                                  className="adjustment-action-item"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleDeleteItem(item.id);
+                                    setOpenActionMenuId(null);
+                                  }}
+                                >
+                                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                    <polyline points="3 6 5 6 21 6" />
+                                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                                  </svg>
+                                  <span>Delete</span>
+                                </button>
+                              )}
+                              {canDownloadAdjustment && (
+                                <button
+                                  type="button"
+                                  className="adjustment-action-item"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleDownloadItem(item);
+                                    setOpenActionMenuId(null);
+                                  }}
+                                >
+                                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                                    <polyline points="7 10 12 15 17 10" />
+                                    <line x1="12" y1="15" x2="12" y2="3" />
+                                  </svg>
+                                  <span>Download</span>
+                                </button>
+                              )}
+                            </div>
+                            );
+                          })()}
+                        </td>
+                      )}
                     </tr>
                   ))
                 )}
@@ -1308,7 +1334,7 @@ export function StockAdjustmentPage({
         </SideDrawer>
 
         {/* Modal: Add New Stock Adjustment */}
-        {showAddModal && (
+        {canCreateAdjustment && showAddModal && (
           <div
             style={{
               position: "fixed",

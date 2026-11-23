@@ -70,9 +70,22 @@ export const NAV_SECTIONS: NavSection[] = [
   {
     label: "INVENTORY",
     items: [
-      { key: "product-stock", label: "Product Stock", path: "/product-stock/list", icon: "stock", permission: "product.view" },
-      { key: "stock-adjustment", label: "Stock Adjustment", path: "/stock-adjustment", icon: "sliders", permission: "product.view" },
-      { key: "stock-transfer", label: "Stock Transfer", path: "/stock-transfer", icon: "transfer", permission: "product.view" },
+      { key: "product-stock", label: "Product Stock", path: "/product-stock/list", icon: "stock", permission: "product_stock.view" },
+      { key: "stock-adjustment", label: "Stock Adjustment", path: "/stock-adjustment", icon: "sliders", permission: "stock_adjustment.view" },
+      {
+        key: "stock-transfer",
+        label: "Stock Transfer",
+        path: "/stock-transfer",
+        icon: "transfer",
+        anyPermissions: [
+          "stock_transfer.view",
+          "stock_transfer.pending.view",
+          "stock_transfer.confirmed.view",
+          "stock_transfer.received.view",
+          "stock_transfer.cancel.view",
+          "stock_transfer.manage",
+        ],
+      },
       { key: "masters-products", label: "Product Master", path: "/product/list", icon: "box", permission: "product.view" },
       { key: "product-gallery", label: "Product Gallery", path: "/product-gallery", icon: "image", permission: "productgallery.view" },
       { key: "masters-categories", label: "Categories", path: "/masters/categories", icon: "layers", permission: "category.view" },
@@ -210,7 +223,6 @@ export const PAGE_TITLES: Record<string, string> = {
   "reports-general": "General Reports",
   "reports-financial-planning": "Financial Planning Report",
   "reports-cargo-overview": "Cargo Overview",
-  planning: "Shipment Planning",
   crm: "Customer Relationship Management",
   "crm-pipelines": "Pipeline Setup",
   sales: "Sales Process",

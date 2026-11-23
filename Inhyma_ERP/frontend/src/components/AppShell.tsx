@@ -16,7 +16,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link, Navigate, useLocation, useNavigate } from "react-router-dom";
-import { API_BASE, apiGet, apiPost } from "@/lib/api";
+import { API_BASE, apiGet, apiPost, setForbiddenHandler } from "@/lib/api";
 import { Auth, initials, roleLabel } from "@/lib/auth";
 import { useAuth } from "@/lib/hooks";
 import { InlineListSkeleton } from "@/components/Skeleton";
@@ -1345,19 +1345,62 @@ export function AppShell({ activeKey, children, pageClassName }: AppShellProps) 
 
   const loggedIn = Auth.isLoggedIn();
 
+  const syncProfileNow = useCallback(
+    (force = false) =>
+      Auth.syncProfile(async () => {
+        const res = await apiGet<Profile>("/auth/profile");
+        return res?.data || null;
+      }, force),
+    []
+  );
+
   useEffect(() => {
-    if (!loggedIn || !Auth.shouldSyncProfile()) return;
-    apiGet<Profile>("/auth/profile")
-      .then((res) => {
-        if (res && res.data) {
-          Auth.updateProfile(res.data);
-          Auth.markProfileSynced();
-        }
-      })
-      .catch(() => {
-        /* profile refresh fallback */
-      });
-  }, [loggedIn]);
+    if (!loggedIn) {
+      setForbiddenHandler(null);
+      return;
+    }
+    setForbiddenHandler(() => {
+      void syncProfileNow(true);
+    });
+    return () => setForbiddenHandler(null);
+  }, [loggedIn, syncProfileNow]);
+
+  useEffect(() => {
+    if (!loggedIn) return;
+    void syncProfileNow(false);
+  }, [loggedIn, location.pathname, syncProfileNow]);
+
+  useEffect(() => {
+    if (!loggedIn) return;
+    const onFocusOrVisible = () => {
+      if (document.visibilityState === "hidden") return;
+      void syncProfileNow(false);
+    };
+    window.addEventListener("focus", onFocusOrVisible);
+    document.addEventListener("visibilitychange", onFocusOrVisible);
+    const interval = setInterval(() => {
+      if (document.visibilityState !== "hidden") {
+        void syncProfileNow(false);
+      }
+    }, 15000);
+    return () => {
+      window.removeEventListener("focus", onFocusOrVisible);
+      document.removeEventListener("visibilitychange", onFocusOrVisible);
+      clearInterval(interval);
+    };
+  }, [loggedIn, syncProfileNow]);
+
+  useEffect(() => {
+    if (!loggedIn || !profile?.id) return;
+    const unsubscribe = liveClient.onEvent((event: LiveEvent) => {
+      if (event && event.event_type === "PERMISSIONS_UPDATED") {
+        void syncProfileNow(true);
+      }
+    });
+    return () => {
+      unsubscribe();
+    };
+  }, [loggedIn, profile?.id, syncProfileNow]);
 
   useEffect(() => subscribeBrandName(setBrandName), []);
   useEffect(() => subscribeBrandLogo(setBrandLogo), []);

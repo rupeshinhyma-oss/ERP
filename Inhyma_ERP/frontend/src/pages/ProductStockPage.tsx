@@ -7,6 +7,7 @@ import { Pagination } from "@/components/Pagination";
 import { SortHeader } from "@/components/SortHeader";
 import type { PaginationMeta } from "@/types";
 import { InventoryApi } from "@/lib/api";
+import { useAuth } from "@/lib/hooks";
 import "@/styles/productStock.css";
 
 export interface OrderDetail {
@@ -762,6 +763,7 @@ export function ProductStockPage({
   const navigate = useNavigate();
   const location = useLocation();
   const [searchParams] = useSearchParams();
+  const { hasPermission } = useAuth();
   const initialTab =
     defaultTab ||
     (searchParams.get("tab") === "goods-expected" || location.pathname.includes("goods-expected")
@@ -784,6 +786,9 @@ export function ProductStockPage({
       : "Product Stock";
 
   const isTestMode = import.meta.env.MODE === "test";
+  const canExportStock = isTransactionReport
+    ? hasPermission("report.view") || hasPermission("product_stock.export") || hasPermission("product_stock.manage")
+    : hasPermission("product_stock.export") || hasPermission("product_stock.manage");
   // Goods Expected Date Report tab is kept in the codebase but hidden from the general UI as requested.
   // It remains accessible in test mode or if explicitly requested via query parameter (?tab=goods-expected).
   const showGoodsExpectedTab =
@@ -1010,6 +1015,7 @@ export function ProductStockPage({
   }, [filteredExpectedItems]);
 
   const handleExportExpected = useCallback(async () => {
+    if (!canExportStock) return;
     const XLSX = await import("xlsx");
     const exportData = filteredExpectedItems.map((item) => ({
       "Sr. No.": item.sr_no,
@@ -1030,7 +1036,7 @@ export function ProductStockPage({
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Goods Expected Report");
     XLSX.writeFile(wb, "Goods_Expected_Date_Report.xlsx");
-  }, [filteredExpectedItems]);
+  }, [canExportStock, filteredExpectedItems]);
 
   // Extract unique Category options (server master + loaded items)
   const categoryOptions = useMemo(() => {
@@ -1271,6 +1277,7 @@ export function ProductStockPage({
 
   // Export to Excel
   const handleExport = useCallback(async () => {
+    if (!canExportStock) return;
     const XLSX = await import("xlsx");
     const exportData = filteredItems.map((item) => ({
       "Sr. No.": item.sr_no,
@@ -1304,7 +1311,7 @@ export function ProductStockPage({
       wb,
       isTransactionReport ? "Product_Stock_Transactions.xlsx" : "Product_Stock_List.xlsx"
     );
-  }, [filteredItems, isTransactionReport]);
+  }, [canExportStock, filteredItems, isTransactionReport]);
 
   const hasCellBreakup = useCallback(
     (it: ProductStockItem, colKey: string, qty: number): boolean =>
@@ -1355,52 +1362,56 @@ export function ProductStockPage({
                 </button>
 
                 {/* Export Button (matches Companies Imp/Exp golden-amber theme) */}
-                <button
-                  type="button"
-                  className="btn btn-imp-exp stock-btn-export"
-                  onClick={handleExport}
-                  title="Export to Excel"
-                >
-                  <svg
-                    width="14"
-                    height="14"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2.2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    aria-hidden="true"
+                {canExportStock && (
+                  <button
+                    type="button"
+                    className="btn btn-imp-exp stock-btn-export"
+                    onClick={handleExport}
+                    title="Export to Excel"
                   >
-                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                    <polyline points="7 10 12 15 17 10" />
-                    <line x1="12" y1="15" x2="12" y2="3" />
-                  </svg>
-                  <span>Export</span>
-                </button>
+                    <svg
+                      width="14"
+                      height="14"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2.2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      aria-hidden="true"
+                    >
+                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                      <polyline points="7 10 12 15 17 10" />
+                      <line x1="12" y1="15" x2="12" y2="3" />
+                    </svg>
+                    <span>Export</span>
+                  </button>
+                )}
               </>
             ) : (
-              <button
-                type="button"
-                className="btn btn-secondary"
-                onClick={handleExportExpected}
-                style={{
-                  background: "#0284c7",
-                  color: "#ffffff",
-                  border: "none",
-                  padding: "8px 16px",
-                  borderRadius: "4px",
-                  fontSize: "13px",
-                  fontWeight: 600,
-                  cursor: "pointer",
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "6px",
-                }}
-              >
-                <span>📥</span>
-                <span>Export Excel</span>
-              </button>
+              canExportStock && (
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={handleExportExpected}
+                  style={{
+                    background: "#0284c7",
+                    color: "#ffffff",
+                    border: "none",
+                    padding: "8px 16px",
+                    borderRadius: "4px",
+                    fontSize: "13px",
+                    fontWeight: 600,
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "6px",
+                  }}
+                >
+                  <span>📥</span>
+                  <span>Export Excel</span>
+                </button>
+              )
             )}
           </div>
         </div>

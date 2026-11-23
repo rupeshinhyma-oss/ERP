@@ -1209,14 +1209,16 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
   const POTENTIAL_BUSINESS_OPTIONS = optionValues(companyOptionGroups, "company.potential_business_per_month");
   const DIRECT_IMPORT_OPTIONS = optionValues(companyOptionGroups, "company.direct_import_from_china");
   const IMPORT_VOLUME_OPTIONS = optionValues(companyOptionGroups, "company.monthly_import_volume");
-  const canCreate = hasPermission("company.create") || hasPermission("supplier.create");
-  const canUpdate = hasPermission("company.update") || hasPermission("supplier.update");
-  const canDelete = hasPermission("company.delete") || hasPermission("supplier.delete");
-  const canExport = hasPermission("company.export") || hasPermission("supplier.export");
-  const canImport = hasPermission("company.import") || hasPermission("supplier.import");
-  const canBulkAction = hasPermission("company.bulk_action") || hasPermission("supplier.bulk_action");
-  const canEditGrade = hasPermission("company.grade_edit") || hasPermission("supplier.grade_edit") || canUpdate;
-  const canEditPotential = hasPermission("company.potential_edit") || hasPermission("supplier.potential_edit") || canUpdate;
+  const canManageAll = hasPermission("company.manage");
+  const canQuickAdd = canManageAll || hasPermission("company.quick_add");
+  const canCreate = canManageAll || hasPermission("company.create");
+  const canUpdate = canManageAll || hasPermission("company.update");
+  const canDelete = canManageAll || hasPermission("company.delete");
+  const canExport = canManageAll || hasPermission("company.export");
+  const canImport = canManageAll || hasPermission("company.import");
+  const canBulkAction = canManageAll || hasPermission("company.bulk_action");
+  const canEditGrade = canManageAll || hasPermission("company.grade_edit");
+  const canEditPotential = canManageAll || hasPermission("company.potential_edit");
 
   const [rows, setRows] = useState<Company[]>([]);
   const [pagination, setPagination] = useState<PaginationMeta | undefined>();
@@ -1525,8 +1527,12 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
   const [alertPopup, setAlertPopup] = useState<{ title: string; message: string } | null>(null);
   const [drawerCompany, setDrawerCompany] = useState<Company | null>(null);
   const displayOrder = useMemo(() => {
-    return Array.from({ length: COMPANY_TABLE_COLUMNS.length }, (_, i) => i);
-  }, []);
+    return Array.from({ length: COMPANY_TABLE_COLUMNS.length }, (_, i) => i).filter((idx) => {
+      if (idx === 0 && !canBulkAction) return false;
+      if (idx === 14 && !canUpdate) return false;
+      return true;
+    });
+  }, [canBulkAction, canUpdate]);
 
   const getFreezeStyle = useCallback((_colIdx: number, isHeader = false): React.CSSProperties => {
     return isHeader
@@ -1571,10 +1577,10 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
   useModalHistorySync(isImportPageOpen, () => setIsImportPageOpen(false));
 
   useEffect(() => {
-    if (defaultAdd || isAddParam) {
+    if ((defaultAdd || isAddParam) && canCreate) {
       void openModal(null, "full");
     }
-  }, [defaultAdd, isAddParam]);
+  }, [defaultAdd, isAddParam, canCreate]);
 
   /* Quick Add Drawer state */
   const [quickDrawerOpen, setQuickDrawerOpen] = useState(false);
@@ -1648,6 +1654,9 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
     setQuickDrawerOpen(true);
   }, [getLoggedInSalesPersonId]);
 
+  const getLoggedInSalesPersonIdRef = useRef(getLoggedInSalesPersonId);
+  getLoggedInSalesPersonIdRef.current = getLoggedInSalesPersonId;
+
   const [defaultIndiaId, setDefaultIndiaId] = useState<string>("bf5a75c1-34e6-48ab-8a52-b537806107e0");
 
   useEffect(() => {
@@ -1672,7 +1681,7 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
         .then((res) => {
           if (res?.data && res.data.length > 0) {
             setSalesPersons(res.data);
-            const defaultSpId = getLoggedInSalesPersonId();
+            const defaultSpId = getLoggedInSalesPersonIdRef.current();
             if (defaultSpId) {
               setQuickForm((prev) => (!prev.sales_person_id ? { ...prev, sales_person_id: defaultSpId } : prev));
             }
@@ -1694,7 +1703,7 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
             .catch(() => { });
         });
     }
-  }, [quickDrawerOpen, modalOpen, profile, getLoggedInSalesPersonId]);
+  }, [quickDrawerOpen, modalOpen, profile]);
 
   useEffect(() => {
     if (profile && quickDrawerOpen && !quickForm.sales_person_id) {
@@ -3221,7 +3230,7 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
   /* ------------------------------------------------------------------------- */
   /* RENDER: DEDICATED FULL-PAGE IMPORT SUPPLIERS VIEW                         */
   /* ------------------------------------------------------------------------- */
-  if (isImportPageOpen) {
+  if (isImportPageOpen && canImport) {
     return (
       <AppShell activeKey="companies" pageClassName="page-suppliers">
         <main className="page">
@@ -5940,7 +5949,7 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
                   <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon>
                 </svg>
               </button>
-              {canCreate && (
+              {canQuickAdd && (
                 <button className="btn btn-quick-add" onClick={openQuickAdd}>
                   + QUICK ADD
                 </button>
@@ -5970,8 +5979,8 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
               {canBulkAction && (
                 <BulkActionsDropdown
                   selectedCount={selectedIds.length}
-                  onBulkActivate={canUpdate && statusTab === "inactive" ? handleBulkActivate : undefined}
-                  onBulkDeactivate={canUpdate && statusTab === "active" ? handleBulkDeactivate : undefined}
+                  onBulkActivate={statusTab === "inactive" ? handleBulkActivate : undefined}
+                  onBulkDeactivate={statusTab === "active" ? handleBulkDeactivate : undefined}
                   onBulkDelete={canDelete ? handleBulkDelete : undefined}
                 />
               )}
@@ -6661,7 +6670,7 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
                   {loading ? (
                     <CompanySkeletonRows count={8} displayOrder={displayOrder} getFreezeStyle={getFreezeStyle} />
                   ) : sortedRows.length === 0 ? (
-                    <TableMessageRow colSpan={COMPANY_TABLE_COLUMNS.length}>No Data</TableMessageRow>
+                    <TableMessageRow colSpan={displayOrder.length}>No Data</TableMessageRow>
                   ) : (
                     sortedRows.map((s, index) => (
                       <tr key={s.id}>
@@ -7694,25 +7703,27 @@ export function CompaniesPage({ defaultAdd, defaultFilterOpen = false }: { defau
               zIndex: 10,
             }}
           >
-            <button
-              type="button"
-              disabled={quickSaving}
-              onClick={() => handleQuickSave(false)}
-              style={{
-                flex: 1,
-                background: "#0061f2",
-                color: "#ffffff",
-                border: "none",
-                borderRadius: "4px",
-                padding: "10px 16px",
-                fontWeight: 600,
-                fontSize: "13.5px",
-                cursor: quickSaving ? "not-allowed" : "pointer",
-                opacity: quickSaving ? 0.7 : 1,
-              }}
-            >
-              {quickSaving ? "Saving..." : "Save & Continue"}
-            </button>
+            {canUpdate && (
+              <button
+                type="button"
+                disabled={quickSaving}
+                onClick={() => handleQuickSave(false)}
+                style={{
+                  flex: 1,
+                  background: "#0061f2",
+                  color: "#ffffff",
+                  border: "none",
+                  borderRadius: "4px",
+                  padding: "10px 16px",
+                  fontWeight: 600,
+                  fontSize: "13.5px",
+                  cursor: quickSaving ? "not-allowed" : "pointer",
+                  opacity: quickSaving ? 0.7 : 1,
+                }}
+              >
+                {quickSaving ? "Saving..." : "Save & Continue"}
+              </button>
+            )}
             <button
               type="button"
               disabled={quickSaving}

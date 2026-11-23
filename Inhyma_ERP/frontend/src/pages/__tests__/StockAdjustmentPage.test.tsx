@@ -13,6 +13,33 @@ vi.mock("@/components/AppShell", () => ({
   ),
 }));
 
+const authState = vi.hoisted(() => ({
+  perms: [
+    "stock_adjustment.view",
+    "stock_adjustment.create",
+    "stock_adjustment.export",
+    "stock_adjustment.delete",
+    "stock_adjustment.download",
+    "stock_adjustment.manage",
+  ] as string[],
+}));
+
+vi.mock("@/lib/hooks", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/hooks")>();
+  return {
+    ...actual,
+    useAuth: () => ({
+      profile: { id: "u-1", username: "testuser", display_name: "Test User" },
+      isSuperAdmin: false,
+      hasPermission: (code?: string | null) =>
+        !code ||
+        authState.perms.includes("*") ||
+        authState.perms.includes(code) ||
+        (code.endsWith(".view") && authState.perms.includes(code.replace(/\.view$/, ".manage"))),
+    }),
+  };
+});
+
 const mockGeneratePdf = vi.fn();
 vi.mock("@/lib/stockAdjustmentPdf", () => ({
   generateStockAdjustmentPdf: (...args: any[]) => mockGeneratePdf(...args),
@@ -25,6 +52,14 @@ describe("StockAdjustmentPage", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    authState.perms = [
+      "stock_adjustment.view",
+      "stock_adjustment.create",
+      "stock_adjustment.export",
+      "stock_adjustment.delete",
+      "stock_adjustment.download",
+      "stock_adjustment.manage",
+    ];
   });
 
   it("renders page header and action buttons", () => {
@@ -391,5 +426,54 @@ describe("StockAdjustmentPage", () => {
 
     const skeletonRows = screen.getAllByTestId("skeleton-row");
     expect(skeletonRows.length).toBe(8);
+  });
+
+  it("enforces granular stock_adjustment.* permissions on + Add New, Export, Action column, Delete, and Download", () => {
+    // 1. View only: hides + Add New, Export, and Action column
+    authState.perms = ["stock_adjustment.view"];
+    const { rerender } = render(
+      <BrowserRouter>
+        <StockAdjustmentPage />
+      </BrowserRouter>
+    );
+    expect(screen.queryByRole("button", { name: /Add New/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Export$/i })).toBeNull();
+    expect(screen.queryAllByRole("button", { name: "Actions" }).length).toBe(0);
+
+    // 2. View + Create + Export: shows + Add New and Export, keeps Action column hidden
+    authState.perms = ["stock_adjustment.view", "stock_adjustment.create", "stock_adjustment.export"];
+    rerender(
+      <BrowserRouter>
+        <StockAdjustmentPage />
+      </BrowserRouter>
+    );
+    expect(screen.getByRole("button", { name: /Add New/i })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /^Export$/i })).toBeTruthy();
+    expect(screen.queryAllByRole("button", { name: "Actions" }).length).toBe(0);
+
+    // 3. View + Download only: Action menu shows Download, hides Delete
+    authState.perms = ["stock_adjustment.view", "stock_adjustment.download"];
+    rerender(
+      <BrowserRouter>
+        <StockAdjustmentPage />
+      </BrowserRouter>
+    );
+    fireEvent.click(screen.getAllByRole("button", { name: "Actions" })[0]);
+    expect(screen.queryByRole("button", { name: /Delete/i })).toBeNull();
+    expect(screen.getByRole("button", { name: /Download/i })).toBeTruthy();
+
+    // 4. Manage All: shows + Add New, Export, Delete, and Download
+    cleanup();
+    authState.perms = ["stock_adjustment.manage"];
+    render(
+      <BrowserRouter>
+        <StockAdjustmentPage />
+      </BrowserRouter>
+    );
+    expect(screen.getByRole("button", { name: /Add New/i })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /^Export$/i })).toBeTruthy();
+    fireEvent.click(screen.getAllByRole("button", { name: "Actions" })[0]);
+    expect(screen.getByRole("button", { name: /Delete/i })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Download/i })).toBeTruthy();
   });
 });

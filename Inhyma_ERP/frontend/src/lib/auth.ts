@@ -29,15 +29,58 @@ function notify(profile: Profile | null): void {
 }
 
 let lastProfileSyncTime = 0;
+let profileSyncInFlight: Promise<Profile | null> | null = null;
+const PROFILE_SYNC_COOLDOWN_MS = 5000;
+
+if (typeof window !== "undefined") {
+  window.addEventListener("storage", (e) => {
+    if (e.key === PROFILE_KEY) {
+      notify(Auth.getProfile());
+    }
+  });
+}
 
 export const Auth = {
-  /** Check if profile sync is needed (throttled to at most once per 60 seconds). */
+  /** Check if profile sync is needed (throttled to at most once per 5 seconds). */
   shouldSyncProfile(): boolean {
-    return Date.now() - lastProfileSyncTime > 60000;
+    return Date.now() - lastProfileSyncTime > PROFILE_SYNC_COOLDOWN_MS;
   },
 
   markProfileSynced(): void {
     lastProfileSyncTime = Date.now();
+  },
+
+  resetProfileSyncCooldown(): void {
+    lastProfileSyncTime = 0;
+  },
+
+  /** Single-flight profile/permissions sync, honoring the short cooldown unless `force` is true. */
+  async syncProfile(
+    fetcher: () => Promise<Profile | null | undefined>,
+    force = false
+  ): Promise<Profile | null> {
+    if (!force && !this.shouldSyncProfile()) {
+      return this.getProfile();
+    }
+    if (profileSyncInFlight) {
+      return profileSyncInFlight;
+    }
+    profileSyncInFlight = (async () => {
+      try {
+        const nextProfile = await fetcher();
+        if (nextProfile) {
+          this.updateProfile(nextProfile);
+          this.markProfileSynced();
+          return nextProfile;
+        }
+      } catch {
+        /* ignore background profile sync errors */
+      } finally {
+        profileSyncInFlight = null;
+      }
+      return this.getProfile();
+    })();
+    return profileSyncInFlight;
   },
 
   /** Subscribe to profile/permission changes. Returns an unsubscribe fn. */

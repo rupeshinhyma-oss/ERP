@@ -38,7 +38,10 @@ function formatNumber(amount: number | null | undefined): string {
 
 type TabType = "all" | "pending" | "completed";
 
-const TechnicalPaymentsSkeletonRows: React.FC<{ count?: number }> = ({ count = 8 }) => (
+const TechnicalPaymentsSkeletonRows: React.FC<{ count?: number; showActionColumn?: boolean }> = ({
+  count = 8,
+  showActionColumn = true,
+}) => (
   <>
     {Array.from({ length: count }).map((_, index) => (
       <tr key={`tech-payment-skeleton-${index}`} className="table-skeleton-row">
@@ -57,9 +60,11 @@ const TechnicalPaymentsSkeletonRows: React.FC<{ count?: number }> = ({ count = 8
         <td style={{ padding: "12px" }}><div className="skeleton-line" style={{ width: "60%" }} /></td>
         <td style={{ padding: "12px" }}><div className="skeleton-line" style={{ width: "55%" }} /></td>
         <td style={{ padding: "12px" }}><div className="skeleton-badge" style={{ width: 75 }} /></td>
-        <td style={{ width: 44, padding: "12px", textAlign: "center" }}>
-          <div className="skeleton-box" style={{ width: 26, height: 26, borderRadius: 4, margin: "0 auto" }} />
-        </td>
+        {showActionColumn && (
+          <td style={{ width: 44, padding: "12px", textAlign: "center" }}>
+            <div className="skeleton-box" style={{ width: 26, height: 26, borderRadius: 4, margin: "0 auto" }} />
+          </td>
+        )}
       </tr>
     ))}
   </>
@@ -68,12 +73,18 @@ const TechnicalPaymentsSkeletonRows: React.FC<{ count?: number }> = ({ count = 8
 export function PaymentsPage() {
   const { isSuperAdmin, hasPermission } = useAuth();
   const canManageAll = isSuperAdmin || hasPermission("payment.manage");
+  const canViewPendingTab = canManageAll || hasPermission("payment.pending.view");
+  const canViewCompletedTab = canManageAll || hasPermission("payment.completed.view");
   const canCreate = canManageAll || hasPermission("payment.create");
-  const canUpdate = canManageAll || hasPermission("payment.update");
   const canDelete = canManageAll || hasPermission("payment.delete");
+  const canViewActionColumn = canManageAll || hasPermission("payment.action.view");
+  const canViewDetails = canManageAll || hasPermission("payment.details.view");
+  const canUpdate = canManageAll || hasPermission("payment.update");
 
   // Tabs & Summary
-  const [activeTab, setActiveTab] = useState<TabType>("pending");
+  const [activeTab, setActiveTab] = useState<TabType>(() =>
+    canViewPendingTab ? "pending" : canViewCompletedTab ? "completed" : "all"
+  );
   const [summary, setSummary] = useState<TechnicalTaskPaymentSummary>({
     total_payment: 0,
     paid: 0,
@@ -169,8 +180,20 @@ export function PaymentsPage() {
     }
   }, []);
 
+  // Keep activeTab aligned with permitted tabs
+  useEffect(() => {
+    if (activeTab === "pending" && !canViewPendingTab) {
+      setActiveTab(canViewCompletedTab ? "completed" : "all");
+    } else if (activeTab === "completed" && !canViewCompletedTab) {
+      setActiveTab(canViewPendingTab ? "pending" : "all");
+    }
+  }, [activeTab, canViewPendingTab, canViewCompletedTab]);
+
   // Fetch Tasks for the active tab and filters
   const loadTasks = useCallback(async () => {
+    if ((activeTab === "pending" && !canViewPendingTab) || (activeTab === "completed" && !canViewCompletedTab)) {
+      return;
+    }
     setLoading(true);
     try {
       const params: TechnicalTaskListParams = {
@@ -204,6 +227,8 @@ export function PaymentsPage() {
     }
   }, [
     activeTab,
+    canViewPendingTab,
+    canViewCompletedTab,
     page,
     pageSize,
     searchQuery,
@@ -818,40 +843,44 @@ export function PaymentsPage() {
               >
                 All ({allCount})
               </button>
-              <button
-                type="button"
-                style={{
-                  background: "none",
-                  border: "none",
-                  borderBottom: activeTab === "pending" ? "2.5px solid #0061f2" : "2.5px solid transparent",
-                  color: activeTab === "pending" ? "#0061f2" : "#64748b",
-                  fontWeight: 700,
-                  fontSize: "13.5px",
-                  paddingBottom: "8px",
-                  cursor: "pointer",
-                  whiteSpace: "nowrap",
-                }}
-                onClick={() => handleTabChange("pending")}
-              >
-                Pending ({summary.pending_count})
-              </button>
-              <button
-                type="button"
-                style={{
-                  background: "none",
-                  border: "none",
-                  borderBottom: activeTab === "completed" ? "2.5px solid #0061f2" : "2.5px solid transparent",
-                  color: activeTab === "completed" ? "#0061f2" : "#64748b",
-                  fontWeight: 700,
-                  fontSize: "13.5px",
-                  paddingBottom: "8px",
-                  cursor: "pointer",
-                  whiteSpace: "nowrap",
-                }}
-                onClick={() => handleTabChange("completed")}
-              >
-                Completed ({summary.completed_count})
-              </button>
+              {canViewPendingTab && (
+                <button
+                  type="button"
+                  style={{
+                    background: "none",
+                    border: "none",
+                    borderBottom: activeTab === "pending" ? "2.5px solid #0061f2" : "2.5px solid transparent",
+                    color: activeTab === "pending" ? "#0061f2" : "#64748b",
+                    fontWeight: 700,
+                    fontSize: "13.5px",
+                    paddingBottom: "8px",
+                    cursor: "pointer",
+                    whiteSpace: "nowrap",
+                  }}
+                  onClick={() => handleTabChange("pending")}
+                >
+                  Pending ({summary.pending_count})
+                </button>
+              )}
+              {canViewCompletedTab && (
+                <button
+                  type="button"
+                  style={{
+                    background: "none",
+                    border: "none",
+                    borderBottom: activeTab === "completed" ? "2.5px solid #0061f2" : "2.5px solid transparent",
+                    color: activeTab === "completed" ? "#0061f2" : "#64748b",
+                    fontWeight: 700,
+                    fontSize: "13.5px",
+                    paddingBottom: "8px",
+                    cursor: "pointer",
+                    whiteSpace: "nowrap",
+                  }}
+                  onClick={() => handleTabChange("completed")}
+                >
+                  Completed ({summary.completed_count})
+                </button>
+              )}
             </div>
 
             {/* Sub-toolbar inside Card */}
@@ -950,15 +979,18 @@ export function PaymentsPage() {
                     <th>Total Amount</th>
                     <th>Paid/Due</th>
                     <th>Task Status</th>
-                    <th style={{ width: 50, textAlign: "center" }}>Action</th>
+                    {canViewActionColumn && <th style={{ width: 50, textAlign: "center" }}>Action</th>}
                   </tr>
                 </thead>
                 <tbody>
                   {loading ? (
-                    <TechnicalPaymentsSkeletonRows count={pageSize > 10 ? 8 : pageSize} />
+                    <TechnicalPaymentsSkeletonRows
+                      count={pageSize > 10 ? 8 : pageSize}
+                      showActionColumn={canViewActionColumn}
+                    />
                   ) : tasks.length === 0 ? (
                     <tr>
-                      <td colSpan={14} style={{ textAlign: "center", padding: "60px 20px" }}>
+                      <td colSpan={canViewActionColumn ? 14 : 13} style={{ textAlign: "center", padding: "60px 20px" }}>
                         <div
                           style={{
                             width: "48px",
@@ -1024,16 +1056,20 @@ export function PaymentsPage() {
                             />
                           </td>
                           <td>
-                            <a
-                              href="#details"
-                              className="payment-company-link"
-                              onClick={(e) => {
-                                e.preventDefault();
-                                setDetailTask(task);
-                              }}
-                            >
-                              {task.company_name}
-                            </a>
+                            {canViewDetails ? (
+                              <a
+                                href="#details"
+                                className="payment-company-link"
+                                onClick={(e) => {
+                                  e.preventDefault();
+                                  setDetailTask(task);
+                                }}
+                              >
+                                {task.company_name}
+                              </a>
+                            ) : (
+                              <span>{task.company_name}</span>
+                            )}
                           </td>
                           <td>
                             <span className={`badge-task-type ${taskTypeBadge}`}>
@@ -1089,56 +1125,66 @@ export function PaymentsPage() {
                               {task.status || "Pending"}
                             </span>
                           </td>
-                          <td style={{ textAlign: "center" }}>
-                            <div className="payment-action-menu-wrapper" style={{ zIndex: openActionMenuId === task.id ? 50 : 1 }}>
-                              <button
-                                type="button"
-                                className="btn-payment-action"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setOpenActionMenuId(openActionMenuId === task.id ? null : task.id);
-                                }}
-                              >
-                                &#8942;
-                              </button>
+                          {canViewActionColumn && (
+                            <td style={{ textAlign: "center" }}>
+                              <div className="payment-action-menu-wrapper" style={{ zIndex: openActionMenuId === task.id ? 50 : 1 }}>
+                                <button
+                                  type="button"
+                                  className="btn-payment-action"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setOpenActionMenuId(openActionMenuId === task.id ? null : task.id);
+                                  }}
+                                >
+                                  &#8942;
+                                </button>
 
-                              {openActionMenuId === task.id && (() => {
-                                const openUpward = tasks.length >= 3 && idx >= tasks.length - (tasks.length >= 4 ? 2 : 1);
-                                return (
-                                <div className={`payment-action-dropdown ${openUpward ? "open-upward" : ""}`}>
-                                  {canUpdate && (
-                                    <button
-                                      type="button"
-                                      onClick={() => openRecordPayment(task)}
-                                    >
-                                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                        <path d="M6 3h12" />
-                                        <path d="M6 8h12" />
-                                        <path d="m6 13 8.5 8" />
-                                        <path d="M6 13h3" />
-                                        <path d="M9 13c6.667 0 6.667-10 0-10" />
-                                      </svg>
-                                      Record Payment
-                                    </button>
-                                  )}
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      setDetailTask(task);
-                                      setOpenActionMenuId(null);
-                                    }}
-                                  >
-                                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
-                                      <circle cx="12" cy="12" r="3" />
-                                    </svg>
-                                    View Details
-                                  </button>
-                                </div>
-                                );
-                              })()}
-                            </div>
-                          </td>
+                                {openActionMenuId === task.id && (() => {
+                                  const openUpward = tasks.length >= 3 && idx >= tasks.length - (tasks.length >= 4 ? 2 : 1);
+                                  const hasAnyAction = canUpdate || canViewDetails;
+                                  return (
+                                  <div className={`payment-action-dropdown ${openUpward ? "open-upward" : ""}`}>
+                                    {canUpdate && (
+                                      <button
+                                        type="button"
+                                        onClick={() => openRecordPayment(task)}
+                                      >
+                                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                          <path d="M6 3h12" />
+                                          <path d="M6 8h12" />
+                                          <path d="m6 13 8.5 8" />
+                                          <path d="M6 13h3" />
+                                          <path d="M9 13c6.667 0 6.667-10 0-10" />
+                                        </svg>
+                                        Record Payment
+                                      </button>
+                                    )}
+                                    {canViewDetails && (
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setDetailTask(task);
+                                          setOpenActionMenuId(null);
+                                        }}
+                                      >
+                                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                          <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                                          <circle cx="12" cy="12" r="3" />
+                                        </svg>
+                                        View Details
+                                      </button>
+                                    )}
+                                    {!hasAnyAction && (
+                                      <div style={{ padding: "10px 12px", fontSize: "12px", color: "#64748b", fontStyle: "italic" }}>
+                                        No actions permitted
+                                      </div>
+                                    )}
+                                  </div>
+                                  );
+                                })()}
+                              </div>
+                            </td>
+                          )}
                         </tr>
                       );
                     })
@@ -1579,7 +1625,7 @@ export function PaymentsPage() {
           )}
 
           {/* Details Modal */}
-          {detailTask && (
+          {detailTask && canViewDetails && (
             <Modal
               open={Boolean(detailTask)}
               variant="center"

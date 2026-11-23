@@ -484,6 +484,102 @@ async def test_inventory_api_needs_a_login_and_product_view(db):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
         assert (await c.get("/api/v1/inventory/product-stock")).status_code == 200
 
+    for stock_perm in ("product_stock.view", "product_stock.manage"):
+        stock_user = CurrentUser(id=uuid.uuid4(), username="stock_user", permissions={stock_perm})
+        app.dependency_overrides[get_current_user] = lambda u=stock_user: u
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            assert (await c.get("/api/v1/inventory/product-stock")).status_code == 200
+            assert (await c.get("/api/v1/product-stock/list")).status_code == 200
+            assert (await c.get("/api/v1/inventory/stock-adjustment")).status_code == 403
+            assert (await c.get("/api/v1/inventory/product-reorder")).status_code == 403
+
+    # Granular Stock Adjustment RBAC
+    adj_viewer = CurrentUser(id=uuid.uuid4(), username="adj_view", permissions={"stock_adjustment.view"})
+    app.dependency_overrides[get_current_user] = lambda: adj_viewer
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        assert (await c.get("/api/v1/inventory/stock-adjustment")).status_code == 200
+        assert (await c.post("/api/v1/inventory/stock-adjustment", json=adj_body())).status_code == 403
+        assert (await c.delete(f"/api/v1/inventory/stock-adjustment/{uuid.uuid4()}")).status_code == 403
+
+    adj_creator = CurrentUser(id=uuid.uuid4(), username="adj_create", permissions={"stock_adjustment.create"})
+    app.dependency_overrides[get_current_user] = lambda: adj_creator
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        assert (await c.get("/api/v1/inventory/product-stock")).status_code == 200
+        assert (await c.post("/api/v1/inventory/stock-adjustment", json=adj_body())).status_code != 403
+        assert (await c.delete(f"/api/v1/inventory/stock-adjustment/{uuid.uuid4()}")).status_code == 403
+
+    adj_deleter = CurrentUser(id=uuid.uuid4(), username="adj_del", permissions={"stock_adjustment.delete"})
+    app.dependency_overrides[get_current_user] = lambda: adj_deleter
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        assert (await c.delete(f"/api/v1/inventory/stock-adjustment/{uuid.uuid4()}")).status_code == 404
+
+    adj_manager = CurrentUser(id=uuid.uuid4(), username="adj_mgr", permissions={"stock_adjustment.manage"})
+    app.dependency_overrides[get_current_user] = lambda: adj_manager
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        assert (await c.get("/api/v1/inventory/stock-adjustment")).status_code == 200
+        assert (await c.post("/api/v1/inventory/stock-adjustment", json=adj_body())).status_code != 403
+        assert (await c.delete(f"/api/v1/inventory/stock-adjustment/{uuid.uuid4()}")).status_code == 404
+
+    # Granular Stock Transfer RBAC (view, stage views, create, stages, cancel, manage)
+    trf_bare = CurrentUser(id=uuid.uuid4(), username="trf_bare", permissions=set())
+    app.dependency_overrides[get_current_user] = lambda: trf_bare
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        assert (await c.get("/api/v1/inventory/stock-transfer")).status_code == 403
+        assert (await c.get("/api/v1/transfer/list")).status_code == 403
+        assert (await c.post("/api/v1/inventory/stock-transfer", json={})).status_code == 403
+        assert (await c.patch(f"/api/v1/inventory/stock-transfer/{uuid.uuid4()}/status", json={"status": "Confirmed"})).status_code == 403
+        assert (await c.post(f"/api/v1/inventory/stock-transfer/{uuid.uuid4()}/receive-to-main")).status_code == 403
+
+    trf_viewer = CurrentUser(id=uuid.uuid4(), username="trf_view", permissions={"stock_transfer.view"})
+    app.dependency_overrides[get_current_user] = lambda: trf_viewer
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        assert (await c.get("/api/v1/inventory/stock-transfer")).status_code == 200
+        assert (await c.get("/api/v1/transfer/list")).status_code == 200
+        assert (await c.post("/api/v1/inventory/stock-transfer", json={})).status_code == 403
+        assert (await c.patch(f"/api/v1/inventory/stock-transfer/{uuid.uuid4()}/status", json={"status": "Cancel"})).status_code == 403
+        assert (await c.post(f"/api/v1/inventory/stock-transfer/{uuid.uuid4()}/receive-to-main")).status_code == 403
+
+    trf_pending_view = CurrentUser(id=uuid.uuid4(), username="trf_pend_v", permissions={"stock_transfer.pending.view"})
+    app.dependency_overrides[get_current_user] = lambda: trf_pending_view
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        assert (await c.get("/api/v1/inventory/stock-transfer?status=Pending")).status_code == 200
+        assert (await c.get("/api/v1/inventory/stock-transfer?status=Confirmed")).status_code == 403
+
+    trf_creator = CurrentUser(id=uuid.uuid4(), username="trf_create", permissions={"stock_transfer.create"})
+    app.dependency_overrides[get_current_user] = lambda: trf_creator
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        assert (await c.get("/api/v1/inventory/product-stock")).status_code == 200
+        assert (await c.post("/api/v1/inventory/stock-transfer", json={})).status_code == 422
+        assert (await c.patch(f"/api/v1/inventory/stock-transfer/{uuid.uuid4()}/status", json={"status": "Confirmed"})).status_code == 403
+
+    trf_confirmer = CurrentUser(id=uuid.uuid4(), username="trf_conf", permissions={"stock_transfer.confirmed"})
+    app.dependency_overrides[get_current_user] = lambda: trf_confirmer
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        assert (await c.patch(f"/api/v1/inventory/stock-transfer/{uuid.uuid4()}/status", json={"status": "Confirmed"})).status_code == 404
+        assert (await c.patch(f"/api/v1/inventory/stock-transfer/{uuid.uuid4()}/status", json={"status": "Received"})).status_code == 403
+        assert (await c.post(f"/api/v1/inventory/stock-transfer/{uuid.uuid4()}/receive-to-main")).status_code == 403
+
+    trf_receiver = CurrentUser(id=uuid.uuid4(), username="trf_recv", permissions={"stock_transfer.received"})
+    app.dependency_overrides[get_current_user] = lambda: trf_receiver
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        assert (await c.post(f"/api/v1/inventory/stock-transfer/{uuid.uuid4()}/receive-to-main")).status_code == 404
+        assert (await c.patch(f"/api/v1/inventory/stock-transfer/{uuid.uuid4()}/status", json={"status": "Received"})).status_code == 404
+        assert (await c.patch(f"/api/v1/inventory/stock-transfer/{uuid.uuid4()}/status", json={"status": "Cancel"})).status_code == 403
+
+    trf_canceller = CurrentUser(id=uuid.uuid4(), username="trf_canc", permissions={"stock_transfer.cancel"})
+    app.dependency_overrides[get_current_user] = lambda: trf_canceller
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        assert (await c.patch(f"/api/v1/inventory/stock-transfer/{uuid.uuid4()}/status", json={"status": "Cancel"})).status_code == 404
+        assert (await c.patch(f"/api/v1/inventory/stock-transfer/{uuid.uuid4()}/status", json={"status": "Pending"})).status_code == 403
+
+    trf_manager = CurrentUser(id=uuid.uuid4(), username="trf_mgr", permissions={"stock_transfer.manage"})
+    app.dependency_overrides[get_current_user] = lambda: trf_manager
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        assert (await c.get("/api/v1/inventory/stock-transfer?status=Confirmed")).status_code == 200
+        assert (await c.post("/api/v1/inventory/stock-transfer", json={})).status_code == 422
+        assert (await c.post(f"/api/v1/inventory/stock-transfer/{uuid.uuid4()}/receive-to-main")).status_code == 404
+        assert (await c.patch(f"/api/v1/inventory/stock-transfer/{uuid.uuid4()}/status", json={"status": "Cancel"})).status_code == 404
+
 
 async def test_product_bulk_delete_needs_the_bulk_actions_permission_as_well(db):
     app = create_application()

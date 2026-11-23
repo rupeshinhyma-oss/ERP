@@ -17,9 +17,33 @@ from __future__ import annotations
 
 from fastapi import FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
-from sqlalchemy.exc import OperationalError, TimeoutError as SATimeoutError
+from sqlalchemy.exc import DBAPIError, InterfaceError, OperationalError, TimeoutError as SATimeoutError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import JSONResponse
+
+try:
+    import asyncpg  # type: ignore[import-untyped]
+
+    _ASYNCPG_TRANSIENT_ERRORS: tuple[type[BaseException], ...] = (
+        asyncpg.PostgresConnectionError,
+        asyncpg.InterfaceError,
+        asyncpg.InternalClientError,
+    )
+except ImportError:
+    _ASYNCPG_TRANSIENT_ERRORS = ()
+
+
+def _is_database_unavailable_error(exc: Exception) -> bool:
+    """Return True if *exc* (or its underlying DB driver cause) represents a transient DB/pooler outage."""
+    if isinstance(exc, (OperationalError, SATimeoutError, InterfaceError)):
+        return True
+    if isinstance(exc, DBAPIError) and getattr(exc, "connection_invalidated", False):
+        return True
+    if _ASYNCPG_TRANSIENT_ERRORS:
+        for candidate in (exc, getattr(exc, "orig", None), getattr(exc, "__cause__", None)):
+            if isinstance(candidate, _ASYNCPG_TRANSIENT_ERRORS):
+                return True
+    return False
 
 from app.core.exceptions import AppException
 from app.core.logging import get_logger
@@ -134,6 +158,8 @@ async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONR
     leaked, which is a common source of information disclosure in APIs
     that let default framework error pages reach production.
     """
+    if _is_database_unavailable_error(exc):
+        return await database_unavailable_handler(request, exc)
     request_id = _get_request_id(request)
     logger.exception("Unhandled exception.", extra={"path": request.url.path, "request_id": request_id})
     return JSONResponse(
@@ -152,5 +178,6 @@ def register_exception_handlers(app: FastAPI) -> None:
     app.add_exception_handler(StarletteHTTPException, http_exception_handler)
     app.add_exception_handler(RequestValidationError, validation_exception_handler)
     app.add_exception_handler(OperationalError, database_unavailable_handler)
+    app.add_exception_handler(InterfaceError, database_unavailable_handler)
     app.add_exception_handler(SATimeoutError, database_unavailable_handler)
     app.add_exception_handler(Exception, unhandled_exception_handler)
