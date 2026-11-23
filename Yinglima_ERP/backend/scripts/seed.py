@@ -142,6 +142,14 @@ BOOTSTRAP_PERMISSIONS: list[tuple[str, str, str, str, str, str]] = [
     ("buyertype.export", "buyertype", "buyer-types", "export", "ALL", "Export buyer type data."),
     ("buyertype.import", "buyertype", "buyer-types", "import", "ALL", "Import buyer type data."),
     ("buyertype.bulk_action", "buyertype", "buyer-types", "manage", "ALL", "Use Bulk Actions in the buyer type list."),
+    # Payment Modes / Bank Accounts (Configurations master)
+    ("payment_mode.view", "payment_mode", "masters-payment-modes", "view", "ALL", "View payment modes & bank accounts; use search, filters, and the Active/Inactive tabs."),
+    ("payment_mode.create", "payment_mode", "masters-payment-modes", "create", "ALL", "Create payment modes & bank accounts."),
+    ("payment_mode.update", "payment_mode", "masters-payment-modes", "update", "ALL", "Edit and activate/deactivate payment modes & bank accounts."),
+    ("payment_mode.delete", "payment_mode", "masters-payment-modes", "delete", "ALL", "Delete payment modes & bank accounts."),
+    ("payment_mode.export", "payment_mode", "masters-payment-modes", "export", "ALL", "Export payment mode & bank account data."),
+    ("payment_mode.import", "payment_mode", "masters-payment-modes", "import", "ALL", "Import payment mode & bank account data."),
+    ("payment_mode.bulk_action", "payment_mode", "masters-payment-modes", "manage", "ALL", "Use Bulk Actions in the payment modes list."),
     # Master Data Configurations
     ("country.view", "country", "masters-countries", "view", "ALL", "View countries."),
     ("country.create", "country", "masters-countries", "create", "ALL", "Create countries."),
@@ -554,6 +562,27 @@ async def seed_with_session(session) -> None:
         await _geo.seed_china(session)
     else:
         logger.info("Country master data already present; geography seed skipped.")
+
+    # Seed default Payment Modes / Bank Accounts if table is empty
+    from app.core.constants import RecordStatus as _RecordStatus
+    from app.masters.payment_modes.constants import DEFAULT_PAYMENT_MODES
+    from app.masters.payment_modes.models import PaymentMode
+
+    _pm_rows = (await session.scalar(select(_func.count()).select_from(PaymentMode))) or 0
+    if _pm_rows == 0:
+        for pm_name, pm_code, pm_type, pm_curr, pm_desc in DEFAULT_PAYMENT_MODES:
+            session.add(
+                PaymentMode(
+                    name=pm_name,
+                    code=pm_code,
+                    account_type=pm_type,
+                    currency_code=pm_curr,
+                    description=pm_desc,
+                    status=_RecordStatus.ACTIVE,
+                )
+            )
+        await session.flush()
+        logger.info("Seeded default Payment Modes / Bank Accounts.")
 
 
 async def _run_seed_with_retry(max_retries: int = 5, delay: float = 2.0) -> None:

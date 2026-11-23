@@ -11,6 +11,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
 import { Banner } from "@/components/ui";
+import { SelectField } from "@/components/fields";
 import { Pagination } from "@/components/Pagination";
 import { apiGet } from "@/lib/api";
 import type { EffectivePermissionsBreakdown, ItemsPage, User } from "@/types";
@@ -190,12 +191,11 @@ export function EffectivePermissionsPage() {
           >
             Select User Account to Inspect:
           </label>
-          <select
+          <SelectField
             value={selectedUserId}
-            onChange={(e) => setSelectedUserId(e.target.value)}
-            style={{
-              width: "100%",
-              maxWidth: "540px",
+            onChange={(val) => setSelectedUserId(val)}
+            style={{ width: "100%", maxWidth: "540px" }}
+            triggerStyle={{
               padding: "10px",
               border: "1px solid #cbd5e0",
               borderRadius: "6px",
@@ -208,7 +208,7 @@ export function EffectivePermissionsPage() {
                 {`${u.display_name || u.full_name || u.email || "Unnamed"} (${u.email || "No email"}) - Status: ${u.status}`}
               </option>
             ))}
-          </select>
+          </SelectField>
         </div>
 
         {status === "idle" && (
@@ -368,12 +368,12 @@ export function EffectivePermissionsPage() {
                     setTableSearch(e.target.value);
                   }}
                 />
-                <select
-                  style={{ maxWidth: "200px" }}
+                <SelectField
+                  style={{ maxWidth: "200px", minWidth: "160px" }}
                   value={moduleFilter}
-                  onChange={(e) => {
+                  onChange={(val) => {
                     setTablePage(1);
-                    setModuleFilter(e.target.value);
+                    setModuleFilter(val);
                   }}
                 >
                   <option value="">All Modules</option>
@@ -382,7 +382,7 @@ export function EffectivePermissionsPage() {
                       {m.toUpperCase()}
                     </option>
                   ))}
-                </select>
+                </SelectField>
                 <select
                   style={{ maxWidth: "200px" }}
                   value={sourceFilter}

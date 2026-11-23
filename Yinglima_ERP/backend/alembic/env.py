@@ -53,6 +53,7 @@ import app.masters.product_categories.models  # noqa: F401,E402 - Phase 7
 import app.masters.product_sub_categories.models  # noqa: F401,E402 - Phase 7
 import app.masters.products.models  # noqa: F401,E402 - Phase 7
 import app.masters.warehouses.models  # noqa: F401,E402 - Warehouse Master
+import app.masters.payment_modes.models  # noqa: F401,E402 - Payment Modes / Bank Accounts Master
 import app.suppliers.models  # noqa: F401,E402 - Phase 8
 import app.buyers.models  # noqa: F401,E402
 import app.inquiries.models  # noqa: F401,E402

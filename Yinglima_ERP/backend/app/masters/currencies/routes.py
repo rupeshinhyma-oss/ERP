@@ -120,7 +120,7 @@ async def list_currencys(
     request: Request,
     query: ListQueryParams = Depends(get_list_query_params),
     service: CurrencyService = Depends(get_currency_service),
-    _current_user: CurrentUser = Depends(require_any_permission("currency.view", "inquiry.view", "inquiry.create", "inquiry.update", "local_purchase.view", "local_purchase.create", "local_purchase.update", "sale_process.view", "sale_process.create", "sale_process.update", "finance_report.view", "vat_return.view")),
+    _current_user: CurrentUser = Depends(require_any_permission("currency.view", "payment_mode.view", "payment_mode.create", "payment_mode.update", "inquiry.view", "inquiry.create", "inquiry.update", "local_purchase.view", "local_purchase.create", "local_purchase.update", "sale_process.view", "sale_process.create", "sale_process.update", "finance_report.view", "vat_return.view")),
 ) -> dict:
     """List currencys, with search/sort/filter/pagination."""
     currencys, total = await service.list_paginated(query)

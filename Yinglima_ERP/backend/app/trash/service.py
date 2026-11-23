@@ -33,6 +33,7 @@ from app.masters.cities.models import City
 from app.masters.currencies.models import Currency
 from app.masters.supplier_types.models import SupplierType
 from app.masters.buyer_types.models import BuyerType
+from app.masters.payment_modes.models import PaymentMode
 from app.masters.warehouses.models import Warehouse
 from app.masters.company_list.models import MasterCompany
 from app.suppliers.models import Supplier, SupplierContact
@@ -63,6 +64,7 @@ MODEL_MAP: dict[str, tuple[Type[Any], str, str | None]] = {
     "Currency": (Currency, "name", "code"),
     "Supplier Type": (SupplierType, "name", "code"),
     "Buyer Type": (BuyerType, "name", "code"),
+    "Payment Mode": (PaymentMode, "name", "code"),
     "Warehouse": (Warehouse, "name", "code"),
     "Company": (MasterCompany, "name", "code"),
     "Supplier": (Supplier, "company_name", "supplier_code"),
