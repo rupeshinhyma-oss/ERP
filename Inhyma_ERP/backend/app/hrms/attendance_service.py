@@ -25,11 +25,13 @@ from typing import List, Optional
 
 logger = logging.getLogger(__name__)
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import BadRequestException, ForbiddenException, NotFoundException
 from app.hrms.notifications import (
+    notify_regularization_cancelled,
     notify_regularization_decision,
     notify_regularization_requested,
 )
@@ -56,6 +58,7 @@ from app.hrms.schemas import (
     PunchInRequest,
     PunchOutRequest,
     RegularizationApprovalAction,
+    RegularizationCancelAction,
     RegularizationCreate,
     RegularizationRead,
     RegularizationRejectAction,
@@ -102,6 +105,7 @@ def haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> fl
         math.sin(delta_phi / 2.0) ** 2
         + math.cos(phi1) * math.cos(phi2) * math.sin(delta_lambda / 2.0) ** 2
     )
+    a = min(1.0, max(0.0, a))
     c = 2.0 * math.atan2(math.sqrt(a), math.sqrt(1.0 - a))
     return R * c
 
@@ -692,7 +696,16 @@ class HrmsAttendanceService:
         office = validating_office
         distance = validating_distance
 
-        # 3. Duplicate punch check
+        # 3. Serialize concurrent punch-in for same employee & date on PostgreSQL (HRMS-BUG-19)
+        if isinstance(self.db, AsyncSession):
+            bind = self.db.get_bind()
+            if bind is not None and bind.dialect.name == "postgresql":
+                await self.db.execute(
+                    text("SELECT pg_advisory_xact_lock(hashtext(:lock_key))"),
+                    {"lock_key": f"hrms_punch_in:{user_id}:{today.isoformat()}"},
+                )
+
+        # Duplicate punch check
         existing = await self.get_today_attendance(user_id, today)
         if existing and existing.punch_in:
             raise BadRequestException("Already punched in for today.")
@@ -792,8 +805,12 @@ class HrmsAttendanceService:
             )
             self.db.add(record)
 
-        await self.db.commit()
-        await self.db.refresh(record)
+        try:
+            await self.db.commit()
+            await self.db.refresh(record)
+        except IntegrityError:
+            await self.db.rollback()
+            raise BadRequestException("Already punched in for today.")
 
         office_read = AssignedOfficeRead(
             id=office.id,
@@ -912,16 +929,43 @@ class HrmsAttendanceService:
         working_mins = max(0, int(working_seconds / 60))
         record.working_minutes = working_mins
 
-        # 4. Check Early Exit against shift_end_time (e.g. 19:00 = 1140 mins)
-        end_h, end_m = map(int, policy.shift_end_time.split(":"))
-        shift_end_mins = end_h * 60 + end_m
-        current_mins = local_dt.hour * 60 + local_dt.minute
-
+        # 4. Check Early Exit against policy shift_end_time & early_exit_buffer_minutes (HRMS-BUG-24)
         early_exit_mins = 0
-        if current_mins < shift_end_mins:
-            early_exit_mins = shift_end_mins - current_mins
-            record.early_exit_minutes = early_exit_mins
-            record.is_irregular = True
+        enable_early = getattr(policy, "enable_early_exit", True)
+        if enable_early is not False:
+            raw_buf = getattr(policy, "early_exit_buffer_minutes", 0)
+            buffer_mins = max(0, int(raw_buf)) if isinstance(raw_buf, (int, float)) else 0
+            raw_end = getattr(policy, "shift_end_time", None)
+            end_str = raw_end if isinstance(raw_end, str) and ":" in raw_end else "19:00"
+            end_h, end_m = map(int, end_str.split(":")[:2])
+            shift_end_mins = end_h * 60 + end_m
+
+            raw_start = getattr(policy, "shift_start_time", None)
+            start_str = raw_start if isinstance(raw_start, str) and ":" in raw_start else "10:30"
+            start_h, start_m = map(int, start_str.split(":")[:2])
+            shift_start_mins = start_h * 60 + start_m
+            required_shift_mins = max(0, shift_end_mins - shift_start_mins)
+            current_mins = local_dt.hour * 60 + local_dt.minute
+
+            is_flexible = getattr(policy, "flexible_shift", False) is True
+            if is_flexible and required_shift_mins > 0:
+                shortfall = required_shift_mins - working_mins
+                if shortfall > buffer_mins:
+                    early_exit_mins = shortfall
+            else:
+                # Inclusive boundary: leaving at (shift_end - buffer) or later is within grace buffer
+                cutoff_mins = shift_end_mins - buffer_mins
+                if current_mins < cutoff_mins:
+                    early_exit_mins = shift_end_mins - current_mins
+
+            mark_early = getattr(policy, "mark_early_exit", True)
+            if early_exit_mins > 0 and mark_early is not False:
+                record.early_exit_minutes = early_exit_mins
+                record.is_irregular = True
+            else:
+                record.early_exit_minutes = 0
+        else:
+            record.early_exit_minutes = 0
 
         out_acc_val = round(payload.accuracy, 2) if payload.accuracy is not None else None
         record.punch_out = local_dt
@@ -1028,7 +1072,7 @@ class HrmsAttendanceService:
 
         # 3. Approved leave requests for employee in month (Priority 3)
         leaves_res = await self.db.execute(
-            select(HrmsLeaveRequest, HrmsLeaveType.name).join(
+            select(HrmsLeaveRequest, HrmsLeaveType.name, HrmsLeaveType.is_paid).join(
                 HrmsLeaveType, HrmsLeaveType.id == HrmsLeaveRequest.leave_type_id
             ).where(
                 HrmsLeaveRequest.employee_id == user_id,
@@ -1038,12 +1082,13 @@ class HrmsAttendanceService:
             )
         )
         leaves = leaves_res.all()
-        leave_map: dict[date, str] = {}
-        for req, lt_name in leaves:
+        leave_map: dict[date, tuple[str, bool, float]] = {}
+        for req, lt_name, lt_is_paid in leaves:
+            day_weight = 0.5 if (req.from_date == req.to_date and abs(float(req.number_of_days or 1.0) - 0.5) < 1e-6) else 1.0
             cur = max(req.from_date, start_date)
             req_end = min(req.to_date, end_date)
             while cur <= req_end:
-                leave_map[cur] = lt_name
+                leave_map[cur] = (lt_name, bool(lt_is_paid), day_weight)
                 cur += timedelta(days=1)
 
         # 4. Attendance records for this employee in month
@@ -1102,14 +1147,17 @@ class HrmsAttendanceService:
                 )
             # Priority 2: Approved Leave
             elif is_leave:
-                lt_name = leave_map[cur_date]
+                lt_name, lt_is_paid, lv_weight = leave_map[cur_date]
+                display_lt = f"{lt_name} (Half Day)" if lv_weight == 0.5 else lt_name
                 days_list.append(
                     CalendarDayRead(
                         date=cur_date.isoformat(),
                         day_number=d_num,
                         day_name=day_names[weekday_idx],
-                        status="LEAVE",
-                        leave_type_name=lt_name,
+                        status="HALF_DAY" if (lv_weight == 0.5 and rec and rec.punch_in) else "LEAVE",
+                        leave_type_name=display_lt,
+                        is_paid_leave=lt_is_paid,
+                        leave_days=lv_weight,
                         punch_in=format_time_ist(rec.punch_in) if rec else None,
                         punch_out=format_time_ist(rec.punch_out) if rec else None,
                         working_minutes=rec.working_minutes if rec else None,
@@ -1385,6 +1433,7 @@ class HrmsAttendanceService:
                 attendance_date=reg_req.attendance_date.isoformat(),
                 reason=reg_req.reason,
                 actor_id=user_id,
+                request_id=reg_req.id,
             )
         await self.db.commit()
         await self.db.refresh(reg_req)
@@ -1630,6 +1679,7 @@ class HrmsAttendanceService:
             select(HrmsAttendanceRegularization)
             .where(HrmsAttendanceRegularization.id == request_id)
             .with_for_update()
+            .execution_options(populate_existing=True)
         )
         reg_req = res.scalar_one_or_none()
         if not reg_req:
@@ -1811,6 +1861,7 @@ class HrmsAttendanceService:
                 decision="APPROVED",
                 attendance_date=reg_req.attendance_date.isoformat(),
                 actor_id=reviewer_id,
+                request_id=reg_req.id,
             )
         except Exception as exc:
             logger.warning("Failed to dispatch regularization approval notification: %s", exc)
@@ -1867,6 +1918,7 @@ class HrmsAttendanceService:
             select(HrmsAttendanceRegularization)
             .where(HrmsAttendanceRegularization.id == request_id)
             .with_for_update()
+            .execution_options(populate_existing=True)
         )
         reg_req = res.scalar_one_or_none()
         if not reg_req:
@@ -1928,6 +1980,7 @@ class HrmsAttendanceService:
                 decision="REJECTED",
                 attendance_date=reg_req.attendance_date.isoformat(),
                 actor_id=reviewer_id,
+                request_id=reg_req.id,
             )
         except Exception as exc:
             logger.warning("Failed to dispatch regularization rejection notification: %s", exc)
@@ -1940,6 +1993,144 @@ class HrmsAttendanceService:
         users_map = {u.id: u for u in users_res.scalars().all()}
         emp = users_map.get(reg_req.employee_id)
         rev = users_map.get(reviewer_id)
+
+        punch_in_str = reg_req.punch_in_time or format_time_ist(att_rec.punch_in if att_rec else None)
+        punch_out_str = reg_req.punch_out_time or format_time_ist(att_rec.punch_out if att_rec else None)
+        hours_str = reg_req.total_hours
+        if not hours_str and att_rec and att_rec.working_minutes:
+            hours_str = f"{att_rec.working_minutes // 60}h {att_rec.working_minutes % 60:02d}m"
+
+        return RegularizationRead(
+            id=reg_req.id,
+            employee_id=reg_req.employee_id,
+            employee_name=(emp.display_name or f"{emp.first_name or ''} {emp.last_name or ''}".strip() or emp.username or "Employee") if emp else "Employee",
+            employee_email=emp.email if emp else None,
+            attendance_record_id=reg_req.attendance_record_id,
+            attendance_date=reg_req.attendance_date.isoformat(),
+            request_type=reg_req.request_type,
+            reason=reg_req.reason,
+            notes=reg_req.notes,
+            punch_in_time=reg_req.punch_in_time,
+            punch_out_time=reg_req.punch_out_time,
+            total_hours=hours_str,
+            punch_in=punch_in_str,
+            punch_out=punch_out_str,
+            status=reg_req.status,
+            regularization_status=reg_req.status,
+            regularization_reason=reg_req.reason,
+            submitted_at=reg_req.submitted_at,
+            reviewed_at=reg_req.reviewed_at,
+            reviewed_by=reg_req.reviewed_by,
+            reviewed_by_name=(rev.display_name or f"{rev.first_name or ''} {rev.last_name or ''}".strip() or rev.username) if rev else None,
+            manager_remarks=reg_req.manager_remarks,
+            action_taken=reg_req.action_taken,
+        )
+
+    async def cancel_regularization(
+        self,
+        request_id: uuid.UUID,
+        actor_id: uuid.UUID,
+        payload: Optional[RegularizationCancelAction] = None,
+        ctx=None,
+    ) -> RegularizationRead:
+        """
+        Cancel a PENDING attendance regularization request without deleting audit history.
+        - Serialized with FOR UPDATE + populate_existing=True against concurrent approve/reject.
+        - Permitted only for requester, Admin, HR, or authorized manager of the requester.
+        - Terminal states (APPROVED, REJECTED, CANCELLED) cannot be cancelled.
+        - Restores linked HrmsAttendance.regularization_status from PENDING back to NONE.
+        """
+        res = await self.db.execute(
+            select(HrmsAttendanceRegularization)
+            .where(HrmsAttendanceRegularization.id == request_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        reg_req = res.scalar_one_or_none()
+        if not reg_req:
+            raise NotFoundException(f"Regularization request {request_id} not found.")
+
+        resolved_ctx = ctx if ctx is not None else await self._resolve_hrms_context_for_user(actor_id)
+        if resolved_ctx.user_id != actor_id:
+            raise ForbiddenException("Actor identity does not match authenticated context.")
+
+        is_owner = reg_req.employee_id == actor_id
+        is_authorized_actor = (
+            is_owner
+            or resolved_ctx.is_admin
+            or resolved_ctx.is_hr
+            or (resolved_ctx.is_manager and reg_req.employee_id in resolved_ctx.managed_employee_ids)
+        )
+        if not is_authorized_actor:
+            raise ForbiddenException(
+                "Permission denied. Only the requester, their manager, HR, or an Administrator can cancel this regularization request."
+            )
+
+        if reg_req.status != "PENDING":
+            raise BadRequestException(
+                f"Cannot cancel regularization request with status '{reg_req.status}'. Only PENDING requests can be cancelled."
+            )
+
+        now_ist = datetime.now(IST)
+        cancel_reason = (
+            payload.reason.strip()
+            if payload and payload.reason and payload.reason.strip()
+            else ("Cancelled by requester" if is_owner else "Cancelled by authorized reviewer")
+        )
+
+        reg_req.status = "CANCELLED"
+        reg_req.reviewed_at = now_ist
+        reg_req.reviewed_by = actor_id
+        reg_req.action_taken = "CANCELLED"
+        reg_req.manager_remarks = cancel_reason
+
+        # Restore linked attendance record if it is still referencing this PENDING request
+        att_rec = None
+        if reg_req.attendance_record_id:
+            att_res = await self.db.execute(
+                select(HrmsAttendance)
+                .where(HrmsAttendance.id == reg_req.attendance_record_id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+            att_rec = att_res.scalar_one_or_none()
+        if not att_rec:
+            att_res = await self.db.execute(
+                select(HrmsAttendance)
+                .where(
+                    HrmsAttendance.employee_id == reg_req.employee_id,
+                    HrmsAttendance.attendance_date == reg_req.attendance_date,
+                )
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+            att_rec = att_res.scalar_one_or_none()
+
+        if att_rec and att_rec.regularization_status == "PENDING":
+            att_rec.regularization_status = "NONE"
+            att_rec.regularization_note = f"Cancelled: {cancel_reason}"
+
+        await self.db.flush()
+        try:
+            await notify_regularization_cancelled(
+                self.db,
+                employee_id=reg_req.employee_id,
+                attendance_date=reg_req.attendance_date.isoformat(),
+                actor_id=actor_id,
+                request_id=reg_req.id,
+                reason=cancel_reason,
+            )
+        except Exception as exc:
+            logger.warning("Failed to dispatch regularization cancellation notification: %s", exc)
+        await self.db.commit()
+        await self.db.refresh(reg_req)
+
+        users_res = await self.db.execute(
+            select(User).where(User.id.in_([reg_req.employee_id, actor_id]))
+        )
+        users_map = {u.id: u for u in users_res.scalars().all()}
+        emp = users_map.get(reg_req.employee_id)
+        rev = users_map.get(actor_id)
 
         punch_in_str = reg_req.punch_in_time or format_time_ist(att_rec.punch_in if att_rec else None)
         punch_out_str = reg_req.punch_out_time or format_time_ist(att_rec.punch_out if att_rec else None)
@@ -2008,26 +2199,47 @@ class HrmsAttendanceService:
         employee_id: uuid.UUID,
         latitude: float,
         longitude: float,
-        accuracy: float = 10.0,
+        accuracy: Optional[float] = 10.0,
+        gps_timestamp: Optional[datetime] = None,
     ) -> GeofenceCheckResponse:
         """
         Evaluate employee's current GPS position against their assigned office geofence.
-        Manages the return timer upon exit and persists geofence violation events upon timer expiry.
-        Cancels the active exit timer if the employee returns inside the perimeter before expiry.
+        Validates coordinate finiteness/bounds, rejects (0,0) & invalid accuracy/freshness,
+        serializes concurrent heartbeats via PostgreSQL advisory lock to prevent duplicate
+        open violation rows, handles poor-accuracy GPS drift without false exits,
+        manages return timers, and resolves events upon return inside perimeter.
         """
+        # 1. Strict GPS coordinate, accuracy, and optional freshness validation (HRMS-BUG-13)
+        if not math.isfinite(latitude) or not math.isfinite(longitude):
+            raise BadRequestException("Invalid GPS coordinates: latitude and longitude must be finite numbers.")
+        if not (-90.0 <= latitude <= 90.0) or not (-180.0 <= longitude <= 180.0):
+            raise BadRequestException("Invalid GPS coordinates: latitude must be within [-90, 90] and longitude within [-180, 180].")
+        if abs(latitude) < 1e-6 and abs(longitude) < 1e-6:
+            raise BadRequestException("Invalid GPS coordinates: (0, 0) coordinates are not permitted.")
+        if accuracy is not None and (not math.isfinite(accuracy) or accuracy < 0.0):
+            raise BadRequestException("Invalid GPS accuracy value: must be a finite, non-negative number.")
+
+        now = datetime.now(timezone.utc)
+        if gps_timestamp is not None:
+            validate_gps_freshness(gps_timestamp, server_now_utc=now)
+
         from app.hrms.service import HrmsSetupService
         setup_svc = HrmsSetupService(self.db)
         settings = await setup_svc.get_effective_tracking_settings(employee_id)
 
         primary_office, permitted_offices = await self.get_permitted_locations(employee_id)
+        if not permitted_offices:
+            raise BadRequestException("No active office locations are assigned for geofence verification.")
 
         validating_office = None
         validating_distance = None
-        closest_office = primary_office
+        closest_office = primary_office or permitted_offices[0]
         closest_distance = float("inf")
 
         for off in permitted_offices:
             dist = haversine_distance(latitude, longitude, off.latitude, off.longitude)
+            if not math.isfinite(dist):
+                continue
             allowed_r = float(off.radius_meters or 150.0)
             if dist <= allowed_r:
                 validating_office = off
@@ -2037,13 +2249,16 @@ class HrmsAttendanceService:
                 closest_distance = dist
                 closest_office = off
 
+        if not math.isfinite(closest_distance) and validating_distance is None:
+            raise BadRequestException("Unable to compute finite geofence distance for assigned offices.")
+
         is_inside_geofence = (validating_office is not None)
         office = validating_office if is_inside_geofence else closest_office
         distance = validating_distance if is_inside_geofence else closest_distance
         allowed_radius = float(office.radius_meters or 150.0)
 
         max_acc = float(settings.max_gps_accuracy_meters or 50.0)
-        # If accuracy is unreliable, do not trigger new exit or return
+        # If accuracy is unreliable, do not trigger a false exit or false return
         if accuracy is not None and accuracy > max_acc:
             stmt = (
                 select(HrmsGeofenceViolation)
@@ -2057,7 +2272,6 @@ class HrmsAttendanceService:
             )
             incident = (await self.db.execute(stmt)).scalar_one_or_none()
             if incident:
-                now = datetime.now(timezone.utc)
                 rem_secs = None
                 if incident.expiry_time and incident.expiry_time > now:
                     rem_secs = max(0, int((incident.expiry_time - now).total_seconds()))
@@ -2074,8 +2288,8 @@ class HrmsAttendanceService:
                     incident_id=incident.id,
                 )
             return GeofenceCheckResponse(
-                is_inside=True,
-                status="INSIDE",
+                is_inside=is_inside_geofence,
+                status="POOR_ACCURACY",
                 distance_meters=round(distance, 1),
                 boundary_radius_meters=allowed_radius,
                 office_name=office.name,
@@ -2086,9 +2300,16 @@ class HrmsAttendanceService:
                 incident_id=None,
             )
 
-        now = datetime.now(timezone.utc)
+        # Serialize concurrent geofence heartbeats per employee on PostgreSQL (HRMS-BUG-20)
+        if isinstance(self.db, AsyncSession):
+            bind = self.db.get_bind()
+            if bind is not None and bind.dialect.name == "postgresql":
+                await self.db.execute(
+                    text("SELECT pg_advisory_xact_lock(hashtext(:lock_key))"),
+                    {"lock_key": f"hrms_geofence:{employee_id}"},
+                )
 
-        # Fetch active exit incident
+        # Fetch active exit incident (locked)
         stmt = (
             select(HrmsGeofenceViolation)
             .where(
@@ -2098,6 +2319,8 @@ class HrmsAttendanceService:
             )
             .order_by(HrmsGeofenceViolation.exit_time.desc())
             .limit(1)
+            .with_for_update()
+            .execution_options(populate_existing=True)
         )
         incident = (await self.db.execute(stmt)).scalar_one_or_none()
 
@@ -2439,7 +2662,47 @@ class HrmsAttendanceService:
                 is_lop = False
                 att_id = None
 
-                if att_rec:
+                if is_holiday:
+                    status_code = "HOLIDAY"
+                    status_label = "Holiday"
+                    h_name = holiday_obj.name if holiday_obj else "Holiday"
+
+                elif leave_info:
+                    req_obj, lt_obj = leave_info
+                    is_half_leave = (
+                        req_obj.from_date == req_obj.to_date
+                        and abs(float(req_obj.number_of_days or 1.0) - 0.5) < 1e-6
+                    )
+                    lv_weight = 0.5 if is_half_leave else 1.0
+                    l_name = f"{lt_obj.name} (Half Day)" if (lt_obj and is_half_leave) else (lt_obj.name if lt_obj else "Leave")
+                    if lt_obj and getattr(lt_obj, "is_paid", True):
+                        paid_leave_days += lv_weight
+                    else:
+                        unpaid_leave_days += lv_weight
+                        is_lop = True
+
+                    if is_half_leave and att_rec:
+                        att_id = str(att_rec.id)
+                        wm = att_rec.working_minutes or 0
+                        total_working_mins += wm
+                        punch_in_str = format_time_ist(att_rec.punch_in)
+                        punch_out_str = format_time_ist(att_rec.punch_out)
+                        present_days += 0.5
+                        half_days += 1.0
+                        status_code = "HALF_DAY"
+                        status_label = "Half Day Leave"
+                    elif is_half_leave:
+                        status_code = "HALF_DAY"
+                        status_label = "Half Day Leave"
+                        half_days += 1.0
+                        if d < today:
+                            absent_days += 0.5
+                            is_lop = True
+                    else:
+                        status_code = "LEAVE"
+                        status_label = "On Leave"
+
+                elif att_rec:
                     att_id = str(att_rec.id)
                     wm = att_rec.working_minutes or 0
                     total_working_mins += wm
@@ -2483,22 +2746,6 @@ class HrmsAttendanceService:
                         status_code = raw_st
                         status_label = raw_st.replace("_", " ").title()
                         present_days += 1.0
-
-                elif is_holiday:
-                    status_code = "HOLIDAY"
-                    status_label = "Holiday"
-                    h_name = holiday_obj.name if holiday_obj else "Holiday"
-
-                elif leave_info:
-                    req_obj, lt_obj = leave_info
-                    status_code = "LEAVE"
-                    status_label = "On Leave"
-                    l_name = lt_obj.name if lt_obj else "Leave"
-                    if lt_obj and getattr(lt_obj, "is_paid", True):
-                        paid_leave_days += 1.0
-                    else:
-                        unpaid_leave_days += 1.0
-                        is_lop = True
 
                 elif is_weekend:
                     status_code = "WEEKEND"

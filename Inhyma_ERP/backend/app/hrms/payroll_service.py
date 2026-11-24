@@ -8,9 +8,10 @@ Uses AsyncSession for complete consistency with the application architecture.
 from __future__ import annotations
 
 import calendar
+from decimal import Decimal, ROUND_HALF_UP
 import uuid
-from datetime import date, datetime, timezone
-from typing import Any
+from datetime import date, datetime, timedelta, timezone
+from typing import Any, Optional
 
 from sqlalchemy import select, and_, or_, desc, func, delete
 from sqlalchemy.exc import IntegrityError
@@ -20,7 +21,9 @@ from fastapi import HTTPException, status
 
 from app.hrms.models import (
     HrmsPayrollComponent,
+    HrmsEmployeeLocation,
     HrmsEmployeeSalary,
+    HrmsLocation,
     HrmsMonthlyPayroll,
     HrmsMonthlyPayrollItem,
     HrmsPayrollAdjustment,
@@ -38,8 +41,26 @@ from app.hrms.schemas import (
     PayrollAdjustmentCreate,
     MonthlyPayrollItemEditRequest,
 )
-from app.hrms.attendance_service import HrmsAttendanceService
-from app.users.models import User, UserStatus
+from app.hrms.attendance_service import HrmsAttendanceService, IST
+from app.rbac.models import Role, UserRole
+from app.users.models import EmploymentStatus, User, UserStatus
+
+TWO_DP = Decimal("0.01")
+ZERO_DEC = Decimal("0.00")
+TWELVE_DEC = Decimal("12")
+HUNDRED_DEC = Decimal("100")
+
+
+def _to_dec(val: Any) -> Decimal:
+    if isinstance(val, Decimal):
+        return val
+    if val is None:
+        return Decimal("0")
+    return Decimal(str(val))
+
+
+def _q2(val: Decimal) -> Decimal:
+    return val.quantize(TWO_DP, rounding=ROUND_HALF_UP)
 
 
 class HrmsPayrollService:
@@ -81,7 +102,7 @@ class HrmsPayrollService:
             component_type=comp_in.component_type.strip().upper(),
             calculation_type=comp_in.calculation_type.strip().upper(),
             calculation_basis=calc_basis,
-            value=comp_in.value,
+            value=_q2(_to_dec(comp_in.value)),
             is_taxable=comp_in.is_taxable,
             is_statutory=comp_in.is_statutory,
             display_order=comp_in.display_order,
@@ -129,7 +150,7 @@ class HrmsPayrollService:
         if comp_in.calculation_basis is not None:
             component.calculation_basis = comp_in.calculation_basis.strip().upper() if comp_in.calculation_basis else None
         if comp_in.value is not None:
-            component.value = comp_in.value
+            component.value = _q2(_to_dec(comp_in.value))
         if comp_in.is_taxable is not None:
             component.is_taxable = comp_in.is_taxable
         if comp_in.is_statutory is not None:
@@ -174,10 +195,24 @@ class HrmsPayrollService:
         they are actively configured in the database.
         """
         if hasattr(annual_ctc, "annual_ctc"):
-            annual_ctc_val = float(getattr(annual_ctc, "annual_ctc"))
+            annual_ctc_dec = _to_dec(getattr(annual_ctc, "annual_ctc"))
         else:
-            annual_ctc_val = float(annual_ctc)
-        monthly_ctc = round(annual_ctc_val / 12.0, 2)
+            annual_ctc_dec = _to_dec(annual_ctc)
+
+        if annual_ctc_dec <= Decimal("0"):
+            return SalaryPreviewResponse(
+                annual_ctc=0.0,
+                monthly_ctc=0.0,
+                earnings=[],
+                deductions=[],
+                monthly_gross=0.0,
+                total_deductions=0.0,
+                estimated_net_salary=0.0,
+                annual_gross=0.0,
+                annual_net=0.0,
+            )
+
+        monthly_ctc_dec = _q2(annual_ctc_dec / TWELVE_DEC)
         components = custom_components if custom_components is not None else await self.get_components(include_inactive=False)
 
         earnings_list: list[SalaryBreakdownItem] = []
@@ -186,14 +221,14 @@ class HrmsPayrollService:
         earning_comps = [c for c in components if c.component_type.upper() == "EARNING" and c.is_active]
         deduction_comps = [c for c in components if c.component_type.upper() == "DEDUCTION" and c.is_active]
 
-        comp_amounts: dict[str, float] = {}
+        comp_amounts: dict[str, Decimal] = {}
 
         if not earning_comps:
             # If no earning components are configured, gross salary is simply the monthly CTC
-            monthly_gross = monthly_ctc
+            monthly_gross_dec = monthly_ctc_dec
         else:
             # 1. First pass: fixed earnings and percentages based on CTC
-            allocated = 0.0
+            allocated = ZERO_DEC
             remaining_comp: HrmsPayrollComponent | None = None
             deferred_earnings: list[HrmsPayrollComponent] = []
 
@@ -201,14 +236,15 @@ class HrmsPayrollService:
                 ctype = comp.calculation_type.upper()
                 cbasis = (comp.calculation_basis or "").upper()
                 code_up = comp.code.upper()
+                val_dec = _to_dec(comp.value)
 
                 if ctype in ("REMAINING", "REMAINING_ALLOWANCE"):
                     remaining_comp = comp
                     continue
                 elif ctype == "FIXED":
-                    amt = round(comp.value, 2)
-                    comp_amounts[code_up] = amt
-                    allocated += amt
+                    amt_dec = _q2(val_dec)
+                    comp_amounts[code_up] = amt_dec
+                    allocated += amt_dec
                     earnings_list.append(
                         SalaryBreakdownItem(
                             component_id=str(comp.id) if getattr(comp, "id", None) else None,
@@ -218,14 +254,14 @@ class HrmsPayrollService:
                             calculation_type=comp.calculation_type,
                             calculation_basis=comp.calculation_basis,
                             rate_or_pct=comp.value,
-                            monthly_amount=amt,
-                            annual_amount=round(amt * 12.0, 2),
+                            monthly_amount=float(amt_dec),
+                            annual_amount=float(_q2(amt_dec * TWELVE_DEC)),
                         )
                     )
                 elif ctype in ("PERCENTAGE", "PERCENTAGE_OF_CTC") and (not cbasis or cbasis == "CTC"):
-                    amt = round(monthly_ctc * (comp.value / 100.0), 2)
-                    comp_amounts[code_up] = amt
-                    allocated += amt
+                    amt_dec = _q2(monthly_ctc_dec * (val_dec / HUNDRED_DEC))
+                    comp_amounts[code_up] = amt_dec
+                    allocated += amt_dec
                     earnings_list.append(
                         SalaryBreakdownItem(
                             component_id=str(comp.id) if getattr(comp, "id", None) else None,
@@ -235,8 +271,8 @@ class HrmsPayrollService:
                             calculation_type=comp.calculation_type,
                             calculation_basis=comp.calculation_basis,
                             rate_or_pct=comp.value,
-                            monthly_amount=amt,
-                            annual_amount=round(amt * 12.0, 2),
+                            monthly_amount=float(amt_dec),
+                            annual_amount=float(_q2(amt_dec * TWELVE_DEC)),
                         )
                     )
                 else:
@@ -247,17 +283,18 @@ class HrmsPayrollService:
                 ctype = comp.calculation_type.upper()
                 cbasis = (comp.calculation_basis or "").upper()
                 code_up = comp.code.upper()
+                val_dec = _to_dec(comp.value)
 
                 if ctype == "PERCENTAGE_OF_BASIC" or cbasis == "BASIC":
-                    basis_amt = comp_amounts.get("BASIC", 0.0)
+                    basis_amt = comp_amounts.get("BASIC", ZERO_DEC)
                 elif cbasis in comp_amounts:
                     basis_amt = comp_amounts[cbasis]
                 else:
-                    basis_amt = monthly_ctc
+                    basis_amt = monthly_ctc_dec
 
-                amt = round(basis_amt * (comp.value / 100.0), 2)
-                comp_amounts[code_up] = amt
-                allocated += amt
+                amt_dec = _q2(basis_amt * (val_dec / HUNDRED_DEC))
+                comp_amounts[code_up] = amt_dec
+                allocated += amt_dec
                 earnings_list.append(
                     SalaryBreakdownItem(
                         component_id=str(comp.id) if getattr(comp, "id", None) else None,
@@ -267,14 +304,14 @@ class HrmsPayrollService:
                         calculation_type=comp.calculation_type,
                         calculation_basis=comp.calculation_basis,
                         rate_or_pct=comp.value,
-                        monthly_amount=amt,
-                        annual_amount=round(amt * 12.0, 2),
+                        monthly_amount=float(amt_dec),
+                        annual_amount=float(_q2(amt_dec * TWELVE_DEC)),
                     )
                 )
 
             # 3. Third pass: Remaining allowance if and ONLY IF explicitly configured
             if remaining_comp:
-                rem_amt = max(0.0, round(monthly_ctc - allocated, 2))
+                rem_amt = max(ZERO_DEC, _q2(monthly_ctc_dec - allocated))
                 comp_amounts[remaining_comp.code.upper()] = rem_amt
                 earnings_list.append(
                     SalaryBreakdownItem(
@@ -285,36 +322,36 @@ class HrmsPayrollService:
                         calculation_type=remaining_comp.calculation_type,
                         calculation_basis=remaining_comp.calculation_basis,
                         rate_or_pct=remaining_comp.value,
-                        monthly_amount=rem_amt,
-                        annual_amount=round(rem_amt * 12.0, 2),
+                        monthly_amount=float(rem_amt),
+                        annual_amount=float(_q2(rem_amt * TWELVE_DEC)),
                     )
                 )
 
-            monthly_gross = round(sum(e.monthly_amount for e in earnings_list), 2)
+            monthly_gross_dec = _q2(sum((_to_dec(e.monthly_amount) for e in earnings_list), ZERO_DEC))
 
         # 4. Deductions calculation
-        total_deductions = 0.0
+        total_deductions_dec = ZERO_DEC
         for comp in deduction_comps:
             ctype = comp.calculation_type.upper()
             cbasis = (comp.calculation_basis or "").upper()
             code_up = comp.code.upper()
-            monthly_amt = 0.0
+            val_dec = _to_dec(comp.value)
 
             if ctype == "FIXED":
-                monthly_amt = round(comp.value, 2)
+                monthly_amt_dec = _q2(val_dec)
             elif ctype == "PERCENTAGE_OF_BASIC" or cbasis == "BASIC":
-                basis_val = comp_amounts.get("BASIC", monthly_gross)
-                monthly_amt = round(basis_val * (comp.value / 100.0), 2)
+                basis_val = comp_amounts.get("BASIC", monthly_gross_dec)
+                monthly_amt_dec = _q2(basis_val * (val_dec / HUNDRED_DEC))
             elif ctype in ("PERCENTAGE_OF_CTC",) or cbasis == "CTC":
-                monthly_amt = round(monthly_ctc * (comp.value / 100.0), 2)
+                monthly_amt_dec = _q2(monthly_ctc_dec * (val_dec / HUNDRED_DEC))
             elif cbasis == "GROSS":
-                monthly_amt = round(monthly_gross * (comp.value / 100.0), 2)
+                monthly_amt_dec = _q2(monthly_gross_dec * (val_dec / HUNDRED_DEC))
             elif cbasis in comp_amounts:
-                monthly_amt = round(comp_amounts[cbasis] * (comp.value / 100.0), 2)
+                monthly_amt_dec = _q2(comp_amounts[cbasis] * (val_dec / HUNDRED_DEC))
             else:
-                monthly_amt = round(monthly_gross * (comp.value / 100.0), 2)
+                monthly_amt_dec = _q2(monthly_gross_dec * (val_dec / HUNDRED_DEC))
 
-            comp_amounts[code_up] = monthly_amt
+            comp_amounts[code_up] = monthly_amt_dec
             deductions_list.append(
                 SalaryBreakdownItem(
                     component_id=str(comp.id) if getattr(comp, "id", None) else None,
@@ -324,25 +361,25 @@ class HrmsPayrollService:
                     calculation_type=comp.calculation_type,
                     calculation_basis=comp.calculation_basis,
                     rate_or_pct=comp.value,
-                    monthly_amount=monthly_amt,
-                    annual_amount=round(monthly_amt * 12.0, 2),
+                    monthly_amount=float(monthly_amt_dec),
+                    annual_amount=float(_q2(monthly_amt_dec * TWELVE_DEC)),
                 )
             )
-            total_deductions += monthly_amt
+            total_deductions_dec += monthly_amt_dec
 
-        total_deductions = round(total_deductions, 2)
-        estimated_net = max(0.0, round(monthly_gross - total_deductions, 2))
+        total_deductions_dec = _q2(total_deductions_dec)
+        estimated_net_dec = max(ZERO_DEC, _q2(monthly_gross_dec - total_deductions_dec))
 
         return SalaryPreviewResponse(
-            annual_ctc=annual_ctc_val,
-            monthly_ctc=monthly_ctc,
+            annual_ctc=float(_q2(annual_ctc_dec)),
+            monthly_ctc=float(monthly_ctc_dec),
             earnings=earnings_list,
             deductions=deductions_list,
-            monthly_gross=monthly_gross,
-            total_deductions=total_deductions,
-            estimated_net_salary=estimated_net,
-            annual_gross=round(monthly_gross * 12.0, 2),
-            annual_net=round(estimated_net * 12.0, 2),
+            monthly_gross=float(monthly_gross_dec),
+            total_deductions=float(total_deductions_dec),
+            estimated_net_salary=float(estimated_net_dec),
+            annual_gross=float(_q2(monthly_gross_dec * TWELVE_DEC)),
+            annual_net=float(_q2(estimated_net_dec * TWELVE_DEC)),
         )
 
     # ---------------------------------------------------------------------------
@@ -388,8 +425,8 @@ class HrmsPayrollService:
 
         new_salary = HrmsEmployeeSalary(
             employee_id=req.employee_id,
-            annual_ctc=req.annual_ctc,
-            monthly_ctc=monthly_ctc,
+            annual_ctc=_q2(_to_dec(req.annual_ctc)),
+            monthly_ctc=_q2(_to_dec(monthly_ctc)),
             effective_from=req.effective_from,
             is_active=True,
             structure_breakdown=structure_breakdown,
@@ -414,6 +451,10 @@ class HrmsPayrollService:
                 User.deleted_at.is_(None),
                 User.is_active.is_(True),
                 User.status == UserStatus.ACTIVE,
+                or_(
+                    User.employment_status.is_(None),
+                    User.employment_status.notin_([EmploymentStatus.TERMINATED, EmploymentStatus.RESIGNED]),
+                ),
             )
             .order_by(User.first_name.asc(), User.username.asc())
         )
@@ -518,8 +559,8 @@ class HrmsPayrollService:
                     "employee_code": code,
                     "department": dept,
                     "designation": desig,
-                    "annual_ctc": current_salary.annual_ctc if current_salary else None,
-                    "monthly_ctc": current_salary.monthly_ctc if current_salary else None,
+                    "annual_ctc": float(current_salary.annual_ctc) if current_salary else None,
+                    "monthly_ctc": float(current_salary.monthly_ctc) if current_salary else None,
                     "effective_from": str(current_salary.effective_from) if current_salary else None,
                     "has_salary": current_salary is not None,
                     "salary_id": str(current_salary.id) if current_salary else None,
@@ -564,7 +605,7 @@ class HrmsPayrollService:
             payroll_month=adj_in.payroll_month,
             adjustment_type=adj_in.adjustment_type.strip().upper(),
             title=adj_in.title.strip(),
-            amount=adj_in.amount,
+            amount=_q2(_to_dec(adj_in.amount)),
             reason=adj_in.reason.strip(),
             created_by=admin_id,
         )
@@ -622,7 +663,7 @@ class HrmsPayrollService:
                 holiday_dates.add(h.holiday_date)
         holiday_weekday_count = len(holiday_dates)
 
-        working_days = max(1, total_days - sunday_count - holiday_weekday_count)
+        working_days = max(0, total_days - sunday_count - holiday_weekday_count)
 
         return {
             "total_days": total_days,
@@ -665,6 +706,7 @@ class HrmsPayrollService:
             select(HrmsMonthlyPayroll)
             .where(HrmsMonthlyPayroll.payroll_month == payroll_month)
             .with_for_update()
+            .execution_options(populate_existing=True)
         )
         existing_payroll = (await self.db.execute(pay_query)).scalar_one_or_none()
         if existing_payroll and existing_payroll.status == "APPROVED":
@@ -687,6 +729,10 @@ class HrmsPayrollService:
                 User.deleted_at.is_(None),
                 User.is_active.is_(True),
                 User.status == UserStatus.ACTIVE,
+                or_(
+                    User.employment_status.is_(None),
+                    User.employment_status.notin_([EmploymentStatus.TERMINATED, EmploymentStatus.RESIGNED]),
+                ),
             )
             .order_by(User.first_name.asc(), User.username.asc())
         )
@@ -747,6 +793,7 @@ class HrmsPayrollService:
                     select(HrmsMonthlyPayroll)
                     .where(HrmsMonthlyPayroll.payroll_month == payroll_month)
                     .with_for_update()
+                    .execution_options(populate_existing=True)
                 )
                 existing_payroll = (await self.db.execute(pay_query)).scalar_one_or_none()
                 if not existing_payroll:
@@ -782,234 +829,418 @@ class HrmsPayrollService:
                 )
             )
 
-        total_gross = 0.0
-        total_deductions = 0.0
-        total_net = 0.0
+        total_gross_dec = ZERO_DEC
+        total_deductions_dec = ZERO_DEC
+        total_net_dec = ZERO_DEC
         employee_count = 0
 
-        for user in users:
-            # Find effective salary structure as of end_date of this month
-            sal_query = (
-                select(HrmsEmployeeSalary)
-                .where(
-                    HrmsEmployeeSalary.employee_id == user.id,
-                    HrmsEmployeeSalary.effective_from <= end_date,
-                    HrmsEmployeeSalary.deleted_at.is_(None),
+        if users:
+            # Batch-load all payroll calculation inputs in constant O(1) queries (eliminates N+1 storm: HRMS-BUG-27)
+            sal_rows = (
+                await self.db.execute(
+                    select(HrmsEmployeeSalary)
+                    .where(
+                        HrmsEmployeeSalary.employee_id.in_(valid_user_ids),
+                        HrmsEmployeeSalary.effective_from <= end_date,
+                        HrmsEmployeeSalary.deleted_at.is_(None),
+                    )
+                    .order_by(HrmsEmployeeSalary.employee_id.asc(), HrmsEmployeeSalary.effective_from.desc())
                 )
-                .order_by(HrmsEmployeeSalary.effective_from.desc())
-                .limit(1)
-            )
-            effective_salary = (await self.db.execute(sal_query)).scalar_one_or_none()
+            ).scalars().all()
+            salary_by_emp: dict[uuid.UUID, HrmsEmployeeSalary] = {}
+            for s in sal_rows:
+                if s.employee_id not in salary_by_emp:
+                    salary_by_emp[s.employee_id] = s
 
-            if not effective_salary:
-                # Employee has no salary structure configured yet; ensure no item exists in payroll
-                if existing_payroll.id:
-                    await self.db.execute(
-                        delete(HrmsMonthlyPayrollItem).where(
-                            HrmsMonthlyPayrollItem.payroll_id == existing_payroll.id,
-                            HrmsMonthlyPayrollItem.employee_id == user.id,
+            unsalaried_ids = [uid for uid in valid_user_ids if uid not in salary_by_emp]
+            if existing_payroll.id and unsalaried_ids:
+                await self.db.execute(
+                    delete(HrmsMonthlyPayrollItem).where(
+                        HrmsMonthlyPayrollItem.payroll_id == existing_payroll.id,
+                        HrmsMonthlyPayrollItem.employee_id.in_(unsalaried_ids),
+                    )
+                )
+
+            salaried_ids = list(salary_by_emp.keys())
+            if salaried_ids:
+                active_comps = await self.get_components(include_inactive=False)
+                att_service = HrmsAttendanceService(self.db)
+                policy = await att_service.get_policy()
+                weekly_off_raw = (policy.weekly_off or "Sunday").strip()
+                weekly_off_days = {d.strip().capitalize() for d in weekly_off_raw.split(",") if d.strip()} or {"Sunday"}
+                today_ist = datetime.now(IST).date()
+                month_dates = [date(year, month, d_num) for d_num in range(1, cal["total_days"] + 1)]
+
+                # Holidays active in month
+                month_holidays = list(
+                    (
+                        await self.db.execute(
+                            select(HrmsHoliday).where(
+                                HrmsHoliday.deleted_at.is_(None),
+                                HrmsHoliday.is_active.is_(True),
+                                HrmsHoliday.holiday_date >= start_date,
+                                HrmsHoliday.holiday_date <= end_date,
+                            )
                         )
                     )
-                continue
+                    .scalars()
+                    .all()
+                )
 
-            # 1. Check whether attendance or leaves were actually recorded for this employee in this month
-            has_records_query = select(func.count(HrmsAttendance.id)).where(
-                HrmsAttendance.employee_id == user.id,
-                HrmsAttendance.attendance_date >= start_date,
-                HrmsAttendance.attendance_date <= end_date,
-            )
-            att_records_count = (await self.db.execute(has_records_query)).scalar() or 0
+                # Employee primary branches
+                loc_rows = (
+                    await self.db.execute(
+                        select(HrmsEmployeeLocation.user_id, HrmsLocation.name)
+                        .join(HrmsLocation, HrmsLocation.id == HrmsEmployeeLocation.location_id)
+                        .where(
+                            HrmsEmployeeLocation.user_id.in_(salaried_ids),
+                            HrmsLocation.deleted_at.is_(None),
+                        )
+                        .order_by(HrmsEmployeeLocation.is_primary.desc())
+                    )
+                ).all()
+                emp_branch_map: dict[uuid.UUID, str] = {}
+                for uid, lname in loc_rows:
+                    if uid not in emp_branch_map:
+                        emp_branch_map[uid] = lname
 
-            has_leaves_query = select(func.count(HrmsLeaveRequest.id)).where(
-                HrmsLeaveRequest.employee_id == user.id,
-                HrmsLeaveRequest.approval_status == "APPROVED",
-                HrmsLeaveRequest.from_date <= end_date,
-                HrmsLeaveRequest.to_date >= start_date,
-            )
-            leaves_count = (await self.db.execute(has_leaves_query)).scalar() or 0
+                # Employee primary departments
+                role_rows = (
+                    await self.db.execute(
+                        select(UserRole.user_id, Role.name)
+                        .join(Role, Role.id == UserRole.role_id)
+                        .where(UserRole.user_id.in_(salaried_ids))
+                        .order_by(UserRole.is_primary.desc())
+                    )
+                ).all()
+                emp_dept_map: dict[uuid.UUID, str] = {}
+                for uid, rname in role_rows:
+                    if uid not in emp_dept_map:
+                        emp_dept_map[uid] = rname
 
-            has_attendance_data = (att_records_count > 0) or (leaves_count > 0)
+                # All attendance records in month
+                att_rows = (
+                    await self.db.execute(
+                        select(HrmsAttendance).where(
+                            HrmsAttendance.employee_id.in_(salaried_ids),
+                            HrmsAttendance.attendance_date >= start_date,
+                            HrmsAttendance.attendance_date <= end_date,
+                        )
+                    )
+                ).scalars().all()
+                att_by_emp: dict[uuid.UUID, dict[date, HrmsAttendance]] = {}
+                for r in att_rows:
+                    att_by_emp.setdefault(r.employee_id, {})[r.attendance_date] = r
 
-            # Authoritative Attendance & Calendar integration from HrmsAttendanceService
-            att_service = HrmsAttendanceService(self.db)
-            cal_days = await att_service.get_calendar(user.id, year, month)
+                # All approved leave requests overlapping month (preserving HrmsLeaveType.is_paid)
+                lv_rows = (
+                    await self.db.execute(
+                        select(HrmsLeaveRequest, HrmsLeaveType.name, HrmsLeaveType.is_paid)
+                        .join(HrmsLeaveType, HrmsLeaveType.id == HrmsLeaveRequest.leave_type_id)
+                        .where(
+                            HrmsLeaveRequest.employee_id.in_(salaried_ids),
+                            HrmsLeaveRequest.approval_status == "APPROVED",
+                            HrmsLeaveRequest.from_date <= end_date,
+                            HrmsLeaveRequest.to_date >= start_date,
+                        )
+                    )
+                ).all()
+                leaves_by_emp: dict[uuid.UUID, dict[date, tuple[str, bool, Decimal]]] = {}
+                for req, lt_name, lt_is_paid in lv_rows:
+                    is_half = (
+                        req.from_date == req.to_date
+                        and abs(float(req.number_of_days or 1.0) - 0.5) < 1e-6
+                    )
+                    lv_weight = Decimal("0.5") if is_half else Decimal("1")
+                    cur_d = max(req.from_date, start_date)
+                    req_end = min(req.to_date, end_date)
+                    lmap = leaves_by_emp.setdefault(req.employee_id, {})
+                    while cur_d <= req_end:
+                        lmap[cur_d] = (lt_name, bool(lt_is_paid), lv_weight)
+                        cur_d += timedelta(days=1)
 
-            emp_join_date = getattr(user, "date_of_joining", None)
+                # All manual adjustments for payroll_month
+                adj_rows = (
+                    await self.db.execute(
+                        select(HrmsPayrollAdjustment).where(
+                            HrmsPayrollAdjustment.employee_id.in_(salaried_ids),
+                            HrmsPayrollAdjustment.payroll_month == payroll_month,
+                        )
+                    )
+                ).scalars().all()
+                adj_by_emp: dict[uuid.UUID, list[HrmsPayrollAdjustment]] = {}
+                for a in adj_rows:
+                    adj_by_emp.setdefault(a.employee_id, []).append(a)
 
-            working_days_count = 0
-            present_days = 0.0
-            paid_leave_days = 0.0
-            emp_holidays = 0
-            emp_weekends = 0
-            lop_days = 0.0
-            payable_days = 0.0
+                # Existing monthly payroll items
+                existing_items_by_emp: dict[uuid.UUID, HrmsMonthlyPayrollItem] = {}
+                if existing_payroll.id:
+                    ex_items = (
+                        await self.db.execute(
+                            select(HrmsMonthlyPayrollItem).where(
+                                HrmsMonthlyPayrollItem.payroll_id == existing_payroll.id,
+                                HrmsMonthlyPayrollItem.employee_id.in_(salaried_ids),
+                            )
+                        )
+                    ).scalars().all()
+                    existing_items_by_emp = {it.employee_id: it for it in ex_items}
 
-            if not has_attendance_data:
-                # Do NOT invent LOP when attendance is simply not recorded for the month.
-                emp_working_days = working_days
-                emp_holidays = holiday_days
-                emp_weekends = weekend_days
-                present_days = 0.0
-                paid_leave_days = 0.0
-                lop_days = 0.0
-                payable_days = float(working_days)
-            else:
-                for cd in cal_days:
-                    day_date = date.fromisoformat(cd.date) if isinstance(cd.date, str) else cd.date
-                    # If joined mid-month, days prior to joining date are not within employment window
-                    if emp_join_date and day_date < emp_join_date:
+                for user in users:
+                    effective_salary = salary_by_emp.get(user.id)
+                    if not effective_salary:
                         continue
 
-                    c_status = (cd.status or "").upper()
-                    c_reg = (getattr(cd, "regularization_status", "") or "").upper()
+                    record_map = att_by_emp.get(user.id, {})
+                    leave_map = leaves_by_emp.get(user.id, {})
+                    has_attendance_data = bool(record_map) or bool(leave_map)
+                    emp_join_date = getattr(user, "date_of_joining", None)
 
-                    if c_status == "HOLIDAY":
-                        emp_holidays += 1
-                        payable_days += 1.0
-                    elif c_status == "WEEKEND":
-                        emp_weekends += 1
-                        payable_days += 1.0
-                    elif c_status == "LEAVE":
-                        paid_leave_days += 1.0
-                        working_days_count += 1
-                        payable_days += 1.0
-                    elif c_reg == "APPROVED" or c_status in ("PRESENT", "LATE", "IN_PROGRESS", "WORK_FROM_HOME", "ON_DUTY"):
-                        present_days += 1.0
-                        working_days_count += 1
-                        payable_days += 1.0
-                    elif c_status == "HALF_DAY":
-                        present_days += 0.5
-                        lop_days += 0.5
-                        working_days_count += 1
-                        payable_days += 0.5
-                    else:  # ABSENT, NOT_PUNCHED, MISSING_PUNCH
-                        lop_days += 1.0
-                        working_days_count += 1
+                    working_days_count = 0
+                    present_days_dec = Decimal("0")
+                    paid_leave_days_dec = Decimal("0")
+                    unpaid_leave_days_dec = Decimal("0")
+                    future_days_count = 0
+                    emp_holidays = 0
+                    emp_weekends = 0
+                    lop_days_dec = Decimal("0")
+                    payable_days_dec = Decimal("0")
 
-                emp_working_days = working_days_count if working_days_count > 0 else working_days
+                    if not has_attendance_data:
+                        emp_working_days = working_days
+                        emp_holidays = holiday_days
+                        emp_weekends = weekend_days
+                        payable_days_dec = Decimal(str(working_days))
+                    else:
+                        emp_branch = (emp_branch_map.get(user.id) or "Thane").lower()
+                        emp_dept = (emp_dept_map.get(user.id) or "General").lower()
+                        holiday_dates_emp: set[date] = set()
+                        for h in month_holidays:
+                            app_b = (h.branch_applicability or "All Branches").lower()
+                            app_d = (getattr(h, "department_scope", None) or "All Departments").lower()
+                            if ("all" in app_b or emp_branch in app_b) and ("all" in app_d or emp_dept in app_d):
+                                holiday_dates_emp.add(h.holiday_date)
 
-            # 2. Earnings Breakdown & Monthly Gross calculated dynamically from active global setup
-            calc_preview = await self.calculate_preview(effective_salary.annual_ctc)
-            earnings = [item.model_dump() for item in calc_preview.earnings]
-            deductions = [item.model_dump() for item in calc_preview.deductions]
-            monthly_ctc = calc_preview.monthly_ctc
-            annual_ctc = calc_preview.annual_ctc
-            monthly_gross = calc_preview.monthly_gross
+                        for cur_date in month_dates:
+                            if emp_join_date and cur_date < emp_join_date:
+                                continue
 
-            # 3. LOP Deduction based on authoritative attendance
-            if emp_working_days > 0 and lop_days > 0:
-                lop_deduction = round((monthly_gross / float(emp_working_days)) * lop_days, 2)
-            else:
-                lop_deduction = 0.0
+                            rec = record_map.get(cur_date)
+                            is_weekend = cur_date.strftime("%A") in weekly_off_days
 
-            # 4. Manual Adjustments
-            adj_query = select(HrmsPayrollAdjustment).where(
-                HrmsPayrollAdjustment.employee_id == user.id,
-                HrmsPayrollAdjustment.payroll_month == payroll_month,
-            )
-            adjustments = list((await self.db.execute(adj_query)).scalars().all())
+                            if cur_date in holiday_dates_emp:
+                                emp_holidays += 1
+                                payable_days_dec += Decimal("1")
+                            elif cur_date in leave_map:
+                                _, lt_is_paid, lv_weight = leave_map[cur_date]
+                                working_days_count += 1
+                                if lt_is_paid is False:
+                                    unpaid_leave_days_dec += lv_weight
+                                    lop_days_dec += lv_weight
+                                else:
+                                    paid_leave_days_dec += lv_weight
+                                    payable_days_dec += lv_weight
 
-            additions_breakdown = []
-            extra_additions = 0.0
-            extra_deductions = 0.0
+                                # For approved half-day leave (0.5), evaluate the remaining 0.5 working half
+                                if lv_weight == Decimal("0.5"):
+                                    has_worked_half = bool(
+                                        rec
+                                        and (
+                                            rec.punch_in
+                                            or (rec.regularization_status or "").upper() == "APPROVED"
+                                            or (rec.status or "").upper()
+                                            in ("PRESENT", "LATE", "HALF_DAY", "IN_PROGRESS", "WORK_FROM_HOME", "ON_DUTY")
+                                        )
+                                    )
+                                    if has_worked_half:
+                                        present_days_dec += Decimal("0.5")
+                                        payable_days_dec += Decimal("0.5")
+                                    elif cur_date < today_ist:
+                                        lop_days_dec += Decimal("0.5")
+                                    else:
+                                        payable_days_dec += Decimal("0.5")
+                            elif rec and (
+                                rec.punch_in
+                                or rec.status in ("PRESENT", "LATE", "HALF_DAY", "IN_PROGRESS", "MISSING_PUNCH")
+                                or rec.regularization_status in ("PENDING", "APPROVED")
+                            ):
+                                c_status = (rec.status or "").upper()
+                                if cur_date == today_ist and rec.punch_in and not rec.punch_out and c_status == "PRESENT":
+                                    c_status = "IN_PROGRESS"
+                                c_reg = (rec.regularization_status or "").upper()
+                                if c_reg == "APPROVED" or c_status in ("PRESENT", "LATE", "IN_PROGRESS", "WORK_FROM_HOME", "ON_DUTY"):
+                                    present_days_dec += Decimal("1")
+                                    working_days_count += 1
+                                    payable_days_dec += Decimal("1")
+                                elif c_status == "HALF_DAY":
+                                    present_days_dec += Decimal("0.5")
+                                    lop_days_dec += Decimal("0.5")
+                                    working_days_count += 1
+                                    payable_days_dec += Decimal("0.5")
+                                else:
+                                    lop_days_dec += Decimal("1")
+                                    working_days_count += 1
+                            elif is_weekend:
+                                emp_weekends += 1
+                                payable_days_dec += Decimal("1")
+                            elif rec:
+                                c_status = (rec.status or "").upper()
+                                c_reg = (rec.regularization_status or "").upper()
+                                if c_reg == "APPROVED" or c_status in ("PRESENT", "LATE", "IN_PROGRESS", "WORK_FROM_HOME", "ON_DUTY"):
+                                    present_days_dec += Decimal("1")
+                                    working_days_count += 1
+                                    payable_days_dec += Decimal("1")
+                                elif c_status == "HALF_DAY":
+                                    present_days_dec += Decimal("0.5")
+                                    lop_days_dec += Decimal("0.5")
+                                    working_days_count += 1
+                                    payable_days_dec += Decimal("0.5")
+                                else:
+                                    lop_days_dec += Decimal("1")
+                                    working_days_count += 1
+                            else:
+                                if cur_date < today_ist:
+                                    lop_days_dec += Decimal("1")
+                                    working_days_count += 1
+                                else:
+                                    future_days_count += 1
+                                    working_days_count += 1
+                                    payable_days_dec += Decimal("1")
 
-            for adj in adjustments:
-                if adj.adjustment_type.upper() == "ADDITION":
-                    extra_additions += adj.amount
-                    additions_breakdown.append(
-                        {"title": adj.title, "amount": adj.amount, "reason": adj.reason}
+                        emp_working_days = working_days_count if working_days_count > 0 else working_days
+
+                    present_days = float(present_days_dec)
+                    paid_leave_days = float(paid_leave_days_dec)
+                    lop_days = float(lop_days_dec)
+                    payable_days = float(payable_days_dec)
+
+                    # 2. Earnings Breakdown & Monthly Gross using pre-loaded active components (0 SQL queries!)
+                    calc_preview = await self.calculate_preview(effective_salary.annual_ctc, custom_components=active_comps)
+                    earnings = [item.model_dump() for item in calc_preview.earnings]
+                    deductions = [item.model_dump() for item in calc_preview.deductions]
+                    monthly_ctc = calc_preview.monthly_ctc
+                    annual_ctc = calc_preview.annual_ctc
+                    monthly_gross_dec = _to_dec(calc_preview.monthly_gross)
+                    monthly_gross = float(monthly_gross_dec)
+
+                    # 3. LOP Deduction using exact Decimal arithmetic
+                    if emp_working_days > 0 and lop_days_dec > Decimal("0") and monthly_gross_dec > Decimal("0"):
+                        lop_deduction_dec = _q2((monthly_gross_dec / Decimal(str(emp_working_days))) * lop_days_dec)
+                    else:
+                        lop_deduction_dec = ZERO_DEC
+                    lop_deduction = float(lop_deduction_dec)
+
+                    # 4. Manual Adjustments (pre-loaded)
+                    adjustments = adj_by_emp.get(user.id, [])
+                    additions_breakdown = []
+                    extra_additions_dec = ZERO_DEC
+                    extra_deductions_dec = ZERO_DEC
+
+                    for adj in adjustments:
+                        adj_amt_dec = _q2(_to_dec(adj.amount))
+                        if adj.adjustment_type.upper() == "ADDITION":
+                            extra_additions_dec += adj_amt_dec
+                            additions_breakdown.append(
+                                {"title": adj.title, "amount": float(adj_amt_dec), "reason": adj.reason}
+                            )
+                        elif adj.adjustment_type.upper() == "DEDUCTION":
+                            extra_deductions_dec += adj_amt_dec
+
+                    standard_deductions_dec = _to_dec(calc_preview.total_deductions)
+                    total_emp_deductions_dec = _q2(standard_deductions_dec + lop_deduction_dec + extra_deductions_dec)
+                    emp_gross_dec = _q2(monthly_gross_dec + extra_additions_dec)
+                    net_salary_dec = max(ZERO_DEC, _q2(emp_gross_dec - total_emp_deductions_dec))
+
+                    total_emp_deductions = float(total_emp_deductions_dec)
+                    emp_gross = float(emp_gross_dec)
+                    net_salary = float(net_salary_dec)
+                    daily_rate_val = (
+                        float(_q2(monthly_gross_dec / Decimal(str(emp_working_days))))
+                        if emp_working_days > 0 and monthly_gross_dec > Decimal("0")
+                        else 0.0
                     )
-                elif adj.adjustment_type.upper() == "DEDUCTION":
-                    extra_deductions += adj.amount
 
-            # Standard deductions sum
-            standard_deductions_sum = calc_preview.total_deductions
-            total_emp_deductions = round(standard_deductions_sum + lop_deduction + extra_deductions, 2)
-            emp_gross = round(monthly_gross + extra_additions, 2)
-            net_salary = max(0.0, round(emp_gross - total_emp_deductions, 2))
+                    existing_item = existing_items_by_emp.get(user.id)
 
-            # Check existing item
-            item_query = select(HrmsMonthlyPayrollItem).where(
-                HrmsMonthlyPayrollItem.payroll_id == existing_payroll.id,
-                HrmsMonthlyPayrollItem.employee_id == user.id,
-            )
-            existing_item = (await self.db.execute(item_query)).scalar_one_or_none()
+                    calc_details = {
+                        "calendar_days": cal["total_days"],
+                        "working_days": emp_working_days,
+                        "weekend_days": emp_weekends,
+                        "holiday_days": emp_holidays,
+                        "present_days": present_days,
+                        "paid_leave_days": paid_leave_days,
+                        "unpaid_leave_days": float(unpaid_leave_days_dec),
+                        "future_days": future_days_count,
+                        "payable_days": payable_days,
+                        "lop_days": lop_days,
+                        "lop_deduction": lop_deduction,
+                        "attendance_available": has_attendance_data,
+                        "daily_rate": daily_rate_val,
+                        "base_gross": monthly_gross,
+                        "date_of_joining": emp_join_date.isoformat() if emp_join_date else None,
+                        "adjustments": [
+                            {"title": a.title, "type": a.adjustment_type, "amount": float(a.amount), "reason": a.reason}
+                            for a in adjustments
+                        ],
+                    }
 
-            calc_details = {
-                "calendar_days": cal["total_days"],
-                "working_days": emp_working_days,
-                "weekend_days": emp_weekends,
-                "holiday_days": emp_holidays,
-                "present_days": present_days,
-                "paid_leave_days": paid_leave_days,
-                "payable_days": payable_days,
-                "lop_days": lop_days,
-                "lop_deduction": lop_deduction,
-                "attendance_available": has_attendance_data,
-                "daily_rate": round(monthly_gross / emp_working_days, 2) if emp_working_days > 0 else 0,
-                "base_gross": monthly_gross,
-                "date_of_joining": emp_join_date.isoformat() if emp_join_date else None,
-                "adjustments": [
-                    {"title": a.title, "type": a.adjustment_type, "amount": a.amount, "reason": a.reason}
-                    for a in adjustments
-                ],
-            }
+                    annual_ctc_dec = _q2(_to_dec(annual_ctc))
+                    monthly_ctc_dec = _q2(_to_dec(monthly_ctc))
 
-            if existing_item:
-                existing_item.salary_id = effective_salary.id
-                existing_item.annual_ctc = annual_ctc
-                existing_item.monthly_ctc = monthly_ctc
-                existing_item.working_days = emp_working_days
-                existing_item.present_days = present_days
-                existing_item.paid_leave_days = paid_leave_days
-                existing_item.holiday_days = emp_holidays
-                existing_item.weekend_days = emp_weekends
-                existing_item.lop_days = lop_days
-                existing_item.earnings_breakdown = earnings
-                existing_item.deductions_breakdown = deductions
-                existing_item.additions_breakdown = additions_breakdown
-                existing_item.lop_deduction = lop_deduction
-                existing_item.gross_amount = emp_gross
-                existing_item.total_deductions = total_emp_deductions
-                existing_item.net_salary = net_salary
-                existing_item.status = "DRAFT"
-                existing_item.calculation_details = calc_details
-                existing_item.edit_history = existing_item.edit_history or []
-            else:
-                new_item = HrmsMonthlyPayrollItem(
-                    payroll_id=existing_payroll.id,
-                    employee_id=user.id,
-                    salary_id=effective_salary.id,
-                    annual_ctc=annual_ctc,
-                    monthly_ctc=monthly_ctc,
-                    working_days=emp_working_days,
-                    present_days=present_days,
-                    paid_leave_days=paid_leave_days,
-                    holiday_days=emp_holidays,
-                    weekend_days=emp_weekends,
-                    lop_days=lop_days,
-                    earnings_breakdown=earnings,
-                    deductions_breakdown=deductions,
-                    additions_breakdown=additions_breakdown,
-                    lop_deduction=lop_deduction,
-                    gross_amount=emp_gross,
-                    total_deductions=total_emp_deductions,
-                    net_salary=net_salary,
-                    status="DRAFT",
-                    calculation_details=calc_details,
-                    edit_history=[],
-                )
-                self.db.add(new_item)
+                    if existing_item:
+                        existing_item.salary_id = effective_salary.id
+                        existing_item.annual_ctc = annual_ctc_dec
+                        existing_item.monthly_ctc = monthly_ctc_dec
+                        existing_item.working_days = emp_working_days
+                        existing_item.present_days = present_days
+                        existing_item.paid_leave_days = paid_leave_days
+                        existing_item.holiday_days = emp_holidays
+                        existing_item.weekend_days = emp_weekends
+                        existing_item.lop_days = lop_days
+                        existing_item.earnings_breakdown = earnings
+                        existing_item.deductions_breakdown = deductions
+                        existing_item.additions_breakdown = additions_breakdown
+                        existing_item.lop_deduction = lop_deduction_dec
+                        existing_item.gross_amount = emp_gross_dec
+                        existing_item.total_deductions = total_emp_deductions_dec
+                        existing_item.net_salary = net_salary_dec
+                        existing_item.status = "DRAFT"
+                        existing_item.calculation_details = calc_details
+                        existing_item.edit_history = existing_item.edit_history or []
+                    else:
+                        new_item = HrmsMonthlyPayrollItem(
+                            payroll_id=existing_payroll.id,
+                            employee_id=user.id,
+                            salary_id=effective_salary.id,
+                            annual_ctc=annual_ctc_dec,
+                            monthly_ctc=monthly_ctc_dec,
+                            working_days=emp_working_days,
+                            present_days=present_days,
+                            paid_leave_days=paid_leave_days,
+                            holiday_days=emp_holidays,
+                            weekend_days=emp_weekends,
+                            lop_days=lop_days,
+                            earnings_breakdown=earnings,
+                            deductions_breakdown=deductions,
+                            additions_breakdown=additions_breakdown,
+                            lop_deduction=lop_deduction_dec,
+                            gross_amount=emp_gross_dec,
+                            total_deductions=total_emp_deductions_dec,
+                            net_salary=net_salary_dec,
+                            status="DRAFT",
+                            calculation_details=calc_details,
+                            edit_history=[],
+                        )
+                        self.db.add(new_item)
 
-            total_gross += emp_gross
-            total_deductions += total_emp_deductions
-            total_net += net_salary
-            employee_count += 1
+                    total_gross_dec += emp_gross_dec
+                    total_deductions_dec += total_emp_deductions_dec
+                    total_net_dec += net_salary_dec
+                    employee_count += 1
 
         existing_payroll.total_employees = employee_count
-        existing_payroll.total_gross = round(total_gross, 2)
-        existing_payroll.total_deductions = round(total_deductions, 2)
-        existing_payroll.total_net = round(total_net, 2)
+        existing_payroll.total_gross = _q2(total_gross_dec)
+        existing_payroll.total_deductions = _q2(total_deductions_dec)
+        existing_payroll.total_net = _q2(total_net_dec)
         existing_payroll.status = "REVIEW"
 
         await self.db.commit()
@@ -1074,7 +1305,7 @@ class HrmsPayrollService:
                         "annual_amount": round(new_val * 12.0, 2),
                     })
             item.earnings_breakdown = current_earnings
-            item.gross_amount = round(sum(e.get("monthly_amount", 0.0) for e in current_earnings), 2)
+            item.gross_amount = _q2(sum((_to_dec(e.get("monthly_amount", 0.0)) for e in current_earnings), ZERO_DEC))
 
         # 3. Deductions updates
         current_deductions = list(item.deductions_breakdown or [])
@@ -1101,15 +1332,19 @@ class HrmsPayrollService:
                     })
             item.deductions_breakdown = current_deductions
 
-        # 4. Recalculate LOP deduction and Net
-        if item.working_days > 0 and item.lop_days > 0:
-            item.lop_deduction = round((item.gross_amount / float(item.working_days)) * item.lop_days, 2)
+        # 4. Recalculate LOP deduction and Net using exact Decimal arithmetic
+        gross_dec = _q2(_to_dec(item.gross_amount))
+        if item.working_days > 0 and item.lop_days > 0 and gross_dec > Decimal("0"):
+            lop_dec = _q2((gross_dec / Decimal(str(item.working_days))) * _to_dec(item.lop_days))
         else:
-            item.lop_deduction = 0.0
+            lop_dec = ZERO_DEC
+        item.lop_deduction = lop_dec
 
-        comp_deductions = sum(d.get("monthly_amount", 0.0) for d in current_deductions)
-        item.total_deductions = round(comp_deductions + item.lop_deduction, 2)
-        item.net_salary = max(0.0, round(item.gross_amount - item.total_deductions, 2))
+        comp_ded_dec = sum((_to_dec(d.get("monthly_amount", 0.0)) for d in current_deductions), ZERO_DEC)
+        total_ded_dec = _q2(comp_ded_dec + lop_dec)
+        item.total_deductions = total_ded_dec
+        net_dec = max(ZERO_DEC, _q2(gross_dec - total_ded_dec))
+        item.net_salary = net_dec
 
         # 5. Append audit entry
         changes_dict = {
@@ -1136,9 +1371,15 @@ class HrmsPayrollService:
         # 6. Recalculate parent payroll totals
         payroll_stmt = select(HrmsMonthlyPayrollItem).where(HrmsMonthlyPayrollItem.payroll_id == item.payroll_id)
         all_items = list((await self.db.execute(payroll_stmt)).scalars().all())
-        item.payroll.total_gross = round(sum(i.gross_amount for i in all_items if i.id != item.id) + item.gross_amount, 2)
-        item.payroll.total_deductions = round(sum(i.total_deductions for i in all_items if i.id != item.id) + item.total_deductions, 2)
-        item.payroll.total_net = round(sum(i.net_salary for i in all_items if i.id != item.id) + item.net_salary, 2)
+        item.payroll.total_gross = _q2(
+            sum((_to_dec(i.gross_amount) for i in all_items if i.id != item.id), ZERO_DEC) + gross_dec
+        )
+        item.payroll.total_deductions = _q2(
+            sum((_to_dec(i.total_deductions) for i in all_items if i.id != item.id), ZERO_DEC) + total_ded_dec
+        )
+        item.payroll.total_net = _q2(
+            sum((_to_dec(i.net_salary) for i in all_items if i.id != item.id), ZERO_DEC) + net_dec
+        )
 
         await self.db.commit()
         reloaded = (

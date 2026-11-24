@@ -5,14 +5,38 @@ FollowUp Repository.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Any
 
 from sqlalchemy import Select, and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common.base_repository import BaseRepository
+from app.core.exceptions import BadRequestException
 from app.follow_ups.models import FollowUp
+
+
+def _parse_filter_date(value: Any, param_name: str) -> date | None:
+    """Convert an optional YYYY-MM-DD query filter into a native ``datetime.date``."""
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    if isinstance(value, str):
+        cleaned = value.strip()
+        if not cleaned:
+            return None
+        try:
+            return date.fromisoformat(cleaned)
+        except ValueError as exc:
+            raise BadRequestException(
+                f"Invalid {param_name!r} date value {value!r}. Expected ISO format YYYY-MM-DD."
+            ) from exc
+    raise BadRequestException(
+        f"Invalid {param_name!r} date value {value!r}. Expected ISO format YYYY-MM-DD."
+    )
 
 
 class FollowUpRepository(BaseRepository[FollowUp]):
@@ -177,13 +201,28 @@ class FollowUpRepository(BaseRepository[FollowUp]):
         if entry_source and entry_source.strip() and entry_source.strip().lower() not in ("all", "select"):
             stmt = stmt.where(func.lower(FollowUp.entry_source) == entry_source.strip().lower())
 
-        # Date filters
-        if added_date:
-            stmt = stmt.where(FollowUp.added_on == added_date)
-        if date_from:
-            stmt = stmt.where(FollowUp.added_on >= date_from)
-        if date_to:
-            stmt = stmt.where(FollowUp.added_on <= date_to)
+        # Date filters (strictly typed to native datetime.date for PostgreSQL DATE columns)
+        parsed_added_date = _parse_filter_date(added_date, "added_date")
+        parsed_date_from = _parse_filter_date(date_from, "date_from")
+        parsed_date_to = _parse_filter_date(date_to, "date_to")
+        if parsed_added_date is not None:
+            stmt = stmt.where(FollowUp.added_on == parsed_added_date)
+        if parsed_date_from is not None:
+            stmt = stmt.where(FollowUp.added_on >= parsed_date_from)
+        if parsed_date_to is not None:
+            stmt = stmt.where(FollowUp.added_on <= parsed_date_to)
+
+        # Validate sorting against explicit allowlist before model attribute access
+        clean_sort_by = (sort_by or "").strip() or "created_at"
+        if clean_sort_by not in self.sortable_fields:
+            raise BadRequestException(
+                f"Cannot sort follow-ups by {sort_by!r}. Allowed fields: {', '.join(self.sortable_fields)}."
+            )
+        clean_sort_dir = (sort_dir or "").strip().lower() or "desc"
+        if clean_sort_dir not in ("asc", "desc"):
+            raise BadRequestException(
+                f"Invalid sort_dir {sort_dir!r}. Allowed values: asc, desc."
+            )
 
         # Free search
         if search and search.strip():
@@ -211,9 +250,9 @@ class FollowUpRepository(BaseRepository[FollowUp]):
         count_stmt = select(func.count()).select_from(stmt.subquery())
         total = (await self.session.execute(count_stmt)).scalar() or 0
 
-        # Sorting
-        sort_col = getattr(FollowUp, sort_by, FollowUp.created_at)
-        if sort_dir.lower() == "asc":
+        # Sorting (pre-validated against self.sortable_fields & asc/desc allowlist)
+        sort_col = getattr(FollowUp, clean_sort_by)
+        if clean_sort_dir == "asc":
             stmt = stmt.order_by(sort_col.asc().nulls_last())
         else:
             stmt = stmt.order_by(sort_col.desc().nulls_last())
@@ -223,16 +262,21 @@ class FollowUpRepository(BaseRepository[FollowUp]):
         result = await self.session.execute(stmt)
         return list(result.scalars().all()), total
 
+    async def soft_delete(self, instance: FollowUp) -> None:
+        """Soft-delete a single follow-up via BaseRepository.delete (sets deleted_at)."""
+        await self.delete(instance)
+
     async def bulk_soft_delete(self, ids: list[uuid.UUID]) -> int:
-        """Soft delete multiple follow-up records."""
-        count = 0
-        now = datetime.now(timezone.utc)
-        for uid in ids:
-            item = await self.get_by_id(uid)
-            if item and not item.is_deleted:
-                item.is_deleted = True
-                item.deleted_at = now
-                count += 1
-        if count > 0:
-            await self.session.flush()
-        return count
+        """Soft delete multiple follow-up records atomically using SoftDeleteMixin semantics."""
+        unique_ids = list(dict.fromkeys(ids))
+        if not unique_ids:
+            return 0
+        stmt = select(FollowUp).where(
+            FollowUp.id.in_(unique_ids),
+            FollowUp.deleted_at.is_(None),
+        )
+        result = await self.session.execute(stmt)
+        items = list(result.scalars().all())
+        for item in items:
+            await self.soft_delete(item)
+        return len(items)

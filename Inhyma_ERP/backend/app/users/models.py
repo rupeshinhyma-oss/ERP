@@ -207,6 +207,8 @@ class User(Base, UUIDPrimaryKeyMixin, TimestampMixin, VersionMixin, SoftDeleteMi
             return False
         if self.status in (UserStatus.INACTIVE, UserStatus.SUSPENDED):
             return False
+        if self.employment_status in (EmploymentStatus.TERMINATED, EmploymentStatus.RESIGNED):
+            return False
         return bool(
             self.is_active
             and self.status

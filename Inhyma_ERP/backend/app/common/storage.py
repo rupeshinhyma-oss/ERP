@@ -12,9 +12,13 @@ Handles:
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import hashlib
+import hmac
+import io
 import mimetypes
 import os
 import re
+import time
 import uuid
 from pathlib import Path
 from typing import Any, Tuple
@@ -41,16 +45,196 @@ ALLOWED_EXTENSIONS: set[str] = {
     "mp4", "webm", "mov", "avi", "mkv", "m4v",
 }
 
-# Maximum allowed file size: 50MB
+# Maximum allowed file size: 50MB (10MB strict cap for confidential expense receipts)
 MAX_FILE_SIZE: int = 50 * 1024 * 1024
+MAX_RECEIPT_SIZE: int = 10 * 1024 * 1024
 
-# Buckets intended for public access; all other buckets default to private/confidential
-PUBLIC_BUCKETS: set[str] = {"product-images", "supplier-media", "public-assets", "expense-receipts"}
+RECEIPT_ALLOWED_EXTENSIONS: set[str] = {"pdf", "jpg", "jpeg", "png", "webp"}
+
+RECEIPT_EXTENSION_TO_MIMES: dict[str, set[str]] = {
+    "pdf": {"application/pdf"},
+    "jpg": {"image/jpeg", "image/jpg"},
+    "jpeg": {"image/jpeg", "image/jpg"},
+    "png": {"image/png"},
+    "webp": {"image/webp"},
+}
+
+RECEIPT_CANONICAL_MIME: dict[str, str] = {
+    "pdf": "application/pdf",
+    "jpg": "image/jpeg",
+    "jpeg": "image/jpeg",
+    "png": "image/png",
+    "webp": "image/webp",
+}
+
+_DANGEROUS_BINARY_PREFIXES: tuple[bytes, ...] = (
+    b"MZ",                  # Windows PE / EXE / DLL
+    b"\x7fELF",             # Linux ELF binary
+    b"\xfe\xed\xfa\xce",    # Mach-O 32-bit
+    b"\xce\xfa\xed\xfe",    # Mach-O 32-bit LE
+    b"\xfe\xed\xfa\xcf",    # Mach-O 64-bit
+    b"\xcf\xfa\xed\xfe",    # Mach-O 64-bit LE
+    b"\xca\xfe\xba\xbe",    # Java class / Universal Mach-O
+    b"#!",                  # Shell / script shebang
+    b"PK\x03\x04",          # ZIP / JAR / APK / Office macro container
+)
+
+_DANGEROUS_TEXT_MARKERS: tuple[bytes, ...] = (
+    b"<!doctype",
+    b"<html",
+    b"<script",
+    b"<svg",
+    b"<?php",
+    b"<iframe",
+    b"<object",
+    b"<embed",
+    b"javascript:",
+    b"onerror=",
+    b"onload=",
+)
+
+# Buckets intended for public access; all other buckets (including expense-receipts) are private/confidential
+PUBLIC_BUCKETS: set[str] = {"product-images", "supplier-media", "public-assets"}
 
 
 def is_bucket_public(bucket: str) -> bool:
     """Return True if the bucket is configured as public, False if confidential."""
     return bucket.lower() in PUBLIC_BUCKETS
+
+
+def validate_receipt_upload(
+    filename: str,
+    content: bytes,
+    declared_content_type: str | None = None,
+    max_size: int = MAX_RECEIPT_SIZE,
+) -> str:
+    """
+    Strictly validate an expense receipt independently of browser-supplied MIME/filename.
+    Verifies non-empty payload, size cap, allowed extension, executable/HTML/script rejection,
+    MIME/extension consistency, and actual file magic bytes + structural integrity.
+
+    Returns the verified canonical MIME type.
+    Raises BadRequestException (HTTP 400) on any validation failure.
+    """
+    if not content:
+        raise BadRequestException("Receipt file cannot be empty.")
+    if len(content) > max_size:
+        raise BadRequestException(
+            f"Receipt file exceeds maximum allowed size ({max_size // (1024 * 1024)} MB)."
+        )
+
+    ext = filename.rsplit(".", 1)[-1].lower() if "." in (filename or "") else ""
+    if not ext or ext not in RECEIPT_ALLOWED_EXTENSIONS:
+        raise BadRequestException(
+            f"Unsupported receipt format '.{ext}'. Allowed formats: {', '.join(sorted(RECEIPT_ALLOWED_EXTENSIONS))}."
+        )
+
+    # Reject MIME/extension mismatches when client supplies a Content-Type header
+    if declared_content_type:
+        norm_mime = declared_content_type.split(";", 1)[0].strip().lower()
+        if norm_mime and norm_mime not in RECEIPT_EXTENSION_TO_MIMES[ext]:
+            raise BadRequestException(
+                f"Receipt MIME type '{norm_mime}' does not match file extension '.{ext}'."
+            )
+
+    # Unconditionally block executables, scripts, archives, and HTML/SVG/XSS payloads
+    head = content[:4096]
+    head_stripped = head.lstrip()
+    for prefix in _DANGEROUS_BINARY_PREFIXES:
+        if content.startswith(prefix) or head_stripped.startswith(prefix):
+            raise BadRequestException("Executable or unsafe binary content is not permitted for receipts.")
+
+    head_lower = head_stripped.lower()
+    for marker in _DANGEROUS_TEXT_MARKERS:
+        if marker in head_lower:
+            raise BadRequestException("HTML, SVG, or script content is not permitted for receipts.")
+
+    # Verify authentic file format independently via magic bytes + parser
+    if ext == "pdf":
+        if not content.startswith(b"%PDF-") or b"%%EOF" not in content[-2048:] or len(content) < 20:
+            raise BadRequestException("Invalid or corrupted PDF receipt file.")
+        return "application/pdf"
+
+    if ext in ("jpg", "jpeg"):
+        if not content.startswith(b"\xff\xd8\xff"):
+            raise BadRequestException("Invalid or corrupted JPEG receipt file.")
+        expected_pil_fmt = "JPEG"
+    elif ext == "png":
+        if not content.startswith(b"\x89PNG\r\n\x1a\n") or b"IHDR" not in content[:64] or b"IEND" not in content[-64:]:
+            raise BadRequestException("Invalid or corrupted PNG receipt file.")
+        expected_pil_fmt = "PNG"
+    elif ext == "webp":
+        if len(content) < 12 or content[:4] != b"RIFF" or content[8:12] != b"WEBP":
+            raise BadRequestException("Invalid or corrupted WebP receipt file.")
+        expected_pil_fmt = "WEBP"
+    else:
+        raise BadRequestException(f"Unsupported receipt format '.{ext}'.")
+
+    # Structural image integrity verification via Pillow when available
+    try:
+        from PIL import Image
+
+        with Image.open(io.BytesIO(content)) as img:
+            if (img.format or "").upper() != expected_pil_fmt:
+                raise BadRequestException("Image file content does not match its declared extension.")
+            img.verify()
+    except BadRequestException:
+        raise
+    except Exception:
+        raise BadRequestException(f"Corrupted or unreadable {ext.upper()} receipt image.")
+
+    return RECEIPT_CANONICAL_MIME[ext]
+
+
+def _receipt_signing_key() -> bytes:
+    secret = (
+        getattr(settings, "JWT_SECRET_KEY", None)
+        or getattr(settings, "SECRET_KEY", None)
+        or "inhyma-receipt-signing-fallback"
+    )
+    return str(secret).encode("utf-8")
+
+
+def create_receipt_signature(expense_id: str, expires_at: int) -> str:
+    """Create an HMAC-SHA256 signature binding an expense_id and expiration Unix timestamp."""
+    msg = f"expense-receipt:{expense_id}:{expires_at}".encode("utf-8")
+    return hmac.new(_receipt_signing_key(), msg, hashlib.sha256).hexdigest()
+
+
+def verify_receipt_signature(expense_id: str, expires_at: int, signature: str) -> bool:
+    """Verify an HMAC-SHA256 receipt signature and ensure it has not expired."""
+    if not signature or expires_at < int(time.time()):
+        return False
+    expected = create_receipt_signature(expense_id, expires_at)
+    return hmac.compare_digest(expected, signature)
+
+
+async def read_private_file_bytes(bucket: str, local_subfolder: str, stored_name: str) -> bytes | None:
+    """Read a confidential file from local private storage (or private Supabase bucket if configured)."""
+    clean_file = sanitize_filename(stored_name)
+    base_dir = (Path("uploads") / "private" / sanitize_filename(local_subfolder)).resolve()
+    target = (base_dir / clean_file).resolve()
+    if str(target).startswith(str(base_dir)) and target.is_file():
+        return target.read_bytes()
+
+    # Fallback to authenticated Supabase Storage object fetch (never logs credentials or signed URLs)
+    auth_key = settings.supabase_auth_key
+    base_url = settings.supabase_base_url
+    if auth_key and base_url:
+        obj_url = f"{base_url}/storage/v1/object/authenticated/{bucket}/{clean_file}"
+        headers = {
+            "apikey": auth_key,
+            "Authorization": f"Bearer {auth_key}",
+        }
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                resp = await client.get(obj_url, headers=headers)
+                if resp.status_code == 200:
+                    return resp.content
+        except Exception:
+            logger.warning("Private Supabase storage fetch failed for bucket '%s'.", bucket)
+
+    return None
 
 
 def validate_file_upload(
@@ -259,6 +443,8 @@ async def upload_to_supabase(
             if resp.status_code in (200, 201):
                 if is_bucket_public(bucket):
                     return f"{base_url}/storage/v1/object/public/{bucket}/{filename}"
+                if bucket.lower() == "expense-receipts":
+                    return f"private://{bucket}/{filename}"
                 signed_url = await create_signed_url(bucket, filename, expires_in=7 * 86400)
                 return signed_url or f"{base_url}/storage/v1/object/authenticated/{bucket}/{filename}"
 

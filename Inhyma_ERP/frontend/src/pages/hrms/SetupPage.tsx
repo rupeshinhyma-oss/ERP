@@ -13,6 +13,7 @@ import { apiGet, apiPost, apiPut, apiPatch, apiDelete, API_BASE } from "@/lib/ap
 import { Auth } from "@/lib/auth";
 import { useAuth } from "@/lib/hooks";
 import { useToast } from "@/lib/toast";
+import * as googleMapsLib from "@/lib/googleMaps";
 import {
   loadGoogleMapsSdk,
   searchGooglePlaces,
@@ -1142,6 +1143,7 @@ export function SetupPage() {
   const [predictions, setPredictions] = useState<UnifiedPlacePrediction[]>([]);
   const [searchingPlaces, setSearchingPlaces] = useState(false);
   const [loadingMapSdk, setLoadingMapSdk] = useState(false);
+  const [mapSdkError, setMapSdkError] = useState<string | null>(null);
   const [selectedOffice, setSelectedOffice] = useState<HrmsLocation | null>(null);
 
   // Map Refs & Objects
@@ -1212,6 +1214,16 @@ export function SetupPage() {
     if (!officeModalOpen) return;
 
     let isMounted = true;
+    setMapSdkError(null);
+
+    const unsubscribeMapsError = Object.keys(googleMapsLib).includes("subscribeGoogleMapsError")
+      ? googleMapsLib.subscribeGoogleMapsError((errDetail) => {
+          if (isMounted) {
+            setMapSdkError(errDetail.message || "Google Maps authentication or network error.");
+            setLoadingMapSdk(false);
+          }
+        })
+      : () => {};
 
     const initMap = async () => {
       setLoadingMapSdk(true);
@@ -1306,8 +1318,11 @@ export function SetupPage() {
           circle.setCenter(centerPos);
           circle.setRadius(officeForm.radius_meters);
         }
-      } catch (mapErr) {
+      } catch (mapErr: any) {
         console.warn("Google Maps SDK could not be initialized inside modal canvas:", mapErr);
+        if (isMounted) {
+          setMapSdkError(mapErr?.message || "Unable to load Google Maps interactive geofence canvas.");
+        }
       } finally {
         if (isMounted) {
           setLoadingMapSdk(false);
@@ -1322,7 +1337,22 @@ export function SetupPage() {
 
     return () => {
       isMounted = false;
+      unsubscribeMapsError();
       cancelAnimationFrame(frameId);
+      // Clean up detached Google Maps overlays/refs on modal close or unmount
+      if (markerInstanceRef.current) {
+        if (typeof markerInstanceRef.current.setMap === "function") {
+          markerInstanceRef.current.setMap(null);
+        }
+        markerInstanceRef.current = null;
+      }
+      if (circleInstanceRef.current) {
+        if (typeof circleInstanceRef.current.setMap === "function") {
+          circleInstanceRef.current.setMap(null);
+        }
+        circleInstanceRef.current = null;
+      }
+      googleMapInstanceRef.current = null;
     };
   }, [officeModalOpen]);
 
@@ -3823,6 +3853,20 @@ export function SetupPage() {
                           </div>
                           <div style={{ fontSize: "12px", color: "var(--color-muted)" }}>
                             Loading interactive geofence canvas
+                          </div>
+                        </div>
+                      )}
+                      {mapSdkError && (
+                        <div
+                          className="hrms-map-skeleton"
+                          role="alert"
+                          style={{ background: "#fff1f2", color: "#991b1b" }}
+                        >
+                          <div style={{ fontWeight: 600, fontSize: "13.5px" }}>
+                            Google Maps Unavailable
+                          </div>
+                          <div style={{ fontSize: "12px", color: "#64748b", padding: "0 16px", textAlign: "center" }}>
+                            {mapSdkError}
                           </div>
                         </div>
                       )}

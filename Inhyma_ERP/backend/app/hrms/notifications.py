@@ -27,8 +27,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.hrms.rbac import check_manager_availability
 from app.notifications.repository import NotificationRepository
 from app.notifications.service import NotificationService
-from app.rbac.models import Role, RoleAssignmentStatus, UserRole
-from app.users.models import User
+from app.rbac.models import Permission, Role, RoleAssignmentStatus, UserPermission, UserRole
+from app.users.models import EmploymentStatus, User, UserStatus
 
 logger = logging.getLogger(__name__)
 
@@ -53,12 +53,15 @@ def _emp_display_name(emp: object) -> str:
 async def resolve_hrms_approvers(
     db: AsyncSession,
     employee_id: uuid.UUID,
+    *,
+    module_name: Optional[str] = None,
 ) -> List[uuid.UUID]:
     """
     Resolve responsible approvers following Manager-First with HR Fallback.
     1. If the employee has an assigned, active manager who is available (not on leave),
        the notification routes strictly to that manager.
-    2. If the manager is unassigned, inactive, or unavailable, routes to active HR/Admin users.
+    2. If the manager is unassigned, inactive, or unavailable, routes to active HR/Admin users
+       (excluding terminated/resigned users and users explicitly denied module/approval access).
     3. Self-notification is excluded (the employee is never returned as their own approver).
     """
     emp = await db.get(User, employee_id)
@@ -71,7 +74,7 @@ async def resolve_hrms_approvers(
         if mgr_available:
             return [emp.manager_id]
 
-    # 2. HR Fallback: active users with HR or Admin role
+    # 2. HR Fallback: active non-terminated users with HR or Admin role
     hr_stmt = (
         select(User.id)
         .join(UserRole, UserRole.user_id == User.id)
@@ -79,6 +82,11 @@ async def resolve_hrms_approvers(
         .where(
             User.is_active.is_(True),
             User.deleted_at.is_(None),
+            User.status == UserStatus.ACTIVE,
+            or_(
+                User.employment_status.is_(None),
+                User.employment_status.notin_([EmploymentStatus.TERMINATED, EmploymentStatus.RESIGNED]),
+            ),
             UserRole.status == RoleAssignmentStatus.ACTIVE,
             Role.deleted_at.is_(None),
             Role.name.in_(["HR", "hr", "admin", "super_admin", "Super Admin", "Admin", "HR Admin"]),
@@ -86,10 +94,50 @@ async def resolve_hrms_approvers(
         .distinct()
     )
     hr_res = await db.execute(hr_stmt)
-    hr_user_ids = list(hr_res.scalars().all())
+    hr_user_ids = [uid for uid in list(hr_res.scalars().all()) if uid != employee_id]
 
-    # Exclude employee themself
-    return [uid for uid in hr_user_ids if uid != employee_id]
+    # Filter out HR users explicitly denied approval or the target module (only on real AsyncSession)
+    if hr_user_ids and isinstance(db, AsyncSession):
+        deny_codes = ["hrms.approve", "hrms.view"]
+        if module_name:
+            mod = module_name.lower().replace("-", "_")
+            deny_codes.extend([f"hrms.{mod}", f"hrms.{mod}s"])
+
+        # Keep Admins unconditionally; filter non-admin HR users with explicit UserPermission is_granted=False
+        admin_ids = set(
+            (
+                await db.execute(
+                    select(UserRole.user_id)
+                    .join(Role, Role.id == UserRole.role_id)
+                    .where(
+                        UserRole.user_id.in_(hr_user_ids),
+                        UserRole.status == RoleAssignmentStatus.ACTIVE,
+                        Role.deleted_at.is_(None),
+                        Role.name.in_(["admin", "super_admin", "Super Admin", "Admin"]),
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        denied_ids = set(
+            (
+                await db.execute(
+                    select(UserPermission.user_id)
+                    .join(Permission, Permission.id == UserPermission.permission_id)
+                    .where(
+                        UserPermission.user_id.in_(hr_user_ids),
+                        UserPermission.is_granted.is_(False),
+                        Permission.code.in_(deny_codes),
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        hr_user_ids = [uid for uid in hr_user_ids if uid in admin_ids or uid not in denied_ids]
+
+    return hr_user_ids
 
 
 async def send_isolated_hrms_notification(
@@ -143,13 +191,15 @@ async def notify_leave_requested(
     to_date: str,
     number_of_days: float,
     actor_id: Optional[uuid.UUID] = None,
+    request_id: Optional[uuid.UUID] = None,
 ) -> None:
     """Notify responsible manager or HR fallback about a new leave request."""
     emp = await db.get(User, employee_id)
     emp_name = _emp_display_name(emp)
 
-    approvers = await resolve_hrms_approvers(db, employee_id)
+    approvers = await resolve_hrms_approvers(db, employee_id, module_name="leave")
     num_disp = int(number_of_days) if float(number_of_days).is_integer() else number_of_days
+    link = f"/hrms/leave?request_id={request_id}" if request_id else "/hrms/leave"
 
     for approver_id in approvers:
         if actor_id and approver_id == actor_id:
@@ -160,7 +210,7 @@ async def notify_leave_requested(
             type="hrms_leave_requested",
             title="Leave Request Submitted",
             message=f"{emp_name} submitted a leave request ({num_disp} day(s), {from_date} to {to_date}).",
-            link="/hrms/leave",
+            link=link,
         )
 
 
@@ -173,6 +223,7 @@ async def notify_leave_decision(
     to_date: str,
     number_of_days: float,
     actor_id: Optional[uuid.UUID] = None,
+    request_id: Optional[uuid.UUID] = None,
 ) -> None:
     """Notify employee about approval or rejection of their leave request."""
     if actor_id and employee_id == actor_id:
@@ -188,13 +239,14 @@ async def notify_leave_decision(
         title = "Leave Request Rejected"
         message = f"Your leave request for {num_disp} day(s) from {from_date} to {to_date} was rejected."
 
+    link = f"/hrms/leave?request_id={request_id}" if request_id else "/hrms/leave"
     await send_isolated_hrms_notification(
         db,
         recipient_id=employee_id,
         type=notif_type,
         title=title,
         message=message,
-        link="/hrms/leave",
+        link=link,
     )
 
 
@@ -205,12 +257,14 @@ async def notify_regularization_requested(
     attendance_date: str,
     reason: str,
     actor_id: Optional[uuid.UUID] = None,
+    request_id: Optional[uuid.UUID] = None,
 ) -> None:
     """Notify responsible manager or HR fallback about an attendance regularization request."""
     emp = await db.get(User, employee_id)
     emp_name = _emp_display_name(emp)
 
-    approvers = await resolve_hrms_approvers(db, employee_id)
+    approvers = await resolve_hrms_approvers(db, employee_id, module_name="attendance")
+    link = f"/hrms/attendance?regularization_id={request_id}" if request_id else "/hrms/attendance"
     for approver_id in approvers:
         if actor_id and approver_id == actor_id:
             continue
@@ -220,7 +274,7 @@ async def notify_regularization_requested(
             type="hrms_regularization_requested",
             title="Attendance Regularization Requested",
             message=f"{emp_name} requested attendance regularization for {attendance_date}.",
-            link="/hrms/attendance",
+            link=link,
         )
 
 
@@ -231,6 +285,7 @@ async def notify_regularization_decision(
     decision: str,  # "APPROVED" or "REJECTED"
     attendance_date: str,
     actor_id: Optional[uuid.UUID] = None,
+    request_id: Optional[uuid.UUID] = None,
 ) -> None:
     """Notify employee about approval or rejection of their regularization request."""
     if actor_id and employee_id == actor_id:
@@ -245,14 +300,54 @@ async def notify_regularization_decision(
         title = "Regularization Request Rejected"
         message = f"Your attendance regularization request for {attendance_date} was rejected."
 
+    link = f"/hrms/attendance?regularization_id={request_id}" if request_id else "/hrms/attendance"
     await send_isolated_hrms_notification(
         db,
         recipient_id=employee_id,
         type=notif_type,
         title=title,
         message=message,
-        link="/hrms/attendance",
+        link=link,
     )
+
+
+async def notify_regularization_cancelled(
+    db: AsyncSession,
+    *,
+    employee_id: uuid.UUID,
+    attendance_date: str,
+    actor_id: Optional[uuid.UUID] = None,
+    request_id: Optional[uuid.UUID] = None,
+    reason: Optional[str] = None,
+) -> None:
+    """Notify approvers (when requester cancels) or employee (when admin/manager cancels) about cancellation."""
+    emp = await db.get(User, employee_id)
+    emp_name = _emp_display_name(emp)
+    link = f"/hrms/attendance?regularization_id={request_id}" if request_id else "/hrms/attendance"
+    reason_suffix = f" ({reason.strip()})" if reason and reason.strip() else ""
+
+    if actor_id and actor_id != employee_id:
+        await send_isolated_hrms_notification(
+            db,
+            recipient_id=employee_id,
+            type="hrms_regularization_cancelled",
+            title="Regularization Request Cancelled",
+            message=f"Your attendance regularization request for {attendance_date} was cancelled{reason_suffix}.",
+            link=link,
+        )
+    else:
+        approvers = await resolve_hrms_approvers(db, employee_id, module_name="attendance")
+        for approver_id in approvers:
+            if actor_id and approver_id == actor_id:
+                continue
+            await send_isolated_hrms_notification(
+                db,
+                recipient_id=approver_id,
+                type="hrms_regularization_cancelled",
+                title="Regularization Request Cancelled",
+                message=f"{emp_name} cancelled their attendance regularization request for {attendance_date}{reason_suffix}.",
+                link=link,
+            )
 
 
 async def notify_expense_submitted(
@@ -264,12 +359,14 @@ async def notify_expense_submitted(
     amount: float,
     currency: str = "INR",
     actor_id: Optional[uuid.UUID] = None,
+    expense_id: Optional[uuid.UUID] = None,
 ) -> None:
     """Notify responsible manager or HR fallback about a submitted expense claim."""
     emp = await db.get(User, employee_id)
     emp_name = _emp_display_name(emp)
 
-    approvers = await resolve_hrms_approvers(db, employee_id)
+    approvers = await resolve_hrms_approvers(db, employee_id, module_name="expenses")
+    link = f"/hrms/expenses?expense_id={expense_id}" if expense_id else "/hrms/expenses"
     for approver_id in approvers:
         if actor_id and approver_id == actor_id:
             continue
@@ -279,7 +376,7 @@ async def notify_expense_submitted(
             type="hrms_expense_submitted",
             title="Expense Claim Submitted",
             message=f"{emp_name} submitted expense claim {expense_code} ({category}, {currency} {amount:.2f}).",
-            link="/hrms/expenses",
+            link=link,
         )
 
 
@@ -291,6 +388,7 @@ async def notify_expense_decision(
     expense_code: str,
     category: str,
     actor_id: Optional[uuid.UUID] = None,
+    expense_id: Optional[uuid.UUID] = None,
 ) -> None:
     """Notify employee about approval or rejection of their expense claim."""
     if actor_id and employee_id == actor_id:
@@ -305,13 +403,39 @@ async def notify_expense_decision(
         title = "Expense Claim Rejected"
         message = f"Your expense claim {expense_code} ({category}) was rejected."
 
+    link = f"/hrms/expenses?expense_id={expense_id}" if expense_id else "/hrms/expenses"
     await send_isolated_hrms_notification(
         db,
         recipient_id=employee_id,
         type=notif_type,
         title=title,
         message=message,
-        link="/hrms/expenses",
+        link=link,
+    )
+
+
+async def notify_expense_reimbursed(
+    db: AsyncSession,
+    *,
+    employee_id: uuid.UUID,
+    expense_code: str,
+    amount: float,
+    currency: str = "INR",
+    actor_id: Optional[uuid.UUID] = None,
+    expense_id: Optional[uuid.UUID] = None,
+) -> None:
+    """Notify employee when their approved expense claim has been reimbursed."""
+    if actor_id and employee_id == actor_id:
+        return
+
+    link = f"/hrms/expenses?expense_id={expense_id}" if expense_id else "/hrms/expenses"
+    await send_isolated_hrms_notification(
+        db,
+        recipient_id=employee_id,
+        type="hrms_expense_reimbursed",
+        title="Expense Claim Reimbursed",
+        message=f"Your expense claim {expense_code} ({currency} {amount:.2f}) has been marked as reimbursed.",
+        link=link,
     )
 
 
@@ -322,16 +446,94 @@ async def notify_asset_assigned(
     asset_name: str,
     asset_code: str,
     actor_id: Optional[uuid.UUID] = None,
+    asset_id: Optional[uuid.UUID] = None,
 ) -> None:
     """Notify employee about an asset being assigned to them."""
     if actor_id and employee_id == actor_id:
         return
 
+    link = f"/hrms/assets?asset_id={asset_id}" if asset_id else "/hrms/assets"
     await send_isolated_hrms_notification(
         db,
         recipient_id=employee_id,
         type="hrms_asset_assigned",
         title="Asset Assigned",
         message=f"Asset {asset_name} ({asset_code}) has been assigned to you.",
-        link="/hrms/assets",
+        link=link,
+    )
+
+
+async def notify_asset_returned(
+    db: AsyncSession,
+    *,
+    employee_id: uuid.UUID,
+    asset_name: str,
+    asset_code: str,
+    actor_id: Optional[uuid.UUID] = None,
+    asset_id: Optional[uuid.UUID] = None,
+) -> None:
+    """Notify employee when an asset assigned to them has been recorded as returned."""
+    if actor_id and employee_id == actor_id:
+        return
+
+    link = f"/hrms/assets?asset_id={asset_id}" if asset_id else "/hrms/assets"
+    await send_isolated_hrms_notification(
+        db,
+        recipient_id=employee_id,
+        type="hrms_asset_returned",
+        title="Asset Return Recorded",
+        message=f"Return of asset {asset_name} ({asset_code}) has been recorded.",
+        link=link,
+    )
+
+
+async def notify_site_visit_assigned(
+    db: AsyncSession,
+    *,
+    employee_id: uuid.UUID,
+    customer_name: str,
+    visit_date: str,
+    actor_id: Optional[uuid.UUID] = None,
+    visit_id: Optional[uuid.UUID] = None,
+    reassigned: bool = False,
+) -> None:
+    """Notify employee when a site visit is assigned or reassigned to them."""
+    if actor_id and employee_id == actor_id:
+        return
+
+    link = f"/hrms/site-visit?visit_id={visit_id}" if visit_id else "/hrms/site-visit"
+    notif_type = "hrms_site_visit_reassigned" if reassigned else "hrms_site_visit_assigned"
+    title = "Site Visit Reassigned" if reassigned else "Site Visit Assigned"
+    verb = "reassigned" if reassigned else "scheduled"
+    await send_isolated_hrms_notification(
+        db,
+        recipient_id=employee_id,
+        type=notif_type,
+        title=title,
+        message=f"A site visit to {customer_name} on {visit_date} has been {verb} for you.",
+        link=link,
+    )
+
+
+async def notify_site_visit_cancelled(
+    db: AsyncSession,
+    *,
+    employee_id: uuid.UUID,
+    customer_name: str,
+    visit_date: str,
+    actor_id: Optional[uuid.UUID] = None,
+    visit_id: Optional[uuid.UUID] = None,
+) -> None:
+    """Notify assigned employee when a scheduled site visit is cancelled."""
+    if actor_id and employee_id == actor_id:
+        return
+
+    link = f"/hrms/site-visit?visit_id={visit_id}" if visit_id else "/hrms/site-visit"
+    await send_isolated_hrms_notification(
+        db,
+        recipient_id=employee_id,
+        type="hrms_site_visit_cancelled",
+        title="Site Visit Cancelled",
+        message=f"Your scheduled site visit to {customer_name} on {visit_date} has been cancelled.",
+        link=link,
     )

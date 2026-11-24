@@ -503,6 +503,7 @@ export interface TaskRecurringSchedule {
   effective_end_date?: string | null;
   last_generated_period?: string | null;
   last_generated_at?: string | null;
+  next_run_date?: string | null;
   next_due_date?: string | null;
   next_period?: string | null;
   created_by?: string | null;

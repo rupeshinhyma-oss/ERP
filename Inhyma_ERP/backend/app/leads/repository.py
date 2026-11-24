@@ -5,14 +5,38 @@ Lead Repository.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Any
 
 from sqlalchemy import Select, and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common.base_repository import BaseRepository
+from app.core.exceptions import BadRequestException
 from app.leads.models import Lead
+
+
+def _parse_filter_date(value: Any, param_name: str) -> date | None:
+    """Convert an optional YYYY-MM-DD query filter into a native ``datetime.date``."""
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    if isinstance(value, str):
+        cleaned = value.strip()
+        if not cleaned:
+            return None
+        try:
+            return date.fromisoformat(cleaned)
+        except ValueError as exc:
+            raise BadRequestException(
+                f"Invalid {param_name!r} date value {value!r}. Expected ISO format YYYY-MM-DD."
+            ) from exc
+    raise BadRequestException(
+        f"Invalid {param_name!r} date value {value!r}. Expected ISO format YYYY-MM-DD."
+    )
 
 
 class LeadRepository(BaseRepository[Lead]):
@@ -115,10 +139,24 @@ class LeadRepository(BaseRepository[Lead]):
             stmt = stmt.where(func.lower(Lead.city) == city.strip().lower())
         if state and state.strip():
             stmt = stmt.where(func.lower(Lead.state) == state.strip().lower())
-        if date_from:
-            stmt = stmt.where(Lead.added_on >= date_from)
-        if date_to:
-            stmt = stmt.where(Lead.added_on <= date_to)
+        parsed_date_from = _parse_filter_date(date_from, "date_from")
+        parsed_date_to = _parse_filter_date(date_to, "date_to")
+        if parsed_date_from is not None:
+            stmt = stmt.where(Lead.added_on >= parsed_date_from)
+        if parsed_date_to is not None:
+            stmt = stmt.where(Lead.added_on <= parsed_date_to)
+
+        # Validate sorting against explicit allowlist before model attribute access
+        clean_sort_by = (sort_by or "").strip() or "created_at"
+        if clean_sort_by not in self.sortable_fields:
+            raise BadRequestException(
+                f"Cannot sort leads by {sort_by!r}. Allowed fields: {', '.join(self.sortable_fields)}."
+            )
+        clean_sort_dir = (sort_dir or "").strip().lower() or "desc"
+        if clean_sort_dir not in ("asc", "desc"):
+            raise BadRequestException(
+                f"Invalid sort_dir {sort_dir!r}. Allowed values: asc, desc."
+            )
 
         # Full-text search
         if search and search.strip():
@@ -144,9 +182,9 @@ class LeadRepository(BaseRepository[Lead]):
         count_stmt = select(func.count()).select_from(stmt.subquery())
         total = (await self.session.execute(count_stmt)).scalar() or 0
 
-        # Sorting
-        sort_column = getattr(Lead, sort_by, Lead.created_at)
-        if sort_dir.lower() == "asc":
+        # Sorting (pre-validated against self.sortable_fields & asc/desc allowlist)
+        sort_column = getattr(Lead, clean_sort_by)
+        if clean_sort_dir == "asc":
             stmt = stmt.order_by(sort_column.asc())
         else:
             stmt = stmt.order_by(sort_column.desc())

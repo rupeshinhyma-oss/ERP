@@ -16,18 +16,26 @@ from __future__ import annotations
 
 import logging
 from datetime import date, datetime, timedelta, timezone
+from decimal import Decimal, ROUND_HALF_UP
 from typing import Any, List, Optional
 import uuid
 
 logger = logging.getLogger(__name__)
+IST = timezone(timedelta(hours=5, minutes=30))
 
-from sqlalchemy import delete, desc, func, or_, select
+
+def _q2_opt(val: Decimal | float | int | str | None) -> Decimal | None:
+    if val is None:
+        return None
+    return Decimal(str(val)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+from sqlalchemy import delete, desc, func, or_, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.core.exceptions import BadRequestException, ConflictException, NotFoundException
-from app.hrms.notifications import notify_asset_assigned
+from app.hrms.notifications import notify_asset_assigned, notify_asset_returned
 from app.hrms.models import (
     HrmsAsset,
     HrmsAssetAssignment,
@@ -113,7 +121,70 @@ class HrmsAssetService:
         res = await self.db.execute(stmt)
         return res.scalars().first()
 
-    async def _to_assignment_read(self, a: HrmsAssetAssignment) -> AssetAssignmentRead:
+    async def _batch_resolve_employee_depts_and_branches(
+        self, user_ids: set[uuid.UUID]
+    ) -> tuple[dict[uuid.UUID, str | None], dict[uuid.UUID, str | None]]:
+        """Batch-resolve departments and primary branches for a set of employees in 2 queries (eliminates N+1)."""
+        dept_map: dict[uuid.UUID, str | None] = {}
+        branch_map: dict[uuid.UUID, str | None] = {}
+        if not user_ids:
+            return dept_map, branch_map
+
+        role_rows = (
+            await self.db.execute(
+                select(UserRole.user_id, Role.name)
+                .join(Role, Role.id == UserRole.role_id)
+                .where(UserRole.user_id.in_(user_ids))
+            )
+        ).all()
+        roles_by_user: dict[uuid.UUID, list[str]] = {}
+        for uid, rname in role_rows:
+            roles_by_user.setdefault(uid, []).append(rname)
+
+        priority_roles = ["Sales", "HR", "Accounts", "Management", "Operations"]
+        for uid, roles in roles_by_user.items():
+            resolved = None
+            for pr in priority_roles:
+                for r in roles:
+                    if pr.lower() in r.lower():
+                        resolved = pr
+                        break
+                if resolved:
+                    break
+            if not resolved and roles:
+                r0 = roles[0]
+                if r0.lower() == "super_admin":
+                    resolved = "Admin"
+                elif r0.lower() == "user":
+                    resolved = "User"
+                else:
+                    resolved = r0
+            dept_map[uid] = resolved
+
+        loc_rows = (
+            await self.db.execute(
+                select(HrmsEmployeeLocation.user_id, HrmsLocation.name)
+                .join(HrmsLocation, HrmsLocation.id == HrmsEmployeeLocation.location_id)
+                .where(
+                    HrmsEmployeeLocation.user_id.in_(user_ids),
+                    HrmsLocation.deleted_at.is_(None),
+                )
+                .order_by(HrmsEmployeeLocation.is_primary.desc(), HrmsLocation.name.asc())
+            )
+        ).all()
+        for uid, lname in loc_rows:
+            if uid not in branch_map:
+                branch_map[uid] = lname
+
+        return dept_map, branch_map
+
+    async def _to_assignment_read(
+        self,
+        a: HrmsAssetAssignment,
+        *,
+        dept_map: dict[uuid.UUID, str | None] | None = None,
+        branch_map: dict[uuid.UUID, str | None] | None = None,
+    ) -> AssetAssignmentRead:
         """Transform an ORM HrmsAssetAssignment into AssetAssignmentRead schema."""
         emp_name = None
         emp_code = None
@@ -130,8 +201,14 @@ class HrmsAssetService:
             last = emp.last_name or ""
             emp_name = emp.display_name or f"{first} {last}".strip() or emp.username or "Employee"
             emp_code = emp.employee_code
-            emp_dept = await self._resolve_employee_department(emp.id)
-            emp_branch = await self._resolve_employee_branch(emp.id)
+            if dept_map is not None:
+                emp_dept = dept_map.get(emp.id)
+            else:
+                emp_dept = await self._resolve_employee_department(emp.id)
+            if branch_map is not None:
+                emp_branch = branch_map.get(emp.id)
+            else:
+                emp_branch = await self._resolve_employee_branch(emp.id)
 
         assigner_name = None
         if a.assigner:
@@ -219,7 +296,7 @@ class HrmsAssetService:
             maintenance_start=m.maintenance_start,
             maintenance_end=m.maintenance_end,
             vendor_technician=m.vendor_technician,
-            cost=m.cost,
+            cost=float(m.cost) if m.cost is not None else None,
             status=m.status,
             notes=m.notes,
             created_by=m.created_by,
@@ -230,7 +307,15 @@ class HrmsAssetService:
             updated_at=m.updated_at,
         )
 
-    async def _to_asset_read(self, asset: HrmsAsset, include_history: bool = True) -> AssetRead:
+    async def _to_asset_read(
+        self,
+        asset: HrmsAsset,
+        include_history: bool = True,
+        *,
+        dept_map: dict[uuid.UUID, str | None] | None = None,
+        branch_map: dict[uuid.UUID, str | None] | None = None,
+        relations_preloaded: bool = False,
+    ) -> AssetRead:
         """Transform an ORM HrmsAsset into the AssetRead schema with enriched relations."""
         assigned_name = None
         assigned_code = None
@@ -238,7 +323,7 @@ class HrmsAssetService:
         assigned_branch = None
 
         assigned_user = asset.assigned_to
-        if not assigned_user and asset.assigned_to_user_id:
+        if not assigned_user and asset.assigned_to_user_id and not relations_preloaded:
             user_res = await self.db.execute(select(User).where(User.id == asset.assigned_to_user_id))
             assigned_user = user_res.scalar_one_or_none()
 
@@ -247,8 +332,14 @@ class HrmsAssetService:
             last = assigned_user.last_name or ""
             assigned_name = assigned_user.display_name or f"{first} {last}".strip() or assigned_user.username or "Employee"
             assigned_code = assigned_user.employee_code
-            assigned_dept = await self._resolve_employee_department(assigned_user.id)
-            assigned_branch = await self._resolve_employee_branch(assigned_user.id)
+            if dept_map is not None:
+                assigned_dept = dept_map.get(assigned_user.id)
+            else:
+                assigned_dept = await self._resolve_employee_department(assigned_user.id)
+            if branch_map is not None:
+                assigned_branch = branch_map.get(assigned_user.id)
+            else:
+                assigned_branch = await self._resolve_employee_branch(assigned_user.id)
 
         location_obj = asset.location
         if not location_obj and asset.location_id:
@@ -303,12 +394,15 @@ class HrmsAssetService:
         active_assignment_dto = None
         expected_ret_date = None
         assign_count = 0
-        if hasattr(asset, "assignments") and asset.assignments:
-            assign_count = len(asset.assignments)
-            active_assign = next((a for a in asset.assignments if a.assignment_status == "ACTIVE"), None)
+        if relations_preloaded or (hasattr(asset, "assignments") and asset.assignments):
+            assign_list = asset.assignments or []
+            assign_count = len(assign_list)
+            active_assign = next((a for a in assign_list if a.assignment_status == "ACTIVE"), None)
             if active_assign:
                 expected_ret_date = active_assign.expected_return_date
-                active_assignment_dto = await self._to_assignment_read(active_assign)
+                active_assignment_dto = await self._to_assignment_read(
+                    active_assign, dept_map=dept_map, branch_map=branch_map
+                )
         elif asset.assigned_to_user_id:
             act_stmt = select(HrmsAssetAssignment).where(
                 HrmsAssetAssignment.asset_id == asset.id,
@@ -318,11 +412,13 @@ class HrmsAssetService:
             active_assign = act_res.scalar_one_or_none()
             if active_assign:
                 expected_ret_date = active_assign.expected_return_date
-                active_assignment_dto = await self._to_assignment_read(active_assign)
+                active_assignment_dto = await self._to_assignment_read(
+                    active_assign, dept_map=dept_map, branch_map=branch_map
+                )
 
         maint_count = 0
-        if hasattr(asset, "maintenance_records") and asset.maintenance_records:
-            maint_count = len(asset.maintenance_records)
+        if relations_preloaded or (hasattr(asset, "maintenance_records") and asset.maintenance_records):
+            maint_count = len(asset.maintenance_records or [])
         else:
             m_cnt_stmt = select(func.count(HrmsAssetMaintenance.id)).where(HrmsAssetMaintenance.asset_id == asset.id)
             m_cnt_res = await self.db.execute(m_cnt_stmt)
@@ -337,7 +433,7 @@ class HrmsAssetService:
             model=asset.model,
             serial_number=asset.serial_number,
             purchase_date=asset.purchase_date,
-            purchase_cost=asset.purchase_cost,
+            purchase_cost=float(asset.purchase_cost) if asset.purchase_cost is not None else None,
             vendor=asset.vendor,
             warranty_expiry=asset.warranty_expiry,
             condition=asset.condition,
@@ -375,6 +471,7 @@ class HrmsAssetService:
         status: Optional[str] = None,
         category: Optional[str] = None,
         assigned_to_user_id: Optional[uuid.UUID] = None,
+        allowed_employee_ids: Optional[set[uuid.UUID]] = None,
         location_id: Optional[uuid.UUID] = None,
         assigned_status: Optional[str] = None,
         warranty_status: Optional[str] = None,
@@ -416,6 +513,10 @@ class HrmsAssetService:
 
         if assigned_to_user_id:
             query = query.where(HrmsAsset.assigned_to_user_id == assigned_to_user_id)
+        elif allowed_employee_ids is not None:
+            if not allowed_employee_ids:
+                return []
+            query = query.where(HrmsAsset.assigned_to_user_id.in_(allowed_employee_ids))
 
         if assigned_status:
             ast = assigned_status.upper()
@@ -434,7 +535,7 @@ class HrmsAssetService:
 
         if warranty_status:
             w_up = warranty_status.upper()
-            today = date.today()
+            today = datetime.now(IST).date()
             if w_up == "ACTIVE":
                 query = query.where(HrmsAsset.warranty_expiry >= today)
             elif w_up in ("EXPIRING_SOON", "EXPIRING"):
@@ -467,8 +568,26 @@ class HrmsAssetService:
             query = query.offset((page - 1) * page_size).limit(page_size)
 
         res = await self.db.execute(query)
-        assets = res.scalars().all()
-        return [await self._to_asset_read(a) for a in assets]
+        assets = list(res.scalars().all())
+        if not assets:
+            return []
+
+        # Batch-resolve departments and branches once across all assigned employees (eliminates N+1)
+        emp_ids: set[uuid.UUID] = set()
+        for a in assets:
+            if a.assigned_to_user_id:
+                emp_ids.add(a.assigned_to_user_id)
+            if a.assignments:
+                for asgn in a.assignments:
+                    if asgn.assignment_status == "ACTIVE" and asgn.employee_id:
+                        emp_ids.add(asgn.employee_id)
+        dept_map, branch_map = await self._batch_resolve_employee_depts_and_branches(emp_ids)
+        return [
+            await self._to_asset_read(
+                a, dept_map=dept_map, branch_map=branch_map, relations_preloaded=True
+            )
+            for a in assets
+        ]
 
     async def get_summary(self) -> AssetSummaryRead:
         """Compute aggregate counts directly from PostgreSQL database."""
@@ -562,11 +681,18 @@ class HrmsAssetService:
         actor_id: Optional[uuid.UUID] = None,
     ) -> AssetRead:
         """Register a new asset in the system."""
-        # 1. Determine & Validate Asset Code
+        # 1. Determine & Validate Asset Code (serialize auto-generation on PostgreSQL for HRMS-BUG-19)
+        auto_generate_code = not (payload.asset_code and payload.asset_code.strip())
+        if auto_generate_code and isinstance(self.db, AsyncSession):
+            bind = self.db.get_bind()
+            if bind is not None and bind.dialect.name == "postgresql":
+                await self.db.execute(
+                    text("SELECT pg_advisory_xact_lock(hashtext(:lock_key))"),
+                    {"lock_key": "hrms_asset_code_gen"},
+                )
+
         asset_code = payload.asset_code.strip() if payload.asset_code else None
-        if not asset_code:
-            asset_code = await self._generate_asset_code()
-        else:
+        if not auto_generate_code:
             code_check = await self.db.execute(
                 select(HrmsAsset).where(
                     HrmsAsset.asset_code == asset_code,
@@ -605,27 +731,52 @@ class HrmsAssetService:
         if status not in VALID_ASSET_STATUSES:
             raise BadRequestException(f"Invalid status '{payload.status}'. Valid statuses: {VALID_ASSET_STATUSES}")
 
-        new_asset = HrmsAsset(
-            asset_code=asset_code,
-            asset_name=payload.asset_name.strip(),
-            asset_category=payload.asset_category.strip(),
-            brand=payload.brand.strip() if payload.brand else None,
-            model=payload.model.strip() if payload.model else None,
-            serial_number=clean_serial,
-            purchase_date=payload.purchase_date,
-            purchase_cost=payload.purchase_cost,
-            vendor=payload.vendor.strip() if payload.vendor else None,
-            warranty_expiry=payload.warranty_expiry,
-            condition=payload.condition or "GOOD",
-            status=status,
-            location_id=payload.location_id,
-            description=payload.description.strip() if payload.description else None,
-            created_by=actor_id,
-            updated_by=actor_id,
-        )
-        self.db.add(new_asset)
-        await self.db.flush()
+        new_asset: HrmsAsset | None = None
+        for attempt in range(5):
+            cur_code = await self._generate_asset_code() if auto_generate_code else asset_code
+            candidate = HrmsAsset(
+                asset_code=cur_code,
+                asset_name=payload.asset_name.strip(),
+                asset_category=payload.asset_category.strip(),
+                brand=payload.brand.strip() if payload.brand else None,
+                model=payload.model.strip() if payload.model else None,
+                serial_number=clean_serial,
+                purchase_date=payload.purchase_date,
+                purchase_cost=_q2_opt(payload.purchase_cost),
+                vendor=payload.vendor.strip() if payload.vendor else None,
+                warranty_expiry=payload.warranty_expiry,
+                condition=payload.condition or "GOOD",
+                status=status,
+                location_id=payload.location_id,
+                description=payload.description.strip() if payload.description else None,
+                created_by=actor_id,
+                updated_by=actor_id,
+            )
+            if isinstance(self.db, AsyncSession):
+                try:
+                    async with self.db.begin_nested():
+                        self.db.add(candidate)
+                        await self.db.flush()
+                    new_asset = candidate
+                    asset_code = cur_code
+                    break
+                except IntegrityError as exc:
+                    err_str = str(getattr(exc, "orig", exc)).lower()
+                    if auto_generate_code and "asset_code" in err_str and attempt < 4:
+                        continue
+                    if "serial_number" in err_str:
+                        raise ConflictException(f"Asset with serial number '{clean_serial}' already exists.")
+                    if "asset_code" in err_str:
+                        raise ConflictException(f"Asset code '{cur_code}' is already registered.")
+                    raise ConflictException("Asset could not be created due to a uniqueness conflict.")
+            else:
+                self.db.add(candidate)
+                await self.db.flush()
+                new_asset = candidate
+                asset_code = cur_code
+                break
 
+        assert new_asset is not None
         # Audit History Entry
         history = HrmsAssetHistory(
             asset_id=new_asset.id,
@@ -713,7 +864,7 @@ class HrmsAssetService:
         if payload.purchase_date is not None:
             asset.purchase_date = payload.purchase_date
         if payload.purchase_cost is not None:
-            asset.purchase_cost = payload.purchase_cost
+            asset.purchase_cost = _q2_opt(payload.purchase_cost)
         if payload.vendor is not None:
             asset.vendor = payload.vendor.strip() if payload.vendor else None
         if payload.warranty_expiry is not None:
@@ -783,7 +934,7 @@ class HrmsAssetService:
             act_res = await self.db.execute(act_assign_stmt)
             act_assign = act_res.scalar_one_or_none()
             if act_assign:
-                act_assign.returned_at = date.today()
+                act_assign.returned_at = datetime.now(IST).date()
                 act_assign.condition_at_return = "LOST" if new_status == "LOST" else asset.condition
                 act_assign.return_notes = f"Closed due to asset transition to {new_status}"
                 act_assign.assignment_status = "RETURNED"
@@ -913,6 +1064,7 @@ class HrmsAssetService:
                     asset_name=asset.asset_name,
                     asset_code=asset.asset_code,
                     actor_id=actor_id,
+                    asset_id=asset.id,
                 )
             except Exception as exc:
                 logger.warning(
@@ -1009,6 +1161,23 @@ class HrmsAssetService:
         )
         self.db.add(history)
 
+        await self.db.flush()
+        try:
+            await notify_asset_returned(
+                self.db,
+                employee_id=prev_user_id,
+                asset_name=asset.asset_name,
+                asset_code=asset.asset_code,
+                actor_id=actor_id,
+                asset_id=asset.id,
+            )
+        except Exception as exc:
+            logger.warning(
+                "Failed to dispatch asset return notification for asset %s to employee %s: %s",
+                asset.id,
+                prev_user_id,
+                exc,
+            )
         await self.db.commit()
         return await self.get_asset(asset.id)
 
@@ -1056,7 +1225,7 @@ class HrmsAssetService:
             maintenance_start=payload.maintenance_start,
             maintenance_end=payload.maintenance_end,
             vendor_technician=payload.vendor_technician.strip() if payload.vendor_technician else None,
-            cost=payload.cost,
+            cost=_q2_opt(payload.cost),
             status=payload.status.upper(),
             notes=payload.notes.strip() if payload.notes else None,
             created_by=actor_id,

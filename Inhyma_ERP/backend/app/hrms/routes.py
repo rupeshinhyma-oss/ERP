@@ -57,7 +57,18 @@ def get_hrms_setup_service(db: AsyncSession = Depends(get_db_session)) -> HrmsSe
 
 
 def require_setup_read(ctx: HrmsUserContext = Depends(get_hrms_user_context)) -> HrmsUserContext:
-    if not (ctx.is_admin or (ctx.is_hr and ("hrms.manage" in ctx.permissions or "hrms.view" in ctx.permissions or "hrms.setup" in ctx.permissions))):
+    ctx.require_module_access("setup")
+    if not (
+        ctx.is_admin
+        or (
+            ctx.is_hr
+            and (
+                "hrms.manage" in ctx.permissions
+                or "hrms.view" in ctx.permissions
+                or "hrms.setup" in ctx.permissions
+            )
+        )
+    ):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Permission denied. You do not have access to view HRMS Setup configuration.",
@@ -66,7 +77,16 @@ def require_setup_read(ctx: HrmsUserContext = Depends(get_hrms_user_context)) ->
 
 
 def require_setup_manage(ctx: HrmsUserContext = Depends(get_hrms_user_context)) -> HrmsUserContext:
-    if not (ctx.is_admin or (ctx.is_hr and "hrms.manage" in ctx.permissions)):
+    ctx.require_module_access("setup")
+    ctx.require_write_access("setup", action="update")
+    if not (
+        ctx.is_admin
+        or (
+            ctx.is_hr
+            and "hrms.manage" in ctx.permissions
+            and "deny:hrms.manage" not in ctx.permissions
+        )
+    ):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Permission denied. Administrative or explicitly delegated setup permissions required.",
@@ -361,15 +381,10 @@ async def update_expense_settings(
 
 @router.get("/tracking-settings")
 async def get_all_tracking_settings(
-    ctx: HrmsUserContext = Depends(get_hrms_user_context),
+    ctx: HrmsUserContext = Depends(require_setup_read),
     service: HrmsSetupService = Depends(get_hrms_setup_service),
 ):
     """Retrieve organization defaults and all employee overrides (Admin/HR only)."""
-    if not (ctx.is_admin or ctx.is_hr):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Permission denied. Only Admin and HR can view tracking configuration.",
-        )
     overview = await service.list_all_tracking_settings()
     return build_success_response(
         data=overview.model_dump(mode="json"),
@@ -456,12 +471,12 @@ async def delete_employee_tracking_settings(
 @router.get("/detailed-tracking/employees")
 async def list_detailed_tracking_employees(
     search: str | None = Query(None, description="Search employee name, ID, or department"),
-    ctx: HrmsUserContext = Depends(get_hrms_user_context),
+    ctx: HrmsUserContext = Depends(require_setup_read),
     service: HrmsSetupService = Depends(get_hrms_setup_service),
 ):
     """
     List all eligible PostgreSQL employees with their detailed tracking toggle and interval.
-    Filtered by requester's authorized employee scope.
+    Restricted to authorized HRMS Setup viewers (Admin/HR).
     """
     allowed_ids = None if (ctx.is_admin or ctx.is_hr) else ctx.managed_employee_ids
     items = await service.list_detailed_tracking_employees(search=search, allowed_employee_ids=allowed_ids)
@@ -489,12 +504,12 @@ async def update_employee_detailed_tracking(
 @router.get("/return-timer/employees")
 async def list_return_timer_employees(
     search: str | None = Query(None, description="Search employee name, ID, or department"),
-    ctx: HrmsUserContext = Depends(get_hrms_user_context),
+    ctx: HrmsUserContext = Depends(require_setup_read),
     service: HrmsSetupService = Depends(get_hrms_setup_service),
 ):
     """
     List all eligible PostgreSQL employees with their return timer override and effective duration.
-    Filtered by requester's authorized employee scope.
+    Restricted to authorized HRMS Setup viewers (Admin/HR).
     """
     allowed_ids = None if (ctx.is_admin or ctx.is_hr) else ctx.managed_employee_ids
     items = await service.list_return_timer_employees(search=search, allowed_employee_ids=allowed_ids)

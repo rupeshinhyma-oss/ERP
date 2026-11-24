@@ -465,11 +465,25 @@ export function loadGoogleMapsSdk(customApiKey?: string): Promise<typeof google.
       });
     };
 
-    const apiKey =
-      customApiKey ||
-      (typeof import.meta !== "undefined" && import.meta.env
-        ? (import.meta.env.VITE_GOOGLE_MAPS_API_KEY as string)
-        : "");
+    const apiKey = (
+      customApiKey !== undefined
+        ? customApiKey
+        : typeof import.meta !== "undefined" && import.meta.env
+          ? ((import.meta.env.VITE_GOOGLE_MAPS_API_KEY as string) || "")
+          : ""
+    ).trim();
+
+    if (!apiKey) {
+      googleMapsPromise = null;
+      const errDetail: GoogleMapsErrorDetail = {
+        type: "AUTH_FAILURE",
+        message:
+          "Google Maps API key is not configured. Please set VITE_GOOGLE_MAPS_API_KEY in the frontend environment.",
+      };
+      notifyGoogleMapsError(errDetail);
+      reject(new Error(errDetail.message));
+      return;
+    }
 
     const scriptId = "google-maps-platform-script";
     const existingScript = document.getElementById(scriptId) as HTMLScriptElement | null;
@@ -477,9 +491,15 @@ export function loadGoogleMapsSdk(customApiKey?: string): Promise<typeof google.
     if (existingScript) {
       existingScript.addEventListener("load", () => {
         if (window.google?.maps) resolve(window.google.maps);
-        else reject(new Error("Google Maps loaded without window.google.maps namespace."));
+        else {
+          googleMapsPromise = null;
+          existingScript.remove();
+          reject(new Error("Google Maps loaded without window.google.maps namespace."));
+        }
       });
       existingScript.addEventListener("error", (err) => {
+        googleMapsPromise = null;
+        existingScript.remove();
         notifyGoogleMapsError({
           type: "NETWORK_ERROR",
           message: "Failed to connect to Google Maps Platform. Please verify your internet connection.",
@@ -495,6 +515,8 @@ export function loadGoogleMapsSdk(customApiKey?: string): Promise<typeof google.
       if (window.google?.maps) {
         resolve(window.google.maps);
       } else {
+        googleMapsPromise = null;
+        script.remove();
         reject(new Error("Google Maps API callback triggered but maps object not available."));
       }
     };
@@ -502,12 +524,14 @@ export function loadGoogleMapsSdk(customApiKey?: string): Promise<typeof google.
     const script = document.createElement("script");
     script.id = scriptId;
     script.type = "text/javascript";
-    const keyParam = apiKey ? `key=${encodeURIComponent(apiKey)}&` : "";
-    script.src = `https://maps.googleapis.com/maps/api/js?${keyParam}libraries=places,geometry&v=weekly&callback=${callbackName}`;
+    const keyParam = `key=${encodeURIComponent(apiKey)}&`;
+    script.src = `https://maps.googleapis.com/maps/api/js?${keyParam}libraries=places,geometry&v=weekly&loading=async&callback=${callbackName}`;
     script.async = true;
     script.defer = true;
     script.onerror = () => {
       delete (window as any)[callbackName];
+      googleMapsPromise = null;
+      script.remove();
       const errDetail: GoogleMapsErrorDetail = {
         type: "NETWORK_ERROR",
         message:

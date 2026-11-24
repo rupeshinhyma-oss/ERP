@@ -1,7 +1,17 @@
 import { useEffect, useRef, useState } from "react";
+import * as googleMapsLib from "@/lib/googleMaps";
 import {
   loadGoogleMapsSdk,
 } from "@/lib/googleMaps";
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
 
 export interface MapPoint {
   lat: number;
@@ -141,6 +151,16 @@ export function TrackingMap({
       }
     };
 
+    // Subscribe to asynchronous Google Maps authentication/billing/network failures (e.g. window.gm_authFailure)
+    const unsubscribeMapsError = Object.keys(googleMapsLib).includes("subscribeGoogleMapsError")
+      ? googleMapsLib.subscribeGoogleMapsError((errDetail) => {
+          if (isMounted) {
+            setLoadError(errDetail.message || "Google Maps authentication or quota error.");
+            setIsLoadingSdk(false);
+          }
+        })
+      : () => {};
+
     // Use requestAnimationFrame for instantaneous modal/tab render
     const frameId = requestAnimationFrame(() => {
       initializeMap();
@@ -148,7 +168,31 @@ export function TrackingMap({
 
     return () => {
       isMounted = false;
+      unsubscribeMapsError();
       cancelAnimationFrame(frameId);
+      // Clean up all Google Maps overlays and listeners on component unmount
+      markersRef.current.forEach((m) => m.setMap(null));
+      markersRef.current = [];
+      if (polylineRef.current) {
+        polylineRef.current.setMap(null);
+        polylineRef.current = null;
+      }
+      if (interactiveMarkerRef.current) {
+        interactiveMarkerRef.current.setMap(null);
+        interactiveMarkerRef.current = null;
+      }
+      if (infoWindowRef.current) {
+        infoWindowRef.current.close();
+        infoWindowRef.current = null;
+      }
+      if (mapInstanceRef.current && mapsSdkRef.current?.event) {
+        try {
+          mapsSdkRef.current.event.clearInstanceListeners(mapInstanceRef.current);
+        } catch {
+          // Ignore cleanup errors if SDK was unloaded
+        }
+      }
+      mapInstanceRef.current = null;
     };
   }, []);
 
@@ -234,23 +278,24 @@ export function TrackingMap({
 
       marker.addListener("click", () => {
         if (infoWindowRef.current && mapInstanceRef.current) {
+          const safeTitle = escapeHtml(pt.label || typeName);
           const timeHtml = pt.time
-            ? `<div style="font-size:12px;color:#475569;margin-top:2px;">Time: <strong>${pt.time}</strong></div>`
+            ? `<div style="font-size:12px;color:#475569;margin-top:2px;">Time: <strong>${escapeHtml(pt.time)}</strong></div>`
             : "";
           const durationHtml = pt.duration
-            ? `<div style="font-size:12px;color:#c2410c;font-weight:700;margin-top:2px;">Duration: ${pt.duration}</div>`
+            ? `<div style="font-size:12px;color:#c2410c;font-weight:700;margin-top:2px;">Duration: ${escapeHtml(pt.duration)}</div>`
             : "";
           const accHtml = pt.accuracy
             ? `<div style="font-size:12px;color:#475569;">Accuracy: <strong>±${Math.round(pt.accuracy)} m</strong></div>`
             : "";
           const addrHtml = pt.address
-            ? `<div style="font-size:12px;color:#0f172a;margin-top:4px;">${pt.address}</div>`
+            ? `<div style="font-size:12px;color:#0f172a;margin-top:4px;">${escapeHtml(pt.address)}</div>`
             : "";
 
           const html = `
             <div style="font-family:sans-serif;padding:6px 8px;min-width:180px;">
               <div style="font-weight:700;color:${color};font-size:13px;">
-                ${pt.label || typeName}
+                ${safeTitle}
               </div>
               ${timeHtml}
               ${durationHtml}
@@ -267,15 +312,28 @@ export function TrackingMap({
       markersRef.current.push(marker);
     });
 
+    // Include breadcrumb polyline coordinates in auto-fit bounds so full route stays framed
+    polyline.forEach((coord) => {
+      if (Number.isFinite(coord.lat) && Number.isFinite(coord.lng)) {
+        boundsCoords.push({ lat: coord.lat, lng: coord.lng });
+      }
+    });
+
     // Auto-fit bounds if multiple points are displayed
     if (boundsCoords.length > 1) {
-      const bounds = new maps.LatLngBounds();
-      boundsCoords.forEach((c) => bounds.extend(c));
-      map.fitBounds(bounds);
+      if (typeof map.fitBounds === "function" && typeof maps.LatLngBounds === "function") {
+        const bounds = new maps.LatLngBounds();
+        boundsCoords.forEach((c) => bounds.extend(c));
+        map.fitBounds(bounds);
+      }
     } else if (boundsCoords.length === 1 && !center && !selectedCoord) {
-      map.panTo(boundsCoords[0]);
+      if (typeof map.panTo === "function") {
+        map.panTo(boundsCoords[0]);
+      } else if (typeof map.setCenter === "function") {
+        map.setCenter(boundsCoords[0]);
+      }
     }
-  }, [isMapReady, points]);
+  }, [isMapReady, points, polyline]);
 
   // ---------------------------------------------------------------------------
   // 4. Fast Polyline Update (updates existing polyline path)
@@ -293,13 +351,17 @@ export function TrackingMap({
       return;
     }
 
+    const strokeColor = isSimulated ? "#d97706" : "#2563eb";
     if (polylineRef.current) {
       polylineRef.current.setPath(polyline);
+      if (typeof (polylineRef.current as any).setOptions === "function") {
+        (polylineRef.current as any).setOptions({ strokeColor });
+      }
     } else {
       const poly = new maps.Polyline({
         path: polyline,
         geodesic: true,
-        strokeColor: isSimulated ? "#d97706" : "#2563eb",
+        strokeColor,
         strokeOpacity: 0.85,
         strokeWeight: 4,
         map,

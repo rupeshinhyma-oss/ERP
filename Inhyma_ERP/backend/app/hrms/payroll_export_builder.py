@@ -338,8 +338,8 @@ async def build_monthly_payroll_excel(
             (dept, "left", "@"),
             (branch, "left", "@"),
             (cleaned_month, "center", "@"),
-            (it.annual_ctc, "right", "#,##0.00"),
-            (it.monthly_ctc, "right", "#,##0.00"),
+            (float(it.annual_ctc), "right", "#,##0.00"),
+            (float(it.monthly_ctc), "right", "#,##0.00"),
             (it.working_days, "center", "0"),
             (it.present_days, "center", "0.0"),
             (it.paid_leave_days, "center", "0.0"),
@@ -353,16 +353,16 @@ async def build_monthly_payroll_excel(
             val = emp_earnings.get(code, 0.0)
             row_values.append((val, "right", "#,##0.00"))
 
-        row_values.append((it.gross_amount, "right", "#,##0.00"))
-        row_values.append((it.lop_deduction, "right", "#,##0.00"))
+        row_values.append((float(it.gross_amount), "right", "#,##0.00"))
+        row_values.append((float(it.lop_deduction), "right", "#,##0.00"))
 
         for code, _ in sorted_deductions:
             val = emp_deductions.get(code, 0.0)
             row_values.append((val, "right", "#,##0.00"))
 
         row_values.append((other_adjustments, "right", "#,##0.00"))
-        row_values.append((it.total_deductions, "right", "#,##0.00"))
-        row_values.append((it.net_salary, "right", "#,##0.00"))
+        row_values.append((float(it.total_deductions), "right", "#,##0.00"))
+        row_values.append((float(it.net_salary), "right", "#,##0.00"))
         emp_status = (
             "APPROVED"
             if (getattr(payroll, "status", None) == "APPROVED" or getattr(it, "status", None) == "APPROVED")

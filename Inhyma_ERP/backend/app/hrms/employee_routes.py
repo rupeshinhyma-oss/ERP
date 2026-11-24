@@ -14,8 +14,8 @@ from __future__ import annotations
 import uuid
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, Query
-from sqlalchemy import select
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.responses import build_success_response
@@ -23,7 +23,7 @@ from app.database.session import get_db_session
 from app.hrms.rbac import HrmsUserContext, get_hrms_user_context
 from app.org_structure.models import EmployeePositionAssignment, Position
 from app.rbac.models import Role, UserRole
-from app.users.models import User, UserStatus
+from app.users.models import EmploymentStatus, User, UserStatus
 
 router = APIRouter(prefix="/hrms/employees", tags=["HRMS - Employees"])
 
@@ -40,13 +40,33 @@ async def list_hrms_employees(
     - Admin / HR: all active employees
     - Department Manager: department employees
     - Employee: self only
+    Enforces global HRMS view denials (deny:hrms.view / deny:hrms).
     """
+    if not ctx.is_admin:
+        blocked_global = {"deny:hrms.view", "block:hrms.view", "deny:hrms", "block:hrms"}
+        if any(b in ctx.permissions for b in blocked_global):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Permission denied. You do not have access to HRMS employee records.",
+            )
+        if ctx.is_hr and not any(
+            ctx.can_access_module(m)
+            for m in ("attendance", "leave", "assets", "expenses", "site_visits", "payroll", "setup")
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Permission denied. You do not have access to any HRMS module.",
+            )
     stmt = (
         select(User)
         .where(
             User.deleted_at.is_(None),
             User.is_active.is_(True),
             User.status == UserStatus.ACTIVE,
+            or_(
+                User.employment_status.is_(None),
+                User.employment_status.notin_([EmploymentStatus.TERMINATED, EmploymentStatus.RESIGNED]),
+            ),
         )
         .order_by(User.display_name.asc(), User.first_name.asc(), User.username.asc())
     )

@@ -547,6 +547,7 @@ export function CrmLeadsPage() {
   const [kanbanPipelineId, setKanbanPipelineId] = useState("");
   const [kanbanStages, setKanbanStages] = useState<CrmStageOption[]>([]);
   const [kanbanLeads, setKanbanLeads] = useState<CrmLeadListItem[]>([]);
+  const [kanbanTotal, setKanbanTotal] = useState<number>(0);
   const [loadingKanban, setLoadingKanban] = useState(false);
   const [draggedLeadId, setDraggedLeadId] = useState<string | null>(null);
   const [dragOverStageId, setDragOverStageId] = useState<string | null>(null);
@@ -713,7 +714,12 @@ export function CrmLeadsPage() {
     "uom-roll": "ROLL",
   });
 
+  const canViewUom = Auth.hasPermission("uom.view");
+  const canViewDistribution =
+    Auth.hasPermission("crm.distribution.view") || Auth.hasPermission("crm.distribution.manage");
+
   useEffect(() => {
+    if (!canViewUom) return;
     apiGet<any[]>("/masters/uom?limit=250&status=active")
       .then((res) => {
         const items = Array.isArray(res?.data) ? res.data : [];
@@ -735,7 +741,7 @@ export function CrmLeadsPage() {
         }
       })
       .catch(() => {});
-  }, []);
+  }, [canViewUom]);
 
   // Global Assignment History Tab State
   const [historyItems, setHistoryItems] = useState<CrmAssignmentHistoryItem[]>([]);
@@ -753,18 +759,68 @@ export function CrmLeadsPage() {
   const [reassigning, setReassigning] = useState(false);
   const [reassignError, setReassignError] = useState<string | null>(null);
 
+  const canViewLeads = Auth.hasPermission("crm.leads.view");
   const canManageLeads = Auth.hasPermission("crm.leads.manage");
   const isSuperAdmin = Auth.isSuperAdmin();
   const userProfile = Auth.getProfile();
+  // Permission-based manager detection (LM-DEF-024): never rely on role-name substrings
+  const hasManagerPermissions =
+    Auth.hasPermission("crm.distribution.view") ||
+    canManageLeads;
+  const canAccessDistributionWorkload =
+    Auth.hasPermission("crm.distribution.view") ||
+    (canManageLeads && Auth.hasPermission("crm.distribution.manage"));
   const isManager = Boolean(
-    isSuperAdmin ||
-    (userProfile?.roles && userProfile.roles.some((r: any) => {
-      const roleStr = typeof r === "string" ? r : (r?.name || "");
-      return roleStr.toLowerCase().includes("manager") || roleStr.toLowerCase().includes("admin");
-    })) ||
-    Auth.hasPermission("crm.distribution.view")
+    (isSuperAdmin && (canViewLeads || hasManagerPermissions)) ||
+    hasManagerPermissions
   );
-  const isSalesperson = !isSuperAdmin && !isManager;
+  const isSalesperson = !isManager;
+
+  const formatQuoteCurrency = (
+    amount: number | string | null | undefined,
+    currency?: string | null,
+  ): string => {
+    const num = Number(amount ?? 0);
+    const curr = (currency || "INR").trim().toUpperCase();
+    const formatted = num.toLocaleString(curr === "INR" ? "en-IN" : "en-US", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+    return curr === "INR" ? `₹${formatted}` : `${curr} ${formatted}`;
+  };
+
+  const isValidLeadEmail = (rawEmail: string): boolean => {
+    const s = rawEmail.trim();
+    if (!s || s.length > 150 || /\s/.test(s)) return false;
+    const parts = s.split("@");
+    if (parts.length !== 2) return false;
+    const [local, domain] = parts;
+    if (
+      !local ||
+      local.length > 64 ||
+      local.startsWith(".") ||
+      local.endsWith(".") ||
+      local.includes("..") ||
+      !/^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+$/.test(local)
+    ) {
+      return false;
+    }
+    if (
+      !domain ||
+      domain.length > 253 ||
+      !domain.includes(".") ||
+      domain.startsWith(".") ||
+      domain.endsWith(".") ||
+      domain.includes("..")
+    ) {
+      return false;
+    }
+    const labels = domain.split(".");
+    if (labels.some((lbl) => !/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$/.test(lbl))) {
+      return false;
+    }
+    return /^[A-Za-z]{2,63}$/.test(labels[labels.length - 1]);
+  };
 
   const selectedTargetSalesperson = useMemo(() => {
     if (!Array.isArray(salespeople)) return undefined;
@@ -803,17 +859,21 @@ export function CrmLeadsPage() {
       } catch {
         // Non-blocking
       }
-      try {
-        const spRes = await apiGet<CrmSalespersonOption[]>("/api/v1/crm/distribution/salespeople");
-        const spData = Array.isArray(spRes?.data) ? spRes.data : Array.isArray(spRes) ? spRes : [];
-        setSalespeople(spData);
-      } catch {
-        // Non-blocking if unauthorized
+      if (canViewDistribution) {
+        try {
+          const spRes = await apiGet<CrmSalespersonOption[]>("/api/v1/crm/distribution/salespeople");
+          const spData = Array.isArray(spRes?.data) ? spRes.data : Array.isArray(spRes) ? spRes : [];
+          setSalespeople(spData);
+        } catch {
+          // Non-blocking if unauthorized
+          setSalespeople([]);
+        }
+      } else {
         setSalespeople([]);
       }
     }
     fetchMetadata();
-  }, []);
+  }, [canViewDistribution]);
 
   // Fetch leads
   const fetchLeads = useCallback(async () => {
@@ -883,12 +943,15 @@ export function CrmLeadsPage() {
       const leadsRes = await apiGet<CrmLeadPaginationResponse>(`/api/v1/crm/leads?pipeline_id=${pipelineId}&page_size=100`);
       if (seq !== kanbanFetchSeqRef.current) return;
       const leadsData: CrmLeadPaginationResponse = leadsRes?.data || leadsRes;
-      setKanbanLeads(leadsData.items || []);
+      const loadedItems = leadsData.items || [];
+      setKanbanLeads(loadedItems);
+      setKanbanTotal(typeof leadsData.total === "number" ? leadsData.total : loadedItems.length);
     } catch (err: any) {
       if (seq !== kanbanFetchSeqRef.current) return;
       showToast(errorMessage(err) || "Failed to load Kanban board.", "error");
       setKanbanStages([]);
       setKanbanLeads([]);
+      setKanbanTotal(0);
     } finally {
       if (seq === kanbanFetchSeqRef.current) {
         setLoadingKanban(false);
@@ -917,11 +980,16 @@ export function CrmLeadsPage() {
       // Sales Manager may move leads within their authorized team scope
       return true;
     }
-    // Salesperson: may move only leads assigned to or created by them
+    // Salesperson: may act only on leads assigned to them, or unassigned leads they created
     const myId = userProfile?.id;
     if (!myId) return false;
-    return lead.assigned_to === myId || lead.created_by === myId;
+    return lead.assigned_to === myId || (!lead.assigned_to && lead.created_by === myId);
   }, [isSuperAdmin, isManager, userProfile?.id]);
+
+  // Authorized users with crm.leads.manage or crm.leads.view on an accessible lead can create/manage quotations
+  const canQuoteSelectedLead = Boolean(
+    selectedLead && (canManageLeads || (canViewLeads && canUserMoveLead(selectedLead)))
+  );
 
   // Kanban Drag-and-Drop Handlers
   const handleCardDragStart = (e: React.DragEvent, lead: CrmLeadListItem) => {
@@ -1145,6 +1213,11 @@ export function CrmLeadsPage() {
       setCreateError("Phone number is required.");
       return;
     }
+    const trimmedEmail = createEmail.trim();
+    if (trimmedEmail && !isValidLeadEmail(trimmedEmail)) {
+      setCreateError("Please enter a valid email address.");
+      return;
+    }
     setCreateSubmitting(true);
     setCreateError(null);
     try {
@@ -1274,7 +1347,7 @@ export function CrmLeadsPage() {
   const fetchAllFollowUps = useCallback(async (leadId: string) => {
     setLoadingAllFollowUps(true);
     try {
-      const res = await apiGet<CrmFollowUpPaginationResponse>(`/api/v1/crm/follow-ups?lead_id=${leadId}&page_size=50`);
+      const res = await apiGet<CrmFollowUpPaginationResponse>(`/api/v1/crm/follow-ups?lead_id=${leadId}&status=all&page_size=50`);
       const data = res?.data || res;
       setAllFollowUps(data?.items || []);
     } catch {
@@ -1390,8 +1463,8 @@ export function CrmLeadsPage() {
     }
     setSearchingQuoteProducts(true);
     try {
-      // Reusing the working ERP Product Master API: /masters/products (active only)
-      const res = await apiGet<any>(`/masters/products?search=${encodeURIComponent(query.trim())}&limit=50&status=active`);
+      // Use CRM-authorized product lookup endpoint (active & sellable products, requires crm.leads.view/manage)
+      const res = await apiGet<any>(`/api/v1/crm/products/lookup?q=${encodeURIComponent(query.trim())}&limit=50`);
       let items: any[] = [];
       if (Array.isArray(res?.data)) {
         items = res.data;
@@ -1419,7 +1492,7 @@ export function CrmLeadsPage() {
       setSearchingQuoteProducts(true);
       setProductSearchError(null);
       try {
-        const res = await apiGet<any>("/masters/products?limit=25&status=active");
+        const res = await apiGet<any>("/api/v1/crm/products/lookup?limit=25");
         let items: any[] = [];
         if (Array.isArray(res?.data)) {
           items = res.data;
@@ -2283,26 +2356,28 @@ export function CrmLeadsPage() {
               <IconRefresh style={{ width: "14px", height: "14px" }} />
               Refresh
             </button>
-            <button
-              type="button"
-              onClick={() => navigate("/crm/distribution")}
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: "0.35rem",
-                padding: "0.45rem 0.85rem",
-                fontSize: "0.8125rem",
-                fontWeight: 600,
-                borderRadius: "0.375rem",
-                backgroundColor: "#fff",
-                color: "#2563eb",
-                border: "1px solid #93c5fd",
-                cursor: "pointer",
-              }}
-            >
-              <IconUsers style={{ width: "14px", height: "14px" }} />
-              Salesperson Workload
-            </button>
+            {canAccessDistributionWorkload && (
+              <button
+                type="button"
+                onClick={() => navigate("/crm/distribution")}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "0.35rem",
+                  padding: "0.45rem 0.85rem",
+                  fontSize: "0.8125rem",
+                  fontWeight: 600,
+                  borderRadius: "0.375rem",
+                  backgroundColor: "#fff",
+                  color: "#2563eb",
+                  border: "1px solid #93c5fd",
+                  cursor: "pointer",
+                }}
+              >
+                <IconUsers style={{ width: "14px", height: "14px" }} />
+                Salesperson Workload
+              </button>
+            )}
             <button
               type="button"
               onClick={handleOpenCreateModal}
@@ -2558,8 +2633,8 @@ export function CrmLeadsPage() {
                 </select>
               </div>
 
-              {/* Salesperson Filter (hidden in Unassigned tab) */}
-              {activeTab === "leads" && (
+              {/* Salesperson Filter (visible only to authorized managers/admins on Leads tab) */}
+              {activeTab === "leads" && isManager && (
                 <div style={{ minWidth: "160px" }}>
                   <select
                     value={selectedSalespersonId}
@@ -3296,9 +3371,18 @@ export function CrmLeadsPage() {
                 </button>
               </div>
 
-              <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", flexWrap: "wrap" }}>
                 <span style={{ fontSize: "0.8125rem", color: "#64748b" }}>
-                  Total Pipeline Leads: <strong data-testid="kanban-total-leads">{kanbanLeads.length}</strong>
+                  {kanbanTotal > kanbanLeads.length ? (
+                    <>
+                      Showing <strong>{kanbanLeads.length}</strong> of{" "}
+                      <strong data-testid="kanban-total-leads">{kanbanTotal}</strong> Pipeline Leads
+                    </>
+                  ) : (
+                    <>
+                      Total Pipeline Leads: <strong data-testid="kanban-total-leads">{kanbanTotal || kanbanLeads.length}</strong>
+                    </>
+                  )}
                 </span>
                 <button
                   type="button"
@@ -3318,6 +3402,49 @@ export function CrmLeadsPage() {
                 </button>
               </div>
             </div>
+
+            {kanbanTotal > kanbanLeads.length && (
+              <div
+                data-testid="kanban-truncation-warning"
+                role="status"
+                style={{
+                  marginBottom: "0.75rem",
+                  padding: "0.625rem 0.875rem",
+                  borderRadius: "0.5rem",
+                  backgroundColor: "#fffbeb",
+                  border: "1px solid #fde68a",
+                  color: "#92400e",
+                  fontSize: "0.8125rem",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: "0.75rem",
+                  flexWrap: "wrap",
+                }}
+              >
+                <span>
+                  <strong>Partial Board View:</strong> Showing the first <strong>{kanbanLeads.length}</strong> of{" "}
+                  <strong>{kanbanTotal}</strong> leads in this pipeline (board display limit: 100). Switch to the All Leads
+                  list or filter records to view all leads.
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab("leads")}
+                  style={{
+                    padding: "0.25rem 0.6rem",
+                    fontSize: "0.75rem",
+                    fontWeight: 600,
+                    borderRadius: "0.375rem",
+                    border: "1px solid #f59e0b",
+                    backgroundColor: "#fff",
+                    color: "#92400e",
+                    cursor: "pointer",
+                  }}
+                >
+                  View Full List
+                </button>
+              </div>
+            )}
 
             {/* Kanban Board Container */}
             {loadingKanban ? (
@@ -5622,7 +5749,7 @@ export function CrmLeadsPage() {
                             Dedicated sales quotations with decimal-safe calculations and revision snapshots.
                           </p>
                         </div>
-                        {canManageLeads && (
+                        {canQuoteSelectedLead && (
                           <button
                             type="button"
                             data-testid="crm-new-quotation-btn"
@@ -5782,7 +5909,7 @@ export function CrmLeadsPage() {
                           <p style={{ fontSize: "0.8125rem", color: "#64748b", margin: 0, maxWidth: "380px", marginLeft: "auto", marginRight: "auto" }}>
                             Generate formal commercial sales quotations with confirmed quantities, explicit unit prices, and GST rates.
                           </p>
-                          {canManageLeads && (
+                          {canQuoteSelectedLead && (
                             <button
                               type="button"
                               data-testid="crm-create-first-quotation-btn"
@@ -5870,10 +5997,10 @@ export function CrmLeadsPage() {
 
                                   <div style={{ textAlign: "right" }}>
                                     <div style={{ fontSize: "1.0625rem", fontWeight: 700, color: "#0f172a" }}>
-                                      ₹{Number(quote.total_amount).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                      {formatQuoteCurrency(quote.total_amount, quote.currency)}
                                     </div>
                                     <div style={{ fontSize: "0.7rem", color: "#64748b" }}>
-                                      Subtotal: ₹{Number(quote.subtotal).toLocaleString("en-IN", { minimumFractionDigits: 2 })} • Tax: ₹{Number(quote.tax_total).toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+                                      Subtotal: {formatQuoteCurrency(quote.subtotal, quote.currency)} • Tax: {formatQuoteCurrency(quote.tax_total, quote.currency)}
                                     </div>
                                   </div>
                                 </div>
@@ -5971,7 +6098,7 @@ export function CrmLeadsPage() {
                                       💬 {sharingQuotationKey === `wa-${quote.id}` ? "Opening..." : "WhatsApp"}
                                     </button>
 
-                                    {canManageLeads && (
+                                    {canQuoteSelectedLead && (
                                       <button
                                         type="button"
                                         onClick={() => handleOpenEditOrRevisionModal(quote, quote.status !== "draft")}
@@ -5991,7 +6118,7 @@ export function CrmLeadsPage() {
                                     )}
                                   </div>
 
-                                  {canManageLeads && (
+                                  {canQuoteSelectedLead && (
                                     <div style={{ display: "flex", gap: "0.35rem" }}>
                                       {quote.status === "draft" && (
                                         <button
@@ -8626,16 +8753,16 @@ export function CrmLeadsPage() {
                                 {it.quantity} {it.uom}
                               </td>
                               <td style={{ padding: "0.5rem 0.75rem", textAlign: "right" }}>
-                                ₹{Number(it.unit_price).toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+                                {formatQuoteCurrency(it.unit_price, selectedQuotationDetail.currency)}
                               </td>
                               <td style={{ padding: "0.5rem 0.75rem", textAlign: "right" }}>
-                                ₹{Number(it.unit_discount).toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+                                {formatQuoteCurrency(it.unit_discount, selectedQuotationDetail.currency)}
                               </td>
                               <td style={{ padding: "0.5rem 0.75rem", textAlign: "right" }}>
                                 {it.tax_rate}%
                               </td>
                               <td style={{ padding: "0.5rem 0.75rem", textAlign: "right", fontWeight: 700, color: "#0f172a" }}>
-                                ₹{Number(it.total_amount).toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+                                {formatQuoteCurrency(it.total_amount, selectedQuotationDetail.currency)}
                               </td>
                             </tr>
                           ))}
@@ -8648,20 +8775,20 @@ export function CrmLeadsPage() {
                       <div style={{ width: "300px", display: "flex", flexDirection: "column", gap: "0.35rem", fontSize: "0.8125rem" }}>
                         <div style={{ display: "flex", justifyContent: "space-between" }}>
                           <span style={{ color: "#64748b" }}>Subtotal:</span>
-                          <strong>₹{Number(selectedQuotationDetail.subtotal).toLocaleString("en-IN", { minimumFractionDigits: 2 })}</strong>
+                          <strong>{formatQuoteCurrency(selectedQuotationDetail.subtotal, selectedQuotationDetail.currency)}</strong>
                         </div>
                         <div style={{ display: "flex", justifyContent: "space-between" }}>
                           <span style={{ color: "#64748b" }}>Discount Total:</span>
-                          <strong>- ₹{Number(selectedQuotationDetail.discount_total).toLocaleString("en-IN", { minimumFractionDigits: 2 })}</strong>
+                          <strong>- {formatQuoteCurrency(selectedQuotationDetail.discount_total, selectedQuotationDetail.currency)}</strong>
                         </div>
                         <div style={{ display: "flex", justifyContent: "space-between" }}>
                           <span style={{ color: "#64748b" }}>Tax Total (GST):</span>
-                          <strong>+ ₹{Number(selectedQuotationDetail.tax_total).toLocaleString("en-IN", { minimumFractionDigits: 2 })}</strong>
+                          <strong>+ {formatQuoteCurrency(selectedQuotationDetail.tax_total, selectedQuotationDetail.currency)}</strong>
                         </div>
                         <div style={{ display: "flex", justifyContent: "space-between", borderTop: "2px solid #0f172a", paddingTop: "0.35rem", fontSize: "1rem" }}>
                           <span style={{ fontWeight: 700 }}>Total Amount:</span>
                           <strong style={{ color: "#0f172a" }}>
-                            ₹{Number(selectedQuotationDetail.total_amount).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            {formatQuoteCurrency(selectedQuotationDetail.total_amount, selectedQuotationDetail.currency)}
                           </strong>
                         </div>
                       </div>
@@ -8732,7 +8859,7 @@ export function CrmLeadsPage() {
                                 </div>
                                 <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
                                   <div style={{ fontWeight: 700, color: "#0f172a", fontSize: "0.9375rem" }}>
-                                    ₹{Number(header.total_amount || 0).toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+                                    {formatQuoteCurrency(header.total_amount || 0, header.currency || selectedQuotationDetail.currency)}
                                   </div>
                                   <button
                                     type="button"
@@ -8787,10 +8914,10 @@ export function CrmLeadsPage() {
                                 </div>
                               )}
 
-                              <div style={{ fontSize: "0.75rem", color: "#64748b" }}>
-                                <strong>Items in Snapshot ({revItems.length}):</strong>{" "}
-                                {revItems.map((it: any) => `${it.product_name} (${it.quantity} @ ₹${it.unit_price})`).join(", ")}
-                              </div>
+                                <div style={{ fontSize: "0.75rem", color: "#64748b" }}>
+                                  <strong>Items in Snapshot ({revItems.length}):</strong>{" "}
+                                  {revItems.map((it: any) => `${it.product_name} (${it.quantity} @ ${formatQuoteCurrency(it.unit_price, header.currency || selectedQuotationDetail.currency)})`).join(", ")}
+                                </div>
                             </div>
                           );
                         })}

@@ -78,11 +78,10 @@ async def load_explicit_crm_denies(
             # In mock/unit test contexts where session is not connected to RBAC tables
             pass
 
-    if not (db_loaded and is_super_admin):
-        for perm in raw_perms:
-            for prefix in ("deny:", "block:", "!", "-"):
-                if perm.startswith(prefix):
-                    denies.add(perm[len(prefix):].strip())
+    for perm in raw_perms:
+        for prefix in ("deny:", "block:", "!", "-"):
+            if perm.startswith(prefix):
+                denies.add(perm[len(prefix):].strip())
 
     return denies
 

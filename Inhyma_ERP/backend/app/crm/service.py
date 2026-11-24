@@ -17,7 +17,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import case, delete, func, select, update
+from sqlalchemy import case, delete, func, select, text, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -228,8 +228,10 @@ class CrmPipelineService:
                     f"Initial stage '{s_name}' must be of type 'open'. Terminal stages ('won' or 'lost') cannot be initial."
                 )
 
-        # If making this pipeline default, safely unset existing defaults inside transaction
+        # If making this pipeline default, acquire global default-pipeline lock FIRST
+        # and safely unset existing defaults inside transaction before inserting
         if data.is_default:
+            await self._acquire_default_pipeline_lock()
             await self.session.execute(
                 update(CrmPipeline)
                 .where(CrmPipeline.is_default.is_(True), CrmPipeline.deleted_at.is_(None))
@@ -275,10 +277,29 @@ class CrmPipelineService:
 
         return await self.get_pipeline_detail(pipeline.id)
 
+    _DEFAULT_PIPELINE_LOCK_KEY = "crm_pipelines:global_default_invariant"
+
+    async def _acquire_default_pipeline_lock(self) -> None:
+        """
+        Acquire a transaction-scoped advisory lock serializing all global CRM
+        default-pipeline state transitions BEFORE acquiring pipeline row locks,
+        eliminating AB/BA PostgreSQL deadlocks.
+        """
+        bind = self.session.get_bind()
+        if bind is not None and bind.dialect.name == "postgresql":
+            await self.session.execute(
+                text("SELECT pg_advisory_xact_lock(hashtext(:lock_key))"),
+                {"lock_key": self._DEFAULT_PIPELINE_LOCK_KEY},
+            )
+
     async def update_pipeline(
         self, pipeline_id: uuid.UUID, data: CrmPipelineUpdate
     ) -> CrmPipelineDetailRead:
         """Update pipeline metadata and active/default state."""
+        # Acquire global default lock BEFORE row lock whenever default/active state is mutated
+        if data.is_default is not None or data.is_active is not None:
+            await self._acquire_default_pipeline_lock()
+
         # Lock row for concurrency safety
         stmt = (
             select(CrmPipeline)
@@ -343,11 +364,11 @@ class CrmPipelineService:
                     raise BadRequestException(
                         "Cannot deactivate the default pipeline. Please set another active pipeline as default first."
                     )
-                # Check for active leads
+                # Check for active leads (status not in terminal won/lost)
                 leads_cnt_stmt = select(func.count(CrmLead.id)).where(
                     CrmLead.pipeline_id == pipeline_id,
                     CrmLead.deleted_at.is_(None),
-                    CrmLead.status == "open",
+                    CrmLead.status.notin_(["won", "lost"]),
                 )
                 leads_cnt = (await self.session.execute(leads_cnt_stmt)).scalar_one()
                 if leads_cnt > 0:
@@ -379,6 +400,9 @@ class CrmPipelineService:
 
     async def set_default_pipeline(self, pipeline_id: uuid.UUID) -> CrmPipelineDetailRead:
         """Safely switch the default pipeline to the designated one."""
+        # Acquire global default lock FIRST to guarantee strict lock ordering across all paths
+        await self._acquire_default_pipeline_lock()
+
         stmt = (
             select(CrmPipeline)
             .options(selectinload(CrmPipeline.stages))
@@ -400,23 +424,27 @@ class CrmPipelineService:
                 "Cannot set pipeline as default because it has no active initial stage."
             )
 
-        # Ensure it is active
-        pipeline.is_active = True
-        pipeline.is_default = True
-        pipeline.updated_at = datetime.now(timezone.utc)
-
-        # Clear other defaults transactionally
+        # Clear other defaults FIRST (before setting pipeline.is_default = True) so partial
+        # unique index `uq_crm_pipelines_single_default` is never transiently violated on flush.
         await self.session.execute(
             update(CrmPipeline)
             .where(CrmPipeline.id != pipeline_id, CrmPipeline.is_default.is_(True), CrmPipeline.deleted_at.is_(None))
             .values(is_default=False)
         )
 
+        # Ensure it is active and designated default
+        pipeline.is_active = True
+        pipeline.is_default = True
+        pipeline.updated_at = datetime.now(timezone.utc)
+
         await self.session.commit()
         return await self.get_pipeline_detail(pipeline_id)
 
     async def toggle_active_pipeline(self, pipeline_id: uuid.UUID) -> CrmPipelineDetailRead:
         """Toggle active/inactive state of a pipeline."""
+        # Acquire global default lock BEFORE row lock so toggle_active and set_default share lock order
+        await self._acquire_default_pipeline_lock()
+
         stmt = (
             select(CrmPipeline)
             .options(selectinload(CrmPipeline.stages))
@@ -433,6 +461,8 @@ class CrmPipelineService:
 
     async def delete_pipeline(self, pipeline_id: uuid.UUID) -> None:
         """Safely soft-delete a pipeline if not default and no leads exist."""
+        await self._acquire_default_pipeline_lock()
+
         stmt = (
             select(CrmPipeline)
             .options(selectinload(CrmPipeline.stages))
@@ -668,11 +698,11 @@ class CrmPipelineService:
         # Active state update
         if data.is_active is not None:
             if data.is_active is False and stage.is_active:
-                # Check if it has active leads
+                # Check if it has active leads (status not in terminal won/lost)
                 leads_cnt_stmt = select(func.count(CrmLead.id)).where(
                     CrmLead.stage_id == stage_id,
                     CrmLead.deleted_at.is_(None),
-                    CrmLead.status == "open",
+                    CrmLead.status.notin_(["won", "lost"]),
                 )
                 leads_cnt = (await self.session.execute(leads_cnt_stmt)).scalar_one()
                 if leads_cnt > 0:
@@ -1286,15 +1316,16 @@ class CrmSalespersonDistributionService:
             self.session.add(config)
             await self.session.flush()
         else:
+            fields_set = payload.model_fields_set
             if payload.is_eligible is not None:
                 config.is_eligible = payload.is_eligible
             if payload.priority is not None:
                 config.priority = payload.priority
-            if payload.max_lead_capacity is not None:
+            if "max_lead_capacity" in fields_set:
                 config.max_lead_capacity = payload.max_lead_capacity
             if payload.is_active is not None:
                 config.is_active = payload.is_active
-            if payload.notes is not None:
+            if "notes" in fields_set:
                 config.notes = payload.notes
             config.updated_at = datetime.now(timezone.utc)
             await self.session.flush()

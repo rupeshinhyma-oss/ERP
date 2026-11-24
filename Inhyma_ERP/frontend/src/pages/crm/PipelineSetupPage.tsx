@@ -786,7 +786,18 @@ export function PipelineSetupPage() {
 
   return (
     <AppShell activeKey="crm-pipelines">
-      <div className="crm-pipeline-page" style={{ padding: "24px 32px", minHeight: "100vh", background: "#f8fafc" }}>
+      <div
+        className="crm-pipeline-page"
+        style={{
+          padding: "clamp(14px, 3vw, 24px) clamp(12px, 3vw, 32px)",
+          minHeight: "100vh",
+          background: "#f8fafc",
+          width: "100%",
+          maxWidth: "100%",
+          minWidth: 0,
+          boxSizing: "border-box",
+        }}
+      >
         {/* Breadcrumb Trail */}
         <Breadcrumb trail={["CRM", "Pipeline Setup"]} />
 
@@ -894,9 +905,10 @@ export function PipelineSetupPage() {
         <div
           style={{
             display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+            gridTemplateColumns: "repeat(auto-fit, minmax(min(200px, 100%), 1fr))",
             gap: "16px",
             marginBottom: "24px",
+            minWidth: 0,
           }}
         >
           <div
@@ -982,7 +994,7 @@ export function PipelineSetupPage() {
         <div
           style={{
             background: "#ffffff",
-            padding: "16px 20px",
+            padding: "14px 16px",
             borderRadius: "12px",
             border: "1px solid #e2e8f0",
             marginBottom: "16px",
@@ -991,9 +1003,12 @@ export function PipelineSetupPage() {
             alignItems: "center",
             flexWrap: "wrap",
             gap: "12px",
+            minWidth: 0,
+            maxWidth: "100%",
+            boxSizing: "border-box",
           }}
         >
-          <div style={{ display: "flex", alignItems: "center", gap: "10px", flex: 1, minWidth: "260px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "10px", flex: "1 1 180px", minWidth: 0, width: "100%", maxWidth: "100%" }}>
             <input
               type="text"
               placeholder="Search pipelines by name or description..."
@@ -1002,16 +1017,18 @@ export function PipelineSetupPage() {
               style={{
                 width: "100%",
                 maxWidth: "360px",
-                padding: "8px 14px",
+                minWidth: 0,
+                padding: "8px 12px",
                 borderRadius: "8px",
                 border: "1px solid #cbd5e1",
                 fontSize: "13.5px",
                 outline: "none",
+                boxSizing: "border-box",
               }}
             />
           </div>
 
-          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
             <span style={{ fontSize: "13px", fontWeight: 600, color: "#64748b" }}>Status:</span>
             {(["all", "active", "inactive"] as const).map((filter) => (
               <button
@@ -1044,9 +1061,22 @@ export function PipelineSetupPage() {
             border: "1px solid #e2e8f0",
             overflow: "hidden",
             boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
+            width: "100%",
+            maxWidth: "100%",
+            minWidth: 0,
+            boxSizing: "border-box",
           }}
         >
-          <div style={{ overflowX: "auto" }}>
+          <div
+            className="table-scroll"
+            style={{
+              overflowX: "auto",
+              width: "100%",
+              maxWidth: "100%",
+              maxHeight: "none",
+              WebkitOverflowScrolling: "touch",
+            }}
+          >
             <table style={{ width: "100%", borderCollapse: "collapse", textAlign: "left", fontSize: "13.5px" }}>
               <thead>
                 <tr style={{ background: "#f8fafc", borderBottom: "1px solid #e2e8f0" }}>

@@ -18,13 +18,25 @@ Mounts under ``/api/v1/hrms/expenses``:
 from __future__ import annotations
 
 from datetime import date
+import time
 from typing import List, Optional
+from urllib.parse import unquote, urlparse
 import uuid
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, Response, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.common.storage import save_uploaded_file
+from app.auth.dependencies import get_auth_service
+from app.auth.service import AuthService
+from app.common.storage import (
+    create_receipt_signature,
+    guess_content_type,
+    read_private_file_bytes,
+    sanitize_filename,
+    save_uploaded_file,
+    validate_receipt_upload,
+    verify_receipt_signature,
+)
 from app.core.responses import build_success_response
 from app.database.session import get_db_session
 from app.hrms.expense_service import HrmsExpenseService
@@ -87,20 +99,27 @@ async def upload_expense_receipt(
     ctx: HrmsUserContext = Depends(get_hrms_user_context),
 ):
     ctx.require_module_access("expenses")
+    ctx.require_write_access("expenses", action="create")
     content = await file.read()
-    public_url, stored_name = await save_uploaded_file(
+    orig_name = file.filename or "receipt.pdf"
+    verified_mime = validate_receipt_upload(
+        filename=orig_name,
         content=content,
-        original_filename=file.filename or "receipt.pdf",
+        declared_content_type=file.content_type,
+    )
+    private_ref, stored_name = await save_uploaded_file(
+        content=content,
+        original_filename=orig_name,
         bucket="expense-receipts",
         local_subfolder="expenses",
-        content_type=file.content_type,
+        content_type=verified_mime,
     )
     return build_success_response(
         data={
-            "file_url": public_url,
-            "file_name": file.filename or stored_name,
+            "file_url": private_ref,
+            "file_name": orig_name or stored_name,
             "file_size": len(content),
-            "file_type": file.content_type or "application/octet-stream",
+            "file_type": verified_mime,
         },
         message="Receipt uploaded successfully.",
     )
@@ -160,6 +179,7 @@ async def create_expense(
     ctx: HrmsUserContext = Depends(get_hrms_user_context),
 ):
     ctx.require_module_access("expenses")
+    ctx.require_write_access("expenses", action="create")
     # Backend strictly sets employee_id to the authenticated caller
     exp = await service.create_expense(employee_id=ctx.user_id, payload=payload, is_submit=submit)
     dto = service.to_read_dto(exp)
@@ -170,8 +190,95 @@ async def create_expense(
 
 
 # ===========================================================================
-# 5. Get Expense by ID
+# 5. Get Expense by ID & Authorized Receipt Retrieval
 # ===========================================================================
+
+def _extract_stored_receipt_name(receipt_url: str) -> str:
+    parsed = urlparse(receipt_url)
+    path = unquote(parsed.path or receipt_url)
+    return sanitize_filename(path.rsplit("/", 1)[-1])
+
+
+@router.get("/{expense_id}/receipt-url", summary="Generate short-lived signed URL for an expense receipt")
+async def get_expense_receipt_signed_url(
+    expense_id: uuid.UUID,
+    service: HrmsExpenseService = Depends(get_expense_service),
+    ctx: HrmsUserContext = Depends(get_hrms_user_context),
+):
+    ctx.require_module_access("expenses")
+    allowed_ids = None if (ctx.is_admin or ctx.is_hr) else ctx.managed_employee_ids
+    exp = await service.get_expense(
+        expense_id=expense_id,
+        current_user_id=ctx.user_id,
+        is_admin=ctx.is_admin or ctx.is_hr,
+        allowed_employee_ids=allowed_ids,
+    )
+    if not exp.receipt_url:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No receipt attached to this expense claim.")
+
+    expires_at = int(time.time()) + 300
+    sig = create_receipt_signature(str(expense_id), expires_at)
+    return build_success_response(
+        data={
+            "signed_url": f"/api/v1/hrms/expenses/{expense_id}/receipt?exp={expires_at}&sig={sig}",
+            "expires_in_seconds": 300,
+        },
+        message="Signed receipt URL generated successfully.",
+    )
+
+
+@router.get("/{expense_id}/receipt", summary="Download confidential expense receipt (RBAC or short-lived signed URL)")
+async def download_expense_receipt(
+    expense_id: uuid.UUID,
+    request: Request,
+    exp: Optional[int] = Query(default=None),
+    sig: Optional[str] = Query(default=None),
+    service: HrmsExpenseService = Depends(get_expense_service),
+    db: AsyncSession = Depends(get_db_session),
+    auth_service: AuthService = Depends(get_auth_service),
+):
+    expense: HrmsExpense | None = None
+    if sig is not None or exp is not None:
+        if exp is None or not sig or not verify_receipt_signature(str(expense_id), exp, sig):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Invalid or expired signed receipt URL.",
+            )
+        expense = await db.get(HrmsExpense, expense_id)
+        if not expense or getattr(expense, "deleted_at", None) is not None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Expense claim not found.")
+    else:
+        ctx = await get_hrms_user_context(request=request, db=db, auth_service=auth_service)
+        ctx.require_module_access("expenses")
+        allowed_ids = None if (ctx.is_admin or ctx.is_hr) else ctx.managed_employee_ids
+        expense = await service.get_expense(
+            expense_id=expense_id,
+            current_user_id=ctx.user_id,
+            is_admin=ctx.is_admin or ctx.is_hr,
+            allowed_employee_ids=allowed_ids,
+        )
+
+    if not expense.receipt_url:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No receipt attached to this expense claim.")
+
+    stored_name = _extract_stored_receipt_name(expense.receipt_url)
+    data = await read_private_file_bytes("expense-receipts", "expenses", stored_name)
+    if data is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Receipt file not found in private storage.")
+
+    display_name = sanitize_filename(expense.receipt_filename or stored_name)
+    media_type = guess_content_type(display_name)
+    return Response(
+        content=data,
+        media_type=media_type,
+        headers={
+            "Content-Disposition": f'inline; filename="{display_name}"',
+            "Cache-Control": "private, no-store",
+            "Referrer-Policy": "no-referrer",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
+
 
 @router.get("/{expense_id}", summary="Get expense detail by ID")
 async def get_expense_by_id(
@@ -206,6 +313,7 @@ async def update_expense(
     ctx: HrmsUserContext = Depends(get_hrms_user_context),
 ):
     ctx.require_module_access("expenses")
+    ctx.require_write_access("expenses", action="update")
     exp = await service.update_expense(
         expense_id=expense_id,
         current_user_id=ctx.user_id,
@@ -230,6 +338,7 @@ async def delete_expense(
     ctx: HrmsUserContext = Depends(get_hrms_user_context),
 ):
     ctx.require_module_access("expenses")
+    ctx.require_write_access("expenses", action="delete")
     await service.delete_expense(expense_id=expense_id, current_user_id=ctx.user_id, is_admin=ctx.is_admin)
     return build_success_response(
         data={"deleted": True, "id": str(expense_id)},
@@ -248,6 +357,7 @@ async def submit_expense(
     ctx: HrmsUserContext = Depends(get_hrms_user_context),
 ):
     ctx.require_module_access("expenses")
+    ctx.require_write_access("expenses", action="update")
     exp = await service.submit_expense(expense_id=expense_id, current_user_id=ctx.user_id, is_admin=ctx.is_admin)
     dto = service.to_read_dto(exp)
     return build_success_response(
@@ -359,7 +469,13 @@ async def reimburse_expense(
     db: AsyncSession = Depends(get_db_session),
 ):
     ctx.require_module_access("expenses")
-    if not (ctx.is_admin or (ctx.is_hr and ("hrms.approve" in ctx.permissions or "hrms.manage" in ctx.permissions))):
+    has_reimburse_perm = ctx.is_admin or (
+        ctx.is_hr
+        and ("hrms.approve" in ctx.permissions or "hrms.manage" in ctx.permissions)
+        and "deny:hrms.approve" not in ctx.permissions
+        and "deny:hrms.manage" not in ctx.permissions
+    )
+    if not has_reimburse_perm:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only Admin or HR with approval permissions can mark expenses as reimbursed.",

@@ -11,13 +11,15 @@ Business logic for:
 
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 import math
 from typing import List, Optional
 import uuid
 
+IST = timezone(timedelta(hours=5, minutes=30))
+
 from fastapi import HTTPException, status
-from sqlalchemy import delete, func, or_, select
+from sqlalchemy import delete, func, insert, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -26,21 +28,28 @@ from app.hrms.models import (
     HrmsSiteVisit,
     HrmsSiteVisitCheckIn,
     HrmsTrackingPoint,
+    HrmsTrackingSettings,
     HrmsTrackingStop,
+)
+from app.hrms.notifications import (
+    notify_site_visit_assigned,
+    notify_site_visit_cancelled,
 )
 from app.hrms.schemas import (
     RegularizationEvidenceRead,
+    SiteVisitCancel,
     SiteVisitCheckIn,
     SiteVisitCheckOut,
     SiteVisitCreate,
     SiteVisitRead,
+    SiteVisitUpdate,
     TrackingPointItem,
     TrackingSessionRead,
     TrackingStartPayload,
     TrackingStopPayload,
     TrackingStopRead,
 )
-from app.users.models import User
+from app.users.models import EmploymentStatus, User, UserStatus
 
 
 def haversine_distance_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -52,6 +61,7 @@ def haversine_distance_km(lat1: float, lon1: float, lat2: float, lon2: float) ->
         math.sin(dlat / 2.0) ** 2
         + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon / 2.0) ** 2
     )
+    a = min(1.0, max(0.0, a))
     c = 2 * math.atan2(math.sqrt(a), math.sqrt(1.0 - a))
     return R * c
 
@@ -67,6 +77,7 @@ def haversine_distance_meters(lat1: float, lon1: float, lat2: float, lon2: float
         math.sin(delta_phi / 2.0) ** 2
         + math.cos(phi1) * math.cos(phi2) * math.sin(delta_lambda / 2.0) ** 2
     )
+    a = min(1.0, max(0.0, a))
     c = 2.0 * math.atan2(math.sqrt(a), math.sqrt(1.0 - a))
     return R * c
 
@@ -109,6 +120,11 @@ def validate_site_visit_gps(
         raise HTTPException(
             status_code=400,
             detail=f"Invalid GPS coordinates: latitude ({latitude}) must be between -90 and 90, longitude ({longitude}) between -180 and 180."
+        )
+    if abs(latitude) < 1e-6 and abs(longitude) < 1e-6:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid GPS coordinates: (0, 0) coordinates are not permitted.",
         )
 
     # 2. Accuracy check
@@ -278,6 +294,7 @@ class HrmsSiteVisitService:
         s: HrmsLiveTrackingSession,
         is_detailed: bool | None = None,
         interval_minutes: int | None = None,
+        max_gps_accuracy_meters: float | None = None,
     ) -> TrackingSessionRead:
         emp_name = None
         if s.employee:
@@ -293,20 +310,80 @@ class HrmsSiteVisitService:
         if not total_pts:
             if s.route_summary:
                 total_pts = len(s.route_summary)
-            elif hasattr(s, "points") and s.points:
+            elif "points" in s.__dict__ and s.points:
                 total_pts = len(s.points)
 
-        duration_mins = s.total_duration_minutes
-        duration_secs = (duration_mins * 60) if duration_mins else 0
+        duration_mins = max(0, int(s.total_duration_minutes)) if s.total_duration_minutes is not None else 0
+        duration_secs = duration_mins * 60
         if s.status == "ACTIVE" and s.start_time:
             now = datetime.now(timezone.utc)
-            duration_secs = max(0, int((now - s.start_time).total_seconds()))
-            duration_mins = max(0, duration_secs // 60)
+            st_utc = s.start_time.replace(tzinfo=timezone.utc) if s.start_time.tzinfo is None else s.start_time.astimezone(timezone.utc)
+            duration_secs = max(0, int((now - st_utc).total_seconds()))
+            duration_mins = duration_secs // 60
+        elif s.start_time and s.end_time:
+            st_utc = s.start_time.replace(tzinfo=timezone.utc) if s.start_time.tzinfo is None else s.start_time.astimezone(timezone.utc)
+            en_utc = s.end_time.replace(tzinfo=timezone.utc) if s.end_time.tzinfo is None else s.end_time.astimezone(timezone.utc)
+            duration_secs = max(0, int((en_utc - st_utc).total_seconds()))
+            duration_mins = duration_secs // 60
 
         start_lat = s.start_latitude or (s.start_location.get("latitude") if isinstance(s.start_location, dict) else None)
         start_lng = s.start_longitude or (s.start_location.get("longitude") if isinstance(s.start_location, dict) else None)
         end_lat = s.end_latitude or (s.end_location.get("latitude") if isinstance(s.end_location, dict) else None)
         end_lng = s.end_longitude or (s.end_location.get("longitude") if isinstance(s.end_location, dict) else None)
+
+        route_summary = s.route_summary or []
+        approx_distance_km = s.approx_distance_km or 0.0
+
+        # For ACTIVE sessions with persisted tracking points loaded, reconstruct live
+        # chronologically ordered route_summary, live distance, and latest position without extra DB churn.
+        loaded_points = s.__dict__.get("points") if s.status == "ACTIVE" else None
+        if loaded_points:
+            valid_pts = [
+                p
+                for p in loaded_points
+                if math.isfinite(p.latitude)
+                and math.isfinite(p.longitude)
+                and -90.0 <= p.latitude <= 90.0
+                and -180.0 <= p.longitude <= 180.0
+                and not (abs(p.latitude) < 1e-6 and abs(p.longitude) < 1e-6)
+                and (
+                    max_gps_accuracy_meters is None
+                    or p.accuracy is None
+                    or p.accuracy <= max_gps_accuracy_meters
+                )
+            ]
+            if valid_pts:
+                valid_pts.sort(
+                    key=lambda p: (
+                        p.recorded_at.replace(tzinfo=timezone.utc)
+                        if p.recorded_at.tzinfo is None
+                        else p.recorded_at.astimezone(timezone.utc),
+                        str(p.id),
+                    )
+                )
+                live_summary = []
+                live_dist = 0.0
+                for idx, cur in enumerate(valid_pts):
+                    live_summary.append(
+                        {
+                            "lat": round(cur.latitude, 6),
+                            "lng": round(cur.longitude, 6),
+                            "accuracy": cur.accuracy,
+                            "time": cur.recorded_at.isoformat(),
+                        }
+                    )
+                    if idx > 0:
+                        prev = valid_pts[idx - 1]
+                        live_dist += haversine_distance_km(
+                            prev.latitude, prev.longitude, cur.latitude, cur.longitude
+                        )
+                route_summary = live_summary
+                approx_distance_km = round(live_dist, 2)
+                if start_lat is None or start_lng is None:
+                    start_lat = valid_pts[0].latitude
+                    start_lng = valid_pts[0].longitude
+                end_lat = valid_pts[-1].latitude
+                end_lng = valid_pts[-1].longitude
 
         stops_read = []
         if hasattr(s, "stops") and s.stops:
@@ -325,8 +402,8 @@ class HrmsSiteVisitService:
             end_time=s.end_time,
             total_duration_minutes=duration_mins,
             total_duration_seconds=duration_secs,
-            approx_distance_km=s.approx_distance_km or 0.0,
-            approximate_distance_km=s.approx_distance_km or 0.0,
+            approx_distance_km=approx_distance_km,
+            approximate_distance_km=approx_distance_km,
             total_points=total_pts,
             points_count=total_pts,
             start_latitude=start_lat,
@@ -334,7 +411,7 @@ class HrmsSiteVisitService:
             end_latitude=end_lat,
             end_longitude=end_lng,
             start_location=s.start_location,
-            route_summary=s.route_summary or [],
+            route_summary=route_summary,
             stops=stops_read,
             is_active=(s.status == "ACTIVE"),
             is_simulated=bool(
@@ -354,28 +431,46 @@ class HrmsSiteVisitService:
             s,
             is_detailed=eff.is_detailed_tracking_enabled,
             interval_minutes=eff.detailed_interval_minutes or 5,
+            max_gps_accuracy_meters=float(eff.max_gps_accuracy_meters or 50.0),
         )
 
     async def to_tracking_sessions_dto_batch(self, sessions: list[HrmsLiveTrackingSession]) -> list[TrackingSessionRead]:
         if not sessions:
             return []
-        from app.hrms.service import HrmsSetupService
-        setup_svc = HrmsSetupService(self.db)
         emp_ids = list({s.employee_id for s in sessions})
-        settings_map = {}
-        for eid in emp_ids:
-            try:
-                eff = await setup_svc.get_effective_tracking_settings(eid)
-                settings_map[eid] = eff
-            except Exception:
-                pass
+        # Batch load org default + employee overrides in ONE query (eliminates N+1)
+        settings_map: dict[uuid.UUID, HrmsTrackingSettings] = {}
+        org_default: HrmsTrackingSettings | None = None
+        try:
+            stmt = select(HrmsTrackingSettings).where(
+                or_(
+                    HrmsTrackingSettings.employee_id.is_(None),
+                    HrmsTrackingSettings.employee_id.in_(emp_ids),
+                )
+            )
+            rows = list((await self.db.execute(stmt)).scalars().all())
+            for r in rows:
+                if r.employee_id is None:
+                    org_default = r
+                else:
+                    settings_map[r.employee_id] = r
+        except Exception:
+            pass
 
         results = []
         for s in sessions:
-            eff = settings_map.get(s.employee_id)
-            is_det = eff.is_detailed_tracking_enabled if eff else False
+            eff = settings_map.get(s.employee_id) or org_default
+            is_det = bool(eff.is_detailed_tracking_enabled) if eff else False
             inv = (eff.detailed_interval_minutes or 5) if eff else 5
-            results.append(self.to_tracking_session_read(s, is_detailed=is_det, interval_minutes=inv))
+            max_acc = float(eff.max_gps_accuracy_meters or 50.0) if eff else 50.0
+            results.append(
+                self.to_tracking_session_read(
+                    s,
+                    is_detailed=is_det,
+                    interval_minutes=inv,
+                    max_gps_accuracy_meters=max_acc,
+                )
+            )
         return results
 
     def to_tracking_stop_read(self, st: HrmsTrackingStop) -> TrackingStopRead:
@@ -430,10 +525,16 @@ class HrmsSiteVisitService:
                 )
 
         emp = await self.db.get(User, payload.employee_id)
-        if not emp:
+        if (
+            not emp
+            or emp.deleted_at is not None
+            or not emp.is_active
+            or emp.status in (UserStatus.INACTIVE, UserStatus.SUSPENDED)
+            or getattr(emp, "employment_status", None) in (EmploymentStatus.TERMINATED, EmploymentStatus.RESIGNED)
+        ):
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="Assigned employee does not exist.",
+                detail="Assigned employee does not exist or is inactive.",
             )
 
         cust_name = (payload.customer_name or payload.customer_site_name or "").strip()
@@ -451,9 +552,150 @@ class HrmsSiteVisitService:
             created_by=creator_id,
         )
         self.db.add(visit)
+        await self.db.flush()
+        await notify_site_visit_assigned(
+            self.db,
+            employee_id=visit.employee_id,
+            customer_name=visit.customer_name or visit.site_address,
+            visit_date=visit.visit_date.isoformat(),
+            actor_id=creator_id,
+            visit_id=visit.id,
+            reassigned=False,
+        )
         await self.db.commit()
         await self.db.refresh(visit)
         return visit
+
+    async def update_site_visit(
+        self,
+        visit_id: uuid.UUID,
+        actor_id: uuid.UUID,
+        is_admin: bool,
+        payload: SiteVisitUpdate,
+        allowed_employee_ids: Optional[set[uuid.UUID]] = None,
+    ) -> HrmsSiteVisit:
+        """Edit or reassign a scheduled/in-progress site visit with strict RBAC scoping."""
+        visit = await self.get_site_visit(
+            visit_id=visit_id,
+            current_user_id=actor_id,
+            is_admin=is_admin,
+            allowed_employee_ids=allowed_employee_ids,
+            for_update=True,
+        )
+        if visit.status in ("COMPLETED", "CANCELLED"):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Cannot edit a site visit with status '{visit.status}'.",
+            )
+
+        prev_employee_id = visit.employee_id
+        if payload.employee_id is not None and payload.employee_id != visit.employee_id:
+            if visit.status == "CHECKED_IN":
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Cannot reassign a site visit that is already checked in.",
+                )
+            if not is_admin:
+                if allowed_employee_ids is None or payload.employee_id not in allowed_employee_ids:
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail="You do not have permission to reassign this site visit to an employee outside your scope.",
+                    )
+            new_emp = await self.db.get(User, payload.employee_id)
+            if (
+                not new_emp
+                or new_emp.deleted_at is not None
+                or not new_emp.is_active
+                or new_emp.status in (UserStatus.INACTIVE, UserStatus.SUSPENDED)
+                or getattr(new_emp, "employment_status", None) in (EmploymentStatus.TERMINATED, EmploymentStatus.RESIGNED)
+            ):
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Target employee does not exist or is inactive.",
+                )
+            visit.employee_id = payload.employee_id
+
+        if payload.customer_name is not None or payload.customer_site_name is not None:
+            new_cust = (payload.customer_name or payload.customer_site_name or "").strip()
+            if not new_cust:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Customer name cannot be empty.")
+            visit.customer_name = new_cust
+        if payload.site_address is not None:
+            visit.site_address = payload.site_address.strip()
+        if payload.site_latitude is not None and payload.site_longitude is not None:
+            visit.site_latitude = payload.site_latitude
+            visit.site_longitude = payload.site_longitude
+        if payload.visit_date is not None:
+            visit.visit_date = payload.visit_date
+        if payload.planned_start_time is not None:
+            visit.planned_start_time = payload.planned_start_time.strip()
+        if payload.planned_end_time is not None:
+            visit.planned_end_time = payload.planned_end_time.strip()
+        if payload.notes is not None:
+            visit.notes = payload.notes.strip() if payload.notes else None
+
+        await self.db.flush()
+        if visit.employee_id != prev_employee_id:
+            await notify_site_visit_assigned(
+                self.db,
+                employee_id=visit.employee_id,
+                customer_name=visit.customer_name or visit.site_address,
+                visit_date=visit.visit_date.isoformat(),
+                actor_id=actor_id,
+                visit_id=visit.id,
+                reassigned=True,
+            )
+        await self.db.commit()
+        return await self.get_site_visit(visit.id, actor_id, is_admin, allowed_employee_ids=allowed_employee_ids)
+
+    async def cancel_site_visit(
+        self,
+        visit_id: uuid.UUID,
+        actor_id: uuid.UUID,
+        is_admin: bool,
+        payload: Optional[SiteVisitCancel] = None,
+        allowed_employee_ids: Optional[set[uuid.UUID]] = None,
+    ) -> HrmsSiteVisit:
+        """Cancel a scheduled site visit with RBAC enforcement and notification."""
+        visit = await self.get_site_visit(
+            visit_id=visit_id,
+            current_user_id=actor_id,
+            is_admin=is_admin,
+            allowed_employee_ids=allowed_employee_ids,
+            for_update=True,
+        )
+        if visit.status == "COMPLETED":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Cannot cancel a site visit that is already completed.",
+            )
+        if visit.status == "CANCELLED":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Site visit is already cancelled.",
+            )
+        if visit.status == "CHECKED_IN":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Cannot cancel a site visit that is currently checked in.",
+            )
+
+        visit.status = "CANCELLED"
+        reason = payload.reason.strip() if (payload and payload.reason and payload.reason.strip()) else None
+        if reason:
+            visit.notes = f"{visit.notes} | Cancelled: {reason}" if visit.notes else f"Cancelled: {reason}"
+
+        await self.db.flush()
+        await notify_site_visit_cancelled(
+            self.db,
+            employee_id=visit.employee_id,
+            customer_name=visit.customer_name or visit.site_address,
+            visit_date=visit.visit_date.isoformat(),
+            actor_id=actor_id,
+            visit_id=visit.id,
+        )
+        await self.db.commit()
+        return await self.get_site_visit(visit.id, actor_id, is_admin, allowed_employee_ids=allowed_employee_ids)
 
     async def list_site_visits(
         self,
@@ -530,6 +772,7 @@ class HrmsSiteVisitService:
         current_user_id: uuid.UUID,
         is_admin: bool,
         allowed_employee_ids: Optional[set[uuid.UUID]] = None,
+        for_update: bool = False,
     ) -> HrmsSiteVisit:
         """Fetch single site visit ensuring employee data isolation."""
         stmt = (
@@ -541,6 +784,8 @@ class HrmsSiteVisitService:
             )
             .where(HrmsSiteVisit.id == visit_id, HrmsSiteVisit.deleted_at.is_(None))
         )
+        if for_update:
+            stmt = stmt.with_for_update().execution_options(populate_existing=True)
         res = await self.db.execute(stmt)
         visit = res.scalar_one_or_none()
         if not visit:
@@ -574,7 +819,7 @@ class HrmsSiteVisitService:
         max_radius_meters: float | None = None,
     ) -> HrmsSiteVisit:
         """Record employee check-in with GPS location proof and proximity verification."""
-        visit = await self.get_site_visit(visit_id, employee_id, is_admin)
+        visit = await self.get_site_visit(visit_id, employee_id, is_admin, for_update=True)
 
         if not is_admin and visit.employee_id != employee_id:
             raise HTTPException(
@@ -630,10 +875,10 @@ class HrmsSiteVisitService:
         visit.check_in_address = payload.address.strip() if payload.address else "Location Captured"
         visit.status = "CHECKED_IN"
 
-        # Record check-in event in persistent log
+        # Record check-in event in persistent log attributed to the assigned visit employee
         checkin_log = HrmsSiteVisitCheckIn(
             site_visit_id=visit.id,
-            employee_id=employee_id,
+            employee_id=visit.employee_id,
             event_type="CHECK_IN",
             latitude=payload.latitude,
             longitude=payload.longitude,
@@ -657,7 +902,7 @@ class HrmsSiteVisitService:
         max_radius_meters: float | None = None,
     ) -> HrmsSiteVisit:
         """Record employee check-out with GPS location proof and proximity verification."""
-        visit = await self.get_site_visit(visit_id, employee_id, is_admin)
+        visit = await self.get_site_visit(visit_id, employee_id, is_admin, for_update=True)
 
         if not is_admin and visit.employee_id != employee_id:
             raise HTTPException(
@@ -713,10 +958,10 @@ class HrmsSiteVisitService:
         visit.check_out_address = payload.address.strip() if payload.address else "Location Captured"
         visit.status = "COMPLETED"
 
-        # Record check-out event in persistent log
+        # Record check-out event in persistent log attributed to the assigned visit employee
         checkout_log = HrmsSiteVisitCheckIn(
             site_visit_id=visit.id,
-            employee_id=employee_id,
+            employee_id=visit.employee_id,
             event_type="CHECK_OUT",
             latitude=payload.latitude,
             longitude=payload.longitude,
@@ -762,15 +1007,72 @@ class HrmsSiteVisitService:
             session.total_points = pts_count
         return session
 
+    async def _acquire_tracking_advisory_lock(self, lock_key: str) -> None:
+        if not isinstance(self.db, AsyncSession):
+            return
+        bind = self.db.get_bind()
+        if bind is None or bind.dialect.name != "postgresql":
+            return
+        await self.db.execute(
+            text("SELECT pg_advisory_xact_lock(hashtext(:lock_key))"),
+            {"lock_key": lock_key},
+        )
+
+    @staticmethod
+    def _validate_coord_pair(lat: float, lng: float, label: str = "GPS coordinates") -> None:
+        if not math.isfinite(lat) or not math.isfinite(lng):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid {label}: latitude and longitude must be finite numbers.",
+            )
+        if not (-90.0 <= lat <= 90.0) or not (-180.0 <= lng <= 180.0):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid {label}: latitude must be within [-90, 90] and longitude within [-180, 180].",
+            )
+        if abs(lat) < 1e-6 and abs(lng) < 1e-6:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid {label}: (0, 0) coordinates are not permitted.",
+            )
+
     async def start_tracking(
         self,
         employee_id: uuid.UUID,
         payload: TrackingStartPayload,
     ) -> HrmsLiveTrackingSession:
-        """Start a new Live Tracking session."""
+        """Start a new Live Tracking session (serialized per employee to prevent duplicate ACTIVE sessions)."""
         now = datetime.now(timezone.utc)
 
-        # If an active session exists, return it
+        # Validate start_location coordinates if present
+        start_lat = None
+        start_lng = None
+        if isinstance(payload.start_location, dict):
+            raw_lat = payload.start_location.get("latitude", payload.start_location.get("lat"))
+            raw_lng = payload.start_location.get("longitude", payload.start_location.get("lng"))
+            if raw_lat is not None or raw_lng is not None:
+                if raw_lat is None or raw_lng is None:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="Invalid start_location: both latitude and longitude are required.",
+                    )
+                try:
+                    lat_f = float(raw_lat)
+                    lng_f = float(raw_lng)
+                except (ValueError, TypeError):
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="Invalid start_location coordinates.",
+                    )
+                self._validate_coord_pair(lat_f, lng_f, label="start_location")
+                if "latitude" in payload.start_location and "longitude" in payload.start_location:
+                    start_lat = lat_f
+                    start_lng = lng_f
+
+        # Serialize concurrent START requests for the same employee on PostgreSQL
+        await self._acquire_tracking_advisory_lock(f"hrms_track_start:{employee_id}")
+
+        # If an active session exists, return it idempotently
         active = await self.get_active_tracking_session(employee_id)
         if active:
             return active
@@ -778,19 +1080,10 @@ class HrmsSiteVisitService:
         # Link to site visit ONLY if explicitly provided in payload (completely optional)
         site_visit_id = payload.site_visit_id
 
-        start_lat = None
-        start_lng = None
-        if payload.start_location and "latitude" in payload.start_location and "longitude" in payload.start_location:
-            try:
-                start_lat = float(payload.start_location["latitude"])
-                start_lng = float(payload.start_location["longitude"])
-            except (ValueError, TypeError):
-                pass
-
         session = HrmsLiveTrackingSession(
             employee_id=employee_id,
             site_visit_id=site_visit_id,
-            tracking_date=now.date(),
+            tracking_date=now.astimezone(IST).date(),
             status="ACTIVE",
             start_time=now,
             start_location=payload.start_location,
@@ -804,14 +1097,21 @@ class HrmsSiteVisitService:
         self.db.add(session)
         await self.db.flush()
 
-        # If start location has lat/lng, record as the first point in PostgreSQL
+        # If start location has latitude/longitude, record as the first point in PostgreSQL
         if start_lat is not None and start_lng is not None:
+            raw_acc = payload.start_location.get("accuracy")
+            acc_f = float(raw_acc) if raw_acc is not None else None
+            if acc_f is not None and (not math.isfinite(acc_f) or acc_f < 0.0):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Invalid start_location accuracy.",
+                )
             pt = HrmsTrackingPoint(
                 session_id=session.id,
                 employee_id=employee_id,
                 latitude=start_lat,
                 longitude=start_lng,
-                accuracy=float(payload.start_location.get("accuracy", 0.0)) if payload.start_location.get("accuracy") else None,
+                accuracy=acc_f,
                 recorded_at=now,
             )
             self.db.add(pt)
@@ -835,11 +1135,29 @@ class HrmsSiteVisitService:
         session_id: uuid.UUID,
         points: List[TrackingPointItem],
     ) -> int:
-        """Batch record tracking points while session is active."""
+        """
+        Batch record tracking points while session is active:
+        - Enforces coordinate finiteness/bounds, rejects (0,0), rejects invalid accuracy,
+          rejects future (>10s) and excessively stale (>24h old) timestamps.
+        - Filters out poor-accuracy GPS drift (> configured max_gps_accuracy_meters) so
+          mileage and stationary stops cannot be poisoned.
+        - Deduplicates identical points (retry-safe for offline/network recovery).
+        """
         if not points:
             return 0
+        if len(points) > 500:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Batch size exceeds maximum allowed 500 tracking points per upload.",
+            )
 
-        session = await self.db.get(HrmsLiveTrackingSession, session_id)
+        stmt = (
+            select(HrmsLiveTrackingSession)
+            .where(HrmsLiveTrackingSession.id == session_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        session = (await self.db.execute(stmt)).scalar_one_or_none()
         if not session or session.status != "ACTIVE":
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -852,37 +1170,95 @@ class HrmsSiteVisitService:
                 detail="Cannot submit tracking points to another employee's session.",
             )
 
+        from app.hrms.service import HrmsSetupService
+        setup_svc = HrmsSetupService(self.db)
+        effective_settings = await setup_svc.get_effective_tracking_settings(session.employee_id)
+        max_acc = float(effective_settings.max_gps_accuracy_meters or 50.0)
+
         now = datetime.now(timezone.utc)
-        records = []
+        max_future = now + timedelta(seconds=self.MAX_GPS_FUTURE_TOLERANCE_SECONDS)
+        min_allowed = now - timedelta(hours=24)
+
+        # Fetch existing point keys once for O(1) duplicate suppression (network retry safety)
+        existing_rows = (
+            await self.db.execute(
+                select(
+                    HrmsTrackingPoint.recorded_at,
+                    HrmsTrackingPoint.latitude,
+                    HrmsTrackingPoint.longitude,
+                ).where(HrmsTrackingPoint.session_id == session_id)
+            )
+        ).all()
+        seen_keys: set[tuple[int, float, float]] = set()
+        for ex_ts, ex_lat, ex_lng in existing_rows:
+            ts_norm = ex_ts.replace(tzinfo=timezone.utc) if ex_ts.tzinfo is None else ex_ts.astimezone(timezone.utc)
+            seen_keys.add((int(ts_norm.timestamp()), round(float(ex_lat), 6), round(float(ex_lng), 6)))
+
+        rows_to_insert: list[dict] = []
         for pt in points:
-            records.append(
-                HrmsTrackingPoint(
-                    session_id=session_id,
-                    employee_id=employee_id,
-                    latitude=pt.latitude,
-                    longitude=pt.longitude,
-                    accuracy=pt.accuracy,
-                    recorded_at=pt.recorded_at or now,
+            self._validate_coord_pair(pt.latitude, pt.longitude, label="tracking point coordinates")
+            if pt.accuracy is not None and (not math.isfinite(pt.accuracy) or pt.accuracy < 0.0):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Invalid GPS accuracy value: must be a finite non-negative number.",
                 )
+
+            rec_at = pt.recorded_at or now
+            if rec_at.tzinfo is None:
+                rec_at = rec_at.replace(tzinfo=timezone.utc)
+            else:
+                rec_at = rec_at.astimezone(timezone.utc)
+
+            if rec_at > max_future:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Invalid tracking timestamp: recorded_at cannot be in the future.",
+                )
+            if rec_at < min_allowed:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Stale tracking point rejected: recorded_at exceeds 24-hour buffer window.",
+                )
+
+            # Filter out poor-accuracy GPS drift points so they never poison route/distance/stops
+            if pt.accuracy is not None and pt.accuracy > max_acc:
+                continue
+
+            pt_key = (int(rec_at.timestamp()), round(float(pt.latitude), 6), round(float(pt.longitude), 6))
+            if pt_key in seen_keys:
+                continue
+            seen_keys.add(pt_key)
+
+            rows_to_insert.append(
+                {
+                    "id": uuid.uuid4(),
+                    "session_id": session_id,
+                    "employee_id": session.employee_id,
+                    "latitude": pt.latitude,
+                    "longitude": pt.longitude,
+                    "accuracy": pt.accuracy,
+                    "recorded_at": rec_at,
+                }
             )
 
-        self.db.add_all(records)
-        await self.db.flush()
-
-        # Update point count on session
-        count_stmt = select(func.count(HrmsTrackingPoint.id)).where(HrmsTrackingPoint.session_id == session_id)
-        total_count = (await self.db.execute(count_stmt)).scalar() or 0
-        session.total_points = total_count
+        if rows_to_insert:
+            await self.db.execute(insert(HrmsTrackingPoint), rows_to_insert)
+            session.total_points = len(seen_keys)
 
         await self.db.commit()
 
-        # Detailed stationary-stop detection using configured threshold and radius
-        try:
-            await self.process_stationary_stops(session_id, employee_id)
-        except Exception:
-            pass
+        # Run stationary-stop detection ONLY when detailed tracking is enabled and clean points were added
+        if rows_to_insert and effective_settings.is_active and effective_settings.is_detailed_tracking_enabled:
+            try:
+                await self.process_stationary_stops(
+                    session_id,
+                    session.employee_id,
+                    effective_settings=effective_settings,
+                )
+            except Exception:
+                pass
 
-        return len(records)
+        return len(rows_to_insert)
 
     async def stop_tracking(
         self,
@@ -892,11 +1268,30 @@ class HrmsSiteVisitService:
         payload: TrackingStopPayload,
     ) -> HrmsLiveTrackingSession:
         """
-        Stop tracking session:
-        1. Calculate duration and total approximate distance (Haversine formula).
+        Stop tracking session (atomically locked with FOR UPDATE):
+        1. Calculate duration and total approximate distance (Haversine formula over valid,
+           chronologically sorted reliable points).
         2. Build compact permanent route summary and save start/end coordinates.
         3. Persist summary on HrmsLiveTrackingSession with status COMPLETED.
+        4. Attribute all stationary stops strictly to session.employee_id.
         """
+        if isinstance(payload.end_location, dict):
+            raw_lat = payload.end_location.get("latitude", payload.end_location.get("lat"))
+            raw_lng = payload.end_location.get("longitude", payload.end_location.get("lng"))
+            if raw_lat is not None or raw_lng is not None:
+                if raw_lat is None or raw_lng is None:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="Invalid end_location: both latitude and longitude are required.",
+                    )
+                try:
+                    self._validate_coord_pair(float(raw_lat), float(raw_lng), label="end_location")
+                except (ValueError, TypeError):
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="Invalid end_location coordinates.",
+                    )
+
         stmt = (
             select(HrmsLiveTrackingSession)
             .options(
@@ -906,6 +1301,8 @@ class HrmsSiteVisitService:
                 selectinload(HrmsLiveTrackingSession.stops),
             )
             .where(HrmsLiveTrackingSession.id == session_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
         )
         res = await self.db.execute(stmt)
         session = res.scalar_one_or_none()
@@ -924,22 +1321,45 @@ class HrmsSiteVisitService:
         if session.status in ("COMPLETED", "STOPPED"):
             return session
 
+        from app.hrms.service import HrmsSetupService
+        setup_svc = HrmsSetupService(self.db)
+        effective_settings = await setup_svc.get_effective_tracking_settings(session.employee_id)
+        max_acc = float(effective_settings.max_gps_accuracy_meters or 50.0)
+
         now = datetime.now(timezone.utc)
         session.end_time = now
         session.status = "COMPLETED"
 
-        # Calculate duration
-        duration_mins = max(1, int((now - session.start_time).total_seconds() / 60))
+        # Calculate accurate non-negative duration in whole minutes without inventing elapsed time (HRMS-BUG-33)
+        start_utc = (
+            session.start_time.replace(tzinfo=timezone.utc)
+            if session.start_time.tzinfo is None
+            else session.start_time.astimezone(timezone.utc)
+        )
+        duration_secs = max(0, int((now - start_utc).total_seconds()))
+        duration_mins = duration_secs // 60
         session.total_duration_minutes = duration_mins
 
-        # Fetch all points in chronological order
+        # Fetch all points in strict chronological order
         pts_stmt = (
             select(HrmsTrackingPoint)
             .where(HrmsTrackingPoint.session_id == session_id)
-            .order_by(HrmsTrackingPoint.recorded_at.asc())
+            .order_by(HrmsTrackingPoint.recorded_at.asc(), HrmsTrackingPoint.id.asc())
         )
         pts_res = await self.db.execute(pts_stmt)
-        points = list(pts_res.scalars().all())
+        raw_points = list(pts_res.scalars().all())
+
+        # Filter reliable valid points only (exclude poor accuracy drift & invalid coords)
+        points = [
+            p
+            for p in raw_points
+            if math.isfinite(p.latitude)
+            and math.isfinite(p.longitude)
+            and -90.0 <= p.latitude <= 90.0
+            and -180.0 <= p.longitude <= 180.0
+            and not (abs(p.latitude) < 1e-6 and abs(p.longitude) < 1e-6)
+            and (p.accuracy is None or p.accuracy <= max_acc)
+        ]
 
         total_distance = 0.0
         route_summary = []
@@ -988,9 +1408,13 @@ class HrmsSiteVisitService:
 
         await self.db.commit()
 
-        # Process and close stationary stops on stop_tracking
+        # Process and close stationary stops strictly under session.employee_id (never caller/admin ID)
         try:
-            await self.process_stationary_stops(session_id, employee_id)
+            await self.process_stationary_stops(
+                session_id,
+                session.employee_id,
+                effective_settings=effective_settings,
+            )
         except Exception:
             pass
 
@@ -1003,8 +1427,12 @@ class HrmsSiteVisitService:
         is_admin: bool,
         employee_id: Optional[uuid.UUID] = None,
         tracking_date: Optional[date] = None,
+        is_manager: bool = False,
+        allowed_employee_ids: Optional[set[uuid.UUID]] = None,
+        skip: int = 0,
+        limit: int = 100,
     ) -> List[HrmsLiveTrackingSession]:
-        """List tracking sessions with RBAC scoping."""
+        """List tracking sessions with strict RBAC scoping (Admin/HR all, Manager team, Employee self)."""
         stmt = (
             select(HrmsLiveTrackingSession)
             .options(
@@ -1014,16 +1442,32 @@ class HrmsSiteVisitService:
             )
         )
 
-        if not is_admin:
-            stmt = stmt.where(HrmsLiveTrackingSession.employee_id == current_user_id)
-        else:
+        if is_admin:
             if employee_id:
                 stmt = stmt.where(HrmsLiveTrackingSession.employee_id == employee_id)
+        elif is_manager:
+            mgr_allowed = allowed_employee_ids or {current_user_id}
+            if employee_id:
+                if employee_id not in mgr_allowed:
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail="You cannot view tracking sessions for employees outside your management scope.",
+                    )
+                stmt = stmt.where(HrmsLiveTrackingSession.employee_id == employee_id)
+            else:
+                stmt = stmt.where(HrmsLiveTrackingSession.employee_id.in_(mgr_allowed))
+        else:
+            if employee_id and employee_id != current_user_id:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="You can only view your own tracking sessions.",
+                )
+            stmt = stmt.where(HrmsLiveTrackingSession.employee_id == current_user_id)
 
         if tracking_date:
             stmt = stmt.where(HrmsLiveTrackingSession.tracking_date == tracking_date)
 
-        stmt = stmt.order_by(HrmsLiveTrackingSession.start_time.desc())
+        stmt = stmt.order_by(HrmsLiveTrackingSession.start_time.desc()).offset(skip).limit(limit)
         res = await self.db.execute(stmt)
         return list(res.scalars().all())
 
@@ -1091,15 +1535,17 @@ class HrmsSiteVisitService:
         self,
         session_id: uuid.UUID,
         employee_id: uuid.UUID,
+        effective_settings: Optional[HrmsTrackingSettings] = None,
     ) -> List[HrmsTrackingStop]:
         """
         Detect and update qualifying stationary stops for an active or completed tracking session.
         Respects effective tracking settings (threshold, radius, GPS accuracy).
         Idempotent: updates existing open stops and closes stops when movement occurs.
         """
-        from app.hrms.service import HrmsSetupService
-        setup_svc = HrmsSetupService(self.db)
-        effective_settings = await setup_svc.get_effective_tracking_settings(employee_id)
+        if effective_settings is None:
+            from app.hrms.service import HrmsSetupService
+            setup_svc = HrmsSetupService(self.db)
+            effective_settings = await setup_svc.get_effective_tracking_settings(employee_id)
 
         if not effective_settings.is_active:
             return []

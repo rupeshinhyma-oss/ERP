@@ -44,7 +44,10 @@ function getUserInitials(name?: string | null): string {
   return name.slice(0, 2).toUpperCase();
 }
 
-const SubtaskCollaborationSection: React.FC<{ subtaskId: string }> = ({ subtaskId }) => {
+const SubtaskCollaborationSection: React.FC<{ subtaskId: string; readOnly?: boolean }> = ({
+  subtaskId,
+  readOnly = false,
+}) => {
   const [isOpen, setIsOpen] = useState(false);
   const [comments, setComments] = useState<TaskSubtaskComment[]>([]);
   const [attachments, setAttachments] = useState<TaskSubtaskAttachment[]>([]);
@@ -158,11 +161,13 @@ const SubtaskCollaborationSection: React.FC<{ subtaskId: string }> = ({ subtaskI
               </div>
 
               {/* Composer */}
-              <CommentComposer
-                placeholder="Comment on this subtask or attach files..."
-                onSubmit={handleSendComment}
-                isSubmitting={submitting}
-              />
+              {!readOnly && (
+                <CommentComposer
+                  placeholder="Comment on this subtask or attach files..."
+                  onSubmit={handleSendComment}
+                  isSubmitting={submitting}
+                />
+              )}
             </>
           )}
         </div>
@@ -171,7 +176,10 @@ const SubtaskCollaborationSection: React.FC<{ subtaskId: string }> = ({ subtaskI
   );
 };
 
-const EscalationCollaborationSection: React.FC<{ escalationId: string }> = ({ escalationId }) => {
+const EscalationCollaborationSection: React.FC<{ escalationId: string; readOnly?: boolean }> = ({
+  escalationId,
+  readOnly = false,
+}) => {
   const [isOpen, setIsOpen] = useState(true);
   const [comments, setComments] = useState<TaskEscalationComment[]>([]);
   const [loading, setLoading] = useState(false);
@@ -255,11 +263,13 @@ const EscalationCollaborationSection: React.FC<{ escalationId: string }> = ({ es
             </div>
           )}
 
-          <CommentComposer
-            placeholder="Discuss resolution for this escalation..."
-            onSubmit={handleSendComment}
-            isSubmitting={submitting}
-          />
+          {!readOnly && (
+            <CommentComposer
+              placeholder="Discuss resolution for this escalation..."
+              onSubmit={handleSendComment}
+              isSubmitting={submitting}
+            />
+          )}
         </div>
       )}
     </div>
@@ -320,6 +330,12 @@ export const TaskDrawer: React.FC<TaskDrawerProps> = ({
   const [holdReasonDraft, setHoldReasonDraft] = useState("");
   const [holdUntilDraft, setHoldUntilDraft] = useState("");
 
+  // Approval Workflow State (BUG-12)
+  const [showSubmitApprovalForm, setShowSubmitApprovalForm] = useState(false);
+  const [selectedApproverId, setSelectedApproverId] = useState("");
+  const [approvalNotesDraft, setApprovalNotesDraft] = useState("");
+  const [approvalSubmitting, setApprovalSubmitting] = useState(false);
+
   // Subtask creation state
   const [isAddingSubtask, setIsAddingSubtask] = useState(false);
   const [subtaskTitle, setSubtaskTitle] = useState("");
@@ -340,6 +356,7 @@ export const TaskDrawer: React.FC<TaskDrawerProps> = ({
 
   // Assignee & Watcher add state with SearchableUserSelect
   const [availableUsers, setAvailableUsers] = useState<AvailableUser[]>([]);
+  const [managedDeptIds, setManagedDeptIds] = useState<string[]>([]);
   const [showAddAssignee, setShowAddAssignee] = useState(false);
   const [showAddWatcher, setShowAddWatcher] = useState(false);
 
@@ -391,14 +408,16 @@ export const TaskDrawer: React.FC<TaskDrawerProps> = ({
 
   const loadV2Data = async () => {
     try {
-      const [labels, sprints, tasksRes] = await Promise.all([
+      const [labels, sprints, tasksRes, depts] = await Promise.all([
         tasksApi.fetchLabels().catch(() => []),
         tasksApi.fetchSprints().catch(() => []),
         tasksApi.getTasks({ limit: 100 }).catch(() => ({ items: [] })),
+        tasksApi.fetchTaskDepartments ? tasksApi.fetchTaskDepartments().catch(() => []) : Promise.resolve([]),
       ]);
       setAvailableLabels(labels);
       setAvailableSprints(sprints);
       setAvailableCandidateTasks(tasksRes.items || []);
+      setManagedDeptIds((depts || []).filter((d) => d.is_managed).map((d) => d.id));
     } catch (err) {
       console.error("Failed to load V2 options", err);
     }
@@ -415,6 +434,9 @@ export const TaskDrawer: React.FC<TaskDrawerProps> = ({
       setShowAddWatcher(false);
       setIsHoldModalOpen(false);
       setIsAddingDependency(false);
+      setShowSubmitApprovalForm(false);
+      setSelectedApproverId("");
+      setApprovalNotesDraft("");
     } else {
       setTask(null);
       setIsEditingTitle(false);
@@ -425,6 +447,9 @@ export const TaskDrawer: React.FC<TaskDrawerProps> = ({
       setShowAddWatcher(false);
       setIsHoldModalOpen(false);
       setIsAddingDependency(false);
+      setShowSubmitApprovalForm(false);
+      setSelectedApproverId("");
+      setApprovalNotesDraft("");
     }
   }, [isOpen, taskId]);
 
@@ -452,40 +477,46 @@ export const TaskDrawer: React.FC<TaskDrawerProps> = ({
     };
   }, [isOpen, isHoldModalOpen, onClose]);
 
-  const handleIssueTypeChange = async (newType: IssueType) => {
-    if (!task) return;
+  const updateTaskOptimistically = async (
+    patch: Parameters<typeof tasksApi.updateTask>[1],
+    fallbackError: string
+  ): Promise<TaskDetail | null> => {
+    if (!task) return null;
     try {
-      const updated = await tasksApi.updateTask(task.id, { issue_type: newType });
+      const updated = await tasksApi.updateTask(task.id, {
+        ...patch,
+        version: task.version,
+      });
       setTask(updated);
       onTaskUpdated();
-      loadTimeline(task.id);
+      return updated;
     } catch (err: any) {
-      alert(err?.response?.data?.detail || "Failed to update issue type");
+      const status = err?.status ?? err?.response?.status;
+      const msg = err?.message || err?.response?.data?.detail || fallbackError;
+      alert(msg);
+      if (status === 409) {
+        await loadTask(task.id);
+      }
+      return null;
     }
+  };
+
+  const handleIssueTypeChange = async (newType: IssueType) => {
+    if (!task) return;
+    const updated = await updateTaskOptimistically({ issue_type: newType }, "Failed to update issue type");
+    if (updated) loadTimeline(task.id);
   };
 
   const handleParentTaskChange = async (parentId: string | null) => {
     if (!task) return;
-    try {
-      const updated = await tasksApi.updateTask(task.id, { parent_task_id: parentId });
-      setTask(updated);
-      onTaskUpdated();
-      loadTimeline(task.id);
-    } catch (err: any) {
-      alert(err?.response?.data?.detail || "Failed to update parent task");
-    }
+    const updated = await updateTaskOptimistically({ parent_task_id: parentId }, "Failed to update parent task");
+    if (updated) loadTimeline(task.id);
   };
 
   const handleSprintChange = async (sprintId: string | null) => {
     if (!task) return;
-    try {
-      const updated = await tasksApi.updateTask(task.id, { sprint_id: sprintId });
-      setTask(updated);
-      onTaskUpdated();
-      loadTimeline(task.id);
-    } catch (err: any) {
-      alert(err?.response?.data?.detail || "Failed to update sprint");
-    }
+    const updated = await updateTaskOptimistically({ sprint_id: sprintId }, "Failed to update sprint");
+    if (updated) loadTimeline(task.id);
   };
 
   const handleAddLabel = async (labelId: string) => {
@@ -597,14 +628,8 @@ export const TaskDrawer: React.FC<TaskDrawerProps> = ({
         return;
       }
     }
-    try {
-      const updated = await tasksApi.updateTask(task.id, { status: newStatus });
-      setTask(updated);
-      onTaskUpdated();
-      loadTimeline(task.id);
-    } catch (err: any) {
-      alert(err?.response?.data?.detail || "Failed to update status");
-    }
+    const updated = await updateTaskOptimistically({ status: newStatus }, "Failed to update status");
+    if (updated) loadTimeline(task.id);
   };
 
   const handleConfirmHold = async () => {
@@ -613,95 +638,89 @@ export const TaskDrawer: React.FC<TaskDrawerProps> = ({
       alert("A valid, non-empty hold reason is required when placing a task ON_HOLD.");
       return;
     }
-    try {
-      const updated = await tasksApi.updateTask(task.id, {
+    const updated = await updateTaskOptimistically(
+      {
         status: "ON_HOLD",
         hold_reason: holdReasonDraft.trim(),
         hold_until: holdUntilDraft || null,
-      });
-      setTask(updated);
+      },
+      "Failed to put task on hold"
+    );
+    if (updated) {
       setIsHoldModalOpen(false);
-      onTaskUpdated();
       loadTimeline(task.id);
-    } catch (err: any) {
-      alert(err?.response?.data?.detail || "Failed to put task on hold");
     }
   };
 
   const handleResumeFromHold = async () => {
     if (!task) return;
+    const updated = await updateTaskOptimistically({ status: "IN_PROGRESS" }, "Failed to resume task");
+    if (updated) loadTimeline(task.id);
+  };
+
+  const handleSubmitForApproval = async () => {
+    if (!task || !selectedApproverId || approvalSubmitting) return;
+    setApprovalSubmitting(true);
     try {
-      const updated = await tasksApi.updateTask(task.id, {
-        status: "IN_PROGRESS",
+      const updated = await tasksApi.submitTaskForApproval(task.id, {
+        approver_id: selectedApproverId,
+        notes: approvalNotesDraft.trim() || undefined,
       });
       setTask(updated);
+      setShowSubmitApprovalForm(false);
+      setSelectedApproverId("");
+      setApprovalNotesDraft("");
       onTaskUpdated();
       loadTimeline(task.id);
     } catch (err: any) {
-      alert(err?.response?.data?.detail || "Failed to resume task");
+      alert(err?.message || err?.response?.data?.detail || "Failed to submit task for approval");
+    } finally {
+      setApprovalSubmitting(false);
+    }
+  };
+
+  const handleApprovalAction = async (approved: boolean) => {
+    if (!task || approvalSubmitting) return;
+    setApprovalSubmitting(true);
+    try {
+      const updated = await tasksApi.actionTaskApproval(task.id, {
+        approved,
+        notes: approvalNotesDraft.trim() || undefined,
+      });
+      setTask(updated);
+      setApprovalNotesDraft("");
+      onTaskUpdated();
+      loadTimeline(task.id);
+    } catch (err: any) {
+      alert(err?.message || err?.response?.data?.detail || "Failed to process approval action");
+    } finally {
+      setApprovalSubmitting(false);
     }
   };
 
 
   const handlePriorityChange = async (newPriority: TaskPriority) => {
-    if (!task) return;
-    try {
-      const updated = await tasksApi.updateTask(task.id, { priority: newPriority });
-      setTask(updated);
-      onTaskUpdated();
-    } catch (err: any) {
-      alert(err?.response?.data?.detail || "Failed to update priority");
-    }
+    await updateTaskOptimistically({ priority: newPriority }, "Failed to update priority");
   };
 
   const handleStartDateChange = async (dateStr: string) => {
-    if (!task) return;
-    try {
-      const updated = await tasksApi.updateTask(task.id, {
-        start_date: dateStr ? dateStr : null,
-      });
-      setTask(updated);
-      onTaskUpdated();
-    } catch (err: any) {
-      alert(err?.response?.data?.detail || "Failed to update start date");
-    }
+    await updateTaskOptimistically({ start_date: dateStr ? dateStr : null }, "Failed to update start date");
   };
 
   const handleDueDateChange = async (dateStr: string) => {
-    if (!task) return;
-    try {
-      const updated = await tasksApi.updateTask(task.id, {
-        due_date: dateStr ? dateStr : null,
-      });
-      setTask(updated);
-      onTaskUpdated();
-    } catch (err: any) {
-      alert(err?.response?.data?.detail || "Failed to update due date");
-    }
+    await updateTaskOptimistically({ due_date: dateStr ? dateStr : null }, "Failed to update due date");
   };
 
   const handleSaveTitle = async () => {
     if (!task || !titleDraft.trim()) return;
-    try {
-      const updated = await tasksApi.updateTask(task.id, { title: titleDraft.trim() });
-      setTask(updated);
-      setIsEditingTitle(false);
-      onTaskUpdated();
-    } catch (err: any) {
-      alert(err?.response?.data?.detail || "Failed to save title");
-    }
+    const updated = await updateTaskOptimistically({ title: titleDraft.trim() }, "Failed to save title");
+    if (updated) setIsEditingTitle(false);
   };
 
   const handleSaveDesc = async () => {
     if (!task) return;
-    try {
-      const updated = await tasksApi.updateTask(task.id, { description: descDraft });
-      setTask(updated);
-      setIsEditingDesc(false);
-      onTaskUpdated();
-    } catch (err: any) {
-      alert(err?.response?.data?.detail || "Failed to save description");
-    }
+    const updated = await updateTaskOptimistically({ description: descDraft }, "Failed to save description");
+    if (updated) setIsEditingDesc(false);
   };
 
   const handleAddAssignee = async (userId: string) => {
@@ -909,6 +928,36 @@ export const TaskDrawer: React.FC<TaskDrawerProps> = ({
   const assigneesList = task?.assignees.filter((a) => a.assignment_role !== "WATCHER") || [];
   const watchersList = task?.assignees.filter((a) => a.assignment_role === "WATCHER") || [];
 
+  const isCreatorOrAssignee = Boolean(
+    task &&
+      profile?.id &&
+      (task.created_by === profile.id ||
+        assigneesList.some((a) => a.user_id === profile.id))
+  );
+  const isActiveDeptManagerOfTask = Boolean(
+    task &&
+      !canManage &&
+      !hasPermission("task.all_view") &&
+      (hasPermission("task.create") || hasPermission("task.assign")) &&
+      (task as any).department_id &&
+      managedDeptIds.includes((task as any).department_id)
+  );
+  const canEditTask = Boolean(
+    task && (canManage || isCreatorOrAssignee || isActiveDeptManagerOfTask)
+  );
+  const canCollaborate = Boolean(
+    task &&
+      (canEditTask ||
+        watchersList.some((w) => w.user_id === profile?.id) ||
+        (profile?.id && task.approver_id === profile.id))
+  );
+  const canApproveTask = Boolean(
+    task &&
+      task.status === "PENDING_APPROVAL" &&
+      (canManage || (profile?.id && task.approver_id === profile.id && !isCreatorOrAssignee))
+  );
+  const approverCandidates = availableUsers.filter((u) => u.id !== profile?.id);
+
   const subtaskCount = task?.subtasks.length || 0;
   const completedCount = task?.subtasks.filter((s) => s.completed || s.status === "DONE").length || 0;
   const progressPercent = subtaskCount > 0 ? Math.round((completedCount / subtaskCount) * 100) : 0;
@@ -960,8 +1009,30 @@ export const TaskDrawer: React.FC<TaskDrawerProps> = ({
             <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap", marginBottom: "4px" }}>
               <span
                 style={{
-                  background: task?.status === "DONE" ? "#dcfce7" : task?.status === "IN_PROGRESS" ? "#eff6ff" : task?.status === "ON_HOLD" ? "#fef3c7" : "#f1f5f9",
-                  color: task?.status === "DONE" ? "#166534" : task?.status === "IN_PROGRESS" ? "#1e40af" : task?.status === "ON_HOLD" ? "#92400e" : "#475569",
+                  background:
+                    task?.status === "DONE"
+                      ? "#dcfce7"
+                      : task?.status === "IN_PROGRESS"
+                      ? "#eff6ff"
+                      : task?.status === "ON_HOLD"
+                      ? "#fef3c7"
+                      : task?.status === "PENDING_APPROVAL"
+                      ? "#f3e8ff"
+                      : task?.status === "REVIEW"
+                      ? "#e0f2fe"
+                      : "#f1f5f9",
+                  color:
+                    task?.status === "DONE"
+                      ? "#166534"
+                      : task?.status === "IN_PROGRESS"
+                      ? "#1e40af"
+                      : task?.status === "ON_HOLD"
+                      ? "#92400e"
+                      : task?.status === "PENDING_APPROVAL"
+                      ? "#6b21a8"
+                      : task?.status === "REVIEW"
+                      ? "#0369a1"
+                      : "#475569",
                   border: "1px solid #cbd5e1",
                   borderRadius: "12px",
                   padding: "2px 8px",
@@ -969,7 +1040,11 @@ export const TaskDrawer: React.FC<TaskDrawerProps> = ({
                   fontWeight: 700,
                 }}
               >
-                {task?.status === "ON_HOLD" ? "⏸️ ON HOLD" : task?.status?.replace("_", " ")}
+                {task?.status === "ON_HOLD"
+                  ? "⏸️ ON HOLD"
+                  : task?.status === "PENDING_APPROVAL"
+                  ? "⏳ PENDING APPROVAL"
+                  : task?.status?.replace(/_/g, " ")}
               </span>
               <span
                 style={{
@@ -987,6 +1062,7 @@ export const TaskDrawer: React.FC<TaskDrawerProps> = ({
               {/* Issue Type Badge / Selector */}
               <select
                 value={task?.issue_type || "TASK"}
+                disabled={!canEditTask}
                 onChange={(e) => handleIssueTypeChange(e.target.value as IssueType)}
                 style={{
                   padding: "2px 8px",
@@ -996,7 +1072,8 @@ export const TaskDrawer: React.FC<TaskDrawerProps> = ({
                   border: "1px solid #c7d2fe",
                   background: "#e0e7ff",
                   color: "#3730a3",
-                  cursor: "pointer",
+                  cursor: canEditTask ? "pointer" : "not-allowed",
+                  opacity: canEditTask ? 1 : 0.75,
                 }}
               >
                 <option value="TASK">TASK</option>
@@ -1006,6 +1083,23 @@ export const TaskDrawer: React.FC<TaskDrawerProps> = ({
                 <option value="EPIC">EPIC</option>
               </select>
 
+              {task && !canEditTask && (
+                <span
+                  data-testid="task-drawer-readonly-badge"
+                  style={{
+                    background: "#f1f5f9",
+                    color: "#475569",
+                    border: "1px solid #cbd5e1",
+                    padding: "2px 8px",
+                    borderRadius: "12px",
+                    fontSize: "11px",
+                    fontWeight: 700,
+                  }}
+                >
+                  🔒 Read-Only
+                </span>
+              )}
+
               {overdue && (
                 <span style={{ background: "#fee2e2", color: "#991b1b", padding: "2px 8px", borderRadius: "12px", fontSize: "11px", fontWeight: 700 }}>
                   ⚠️ OVERDUE
@@ -1013,7 +1107,7 @@ export const TaskDrawer: React.FC<TaskDrawerProps> = ({
               )}
             </div>
 
-            {isEditingTitle ? (
+            {isEditingTitle && canEditTask ? (
               <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
                 <input
                   type="text"
@@ -1038,21 +1132,21 @@ export const TaskDrawer: React.FC<TaskDrawerProps> = ({
               </div>
             ) : (
               <h2
-                onClick={() => setIsEditingTitle(true)}
-                title="Click to edit title"
+                onClick={() => canEditTask && setIsEditingTitle(true)}
+                title={canEditTask ? "Click to edit title" : undefined}
                 style={{
                   margin: 0,
                   fontSize: "17px",
                   fontWeight: 700,
                   color: "#0f172a",
-                  cursor: "pointer",
+                  cursor: canEditTask ? "pointer" : "default",
                   display: "inline-flex",
                   alignItems: "center",
                   gap: "6px",
                 }}
               >
                 {task?.title ? task.title : <InlineTextSkeleton width={220} height={22} />}
-                <span style={{ fontSize: "12px", color: "#94a3b8" }}>✏️</span>
+                {canEditTask && <span style={{ fontSize: "12px", color: "#94a3b8" }}>✏️</span>}
               </h2>
             )}
 
@@ -1092,17 +1186,19 @@ export const TaskDrawer: React.FC<TaskDrawerProps> = ({
                     }}
                   >
                     {l.name}
-                    <button
-                      type="button"
-                      onClick={() => handleRemoveLabel(l.id)}
-                      title="Remove label"
-                      style={{ background: "none", border: "none", cursor: "pointer", color: l.color, padding: 0, fontSize: "10px" }}
-                    >
-                      ✕
-                    </button>
+                    {canEditTask && (
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveLabel(l.id)}
+                        title="Remove label"
+                        style={{ background: "none", border: "none", cursor: "pointer", color: l.color, padding: 0, fontSize: "10px" }}
+                      >
+                        ✕
+                      </button>
+                    )}
                   </span>
                 ))}
-              {availableLabels.filter((al) => !task?.labels?.some((tl) => tl.id === al.id)).length > 0 && (
+              {canEditTask && availableLabels.filter((al) => !task?.labels?.some((tl) => tl.id === al.id)).length > 0 && (
                 <select
                   defaultValue=""
                   onChange={(e) => {
@@ -1141,6 +1237,7 @@ export const TaskDrawer: React.FC<TaskDrawerProps> = ({
                 <ReactionPicker
                   reactions={task.reactions}
                   onToggleReaction={handleToggleTaskReaction}
+                  disabled={!canCollaborate}
                 />
               </div>
             )}
@@ -1274,28 +1371,171 @@ export const TaskDrawer: React.FC<TaskDrawerProps> = ({
                         )}
                       </div>
                     </div>
-                    <div style={{ display: "flex", gap: "6px" }}>
-                      <button
-                        type="button"
-                        onClick={() => setIsHoldModalOpen(true)}
-                        className="btn btn-small"
-                        style={{ fontSize: "11.5px", padding: "3px 8px", background: "#fef3c7", color: "#92400e", border: "1px solid #fde68a" }}
-                      >
-                        ✏️ Edit Hold
-                      </button>
-                      <button
-                        type="button"
-                        onClick={handleResumeFromHold}
-                        className="btn btn-small btn-primary"
-                        style={{ fontSize: "11.5px", padding: "3px 10px", background: "#16a34a", borderColor: "#15803d" }}
-                      >
-                        ▶️ Resume Task
-                      </button>
-                    </div>
+                    {canEditTask && (
+                      <div style={{ display: "flex", gap: "6px" }}>
+                        <button
+                          type="button"
+                          onClick={() => setIsHoldModalOpen(true)}
+                          className="btn btn-small"
+                          style={{ fontSize: "11.5px", padding: "3px 8px", background: "#fef3c7", color: "#92400e", border: "1px solid #fde68a" }}
+                        >
+                          ✏️ Edit Hold
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleResumeFromHold}
+                          className="btn btn-small btn-primary"
+                          style={{ fontSize: "11.5px", padding: "3px 10px", background: "#16a34a", borderColor: "#15803d" }}
+                        >
+                          ▶️ Resume Task
+                        </button>
+                      </div>
+                    )}
                   </div>
                   {task.hold_reason && (
                     <div style={{ fontSize: "12.5px", color: "#78350f", background: "#ffffff", padding: "8px 10px", borderRadius: "6px", border: "1px solid #fef08a" }}>
                       <strong>Hold Reason:</strong> {task.hold_reason}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Approval Workflow Banner & Controls (BUG-12) */}
+              {task.status === "PENDING_APPROVAL" && (
+                <div
+                  data-testid="task-approval-banner"
+                  style={{
+                    background: "#faf5ff",
+                    border: "1px solid #d8b4fe",
+                    borderRadius: "8px",
+                    padding: "14px",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "10px",
+                  }}
+                >
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "8px" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                      <span style={{ fontSize: "18px" }}>⏳</span>
+                      <div>
+                        <div style={{ fontWeight: 700, color: "#6b21a8", fontSize: "13.5px" }}>
+                          Pending Approval
+                        </div>
+                        <div style={{ fontSize: "11.5px", color: "#7e22ce" }}>
+                          Approver: <strong>{task.approver?.full_name || "Designated Approver"}</strong>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  {task.approval_notes && (
+                    <div style={{ fontSize: "12px", color: "#581c87", background: "#ffffff", padding: "8px 10px", borderRadius: "6px", border: "1px solid #e9d5ff" }}>
+                      <strong>Submission Notes:</strong> {task.approval_notes}
+                    </div>
+                  )}
+                  {canApproveTask ? (
+                    <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                      <input
+                        type="text"
+                        placeholder="Optional approval / rejection notes..."
+                        value={approvalNotesDraft}
+                        onChange={(e) => setApprovalNotesDraft(e.target.value)}
+                        style={{
+                          width: "100%",
+                          padding: "6px 10px",
+                          borderRadius: "6px",
+                          border: "1px solid #d8b4fe",
+                          fontSize: "12.5px",
+                          boxSizing: "border-box",
+                        }}
+                      />
+                      <div style={{ display: "flex", gap: "8px" }}>
+                        <button
+                          type="button"
+                          disabled={approvalSubmitting}
+                          onClick={() => handleApprovalAction(true)}
+                          className="btn btn-small btn-primary"
+                          style={{ background: "#16a34a", borderColor: "#15803d", fontSize: "12px" }}
+                        >
+                          ✅ Approve
+                        </button>
+                        <button
+                          type="button"
+                          disabled={approvalSubmitting}
+                          onClick={() => handleApprovalAction(false)}
+                          className="btn btn-small"
+                          style={{ background: "#fee2e2", color: "#991b1b", border: "1px solid #fca5a5", fontSize: "12px", fontWeight: 600 }}
+                        >
+                          ❌ Reject
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div style={{ fontSize: "11.5px", color: "#6b21a8", fontStyle: "italic" }}>
+                      Awaiting review by the designated approver.
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {task.status !== "PENDING_APPROVAL" && task.status !== "DONE" && canEditTask && (
+                <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "8px", padding: "10px 14px" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "8px" }}>
+                    <div style={{ fontSize: "12px", color: "#475569" }}>
+                      <strong>Approval Workflow</strong>
+                      {task.approval_status === "REJECTED" && (
+                        <span style={{ marginLeft: "8px", color: "#b91c1c", fontWeight: 600 }}>
+                          (Previously Rejected{task.approval_notes ? `: ${task.approval_notes}` : ""})
+                        </span>
+                      )}
+                    </div>
+                    <button
+                      type="button"
+                      className="btn btn-small"
+                      onClick={() => setShowSubmitApprovalForm(!showSubmitApprovalForm)}
+                      style={{
+                        background: showSubmitApprovalForm ? "#f3e8ff" : "#ffffff",
+                        color: "#6b21a8",
+                        border: "1px solid #d8b4fe",
+                        fontWeight: 600,
+                        fontSize: "11.5px",
+                      }}
+                    >
+                      {showSubmitApprovalForm ? "Cancel" : "📤 Submit for Approval"}
+                    </button>
+                  </div>
+                  {showSubmitApprovalForm && (
+                    <div style={{ marginTop: "10px", display: "flex", flexDirection: "column", gap: "8px" }}>
+                      <select
+                        aria-label="Select Approver"
+                        value={selectedApproverId}
+                        onChange={(e) => setSelectedApproverId(e.target.value)}
+                        style={{ width: "100%", padding: "7px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "12.5px" }}
+                      >
+                        <option value="">Select approver...</option>
+                        {approverCandidates.map((u) => (
+                          <option key={u.id} value={u.id}>
+                            {u.display_name || u.full_name} ({u.department || "General"})
+                          </option>
+                        ))}
+                      </select>
+                      <input
+                        type="text"
+                        placeholder="Optional notes for approver..."
+                        value={approvalNotesDraft}
+                        onChange={(e) => setApprovalNotesDraft(e.target.value)}
+                        style={{ width: "100%", padding: "6px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "12.5px", boxSizing: "border-box" }}
+                      />
+                      <div>
+                        <button
+                          type="button"
+                          disabled={!selectedApproverId || approvalSubmitting}
+                          onClick={handleSubmitForApproval}
+                          className="btn btn-small btn-primary"
+                          style={{ background: "#7c3aed", borderColor: "#6d28d9", fontSize: "12px" }}
+                        >
+                          {approvalSubmitting ? "Submitting..." : "Confirm Submit for Approval"}
+                        </button>
+                      </div>
                     </div>
                   )}
                 </div>
@@ -1309,13 +1549,20 @@ export const TaskDrawer: React.FC<TaskDrawerProps> = ({
                   </label>
                   <select
                     value={task.status}
+                    disabled={!canEditTask}
                     onChange={(e) => handleStatusChange(e.target.value as TaskStatus)}
-                    style={{ width: "100%", padding: "7px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "13px" }}
+                    style={{ width: "100%", padding: "7px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "13px", opacity: canEditTask ? 1 : 0.7 }}
                   >
                     <option value="TODO">To Do</option>
                     <option value="IN_PROGRESS">In Progress</option>
+                    <option value="REVIEW">In Review</option>
                     <option value="ON_HOLD">⏸️ On Hold</option>
-                    <option value="DONE">Completed</option>
+                    <option value="PENDING_APPROVAL" disabled>
+                      ⏳ Pending Approval
+                    </option>
+                    <option value="DONE" disabled={task.status === "PENDING_APPROVAL" && !canManage}>
+                      Completed
+                    </option>
                   </select>
                 </div>
                 <div>
@@ -1324,8 +1571,9 @@ export const TaskDrawer: React.FC<TaskDrawerProps> = ({
                   </label>
                   <select
                     value={task.priority}
+                    disabled={!canEditTask}
                     onChange={(e) => handlePriorityChange(e.target.value as TaskPriority)}
-                    style={{ width: "100%", padding: "7px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "13px" }}
+                    style={{ width: "100%", padding: "7px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "13px", opacity: canEditTask ? 1 : 0.7 }}
                   >
                     <option value="LOW">Low</option>
                     <option value="MEDIUM">Medium</option>
@@ -1343,8 +1591,9 @@ export const TaskDrawer: React.FC<TaskDrawerProps> = ({
                   </label>
                   <select
                     value={task.parent_task_id || ""}
+                    disabled={!canEditTask}
                     onChange={(e) => handleParentTaskChange(e.target.value || null)}
-                    style={{ width: "100%", padding: "7px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "13px" }}
+                    style={{ width: "100%", padding: "7px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "13px", opacity: canEditTask ? 1 : 0.7 }}
                   >
                     <option value="">None (Standalone / Epic)</option>
                     {availableCandidateTasks
@@ -1362,8 +1611,9 @@ export const TaskDrawer: React.FC<TaskDrawerProps> = ({
                   </label>
                   <select
                     value={task.sprint_id || ""}
+                    disabled={!canEditTask}
                     onChange={(e) => handleSprintChange(e.target.value || null)}
-                    style={{ width: "100%", padding: "7px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "13px" }}
+                    style={{ width: "100%", padding: "7px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "13px", opacity: canEditTask ? 1 : 0.7 }}
                   >
                     <option value="">📦 Product Backlog</option>
                     {availableSprints.map((s) => (
@@ -1383,9 +1633,10 @@ export const TaskDrawer: React.FC<TaskDrawerProps> = ({
                   </label>
                   <input
                     type="date"
+                    disabled={!canEditTask}
                     value={task.start_date || ""}
                     onChange={(e) => handleStartDateChange(e.target.value)}
-                    style={{ width: "100%", padding: "6px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "13px" }}
+                    style={{ width: "100%", padding: "6px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "13px", opacity: canEditTask ? 1 : 0.7 }}
                   />
                 </div>
                 <div>
@@ -1394,9 +1645,10 @@ export const TaskDrawer: React.FC<TaskDrawerProps> = ({
                   </label>
                   <input
                     type="date"
+                    disabled={!canEditTask}
                     value={task.due_date || ""}
                     onChange={(e) => handleDueDateChange(e.target.value)}
-                    style={{ width: "100%", padding: "6px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "13px" }}
+                    style={{ width: "100%", padding: "6px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "13px", opacity: canEditTask ? 1 : 0.7 }}
                   />
                 </div>
               </div>
@@ -1427,7 +1679,7 @@ export const TaskDrawer: React.FC<TaskDrawerProps> = ({
                   <span style={{ fontSize: "12px", fontWeight: 700, color: "#1e293b" }}>
                     👥 ASSIGNEES ({assigneesList.length})
                   </span>
-                  {canAssign && (
+                  {canAssign && canEditTask && (
                     <button
                       type="button"
                       onClick={() => setShowAddAssignee(!showAddAssignee)}
@@ -1506,7 +1758,7 @@ export const TaskDrawer: React.FC<TaskDrawerProps> = ({
                           </span>
                           <span>{name}</span>
                           <span style={{ fontSize: "11px", color: "#64748b" }}>({dept})</span>
-                          {canAssign && (
+                          {canAssign && canEditTask && (
                             <button
                               type="button"
                               onClick={() => handleRemoveAssignee(a.user_id)}
@@ -1537,25 +1789,27 @@ export const TaskDrawer: React.FC<TaskDrawerProps> = ({
                   <span style={{ fontSize: "12px", fontWeight: 700, color: "#1e293b" }}>
                     👁️ WATCHERS ({watchersList.length})
                   </span>
-                  <button
-                    type="button"
-                    onClick={() => setShowAddWatcher(!showAddWatcher)}
-                    style={{
-                      background: showAddWatcher ? "#faf5ff" : "transparent",
-                      border: "1px solid #e9d5ff",
-                      borderRadius: "4px",
-                      color: "#9333ea",
-                      cursor: "pointer",
-                      fontSize: "12px",
-                      fontWeight: 600,
-                      padding: "2px 8px",
-                    }}
-                  >
-                    {showAddWatcher ? "Cancel" : "+ Add Watcher"}
-                  </button>
+                  {canEditTask && (
+                    <button
+                      type="button"
+                      onClick={() => setShowAddWatcher(!showAddWatcher)}
+                      style={{
+                        background: showAddWatcher ? "#faf5ff" : "transparent",
+                        border: "1px solid #e9d5ff",
+                        borderRadius: "4px",
+                        color: "#9333ea",
+                        cursor: "pointer",
+                        fontSize: "12px",
+                        fontWeight: 600,
+                        padding: "2px 8px",
+                      }}
+                    >
+                      {showAddWatcher ? "Cancel" : "+ Add Watcher"}
+                    </button>
+                  )}
                 </div>
 
-                {showAddWatcher && (
+                {canEditTask && showAddWatcher && (
                   <div style={{ marginBottom: "10px" }}>
                     <SearchableUserSelect
                       users={availableUsers}
@@ -1614,22 +1868,24 @@ export const TaskDrawer: React.FC<TaskDrawerProps> = ({
                           </span>
                           <span>{name}</span>
                           <span style={{ fontSize: "11px", color: "#64748b" }}>({dept})</span>
-                          <button
-                            type="button"
-                            onClick={() => handleRemoveWatcher(w.user_id)}
-                            style={{
-                              border: "none",
-                              background: "transparent",
-                              color: "#9333ea",
-                              cursor: "pointer",
-                              fontSize: "12px",
-                              lineHeight: 1,
-                              fontWeight: "bold",
-                            }}
-                            title={`Remove ${name}`}
-                          >
-                            ✕
-                          </button>
+                          {canEditTask && (
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveWatcher(w.user_id)}
+                              style={{
+                                border: "none",
+                                background: "transparent",
+                                color: "#9333ea",
+                                cursor: "pointer",
+                                fontSize: "12px",
+                                lineHeight: 1,
+                                fontWeight: "bold",
+                              }}
+                              title={`Remove ${name}`}
+                            >
+                              ✕
+                            </button>
+                          )}
                         </span>
                       );
                     })
@@ -1642,7 +1898,7 @@ export const TaskDrawer: React.FC<TaskDrawerProps> = ({
               <div style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "8px", padding: "12px 14px" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
                   <span style={{ fontSize: "12px", fontWeight: 700, color: "#1e293b" }}>DESCRIPTION</span>
-                  {!isEditingDesc && (
+                  {canEditTask && !isEditingDesc && (
                     <button
                       type="button"
                       className="btn btn-small"
@@ -1654,7 +1910,7 @@ export const TaskDrawer: React.FC<TaskDrawerProps> = ({
                   )}
                 </div>
 
-                {isEditingDesc ? (
+                {canEditTask && isEditingDesc ? (
                   <div>
                     <textarea
                       rows={4}
@@ -1684,38 +1940,40 @@ export const TaskDrawer: React.FC<TaskDrawerProps> = ({
                   <span style={{ fontSize: "12px", fontWeight: 700, color: "#1e293b" }}>
                     📎 TASK ATTACHMENTS ({task.attachments?.length || 0})
                   </span>
-                  <div>
-                    <input
-                      type="file"
-                      ref={taskFileInputRef}
-                      style={{ display: "none" }}
-                      multiple
-                      onChange={handleUploadTaskAttachment}
-                    />
-                    <button
-                      type="button"
-                      disabled={uploadingAttachment}
-                      onClick={() => taskFileInputRef.current?.click()}
-                      style={{
-                        background: "#eff6ff",
-                        border: "1px solid #bfdbfe",
-                        borderRadius: "4px",
-                        color: "#2563eb",
-                        cursor: "pointer",
-                        fontSize: "12px",
-                        fontWeight: 600,
-                        padding: "2px 8px",
-                      }}
-                    >
-                      {uploadingAttachment ? "Uploading..." : "+ Add Files"}
-                    </button>
-                  </div>
+                  {canEditTask && (
+                    <div>
+                      <input
+                        type="file"
+                        ref={taskFileInputRef}
+                        style={{ display: "none" }}
+                        multiple
+                        onChange={handleUploadTaskAttachment}
+                      />
+                      <button
+                        type="button"
+                        disabled={uploadingAttachment}
+                        onClick={() => taskFileInputRef.current?.click()}
+                        style={{
+                          background: "#eff6ff",
+                          border: "1px solid #bfdbfe",
+                          borderRadius: "4px",
+                          color: "#2563eb",
+                          cursor: "pointer",
+                          fontSize: "12px",
+                          fontWeight: 600,
+                          padding: "2px 8px",
+                        }}
+                      >
+                        {uploadingAttachment ? "Uploading..." : "+ Add Files"}
+                      </button>
+                    </div>
+                  )}
                 </div>
 
                 <AttachmentList
                   attachments={task.attachments || []}
                   onDelete={(item) => item.id && handleDeleteTaskAttachment(item.id)}
-                  canDelete={canManage || task.created_by === profile?.id}
+                  canDelete={canEditTask && (canManage || task.created_by === profile?.id)}
                 />
               </div>
 
@@ -1725,25 +1983,27 @@ export const TaskDrawer: React.FC<TaskDrawerProps> = ({
                   <span style={{ fontSize: "12px", fontWeight: 700, color: "#1e293b" }}>
                     🎤 VOICE NOTES ({task.voice_notes?.length || 0})
                   </span>
-                  <button
-                    type="button"
-                    onClick={() => setShowVoiceRecorder(!showVoiceRecorder)}
-                    style={{
-                      background: showVoiceRecorder ? "#fee2e2" : "#f0fdf4",
-                      border: showVoiceRecorder ? "1px solid #fca5a5" : "1px solid #bbf7d0",
-                      borderRadius: "4px",
-                      color: showVoiceRecorder ? "#dc2626" : "#16a34a",
-                      cursor: "pointer",
-                      fontSize: "12px",
-                      fontWeight: 600,
-                      padding: "2px 8px",
-                    }}
-                  >
-                    {showVoiceRecorder ? "Cancel" : "🎤 Record Voice Note"}
-                  </button>
+                  {canEditTask && (
+                    <button
+                      type="button"
+                      onClick={() => setShowVoiceRecorder(!showVoiceRecorder)}
+                      style={{
+                        background: showVoiceRecorder ? "#fee2e2" : "#f0fdf4",
+                        border: showVoiceRecorder ? "1px solid #fca5a5" : "1px solid #bbf7d0",
+                        borderRadius: "4px",
+                        color: showVoiceRecorder ? "#dc2626" : "#16a34a",
+                        cursor: "pointer",
+                        fontSize: "12px",
+                        fontWeight: 600,
+                        padding: "2px 8px",
+                      }}
+                    >
+                      {showVoiceRecorder ? "Cancel" : "🎤 Record Voice Note"}
+                    </button>
+                  )}
                 </div>
 
-                {showVoiceRecorder && (
+                {canEditTask && showVoiceRecorder && (
                   <div style={{ marginBottom: "12px" }}>
                     <VoiceNoteRecorder
                       onRecordingComplete={handleSaveTaskVoiceNote}
@@ -1791,18 +2051,20 @@ export const TaskDrawer: React.FC<TaskDrawerProps> = ({
                 <span style={{ fontSize: "13px", fontWeight: 700, color: "#1e293b" }}>
                   Mini-Task Subtasks ({task.subtasks.length})
                 </span>
-                <button
-                  type="button"
-                  className="btn btn-primary btn-small"
-                  onClick={() => setIsAddingSubtask(!isAddingSubtask)}
-                  style={{ fontSize: "12px" }}
-                >
-                  {isAddingSubtask ? "Cancel" : "+ Add Mini-Task"}
-                </button>
+                {canEditTask && (
+                  <button
+                    type="button"
+                    className="btn btn-primary btn-small"
+                    onClick={() => setIsAddingSubtask(!isAddingSubtask)}
+                    style={{ fontSize: "12px" }}
+                  >
+                    {isAddingSubtask ? "Cancel" : "+ Add Mini-Task"}
+                  </button>
+                )}
               </div>
 
               {/* Inline Subtask Form */}
-              {isAddingSubtask && (
+              {canEditTask && isAddingSubtask && (
                 <form
                   onSubmit={handleCreateSubtaskSubmit}
                   style={{
@@ -1895,6 +2157,12 @@ export const TaskDrawer: React.FC<TaskDrawerProps> = ({
                 <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
                   {task.subtasks.map((s) => {
                     const isDone = s.completed || s.status === "DONE";
+                    const isSubAssignee = Boolean(
+                      profile?.id &&
+                        (s.assignee_id === profile.id ||
+                          (s.assignees || []).some((sa) => sa.user_id === profile.id))
+                    );
+                    const canToggleSub = canEditTask || isSubAssignee;
                     return (
                       <div
                         key={s.id}
@@ -1909,12 +2177,13 @@ export const TaskDrawer: React.FC<TaskDrawerProps> = ({
                         }}
                       >
                         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                          <label style={{ display: "flex", alignItems: "center", gap: "8px", cursor: "pointer", flex: 1, minWidth: 0 }}>
+                          <label style={{ display: "flex", alignItems: "center", gap: "8px", cursor: canToggleSub ? "pointer" : "default", flex: 1, minWidth: 0 }}>
                             <input
                               type="checkbox"
                               checked={isDone}
-                              onChange={() => handleToggleSubtask(s.id, isDone)}
-                              style={{ cursor: "pointer", width: "16px", height: "16px" }}
+                              disabled={!canToggleSub}
+                              onChange={() => canToggleSub && handleToggleSubtask(s.id, isDone)}
+                              style={{ cursor: canToggleSub ? "pointer" : "not-allowed", width: "16px", height: "16px" }}
                             />
                             <span
                               style={{
@@ -1933,13 +2202,15 @@ export const TaskDrawer: React.FC<TaskDrawerProps> = ({
                                 {s.priority}
                               </span>
                             )}
-                            <button
-                              type="button"
-                              onClick={() => handleDeleteSubtask(s.id)}
-                              style={{ background: "transparent", border: "none", color: "#ef4444", cursor: "pointer", fontSize: "13px" }}
-                            >
-                              ✕
-                            </button>
+                            {canEditTask && (
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteSubtask(s.id)}
+                                style={{ background: "transparent", border: "none", color: "#ef4444", cursor: "pointer", fontSize: "13px" }}
+                              >
+                                ✕
+                              </button>
+                            )}
                           </div>
                         </div>
 
@@ -1969,7 +2240,7 @@ export const TaskDrawer: React.FC<TaskDrawerProps> = ({
                         </div>
 
                         {/* Stage-Level Subtask Collaboration */}
-                        <SubtaskCollaborationSection subtaskId={s.id} />
+                        <SubtaskCollaborationSection subtaskId={s.id} readOnly={!canCollaborate && !isSubAssignee} />
                       </div>
                     );
                   })}
@@ -1983,26 +2254,28 @@ export const TaskDrawer: React.FC<TaskDrawerProps> = ({
                 <span style={{ fontSize: "13px", fontWeight: 700, color: "#1e293b" }}>
                   Linked Dependencies &amp; Blockers ({task.dependencies?.length || 0})
                 </span>
-                <button
-                  type="button"
-                  onClick={() => setIsAddingDependency(!isAddingDependency)}
-                  style={{
-                    background: "#e0e7ff",
-                    color: "#4338ca",
-                    border: "1px solid #c7d2fe",
-                    fontWeight: 600,
-                    fontSize: "12px",
-                    padding: "4px 10px",
-                    borderRadius: "6px",
-                    cursor: "pointer",
-                  }}
-                >
-                  {isAddingDependency ? "Cancel" : "+ Link Task"}
-                </button>
+                {canEditTask && (
+                  <button
+                    type="button"
+                    onClick={() => setIsAddingDependency(!isAddingDependency)}
+                    style={{
+                      background: "#e0e7ff",
+                      color: "#4338ca",
+                      border: "1px solid #c7d2fe",
+                      fontWeight: 600,
+                      fontSize: "12px",
+                      padding: "4px 10px",
+                      borderRadius: "6px",
+                      cursor: "pointer",
+                    }}
+                  >
+                    {isAddingDependency ? "Cancel" : "+ Link Task"}
+                  </button>
+                )}
               </div>
 
               {/* Add Dependency Form */}
-              {isAddingDependency && (
+              {canEditTask && isAddingDependency && (
                 <div
                   style={{
                     background: "#f8fafc",
@@ -2132,14 +2405,16 @@ export const TaskDrawer: React.FC<TaskDrawerProps> = ({
                         )}
                       </div>
 
-                      <button
-                        type="button"
-                        onClick={() => handleDeleteDependency(dep.id)}
-                        style={{ background: "none", border: "none", color: "#ef4444", cursor: "pointer", fontSize: "14px" }}
-                        title="Remove dependency link"
-                      >
-                        ✕
-                      </button>
+                      {canEditTask && (
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteDependency(dep.id)}
+                          style={{ background: "none", border: "none", color: "#ef4444", cursor: "pointer", fontSize: "14px" }}
+                          title="Remove dependency link"
+                        >
+                          ✕
+                        </button>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -2152,7 +2427,7 @@ export const TaskDrawer: React.FC<TaskDrawerProps> = ({
                 <span style={{ fontSize: "13px", fontWeight: 700, color: "#1e293b" }}>
                   Unlimited Escalation Records ({task.escalations.length})
                 </span>
-                {onEscalateRequest && (
+                {canEscalate && onEscalateRequest && (
                   <button
                     type="button"
                     className="btn btn-small"
@@ -2205,7 +2480,10 @@ export const TaskDrawer: React.FC<TaskDrawerProps> = ({
                       )}
 
                       {/* Independent Escalation Discussion */}
-                      <EscalationCollaborationSection escalationId={esc.id} />
+                      <EscalationCollaborationSection
+                        escalationId={esc.id}
+                        readOnly={!canCollaborate && esc.from_user !== profile?.id && esc.to_user !== profile?.id}
+                      />
                     </div>
                   ))}
                 </div>
@@ -2214,11 +2492,27 @@ export const TaskDrawer: React.FC<TaskDrawerProps> = ({
           ) : drawerTab === "comments" ? (
             /* Comments Tab */
             <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
-              <CommentComposer
-                placeholder="Write a comment, attach files or record a voice note..."
-                onSubmit={handleCreateTaskComment}
-                isSubmitting={postingComment}
-              />
+              {canCollaborate ? (
+                <CommentComposer
+                  placeholder="Write a comment, attach files or record a voice note..."
+                  onSubmit={handleCreateTaskComment}
+                  isSubmitting={postingComment}
+                />
+              ) : (
+                <div
+                  data-testid="comments-readonly-notice"
+                  style={{
+                    padding: "10px 12px",
+                    background: "#f8fafc",
+                    border: "1px solid #e2e8f0",
+                    borderRadius: "6px",
+                    fontSize: "12px",
+                    color: "#64748b",
+                  }}
+                >
+                  🔒 Read-only view — commenting and reactions are disabled for non-participants.
+                </div>
+              )}
 
               <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
                 {task.comments.length === 0 ? (
@@ -2287,6 +2581,7 @@ export const TaskDrawer: React.FC<TaskDrawerProps> = ({
                           size="sm"
                           reactions={c.reactions}
                           onToggleReaction={(emoji) => handleToggleCommentReaction(c.id, emoji)}
+                          disabled={!canCollaborate}
                         />
                       </div>
                     </div>

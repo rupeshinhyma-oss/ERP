@@ -35,10 +35,12 @@ from app.hrms.models import HrmsAttendanceRegularization, HrmsLiveTrackingSessio
 from app.hrms.rbac import HrmsUserContext, get_hrms_user_context
 from app.hrms.schemas import (
     RegularizationEvidenceRead,
+    SiteVisitCancel,
     SiteVisitCheckIn,
     SiteVisitCheckOut,
     SiteVisitCreate,
     SiteVisitRead,
+    SiteVisitUpdate,
     TrackingPointsBatch,
     TrackingSessionRead,
     TrackingStartPayload,
@@ -91,6 +93,7 @@ async def create_site_visit(
     ctx: HrmsUserContext = Depends(get_hrms_user_context),
 ):
     ctx.require_module_access("site_visits")
+    ctx.require_write_access("site_visits", action="create")
     if not (ctx.is_admin or ctx.is_hr or ctx.is_manager):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -174,6 +177,60 @@ async def get_site_visit(
     return build_success_response(data=dto.model_dump(mode="json"), message="Site visit retrieved successfully.")
 
 
+@router.put("/hrms/site-visits/{visit_id}", summary="Edit or reassign site visit")
+@router.patch("/hrms/site-visits/{visit_id}", summary="Edit or reassign site visit")
+async def update_site_visit(
+    visit_id: uuid.UUID,
+    payload: SiteVisitUpdate,
+    service: HrmsSiteVisitService = Depends(get_site_visit_service),
+    ctx: HrmsUserContext = Depends(get_hrms_user_context),
+):
+    ctx.require_module_access("site_visits")
+    ctx.require_write_access("site_visits", action="update")
+    if not (ctx.is_admin or ctx.is_hr or ctx.is_manager):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Permission denied. Only Admin, HR, or Department Managers can edit or reassign Site Visits.",
+        )
+    allowed_ids = None if (ctx.is_admin or ctx.is_hr) else ctx.managed_employee_ids
+    visit = await service.update_site_visit(
+        visit_id=visit_id,
+        actor_id=ctx.user_id,
+        is_admin=ctx.is_admin or ctx.is_hr,
+        payload=payload,
+        allowed_employee_ids=allowed_ids,
+    )
+    dto = service.to_site_visit_read(visit)
+    return build_success_response(data=dto.model_dump(mode="json"), message="Site visit updated successfully.")
+
+
+@router.post("/hrms/site-visits/{visit_id}/cancel", summary="Cancel a scheduled site visit")
+@router.patch("/hrms/site-visits/{visit_id}/cancel", summary="Cancel a scheduled site visit")
+async def cancel_site_visit(
+    visit_id: uuid.UUID,
+    payload: Optional[SiteVisitCancel] = None,
+    service: HrmsSiteVisitService = Depends(get_site_visit_service),
+    ctx: HrmsUserContext = Depends(get_hrms_user_context),
+):
+    ctx.require_module_access("site_visits")
+    ctx.require_write_access("site_visits", action="update")
+    if not (ctx.is_admin or ctx.is_hr or ctx.is_manager):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Permission denied. Only Admin, HR, or Department Managers can cancel Site Visits.",
+        )
+    allowed_ids = None if (ctx.is_admin or ctx.is_hr) else ctx.managed_employee_ids
+    visit = await service.cancel_site_visit(
+        visit_id=visit_id,
+        actor_id=ctx.user_id,
+        is_admin=ctx.is_admin or ctx.is_hr,
+        payload=payload,
+        allowed_employee_ids=allowed_ids,
+    )
+    dto = service.to_site_visit_read(visit)
+    return build_success_response(data=dto.model_dump(mode="json"), message="Site visit cancelled successfully.")
+
+
 @router.post("/hrms/site-visits/{visit_id}/check-in", summary="Employee Check-In at Site Visit")
 async def check_in_site_visit(
     visit_id: uuid.UUID,
@@ -182,6 +239,7 @@ async def check_in_site_visit(
     ctx: HrmsUserContext = Depends(get_hrms_user_context),
 ):
     ctx.require_module_access("site_visits")
+    ctx.require_write_access("site_visits", action="update")
     visit = await service.check_in(
         visit_id=visit_id,
         employee_id=ctx.user_id,
@@ -201,6 +259,7 @@ async def check_out_site_visit(
     ctx: HrmsUserContext = Depends(get_hrms_user_context),
 ):
     ctx.require_module_access("site_visits")
+    ctx.require_write_access("site_visits", action="update")
     visit = await service.check_out(
         visit_id=visit_id,
         employee_id=ctx.user_id,
@@ -236,6 +295,7 @@ async def start_tracking(
     ctx: HrmsUserContext = Depends(get_hrms_user_context),
 ):
     ctx.require_module_access("site_visits")
+    ctx.require_write_access("site_visits", action="create")
     session = await service.start_tracking(employee_id=ctx.user_id, payload=payload)
     dto = await service.to_tracking_session_dto_async(session)
     return build_success_response(data=dto.model_dump(mode="json"), message="Live tracking started successfully.")
@@ -248,6 +308,7 @@ async def upload_tracking_points(
     ctx: HrmsUserContext = Depends(get_hrms_user_context),
 ):
     ctx.require_module_access("site_visits")
+    ctx.require_write_access("site_visits", action="create")
     count = await service.record_tracking_points(
         employee_id=ctx.user_id,
         session_id=payload.session_id,
@@ -264,6 +325,7 @@ async def stop_tracking(
     ctx: HrmsUserContext = Depends(get_hrms_user_context),
 ):
     ctx.require_module_access("site_visits")
+    ctx.require_write_access("site_visits", action="update")
     session = await service.stop_tracking(
         employee_id=ctx.user_id,
         session_id=session_id,
@@ -278,19 +340,26 @@ async def stop_tracking(
 async def list_tracking_sessions(
     employee_id: Optional[uuid.UUID] = Query(default=None),
     date: Optional[date] = Query(default=None),
+    skip: int = Query(default=0, ge=0),
+    limit: int = Query(default=100, ge=1, le=500),
     service: HrmsSiteVisitService = Depends(get_site_visit_service),
     ctx: HrmsUserContext = Depends(get_hrms_user_context),
 ):
     ctx.require_module_access("site_visits")
-    target_id = employee_id or ctx.user_id
-    if not (ctx.is_admin or ctx.is_hr):
-        ctx.require_employee_access(target_id)
+    is_admin_or_hr = ctx.is_admin or ctx.is_hr
+    if employee_id and not is_admin_or_hr:
+        ctx.require_employee_access(employee_id)
 
+    allowed_ids = None if is_admin_or_hr else ctx.managed_employee_ids
     sessions = await service.list_tracking_sessions(
         current_user_id=ctx.user_id,
-        is_admin=ctx.is_admin or ctx.is_hr,
-        employee_id=target_id if (ctx.is_admin or ctx.is_hr or target_id != ctx.user_id) else None,
+        is_admin=is_admin_or_hr,
+        employee_id=employee_id,
         tracking_date=date,
+        is_manager=ctx.is_manager,
+        allowed_employee_ids=allowed_ids,
+        skip=skip,
+        limit=limit,
     )
     dtos = await service.to_tracking_sessions_dto_batch(sessions)
     data = [d.model_dump(mode="json") for d in dtos]
@@ -327,7 +396,7 @@ async def get_regularization_evidence(
     service: HrmsSiteVisitService = Depends(get_site_visit_service),
     ctx: HrmsUserContext = Depends(get_hrms_user_context),
 ):
-    ctx.require_module_access("site_visits")
+    ctx.require_module_access("attendance")
     reg = await db.get(HrmsAttendanceRegularization, regularization_id)
     if not reg:
         raise HTTPException(

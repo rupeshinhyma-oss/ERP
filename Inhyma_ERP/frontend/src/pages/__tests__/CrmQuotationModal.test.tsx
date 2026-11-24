@@ -170,10 +170,22 @@ describe("CRM Phase 7 — Quotation Form Cleanup, Lead Products Tab, Save & PDF 
 
       // 3. CRM Product Lookup endpoint
       if (url.includes("/crm/products/lookup")) {
+        if (shouldFailProductSearch) {
+          return Promise.reject(new Error("Database connection timeout"));
+        }
+        const searchMatch = url.match(/[?&]q=([^&]+)/);
+        const q = searchMatch ? decodeURIComponent(searchMatch[1]).toLowerCase() : "";
+        const filtered = q
+          ? MOCK_PRODUCT_MASTER_CATALOG.filter(
+              (p) =>
+                p.product_name.toLowerCase().includes(q) ||
+                p.product_code.toLowerCase().includes(q)
+            )
+          : MOCK_PRODUCT_MASTER_CATALOG;
         return Promise.resolve({
           data: {
-            items: MOCK_PRODUCT_MASTER_CATALOG,
-            total: MOCK_PRODUCT_MASTER_CATALOG.length,
+            items: filtered,
+            total: filtered.length,
           },
         });
       }

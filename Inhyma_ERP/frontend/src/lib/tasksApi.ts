@@ -140,6 +140,7 @@ export async function updateTask(
     hold_until?: string | null;
     start_date?: string | null;
     due_date?: string | null;
+    version?: number;
   }
 ): Promise<TaskDetail> {
   const res = await apiPatch<TaskDetail>(`/tasks/${id}`, payload);
@@ -560,7 +561,7 @@ export async function toggleCommentReaction(
 
 export async function submitTaskForApproval(
   taskId: string,
-  payload: { approver_id?: string; notes?: string } = {}
+  payload: { approver_id: string; notes?: string }
 ): Promise<TaskDetail> {
   const res = await apiPost<TaskDetail>(`/tasks/${taskId}/submit-approval`, payload);
   return res.data!;
@@ -568,9 +569,13 @@ export async function submitTaskForApproval(
 
 export async function actionTaskApproval(
   taskId: string,
-  payload: { action: "APPROVE" | "REJECT"; notes?: string }
+  payload: { approved: boolean; notes?: string } | { action: "APPROVE" | "REJECT"; notes?: string }
 ): Promise<TaskDetail> {
-  const res = await apiPost<TaskDetail>(`/tasks/${taskId}/action-approval`, payload);
+  const body =
+    "approved" in payload
+      ? { approved: payload.approved, notes: payload.notes }
+      : { approved: payload.action === "APPROVE", notes: payload.notes };
+  const res = await apiPost<TaskDetail>(`/tasks/${taskId}/action-approval`, body);
   return res.data!;
 }
 

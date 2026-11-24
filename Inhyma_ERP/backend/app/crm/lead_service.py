@@ -14,10 +14,10 @@ import uuid
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import and_, case, desc, func, or_, select, text
+from sqlalchemy import and_, case, desc, exists, false, func, or_, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import aliased, selectinload
 from sqlalchemy.orm.attributes import flag_modified
 
 from app.auth.service import CurrentUser
@@ -28,8 +28,13 @@ from app.core.exceptions import (
     NotFoundException,
 )
 from app.core.logging import get_logger
-from app.crm.company_linking import AmbiguousCompanyMatchException, resolve_or_create_company
-from app.crm.import_service import normalize_phone_number
+from app.crm.company_linking import (
+    AmbiguousCompanyMatchException,
+    extract_gstin,
+    resolve_or_create_company,
+    validate_gstin,
+)
+from app.crm.import_service import normalize_phone_number, sanitize_formula_text
 from app.crm.models import (
     CrmActivity,
     CrmAssignmentHistory,
@@ -126,6 +131,64 @@ def _is_system_activity(activity_type: str, subject: str | None) -> bool:
         )):
             return True
     return False
+
+
+async def resolve_unassigned_leads_effective_owners(
+    session: AsyncSession,
+    lead_ids: list[uuid.UUID] | set[uuid.UUID],
+) -> dict[uuid.UUID, tuple[bool, uuid.UUID | None]]:
+    """
+    Resolve authoritative effective ownership for unassigned CrmLeads from
+    append-only CrmAssignmentHistory using strict fail-closed semantics.
+
+    Returns ``lead_id -> (has_history, unambiguous_owner_id)``:
+    - ``(False, None)``: Lead has never had any assignment history row
+      (never-assigned lead; caller may fall back to ``created_by`` only if non-NULL).
+    - ``(True, owner_id)``: Lead has history AND all rows at ``MAX(created_at)``
+      agree on a single non-NULL ``COALESCE(new_owner_id, previous_owner_id)``.
+    - ``(True, None)``: Lead has history, but latest history is incomplete
+      (both ``new_owner_id`` and ``previous_owner_id`` are NULL) or ambiguous
+      (multiple distinct owners tied at ``MAX(created_at)``) -> FAIL CLOSED.
+    """
+    unique_ids = list({lid for lid in lead_ids if lid is not None})
+    if not unique_ids:
+        return {}
+
+    result: dict[uuid.UUID, tuple[bool, uuid.UUID | None]] = {
+        lid: (False, None) for lid in unique_ids
+    }
+
+    rows_by_lead: dict[uuid.UUID, list[tuple[datetime, uuid.UUID | None, uuid.UUID | None]]] = {}
+    for i in range(0, len(unique_ids), 1000):
+        chunk = unique_ids[i : i + 1000]
+        stmt = select(
+            CrmAssignmentHistory.lead_id,
+            CrmAssignmentHistory.created_at,
+            CrmAssignmentHistory.new_owner_id,
+            CrmAssignmentHistory.previous_owner_id,
+        ).where(CrmAssignmentHistory.lead_id.in_(chunk))
+        rows = (await session.execute(stmt)).all()
+        for lid, created_at, new_owner_id, prev_owner_id in rows:
+            rows_by_lead.setdefault(lid, []).append((created_at, new_owner_id, prev_owner_id))
+
+    for lid, hist_rows in rows_by_lead.items():
+        max_ts = max(r[0] for r in hist_rows)
+        latest_rows = [r for r in hist_rows if r[0] == max_ts]
+        effective_owners: set[uuid.UUID] = set()
+        has_null_owner = False
+        for _, new_oid, prev_oid in latest_rows:
+            eff = new_oid if new_oid is not None else prev_oid
+            if eff is None:
+                has_null_owner = True
+                break
+            effective_owners.add(eff)
+
+        if has_null_owner or len(effective_owners) != 1:
+            result[lid] = (True, None)
+        else:
+            result[lid] = (True, next(iter(effective_owners)))
+
+    return result
 
 
 class CrmLeadService:
@@ -267,19 +330,135 @@ class CrmLeadService:
         return managed_dept_ids
 
     @staticmethod
-    def _is_lead_in_manager_scope(lead: CrmLead, scoped_user_ids: set[uuid.UUID]) -> bool:
+    def _manager_visible_lead_clause(scoped_user_ids: set[uuid.UUID]):
         """
-        Authoritative department-manager scope rule for a CrmLead:
-        - Assigned lead (`assigned_to is not None`): `assigned_to in scoped_user_ids`
-          OR (`created_by is not None and created_by in scoped_user_ids`).
-        - Unassigned lead (`assigned_to is None`): `created_by is None`
-          OR `created_by in scoped_user_ids`.
+        Authoritative SQL visibility predicate for a department manager against CrmLead:
+        1. Assigned lead (``assigned_to IS NOT NULL``):
+           ``assigned_to IN scoped_user_ids``.
+        2. Unassigned lead (``assigned_to IS NULL``) with NO assignment history (never assigned):
+           ``created_by IS NOT NULL AND created_by IN scoped_user_ids``
+           (``created_by IS NULL`` fails closed — Admin/SuperAdmin only; BLK-03).
+        3. Unassigned lead (``assigned_to IS NULL``) WITH assignment history:
+           NEVER consult ``created_by`` (prevents cross-department access resurrection; BLK-01).
+           Evaluate all rows at ``MAX(created_at)`` using ``COALESCE(new_owner_id, previous_owner_id)``:
+           - Must exist, be non-NULL, and belong to ``scoped_user_ids``.
+           - Must have NO sibling row at ``MAX(created_at)`` with NULL or conflicting owner
+             (ambiguous/incomplete history fails closed — Admin/SuperAdmin only).
+        """
+        scoped_list = list(scoped_user_ids)
+        if not scoped_list:
+            return false()
+
+        ah_any = aliased(CrmAssignmentHistory)
+        ah_lat = aliased(CrmAssignmentHistory)
+        ah_max = aliased(CrmAssignmentHistory)
+        ah_other = aliased(CrmAssignmentHistory)
+
+        has_history = exists(
+            select(1).where(ah_any.lead_id == CrmLead.id).correlate(CrmLead)
+        )
+        max_ts_subq = (
+            select(func.max(ah_max.created_at))
+            .where(ah_max.lead_id == CrmLead.id)
+            .correlate(CrmLead)
+            .scalar_subquery()
+        )
+        lat_owner = func.coalesce(ah_lat.new_owner_id, ah_lat.previous_owner_id)
+        other_owner = func.coalesce(ah_other.new_owner_id, ah_other.previous_owner_id)
+
+        unambiguous_history_match = exists(
+            select(1)
+            .where(
+                ah_lat.lead_id == CrmLead.id,
+                ah_lat.created_at == max_ts_subq,
+                lat_owner.in_(scoped_list),
+                ~exists(
+                    select(1)
+                    .where(
+                        ah_other.lead_id == CrmLead.id,
+                        ah_other.created_at == ah_lat.created_at,
+                        or_(
+                            other_owner.is_(None),
+                            other_owner != lat_owner,
+                        ),
+                    )
+                    .correlate(CrmLead, ah_lat)
+                ),
+            )
+            .correlate(CrmLead)
+        )
+
+        return or_(
+            CrmLead.assigned_to.in_(scoped_list),
+            and_(
+                CrmLead.assigned_to.is_(None),
+                ~has_history,
+                CrmLead.created_by.is_not(None),
+                CrmLead.created_by.in_(scoped_list),
+            ),
+            and_(
+                CrmLead.assigned_to.is_(None),
+                unambiguous_history_match,
+            ),
+        )
+
+    @staticmethod
+    def _salesperson_visible_lead_clause(actor_id: uuid.UUID):
+        """
+        Authoritative SQL visibility predicate for a regular salesperson against CrmLead:
+        1. Assigned lead: ``assigned_to == actor_id``.
+        2. Unassigned never-assigned lead created by self:
+           ``assigned_to IS NULL AND created_by == actor_id AND NOT EXISTS(history)``.
+        Once a lead has any assignment history and is unassigned, former salespersons
+        cannot regain visibility via ``previous_owner_id``, ``assigned_by``, or ``created_by``.
+        """
+        ah_any = aliased(CrmAssignmentHistory)
+        has_history = exists(
+            select(1).where(ah_any.lead_id == CrmLead.id).correlate(CrmLead)
+        )
+        return or_(
+            CrmLead.assigned_to == actor_id,
+            and_(
+                CrmLead.assigned_to.is_(None),
+                CrmLead.created_by == actor_id,
+                ~has_history,
+            ),
+        )
+
+    async def _is_lead_in_manager_scope_async(
+        self, lead: CrmLead, scoped_user_ids: set[uuid.UUID]
+    ) -> bool:
+        """
+        Authoritative async department-manager scope check mirroring
+        ``_manager_visible_lead_clause`` exactly.
+        """
+        if not scoped_user_ids:
+            return False
+        if lead.assigned_to is not None:
+            return lead.assigned_to in scoped_user_ids
+
+        owners_map = await resolve_unassigned_leads_effective_owners(self.session, [lead.id])
+        has_history, unambiguous_owner_id = owners_map.get(lead.id, (False, None))
+        if has_history:
+            return unambiguous_owner_id is not None and unambiguous_owner_id in scoped_user_ids
+        if lead.created_by is None:
+            return False
+        return lead.created_by in scoped_user_ids
+
+    async def _is_lead_in_salesperson_scope_async(
+        self, lead: CrmLead, actor_id: uuid.UUID
+    ) -> bool:
+        """
+        Authoritative async salesperson scope check mirroring
+        ``_salesperson_visible_lead_clause`` exactly.
         """
         if lead.assigned_to is not None:
-            return lead.assigned_to in scoped_user_ids or (
-                lead.created_by is not None and lead.created_by in scoped_user_ids
-            )
-        return lead.created_by is None or lead.created_by in scoped_user_ids
+            return lead.assigned_to == actor_id
+        if lead.created_by != actor_id:
+            return False
+        owners_map = await resolve_unassigned_leads_effective_owners(self.session, [lead.id])
+        has_history, _ = owners_map.get(lead.id, (False, None))
+        return not has_history
 
     async def list_leads(
         self,
@@ -300,57 +479,35 @@ class CrmLeadService:
         """
         role_type, scoped_user_ids = await self.get_actor_role_and_scope(actor)
 
-        # Base conditions
-        conditions = []
+        # Base conditions (always exclude soft-deleted leads)
+        conditions = [CrmLead.deleted_at.is_(None)]
 
         # Scope enforcement
         if role_type == "manager":
             assert scoped_user_ids is not None
             if assigned_to is not None:
                 if assigned_to not in scoped_user_ids:
-                    # Manager requested leads for someone outside their scope
-                    return CrmLeadPaginationResponse(
-                        items=[],
-                        total=0,
-                        page=page,
-                        page_size=page_size,
-                        total_pages=0,
-                    )
+                    raise ForbiddenException("Requested salesperson is outside your departmental scope.")
                 conditions.append(CrmLead.assigned_to == assigned_to)
             elif unassigned_only:
                 conditions.append(
                     and_(
                         CrmLead.assigned_to.is_(None),
-                        or_(
-                            CrmLead.created_by.is_(None),
-                            CrmLead.created_by.in_(scoped_user_ids),
-                        ),
+                        self._manager_visible_lead_clause(scoped_user_ids),
                     )
                 )
             else:
-                conditions.append(
-                    or_(
-                        CrmLead.assigned_to.in_(scoped_user_ids),
-                        CrmLead.created_by.in_(scoped_user_ids),
-                        and_(
-                            CrmLead.assigned_to.is_(None),
-                            or_(
-                                CrmLead.created_by.is_(None),
-                                CrmLead.created_by.in_(scoped_user_ids),
-                            ),
-                        ),
-                    )
-                )
+                conditions.append(self._manager_visible_lead_clause(scoped_user_ids))
         elif role_type == "salesperson":
             if unassigned_only:
                 raise ForbiddenException("Salespeople are not authorized to access unassigned lead queues.")
             assert scoped_user_ids is not None
             if assigned_to is not None and assigned_to != actor.id:
-                return CrmLeadPaginationResponse(items=[], total=0, page=page, page_size=page_size, total_pages=0)
+                raise ForbiddenException("Salespeople can only query their own leads.")
             if assigned_to is not None:
                 conditions.append(CrmLead.assigned_to == actor.id)
             else:
-                conditions.append(or_(CrmLead.assigned_to == actor.id, CrmLead.created_by == actor.id))
+                conditions.append(self._salesperson_visible_lead_clause(actor.id))
         else:
             # Admin: unrestricted
             if unassigned_only:
@@ -497,7 +654,7 @@ class CrmLeadService:
                 selectinload(CrmLead.assignee),
                 selectinload(CrmLead.company),
             )
-            .where(CrmLead.id == lead_id)
+            .where(CrmLead.id == lead_id, CrmLead.deleted_at.is_(None))
         )
         lead = (await self.session.execute(stmt)).scalar_one_or_none()
         if not lead:
@@ -628,13 +785,13 @@ class CrmLeadService:
         existing_lead = (await self.session.execute(dup_stmt)).scalar_one_or_none()
         if existing_lead:
             role_type, scoped_user_ids = await self.get_actor_role_and_scope(actor)
-            is_in_scope = (
-                role_type == "admin"
-                or (scoped_user_ids is not None and (
-                    existing_lead.assigned_to in scoped_user_ids
-                    or existing_lead.created_by in scoped_user_ids
-                ))
-            )
+            if role_type == "admin":
+                is_in_scope = True
+            elif role_type == "manager":
+                assert scoped_user_ids is not None
+                is_in_scope = await self._is_lead_in_manager_scope_async(existing_lead, scoped_user_ids)
+            else:
+                is_in_scope = await self._is_lead_in_salesperson_scope_async(existing_lead, actor.id)
             if is_in_scope:
                 raise ConflictException(
                     f"A lead with phone '{norm_phone}' already exists (Lead Code: {existing_lead.lead_code}). "
@@ -746,10 +903,16 @@ class CrmLeadService:
         lead_status = "new"
         won_at = None
         lost_at = None
+        clean_lost_reason: str | None = None
         if stage.stage_type == "won":
             lead_status = "won"
             won_at = _utcnow()
         elif stage.stage_type == "lost":
+            clean_lost_reason = (payload.lost_reason or "").strip()
+            if not clean_lost_reason or len(clean_lost_reason) < 3:
+                raise BadRequestException(
+                    "A meaningful lost_reason (minimum 3 characters) is required when creating a lead directly in a lost stage."
+                )
             lead_status = "lost"
             lost_at = _utcnow()
 
@@ -757,28 +920,54 @@ class CrmLeadService:
         if not target_assigned_to:
             custom_fields.setdefault("unassigned_reason", "manual_creation_unassigned")
 
-        # 4b. Company resolution / matching in existing companies master
+        # 4a. Sanitize text fields against spreadsheet/CSV formula injection (LM-DEF-029)
+        clean_name = sanitize_formula_text(payload.name) or payload.name.strip()
+        clean_company_name = sanitize_formula_text(payload.company_name) if payload.company_name else None
+        if clean_company_name == "":
+            clean_company_name = None
+        clean_campaign = sanitize_formula_text(payload.campaign) if payload.campaign else None
+        if clean_campaign == "":
+            clean_campaign = None
+        clean_source_detail = sanitize_formula_text(payload.source_detail) if payload.source_detail else None
+        if clean_source_detail == "":
+            clean_source_detail = None
+        clean_notes = sanitize_formula_text(payload.notes) if payload.notes else None
+        if clean_notes == "":
+            clean_notes = None
+
+        # 4b. Extract & validate optional GSTIN (LM-DEF-023) before company matching
+        raw_gstin = extract_gstin(payload.gstin, custom_fields)
+        norm_gstin: str | None = None
+        if raw_gstin is not None:
+            norm_gstin, gst_err = validate_gstin(raw_gstin)
+            if gst_err:
+                raise BadRequestException(gst_err)
+            if norm_gstin:
+                custom_fields["gstin"] = norm_gstin
+
+        # 4c. Company resolution / matching in existing companies master
         comp_id, comp_name, _ = await resolve_or_create_company(
             self.session,
             company_id=payload.company_id,
-            company_name=payload.company_name,
-            contact_name=payload.name,
+            company_name=clean_company_name,
+            tax_id=norm_gstin,
+            contact_name=clean_name,
             contact_phone=norm_phone,
             actor_id=actor.id,
             auto_create=True,
         )
 
-        # 5. Create CrmLead
+        # 5. Create CrmLead (email already validated & domain-lowercased by CrmLeadCreate schema)
         new_lead = CrmLead(
-            name=payload.name.strip(),
+            name=clean_name,
             original_phone=payload.phone.strip(),
             normalized_phone=norm_phone,
-            email=payload.email.strip().lower() if payload.email and payload.email.strip() else None,
+            email=payload.email,
             company_name=comp_name,
             company_id=comp_id,
-            campaign=payload.campaign.strip() if payload.campaign and payload.campaign.strip() else None,
+            campaign=clean_campaign,
             source_type=payload.source_type or ("personal_lead" if role_type == "salesperson" else "manual_entry"),
-            source_detail=payload.source_detail or "Manual Creation",
+            source_detail=clean_source_detail or "Manual Creation",
             created_by=actor.id,
             assigned_to=target_assigned_to,
             pipeline_id=pipeline.id,
@@ -786,8 +975,9 @@ class CrmLeadService:
             status=lead_status,
             won_at=won_at,
             lost_at=lost_at,
+            lost_reason=clean_lost_reason,
             priority=clean_priority,
-            notes=payload.notes.strip() if payload.notes and payload.notes.strip() else None,
+            notes=clean_notes,
             custom_fields=custom_fields,
         )
         self.session.add(new_lead)
@@ -827,7 +1017,7 @@ class CrmLeadService:
             from_stage_id=None,
             to_stage_id=stage.id,
             changed_by=actor.id,
-            reason="Initial stage during manual lead creation",
+            reason=clean_lost_reason if stage.stage_type == "lost" else "Initial stage during manual lead creation",
         )
         self.session.add(stage_hist)
 
@@ -862,33 +1052,54 @@ class CrmLeadService:
         # Scope enforcement
         await self._check_lead_scope(lead, actor, action="modify")
 
-        # Update provided fields & track material changes
+        # Update provided fields & track material changes (with formula sanitization & email preservation)
         material_changes = []
-        if payload.name is not None and payload.name.strip() and payload.name.strip() != lead.name:
-            material_changes.append(f"Name changed from '{lead.name}' to '{payload.name.strip()}'")
-            lead.name = payload.name.strip()
-        if payload.email is not None:
-            new_email = payload.email.strip().lower() if payload.email.strip() else None
+        if payload.name is not None and payload.name.strip():
+            new_name = sanitize_formula_text(payload.name) or payload.name.strip()
+            if new_name != lead.name:
+                material_changes.append(f"Name changed from '{lead.name}' to '{new_name}'")
+                lead.name = new_name
+        if "email" in payload.model_fields_set:
+            new_email = payload.email
             if new_email != lead.email:
                 material_changes.append(f"Email changed to '{new_email or 'None'}'")
                 lead.email = new_email
         if payload.campaign is not None:
-            new_camp = payload.campaign.strip() if payload.campaign.strip() else None
+            sanitized_camp = sanitize_formula_text(payload.campaign)
+            new_camp = sanitized_camp if sanitized_camp else None
             if new_camp != lead.campaign:
                 material_changes.append(f"Campaign changed to '{new_camp or 'None'}'")
                 lead.campaign = new_camp
         if payload.source_type is not None and payload.source_type != lead.source_type:
             material_changes.append(f"Source type changed to '{payload.source_type}'")
             lead.source_type = payload.source_type
-        if payload.source_detail is not None and payload.source_detail != lead.source_detail:
-            material_changes.append("Source detail updated")
-            lead.source_detail = payload.source_detail
-        if payload.notes is not None and payload.notes != lead.notes:
-            material_changes.append("Notes updated")
-            lead.notes = payload.notes
+        if payload.source_detail is not None:
+            new_source_detail = sanitize_formula_text(payload.source_detail) or None
+            if new_source_detail != lead.source_detail:
+                material_changes.append("Source detail updated")
+                lead.source_detail = new_source_detail
+        if payload.notes is not None:
+            sanitized_notes = sanitize_formula_text(payload.notes)
+            new_notes = sanitized_notes if sanitized_notes else None
+            if new_notes != lead.notes:
+                material_changes.append("Notes updated")
+                lead.notes = new_notes
         if payload.custom_fields is not None:
-            lead.custom_fields = payload.custom_fields
+            lead.custom_fields = dict(payload.custom_fields)
             flag_modified(lead, "custom_fields")
+
+        # Validate optional GSTIN update (LM-DEF-023)
+        raw_gstin = extract_gstin(payload.gstin, payload.custom_fields)
+        norm_gstin: str | None = None
+        if raw_gstin is not None:
+            norm_gstin, gst_err = validate_gstin(raw_gstin)
+            if gst_err:
+                raise BadRequestException(gst_err)
+            if norm_gstin:
+                cf_updated = dict(lead.custom_fields or {})
+                cf_updated["gstin"] = norm_gstin
+                lead.custom_fields = cf_updated
+                flag_modified(lead, "custom_fields")
 
         if material_changes:
             activity = CrmActivity(
@@ -900,15 +1111,25 @@ class CrmLeadService:
             )
             self.session.add(activity)
 
-        # Company matching / update
-        if payload.company_id is not None or payload.company_name is not None:
+        # Company matching / update (triggered on company_id, company_name, or gstin change)
+        if payload.company_id is not None or payload.company_name is not None or norm_gstin is not None:
             old_comp_name = lead.company_name
-            target_comp_name = payload.company_name if payload.company_name is not None else lead.company_name
+            sanitized_payload_comp = (
+                sanitize_formula_text(payload.company_name)
+                if payload.company_name is not None
+                else None
+            )
+            target_comp_name = (
+                sanitized_payload_comp
+                if payload.company_name is not None
+                else lead.company_name
+            )
             new_comp_id, new_comp_name, _ = await resolve_or_create_company(
                 self.session,
                 company_id=payload.company_id,
                 company_name=target_comp_name,
-                contact_name=payload.name or lead.name,
+                tax_id=norm_gstin,
+                contact_name=lead.name,
                 contact_phone=lead.normalized_phone,
                 actor_id=actor.id,
                 auto_create=True,
@@ -963,41 +1184,16 @@ class CrmLeadService:
 
         conditions = []
 
-        # Scope enforcement
+        # Scope enforcement: strictly governed by current authoritative lead ownership (BLK-01/BLK-02/BLK-03)
         if role_type == "manager":
             assert scoped_user_ids is not None
             if salesperson_id is not None and salesperson_id not in scoped_user_ids:
-                return CrmAssignmentHistoryPaginationResponse(
-                    items=[],
-                    total=0,
-                    page=page,
-                    page_size=page_size,
-                    total_pages=0,
-                )
-            conditions.append(
-                or_(
-                    CrmAssignmentHistory.new_owner_id.in_(scoped_user_ids),
-                    CrmAssignmentHistory.previous_owner_id.in_(scoped_user_ids),
-                    CrmAssignmentHistory.assigned_by.in_(scoped_user_ids),
-                    CrmAssignmentHistory.new_owner_id.is_(None),
-                )
-            )
+                raise ForbiddenException("Requested salesperson is outside your departmental scope.")
+            conditions.append(self._manager_visible_lead_clause(scoped_user_ids))
         elif role_type == "salesperson":
             if salesperson_id is not None and salesperson_id != actor.id:
-                return CrmAssignmentHistoryPaginationResponse(
-                    items=[],
-                    total=0,
-                    page=page,
-                    page_size=page_size,
-                    total_pages=0,
-                )
-            conditions.append(
-                or_(
-                    CrmAssignmentHistory.new_owner_id == actor.id,
-                    CrmAssignmentHistory.previous_owner_id == actor.id,
-                    CrmAssignmentHistory.assigned_by == actor.id,
-                )
-            )
+                raise ForbiddenException("Salespeople can only query their own assignment history.")
+            conditions.append(self._salesperson_visible_lead_clause(actor.id))
 
         if lead_id is not None:
             # If lead_id provided, ensure actor is authorized to see that lead
@@ -1019,7 +1215,11 @@ class CrmLeadService:
             conditions.append(CrmAssignmentHistory.batch_id == batch_id)
 
         # Total count
-        count_stmt = select(func.count(CrmAssignmentHistory.id))
+        count_stmt = (
+            select(func.count(CrmAssignmentHistory.id))
+            .join(CrmLead, CrmAssignmentHistory.lead_id == CrmLead.id)
+            .where(CrmLead.deleted_at.is_(None))
+        )
         if conditions:
             count_stmt = count_stmt.where(and_(*conditions))
         total_count = (await self.session.execute(count_stmt)).scalar() or 0
@@ -1030,7 +1230,9 @@ class CrmLeadService:
 
         stmt = (
             select(CrmAssignmentHistory, CrmImportBatch.batch_name)
+            .join(CrmLead, CrmAssignmentHistory.lead_id == CrmLead.id)
             .outerjoin(CrmImportBatch, CrmAssignmentHistory.batch_id == CrmImportBatch.id)
+            .where(CrmLead.deleted_at.is_(None))
             .options(
                 selectinload(CrmAssignmentHistory.lead),
                 selectinload(CrmAssignmentHistory.previous_owner),
@@ -1141,7 +1343,7 @@ class CrmLeadService:
         # If manager, enforce that lead is within their departmental scope
         if role_type == "manager":
             assert scoped_user_ids is not None
-            is_lead_in_scope = self._is_lead_in_manager_scope(lead, scoped_user_ids)
+            is_lead_in_scope = await self._is_lead_in_manager_scope_async(lead, scoped_user_ids)
             if not is_lead_in_scope:
                 raise ForbiddenException("You do not have permission to reassign leads outside your department.")
 
@@ -1221,7 +1423,7 @@ class CrmLeadService:
 
         activity = CrmActivity(
             lead_id=lead.id,
-            activity_type="note",
+            activity_type="reassignment",
             subject="Lead Reassigned",
             description=f"Reassigned to {target_user.display_name or target_user.full_name or target_user.username}. Reason: {clean_reason}",
             performed_by=actor.id,
@@ -1246,11 +1448,11 @@ class CrmLeadService:
             return
         if role_type == "manager":
             assert scoped_user_ids is not None
-            is_scoped = self._is_lead_in_manager_scope(lead, scoped_user_ids)
+            is_scoped = await self._is_lead_in_manager_scope_async(lead, scoped_user_ids)
             if not is_scoped:
                 raise ForbiddenException(f"You do not have permission to {action} this lead.")
         elif role_type == "salesperson":
-            is_scoped = (lead.assigned_to == actor.id) or (lead.created_by == actor.id)
+            is_scoped = await self._is_lead_in_salesperson_scope_async(lead, actor.id)
             if not is_scoped:
                 raise ForbiddenException(f"You do not have permission to {action} this lead.")
 
@@ -1496,7 +1698,19 @@ class CrmLeadService:
         data: CrmFollowUpStatusUpdate,
         actor: CurrentUser,
     ) -> CrmFollowUpRead:
-        """Complete or cancel a scheduled follow-up, logging activity and recalculating next_follow_up_at."""
+        """
+        Complete or cancel a scheduled follow-up with row-level FOR UPDATE locking,
+        strict terminal state-machine guards, idempotent replay handling, activity logging,
+        Enterprise Task synchronization, and next_follow_up_at recalculation.
+
+        Allowed transitions:
+        - pending   -> completed (mutates status, sets completed_at, marks linked Task DONE)
+        - pending   -> cancelled (mutates status, soft-deletes/holds linked Task)
+        - completed -> completed (idempotent no-op; preserves completed_at & avoids duplicates)
+        - cancelled -> cancelled (idempotent no-op; avoids duplicates)
+        - completed -> cancelled (REJECTED 409 ConflictException; linked DONE Task preserved)
+        - cancelled -> completed (REJECTED 409 ConflictException; linked Task preserved)
+        """
         stmt = (
             select(CrmFollowUp)
             .options(
@@ -1506,6 +1720,7 @@ class CrmLeadService:
                 selectinload(CrmFollowUp.creator),
             )
             .where(CrmFollowUp.id == follow_up_id, CrmFollowUp.deleted_at.is_(None))
+            .with_for_update()
         )
         follow_up = (await self.session.execute(stmt)).scalar_one_or_none()
         if not follow_up:
@@ -1514,6 +1729,8 @@ class CrmLeadService:
         lead = follow_up.lead
         if not lead or lead.deleted_at is not None:
             raise NotFoundException("Associated lead not found.")
+
+        await self._check_lead_scope(lead, actor, action="mutate")
 
         role_type, scoped_user_ids = await self.get_actor_role_and_scope(actor)
         if role_type == "salesperson":
@@ -1525,11 +1742,55 @@ class CrmLeadService:
                 (follow_up.assigned_to is not None and follow_up.assigned_to in scoped_user_ids)
                 or (lead.assigned_to is not None and lead.assigned_to in scoped_user_ids)
                 or (follow_up.created_by is not None and follow_up.created_by in scoped_user_ids)
+                or await self._is_lead_in_manager_scope_async(lead, scoped_user_ids)
             )
             if not is_in_scope:
                 raise ForbiddenException("Follow-up is outside your departmental scope.")
 
-        new_status = data.status.lower()
+        current_status = (follow_up.status or "pending").strip().lower()
+        new_status = data.status.strip().lower()
+
+        # Idempotent replay on same terminal state: preserve timestamp & avoid duplicate side effects
+        if current_status == new_status:
+            assignee = follow_up.assignee
+            assignee_name = (assignee.display_name or assignee.full_name or assignee.username) if assignee else None
+            assignee_email = assignee.email if assignee else None
+            creator = follow_up.creator
+            creator_name = (creator.display_name or creator.full_name or creator.username) if creator else None
+            is_overdue = follow_up.status == "pending" and follow_up.due_at < datetime.now(timezone.utc)
+            return CrmFollowUpRead(
+                id=follow_up.id,
+                lead_id=lead.id,
+                lead_code=lead.lead_code,
+                lead_name=lead.name,
+                lead_phone=lead.normalized_phone or lead.original_phone,
+                lead_company=lead.company_name,
+                lead_priority=lead.priority,
+                lead_stage_name=lead.stage.name if lead.stage else None,
+                lead_pipeline_name=lead.pipeline.name if lead.pipeline else None,
+                assigned_to=follow_up.assigned_to,
+                assignee_name=assignee_name,
+                assignee_email=assignee_email,
+                due_at=follow_up.due_at,
+                follow_up_type=follow_up.follow_up_type,
+                notes=follow_up.notes,
+                status=follow_up.status,
+                completed_at=follow_up.completed_at,
+                created_by=follow_up.created_by,
+                creator_name=creator_name,
+                task_id=follow_up.task_id,
+                created_at=follow_up.created_at,
+                updated_at=follow_up.updated_at,
+                is_overdue=is_overdue,
+            )
+
+        # Reject transitions out of terminal states (completed / cancelled)
+        if current_status in ("completed", "cancelled"):
+            raise ConflictException(
+                f"Cannot transition follow-up from '{current_status}' to '{new_status}'. "
+                f"Follow-ups in '{current_status}' status are terminal."
+            )
+
         follow_up.status = new_status
         now_dt = _utcnow()
         follow_up.updated_at = now_dt
@@ -1656,6 +1917,8 @@ class CrmLeadService:
         if not lead or lead.deleted_at is not None:
             raise NotFoundException("Associated lead not found.")
 
+        await self._check_lead_scope(lead, actor, action="mutate")
+
         role_type, scoped_user_ids = await self.get_actor_role_and_scope(actor)
         if role_type == "salesperson":
             if follow_up.assigned_to != actor.id and lead.assigned_to != actor.id and follow_up.created_by != actor.id:
@@ -1668,6 +1931,7 @@ class CrmLeadService:
                 (follow_up.assigned_to is not None and follow_up.assigned_to in scoped_user_ids)
                 or (lead.assigned_to is not None and lead.assigned_to in scoped_user_ids)
                 or (follow_up.created_by is not None and follow_up.created_by in scoped_user_ids)
+                or await self._is_lead_in_manager_scope_async(lead, scoped_user_ids)
             )
             if not is_in_scope:
                 raise ForbiddenException("Follow-up is outside your departmental scope.")
@@ -1840,21 +2104,19 @@ class CrmLeadService:
         if role_type == "salesperson":
             if assigned_to and assigned_to != actor.id:
                 raise ForbiddenException("Salespeople can only query their own follow-ups.")
-            stmt = stmt.where(or_(CrmFollowUp.assigned_to == actor.id, CrmFollowUp.created_by == actor.id))
+            stmt = stmt.where(
+                or_(CrmFollowUp.assigned_to == actor.id, CrmFollowUp.created_by == actor.id),
+                self._salesperson_visible_lead_clause(actor.id),
+            )
         elif role_type == "manager":
             assert scoped_user_ids is not None
+            lead_mgr_scope = self._manager_visible_lead_clause(scoped_user_ids)
             if assigned_to:
                 if assigned_to not in scoped_user_ids:
                     raise ForbiddenException("Requested salesperson is outside your departmental scope.")
-                stmt = stmt.where(CrmFollowUp.assigned_to == assigned_to)
+                stmt = stmt.where(CrmFollowUp.assigned_to == assigned_to, lead_mgr_scope)
             else:
-                stmt = stmt.where(
-                    or_(
-                        CrmFollowUp.assigned_to.in_(list(scoped_user_ids)),
-                        CrmFollowUp.created_by.in_(list(scoped_user_ids)),
-                        CrmLead.assigned_to.in_(list(scoped_user_ids)),
-                    )
-                )
+                stmt = stmt.where(lead_mgr_scope)
         elif role_type == "admin":
             if assigned_to:
                 stmt = stmt.where(CrmFollowUp.assigned_to == assigned_to)
@@ -2130,8 +2392,20 @@ class CrmLeadService:
             .order_by(desc(CrmActivity.activity_at))
         )
         act_rows = (await self.session.execute(act_stmt)).all()
+        fu_completed_acts: list[tuple[CrmActivity, User | None]] = []
+        fu_cancelled_acts: list[tuple[CrmActivity, User | None]] = []
         for act, performer in act_rows:
+            if act.activity_type == "follow_up_completed":
+                fu_completed_acts.append((act, performer))
+            elif act.activity_type == "follow_up_cancelled":
+                fu_cancelled_acts.append((act, performer))
             if act.activity_type in dedup_activity_types:
+                continue
+            # Non-destructively deduplicate legacy pre-Wave3 reassignment stubs stored as activity_type='note'
+            if (
+                act.activity_type == "note"
+                and (act.subject or "").strip().lower() == "lead reassigned"
+            ):
                 continue
             p_name = (performer.display_name or performer.full_name or performer.username) if performer else None
             p_email = performer.email if performer else None
@@ -2153,18 +2427,85 @@ class CrmLeadService:
                 )
             )
 
-        # 2. Follow-Ups
+        # 2. Follow-Ups — resolve actor_id, actor_name, and actor_email from the EXACT SAME User record (LM-DEF-028):
+        #    - pending   -> creator (CrmFollowUp.created_by)
+        #    - completed -> actor from matching follow_up_completed activity (fallback: creator)
+        #    - cancelled -> actor from matching follow_up_cancelled activity (fallback: creator)
         fu_stmt = (
             select(CrmFollowUp, User)
-            .outerjoin(User, CrmFollowUp.assigned_to == User.id)
+            .outerjoin(User, CrmFollowUp.created_by == User.id)
             .where(CrmFollowUp.lead_id == lead.id, CrmFollowUp.deleted_at.is_(None))
             .order_by(desc(CrmFollowUp.due_at))
         )
         fu_rows = (await self.session.execute(fu_stmt)).all()
-        for fu, assignee in fu_rows:
-            a_name = (assignee.display_name or assignee.full_name or assignee.username) if assignee else None
-            a_email = assignee.email if assignee else None
-            ts = fu.completed_at if fu.status == "completed" and fu.completed_at else fu.created_at
+        consumed_act_ids: set[uuid.UUID] = set()
+
+        def _match_fu_lifecycle_actor(
+            candidates: list[tuple[CrmActivity, User | None]],
+            target_ts: datetime | None,
+            fu_type: str,
+        ) -> tuple[uuid.UUID | None, User | None] | None:
+            best_idx: int | None = None
+            best_score: tuple[int, float] | None = None
+            fu_type_low = (fu_type or "").lower()
+            for idx_c, (cand_act, _cand_user) in enumerate(candidates):
+                if cand_act.id in consumed_act_ids:
+                    continue
+                if target_ts is not None and cand_act.activity_at is not None:
+                    diff = abs((cand_act.activity_at - target_ts).total_seconds())
+                else:
+                    diff = 999999.0
+                if diff > 5.0:
+                    continue
+                type_mismatch = 0 if (fu_type_low and fu_type_low in (cand_act.subject or "").lower()) else 1
+                score = (type_mismatch, diff)
+                if best_score is None or score < best_score:
+                    best_score = score
+                    best_idx = idx_c
+            if best_idx is not None:
+                matched_act, matched_user = candidates[best_idx]
+                consumed_act_ids.add(matched_act.id)
+                return matched_act.performed_by, matched_user
+            return None
+
+        for fu, creator in fu_rows:
+            resolved_actor_id: uuid.UUID | None = fu.created_by
+            resolved_actor_user: User | None = creator if fu.created_by is not None else None
+
+            if fu.status == "completed":
+                matched = _match_fu_lifecycle_actor(
+                    fu_completed_acts,
+                    fu.completed_at or fu.updated_at,
+                    fu.follow_up_type,
+                )
+                if matched is not None:
+                    resolved_actor_id, resolved_actor_user = matched
+            elif fu.status == "cancelled":
+                matched = _match_fu_lifecycle_actor(
+                    fu_cancelled_acts,
+                    fu.updated_at,
+                    fu.follow_up_type,
+                )
+                if matched is not None:
+                    resolved_actor_id, resolved_actor_user = matched
+
+            actor_name = (
+                (resolved_actor_user.display_name or resolved_actor_user.full_name or resolved_actor_user.username)
+                if (resolved_actor_id is not None and resolved_actor_user is not None)
+                else None
+            )
+            actor_email = (
+                resolved_actor_user.email
+                if (resolved_actor_id is not None and resolved_actor_user is not None)
+                else None
+            )
+            if fu.status == "completed" and fu.completed_at:
+                ts = fu.completed_at
+            elif fu.status == "cancelled" and fu.updated_at:
+                ts = fu.updated_at
+            else:
+                ts = fu.created_at
+
             items.append(
                 CrmTimelineItem(
                     id=fu.id,
@@ -2172,14 +2513,15 @@ class CrmLeadService:
                     title=f"Follow-Up ({fu.follow_up_type.capitalize()}): {fu.status.capitalize()}",
                     description=fu.notes,
                     timestamp=ts,
-                    actor_id=fu.created_by,
-                    actor_name=a_name,
-                    actor_email=a_email,
+                    actor_id=resolved_actor_id,
+                    actor_name=actor_name,
+                    actor_email=actor_email,
                     metadata={
                         "status": fu.status,
                         "due_at": fu.due_at.isoformat(),
                         "follow_up_type": fu.follow_up_type,
                         "assigned_to": str(fu.assigned_to) if fu.assigned_to else None,
+                        "created_by": str(fu.created_by) if fu.created_by else None,
                     },
                 )
             )
@@ -2310,39 +2652,45 @@ class CrmLeadService:
             local_today.year, local_today.month, local_today.day, 23, 59, 59, 999999, tzinfo=BUSINESS_TZ
         ).astimezone(timezone.utc)
 
-        # 1. Overdue Follow-ups (pending, due before today start)
+        # 1. Overdue Follow-ups (pending, due before today start, active parent lead)
         overdue_stmt = (
             select(func.count(CrmFollowUp.id))
+            .join(CrmLead, CrmFollowUp.lead_id == CrmLead.id)
             .where(
                 CrmFollowUp.assigned_to == target_id,
                 CrmFollowUp.deleted_at.is_(None),
                 CrmFollowUp.status == "pending",
                 CrmFollowUp.due_at < local_today_start,
+                CrmLead.deleted_at.is_(None),
             )
         )
         overdue_count = (await self.session.execute(overdue_stmt)).scalar() or 0
 
-        # 2. Due Today Follow-ups (pending, due within today)
+        # 2. Due Today Follow-ups (pending, due within today, active parent lead)
         due_today_stmt = (
             select(func.count(CrmFollowUp.id))
+            .join(CrmLead, CrmFollowUp.lead_id == CrmLead.id)
             .where(
                 CrmFollowUp.assigned_to == target_id,
                 CrmFollowUp.deleted_at.is_(None),
                 CrmFollowUp.status == "pending",
                 CrmFollowUp.due_at >= local_today_start,
                 CrmFollowUp.due_at <= local_today_end,
+                CrmLead.deleted_at.is_(None),
             )
         )
         due_today_count = (await self.session.execute(due_today_stmt)).scalar() or 0
 
-        # 3. Upcoming Follow-ups (pending, due after today end)
+        # 3. Upcoming Follow-ups (pending, due after today end, active parent lead)
         upcoming_stmt = (
             select(func.count(CrmFollowUp.id))
+            .join(CrmLead, CrmFollowUp.lead_id == CrmLead.id)
             .where(
                 CrmFollowUp.assigned_to == target_id,
                 CrmFollowUp.deleted_at.is_(None),
                 CrmFollowUp.status == "pending",
                 CrmFollowUp.due_at > local_today_end,
+                CrmLead.deleted_at.is_(None),
             )
         )
         upcoming_count = (await self.session.execute(upcoming_stmt)).scalar() or 0
@@ -2511,7 +2859,7 @@ class CrmLeadService:
         active_leads_rows = (await self.session.execute(active_leads_stmt)).all()
         active_leads_map = {r[0]: int(r[1]) for r in active_leads_rows if r[0] is not None}
 
-        # Bulk Query 2: Overdue and Due Today follow-ups per rep
+        # Bulk Query 2: Overdue and Due Today follow-ups per rep (excluding soft-deleted parent leads)
         follow_ups_stmt = (
             select(
                 CrmFollowUp.assigned_to,
@@ -2529,10 +2877,12 @@ class CrmLeadService:
                     )
                 ).label("due_today_count"),
             )
+            .join(CrmLead, CrmFollowUp.lead_id == CrmLead.id)
             .where(
                 CrmFollowUp.assigned_to.in_(rep_ids),
                 CrmFollowUp.deleted_at.is_(None),
                 CrmFollowUp.status == "pending",
+                CrmLead.deleted_at.is_(None),
             )
             .group_by(CrmFollowUp.assigned_to)
         )

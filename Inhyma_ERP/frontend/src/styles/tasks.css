@@ -412,10 +412,10 @@
    V2.1 Enterprise Polish: Kanban Drag & Drop, Calendar, Workload & Scrolling
    ========================================================================== */
 
-/* 4-Column ERP Kanban Board */
+/* 6-Column ERP Kanban Board (TODO, IN_PROGRESS, REVIEW, PENDING_APPROVAL, ON_HOLD, DONE) */
 .kanban-board-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(280px, 1fr));
+  grid-template-columns: repeat(6, minmax(240px, 1fr));
   gap: 16px;
   overflow-x: auto;
   padding: 4px 2px 20px 2px;

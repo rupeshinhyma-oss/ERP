@@ -497,7 +497,7 @@ export function App() {
           <Route path="/masters/payment_terms" element={<Navigate to="/masters/payment-terms" replace />} />
           <Route path="/payment-terms/list" element={<Navigate to="/masters/payment-terms" replace />} />
           <Route path="/paymentterms/list" element={<Navigate to="/masters/payment-terms" replace />} />
-          <Route path="/masters/lead-sources" element={<HrmsRouteGuard><LeadSourcesPage /></HrmsRouteGuard>} />
+          <Route path="/masters/lead-sources" element={<HrmsRouteGuard permission="lead_source.view"><LeadSourcesPage /></HrmsRouteGuard>} />
           <Route path="/masters/lead_sources" element={<Navigate to="/masters/lead-sources" replace />} />
           <Route path="/lead-sources/list" element={<Navigate to="/masters/lead-sources" replace />} />
           <Route path="/leadsources/list" element={<Navigate to="/masters/lead-sources" replace />} />

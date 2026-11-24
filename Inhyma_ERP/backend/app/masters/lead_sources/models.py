@@ -7,7 +7,7 @@ Indiamart, Facebook, Instagram, Agent, Other, Data Scrapping.
 
 from __future__ import annotations
 
-from sqlalchemy import String
+from sqlalchemy import String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.constants import RecordStatus
@@ -18,8 +18,9 @@ class LeadSource(Base, UUIDPrimaryKeyMixin, TimestampMixin, VersionMixin, SoftDe
     """A single lead source record."""
 
     __tablename__ = "lead_sources"
+    __table_args__ = (UniqueConstraint("name", name="uq_lead_sources_name"),)
 
-    name: Mapped[str] = mapped_column(String(100), nullable=False, unique=True, index=True)
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
 
     status: Mapped[RecordStatus] = mapped_column(
         RecordStatusColumn(),

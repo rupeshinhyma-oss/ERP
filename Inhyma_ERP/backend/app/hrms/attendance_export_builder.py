@@ -19,11 +19,12 @@ Builds a professional, multi-tab attendance workbook:
 
 from __future__ import annotations
 
+import asyncio
 import calendar
 import io
 import uuid
 from datetime import date, datetime, timedelta, timezone
-from typing import Optional, Set
+from typing import Any, Optional, Set
 
 import openpyxl
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
@@ -188,23 +189,24 @@ def validate_attendance_matrix_workbook(wb: openpyxl.Workbook, date_list: list[d
         )
 
 
-async def build_monthly_attendance_excel(
-    db: AsyncSession,
-    start_date: date,
-    end_date: date,
-    employee_id: Optional[uuid.UUID] = None,
-    allowed_employee_ids: Optional[Set[uuid.UUID]] = None,
-    is_admin: bool = False,
-    calendar_month_name: Optional[str] = None,
-) -> tuple[io.BytesIO, int, int]:
+def _build_attendance_matrix_workbook_sync(
+    *,
+    date_list: list[date],
+    today: date,
+    shift_name: str,
+    shift_minutes: int,
+    weekly_off_days: set[str],
+    user_rows: list[dict[str, Any]],
+    holiday_rows: list[dict[str, Any]],
+    emp_leave_map: dict[uuid.UUID, dict[date, dict[str, Any]]],
+    emp_att_map: dict[tuple[uuid.UUID, date], dict[str, Any]],
+) -> io.BytesIO:
     """
-    Generate authoritative attendance Excel workbook directly from PostgreSQL data.
-    Enforces Row 1 & Row 2 two-level headers with freeze panes C3 and programmatic validation.
-    Returns: (BytesIO buffer, total_employees_count, total_attendance_records_count).
+    Pure synchronous openpyxl workbook generator + validator executed in a worker thread
+    via asyncio.to_thread so large Excel exports never block the FastAPI asyncio event loop.
+    Operates strictly on plain Python data snapshots (no SQLAlchemy ORM/session access).
     """
-    num_days = (end_date - start_date).days + 1
-    today = datetime.now(IST).date()
-    date_list = [start_date + timedelta(days=i) for i in range(num_days)]
+    num_days = len(date_list)
 
     summary_headers = [
         "Employee Code / ID",
@@ -237,7 +239,6 @@ async def build_monthly_attendance_excel(
         ("REASON", "Reason / Regularization"),
     ]
     num_metrics_per_day = len(daily_metrics)  # 7
-    total_cols = num_summary_cols + num_days * num_metrics_per_day
 
     # Visual Styles
     navy_dark = "1E293B"
@@ -324,168 +325,37 @@ async def build_monthly_attendance_excel(
                 col_letter = get_column_letter(d_start_col + m_idx)
                 ws.column_dimensions[col_letter].width = mw
 
-    # 1. Fetch attendance policy for shift and weekly off configuration
-    policy_res = await db.execute(select(HrmsAttendancePolicy).limit(1))
-    policy = policy_res.scalar_one_or_none()
-
-    shift_name = policy.shift_name if policy and policy.shift_name else "Inhyma General Shift"
-    shift_start = policy.shift_start_time if policy and policy.shift_start_time else "10:30"
-    shift_end = policy.shift_end_time if policy and policy.shift_end_time else "19:00"
-    weekly_off_raw = (policy.weekly_off or "Sunday") if policy else "Sunday"
-    weekly_off_days = {d.strip().capitalize() for d in weekly_off_raw.split(",") if d.strip()}
-    if not weekly_off_days:
-        weekly_off_days = {"Sunday"}
-
-    try:
-        sh1, sm1 = map(int, shift_start.split(":"))
-        sh2, sm2 = map(int, shift_end.split(":"))
-        shift_minutes = (sh2 * 60 + sm2) - (sh1 * 60 + sm1)
-        if shift_minutes <= 0:
-            shift_minutes = 510
-    except Exception:
-        shift_minutes = 510
-
-    # 2. Query authorized employees from User table
-    user_stmt = (
-        select(User)
-        .where(
-            User.deleted_at.is_(None),
-            User.is_active.is_(True),
-            User.status == UserStatus.ACTIVE,
-        )
-        .order_by(User.first_name.asc(), User.last_name.asc(), User.username.asc())
-    )
-    if employee_id:
-        user_stmt = user_stmt.where(User.id == employee_id)
-    elif allowed_employee_ids is not None:
-        user_stmt = user_stmt.where(User.id.in_(allowed_employee_ids))
-    elif not is_admin:
-        user_stmt = user_stmt.where(User.id == employee_id if employee_id else False)
-
-    users = list((await db.execute(user_stmt)).scalars().all())
-    uids = [u.id for u in users]
-
-    # Handle empty employees case
-    if not uids:
-        wb = openpyxl.Workbook()
-        ws = wb.active
-        ws.title = "Attendance Matrix"
-        apply_header_structure(ws)
-        validate_attendance_matrix_workbook(wb, date_list)
-        buf = io.BytesIO()
-        wb.save(buf)
-        buf.seek(0)
-        return buf, 0, 0
-
-    # 3. Batch resolve departments and branch offices for authorized employees
-    dept_map: dict[uuid.UUID, str] = {}
-    branch_map: dict[uuid.UUID, str] = {}
-
-    try:
-        r_stmt = (
-            select(UserRole.user_id, Role.name)
-            .join(Role, Role.id == UserRole.role_id)
-            .where(UserRole.user_id.in_(uids), Role.deleted_at.is_(None))
-        )
-        for uid, rname in (await db.execute(r_stmt)).all():
-            if rname.lower() not in ("user", "employee", "department_manager", "super_admin", "admin") and uid not in dept_map:
-                dept_map[uid] = rname
-    except Exception:
-        pass
-
-    try:
-        loc_stmt = (
-            select(HrmsEmployeeLocation.user_id, HrmsLocation.name)
-            .join(HrmsLocation, HrmsLocation.id == HrmsEmployeeLocation.location_id)
-            .where(HrmsEmployeeLocation.user_id.in_(uids), HrmsLocation.deleted_at.is_(None))
-            .order_by(HrmsEmployeeLocation.is_primary.desc())
-        )
-        for uid, lname in (await db.execute(loc_stmt)).all():
-            if uid not in branch_map:
-                branch_map[uid] = lname
-    except Exception:
-        pass
-
-    # 4. Fetch holidays in date range
-    holidays_stmt = (
-        select(HrmsHoliday)
-        .where(
-            HrmsHoliday.deleted_at.is_(None),
-            HrmsHoliday.is_active.is_(True),
-            HrmsHoliday.holiday_date >= start_date,
-            HrmsHoliday.holiday_date <= end_date,
-        )
-    )
-    all_holidays = list((await db.execute(holidays_stmt)).scalars().all())
-
-    # 5. Fetch approved leaves in date range
-    leaves_stmt = (
-        select(HrmsLeaveRequest, HrmsLeaveType)
-        .join(HrmsLeaveType, HrmsLeaveType.id == HrmsLeaveRequest.leave_type_id)
-        .where(
-            HrmsLeaveRequest.employee_id.in_(uids),
-            HrmsLeaveRequest.approval_status == "APPROVED",
-            HrmsLeaveRequest.from_date <= end_date,
-            HrmsLeaveRequest.to_date >= start_date,
-        )
-    )
-    all_leaves = list((await db.execute(leaves_stmt)).all())
-
-    # 6. Fetch actual PostgreSQL attendance records in date range
-    att_stmt = (
-        select(HrmsAttendance)
-        .where(
-            HrmsAttendance.employee_id.in_(uids),
-            HrmsAttendance.attendance_date >= start_date,
-            HrmsAttendance.attendance_date <= end_date,
-        )
-    )
-    all_attendance = list((await db.execute(att_stmt)).scalars().all())
-    total_matched_att_records = len(all_attendance)
-
-    # Index attendance by (employee_id, date)
-    emp_att_map: dict[tuple[uuid.UUID, date], HrmsAttendance] = {}
-    for a in all_attendance:
-        emp_att_map[(a.employee_id, a.attendance_date)] = a
-
-    # Index leaves by employee_id -> dict[date, tuple[HrmsLeaveRequest, HrmsLeaveType]]
-    emp_leave_map: dict[uuid.UUID, dict[date, tuple[HrmsLeaveRequest, HrmsLeaveType]]] = {}
-    for req, lt in all_leaves:
-        cur = max(req.from_date, start_date)
-        req_end = min(req.to_date, end_date)
-        if req.employee_id not in emp_leave_map:
-            emp_leave_map[req.employee_id] = {}
-        while cur <= req_end:
-            emp_leave_map[req.employee_id][cur] = (req, lt)
-            cur += timedelta(days=1)
-
-    # 7. Create Excel Workbook
     wb = openpyxl.Workbook()
     ws1 = wb.active
     ws1.title = "Attendance Matrix"
     apply_header_structure(ws1)
 
+    if not user_rows:
+        validate_attendance_matrix_workbook(wb, date_list)
+        buf = io.BytesIO()
+        wb.save(buf)
+        buf.seek(0)
+        return buf
+
     current_row = 3
 
-    for user_idx, u in enumerate(users):
-        emp_code = u.employee_code or getattr(u, "code", None) or f"EMP-{str(u.id)[:6].upper()}"
-        first = u.first_name or ""
-        last = u.last_name or ""
-        emp_name = getattr(u, "display_name", None) or f"{first} {last}".strip() or getattr(u, "username", "Employee") or "Employee"
-        emp_branch = branch_map.get(u.id) or "Main Office"
-        emp_dept = dept_map.get(u.id) or getattr(u, "department", None) or "General"
-        raw_emp_type = getattr(u.employment_type, "value", u.employment_type) or getattr(u, "employment_status", None) or "Full-Time"
-        emp_type = str(raw_emp_type).replace("_", " ").title() if raw_emp_type else "Full-Time"
-        doj_str = u.date_of_joining.strftime("%Y-%m-%d") if u.date_of_joining else "-"
+    for user_idx, u in enumerate(user_rows):
+        uid = u["id"]
+        emp_code = u["emp_code"]
+        emp_name = u["emp_name"]
+        emp_branch = u["emp_branch"]
+        emp_dept = u["emp_dept"]
+        emp_type = u["emp_type"]
+        doj_str = u["doj_str"]
 
         emp_hol_map = {}
-        for h in all_holidays:
-            b_app = (h.branch_applicability or "All Branches").lower()
-            d_app = (getattr(h, "department_scope", None) or "All Departments").lower()
+        for h in holiday_rows:
+            b_app = h["branch_app"]
+            d_app = h["dept_app"]
             if ("all" in b_app or emp_branch.lower() in b_app) and ("all" in d_app or emp_dept.lower() in d_app):
-                emp_hol_map[h.holiday_date] = h
+                emp_hol_map[h["holiday_date"]] = h["name"]
 
-        leaves_for_emp = emp_leave_map.get(u.id, {})
+        leaves_for_emp = emp_leave_map.get(uid, {})
 
         total_working_days = 0
         paid_days = 0.0
@@ -498,18 +368,17 @@ async def build_monthly_attendance_excel(
         total_ot_mins = 0
         total_week_offs = 0
         total_holidays = 0
-        actual_db_punches = 0
 
         daily_eval = {}
-        has_records = any((u.id, d) in emp_att_map for d in date_list) or len(leaves_for_emp) > 0
+        has_records = any((uid, d) in emp_att_map for d in date_list) or len(leaves_for_emp) > 0
 
         for d in date_list:
             day_name = d.strftime("%A")
             is_weekend = day_name in weekly_off_days
             is_holiday = d in emp_hol_map
-            holiday_obj = emp_hol_map.get(d)
+            holiday_name = emp_hol_map.get(d)
             leave_info = leaves_for_emp.get(d)
-            att_rec = emp_att_map.get((u.id, d))
+            att_rec = emp_att_map.get((uid, d))
 
             if is_weekend:
                 total_week_offs += 1
@@ -528,24 +397,62 @@ async def build_monthly_attendance_excel(
             d_reason = "-"
             badge_type = "neutral"
 
-            if att_rec:
-                actual_db_punches += 1
-                wm = att_rec.working_minutes or 0
+            if is_holiday:
+                d_status = "HOLIDAY"
+                badge_type = "holiday"
+                d_reason = holiday_name or "Declared Holiday"
+                paid_days += 1.0
+            elif leave_info:
+                lv_weight = leave_info["weight"]
+                lt_label = leave_info["code"] or leave_info["name"]
+                if lv_weight == 0.5:
+                    d_status = f"HALF_DAY LEAVE ({lt_label})"
+                    badge_type = "half_day"
+                    d_reason = f"Approved Half-Day {leave_info['name']}: {leave_info['reason']}".strip()
+                    if leave_info["is_paid"]:
+                        paid_leave += 0.5
+                        paid_days += 0.5
+                    else:
+                        unpaid_leave += 0.5
+                    if att_rec:
+                        wm = att_rec["working_minutes"]
+                        total_working_mins += wm
+                        in_time_dt = to_ist(att_rec["punch_in"])
+                        out_time_dt = to_ist(att_rec["punch_out"])
+                        d_in = in_time_dt.strftime("%I:%M %p") if in_time_dt else "-"
+                        d_out = out_time_dt.strftime("%I:%M %p") if out_time_dt else "-"
+                        d_hrs = format_duration(wm) if wm > 0 else "0h 00m"
+                        present_days += 0.5
+                        paid_days += 0.5
+                    elif d < today:
+                        absent_days += 0.5
+                else:
+                    d_status = f"LEAVE ({lt_label})"
+                    badge_type = "leave"
+                    d_reason = f"Approved {leave_info['name']}: {leave_info['reason']}".strip()
+                    if leave_info["is_paid"]:
+                        paid_leave += 1.0
+                        paid_days += 1.0
+                    else:
+                        unpaid_leave += 1.0
+            elif att_rec:
+                wm = att_rec["working_minutes"]
                 total_working_mins += wm
 
                 ot_m = max(0, wm - shift_minutes) if wm > shift_minutes else 0
                 total_ot_mins += ot_m
 
-                in_time_dt = to_ist(att_rec.punch_in)
-                out_time_dt = to_ist(att_rec.punch_out)
+                in_time_dt = to_ist(att_rec["punch_in"])
+                out_time_dt = to_ist(att_rec["punch_out"])
 
-                d_in = in_time_dt.strftime("%I:%M %p") if in_time_dt else ("Punched In" if att_rec.punch_in else "-")
-                d_out = out_time_dt.strftime("%I:%M %p") if out_time_dt else ("In Progress" if att_rec.punch_in and not att_rec.punch_out else "-")
-                d_hrs = format_duration(wm) if wm > 0 else ("0h 00m" if att_rec.punch_in else "-")
+                d_in = in_time_dt.strftime("%I:%M %p") if in_time_dt else ("Punched In" if att_rec["punch_in"] else "-")
+                d_out = out_time_dt.strftime("%I:%M %p") if out_time_dt else ("In Progress" if att_rec["punch_in"] and not att_rec["punch_out"] else "-")
+                d_hrs = format_duration(wm) if wm > 0 else ("0h 00m" if att_rec["punch_in"] else "-")
                 d_ot = format_duration(ot_m) if ot_m > 0 else "0h 00m"
 
-                status_raw = (att_rec.status or "PRESENT").upper()
-                if status_raw in ("PRESENT", "LATE", "IN_PROGRESS", "WORK_FROM_HOME", "ON_DUTY") or att_rec.regularization_status == "APPROVED":
+                status_raw = att_rec["status"]
+                reg_status = att_rec["regularization_status"]
+                if status_raw in ("PRESENT", "LATE", "IN_PROGRESS", "WORK_FROM_HOME", "ON_DUTY") or reg_status == "APPROVED":
                     present_days += 1.0
                     paid_days += 1.0
                     badge_type = "present" if status_raw != "LATE" else "late"
@@ -565,31 +472,16 @@ async def build_monthly_attendance_excel(
                     if is_holiday or is_weekend:
                         paid_days += 1.0
 
-                if att_rec.regularization_status and att_rec.regularization_status != "NONE":
-                    note = att_rec.regularization_reason or att_rec.regularization_note or ""
-                    d_reason = f"Reg: {att_rec.regularization_status} {note}".strip()
-                elif att_rec.late_minutes and att_rec.late_minutes > 0:
-                    d_reason = f"Late by {att_rec.late_minutes}m"
-                elif att_rec.early_exit_minutes and att_rec.early_exit_minutes > 0:
-                    d_reason = f"Early exit {att_rec.early_exit_minutes}m"
+                if reg_status and reg_status != "NONE":
+                    note = att_rec["regularization_reason"] or att_rec["regularization_note"] or ""
+                    d_reason = f"Reg: {reg_status} {note}".strip()
+                elif att_rec["late_minutes"] > 0:
+                    d_reason = f"Late by {att_rec['late_minutes']}m"
+                elif att_rec["early_exit_minutes"] > 0:
+                    d_reason = f"Early exit {att_rec['early_exit_minutes']}m"
                 else:
                     d_reason = "-"
 
-            elif leave_info:
-                req, lt = leave_info
-                d_status = f"LEAVE ({lt.code or lt.name})"
-                badge_type = "leave"
-                d_reason = f"Approved {lt.name}: {req.reason or ''}".strip()
-                if lt.is_paid:
-                    paid_leave += 1.0
-                    paid_days += 1.0
-                else:
-                    unpaid_leave += 1.0
-            elif is_holiday:
-                d_status = "HOLIDAY"
-                badge_type = "holiday"
-                d_reason = holiday_obj.name if holiday_obj else "Declared Holiday"
-                paid_days += 1.0
             elif is_weekend:
                 d_status = "WEEKEND"
                 badge_type = "weekend"
@@ -704,4 +596,221 @@ async def build_monthly_attendance_excel(
     buf = io.BytesIO()
     wb.save(buf)
     buf.seek(0)
+    return buf
+
+
+async def build_monthly_attendance_excel(
+    db: AsyncSession,
+    start_date: date,
+    end_date: date,
+    employee_id: Optional[uuid.UUID] = None,
+    allowed_employee_ids: Optional[Set[uuid.UUID]] = None,
+    is_admin: bool = False,
+    calendar_month_name: Optional[str] = None,
+) -> tuple[io.BytesIO, int, int]:
+    """
+    Generate authoritative attendance Excel workbook directly from PostgreSQL data.
+    Executes async DB queries first, then offloads CPU-intensive openpyxl workbook construction,
+    styling, validation, and serialization via asyncio.to_thread to keep the event loop responsive.
+    Returns: (BytesIO buffer, total_employees_count, total_attendance_records_count).
+    """
+    num_days = (end_date - start_date).days + 1
+    today = datetime.now(IST).date()
+    date_list = [start_date + timedelta(days=i) for i in range(num_days)]
+
+    # 1. Fetch attendance policy for shift and weekly off configuration
+    policy_res = await db.execute(select(HrmsAttendancePolicy).limit(1))
+    policy = policy_res.scalar_one_or_none()
+
+    shift_name = policy.shift_name if policy and policy.shift_name else "Inhyma General Shift"
+    shift_start = policy.shift_start_time if policy and policy.shift_start_time else "10:30"
+    shift_end = policy.shift_end_time if policy and policy.shift_end_time else "19:00"
+    weekly_off_raw = (policy.weekly_off or "Sunday") if policy else "Sunday"
+    weekly_off_days = {d.strip().capitalize() for d in weekly_off_raw.split(",") if d.strip()}
+    if not weekly_off_days:
+        weekly_off_days = {"Sunday"}
+
+    try:
+        sh1, sm1 = map(int, shift_start.split(":"))
+        sh2, sm2 = map(int, shift_end.split(":"))
+        shift_minutes = (sh2 * 60 + sm2) - (sh1 * 60 + sm1)
+        if shift_minutes <= 0:
+            shift_minutes = 510
+    except Exception:
+        shift_minutes = 510
+
+    # 2. Query authorized employees from User table
+    user_stmt = (
+        select(User)
+        .where(
+            User.deleted_at.is_(None),
+            User.is_active.is_(True),
+            User.status == UserStatus.ACTIVE,
+        )
+        .order_by(User.first_name.asc(), User.last_name.asc(), User.username.asc())
+    )
+    if employee_id:
+        user_stmt = user_stmt.where(User.id == employee_id)
+    elif allowed_employee_ids is not None:
+        user_stmt = user_stmt.where(User.id.in_(allowed_employee_ids))
+    elif not is_admin:
+        user_stmt = user_stmt.where(User.id == employee_id if employee_id else False)
+
+    users = list((await db.execute(user_stmt)).scalars().all())
+    uids = [u.id for u in users]
+
+    # Handle empty employees case off the event loop
+    if not uids:
+        buf = await asyncio.to_thread(
+            _build_attendance_matrix_workbook_sync,
+            date_list=date_list,
+            today=today,
+            shift_name=shift_name,
+            shift_minutes=shift_minutes,
+            weekly_off_days=weekly_off_days,
+            user_rows=[],
+            holiday_rows=[],
+            emp_leave_map={},
+            emp_att_map={},
+        )
+        return buf, 0, 0
+
+    # 3. Batch resolve departments and branch offices for authorized employees
+    dept_map: dict[uuid.UUID, str] = {}
+    branch_map: dict[uuid.UUID, str] = {}
+
+    try:
+        r_stmt = (
+            select(UserRole.user_id, Role.name)
+            .join(Role, Role.id == UserRole.role_id)
+            .where(UserRole.user_id.in_(uids), Role.deleted_at.is_(None))
+        )
+        for uid, rname in (await db.execute(r_stmt)).all():
+            if rname.lower() not in ("user", "employee", "department_manager", "super_admin", "admin") and uid not in dept_map:
+                dept_map[uid] = rname
+    except Exception:
+        pass
+
+    try:
+        loc_stmt = (
+            select(HrmsEmployeeLocation.user_id, HrmsLocation.name)
+            .join(HrmsLocation, HrmsLocation.id == HrmsEmployeeLocation.location_id)
+            .where(HrmsEmployeeLocation.user_id.in_(uids), HrmsLocation.deleted_at.is_(None))
+            .order_by(HrmsEmployeeLocation.is_primary.desc())
+        )
+        for uid, lname in (await db.execute(loc_stmt)).all():
+            if uid not in branch_map:
+                branch_map[uid] = lname
+    except Exception:
+        pass
+
+    # 4. Fetch holidays in date range
+    holidays_stmt = (
+        select(HrmsHoliday)
+        .where(
+            HrmsHoliday.deleted_at.is_(None),
+            HrmsHoliday.is_active.is_(True),
+            HrmsHoliday.holiday_date >= start_date,
+            HrmsHoliday.holiday_date <= end_date,
+        )
+    )
+    all_holidays = list((await db.execute(holidays_stmt)).scalars().all())
+
+    # 5. Fetch approved leaves in date range
+    leaves_stmt = (
+        select(HrmsLeaveRequest, HrmsLeaveType)
+        .join(HrmsLeaveType, HrmsLeaveType.id == HrmsLeaveRequest.leave_type_id)
+        .where(
+            HrmsLeaveRequest.employee_id.in_(uids),
+            HrmsLeaveRequest.approval_status == "APPROVED",
+            HrmsLeaveRequest.from_date <= end_date,
+            HrmsLeaveRequest.to_date >= start_date,
+        )
+    )
+    all_leaves = list((await db.execute(leaves_stmt)).all())
+
+    # 6. Fetch actual PostgreSQL attendance records in date range
+    att_stmt = (
+        select(HrmsAttendance)
+        .where(
+            HrmsAttendance.employee_id.in_(uids),
+            HrmsAttendance.attendance_date >= start_date,
+            HrmsAttendance.attendance_date <= end_date,
+        )
+    )
+    all_attendance = list((await db.execute(att_stmt)).scalars().all())
+    total_matched_att_records = len(all_attendance)
+
+    # Snapshot plain Python structures before offloading to worker thread
+    user_rows: list[dict[str, Any]] = []
+    for u in users:
+        first = u.first_name or ""
+        last = u.last_name or ""
+        raw_emp_type = getattr(u.employment_type, "value", u.employment_type) or getattr(u, "employment_status", None) or "Full-Time"
+        user_rows.append(
+            {
+                "id": u.id,
+                "emp_code": u.employee_code or getattr(u, "code", None) or f"EMP-{str(u.id)[:6].upper()}",
+                "emp_name": getattr(u, "display_name", None) or f"{first} {last}".strip() or getattr(u, "username", "Employee") or "Employee",
+                "emp_branch": branch_map.get(u.id) or "Main Office",
+                "emp_dept": dept_map.get(u.id) or getattr(u, "department", None) or "General",
+                "emp_type": str(raw_emp_type).replace("_", " ").title() if raw_emp_type else "Full-Time",
+                "doj_str": u.date_of_joining.strftime("%Y-%m-%d") if u.date_of_joining else "-",
+            }
+        )
+
+    holiday_rows: list[dict[str, Any]] = [
+        {
+            "holiday_date": h.holiday_date,
+            "name": h.name,
+            "branch_app": (h.branch_applicability or "All Branches").lower(),
+            "dept_app": (getattr(h, "department_scope", None) or "All Departments").lower(),
+        }
+        for h in all_holidays
+    ]
+
+    emp_att_map: dict[tuple[uuid.UUID, date], dict[str, Any]] = {}
+    for a in all_attendance:
+        emp_att_map[(a.employee_id, a.attendance_date)] = {
+            "working_minutes": a.working_minutes or 0,
+            "punch_in": a.punch_in,
+            "punch_out": a.punch_out,
+            "status": (a.status or "PRESENT").upper(),
+            "regularization_status": a.regularization_status or "NONE",
+            "regularization_reason": a.regularization_reason,
+            "regularization_note": a.regularization_note,
+            "late_minutes": a.late_minutes or 0,
+            "early_exit_minutes": a.early_exit_minutes or 0,
+        }
+
+    emp_leave_map: dict[uuid.UUID, dict[date, dict[str, Any]]] = {}
+    for req, lt in all_leaves:
+        is_half = req.from_date == req.to_date and abs(float(req.number_of_days or 1.0) - 0.5) < 1e-6
+        info = {
+            "weight": 0.5 if is_half else 1.0,
+            "code": lt.code,
+            "name": lt.name,
+            "is_paid": bool(lt.is_paid),
+            "reason": req.reason or "",
+        }
+        cur = max(req.from_date, start_date)
+        req_end = min(req.to_date, end_date)
+        lmap = emp_leave_map.setdefault(req.employee_id, {})
+        while cur <= req_end:
+            lmap[cur] = info
+            cur += timedelta(days=1)
+
+    # 7. Build, style, validate, and serialize Excel workbook in worker thread
+    buf = await asyncio.to_thread(
+        _build_attendance_matrix_workbook_sync,
+        date_list=date_list,
+        today=today,
+        shift_name=shift_name,
+        shift_minutes=shift_minutes,
+        weekly_off_days=weekly_off_days,
+        user_rows=user_rows,
+        holiday_rows=holiday_rows,
+        emp_leave_map=emp_leave_map,
+        emp_att_map=emp_att_map,
+    )
     return buf, len(users), total_matched_att_records

@@ -8,7 +8,7 @@ import uuid
 from datetime import date, datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, ValidationInfo, field_validator, model_validator
 
 from app.tasks.models import (
     ApprovalStatus,
@@ -21,6 +21,40 @@ from app.tasks.models import (
     TaskPriority,
     TaskStatus,
 )
+
+
+def summarize_reactions(raw_reactions: Any, current_user_id: uuid.UUID | None = None) -> list[dict[str, Any]]:
+    """Aggregate raw ORM TaskReaction rows (or pre-aggregated summaries) into TaskReactionSummary dicts."""
+    if not raw_reactions:
+        return []
+    summary_map: dict[str, dict[str, Any]] = {}
+    passthrough: list[Any] = []
+    for item in raw_reactions:
+        if isinstance(item, TaskReactionSummary):
+            passthrough.append(item)
+            continue
+        if isinstance(item, dict) and "count" in item and "emoji" in item:
+            passthrough.append(item)
+            continue
+        emoji = getattr(item, "emoji", None) if not isinstance(item, dict) else item.get("emoji")
+        user_id = getattr(item, "user_id", None) if not isinstance(item, dict) else item.get("user_id")
+        if not emoji:
+            continue
+        if emoji not in summary_map:
+            summary_map[emoji] = {
+                "emoji": emoji,
+                "count": 0,
+                "user_ids": [],
+                "has_reacted": False,
+            }
+        summary_map[emoji]["count"] += 1
+        if user_id is not None:
+            summary_map[emoji]["user_ids"].append(user_id)
+            if current_user_id is not None and str(user_id) == str(current_user_id):
+                summary_map[emoji]["has_reacted"] = True
+    if passthrough and not summary_map:
+        return passthrough
+    return list(summary_map.values())
 
 
 # --- User Snapshot in Schemas ---
@@ -149,6 +183,12 @@ class TaskCommentRead(BaseModel):
     reactions: list[TaskReactionSummary] = []
     mentions: list[TaskMentionRead] = []
 
+    @field_validator("reactions", mode="before")
+    @classmethod
+    def _coerce_comment_reactions(cls, value: Any, info: ValidationInfo) -> list[Any]:
+        ctx = info.context or {}
+        return summarize_reactions(value, current_user_id=ctx.get("current_user_id"))
+
 
 # --- Attachments & Voice Notes ---
 class TaskAttachmentCreateInput(BaseModel):
@@ -173,9 +213,12 @@ class TaskAttachmentRead(BaseModel):
 
 
 class TaskVoiceNoteCreateInput(BaseModel):
-    file_name: str = "Voice Note"
-    audio_url: str
-    duration_seconds: int = 0
+    file_name: str = Field(default="Voice Note", min_length=1, max_length=255)
+    audio_url: str = Field(..., min_length=1, max_length=500)
+    duration_seconds: int = Field(default=0, ge=0)
+    file_size: int = Field(default=0, ge=0)
+    mime_type: str = Field(default="audio/webm", max_length=100)
+    title: str | None = Field(default=None, max_length=255)
 
 
 class TaskVoiceNoteRead(BaseModel):
@@ -375,7 +418,10 @@ class TaskTemplateRead(BaseModel):
 # --- Dependencies ---
 class TaskDependencyCreate(BaseModel):
     depends_on_task_id: uuid.UUID
-    dependency_type: DependencyType = DependencyType.BLOCKS
+    dependency_type: DependencyType = Field(
+        default=DependencyType.BLOCKS,
+        validation_alias=AliasChoices("dependency_type", "relationship_type"),
+    )
 
 
 class TaskDependencyRead(BaseModel):
@@ -564,6 +610,7 @@ class TaskUpdate(BaseModel):
     approver_id: uuid.UUID | None = None
     approval_notes: str | None = None
     completion_notes: str | None = None
+    version: int | None = Field(None, ge=1)
 
     @model_validator(mode="after")
     def validate_dates(self) -> TaskUpdate:
@@ -616,6 +663,12 @@ class TaskSummaryRead(BaseModel):
     department_id: uuid.UUID | None = None
     department_name: str | None = None
 
+    @field_validator("reactions", mode="before")
+    @classmethod
+    def _coerce_summary_reactions(cls, value: Any, info: ValidationInfo) -> list[Any]:
+        ctx = info.context or {}
+        return summarize_reactions(value, current_user_id=ctx.get("current_user_id"))
+
 
 class TaskRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -659,6 +712,12 @@ class TaskRead(BaseModel):
     progress_percent: int = 0
     department_id: uuid.UUID | None = None
     department_name: str | None = None
+
+    @field_validator("reactions", mode="before")
+    @classmethod
+    def _coerce_task_reactions(cls, value: Any, info: ValidationInfo) -> list[Any]:
+        ctx = info.context or {}
+        return summarize_reactions(value, current_user_id=ctx.get("current_user_id"))
 
 
 class TaskDepartmentRead(BaseModel):

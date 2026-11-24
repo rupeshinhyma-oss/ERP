@@ -129,10 +129,10 @@ export function SalespersonDistributionPage() {
   // Authorization check
   const canManage = auth.hasPermission("crm.distribution.manage");
 
-  // Fetch States from ERP master
+  // Fetch States via lookup endpoint (does not require state.view master permission)
   const fetchStates = useCallback(async () => {
     try {
-      const res = await apiGet<any>("/masters/states?limit=500&page_size=500&status=active");
+      const res = await apiGet<any>("/masters/states/lookup");
       const dataPayload = (res as any)?.data ?? res;
       const list = Array.isArray(dataPayload) ? dataPayload : dataPayload?.items || dataPayload?.data || [];
       const mapped: StateMasterItem[] = list.map((s: any) => ({
@@ -205,9 +205,10 @@ export function SalespersonDistributionPage() {
       if (eligibilityFilter === "ELIGIBLE" && !u.is_eligible) return false;
       if (eligibilityFilter === "INELIGIBLE" && u.is_eligible) return false;
 
-      // Territory
+      // Territory (wildcard [] on configured/eligible salesperson covers all active states)
       if (territoryFilter !== "ALL") {
-        const hasState = u.territories.some((t) => t.state_id === territoryFilter);
+        const isWildcard = u.territories.length === 0 && (u.is_eligible || u.updated_at !== null);
+        const hasState = isWildcard || u.territories.some((t) => t.state_id === territoryFilter);
         if (!hasState) return false;
       }
 
@@ -256,16 +257,16 @@ export function SalespersonDistributionPage() {
   const handleOpenDrawer = (user: SalespersonDistributionItem) => {
     setSelectedUser(user);
 
-    // Determine initial territory mode: if all available states are covered, set mode to ALL
+    // Determine initial territory mode: empty list [] is the canonical wildcard for All Territories
+    // (also treat legacy records containing all loaded states as All Territories)
     const hasAllStates =
-      availableStates.length > 0 &&
-      user.territories.length >= availableStates.length &&
-      availableStates.every((s) => user.territories.some((t) => t.state_id === s.id));
+      user.territories.length === 0 ||
+      (availableStates.length > 0 &&
+        user.territories.length >= availableStates.length &&
+        availableStates.every((s) => user.territories.some((t) => t.state_id === s.id)));
 
     const initialMode: "ALL" | "SPECIFIC" = hasAllStates ? "ALL" : "SPECIFIC";
-    const initialIds = hasAllStates
-      ? availableStates.map((s) => s.id)
-      : user.territories.map((t) => t.state_id);
+    const initialIds = hasAllStates ? [] : user.territories.map((t) => t.state_id);
 
     const initial: InitialFormState = {
       eligible: user.is_eligible,
@@ -369,7 +370,8 @@ export function SalespersonDistributionPage() {
       // Validate territory selection
       let finalStateIds: string[] = [];
       if (territoryMode === "ALL") {
-        finalStateIds = availableStates.map((s) => s.id);
+        // Persist canonical wildcard [] so all current and future valid territories are covered
+        finalStateIds = [];
       } else {
         if (editTerritoryStateIds.length === 0) {
           throw new Error(
@@ -443,7 +445,17 @@ export function SalespersonDistributionPage() {
 
   return (
     <AppShell activeKey="crm-distribution">
-      <div className="crm-configuration-page" style={{ padding: "1.5rem", maxWidth: "1400px", margin: "0 auto", boxSizing: "border-box" }}>
+      <div
+        className="crm-configuration-page"
+        style={{
+          padding: "clamp(0.75rem, 2.5vw, 1.5rem)",
+          width: "100%",
+          maxWidth: "min(100%, 1400px)",
+          minWidth: 0,
+          margin: "0 auto",
+          boxSizing: "border-box",
+        }}
+      >
         {/* Breadcrumb */}
         <Breadcrumb trail={["CRM", "Salesperson Configuration"]} />
 
@@ -457,9 +469,10 @@ export function SalespersonDistributionPage() {
             marginTop: "1rem",
             marginBottom: "1.5rem",
             gap: "1rem",
+            minWidth: 0,
           }}
         >
-          <div>
+          <div style={{ minWidth: 0, flex: "1 1 240px" }}>
             <h1
               style={{
                 fontSize: "1.5rem",
@@ -469,17 +482,18 @@ export function SalespersonDistributionPage() {
                 display: "flex",
                 alignItems: "center",
                 gap: "0.5rem",
+                flexWrap: "wrap",
               }}
             >
               <IconMap style={{ width: "24px", height: "24px", color: "var(--color-primary, #2563eb)" }} />
               Salesperson Configuration
             </h1>
             <p style={{ margin: "0.25rem 0 0 0", color: "#64748b", fontSize: "0.875rem" }}>
-              Configure salesperson eligibility and assignment preferences for future CRM lead allocation.
+              Configure salesperson eligibility, territory coverage, priority, and capacity for CRM lead assignment.
             </p>
           </div>
 
-          <div style={{ display: "flex", gap: "0.5rem" }}>
+          <div style={{ display: "flex", gap: "0.5rem", flexShrink: 0 }}>
             <button
               type="button"
               className="btn btn-secondary"
@@ -514,9 +528,10 @@ export function SalespersonDistributionPage() {
         <div
           style={{
             display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+            gridTemplateColumns: "repeat(auto-fit, minmax(min(220px, 100%), 1fr))",
             gap: "1rem",
             marginBottom: "1.5rem",
+            minWidth: 0,
           }}
         >
           <div
@@ -526,6 +541,7 @@ export function SalespersonDistributionPage() {
               border: "1px solid #e2e8f0",
               padding: "1rem 1.25rem",
               boxShadow: "0 1px 2px rgba(0,0,0,0.04)",
+              minWidth: 0,
             }}
           >
             <div style={{ fontSize: "0.8125rem", color: "#64748b", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.025em" }}>
@@ -540,7 +556,7 @@ export function SalespersonDistributionPage() {
               </span>
             </div>
             <div style={{ fontSize: "0.75rem", color: "#64748b", marginTop: "0.35rem" }}>
-              Configured for future lead routing
+              Eligible for CRM lead assignment
             </div>
           </div>
 
@@ -613,9 +629,9 @@ export function SalespersonDistributionPage() {
             boxShadow: "0 1px 2px rgba(0,0,0,0.04)",
           }}
         >
-          <div style={{ display: "flex", flexWrap: "wrap", gap: "0.75rem", alignItems: "center" }}>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: "0.75rem", alignItems: "center", minWidth: 0 }}>
             {/* Search Input */}
-            <div style={{ flex: "1 1 240px", minWidth: "220px" }}>
+            <div style={{ flex: "1 1 200px", minWidth: 0, maxWidth: "100%" }}>
               <input
                 type="text"
                 placeholder="Search by name, employee code, or email..."
@@ -628,12 +644,13 @@ export function SalespersonDistributionPage() {
                   border: "1px solid #cbd5e1",
                   borderRadius: "0.375rem",
                   outline: "none",
+                  boxSizing: "border-box",
                 }}
               />
             </div>
 
             {/* Department Filter */}
-            <div style={{ minWidth: "160px" }}>
+            <div style={{ flex: "1 1 150px", minWidth: 0, maxWidth: "100%" }}>
               <select
                 value={departmentFilter}
                 onChange={(e) => setDepartmentFilter(e.target.value)}
@@ -656,7 +673,7 @@ export function SalespersonDistributionPage() {
             </div>
 
             {/* Eligibility Filter */}
-            <div style={{ minWidth: "150px" }}>
+            <div style={{ flex: "1 1 140px", minWidth: 0, maxWidth: "100%" }}>
               <select
                 value={eligibilityFilter}
                 onChange={(e) => setEligibilityFilter(e.target.value as any)}
@@ -676,7 +693,7 @@ export function SalespersonDistributionPage() {
             </div>
 
             {/* Territory Filter */}
-            <div style={{ minWidth: "160px" }}>
+            <div style={{ flex: "1 1 150px", minWidth: 0, maxWidth: "100%" }}>
               <select
                 value={territoryFilter}
                 onChange={(e) => setTerritoryFilter(e.target.value)}
@@ -800,7 +817,7 @@ export function SalespersonDistributionPage() {
           )}
         </div>
 
-        {/* Salespeople Table — Compact, viewport-fitted with clean column proportions */}
+        {/* Salespeople Table — Constrained within internal table-scroll wrapper */}
         <div
           style={{
             background: "#fff",
@@ -808,9 +825,22 @@ export function SalespersonDistributionPage() {
             border: "1px solid #e2e8f0",
             overflow: "hidden",
             boxShadow: "0 1px 2px rgba(0,0,0,0.04)",
+            width: "100%",
+            maxWidth: "100%",
+            minWidth: 0,
+            boxSizing: "border-box",
           }}
         >
-          <div style={{ overflowX: "auto" }}>
+          <div
+            className="table-scroll"
+            style={{
+              overflowX: "auto",
+              width: "100%",
+              maxWidth: "100%",
+              maxHeight: "none",
+              WebkitOverflowScrolling: "touch",
+            }}
+          >
             <table
               style={{
                 width: "100%",
@@ -879,10 +909,12 @@ export function SalespersonDistributionPage() {
                 ) : (
                   filteredSalespeople.map((u) => {
                     const isSelected = selectedUserIds.includes(u.user_id);
+                    const isWildcardAll = u.territories.length === 0 && (u.is_eligible || u.updated_at !== null);
                     const isAllTerritories =
-                      availableStates.length > 0 &&
-                      u.territories.length >= availableStates.length &&
-                      availableStates.every((s) => u.territories.some((t) => t.state_id === s.id));
+                      isWildcardAll ||
+                      (availableStates.length > 0 &&
+                        u.territories.length >= availableStates.length &&
+                        availableStates.every((s) => u.territories.some((t) => t.state_id === s.id)));
 
                     return (
                       <tr
@@ -1027,7 +1059,7 @@ export function SalespersonDistributionPage() {
                                 whiteSpace: "nowrap",
                               }}
                             >
-                              All ({u.territories.length})
+                              All Territories
                             </span>
                           ) : u.territories.length === 0 ? (
                             <span style={{ color: "#94a3b8", fontSize: "0.8125rem" }}>—</span>
@@ -1184,8 +1216,8 @@ export function SalespersonDistributionPage() {
             gap: "0.5rem",
           }}
         >
-          <span style={{ fontWeight: 600, color: "#334155" }}>Notice:</span>
-          This page manages salesperson configuration settings for future lead assignment. Leads are not automatically distributed or reassigned in this phase.
+          <span style={{ fontWeight: 600, color: "#334155" }}>Note:</span>
+          Eligibility, territory coverage, priority, and capacity settings govern automated and manual CRM lead assignment. Updating these settings does not alter existing lead ownership.
         </div>
       </div>
 
@@ -1341,7 +1373,7 @@ export function SalespersonDistributionPage() {
                       Eligible for Automatic Assignment
                     </label>
                     <p style={{ margin: "0.35rem 0 0 0", fontSize: "0.8125rem", color: "#475569", lineHeight: 1.4 }}>
-                      Prepares this user for future lead assignment. Leads are not assigned immediately or automatically in this phase.
+                      Includes this salesperson in CRM automated lead assignment according to territory, priority, and active capacity rules.
                     </p>
                     <p style={{ margin: "0.25rem 0 0 0", fontSize: "0.75rem", color: "#64748b" }}>
                       Disabling eligibility retains previously saved territory and priority preferences, and does not alter existing lead ownership.
@@ -1468,7 +1500,7 @@ export function SalespersonDistributionPage() {
                       color: "#1e40af",
                     }}
                   >
-                    <strong>Nationwide Coverage:</strong> This salesperson is eligible to receive leads from all {availableStates.length} registered states and territories.
+                    <strong>Nationwide Coverage:</strong> This salesperson is eligible to receive leads from all current and future active states and territories.
                   </div>
                 ) : (
                   <div>
@@ -1862,8 +1894,8 @@ export function SalespersonDistributionPage() {
 
           <p style={{ fontSize: "0.8125rem", color: "#64748b", marginTop: "0.75rem" }}>
             {bulkTargetEligibility
-              ? "This updates eligibility configuration for future CRM lead allocation. No leads will be allocated or reassigned at this time."
-              : "Disabled users will not be eligible for future automated routing. Existing leads already assigned to these users will remain unaffected."}
+              ? "Enabled users will be included in CRM lead assignment according to their territory, priority, and capacity rules. Existing lead ownership will remain unchanged."
+              : "Disabled users will be excluded from automated CRM lead assignment. Existing leads already assigned to these users will remain unaffected."}
           </p>
 
           <div

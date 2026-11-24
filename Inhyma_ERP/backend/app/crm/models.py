@@ -66,6 +66,15 @@ class CrmPipeline(Base, UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, Ve
     """
 
     __tablename__ = "crm_pipelines"
+    __table_args__ = (
+        Index(
+            "uq_crm_pipelines_single_default",
+            "is_default",
+            unique=True,
+            postgresql_where=text("is_default IS TRUE AND deleted_at IS NULL"),
+            sqlite_where=text("is_default = 1 AND deleted_at IS NULL"),
+        ),
+    )
 
     name: Mapped[str] = mapped_column(String(150), nullable=False, unique=True, index=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)

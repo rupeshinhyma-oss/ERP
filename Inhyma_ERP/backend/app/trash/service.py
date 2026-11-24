@@ -47,6 +47,7 @@ from app.users.models import User
 from app.rbac.models import Role
 from app.inquiries.models import ConsignmentCode, Inquiry, InquiryItem
 from app.planning.models import PlanningChangeLog, PlanningSheet, PlanningRow, PlanningColumn, PlanningStatusTag
+from app.tasks.models import Task, TaskRecurringSchedule
 
 # (model class, primary display-name attribute, secondary "code"-like
 # attribute or None). ``name_attr`` MUST be a real attribute on the model
@@ -91,6 +92,8 @@ MODEL_MAP: dict[str, tuple[Type[Any], str, str | None]] = {
     "Planning Row": (PlanningRow, "label", None),
     "Planning Column": (PlanningColumn, "name", None),
     "Planning Status Tag": (PlanningStatusTag, "label", None),
+    "Task": (Task, "title", None),
+    "Recurring Task Schedule": (TaskRecurringSchedule, "title", None),
 }
 
 # Phase 8 item 9/16: list_trash() used to run an UNBOUNDED
@@ -198,6 +201,8 @@ class TrashService:
             raise NotFoundException(f"{entity_type} with ID '{item_id}' not found.")
 
         row.deleted_at = None
+        if hasattr(row, "deleted_by"):
+            row.deleted_by = None
         await self.db.flush()
         return True
 

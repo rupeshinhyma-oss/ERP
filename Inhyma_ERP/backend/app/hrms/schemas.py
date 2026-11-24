@@ -5,6 +5,7 @@ Request and response validation models for HRMS Setup endpoints.
 
 from __future__ import annotations
 
+import math
 import uuid
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
@@ -453,6 +454,14 @@ class PunchInRequest(BaseModel):
     location_id: uuid.UUID | None = None
     timestamp: datetime | None = None  # optional override for policy testing
 
+    @model_validator(mode="after")
+    def validate_gps_coordinates(self) -> "PunchInRequest":
+        if not math.isfinite(self.latitude) or not math.isfinite(self.longitude) or not math.isfinite(self.accuracy):
+            raise ValueError("Latitude, longitude, and accuracy must be finite numbers.")
+        if abs(self.latitude) < 1e-6 and abs(self.longitude) < 1e-6:
+            raise ValueError("Invalid GPS coordinates: (0, 0) coordinates are not permitted.")
+        return self
+
 
 class PunchOutRequest(BaseModel):
     latitude: float = Field(..., ge=-90.0, le=90.0)
@@ -460,6 +469,14 @@ class PunchOutRequest(BaseModel):
     accuracy: float = Field(..., ge=0.0, le=100.0, description="GPS accuracy in meters (maximum 100m)")
     gps_timestamp: datetime | None = None
     timestamp: datetime | None = None
+
+    @model_validator(mode="after")
+    def validate_gps_coordinates(self) -> "PunchOutRequest":
+        if not math.isfinite(self.latitude) or not math.isfinite(self.longitude) or not math.isfinite(self.accuracy):
+            raise ValueError("Latitude, longitude, and accuracy must be finite numbers.")
+        if abs(self.latitude) < 1e-6 and abs(self.longitude) < 1e-6:
+            raise ValueError("Invalid GPS coordinates: (0, 0) coordinates are not permitted.")
+        return self
 
 
 class AssignedOfficeRead(BaseModel):
@@ -534,6 +551,8 @@ class CalendarDayRead(BaseModel):
     status: str  # PRESENT, LATE, HALF_DAY, MISSING_PUNCH, IN_PROGRESS, WEEKEND, HOLIDAY, LEAVE
     holiday_name: str | None = None
     leave_type_name: str | None = None
+    is_paid_leave: bool | None = None
+    leave_days: float | None = None
     punch_in: str | None = None
     punch_out: str | None = None
     working_minutes: int | None = None
@@ -594,6 +613,10 @@ class RegularizationApprovalAction(BaseModel):
 class RegularizationRejectAction(BaseModel):
     action: str = Field(default="REJECT_LOP")
     manager_remarks: str = Field(default="Rejected", min_length=1)
+
+
+class RegularizationCancelAction(BaseModel):
+    reason: str | None = Field(default=None, max_length=500)
 
 
 class RegularizationRead(BaseModel):
@@ -799,6 +822,9 @@ class LeaveRequestCreate(BaseModel):
     to_date: date
     reason: str = Field(..., min_length=1, description="Reason for leave")
     attachment: str | None = None
+    is_half_day: bool = False
+    half_day_session: str | None = Field(default=None, description="Optional FIRST_HALF or SECOND_HALF when is_half_day=True")
+    number_of_days: float | None = Field(default=None, description="Optional explicit day count (0.5 for half-day leave)")
 
 
 class LeaveApprovalAction(BaseModel):
@@ -1095,6 +1121,18 @@ class AssetRead(AssetBase):
 # HRMS Site Visit & Live Tracking Schemas
 # ===========================================================================
 
+def _validate_optional_coords(lat: float | None, lng: float | None, *, field_prefix: str = "") -> None:
+    if (lat is None) != (lng is None):
+        raise ValueError(f"Both {field_prefix}latitude and {field_prefix}longitude must be provided together.")
+    if lat is not None and lng is not None:
+        if not math.isfinite(lat) or not math.isfinite(lng):
+            raise ValueError(f"Invalid {field_prefix}coordinates: latitude and longitude must be finite numbers.")
+        if not (-90.0 <= lat <= 90.0) or not (-180.0 <= lng <= 180.0):
+            raise ValueError(f"Invalid {field_prefix}coordinates: latitude must be in [-90, 90] and longitude in [-180, 180].")
+        if abs(lat) < 1e-6 and abs(lng) < 1e-6:
+            raise ValueError(f"Invalid {field_prefix}coordinates: (0, 0) null-island coordinates are not permitted.")
+
+
 class SiteVisitCreate(BaseModel):
     employee_id: uuid.UUID
     customer_name: str | None = None
@@ -1117,6 +1155,43 @@ class SiteVisitCreate(BaseModel):
             data["customer_site_name"] = c_name
         return data
 
+    @model_validator(mode="after")
+    def validate_site_coords(self) -> "SiteVisitCreate":
+        _validate_optional_coords(self.site_latitude, self.site_longitude, field_prefix="site_")
+        return self
+
+
+class SiteVisitUpdate(BaseModel):
+    employee_id: uuid.UUID | None = None
+    customer_name: str | None = None
+    customer_site_name: str | None = None
+    site_address: str | None = Field(default=None, min_length=1)
+    site_latitude: float | None = None
+    site_longitude: float | None = None
+    visit_date: date | None = None
+    planned_start_time: str | None = None
+    planned_end_time: str | None = None
+    notes: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def resolve_customer_name(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            if "customer_name" in data or "customer_site_name" in data:
+                c_name = data.get("customer_name") or data.get("customer_site_name")
+                data["customer_name"] = c_name
+                data["customer_site_name"] = c_name
+        return data
+
+    @model_validator(mode="after")
+    def validate_site_coords(self) -> "SiteVisitUpdate":
+        _validate_optional_coords(self.site_latitude, self.site_longitude, field_prefix="site_")
+        return self
+
+
+class SiteVisitCancel(BaseModel):
+    reason: str | None = Field(default=None, max_length=500)
+
 
 class SiteVisitCheckIn(BaseModel):
     latitude: float = Field(..., ge=-90.0, le=90.0, description="GPS latitude (-90 to +90)")
@@ -1125,6 +1200,14 @@ class SiteVisitCheckIn(BaseModel):
     gps_timestamp: datetime | None = None
     address: str | None = None
 
+    @model_validator(mode="after")
+    def validate_gps_coordinates(self) -> "SiteVisitCheckIn":
+        if not math.isfinite(self.latitude) or not math.isfinite(self.longitude) or not math.isfinite(self.accuracy):
+            raise ValueError("Latitude, longitude, and accuracy must be finite numbers.")
+        if abs(self.latitude) < 1e-6 and abs(self.longitude) < 1e-6:
+            raise ValueError("Invalid GPS coordinates: (0, 0) coordinates are not permitted.")
+        return self
+
 
 class SiteVisitCheckOut(BaseModel):
     latitude: float = Field(..., ge=-90.0, le=90.0, description="GPS latitude (-90 to +90)")
@@ -1132,6 +1215,14 @@ class SiteVisitCheckOut(BaseModel):
     accuracy: float = Field(..., ge=0.0, le=100.0, description="GPS accuracy in meters (maximum 100m)")
     gps_timestamp: datetime | None = None
     address: str | None = None
+
+    @model_validator(mode="after")
+    def validate_gps_coordinates(self) -> "SiteVisitCheckOut":
+        if not math.isfinite(self.latitude) or not math.isfinite(self.longitude) or not math.isfinite(self.accuracy):
+            raise ValueError("Latitude, longitude, and accuracy must be finite numbers.")
+        if abs(self.latitude) < 1e-6 and abs(self.longitude) < 1e-6:
+            raise ValueError("Invalid GPS coordinates: (0, 0) coordinates are not permitted.")
+        return self
 
 
 class SiteVisitRead(BaseModel):
@@ -1178,15 +1269,25 @@ class TrackingStartPayload(BaseModel):
 
 
 class TrackingPointItem(BaseModel):
-    latitude: float
-    longitude: float
-    accuracy: float | None = None
+    latitude: float = Field(..., ge=-90.0, le=90.0)
+    longitude: float = Field(..., ge=-180.0, le=180.0)
+    accuracy: float | None = Field(default=None, ge=0.0)
     recorded_at: datetime | None = None
+
+    @model_validator(mode="after")
+    def validate_point_values(self) -> "TrackingPointItem":
+        if not math.isfinite(self.latitude) or not math.isfinite(self.longitude):
+            raise ValueError("Tracking point latitude and longitude must be finite numbers.")
+        if abs(self.latitude) < 1e-6 and abs(self.longitude) < 1e-6:
+            raise ValueError("Invalid tracking coordinates: (0, 0) coordinates are not permitted.")
+        if self.accuracy is not None and (not math.isfinite(self.accuracy) or self.accuracy < 0.0):
+            raise ValueError("Tracking point accuracy must be a finite non-negative number.")
+        return self
 
 
 class TrackingPointsBatch(BaseModel):
     session_id: uuid.UUID
-    points: list[TrackingPointItem]
+    points: list[TrackingPointItem] = Field(..., max_length=500)
 
 
 class TrackingStopPayload(BaseModel):
@@ -1345,9 +1446,21 @@ class EmployeeTrackingSettingsResponse(BaseModel):
 
 
 class GeofenceCheckRequest(BaseModel):
-    latitude: float
-    longitude: float
-    accuracy: float | None = 10.0
+    latitude: float = Field(..., ge=-90.0, le=90.0)
+    longitude: float = Field(..., ge=-180.0, le=180.0)
+    accuracy: float | None = Field(default=None, ge=0.0)
+    gps_timestamp: datetime | None = None
+    location_id: uuid.UUID | None = None
+
+    @model_validator(mode="after")
+    def validate_geofence_coords(self) -> "GeofenceCheckRequest":
+        if not math.isfinite(self.latitude) or not math.isfinite(self.longitude):
+            raise ValueError("Latitude and longitude must be finite numbers.")
+        if abs(self.latitude) < 1e-6 and abs(self.longitude) < 1e-6:
+            raise ValueError("Invalid GPS coordinates: (0, 0) coordinates are not permitted.")
+        if self.accuracy is not None and (not math.isfinite(self.accuracy) or self.accuracy < 0.0):
+            raise ValueError("GPS accuracy must be a finite non-negative number.")
+        return self
 
 
 class GeofenceCheckResponse(BaseModel):

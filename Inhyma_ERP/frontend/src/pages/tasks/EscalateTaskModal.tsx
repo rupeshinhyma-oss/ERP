@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { escalateTask, fetchEscalateOptions, getAvailableAssignees } from "@/lib/tasksApi";
 import { SearchableUserSelect } from "@/components/SearchableUserSelect";
 import type { AvailableUser, TaskEscalateCandidate, TaskEscalateOptionsResponse } from "@/types/tasks";
@@ -85,6 +85,24 @@ export const EscalateTaskModal: React.FC<EscalateTaskModalProps> = ({
       document.body.style.overflow = originalOverflow;
     };
   }, [isOpen, onClose]);
+
+  const orgUserSelectorOptions: AvailableUser[] = useMemo(() => {
+    const map = new Map<string, AvailableUser>();
+    for (const c of options.organization_users || []) {
+      map.set(c.user_id, {
+        id: c.user_id,
+        full_name: c.name,
+        display_name: c.name,
+        department: c.detail || "Organization Member",
+      });
+    }
+    for (const u of availableUsers || []) {
+      if (!map.has(u.id)) {
+        map.set(u.id, u);
+      }
+    }
+    return Array.from(map.values());
+  }, [options.organization_users, availableUsers]);
 
   if (!isOpen) return null;
 
@@ -298,7 +316,7 @@ export const EscalateTaskModal: React.FC<EscalateTaskModalProps> = ({
                 </div>
               ) : targetType === "ORGANIZATION_USER" ? (
                 <SearchableUserSelect
-                  users={availableUsers}
+                  users={orgUserSelectorOptions}
                   selectedUserIds={selectedUserId ? [selectedUserId] : []}
                   onChange={(ids) => setSelectedUserId(ids[0] || "")}
                   multiple={false}

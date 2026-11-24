@@ -736,7 +736,7 @@ export function AttendancePage() {
     is_inside: boolean;
     distance_meters: number;
     boundary_radius_meters: number;
-    status: "INSIDE" | "OUTSIDE_PENDING" | "EXPIRED" | "RESOLVED";
+    status: "INSIDE" | "OUTSIDE_PENDING" | "EXPIRED" | "RESOLVED" | "POOR_ACCURACY";
     remaining_seconds: number | null;
     return_timer_seconds: number | null;
     is_unlimited: boolean;
@@ -1124,6 +1124,8 @@ export function AttendancePage() {
     const req = apiPost<any>("/hrms/attendance/geofence-status", {
       latitude: coords.lat,
       longitude: coords.lng,
+      accuracy: typeof coords.accuracy === "number" ? coords.accuracy : undefined,
+      gps_timestamp: new Date().toISOString(),
       location_id: office.id,
     });
     if (req && typeof req.then === "function") {
@@ -1158,6 +1160,8 @@ export function AttendancePage() {
             apiPost<any>("/hrms/attendance/geofence-status", {
               latitude: coords.lat,
               longitude: coords.lng,
+              accuracy: typeof coords.accuracy === "number" ? coords.accuracy : undefined,
+              gps_timestamp: new Date().toISOString(),
               location_id: office.id,
             }).then((res) => {
               if (res?.data) {
@@ -1494,6 +1498,26 @@ export function AttendancePage() {
     }
   };
 
+  const handleCancelRegularization = async (id: string) => {
+    setActionLoading(true);
+    try {
+      await apiPatch(`/hrms/attendance/regularizations/${id}/cancel`, {
+        reason: "Cancelled by employee",
+      });
+      setAlert({ type: "success", message: "Regularization request cancelled successfully." });
+      setDrawerOpen(false);
+      await Promise.all([
+        loadRegularizations(),
+        loadCalendar(selectedYear, selectedMonth, selectedEmployeeId),
+        loadTodayRecord(selectedEmployeeId || undefined),
+      ]);
+    } catch (err: any) {
+      setAlert({ type: "error", message: err?.message || "Failed to cancel regularization request." });
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
   const handleConfirmApprovalAction = async () => {
     if (!approvalModal || !approvalModal.item) return;
     const { item, action, remarks } = approvalModal;
@@ -1770,6 +1794,8 @@ export function AttendancePage() {
                     className={`hrms-gps-pill ${
                       gpsStatus === "denied"
                         ? "denied"
+                        : currentDistance === null
+                        ? "acquiring"
                         : isInsideGeofence
                         ? "inside"
                         : "outside"
@@ -1818,7 +1844,7 @@ export function AttendancePage() {
                       <h2 className="hrms-section-title">Punch Card Container</h2>
                       <div className="hrms-section-desc">
                         {!todayRecord?.punch_in
-                          ? "Punch functionality will be available here."
+                          ? "Verify your office geofence and punch in to begin your daily shift."
                           : !todayRecord?.punch_out
                           ? `Session started at ${formatDateTimeIST(todayRecord.punch_in)}`
                           : `Punched out at ${formatDateTimeIST(todayRecord.punch_out)}`}
@@ -1881,13 +1907,21 @@ export function AttendancePage() {
                         </button>
 
                         <div className="hrms-punch-distance-chip">
-                          {isInsideGeofence ? (
+                          {gpsStatus === "denied" || (typeof navigator !== "undefined" && !navigator.geolocation) ? (
+                            <span style={{ color: "#dc2626" }}>
+                              ✕ GPS Unavailable / Denied (Outside Geofence — enable browser GPS to punch in)
+                            </span>
+                          ) : isAcquiringGps || currentDistance === null ? (
+                            <span style={{ color: "#1d4ed8" }}>
+                              ⏳ Acquiring GPS location...
+                            </span>
+                          ) : isInsideGeofence ? (
                             <span style={{ color: "#059669" }}>
                               ✓ Inside Geofence: {activeOffice?.name || "Office"} ({currentDistance} m — {allowedRadius}m allowed)
                             </span>
                           ) : (
                             <span style={{ color: "#dc2626" }}>
-                              ✕ Outside Geofence ({currentDistance ?? "—"} m from {activeOffice?.name || "office"} — {allowedRadius}m allowed)
+                              ✕ Outside Geofence ({currentDistance} m from {activeOffice?.name || "office"} — {allowedRadius}m allowed)
                             </span>
                           )}
                         </div>
@@ -2139,7 +2173,7 @@ export function AttendancePage() {
                   </div>
 
                   {isPrivileged && (
-                    <div className="hrms-view-mode-toggle" style={{ display: "inline-flex", background: "#f1f5f9", padding: "4px", borderRadius: "8px", gap: "4px" }}>
+                    <div className="hrms-view-mode-toggle" style={{ display: "inline-flex", flexWrap: "wrap", maxWidth: "100%", background: "#f1f5f9", padding: "4px", borderRadius: "8px", gap: "4px" }}>
                       <button
                         type="button"
                         className={`btn btn-sm ${calendarViewMode === "individual" ? "btn-primary" : "btn-secondary"}`}
@@ -2174,7 +2208,7 @@ export function AttendancePage() {
                   )}
 
                   {calendarViewMode === "individual" && isPrivileged && employees.length > 0 && (
-                    <div style={{ display: "inline-flex", alignItems: "center", gap: "8px" }}>
+                    <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "8px", maxWidth: "100%" }}>
                       <label htmlFor="attendance-emp-select" style={{ fontSize: "12px", fontWeight: 700, color: "#475569" }}>
                         Employee:
                       </label>
@@ -2183,7 +2217,7 @@ export function AttendancePage() {
                         value={selectedEmployeeId}
                         onChange={(e) => handleSelectEmployee(e.target.value)}
                         className="form-control"
-                        style={{ width: "auto", minWidth: "220px", fontWeight: 600, padding: "5px 10px", fontSize: "13px" }}
+                        style={{ width: "auto", minWidth: 0, maxWidth: "100%", fontWeight: 600, padding: "5px 10px", fontSize: "13px" }}
                       >
                         <option value="">My Attendance</option>
                         {employees.map((emp) => (
@@ -2941,10 +2975,31 @@ export function AttendancePage() {
                         type="button"
                         className="hrms-cal-nav-btn"
                         onClick={() => setDrawerOpen(false)}
-                        disabled={regSubmitting}
+                        disabled={regSubmitting || actionLoading}
                       >
                         Cancel
                       </button>
+                      {selectedDayForReg.regularization_status === "PENDING" && (() => {
+                        const ownPendingReg = regularizations.find(
+                          (r) =>
+                            r.status === "PENDING" &&
+                            r.attendance_date === selectedDayForReg.date &&
+                            r.employee_id === (profile as any)?.id
+                        );
+                        if (!ownPendingReg) return null;
+                        return (
+                          <button
+                            type="button"
+                            className="hrms-btn-reject"
+                            disabled={actionLoading || regSubmitting}
+                            onClick={() => handleCancelRegularization(ownPendingReg.id)}
+                            data-testid="drawer-cancel-reg-btn"
+                            title="Cancel your pending regularization request"
+                          >
+                            {actionLoading ? "Cancelling..." : "Cancel Pending Request"}
+                          </button>
+                        );
+                      })()}
                       {isAdmin ? (
                         <>
                           <button
@@ -3064,20 +3119,32 @@ export function AttendancePage() {
                               </td>
                               <td>
                                 {item.employee_id === (profile as any)?.id && !isSelfApprovalAuthorized ? (
-                                  <span
-                                    className="status-badge-pending"
-                                    style={{
-                                      background: "#fef3c7",
-                                      color: "#92400e",
-                                      borderColor: "#fde68a",
-                                      fontSize: "11px",
-                                      padding: "4px 8px",
-                                      display: "inline-block",
-                                    }}
-                                    data-testid={`self-approval-blocked-${item.id}`}
-                                  >
-                                    Self-Request (Cannot Self-Approve)
-                                  </span>
+                                  <div style={{ display: "inline-flex", alignItems: "center", gap: "6px", flexWrap: "wrap" }}>
+                                    <span
+                                      className="status-badge-pending"
+                                      style={{
+                                        background: "#fef3c7",
+                                        color: "#92400e",
+                                        borderColor: "#fde68a",
+                                        fontSize: "11px",
+                                        padding: "4px 8px",
+                                        display: "inline-block",
+                                      }}
+                                      data-testid={`self-approval-blocked-${item.id}`}
+                                    >
+                                      Self-Request (Cannot Self-Approve)
+                                    </span>
+                                    <button
+                                      type="button"
+                                      className="hrms-btn-reject"
+                                      disabled={actionLoading}
+                                      onClick={() => handleCancelRegularization(item.id)}
+                                      data-testid={`cancel-reg-btn-${item.id}`}
+                                      title="Cancel your own pending regularization request"
+                                    >
+                                      <span>Cancel Request</span>
+                                    </button>
+                                  </div>
                                 ) : (
                                   <div className="hrms-approval-actions">
                                     <button
@@ -3203,7 +3270,11 @@ export function AttendancePage() {
                               <td>
                                 <span
                                   className={
-                                    item.status === "APPROVED" ? "status-badge-approved" : "status-badge-rejected"
+                                    item.status === "APPROVED"
+                                      ? "status-badge-approved"
+                                      : item.status === "CANCELLED"
+                                      ? "hrms-badge hrms-badge-neutral"
+                                      : "status-badge-rejected"
                                   }
                                 >
                                   {item.status}

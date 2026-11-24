@@ -12,8 +12,9 @@ Permanent PostgreSQL schema for:
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta, timezone
+from decimal import Decimal
 import uuid
-from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Integer, JSON, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Index, Integer, JSON, Numeric, String, Text, UniqueConstraint, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database.base import (
@@ -174,9 +175,9 @@ class HrmsExpenseSettings(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     approval_manager: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     approval_accounts: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
-    max_claim_amount: Mapped[float] = mapped_column(Float, default=50000.0, nullable=False)
+    max_claim_amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=Decimal("50000.00"), nullable=False)
     receipt_required: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-    auto_approval_limit: Mapped[float] = mapped_column(Float, default=500.0, nullable=False)
+    auto_approval_limit: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=Decimal("500.00"), nullable=False)
     submission_window_days: Mapped[int] = mapped_column(Integer, default=30, nullable=False)
 
 
@@ -487,7 +488,7 @@ class HrmsAsset(Base, UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, Vers
     model: Mapped[str | None] = mapped_column(String(100), nullable=True)
     serial_number: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
     purchase_date: Mapped[date | None] = mapped_column(Date, nullable=True)
-    purchase_cost: Mapped[float | None] = mapped_column(Float, nullable=True)
+    purchase_cost: Mapped[Decimal | None] = mapped_column(Numeric(14, 2), nullable=True)
     status: Mapped[str] = mapped_column(String(50), default="AVAILABLE", nullable=False, index=True)
     condition: Mapped[str] = mapped_column(String(50), default="GOOD", nullable=False)
     location_id: Mapped[uuid.UUID | None] = mapped_column(
@@ -614,7 +615,7 @@ class HrmsAssetMaintenance(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     maintenance_start: Mapped[date | None] = mapped_column(Date, nullable=True)
     maintenance_end: Mapped[date | None] = mapped_column(Date, nullable=True)
     vendor_technician: Mapped[str | None] = mapped_column(String(150), nullable=True)
-    cost: Mapped[float | None] = mapped_column(Float, nullable=True)
+    cost: Mapped[Decimal | None] = mapped_column(Numeric(14, 2), nullable=True)
     status: Mapped[str] = mapped_column(String(50), default="OPEN", nullable=False, index=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_by: Mapped[uuid.UUID | None] = mapped_column(
@@ -647,7 +648,7 @@ class HrmsExpense(Base, UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, Ve
     )
     expense_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
     category: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
-    amount: Mapped[float] = mapped_column(Float, nullable=False)
+    amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
     currency: Mapped[str] = mapped_column(String(10), default="INR", nullable=False)
     description: Mapped[str] = mapped_column(Text, nullable=False)
     location_id: Mapped[uuid.UUID | None] = mapped_column(
@@ -734,6 +735,15 @@ class HrmsLiveTrackingSession(Base, UUIDPrimaryKeyMixin, TimestampMixin, Version
     """
 
     __tablename__ = "hrms_tracking_sessions"
+    __table_args__ = (
+        Index(
+            "uq_hrms_tracking_sessions_active_employee",
+            "employee_id",
+            unique=True,
+            postgresql_where=text("status = 'ACTIVE'"),
+            sqlite_where=text("status = 'ACTIVE'"),
+        ),
+    )
 
     employee_id: Mapped[uuid.UUID] = mapped_column(
         GUID(), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
@@ -832,7 +842,7 @@ class HrmsPayrollComponent(Base, UUIDPrimaryKeyMixin, TimestampMixin, SoftDelete
         String(30), nullable=False
     )  # PERCENTAGE / FIXED / REMAINING
     calculation_basis: Mapped[str | None] = mapped_column(String(50), nullable=True)  # CTC / BASIC / GROSS / <CODE>
-    value: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    value: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=Decimal("0.00"), nullable=False)
     is_taxable: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     is_statutory: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     display_order: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
@@ -850,8 +860,8 @@ class HrmsEmployeeSalary(Base, UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMi
     employee_id: Mapped[uuid.UUID] = mapped_column(
         GUID(), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    annual_ctc: Mapped[float] = mapped_column(Float, nullable=False)
-    monthly_ctc: Mapped[float] = mapped_column(Float, nullable=False)
+    annual_ctc: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    monthly_ctc: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
     effective_from: Mapped[date] = mapped_column(Date, nullable=False, index=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False, index=True)
     structure_breakdown: Mapped[dict | None] = mapped_column(JSON, nullable=True)
@@ -880,9 +890,9 @@ class HrmsMonthlyPayroll(Base, UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMi
     month_number: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
     status: Mapped[str] = mapped_column(String(30), default="DRAFT", nullable=False, index=True)  # DRAFT / PROCESSED / APPROVED
     total_employees: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
-    total_gross: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
-    total_deductions: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
-    total_net: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    total_gross: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=Decimal("0.00"), nullable=False)
+    total_deductions: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=Decimal("0.00"), nullable=False)
+    total_net: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=Decimal("0.00"), nullable=False)
     working_days: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     weekend_days: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     holiday_days: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
@@ -920,8 +930,8 @@ class HrmsMonthlyPayrollItem(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     salary_id: Mapped[uuid.UUID | None] = mapped_column(
         GUID(), ForeignKey("hrms_employee_salaries.id", ondelete="SET NULL"), nullable=True
     )
-    annual_ctc: Mapped[float] = mapped_column(Float, nullable=False)
-    monthly_ctc: Mapped[float] = mapped_column(Float, nullable=False)
+    annual_ctc: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    monthly_ctc: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
     working_days: Mapped[int] = mapped_column(Integer, nullable=False)
     present_days: Mapped[float] = mapped_column(Float, nullable=False)
     paid_leave_days: Mapped[float] = mapped_column(Float, nullable=False)
@@ -933,10 +943,10 @@ class HrmsMonthlyPayrollItem(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     deductions_breakdown: Mapped[list | None] = mapped_column(JSON, nullable=True)
     additions_breakdown: Mapped[list | None] = mapped_column(JSON, nullable=True)
 
-    lop_deduction: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
-    gross_amount: Mapped[float] = mapped_column(Float, nullable=False)
-    total_deductions: Mapped[float] = mapped_column(Float, nullable=False)
-    net_salary: Mapped[float] = mapped_column(Float, nullable=False)
+    lop_deduction: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=Decimal("0.00"), nullable=False)
+    gross_amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    total_deductions: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    net_salary: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
 
     status: Mapped[str] = mapped_column(String(30), default="DRAFT", nullable=False, index=True)
     calculation_details: Mapped[dict | None] = mapped_column(JSON, nullable=True)
@@ -968,7 +978,7 @@ class HrmsPayrollAdjustment(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     payroll_month: Mapped[str] = mapped_column(String(7), nullable=False, index=True)
     adjustment_type: Mapped[str] = mapped_column(String(20), nullable=False)  # ADDITION / DEDUCTION
     title: Mapped[str] = mapped_column(String(150), nullable=False)
-    amount: Mapped[float] = mapped_column(Float, nullable=False)
+    amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
     reason: Mapped[str] = mapped_column(Text, nullable=False)
     created_by: Mapped[uuid.UUID | None] = mapped_column(
         GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
@@ -1044,6 +1054,15 @@ class HrmsGeofenceViolation(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     """
 
     __tablename__ = "hrms_geofence_violations"
+    __table_args__ = (
+        Index(
+            "uq_hrms_geofence_violations_open_employee",
+            "employee_id",
+            unique=True,
+            postgresql_where=text("status IN ('ACTIVE_EXIT', 'EXPIRED') AND return_time IS NULL"),
+            sqlite_where=text("status IN ('ACTIVE_EXIT', 'EXPIRED') AND return_time IS NULL"),
+        ),
+    )
 
     employee_id: Mapped[uuid.UUID] = mapped_column(
         GUID(), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True

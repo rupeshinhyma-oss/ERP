@@ -190,11 +190,36 @@ function formatDateDisplay(dateStr?: string | null): string {
   }
 }
 
-// Helper: Format Duration (e.g. 4h 07m)
-function formatDuration(minutes?: number | null): string {
-  if (!minutes && minutes !== 0) return "0m";
-  const h = Math.floor(minutes / 60);
-  const m = minutes % 60;
+// Helper: Format Duration accurately from seconds/timestamps/minutes without inventing elapsed time (W3-12)
+function formatDuration(
+  minutes?: number | null,
+  seconds?: number | null,
+  startTime?: string | null,
+  endTime?: string | null
+): string {
+  let totalSecs: number | null = null;
+  if (seconds !== null && seconds !== undefined && Number.isFinite(seconds) && seconds >= 0) {
+    totalSecs = Math.floor(seconds);
+  } else if (startTime && endTime) {
+    const st = new Date(startTime).getTime();
+    const et = new Date(endTime).getTime();
+    if (!Number.isNaN(st) && !Number.isNaN(et) && et >= st) {
+      totalSecs = Math.floor((et - st) / 1000);
+    }
+  }
+  if (totalSecs !== null) {
+    if (totalSecs < 60) return `${totalSecs}s`;
+    const h = Math.floor(totalSecs / 3600);
+    const m = Math.floor((totalSecs % 3600) / 60);
+    const s = totalSecs % 60;
+    if (h > 0) return `${h}h ${m.toString().padStart(2, "0")}m`;
+    if (s > 0) return `${m}m ${s}s`;
+    return `${m}m`;
+  }
+  if (!minutes && minutes !== 0) return "0s";
+  const safeMins = Math.max(0, Math.floor(minutes));
+  const h = Math.floor(safeMins / 60);
+  const m = safeMins % 60;
   if (h > 0) return `${h}h ${m.toString().padStart(2, "0")}m`;
   return `${m}m`;
 }
@@ -320,6 +345,26 @@ export function SiteVisitPage() {
       perms.includes("hrms.approve") ||
       perms.includes("hrms:admin") ||
       perms.includes("hrms:approve")
+    );
+  }, [currentUser]);
+
+  const canReadUsersDirectory = useMemo(() => {
+    if (!currentUser) return false;
+    const perms = (currentUser.permissions as string[]) || [];
+    const role = String(currentUser.role || "").trim().toUpperCase();
+    const roleList = Array.isArray((currentUser as any).roles)
+      ? ((currentUser as any).roles as any[]).map((r) => String(r?.name || r || "").trim().toLowerCase())
+      : [];
+    return (
+      Boolean(currentUser.is_super_admin) ||
+      role === "ADMIN" ||
+      role === "SUPER_ADMIN" ||
+      roleList.includes("admin") ||
+      roleList.includes("super_admin") ||
+      perms.includes("*") ||
+      perms.includes("admin") ||
+      perms.includes("users.view") ||
+      perms.includes("user.view")
     );
   }, [currentUser]);
 
@@ -488,19 +533,23 @@ export function SiteVisitPage() {
   }, []);
 
   const fetchEmployees = useCallback(async () => {
+    if (!canManageVisits) {
+      setEmployees([]);
+      return;
+    }
     try {
       let res: any;
-      try {
-        res = await apiGet<any>("/users?status=ACTIVE");
-        if (!res?.data || (Array.isArray(res.data) && res.data.length === 0)) {
-          res = await apiGet<any>("/hrms/employees");
-        }
-      } catch {
+      if (canReadUsersDirectory) {
         try {
-          res = await apiGet<any>("/hrms/employees");
+          res = await apiGet<any>("/users?status=ACTIVE");
+          if (!res?.data || (Array.isArray(res.data) && res.data.length === 0)) {
+            res = await apiGet<any>("/hrms/employees");
+          }
         } catch {
-          res = await apiGet<any>("/hrms/site-visits/employees");
+          res = await apiGet<any>("/hrms/employees");
         }
+      } else {
+        res = await apiGet<any>("/hrms/employees");
       }
 
       const rawList = extractList<any>(res);
@@ -523,7 +572,7 @@ export function SiteVisitPage() {
     } catch {
       setEmployees([]);
     }
-  }, []);
+  }, [canManageVisits, canReadUsersDirectory]);
 
   const refreshAll = useCallback(async () => {
     setIsLoading(true);
@@ -604,9 +653,12 @@ export function SiteVisitPage() {
     return { todays, upcoming, inProgress, completed };
   }, [visits, todayStr]);
 
-  // Summary Metrics for Live Tracking
+  // Summary Metrics for Live Tracking (deduplicate activeSession if already present in trackingSessions)
   const trackingMetrics = useMemo(() => {
-    const active = trackingSessions.filter((s) => s.status === "ACTIVE").length + (activeSession ? 1 : 0);
+    const activeInList = trackingSessions.filter((s) => s.status === "ACTIVE").length;
+    const extraActive =
+      activeSession && !trackingSessions.some((s) => s.id === activeSession.id) ? 1 : 0;
+    const active = activeInList + extraActive;
     const completed = trackingSessions.filter((s) => s.status === "COMPLETED" || s.status === "STOPPED").length;
     return { active, completed };
   }, [trackingSessions, activeSession]);
@@ -859,10 +911,73 @@ export function SiteVisitPage() {
     });
   }, [simulationMode, simulatedCustomLocation]);
 
+  // Bounded local retry buffer for live tracking points captured during temporary network interruptions
+  const pendingPointsRef = useRef<
+    Array<{ latitude: number; longitude: number; accuracy: number; recorded_at: string }>
+  >([]);
+
+  const readBufferedPoints = useCallback((sessionId: string) => {
+    try {
+      const raw = sessionStorage.getItem(`hrms_tracking_queue_${sessionId}`);
+      if (!raw) return [];
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed.slice(-500) : [];
+    } catch {
+      return [];
+    }
+  }, []);
+
+  const persistBufferedPoints = useCallback(
+    (
+      sessionId: string,
+      pts: Array<{ latitude: number; longitude: number; accuracy: number; recorded_at: string }>
+    ) => {
+      try {
+        if (pts.length === 0) {
+          sessionStorage.removeItem(`hrms_tracking_queue_${sessionId}`);
+        } else {
+          sessionStorage.setItem(`hrms_tracking_queue_${sessionId}`, JSON.stringify(pts.slice(-500)));
+        }
+      } catch {
+        // Ignore storage quota/privacy restrictions
+      }
+    },
+    []
+  );
+
+  const flushBufferedPoints = useCallback(
+    async (sessionId: string): Promise<boolean> => {
+      const queue = pendingPointsRef.current;
+      if (queue.length === 0) return true;
+      const batch = queue.slice(0, 500);
+      try {
+        await apiPost("/hrms/tracking/points", {
+          session_id: sessionId,
+          points: batch,
+        });
+        pendingPointsRef.current = pendingPointsRef.current.slice(batch.length);
+        persistBufferedPoints(sessionId, pendingPointsRef.current);
+        return true;
+      } catch (err) {
+        console.warn("Tracking point upload deferred due to network/server error; queued for retry:", err);
+        persistBufferedPoints(sessionId, pendingPointsRef.current);
+        return false;
+      }
+    },
+    [persistBufferedPoints]
+  );
+
   // Automated periodic GPS collection respecting Mode A (Standard 5m) vs Mode B (Detailed configurable)
   useEffect(() => {
     if (!activeSession || activeSession.status !== "ACTIVE" || simulationMode === "SIMULATED") {
       return;
+    }
+
+    const sessionId = activeSession.id;
+    // Hydrate any unsent buffered points from an earlier disconnect/refresh for this session
+    const hydrated = readBufferedPoints(sessionId);
+    if (hydrated.length > 0 && pendingPointsRef.current.length === 0) {
+      pendingPointsRef.current = hydrated;
     }
 
     const isDetailed = Boolean(activeSession.is_detailed_tracking_enabled);
@@ -872,25 +987,47 @@ export function SiteVisitPage() {
     const captureAndUploadPoint = async () => {
       try {
         const coords = await captureCurrentGps();
-        await apiPost("/hrms/tracking/points", {
-          session_id: activeSession.id,
-          points: [
-            {
-              latitude: coords.latitude,
-              longitude: coords.longitude,
-              accuracy: coords.accuracy,
-              recorded_at: new Date().toISOString(),
-            },
-          ],
-        });
-        await fetchActiveTracking();
+        const tsIso =
+          coords.timestamp instanceof Date && !Number.isNaN(coords.timestamp.getTime())
+            ? coords.timestamp.toISOString()
+            : new Date().toISOString();
+        pendingPointsRef.current = [
+          ...pendingPointsRef.current.slice(-499),
+          {
+            latitude: coords.latitude,
+            longitude: coords.longitude,
+            accuracy: coords.accuracy,
+            recorded_at: tsIso,
+          },
+        ];
+        persistBufferedPoints(sessionId, pendingPointsRef.current);
+        const ok = await flushBufferedPoints(sessionId);
+        if (ok) {
+          await fetchActiveTracking();
+        }
       } catch (err) {
-        console.warn("Periodic tracking point upload skipped or failed:", err);
+        console.warn("Periodic tracking point capture skipped or failed:", err);
       }
     };
 
+    const handleOnline = async () => {
+      const ok = await flushBufferedPoints(sessionId);
+      if (ok) {
+        await fetchActiveTracking();
+      }
+    };
+
+    // Flush any hydrated offline points immediately when mounted online
+    if (pendingPointsRef.current.length > 0 && (typeof navigator === "undefined" || navigator.onLine !== false)) {
+      void handleOnline();
+    }
+
+    window.addEventListener("online", handleOnline);
     const timer = setInterval(captureAndUploadPoint, intervalMs);
-    return () => clearInterval(timer);
+    return () => {
+      window.removeEventListener("online", handleOnline);
+      clearInterval(timer);
+    };
   }, [
     activeSession?.id,
     activeSession?.status,
@@ -899,6 +1036,9 @@ export function SiteVisitPage() {
     simulationMode,
     captureCurrentGps,
     fetchActiveTracking,
+    readBufferedPoints,
+    persistBufferedPoints,
+    flushBufferedPoints,
   ]);
 
   // -------------------------------------------------------------------------
@@ -1002,16 +1142,28 @@ export function SiteVisitPage() {
     if (!activeSession) return;
     setActionLoading(true);
     try {
-      const coords = await captureCurrentGps();
+      // Flush any offline-buffered GPS points before stopping so valid route evidence is preserved
+      if (pendingPointsRef.current.length > 0) {
+        await flushBufferedPoints(activeSession.id);
+      }
       const isSim = simulationMode === "SIMULATED";
-      await apiPost(`/hrms/tracking/${activeSession.id}/stop`, {
-        end_location: {
+      let endLocation: Record<string, unknown> | null = null;
+      try {
+        const coords = await captureCurrentGps();
+        endLocation = {
           latitude: coords.latitude,
           longitude: coords.longitude,
           accuracy: coords.accuracy,
           is_simulated: isSim,
-        },
+        };
+      } catch (gpsErr) {
+        console.warn("End GPS capture unavailable while stopping tracking; stopping with recorded waypoints:", gpsErr);
+      }
+      await apiPost(`/hrms/tracking/${activeSession.id}/stop`, {
+        end_location: endLocation,
       });
+      pendingPointsRef.current = [];
+      persistBufferedPoints(activeSession.id, []);
       toast.success("Live tracking stopped and summary saved permanently.");
       setActiveSession(null);
       await fetchTrackingSessions();
@@ -1195,6 +1347,13 @@ export function SiteVisitPage() {
         </span>
       );
     }
+    if (s === "CANCELLED") {
+      return (
+        <span style={{ display: "inline-flex", alignItems: "center", gap: "5px", padding: "3px 10px", borderRadius: "12px", fontSize: "12px", fontWeight: 600, background: "#fee2e2", color: "#991b1b" }}>
+          ✕ Cancelled
+        </span>
+      );
+    }
     return (
       <span style={{ display: "inline-flex", alignItems: "center", gap: "5px", padding: "3px 10px", borderRadius: "12px", fontSize: "12px", fontWeight: 600, background: "#fef3c7", color: "#92400e" }}>
         ● Scheduled
@@ -1216,8 +1375,8 @@ export function SiteVisitPage() {
           </div>
 
           <div className="page-header-actions" style={{ display: "flex", gap: "10px", alignItems: "center", flexWrap: "wrap" }}>
-            {/* Location Simulator Toggle for Admin/Dev */}
-            {canManageVisits && (
+            {/* Location Simulator Toggle (strictly dev-only; never exposed in production builds) */}
+            {import.meta.env.DEV && canManageVisits && (
               <button
                 type="button"
                 className="btn btn-outline"
@@ -1301,7 +1460,7 @@ export function SiteVisitPage() {
         {/* ================================================================= */}
         {/* COLLAPSIBLE LOCATION SIMULATOR (Section 6 — Office Testing Mode)   */}
         {/* ================================================================= */}
-        {canManageVisits && isSimulatorOpen && (
+        {import.meta.env.DEV && canManageVisits && isSimulatorOpen && (
           <div
             style={{
               background: "#fffbeb",
@@ -1344,7 +1503,7 @@ export function SiteVisitPage() {
               Enables testing Start Tracking, periodic GPS collection, Check In/Out, and route map rendering from the office without physically travelling.
             </div>
 
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px", marginBottom: "14px" }}>
+            <div className="hrms-site-sim-grid" style={{ marginBottom: "14px" }}>
               <div>
                 <label style={{ display: "block", fontSize: "12px", fontWeight: 700, color: "#92400e", marginBottom: "6px" }}>
                   Operating Mode
@@ -1417,7 +1576,7 @@ export function SiteVisitPage() {
                 </div>
 
                 {/* Active test coordinate readings */}
-                <div style={{ background: "#fef3c7", border: "1px solid #fde68a", padding: "8px 12px", borderRadius: "6px", marginBottom: "10px", display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "8px", fontSize: "12px", color: "#78350f" }}>
+                <div className="hrms-site-stats-4" style={{ background: "#fef3c7", border: "1px solid #fde68a", padding: "8px 12px", borderRadius: "6px", marginBottom: "10px", fontSize: "12px", color: "#78350f" }}>
                   <div>
                     <div style={{ fontSize: "10px", color: "#b45309", fontWeight: 700, textTransform: "uppercase" }}>Test Latitude</div>
                     <div style={{ fontWeight: 700, marginTop: "2px" }}>{simulatedCustomLocation.latitude.toFixed(5)}</div>
@@ -1636,7 +1795,7 @@ export function SiteVisitPage() {
 
             {/* Section 1B: Admin Summary Metric Cards (Section 7: Keep Simple) */}
             {canManageVisits && (
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "12px" }}>
+              <div className="hrms-site-metrics-3">
                 <div style={{ background: "#ffffff", padding: "14px 18px", borderRadius: "8px", border: "1px solid #e2e8f0", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                   <div>
                     <div style={{ fontSize: "12px", color: "#64748b", fontWeight: 600 }}>Today's Visits</div>
@@ -2007,7 +2166,7 @@ export function SiteVisitPage() {
                 >
                   <div style={{ fontSize: "12.5px", color: "#334155" }}>
                     <span style={{ color: "#16a34a", fontWeight: 700 }}>✓ Tracking Completed: </span>
-                    {formatTime(latestCompletedTracking.start_time)} → {formatTime(latestCompletedTracking.end_time)} • Duration: {formatDuration(latestCompletedTracking.total_duration_minutes)} • Distance: {(latestCompletedTracking.approx_distance_km || latestCompletedTracking.approximate_distance_km || 0).toFixed(1)} km • Points: {latestCompletedTracking.total_points || 0}
+                    {formatTime(latestCompletedTracking.start_time)} → {formatTime(latestCompletedTracking.end_time)} • Duration: {formatDuration(latestCompletedTracking.total_duration_minutes, latestCompletedTracking.total_duration_seconds, latestCompletedTracking.start_time, latestCompletedTracking.end_time)} • Distance: {(latestCompletedTracking.approx_distance_km || latestCompletedTracking.approximate_distance_km || 0).toFixed(1)} km • Points: {latestCompletedTracking.total_points || 0}
                   </div>
                   <button
                     type="button"
@@ -2025,7 +2184,7 @@ export function SiteVisitPage() {
             {canManageVisits && (
               <>
                 {/* Metric Summary Counters */}
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: "12px" }}>
+                <div className="hrms-site-metrics-2">
                   <div style={{ background: "#ffffff", padding: "14px 18px", borderRadius: "8px", border: "1px solid #e2e8f0", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                     <div>
                       <div style={{ fontSize: "12px", color: "#64748b", fontWeight: 600 }}>Active Sessions</div>
@@ -2131,7 +2290,7 @@ export function SiteVisitPage() {
                                   {isAct ? <span style={{ color: "#16a34a", fontWeight: 600 }}>Active</span> : formatTime(s.end_time)}
                                 </td>
                                 <td style={{ padding: "12px", verticalAlign: "middle" }}>
-                                  {formatDuration(s.total_duration_minutes)}
+                                  {formatDuration(s.total_duration_minutes, s.total_duration_seconds, s.start_time, s.end_time)}
                                 </td>
                                 <td style={{ padding: "12px", verticalAlign: "middle" }}>
                                   {dist.toFixed(1)} km
@@ -2621,7 +2780,7 @@ export function SiteVisitPage() {
 
               <div className="hrms-modal-body" style={{ padding: "20px" }}>
                 {/* Stats Summary Bar */}
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "10px", background: "#f8fafc", padding: "10px 14px", borderRadius: "8px", border: "1px solid #e2e8f0", marginBottom: "14px", textAlign: "center" }}>
+                <div className="hrms-site-stats-4" style={{ background: "#f8fafc", padding: "10px 14px", borderRadius: "8px", border: "1px solid #e2e8f0", marginBottom: "14px", textAlign: "center" }}>
                   <div>
                     <div style={{ fontSize: "11px", color: "#64748b", textTransform: "uppercase", fontWeight: 700 }}>Time</div>
                     <div style={{ fontSize: "13px", fontWeight: 700, color: "#0f172a", marginTop: "2px" }}>
@@ -2631,7 +2790,7 @@ export function SiteVisitPage() {
                   <div>
                     <div style={{ fontSize: "11px", color: "#64748b", textTransform: "uppercase", fontWeight: 700 }}>Duration</div>
                     <div style={{ fontSize: "14px", fontWeight: 700, color: "#0f172a", marginTop: "2px" }}>
-                      {formatDuration(viewRouteSession.total_duration_minutes)}
+                      {formatDuration(viewRouteSession.total_duration_minutes, viewRouteSession.total_duration_seconds, viewRouteSession.start_time, viewRouteSession.end_time)}
                     </div>
                   </div>
                   <div>

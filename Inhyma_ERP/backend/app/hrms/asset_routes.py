@@ -106,26 +106,27 @@ async def list_assets(
     eff_location = location_id or branch_id
 
     target_assigned = assigned_to_user_id
+    allowed_employee_ids: Optional[set[uuid.UUID]] = None
     if not (ctx.is_admin or ctx.is_hr):
         if not ctx.is_manager:
             target_assigned = ctx.user_id
         else:
             if target_assigned:
                 ctx.require_employee_access(target_assigned)
+            allowed_employee_ids = _allowed_employee_scope(ctx)
 
     assets = await service.list_assets(
         search=search,
         status=status,
         category=category,
         assigned_to_user_id=target_assigned,
+        allowed_employee_ids=allowed_employee_ids,
         location_id=eff_location,
         assigned_status=assigned_status,
         warranty_status=warranty_status,
         page=page,
         page_size=page_size,
     )
-    if ctx.is_manager and not (ctx.is_admin or ctx.is_hr):
-        assets = [a for a in assets if not a.assigned_to_user_id or a.assigned_to_user_id in ctx.managed_employee_ids]
 
     return build_success_response(
         data=[a.model_dump(mode="json") for a in assets],
@@ -203,6 +204,7 @@ async def create_asset(
     ctx: HrmsUserContext = Depends(get_hrms_user_context),
 ):
     ctx.require_module_access("assets")
+    ctx.require_write_access("assets", action="create")
     if not (ctx.is_admin or ctx.is_hr):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Permission denied. Only Admin or HR can create assets.")
     """Create a new asset."""

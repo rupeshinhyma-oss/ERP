@@ -324,8 +324,13 @@ export function AssetPage() {
     }
   }, [canManageAssets]);
 
-  // 2. Fetch Supporting Data (Locations & Active Employees from users DB)
+  // 2. Fetch Supporting Data (Locations & Active Employees — Admin/HR asset managers only, W3-10)
   const fetchSupportingData = useCallback(async () => {
+    if (!canManageAssets) {
+      setLocations([]);
+      setEmployees([]);
+      return;
+    }
     try {
       const locRes = await apiGet<DbLocation[]>("/hrms/setup/locations?active_only=true");
       setLocations(locRes.data || []);
@@ -358,7 +363,7 @@ export function AssetPage() {
     } catch (err) {
       console.warn("Could not load database users:", err);
     }
-  }, []);
+  }, [canManageAssets]);
 
   useEffect(() => {
     fetchAssets();

@@ -15,7 +15,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit.constants import AuditAction
 from app.audit.service import AuditService
-from app.core.exceptions import BadRequestException, ForbiddenException, NotFoundException, ValidationException
+from app.core.exceptions import (
+    BadRequestException,
+    ConflictException,
+    ForbiddenException,
+    NotFoundException,
+    ValidationException,
+)
 from app.core.logging import get_logger
 from app.events.channels import module_channel, user_channel
 from app.events.dispatcher import EventDispatcher
@@ -99,8 +105,9 @@ from app.tasks.schemas import (
     WorkloadDashboardResponse,
     RecurrencePreviewRequest,
     RecurrencePreviewResponse,
+    summarize_reactions,
 )
-from app.users.models import User
+from app.users.models import EmploymentStatus, User, UserStatus
 
 logger = get_logger(__name__)
 
@@ -235,6 +242,150 @@ class TaskService:
 
         raise ForbiddenException(f"You do not have permission to {action} this task.")
 
+    @staticmethod
+    def _is_eligible_active_user(user: User | None) -> bool:
+        """Check whether a User row is an active, non-deleted, eligible organization member."""
+        if user is None:
+            return False
+        if getattr(user, "deleted_at", None) is not None:
+            return False
+        if not getattr(user, "is_active", False):
+            return False
+        if getattr(user, "status", None) in (UserStatus.INACTIVE, UserStatus.SUSPENDED, UserStatus.LOCKED):
+            return False
+        if getattr(user, "employment_status", None) in (
+            EmploymentStatus.TERMINATED,
+            EmploymentStatus.RESIGNED,
+            EmploymentStatus.INACTIVE,
+        ):
+            return False
+        return True
+
+    async def _validate_eligible_active_users(
+        self,
+        user_ids: list[uuid.UUID] | set[uuid.UUID] | tuple[uuid.UUID, ...],
+        *,
+        field_label: str = "assignee",
+    ) -> dict[uuid.UUID, User]:
+        """Validate submitted target user IDs exist and are eligible active organization users."""
+        unique_ids = list(dict.fromkeys(uid for uid in (user_ids or []) if uid is not None))
+        if not unique_ids or not isinstance(self.repository.session, AsyncSession):
+            return {}
+        stmt = select(User).where(User.id.in_(unique_ids))
+        res = await self.repository.session.execute(stmt)
+        found = {u.id: u for u in res.scalars().all()}
+        for uid in unique_ids:
+            u = found.get(uid)
+            if u is None or getattr(u, "deleted_at", None) is not None:
+                raise ValidationException(f"Invalid {field_label}: user '{uid}' does not exist.")
+            if not self._is_eligible_active_user(u):
+                label = u.display_name or u.full_name or str(uid)
+                raise ValidationException(f"Invalid {field_label}: user '{label}' is inactive or ineligible.")
+        return found
+
+    async def _assert_can_collaborate_on_task(
+        self,
+        task: Task,
+        current_user: Any,
+        action: str = "collaborate on",
+        *,
+        extra_allowed_user_ids: set[uuid.UUID] | None = None,
+    ) -> None:
+        """
+        Enforce strict participation/mutation authorization on collaboration write endpoints
+        (comments, reactions, comment reactions, subtask comments, escalation comments).
+        Read-only visibility permissions (`task.all_view`, `task.department_view`) MUST NOT
+        allow writing to foreign tasks where the actor is not a participant or active manager.
+        """
+        if self._is_task_admin_manager(current_user):
+            return
+
+        actor_id = getattr(current_user, "id", None)
+        if not actor_id:
+            raise ForbiddenException(f"You do not have permission to {action} this task.")
+
+        if task.created_by == actor_id or getattr(task, "approver_id", None) == actor_id:
+            return
+
+        if extra_allowed_user_ids and actor_id in extra_allowed_user_ids:
+            return
+
+        is_participant = any(
+            getattr(a, "user_id", None) == actor_id for a in (getattr(task, "assignees", []) or [])
+        ) or any(
+            getattr(w, "user_id", None) == actor_id for w in (getattr(task, "watchers", []) or [])
+        )
+        if is_participant:
+            return
+
+        # Active Department Manager of creator's or assignees' department(s)
+        target_user_ids = {task.created_by} if task.created_by else set()
+        for a in getattr(task, "assignees", []) or []:
+            if getattr(a, "user_id", None):
+                target_user_ids.add(a.user_id)
+
+        if target_user_ids:
+            dept_subq = select(UserRole.role_id).where(
+                UserRole.user_id.in_(target_user_ids),
+                or_(UserRole.status == RoleAssignmentStatus.ACTIVE, UserRole.status.is_(None)),
+            )
+            mgr_stmt = (
+                select(DepartmentLeadershipAssignment.id)
+                .where(
+                    DepartmentLeadershipAssignment.employee_id == actor_id,
+                    DepartmentLeadershipAssignment.status == OrgRecordStatus.ACTIVE,
+                    DepartmentLeadershipAssignment.department_id.in_(dept_subq),
+                )
+                .limit(1)
+            )
+            res = await self.repository.session.execute(mgr_stmt)
+            if res.scalar_one_or_none():
+                return
+
+        raise ForbiddenException(f"You do not have permission to {action} this task.")
+
+    async def _assert_can_manage_owned_resource(
+        self,
+        created_by: uuid.UUID | None,
+        current_user: Any,
+        *,
+        resource_name: str,
+        action: str,
+    ) -> None:
+        """
+        Enforce ownership / department leadership / admin authorization for sprints and templates.
+        `task.create` alone MUST NOT allow modifying or deleting another user's or Admin's resource.
+        """
+        if self._is_task_admin_manager(current_user):
+            return
+
+        actor_id = getattr(current_user, "id", None)
+        if not actor_id:
+            raise ForbiddenException(f"You do not have permission to {action} this {resource_name}.")
+
+        if created_by is not None and created_by == actor_id:
+            return
+
+        if created_by is not None:
+            dept_subq = select(UserRole.role_id).where(
+                UserRole.user_id == created_by,
+                or_(UserRole.status == RoleAssignmentStatus.ACTIVE, UserRole.status.is_(None)),
+            )
+            mgr_stmt = (
+                select(DepartmentLeadershipAssignment.id)
+                .where(
+                    DepartmentLeadershipAssignment.employee_id == actor_id,
+                    DepartmentLeadershipAssignment.status == OrgRecordStatus.ACTIVE,
+                    DepartmentLeadershipAssignment.department_id.in_(dept_subq),
+                )
+                .limit(1)
+            )
+            res = await self.repository.session.execute(mgr_stmt)
+            if res.scalar_one_or_none():
+                return
+
+        raise ForbiddenException(f"You do not have permission to {action} this {resource_name}.")
+
     async def _resolve_task_department(self, task_id: uuid.UUID) -> tuple[uuid.UUID | None, str | None]:
         """
         Safely resolve task department from repository.
@@ -346,7 +497,7 @@ class TaskService:
 
         raise ForbiddenException("You do not have permission to view this task.")
 
-    def _to_summary(self, task: Task) -> TaskSummaryRead:
+    def _to_summary(self, task: Task, current_user_id: uuid.UUID | None = None) -> TaskSummaryRead:
         from sqlalchemy import inspect
         state = inspect(task, raiseerr=False)
 
@@ -370,6 +521,8 @@ class TaskService:
         escalations = state.dict.get("escalations", []) if state else []
         attachments = state.dict.get("attachments", []) if state else []
         voice_notes = state.dict.get("voice_notes", []) if state else []
+        raw_reactions = state.dict.get("reactions", []) if state else []
+        reactions = summarize_reactions(raw_reactions, current_user_id=current_user_id)
         dependencies = state.dict.get("dependencies", []) if state else []
         depends_on_ids = [
             d.depends_on_task_id
@@ -407,7 +560,7 @@ class TaskService:
             updated_at=task.updated_at,
             assignees=assignees,
             labels=labels,
-            reactions=[],
+            reactions=reactions,
             subtask_total=subtask_total,
             subtask_completed=subtask_completed,
             child_task_count=child_count,
@@ -521,7 +674,7 @@ class TaskService:
         dept_map = await self.repository.resolve_tasks_departments(task_ids)
         summaries: list[TaskSummaryRead] = []
         for t in tasks:
-            s = self._to_summary(t)
+            s = self._to_summary(t, current_user_id=current_user_id)
             d_info = dept_map.get(t.id)
             if d_info:
                 s.department_id = d_info[0]
@@ -535,20 +688,6 @@ class TaskService:
             raise NotFoundException(f"Task with ID {task_id} not found.")
         if current_user is not None:
             await self._assert_can_view_task(task, current_user)
-        await self.repository.session.refresh(
-            task, [
-                "assignees",
-                "subtasks",
-                "comments",
-                "escalations",
-                "attachments",
-                "voice_notes",
-                "task_label_links",
-                "dependencies",
-                "child_tasks",
-                "reactions",
-            ]
-        )
         dept_id, dept_name = await self._resolve_task_department(task.id)
         setattr(task, "department_id", dept_id)
         setattr(task, "department_name", dept_name)
@@ -577,6 +716,30 @@ class TaskService:
         hold_until_val = getattr(payload, "hold_until", None)
         if payload.status == TaskStatus.ON_HOLD and (not hold_reason_val or not hold_reason_val.strip()):
             raise ValidationException("Hold reason is required when setting task status to ON_HOLD.")
+
+        # Validate all referenced target users are active, eligible organization members
+        if payload.assignee_ids:
+            await self._validate_eligible_active_users(payload.assignee_ids, field_label="assignee")
+        if payload.watcher_ids:
+            await self._validate_eligible_active_users(payload.watcher_ids, field_label="watcher")
+        if payload.approver_id:
+            await self._validate_eligible_active_users([payload.approver_id], field_label="approver")
+        if payload.initial_escalation:
+            if payload.initial_escalation.due_date and payload.initial_escalation.due_date < date.today():
+                raise ValidationException("Escalation SLA resolution due date cannot be in the past.")
+            await self._validate_eligible_active_users(
+                [payload.initial_escalation.escalated_to_id], field_label="escalation target"
+            )
+        if payload.subtasks:
+            sub_uids: list[uuid.UUID] = []
+            for sub_item in payload.subtasks:
+                if not isinstance(sub_item, str):
+                    if sub_item.assignee_id:
+                        sub_uids.append(sub_item.assignee_id)
+                    if sub_item.assignee_ids:
+                        sub_uids.extend(sub_item.assignee_ids)
+            if sub_uids:
+                await self._validate_eligible_active_users(sub_uids, field_label="subtask assignee")
 
         issue_type_str = payload.issue_type.value if hasattr(payload.issue_type, "value") else str(payload.issue_type or "TASK")
         task = Task(
@@ -691,14 +854,15 @@ class TaskService:
         # Add initial voice notes if supplied
         if payload.voice_notes:
             for vn in payload.voice_notes:
+                resolved_vn_title = getattr(vn, "title", None) or getattr(vn, "file_name", None) or "Voice Note"
                 await self.repository.add_voice_note(
                     task_id=task.id,
                     user_id=current_user.id,
                     audio_url=vn.audio_url,
                     duration_seconds=vn.duration_seconds,
-                    file_size=vn.file_size,
-                    mime_type=vn.mime_type or "audio/webm",
-                    title=vn.title,
+                    file_size=getattr(vn, "file_size", 0),
+                    mime_type=getattr(vn, "mime_type", None) or "audio/webm",
+                    title=resolved_vn_title,
                 )
 
         await self.repository.session.commit()
@@ -755,8 +919,17 @@ class TaskService:
         payload: TaskUpdate,
         current_user: Any,
     ) -> Task:
+        if isinstance(self.repository.session, AsyncSession) and hasattr(self.repository, "lock_task_row"):
+            await self.repository.lock_task_row(task_id)
+
         task = await self.get_task(task_id)
         await self._assert_can_mutate_task(task, current_user, action="update")
+
+        if payload.version is not None and task.version != payload.version:
+            raise ConflictException(
+                f"Task has been modified by another user (expected version {payload.version}, "
+                f"current version {task.version}). Please refresh and try again."
+            )
 
         new_start = payload.start_date if payload.start_date is not None else task.start_date
         new_due = payload.due_date if payload.due_date is not None else task.due_date
@@ -775,6 +948,74 @@ class TaskService:
             sprint = await self.repository.get_sprint_by_id(payload.sprint_id)
             if not sprint:
                 raise ValidationException("Specified sprint does not exist.")
+
+        if payload.approver_id is not None:
+            await self._validate_eligible_active_users([payload.approver_id], field_label="approver")
+
+        # Validate approval workflow integrity — prevent direct PATCH bypass (BUG-12)
+        if payload.status == TaskStatus.PENDING_APPROVAL and task.status != TaskStatus.PENDING_APPROVAL:
+            raise ValidationException(
+                "Cannot set status to PENDING_APPROVAL directly. Use the Submit for Approval workflow with a designated approver."
+            )
+        if payload.approval_status is not None:
+            requested_appr = (
+                payload.approval_status.value
+                if hasattr(payload.approval_status, "value")
+                else str(payload.approval_status)
+            )
+            current_appr = (
+                task.approval_status.value
+                if hasattr(task.approval_status, "value")
+                else str(task.approval_status or "NONE")
+            )
+            if requested_appr != current_appr and requested_appr in (
+                "PENDING",
+                "PENDING_APPROVAL",
+                "APPROVED",
+                "REJECTED",
+            ):
+                raise ValidationException(
+                    "Approval status cannot be changed directly via PATCH. Use Submit for Approval or Action Approval."
+                )
+        if (
+            task.status == TaskStatus.PENDING_APPROVAL
+            and payload.status == TaskStatus.DONE
+            and not self._is_task_admin_manager(current_user)
+        ):
+            raise ValidationException(
+                "Tasks pending approval cannot be marked DONE directly. Use the approval workflow."
+            )
+
+        # Validate status transition rules BEFORE mutating any fields on the task
+        if payload.status is not None:
+            if payload.status == TaskStatus.DONE:
+                incomplete_blockers: list[str] = []
+                if isinstance(self.repository.session, AsyncSession) and hasattr(
+                    self.repository, "get_incomplete_blocking_task_titles"
+                ):
+                    incomplete_blockers = await self.repository.get_incomplete_blocking_task_titles(task.id)
+                else:
+                    for dep in getattr(task, "dependencies", []):
+                        dep_type = dep.dependency_type.value if hasattr(dep.dependency_type, "value") else str(dep.dependency_type)
+                        if dep_type == "BLOCKED_BY":
+                            dep_task = await self.repository.get_task_by_id(dep.depends_on_task_id)
+                            if dep_task and dep_task.status != TaskStatus.DONE:
+                                incomplete_blockers.append(dep_task.title)
+                    for dep in getattr(task, "dependent_on", []):
+                        dep_type = dep.dependency_type.value if hasattr(dep.dependency_type, "value") else str(dep.dependency_type)
+                        if dep_type == "BLOCKS":
+                            dep_task = await self.repository.get_task_by_id(dep.task_id)
+                            if dep_task and dep_task.status != TaskStatus.DONE:
+                                incomplete_blockers.append(dep_task.title)
+                if incomplete_blockers:
+                    raise ValidationException(
+                        f"Cannot complete task. Blocked by: {', '.join(incomplete_blockers)}"
+                    )
+
+            if payload.status == TaskStatus.ON_HOLD:
+                hold_reason_check = payload.hold_reason if payload.hold_reason is not None else task.hold_reason
+                if not hold_reason_check or not hold_reason_check.strip():
+                    raise ValidationException("A valid, non-empty hold reason is required when placing a task ON_HOLD.")
 
         old_values = {
             "title": task.title,
@@ -819,31 +1060,6 @@ class TaskService:
         status_changed_from_hold = False
 
         if payload.status is not None:
-            if payload.status == TaskStatus.DONE:
-                # Check all BLOCKED_BY dependencies (BUG-03)
-                incomplete_blockers: list[str] = []
-                for dep in getattr(task, "dependencies", []):
-                    dep_type = dep.dependency_type.value if hasattr(dep.dependency_type, "value") else str(dep.dependency_type)
-                    if dep_type == "BLOCKED_BY":
-                        dep_task = await self.repository.get_task_by_id(dep.depends_on_task_id)
-                        if dep_task and dep_task.status != TaskStatus.DONE:
-                            incomplete_blockers.append(dep_task.title)
-                for dep in getattr(task, "dependent_on", []):
-                    dep_type = dep.dependency_type.value if hasattr(dep.dependency_type, "value") else str(dep.dependency_type)
-                    if dep_type == "BLOCKS":
-                        dep_task = await self.repository.get_task_by_id(dep.task_id)
-                        if dep_task and dep_task.status != TaskStatus.DONE:
-                            incomplete_blockers.append(dep_task.title)
-                if incomplete_blockers:
-                    raise ValidationException(
-                        f"Cannot complete task. Blocked by: {', '.join(incomplete_blockers)}"
-                    )
-
-            if payload.status == TaskStatus.ON_HOLD:
-                hold_reason_check = payload.hold_reason or task.hold_reason
-                if not hold_reason_check or not hold_reason_check.strip():
-                    raise ValidationException("A valid, non-empty hold reason is required when placing a task ON_HOLD.")
-
             if task.status != TaskStatus.DONE and payload.status == TaskStatus.DONE:
                 status_changed_to_done = True
             if task.status != TaskStatus.ON_HOLD and payload.status == TaskStatus.ON_HOLD:
@@ -1092,41 +1308,22 @@ class TaskService:
         current_user: Any,
         role: str = "ASSIGNEE",
     ) -> Task:
+        if isinstance(self.repository.session, AsyncSession) and hasattr(self.repository, "lock_task_row"):
+            await self.repository.lock_task_row(task_id)
+
         task = await self.get_task(task_id, current_user=current_user)
         await self._assert_can_mutate_task(task, current_user, action="assign users to")
 
-        if not self._is_task_admin_manager(current_user) and user_ids:
-            managed_depts = await self.repository.get_user_managed_department_ids(current_user.id)
-            if managed_depts:
-                dept_users_subq = select(UserRole.user_id).where(
-                    UserRole.role_id.in_(managed_depts),
-                    or_(UserRole.status == RoleAssignmentStatus.ACTIVE, UserRole.status.is_(None)),
-                )
-                lead_users_subq = select(DepartmentLeadershipAssignment.employee_id).where(
-                    DepartmentLeadershipAssignment.department_id.in_(managed_depts),
-                    DepartmentLeadershipAssignment.status == OrgRecordStatus.ACTIVE,
-                )
-                allowed_res = await self.repository.session.execute(dept_users_subq.union(lead_users_subq))
-                allowed_uids = set(allowed_res.scalars().all()) | {current_user.id}
-                if set(user_ids) - allowed_uids:
-                    raise ForbiddenException("Cannot assign users outside your managed department(s).")
-            else:
-                assigned_depts = await self.repository.get_user_assigned_department_ids(current_user.id)
-                dept_users_subq = select(UserRole.user_id).where(
-                    UserRole.role_id.in_(assigned_depts),
-                    or_(UserRole.status == RoleAssignmentStatus.ACTIVE, UserRole.status.is_(None)),
-                )
-                allowed_res = await self.repository.session.execute(dept_users_subq)
-                allowed_uids = set(allowed_res.scalars().all()) | {current_user.id}
-                if set(user_ids) - allowed_uids:
-                    raise ForbiddenException("Cannot assign users outside your department.")
+        deduped_ids = list(dict.fromkeys(user_ids or []))
+        if deduped_ids:
+            await self._validate_eligible_active_users(deduped_ids, field_label=role.lower())
 
         old_ids = {a.user_id for a in task.assignees if a.assignment_role == role}
-        await self.repository.set_assignees(task, user_ids, role=role)
+        await self.repository.set_assignees(task, deduped_ids, role=role)
         await self.repository.session.commit()
         refreshed = await self.get_task(task.id)
 
-        newly_added = set(user_ids) - old_ids
+        newly_added = set(deduped_ids) - old_ids
         for uid in newly_added:
             if uid != current_user.id:
                 notif_type = "task_watcher" if role == "WATCHER" else "task_assigned"
@@ -1237,6 +1434,7 @@ class TaskService:
         attachments: list[dict[str, Any]] | None = None,
     ) -> TaskComment:
         task = await self.get_task(task_id, current_user=current_user)
+        await self._assert_can_collaborate_on_task(task, current_user, action="comment on")
         comment = await self.repository.add_comment(
             task.id, current_user.id, message, audio_url=audio_url, attachments_data=attachments
         )
@@ -1398,19 +1596,30 @@ class TaskService:
         title: str | None,
         current_user: Any,
     ) -> TaskVoiceNote:
+        if not audio_url or not audio_url.strip():
+            raise ValidationException("Voice note audio_url is required.")
+        if duration_seconds is not None and duration_seconds < 0:
+            raise ValidationException("Voice note duration_seconds cannot be negative.")
+        if file_size is not None and file_size < 0:
+            raise ValidationException("Voice note file_size cannot be negative.")
+
         task = await self.get_task(task_id, current_user=current_user)
         await self._assert_can_mutate_task(task, current_user, action="add voice note to")
         vn = await self.repository.add_voice_note(
             task.id,
             current_user.id,
-            audio_url=audio_url,
+            audio_url=audio_url.strip(),
             duration_seconds=duration_seconds,
             file_size=file_size,
             mime_type=mime_type,
             title=title,
         )
+        vn_id = vn.id
         await self.repository.session.commit()
-        await self.repository.session.refresh(vn)
+        if isinstance(self.repository.session, AsyncSession) and hasattr(self.repository, "get_voice_note_by_id"):
+            vn = (await self.repository.get_voice_note_by_id(vn_id)) or vn
+        else:
+            await self.repository.session.refresh(vn)
 
         await self.audit_service.record(
             action=AuditAction.UPDATE,
@@ -1505,12 +1714,21 @@ class TaskService:
         if not subtask:
             raise NotFoundException(f"Subtask with ID {subtask_id} not found.")
         task = await self.get_task(subtask.task_id, current_user=current_user)
+        sub_participants = {a.user_id for a in (getattr(subtask, "assignees", []) or []) if getattr(a, "user_id", None)}
+        if subtask.assignee_id:
+            sub_participants.add(subtask.assignee_id)
+        await self._assert_can_collaborate_on_task(
+            task, current_user, action="comment on subtask of", extra_allowed_user_ids=sub_participants
+        )
 
         sc = await self.repository.add_subtask_comment(
             subtask.id, current_user.id, message, audio_url=audio_url
         )
         await self.repository.session.commit()
-        await self.repository.session.refresh(sc)
+        if isinstance(self.repository.session, AsyncSession):
+            await self.repository.session.refresh(sc, ["user"])
+        else:
+            await self.repository.session.refresh(sc)
 
         await self._process_mentions(message, task.id, None, current_user, f"Subtask '{subtask.title}' on {task.title}")
 
@@ -1600,12 +1818,19 @@ class TaskService:
         if not esc:
             raise NotFoundException(f"Escalation with ID {escalation_id} not found.")
         task = await self.get_task(esc.task_id, current_user=current_user)
+        esc_participants = {u for u in (esc.from_user, esc.to_user) if u is not None}
+        await self._assert_can_collaborate_on_task(
+            task, current_user, action="comment on escalation of", extra_allowed_user_ids=esc_participants
+        )
 
         ec = await self.repository.add_escalation_comment(
             esc.id, current_user.id, message, audio_url=audio_url
         )
         await self.repository.session.commit()
-        await self.repository.session.refresh(ec)
+        if isinstance(self.repository.session, AsyncSession):
+            await self.repository.session.refresh(ec, ["user"])
+        else:
+            await self.repository.session.refresh(ec)
 
         await self._process_mentions(message, task.id, None, current_user, f"Escalation on {task.title}")
 
@@ -1655,17 +1880,46 @@ class TaskService:
             raise ValidationException("A clear reason is required for escalation.")
         if not due_date:
             raise ValidationException("SLA resolution due date is required for escalation.")
+        if due_date < date.today():
+            raise ValidationException("Escalation SLA resolution due date cannot be in the past.")
+
+        clean_reason = reason.strip()
+
+        if isinstance(self.repository.session, AsyncSession) and hasattr(self.repository, "lock_task_row"):
+            await self.repository.lock_task_row(task_id)
 
         task = await self.get_task(task_id, current_user=current_user)
+        await self._validate_eligible_active_users([to_user], field_label="escalation target")
+
+        # Idempotency guard: prevent duplicate DB rows when clients retry an identical escalation
+        if isinstance(self.repository.session, AsyncSession) and hasattr(
+            self.repository, "find_recent_identical_escalation"
+        ):
+            existing_esc = await self.repository.find_recent_identical_escalation(
+                task_id=task.id,
+                from_user=current_user.id,
+                to_user=to_user,
+                reason=clean_reason,
+                escalation_type=escalation_type,
+                due_date=due_date,
+                since=datetime.now(timezone.utc) - timedelta(seconds=60),
+            )
+            if existing_esc is not None:
+                await self.repository.session.commit()
+                return (await self.repository.get_escalation_by_id(existing_esc.id)) or existing_esc
+
         esc = await self.repository.add_escalation(
             task.id,
             from_user=current_user.id,
             to_user=to_user,
-            reason=reason,
+            reason=clean_reason,
             escalation_type=escalation_type,
             due_date=due_date,
         )
+        esc_id = esc.id
         await self.repository.session.commit()
+        if isinstance(self.repository.session, AsyncSession) and hasattr(self.repository, "get_escalation_by_id"):
+            esc = (await self.repository.get_escalation_by_id(esc_id)) or esc
 
         # Audit Log
         await self.audit_service.record(
@@ -1723,6 +1977,11 @@ class TaskService:
     ) -> TaskSubtask:
         task = await self.get_task(task_id, current_user=current_user)
         await self._assert_can_mutate_task(task, current_user, action="create subtask on")
+        sub_uids = list(assignee_ids or [])
+        if assignee_id:
+            sub_uids.append(assignee_id)
+        if sub_uids:
+            await self._validate_eligible_active_users(sub_uids, field_label="subtask assignee")
         subtask = await self.repository.create_subtask(
             task.id,
             title,
@@ -1780,6 +2039,12 @@ class TaskService:
         )
         if not is_sub_assignee:
             await self._assert_can_mutate_task(task, current_user, action="update subtask on")
+
+        sub_uids = list(assignee_ids or [])
+        if assignee_id:
+            sub_uids.append(assignee_id)
+        if sub_uids:
+            await self._validate_eligible_active_users(sub_uids, field_label="subtask assignee")
 
         was_completed = subtask.completed or subtask.status == "DONE"
         updated = await self.repository.update_subtask(
@@ -1991,13 +2256,13 @@ class TaskService:
         seen_uids: set[uuid.UUID] = {current_user_id}
 
         for r in rep_rels:
-            if r.manager and r.manager.id not in seen_uids:
+            if r.manager and r.manager.id not in seen_uids and self._is_eligible_active_user(r.manager):
                 seen_uids.add(r.manager.id)
                 reporting_managers.append(
                     TaskEscalateCandidate(
                         user_id=r.manager.id,
-                        name=r.manager.full_name,
-                        email=r.manager.email,
+                        name=r.manager.display_name or r.manager.full_name,
+                        email=None,
                         category="REPORTING_MANAGER",
                         detail=f"Reporting line ({r.relationship_type.value if hasattr(r.relationship_type, 'value') else r.relationship_type})",
                     )
@@ -2011,20 +2276,23 @@ class TaskService:
             mgr_stmt = select(User).where(User.id == u_record.manager_id)
             mgr_res = await session.execute(mgr_stmt)
             mgr = mgr_res.scalar_one_or_none()
-            if mgr:
+            if mgr and self._is_eligible_active_user(mgr):
                 seen_uids.add(mgr.id)
                 reporting_managers.append(
                     TaskEscalateCandidate(
                         user_id=mgr.id,
-                        name=mgr.full_name,
-                        email=mgr.email,
+                        name=mgr.display_name or mgr.full_name,
+                        email=None,
                         category="REPORTING_MANAGER",
                         detail="Direct Manager",
                     )
                 )
 
         # 2. Department Managers for current user's departments
-        dept_ids_stmt = select(UserRole.role_id).where(UserRole.user_id == current_user_id)
+        dept_ids_stmt = select(UserRole.role_id).where(
+            UserRole.user_id == current_user_id,
+            or_(UserRole.status == RoleAssignmentStatus.ACTIVE, UserRole.status.is_(None)),
+        )
         dept_ids_res = await session.execute(dept_ids_stmt)
         my_depts = [row[0] for row in dept_ids_res.fetchall()]
 
@@ -2032,36 +2300,64 @@ class TaskService:
         if my_depts:
             ldr_stmt = (
                 select(DepartmentLeadershipAssignment)
-                .where(DepartmentLeadershipAssignment.department_id.in_(my_depts))
+                .where(
+                    DepartmentLeadershipAssignment.department_id.in_(my_depts),
+                    DepartmentLeadershipAssignment.status == OrgRecordStatus.ACTIVE,
+                )
             )
             ldr_res = await session.execute(ldr_stmt)
             leaders = ldr_res.scalars().all()
             for ldr in leaders:
-                if ldr.employee and ldr.employee.id not in seen_uids:
+                if ldr.employee and ldr.employee.id not in seen_uids and self._is_eligible_active_user(ldr.employee):
                     seen_uids.add(ldr.employee.id)
                     dept_name = ldr.department.name if ldr.department else "Department"
                     department_managers.append(
                         TaskEscalateCandidate(
                             user_id=ldr.employee.id,
-                            name=ldr.employee.full_name,
-                            email=ldr.employee.email,
+                            name=ldr.employee.display_name or ldr.employee.full_name,
+                            email=None,
                             category="DEPARTMENT_MANAGER",
                             detail=f"{dept_name} ({ldr.leadership_type.value if hasattr(ldr.leadership_type, 'value') else ldr.leadership_type})",
                         )
                     )
 
-        # 3. All other active organization users
+        # 3. All other eligible active organization users (minimum info only — no emails)
         all_users_stmt = (
             select(User)
             .where(
                 User.deleted_at.is_(None),
                 User.is_active.is_(True),
+                User.status.notin_([UserStatus.INACTIVE, UserStatus.SUSPENDED, UserStatus.LOCKED]),
+                or_(
+                    User.employment_status.is_(None),
+                    User.employment_status.notin_(
+                        [EmploymentStatus.TERMINATED, EmploymentStatus.RESIGNED, EmploymentStatus.INACTIVE]
+                    ),
+                ),
             )
-            .order_by(User.first_name.asc(), User.username.asc())
-            .limit(200)
+            .order_by(User.first_name.asc(), User.last_name.asc(), User.username.asc())
         )
         all_users_res = await session.execute(all_users_stmt)
         all_users = all_users_res.scalars().all()
+
+        # Batch department names for organization users in 1 query (no N+1, no email leakage)
+        candidate_ids = [u.id for u in all_users if u.id not in seen_uids]
+        dept_name_by_user: dict[uuid.UUID, str] = {}
+        if candidate_ids:
+            dept_rows = await session.execute(
+                select(UserRole.user_id, Role.name)
+                .join(Role, UserRole.role_id == Role.id)
+                .where(
+                    UserRole.user_id.in_(candidate_ids),
+                    or_(UserRole.status == RoleAssignmentStatus.ACTIVE, UserRole.status.is_(None)),
+                    Role.name.notin_(["super_admin", "user"]),
+                    Role.deleted_at.is_(None),
+                )
+                .order_by(UserRole.is_primary.desc(), Role.name.asc())
+            )
+            for uid, rname in dept_rows.fetchall():
+                if uid not in dept_name_by_user and rname:
+                    dept_name_by_user[uid] = rname
 
         org_users: list[TaskEscalateCandidate] = []
         for u in all_users:
@@ -2069,10 +2365,10 @@ class TaskService:
                 org_users.append(
                     TaskEscalateCandidate(
                         user_id=u.id,
-                        name=u.full_name,
-                        email=u.email,
+                        name=u.display_name or u.full_name,
+                        email=None,
                         category="ORGANIZATION_USER",
-                        detail=u.email or "Employee",
+                        detail=dept_name_by_user.get(u.id) or "Organization Member",
                     )
                 )
 
@@ -2090,6 +2386,7 @@ class TaskService:
         current_user: Any,
     ) -> bool:
         task = await self.get_task(task_id, current_user=current_user)
+        await self._assert_can_collaborate_on_task(task, current_user, action="react to")
         added = await self.repository.toggle_reaction(
             user_id=current_user.id,
             emoji=emoji,
@@ -2116,8 +2413,9 @@ class TaskService:
         if not comment:
             raise NotFoundException(f"Comment with ID {comment_id} not found.")
 
-        # Enforce read authorization on parent task BEFORE mutating reactions
+        # Enforce read + collaboration authorization on parent task BEFORE mutating reactions
         task = await self.get_task(comment.task_id, current_user=current_user)
+        await self._assert_can_collaborate_on_task(task, current_user, action="react to comment on")
         added = await self.repository.toggle_reaction(
             user_id=current_user.id,
             emoji=emoji,
@@ -2155,8 +2453,12 @@ class TaskService:
             depends_on_task_id=payload.depends_on_task_id,
             dependency_type=dep_type_str,
         )
+        dep_id = dep.id
         await self.repository.session.commit()
-        await self.repository.session.refresh(dep)
+        if isinstance(self.repository.session, AsyncSession) and hasattr(self.repository, "get_dependency_by_id"):
+            dep = (await self.repository.get_dependency_by_id(dep_id)) or dep
+        else:
+            await self.repository.session.refresh(dep)
 
         await self.audit_service.record(
             action=AuditAction.UPDATE,
@@ -2196,8 +2498,10 @@ class TaskService:
         if payload.approver_id == current_user.id:
             raise ValidationException("You cannot submit a task for approval to yourself.")
         approver = await self.repository.session.get(User, payload.approver_id)
-        if not approver:
+        if not approver or getattr(approver, "deleted_at", None) is not None:
             raise NotFoundException(f"Approver with ID {payload.approver_id} not found.")
+        if not self._is_eligible_active_user(approver):
+            raise ValidationException("Selected approver is inactive or ineligible.")
 
         task.status = TaskStatus.PENDING_APPROVAL
         task.approval_status = "PENDING_APPROVAL"
@@ -2235,6 +2539,9 @@ class TaskService:
         payload: TaskApprovalActionRequest,
         current_user: Any,
     ) -> Task:
+        if isinstance(self.repository.session, AsyncSession) and hasattr(self.repository, "lock_task_row"):
+            await self.repository.lock_task_row(task_id)
+
         task = await self.get_task(task_id, current_user=current_user)
 
         user_perms = set(getattr(current_user, "permissions", []))
@@ -2438,6 +2745,21 @@ class TaskService:
                 message=f"No tasks were updated. Permission denied for {len(failed_ids)} tasks.",
             )
 
+        if payload.action == "STATUS" and str(payload.value) == TaskStatus.PENDING_APPROVAL.value:
+            raise ValidationException(
+                "Cannot set PENDING_APPROVAL via bulk status update. Use Submit for Approval."
+            )
+
+        if payload.action in ("ASSIGN", "ADD_WATCHER") and payload.value is not None:
+            raw_uids = payload.value if isinstance(payload.value, list) else [payload.value]
+            try:
+                parsed_uids = [uuid.UUID(str(u)) for u in raw_uids]
+            except (TypeError, ValueError):
+                raise ValidationException("Invalid user ID supplied for bulk action.")
+            await self._validate_eligible_active_users(
+                parsed_uids, field_label="watcher" if payload.action == "ADD_WATCHER" else "assignee"
+            )
+
         success_count, more_failed = await self.repository.bulk_update_tasks(
             task_ids=authorized_task_ids,
             action=payload.action,
@@ -2511,6 +2833,8 @@ class TaskService:
         current_user: Any | None = None,
     ) -> list[TaskSprintRead]:
         sprints = await self.repository.list_sprints(status=status)
+        if not sprints:
+            return []
         can_view_all = current_user is None or self._can_view_all_tasks(current_user)
         scoped_dept_users: set[uuid.UUID] | None = None
         actor_id = getattr(current_user, "id", None) if current_user is not None else None
@@ -2519,27 +2843,43 @@ class TaskService:
             if dept_scope_ids:
                 scoped_dept_users = (await self.repository.get_department_user_ids(dept_scope_ids)) | {actor_id}
 
+        counts_by_sprint: dict[uuid.UUID, tuple[int, int]] = {}
+        if isinstance(self.repository.session, AsyncSession) and hasattr(self.repository, "get_sprint_task_counts"):
+            counts_by_sprint = await self.repository.get_sprint_task_counts(
+                [s.id for s in sprints],
+                can_view_all=can_view_all,
+                actor_id=actor_id,
+                scoped_dept_users=scoped_dept_users,
+            )
+
         result = []
         for s in sprints:
-            raw_tasks = [t for t in getattr(s, "tasks", []) if getattr(t, "deleted_at", None) is None]
-            if can_view_all or actor_id is None:
-                visible_tasks = raw_tasks
-            elif scoped_dept_users is not None:
-                visible_tasks = [
-                    t for t in raw_tasks
-                    if t.created_by in scoped_dept_users
-                    or getattr(t, "approver_id", None) in scoped_dept_users
-                    or any(getattr(a, "user_id", None) in scoped_dept_users for a in (getattr(t, "assignees", []) or []))
-                ]
+            if counts_by_sprint or isinstance(self.repository.session, AsyncSession):
+                t_count, comp_count = counts_by_sprint.get(s.id, (0, 0))
             else:
-                visible_tasks = [
-                    t for t in raw_tasks
-                    if t.created_by == actor_id
-                    or getattr(t, "approver_id", None) == actor_id
-                    or any(getattr(a, "user_id", None) == actor_id for a in (getattr(t, "assignees", []) or []))
-                ]
-            t_count = len(visible_tasks)
-            comp_count = sum(1 for t in visible_tasks if getattr(t, "status", None) == "DONE" or getattr(getattr(t, "status", None), "value", None) == "DONE")
+                raw_tasks = [t for t in getattr(s, "tasks", []) if getattr(t, "deleted_at", None) is None]
+                if can_view_all or actor_id is None:
+                    visible_tasks = raw_tasks
+                elif scoped_dept_users is not None:
+                    visible_tasks = [
+                        t for t in raw_tasks
+                        if t.created_by in scoped_dept_users
+                        or getattr(t, "approver_id", None) in scoped_dept_users
+                        or any(getattr(a, "user_id", None) in scoped_dept_users for a in (getattr(t, "assignees", []) or []))
+                    ]
+                else:
+                    visible_tasks = [
+                        t for t in raw_tasks
+                        if t.created_by == actor_id
+                        or getattr(t, "approver_id", None) == actor_id
+                        or any(getattr(a, "user_id", None) == actor_id for a in (getattr(t, "assignees", []) or []))
+                    ]
+                t_count = len(visible_tasks)
+                comp_count = sum(
+                    1 for t in visible_tasks
+                    if getattr(t, "status", None) == "DONE"
+                    or getattr(getattr(t, "status", None), "value", None) == "DONE"
+                )
             st_val = getattr(s, "status", "FUTURE")
             read_obj = TaskSprintRead(
                 id=s.id,
@@ -2573,6 +2913,9 @@ class TaskService:
         sprint = await self.repository.get_sprint_by_id(sprint_id)
         if not sprint:
             raise NotFoundException(f"Sprint with ID {sprint_id} not found.")
+        await self._assert_can_manage_owned_resource(
+            sprint.created_by, current_user, resource_name="sprint", action="update"
+        )
         updated = await self.repository.update_sprint(
             sprint,
             name=payload.name,
@@ -2588,6 +2931,9 @@ class TaskService:
         sprint = await self.repository.get_sprint_by_id(sprint_id)
         if not sprint:
             raise NotFoundException(f"Sprint with ID {sprint_id} not found.")
+        await self._assert_can_manage_owned_resource(
+            sprint.created_by, current_user, resource_name="sprint", action="delete"
+        )
         await self.repository.delete_sprint(sprint)
         await self.repository.session.commit()
 
@@ -2611,6 +2957,9 @@ class TaskService:
         tpl = await self.repository.get_template_by_id(template_id)
         if not tpl:
             raise NotFoundException(f"Template with ID {template_id} not found.")
+        await self._assert_can_manage_owned_resource(
+            tpl.created_by, current_user, resource_name="template", action="update"
+        )
         updated = await self.repository.update_template(
             tpl,
             name=payload.name,
@@ -2625,6 +2974,9 @@ class TaskService:
         tpl = await self.repository.get_template_by_id(template_id)
         if not tpl:
             raise NotFoundException(f"Template with ID {template_id} not found.")
+        await self._assert_can_manage_owned_resource(
+            tpl.created_by, current_user, resource_name="template", action="delete"
+        )
         await self.repository.delete_template(tpl)
         await self.repository.session.commit()
 
@@ -2825,7 +3177,8 @@ class TaskService:
             username_snapshot=getattr(current_user, "display_name", None) or getattr(current_user, "full_name", None) or getattr(current_user, "username", "system"),
             entity_type="TaskRecurringSchedule",
             entity_id=str(created.id),
-            new_values={"title": created.title, "frequency": created.frequency},
+            new_values={"title": created.title, "frequency": created.frequency, "status": created.status},
+            description=f"Created recurring schedule '{created.title}' ({created.frequency})",
         )
         return TaskRecurringScheduleRead.model_validate(created)
 
@@ -2942,6 +3295,9 @@ class TaskService:
             raise NotFoundException(f"Recurring task schedule {schedule_id} not found.")
         await self._assert_can_access_recurring_schedule(schedule, current_user, for_mutation=True)
 
+        old_status = schedule.status
+        old_title = schedule.title
+
         new_freq = payload.frequency.value if payload.frequency and hasattr(payload.frequency, "value") else (str(payload.frequency) if payload.frequency else schedule.frequency)
         new_config = payload.recurrence_config if payload.recurrence_config is not None else schedule.recurrence_config
         new_start = payload.effective_start_date or schedule.effective_start_date
@@ -3010,7 +3366,9 @@ class TaskService:
             username_snapshot=getattr(current_user, "display_name", None) or getattr(current_user, "full_name", None) or getattr(current_user, "username", "system"),
             entity_type="TaskRecurringSchedule",
             entity_id=str(schedule.id),
+            old_values={"title": old_title, "status": old_status},
             new_values={"title": schedule.title, "status": schedule.status},
+            description=f"Updated recurring schedule '{schedule.title}'",
         )
         return TaskRecurringScheduleRead.model_validate(schedule)
 
@@ -3026,6 +3384,7 @@ class TaskService:
         if schedule.status == "PAUSED":
             return TaskRecurringScheduleRead.model_validate(schedule)
 
+        prev_status = schedule.status
         schedule.status = "PAUSED"
         schedule.next_run_date = None
         await self.repository.session.commit()
@@ -3037,7 +3396,9 @@ class TaskService:
             username_snapshot=getattr(current_user, "display_name", None) or getattr(current_user, "full_name", None) or getattr(current_user, "username", "system"),
             entity_type="TaskRecurringSchedule",
             entity_id=str(schedule.id),
+            old_values={"status": prev_status},
             new_values={"status": "PAUSED"},
+            description=f"Paused recurring schedule '{schedule.title}'",
         )
         return TaskRecurringScheduleRead.model_validate(schedule)
 
@@ -3053,6 +3414,7 @@ class TaskService:
         if schedule.status == "ACTIVE":
             return TaskRecurringScheduleRead.model_validate(schedule)
 
+        prev_status = schedule.status
         schedule.status = "ACTIVE"
         nxt = calculate_next_occurrence(
             frequency=schedule.frequency,
@@ -3071,7 +3433,9 @@ class TaskService:
             username_snapshot=getattr(current_user, "display_name", None) or getattr(current_user, "full_name", None) or getattr(current_user, "username", "system"),
             entity_type="TaskRecurringSchedule",
             entity_id=str(schedule.id),
+            old_values={"status": prev_status},
             new_values={"status": "ACTIVE"},
+            description=f"Resumed recurring schedule '{schedule.title}'",
         )
         return TaskRecurringScheduleRead.model_validate(schedule)
 
@@ -3085,6 +3449,7 @@ class TaskService:
         if schedule.status == "ARCHIVED":
             return TaskRecurringScheduleRead.model_validate(schedule)
 
+        prev_status = schedule.status
         cfg = dict(schedule.recurrence_config or {})
         cfg["_pre_archive_status"] = schedule.status
         schedule.recurrence_config = cfg
@@ -3100,7 +3465,9 @@ class TaskService:
             username_snapshot=getattr(current_user, "display_name", None) or getattr(current_user, "full_name", None) or getattr(current_user, "username", "system"),
             entity_type="TaskRecurringSchedule",
             entity_id=str(schedule.id),
+            old_values={"status": prev_status},
             new_values={"status": "ARCHIVED"},
+            description=f"Archived recurring schedule '{schedule.title}'",
         )
         return TaskRecurringScheduleRead.model_validate(schedule)
 
@@ -3146,7 +3513,9 @@ class TaskService:
             username_snapshot=getattr(current_user, "display_name", None) or getattr(current_user, "full_name", None) or getattr(current_user, "username", "system"),
             entity_type="TaskRecurringSchedule",
             entity_id=str(schedule.id),
+            old_values={"status": "ARCHIVED"},
             new_values={"status": schedule.status},
+            description=f"Restored recurring schedule '{schedule.title}' to {schedule.status}",
         )
         return TaskRecurringScheduleRead.model_validate(schedule)
 
@@ -3167,6 +3536,7 @@ class TaskService:
             username_snapshot=getattr(current_user, "display_name", None) or getattr(current_user, "full_name", None) or getattr(current_user, "username", "system"),
             entity_type="TaskRecurringSchedule",
             entity_id=str(schedule.id),
+            description=f"Soft-deleted recurring schedule '{schedule.title}'",
         )
 
     async def generate_recurring_tasks(
@@ -3191,13 +3561,30 @@ class TaskService:
         else:
             schedules = await self.repository.get_active_recurring_schedules()
 
+        # Deterministic lock ordering across schedules prevents multi-schedule deadlocks
+        schedule_ids = sorted({s.id for s in schedules}, key=lambda sid: str(sid))
+        schedule_by_id = {s.id: s for s in schedules}
         generated_tasks: list[Task] = []
 
-        for sch in schedules:
-            current_sch_id = sch.id
+        for current_sch_id in schedule_ids:
+            if isinstance(self.repository.session, AsyncSession) and hasattr(
+                self.repository, "lock_recurring_schedule"
+            ):
+                sch = await self.repository.lock_recurring_schedule(current_sch_id)
+            else:
+                sch = schedule_by_id.get(current_sch_id)
+
+            if not sch or sch.status != "ACTIVE" or getattr(sch, "deleted_at", None) is not None:
+                if auto_commit and isinstance(self.repository.session, AsyncSession):
+                    await self.repository.session.commit()
+                continue
             if sch.effective_end_date and ref_date > sch.effective_end_date:
+                if auto_commit and isinstance(self.repository.session, AsyncSession):
+                    await self.repository.session.commit()
                 continue
             if ref_date < sch.effective_start_date:
+                if auto_commit and isinstance(self.repository.session, AsyncSession):
+                    await self.repository.session.commit()
                 continue
 
             # Calculate the current or upcoming eligible occurrence
@@ -3209,13 +3596,17 @@ class TaskService:
                 effective_end_date=sch.effective_end_date,
             )
             if not nxt:
+                if auto_commit and isinstance(self.repository.session, AsyncSession):
+                    await self.repository.session.commit()
                 continue
 
             due_date, period_key = nxt
 
-            # IDEMPOTENCY CHECK:
+            # IDEMPOTENCY CHECK (executed AFTER acquiring per-schedule advisory + FOR UPDATE lock):
             existing = await self.repository.get_recurring_task_instance(sch.id, period_key)
             if existing:
+                if auto_commit and isinstance(self.repository.session, AsyncSession):
+                    await self.repository.session.commit()
                 continue
 
             # Create Task instance
@@ -3340,7 +3731,11 @@ class TaskService:
             scoped_user_id=scoped_user_id,
             scoped_department_user_ids=scoped_dept_users,
         )
-        return [TaskSummaryRead.model_validate(t) for t in instances]
+        actor_id = getattr(current_user, "id", None) if current_user is not None else None
+        return [
+            TaskSummaryRead.model_validate(t, context={"current_user_id": actor_id})
+            for t in instances
+        ]
 
     async def check_recurring_reminders_and_escalations(
         self,
@@ -3505,63 +3900,91 @@ class TaskService:
 
     async def list_task_assignees(self, current_user: Any) -> list[TaskAssigneeOptionRead]:
         """
-        Return assignable users scoped strictly to the user's authority:
-        - Admin, Admin-approved (`task.all_view`), or Task Manager (`task.manage`): all active users.
-        - Department Manager: active users in their authorized department(s) + themselves.
-        - Employee with `task.create` or `task.assign`: active users in their assigned department(s) + themselves.
-        - Read-only Employee: only themselves.
+        Return assignable users preserving BOTH directory privacy and org-wide assignment workflows:
+        - Admin, `task.manage`, `task.all_view`, `task.create`, `task.assign`, `task.escalate`,
+          or active Department Manager: all eligible active organization users.
+        - Read-only `task.department_view` (without create/assign/escalate/leadership):
+          eligible active users in their scoped department(s) + themselves.
+        - Plain `task.view` Employee: ONLY themselves (directory privacy enforced).
+        Returns minimum selector info only (no emails or unnecessary directory fields).
         """
         user_perms = set(getattr(current_user, "permissions", []) or [])
-        if self._can_view_all_tasks(current_user):
+        can_assign_org_wide = (
+            self._can_view_all_tasks(current_user)
+            or "task.create" in user_perms
+            or "task.assign" in user_perms
+            or "task.escalate" in user_perms
+        )
+        if not can_assign_org_wide:
+            managed_dept_ids = await self.repository.get_user_managed_department_ids(current_user.id)
+            if managed_dept_ids:
+                can_assign_org_wide = True
+
+        active_user_filters = [
+            User.deleted_at.is_(None),
+            User.is_active.is_(True),
+            User.status.notin_([UserStatus.INACTIVE, UserStatus.SUSPENDED, UserStatus.LOCKED]),
+            or_(
+                User.employment_status.is_(None),
+                User.employment_status.notin_(
+                    [EmploymentStatus.TERMINATED, EmploymentStatus.RESIGNED, EmploymentStatus.INACTIVE]
+                ),
+            ),
+        ]
+
+        if can_assign_org_wide:
             stmt = (
-                select(User)
-                .where(User.deleted_at.is_(None), User.is_active.is_(True))
+                select(
+                    User.id,
+                    User.display_name,
+                    User.first_name,
+                    User.last_name,
+                    User.username,
+                )
+                .where(*active_user_filters)
                 .order_by(User.first_name, User.last_name)
             )
             res = await self.repository.session.execute(stmt)
-            users = res.scalars().all()
+            user_rows = res.fetchall()
         else:
             dept_scope_ids = await self._resolve_user_department_scope_ids(current_user)
             if dept_scope_ids:
                 allowed_uids = (await self.repository.get_department_user_ids(dept_scope_ids)) | {current_user.id}
-            elif "task.create" in user_perms or "task.assign" in user_perms:
-                assigned_dept_ids = await self.repository.get_user_assigned_department_ids(current_user.id)
-                allowed_uids = (
-                    (await self.repository.get_department_user_ids(assigned_dept_ids))
-                    if assigned_dept_ids
-                    else set()
-                ) | {current_user.id}
             else:
                 allowed_uids = {current_user.id}
 
             stmt = (
-                select(User)
-                .where(
-                    User.id.in_(allowed_uids),
-                    User.deleted_at.is_(None),
-                    User.is_active.is_(True),
+                select(
+                    User.id,
+                    User.display_name,
+                    User.first_name,
+                    User.last_name,
+                    User.username,
                 )
+                .where(User.id.in_(allowed_uids), *active_user_filters)
                 .order_by(User.first_name, User.last_name)
             )
             res = await self.repository.session.execute(stmt)
-            users = res.scalars().all()
+            user_rows = res.fetchall()
+
+        user_ids = [row[0] for row in user_rows]
+        dept_map = (
+            await self.repository.get_users_primary_departments(user_ids)
+            if user_ids and hasattr(self.repository, "get_users_primary_departments")
+            else {}
+        )
 
         options: list[TaskAssigneeOptionRead] = []
-        for u in users:
-            dept_id = await self.repository.get_user_primary_department_id(u.id)
-            dept_name = None
-            if dept_id:
-                dept_role = await self.repository.session.get(Role, dept_id)
-                dept_name = dept_role.name if dept_role else None
-
-            full_name = (u.display_name or f"{u.first_name or ''} {u.last_name or ''}".strip() or u.username or u.email)
+        for uid, dname, fname, lname, uname in user_rows:
+            dept_id, dept_name = dept_map.get(uid, (None, None))
+            full_name = (dname or f"{fname or ''} {lname or ''}".strip() or uname or "Team Member")
             options.append(
                 TaskAssigneeOptionRead(
-                    id=u.id,
-                    display_name=u.display_name,
+                    id=uid,
+                    display_name=dname,
                     full_name=full_name,
-                    username=u.username,
-                    email=u.email,
+                    username=None,
+                    email=None,
                     department=dept_name or "General",
                     department_id=dept_id,
                 )

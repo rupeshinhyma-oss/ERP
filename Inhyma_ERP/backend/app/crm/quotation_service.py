@@ -35,6 +35,18 @@ from app.core.exceptions import (
 from app.database.base import _utcnow
 from app.core.logging import get_logger
 from app.masters.products.models import Product
+from app.masters.uom.models import UnitOfMeasurement
+
+
+def _resolve_uom_label(uom_obj: UnitOfMeasurement | None) -> str:
+    """Resolve actual UOM code/short_name/name from UnitOfMeasurement master, defaulting to 'Nos' only when missing."""
+    if uom_obj is None:
+        return "Nos"
+    for attr in ("code", "short_name", "name"):
+        val = getattr(uom_obj, attr, None)
+        if val and str(val).strip():
+            return str(val).strip()
+    return "Nos"
 
 
 def _sanitize_crm_image_url(url: str | None) -> str | None:
@@ -348,7 +360,8 @@ class CrmQuotationService:
         Enforces that only non-deleted, active, and sellable products are returned.
         """
         stmt = (
-            select(Product)
+            select(Product, UnitOfMeasurement)
+            .outerjoin(UnitOfMeasurement, Product.uom_id == UnitOfMeasurement.id)
             .options(selectinload(Product.hsn))
             .where(
                 Product.deleted_at.is_(None),
@@ -368,10 +381,10 @@ class CrmQuotationService:
             )
 
         stmt = stmt.order_by(Product.product_name.asc()).limit(limit)
-        products = (await self.session.execute(stmt)).scalars().all()
+        product_rows = (await self.session.execute(stmt)).all()
 
         items: list[CrmProductLookupItem] = []
-        for p in products:
+        for p, uom_obj in product_rows:
             img_list: list[str] = []
             if isinstance(p.images, list):
                 img_list = [str(url) for url in p.images if url]
@@ -388,7 +401,7 @@ class CrmQuotationService:
                     specification_doc_name=getattr(p, "specification_doc_name", None),
                     specification_doc_url=getattr(p, "specification_doc_url", None),
                     description=p.description,
-                    uom="Nos",
+                    uom=_resolve_uom_label(uom_obj),
                     standard_price=float(p.standard_price) if p.standard_price is not None else None,
                     minimum_price=float(p.minimum_price) if p.minimum_price is not None else None,
                     gst_percent=gst,
@@ -419,15 +432,17 @@ class CrmQuotationService:
         await self.lead_service._check_lead_scope(lead, actor, action="view")
 
         stmt = (
-            select(CrmLeadProduct)
+            select(CrmLeadProduct, UnitOfMeasurement)
             .options(selectinload(CrmLeadProduct.product))
+            .outerjoin(Product, CrmLeadProduct.product_id == Product.id)
+            .outerjoin(UnitOfMeasurement, Product.uom_id == UnitOfMeasurement.id)
             .where(CrmLeadProduct.lead_id == lead_id)
             .order_by(desc(CrmLeadProduct.created_at))
         )
-        associations = (await self.session.execute(stmt)).scalars().all()
+        assoc_rows = (await self.session.execute(stmt)).all()
 
         items: list[CrmLeadProductRead] = []
-        for assoc in associations:
+        for assoc, uom_obj in assoc_rows:
             p = assoc.product
             selected_img = None
             if p and isinstance(p.images, list) and len(p.images) > 0:
@@ -441,7 +456,7 @@ class CrmQuotationService:
                     product_name=p.product_name if p else "Unknown Product",
                     product_code=p.product_code if p else None,
                     specification=p.specification if p else None,
-                    uom="Nos",
+                    uom=_resolve_uom_label(uom_obj),
                     selected_image_url=selected_img,
                     notes=assoc.notes,
                     created_at=assoc.created_at,
@@ -502,6 +517,7 @@ class CrmQuotationService:
         await self.session.commit()
         await self.session.refresh(new_assoc)
 
+        uom_obj = await self.session.get(UnitOfMeasurement, product.uom_id) if product.uom_id else None
         selected_img = product.images[0] if (product.images and len(product.images) > 0) else None
         return CrmLeadProductRead(
             id=new_assoc.id,
@@ -510,7 +526,7 @@ class CrmQuotationService:
             product_name=product.product_name,
             product_code=product.product_code,
             specification=product.specification,
-            uom="Nos",
+            uom=_resolve_uom_label(uom_obj),
             selected_image_url=selected_img,
             notes=new_assoc.notes,
             created_at=new_assoc.created_at,
@@ -659,6 +675,7 @@ class CrmQuotationService:
         self,
         items_in: list[CrmQuotationItemIn],
         products_map: dict[uuid.UUID, Product],
+        product_uoms_map: dict[uuid.UUID, str] | None = None,
     ) -> tuple[list[dict[str, Any]], Decimal, Decimal, Decimal, Decimal]:
         """
         Calculate decimal-safe line totals and commercial quotation totals.
@@ -733,7 +750,11 @@ class CrmQuotationService:
                     "product_code": product.product_code,
                     "description": item.description if item.description is not None else product.description,
                     "specification": effective_spec,
-                    "uom": item.uom or "Nos",
+                    "uom": (
+                        item.uom.strip()
+                        if item.uom and item.uom.strip()
+                        else (product_uoms_map.get(product.id) if product_uoms_map else None) or "Nos"
+                    ),
                     "include_images": item.include_images,
                     "selected_image_url": img_to_include,
                     "include_specifications": effective_include_specs,
@@ -857,22 +878,27 @@ class CrmQuotationService:
         if not payload.items or len(payload.items) == 0:
             raise BadRequestException("Quotation must contain at least one line item.")
 
-        # Batch load products and validate
+        # Batch load products with actual UOM labels and validate
         product_ids = [it.product_id for it in payload.items]
-        p_stmt = select(Product).where(
-            Product.id.in_(product_ids),
-            Product.deleted_at.is_(None),
-            Product.status == RecordStatus.ACTIVE,
+        p_stmt = (
+            select(Product, UnitOfMeasurement)
+            .outerjoin(UnitOfMeasurement, Product.uom_id == UnitOfMeasurement.id)
+            .where(
+                Product.id.in_(product_ids),
+                Product.deleted_at.is_(None),
+                Product.status == RecordStatus.ACTIVE,
+            )
         )
-        products = (await self.session.execute(p_stmt)).scalars().all()
-        products_map = {p.id: p for p in products}
+        product_rows = (await self.session.execute(p_stmt)).all()
+        products_map = {p.id: p for p, _ in product_rows}
+        product_uoms_map = {p.id: _resolve_uom_label(uom_obj) for p, uom_obj in product_rows}
 
         if len(products_map) != len(set(product_ids)):
             missing = set(product_ids) - set(products_map.keys())
             raise BadRequestException(f"One or more products are invalid or inactive: {missing}")
 
         line_data_list, subtotal, discount_total, tax_total, total_amount = self._calculate_commercials(
-            payload.items, products_map
+            payload.items, products_map, product_uoms_map=product_uoms_map
         )
 
         quotation_number = await self._generate_quotation_number()
@@ -903,6 +929,7 @@ class CrmQuotationService:
         cust_info = resolve_customer_details(lead, company_obj)
         assigned_company_id = company_obj.id if company_obj else lead.company_id
 
+        q_currency = (payload.currency or "INR").strip().upper() or "INR"
         quotation = CrmSalesQuotation(
             quotation_number=quotation_number,
             lead_id=lead_id,
@@ -911,7 +938,7 @@ class CrmQuotationService:
             status="draft",
             quotation_date=_utcnow(),
             valid_until=payload.valid_until,
-            currency=payload.currency or "INR",
+            currency=q_currency,
             customer_name_snapshot=cust_info["customer_name"] or "—",
             customer_phone_snapshot=cust_info["customer_phone"],
             customer_email_snapshot=cust_info["customer_email"],
@@ -944,11 +971,11 @@ class CrmQuotationService:
             )
             self.session.add(item)
 
-        # Log exactly-once CRM activity
+        # Log exactly-once CRM activity using actual quotation currency (LM-DEF-027)
         activity = CrmActivity(
             lead_id=lead_id,
             activity_type="quotation_created",
-            subject=f"Sales Quotation {quotation_number} (v1) draft created — Total: {total_amount:,.2f} INR",
+            subject=f"Sales Quotation {quotation_number} (v1) draft created — Total: {total_amount:,.2f} {q_currency}",
             description=f"Items: {len(line_data_list)}, Taxable: {subtotal:,.2f}, Tax: {tax_total:,.2f}",
             performed_by=actor.id,
             activity_at=_utcnow(),
@@ -1016,6 +1043,8 @@ class CrmQuotationService:
         q = (await self.session.execute(stmt)).scalar_one_or_none()
         if not q:
             raise NotFoundException(f"Quotation with id {quotation_id} not found.")
+        if not q.lead or getattr(q.lead, "deleted_at", None) is not None:
+            raise NotFoundException(f"Lead with id {q.lead_id} not found.")
 
         # Strict authorization check for the associated lead
         await self.lead_service._check_lead_scope(q.lead, actor, action="view")
@@ -1053,6 +1082,8 @@ class CrmQuotationService:
         q = (await self.session.execute(stmt)).scalar_one_or_none()
         if not q:
             raise NotFoundException(f"Quotation with id {quotation_id} not found.")
+        if not q.lead or getattr(q.lead, "deleted_at", None) is not None:
+            raise NotFoundException(f"Lead with id {q.lead_id} not found.")
 
         await self.lead_service._check_lead_scope(q.lead, actor, action="edit")
 
@@ -1078,8 +1109,8 @@ class CrmQuotationService:
         # Update terms/notes if provided
         if payload.valid_until is not None:
             q.valid_until = payload.valid_until
-        if payload.currency is not None:
-            q.currency = payload.currency
+        if payload.currency is not None and payload.currency.strip():
+            q.currency = payload.currency.strip().upper()
         if payload.payment_terms is not None:
             q.payment_terms = payload.payment_terms
         if payload.delivery_terms is not None:
@@ -1095,20 +1126,25 @@ class CrmQuotationService:
                 raise BadRequestException("Quotation must contain at least one line item.")
 
             product_ids = [it.product_id for it in payload.items]
-            p_stmt = select(Product).where(
-                Product.id.in_(product_ids),
-                Product.deleted_at.is_(None),
-                Product.status == RecordStatus.ACTIVE,
+            p_stmt = (
+                select(Product, UnitOfMeasurement)
+                .outerjoin(UnitOfMeasurement, Product.uom_id == UnitOfMeasurement.id)
+                .where(
+                    Product.id.in_(product_ids),
+                    Product.deleted_at.is_(None),
+                    Product.status == RecordStatus.ACTIVE,
+                )
             )
-            products = (await self.session.execute(p_stmt)).scalars().all()
-            products_map = {p.id: p for p in products}
+            product_rows = (await self.session.execute(p_stmt)).all()
+            products_map = {p.id: p for p, _ in product_rows}
+            product_uoms_map = {p.id: _resolve_uom_label(uom_obj) for p, uom_obj in product_rows}
 
             if len(products_map) != len(set(product_ids)):
                 missing = set(product_ids) - set(products_map.keys())
                 raise BadRequestException(f"One or more products are invalid or inactive: {missing}")
 
             line_data_list, subtotal, discount_total, tax_total, total_amount = self._calculate_commercials(
-                payload.items, products_map
+                payload.items, products_map, product_uoms_map=product_uoms_map
             )
 
             # Remove old items
@@ -1132,12 +1168,13 @@ class CrmQuotationService:
         q.updated_by = actor.id
         q.updated_at = _utcnow()
 
-        # Log activity
+        # Log activity using actual quotation currency (LM-DEF-027)
+        q_currency = (q.currency or "INR").strip().upper() or "INR"
         action_desc = f"Revision v{q.version} created" if is_revision_needed else f"Draft (v{q.version}) updated"
         activity = CrmActivity(
             lead_id=q.lead_id,
             activity_type="quotation_updated",
-            subject=f"Sales Quotation {q.quotation_number}: {action_desc} — Total: {q.total_amount:,.2f} INR",
+            subject=f"Sales Quotation {q.quotation_number}: {action_desc} — Total: {q.total_amount:,.2f} {q_currency}",
             description=payload.revision_notes or f"Updated quotation {q.quotation_number}",
             performed_by=actor.id,
             activity_at=_utcnow(),
@@ -1156,6 +1193,22 @@ class CrmQuotationService:
 
         return await self.get_quotation(q.id, actor=actor)
 
+    # Explicit quotation status transition map matching the verified CRM quotation lifecycle:
+    # - draft     -> sent, cancelled
+    # - sent      -> accepted, rejected, revised, cancelled
+    # - revised   -> draft, sent, cancelled
+    # - rejected  -> revised, cancelled
+    # - accepted  -> (terminal)
+    # - cancelled -> (terminal)
+    ALLOWED_STATUS_TRANSITIONS: dict[str, set[str]] = {
+        "draft": {"sent", "cancelled"},
+        "sent": {"accepted", "rejected", "revised", "cancelled"},
+        "revised": {"draft", "sent", "cancelled"},
+        "rejected": {"revised", "cancelled"},
+        "accepted": set(),
+        "cancelled": set(),
+    }
+
     async def update_quotation_status(
         self,
         quotation_id: uuid.UUID,
@@ -1163,7 +1216,7 @@ class CrmQuotationService:
         *,
         actor: CurrentUser,
     ) -> CrmSalesQuotationRead:
-        """Update quotation lifecycle status (e.g. draft -> sent, accepted, rejected, cancelled)."""
+        """Update quotation lifecycle status subject to explicit allowed state transitions."""
         stmt = (
             select(CrmSalesQuotation)
             .options(selectinload(CrmSalesQuotation.lead))
@@ -1176,18 +1229,34 @@ class CrmQuotationService:
         q = (await self.session.execute(stmt)).scalar_one_or_none()
         if not q:
             raise NotFoundException(f"Quotation with id {quotation_id} not found.")
+        if not q.lead or getattr(q.lead, "deleted_at", None) is not None:
+            raise NotFoundException(f"Lead with id {q.lead_id} not found.")
 
         await self.lead_service._check_lead_scope(q.lead, actor, action="edit")
 
-        old_status = q.status
-        q.status = payload.status
+        old_status = (q.status or "draft").strip().lower()
+        new_status = payload.status.strip().lower()
+
+        # Idempotent replay on same status: no duplicate activity, no mutation
+        if old_status == new_status:
+            return await self.get_quotation(q.id, actor=actor)
+
+        allowed_targets = self.ALLOWED_STATUS_TRANSITIONS.get(old_status, set())
+        if new_status not in allowed_targets:
+            allowed_str = ", ".join(sorted(allowed_targets)) if allowed_targets else "none (terminal state)"
+            raise ConflictException(
+                f"Invalid quotation status transition from '{old_status}' to '{new_status}'. "
+                f"Allowed next statuses: {allowed_str}."
+            )
+
+        q.status = new_status
         q.updated_by = actor.id
         q.updated_at = _utcnow()
 
         activity = CrmActivity(
             lead_id=q.lead_id,
             activity_type="quotation_status_change",
-            subject=f"Sales Quotation {q.quotation_number} status changed from '{old_status}' to '{payload.status}'",
+            subject=f"Sales Quotation {q.quotation_number} status changed from '{old_status}' to '{new_status}'",
             description=payload.notes,
             performed_by=actor.id,
             activity_at=_utcnow(),
@@ -1383,6 +1452,8 @@ class CrmQuotationService:
         q = (await self.session.execute(stmt)).scalar_one_or_none()
         if not q:
             raise NotFoundException(f"Quotation with id {quotation_id} not found.")
+        if not q.lead or getattr(q.lead, "deleted_at", None) is not None:
+            raise NotFoundException(f"Lead with id {q.lead_id} not found.")
 
         # RBAC check: Salesperson (assigned only), Manager (department scope), Admin (full access)
         await self.lead_service._check_lead_scope(q.lead, actor, action="view")
@@ -1499,6 +1570,8 @@ class CrmQuotationService:
         q = (await self.session.execute(stmt)).scalar_one_or_none()
         if not q:
             raise NotFoundException(f"Quotation with id {quotation_id} not found.")
+        if not q.lead or getattr(q.lead, "deleted_at", None) is not None:
+            raise NotFoundException(f"Lead with id {q.lead_id} not found.")
 
         # RBAC check: Salesperson (assigned only), Manager (department scope), Admin (full access)
         await self.lead_service._check_lead_scope(q.lead, actor, action="view")

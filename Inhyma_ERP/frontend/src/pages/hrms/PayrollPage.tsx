@@ -300,10 +300,30 @@ export function PayrollPage() {
     );
   }, [isSuperAdmin, hasPermission, normalizedRoles]);
 
-  const canConfigureSalary = useMemo(() => {
+  const isHrRole = useMemo(
+    () => normalizedRoles.includes("hr") || normalizedRoles.includes("human_resources"),
+    [normalizedRoles]
+  );
+
+  const isPayrollDenied = useMemo(() => {
+    if (isTrueAdmin) return false;
     if (explicitPerms.includes("deny:hrms.payroll") || explicitPerms.includes("block:hrms.payroll")) {
-      return false;
+      return true;
     }
+    if (
+      isHrRole &&
+      !explicitPerms.includes("hrms.payroll") &&
+      !explicitPerms.includes("hrms.payroll.view") &&
+      !explicitPerms.includes("hrms.payroll.configure") &&
+      !explicitPerms.includes("hrms.payroll.approve")
+    ) {
+      return true;
+    }
+    return false;
+  }, [isTrueAdmin, explicitPerms, isHrRole]);
+
+  const canConfigureSalary = useMemo(() => {
+    if (isPayrollDenied) return false;
     if (isTrueAdmin) return true;
     if (explicitPerms.includes("deny:hrms.payroll.configure")) return false;
     return Boolean(
@@ -312,12 +332,10 @@ export function PayrollPage() {
       hasPermission("hrms.setup") ||
       hasPermission("hrms:payroll:manage")
     );
-  }, [isTrueAdmin, hasPermission, explicitPerms]);
+  }, [isPayrollDenied, isTrueAdmin, hasPermission, explicitPerms]);
 
   const canApprovePayroll = useMemo(() => {
-    if (explicitPerms.includes("deny:hrms.payroll") || explicitPerms.includes("block:hrms.payroll")) {
-      return false;
-    }
+    if (isPayrollDenied) return false;
     if (isTrueAdmin) return true;
     if (explicitPerms.includes("deny:hrms.payroll.approve")) return false;
     return Boolean(
@@ -326,24 +344,23 @@ export function PayrollPage() {
       hasPermission("hrms.manage") ||
       hasPermission("hrms:payroll:manage")
     );
-  }, [isTrueAdmin, hasPermission, explicitPerms]);
+  }, [isPayrollDenied, isTrueAdmin, hasPermission, explicitPerms]);
 
-  // Check if current user can access Payroll administrative/review tabs vs self-service My Payslips
+  // Check if current user can access Payroll administrative/review tabs vs self-service My Payslips.
+  // Ordinary employees and department managers without explicit Admin/HR payroll permissions
+  // are routed to self-service My Salary Slips (own approved payslips only).
   const isAdmin = useMemo(() => {
-    if (explicitPerms.includes("deny:hrms.payroll") || explicitPerms.includes("block:hrms.payroll")) {
+    if (isPayrollDenied) {
       return false;
     }
     return Boolean(
       isTrueAdmin ||
       canConfigureSalary ||
       canApprovePayroll ||
-      hasPermission("hrms.payroll") ||
-      hasPermission("hrms.payroll.view") ||
-      normalizedRoles.includes("hr") ||
-      normalizedRoles.includes("human_resources") ||
-      normalizedRoles.includes("department_manager")
+      explicitPerms.includes("hrms.payroll.view") ||
+      (isHrRole && explicitPerms.includes("hrms.payroll"))
     );
-  }, [isTrueAdmin, canConfigureSalary, canApprovePayroll, hasPermission, normalizedRoles, explicitPerms]);
+  }, [isPayrollDenied, isTrueAdmin, canConfigureSalary, canApprovePayroll, isHrRole, explicitPerms]);
 
   // PRIMARY WORKFLOW TABS: Strictly 3 tabs for Admin
   const [activeTab, setActiveTab] = useState<"setup" | "salary" | "monthly">(
@@ -906,6 +923,7 @@ export function PayrollPage() {
 
   // Initial load hooks
   useEffect(() => {
+    if (isPayrollDenied) return;
     if (isAdmin) {
       if (canConfigureSalary) {
         fetchComponents();
@@ -915,14 +933,14 @@ export function PayrollPage() {
     } else {
       fetchMyPayslips();
     }
-  }, [isAdmin, canConfigureSalary, fetchComponents, fetchSetupPreview, testAnnualCtc, fetchEmployeeSalaries, fetchMyPayslips]);
+  }, [isPayrollDenied, isAdmin, canConfigureSalary, fetchComponents, fetchSetupPreview, testAnnualCtc, fetchEmployeeSalaries, fetchMyPayslips]);
 
   useEffect(() => {
-    if (isAdmin && activeTab === "monthly") {
+    if (!isPayrollDenied && isAdmin && activeTab === "monthly") {
       setMonthlyPayroll(null);
       fetchMonthlyPayroll(selectedMonth);
     }
-  }, [isAdmin, activeTab, selectedMonth, fetchMonthlyPayroll]);
+  }, [isPayrollDenied, isAdmin, activeTab, selectedMonth, fetchMonthlyPayroll]);
 
   // PDF Download Handler
   const handleDownloadPdf = (item: MonthlyPayrollItem) => {
@@ -1060,6 +1078,27 @@ export function PayrollPage() {
     if (basis === "GROSS") return "% of Gross Earnings";
     return `% of ${basis}`;
   };
+
+  // ===========================================================================
+  // DENIED ACCESS VIEW (Explicit deny:hrms.payroll or HR without Payroll)
+  // ===========================================================================
+  if (isPayrollDenied) {
+    return (
+      <AppShell activeKey="hrms-payroll">
+        <main className="page">
+          <Breadcrumb trail={["HRMS", "Payroll"]} />
+          <div className="card" style={{ padding: "32px", textAlign: "center", marginTop: "20px" }}>
+            <h2 style={{ margin: "0 0 8px 0", fontSize: "18px", color: "#991b1b" }}>
+              Payroll Access Restricted
+            </h2>
+            <p style={{ margin: 0, color: "#64748b", fontSize: "14px" }}>
+              You do not have permission to access the Payroll module. Contact an administrator if you require access.
+            </p>
+          </div>
+        </main>
+      </AppShell>
+    );
+  }
 
   // ===========================================================================
   // NON-ADMIN / EMPLOYEE VIEW: My Salary Slips
@@ -1330,6 +1369,7 @@ export function PayrollPage() {
         <div
           style={{
             display: "flex",
+            flexWrap: "wrap",
             gap: "12px",
             borderBottom: "2px solid #e2e8f0",
             marginBottom: "20px",
@@ -1666,7 +1706,7 @@ export function PayrollPage() {
                   </div>
                 </div>
 
-                <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
                   <label htmlFor="test-ctc-input" style={{ fontSize: "13px", fontWeight: 600, color: "#334155" }}>
                     Test Annual CTC (₹):
                   </label>
@@ -1681,13 +1721,13 @@ export function PayrollPage() {
                       fetchSetupPreview(val);
                     }}
                     className="form-control"
-                    style={{ width: "160px", padding: "6px 10px" }}
+                    style={{ width: "160px", maxWidth: "100%", padding: "6px 10px" }}
                   />
                 </div>
               </div>
 
               {setupPreview ? (
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: "16px" }}>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(280px, 100%), 1fr))", gap: "16px" }}>
                   {/* Earnings column */}
                   <div style={{ background: "#ffffff", padding: "14px", borderRadius: "8px", border: "1px solid #e2e8f0" }}>
                     <div style={{ display: "flex", justifyContent: "space-between", borderBottom: "1px solid #f1f5f9", paddingBottom: "6px", marginBottom: "8px" }}>
@@ -1776,7 +1816,7 @@ export function PayrollPage() {
               </div>
 
               {/* Search Filter */}
-              <div style={{ position: "relative", minWidth: "280px" }}>
+              <div style={{ position: "relative", width: "100%", maxWidth: "280px", flex: "1 1 220px" }}>
                 <span style={{ position: "absolute", left: "10px", top: "50%", transform: "translateY(-50%)", color: "#94a3b8" }}>
                   <IconSearch />
                 </span>
@@ -1944,7 +1984,7 @@ export function PayrollPage() {
               </div>
 
               {/* Status and Approval controls */}
-              <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>
                 {monthlyPayroll && (
                   <span
                     style={{
@@ -2019,7 +2059,7 @@ export function PayrollPage() {
 
             {/* Attendance & Metrics Summary Bar */}
             {monthlyPayroll && (
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "14px" }}>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(180px, 100%), 1fr))", gap: "14px" }}>
                 <div className="card" style={{ padding: "14px 18px", margin: 0 }}>
                   <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748b", textTransform: "uppercase" }}>Payable & Working Days</div>
                   <div style={{ fontSize: "20px", fontWeight: 800, color: "#0f172a", marginTop: "4px" }}>
@@ -2505,7 +2545,7 @@ export function PayrollPage() {
                   Salary Revision History
                 </h5>
                 {loadingRevisions ? (
-                  <div style={{ border: "1px solid #e2e8f0", borderRadius: "6px", overflow: "hidden" }}>
+                  <div style={{ border: "1px solid #e2e8f0", borderRadius: "6px", overflowX: "auto" }}>
                     <table className="table" style={{ width: "100%", margin: 0, fontSize: "12px" }}>
                       <thead style={{ background: "#f8fafc" }}>
                         <tr>
@@ -2530,7 +2570,7 @@ export function PayrollPage() {
                 ) : revisions.length === 0 ? (
                   <div style={{ fontSize: "12px", color: "#94a3b8", fontStyle: "italic" }}>No previous revisions on record.</div>
                 ) : (
-                  <div style={{ border: "1px solid #e2e8f0", borderRadius: "6px", overflow: "hidden" }}>
+                  <div style={{ border: "1px solid #e2e8f0", borderRadius: "6px", overflowX: "auto" }}>
                     <table className="table" style={{ width: "100%", margin: 0, fontSize: "12px" }}>
                       <thead style={{ background: "#f8fafc" }}>
                         <tr>

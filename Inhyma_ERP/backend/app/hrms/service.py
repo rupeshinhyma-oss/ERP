@@ -13,7 +13,12 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timezone
+from decimal import Decimal, ROUND_HALF_UP
 from typing import List, Optional
+
+
+def _q2_dec(val: Decimal | float | int | str) -> Decimal:
+    return Decimal(str(val)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -266,9 +271,9 @@ class HrmsSetupService:
                 approval_team_lead=True,
                 approval_manager=True,
                 approval_accounts=True,
-                max_claim_amount=50000.0,
+                max_claim_amount=Decimal("50000.00"),
                 receipt_required=True,
-                auto_approval_limit=500.0,
+                auto_approval_limit=Decimal("500.00"),
                 submission_window_days=30,
             )
             self.db.add(default_settings)
@@ -670,9 +675,9 @@ class HrmsSetupService:
                 approval_team_lead=True,
                 approval_manager=True,
                 approval_accounts=True,
-                max_claim_amount=50000.0,
+                max_claim_amount=Decimal("50000.00"),
                 receipt_required=True,
-                auto_approval_limit=500.0,
+                auto_approval_limit=Decimal("500.00"),
                 submission_window_days=30,
             )
             self.db.add(settings)
@@ -685,9 +690,9 @@ class HrmsSetupService:
         settings.approval_team_lead = payload.approval_team_lead
         settings.approval_manager = payload.approval_manager
         settings.approval_accounts = payload.approval_accounts
-        settings.max_claim_amount = payload.max_claim_amount
+        settings.max_claim_amount = _q2_dec(payload.max_claim_amount)
         settings.receipt_required = payload.receipt_required
-        settings.auto_approval_limit = payload.auto_approval_limit
+        settings.auto_approval_limit = _q2_dec(payload.auto_approval_limit)
         settings.submission_window_days = payload.submission_window_days
         settings.updated_at = _utcnow()
         await self.db.commit()

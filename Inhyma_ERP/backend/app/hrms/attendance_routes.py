@@ -42,6 +42,7 @@ from app.hrms.schemas import (
     PunchInRequest,
     PunchOutRequest,
     RegularizationApprovalAction,
+    RegularizationCancelAction,
     RegularizationCreate,
     RegularizationRead,
     RegularizationRejectAction,
@@ -137,19 +138,26 @@ async def get_permitted_offices(
     employee_id: Optional[str] = Query(default=None),
     ctx: HrmsUserContext = Depends(get_hrms_user_context),
     service: HrmsAttendanceService = Depends(get_attendance_service),
+    db: AsyncSession = Depends(get_db_session),
 ):
     """
     Fetch all active authorized office locations (primary and additional) for the employee.
     Used by frontend attendance engine to validate geofence across all permitted locations.
+    Strictly enforces employee ownership / manager scope across UUID, employee_code, and username.
     """
     ctx.require_module_access("attendance")
     target_id = ctx.user_id
-    if employee_id:
-        if ctx.is_admin or ctx.is_hr:
+    if employee_id and employee_id.strip():
+        raw_id = employee_id.strip()
+        if not (ctx.is_admin or ctx.is_hr):
             try:
-                target_id = uuid.UUID(employee_id)
+                parsed_uuid = uuid.UUID(raw_id)
+                ctx.require_employee_access(parsed_uuid)
             except ValueError:
                 pass
+        target_user = await resolve_hrms_employee_or_404(db, raw_id, error_label="employee")
+        ctx.require_employee_access(target_user.id)
+        target_id = target_user.id
 
     _, permitted = await service.get_permitted_locations(target_id)
     return build_success_response(
@@ -204,10 +212,12 @@ async def get_today_attendance(
 @router.post("/punch-in", status_code=status.HTTP_201_CREATED)
 async def punch_in(
     payload: PunchInRequest,
-    employee_id: uuid.UUID = Depends(get_current_employee_id),
+    ctx: HrmsUserContext = Depends(get_hrms_user_context),
     service: HrmsAttendanceService = Depends(get_attendance_service),
 ):
-    record = await service.punch_in(employee_id, payload)
+    ctx.require_module_access("attendance")
+    ctx.require_write_access("attendance", action="create")
+    record = await service.punch_in(ctx.user_id, payload)
     return build_success_response(
         data=record.model_dump(mode="json"),
         message=f"Punched in successfully as {record.status}.",
@@ -217,10 +227,12 @@ async def punch_in(
 @router.post("/punch-out", status_code=status.HTTP_200_OK)
 async def punch_out(
     payload: PunchOutRequest,
-    employee_id: uuid.UUID = Depends(get_current_employee_id),
+    ctx: HrmsUserContext = Depends(get_hrms_user_context),
     service: HrmsAttendanceService = Depends(get_attendance_service),
 ):
-    record = await service.punch_out(employee_id, payload)
+    ctx.require_module_access("attendance")
+    ctx.require_write_access("attendance", action="update")
+    record = await service.punch_out(ctx.user_id, payload)
     return build_success_response(
         data=record.model_dump(mode="json"),
         message="Punched out successfully. Active work session logged.",
@@ -339,6 +351,7 @@ async def submit_regularization(
     service: HrmsAttendanceService = Depends(get_attendance_service),
 ):
     ctx.require_module_access("attendance")
+    ctx.require_write_access("attendance", action="create")
     target_id = payload.employee_id if (payload.employee_id and (ctx.is_admin or ctx.is_hr)) else ctx.user_id
     if payload.direct_regularize:
         if not ctx.is_admin:
@@ -462,6 +475,29 @@ async def reject_regularization(
     )
 
 
+@router.patch("/regularizations/{request_id}/cancel", status_code=status.HTTP_200_OK)
+@router.post("/regularizations/{request_id}/cancel", status_code=status.HTTP_200_OK)
+async def cancel_regularization(
+    request_id: uuid.UUID,
+    payload: Optional[RegularizationCancelAction] = None,
+    ctx: HrmsUserContext = Depends(get_hrms_user_context),
+    service: HrmsAttendanceService = Depends(get_attendance_service),
+):
+    """Cancel a PENDING attendance regularization request without deleting audit history."""
+    ctx.require_module_access("attendance")
+    ctx.require_write_access("attendance", action="update")
+    record = await service.cancel_regularization(
+        request_id=request_id,
+        actor_id=ctx.user_id,
+        payload=payload,
+        ctx=ctx,
+    )
+    return build_success_response(
+        data=record.model_dump(mode="json"),
+        message="Attendance regularization request cancelled successfully.",
+    )
+
+
 # ===========================================================================
 # Geofence Status & Return Timer Verification
 # ===========================================================================
@@ -471,7 +507,8 @@ async def reject_regularization(
 async def check_geofence_status(
     latitude: Optional[float] = Query(None),
     longitude: Optional[float] = Query(None),
-    accuracy: Optional[float] = Query(10.0),
+    accuracy: Optional[float] = Query(None),
+    gps_timestamp: Optional[datetime] = Query(None),
     payload: Optional[GeofenceCheckRequest] = None,
     ctx: HrmsUserContext = Depends(get_hrms_user_context),
     service: HrmsAttendanceService = Depends(get_attendance_service),
@@ -485,6 +522,7 @@ async def check_geofence_status(
     lat = payload.latitude if (payload and payload.latitude is not None) else latitude
     lng = payload.longitude if (payload and payload.longitude is not None) else longitude
     acc = payload.accuracy if (payload and payload.accuracy is not None) else accuracy
+    ts = payload.gps_timestamp if (payload and payload.gps_timestamp is not None) else gps_timestamp
 
     if lat is None or lng is None:
         raise HTTPException(
@@ -496,7 +534,8 @@ async def check_geofence_status(
         employee_id=ctx.user_id,
         latitude=float(lat),
         longitude=float(lng),
-        accuracy=float(acc or 10.0),
+        accuracy=float(acc) if acc is not None else None,
+        gps_timestamp=ts,
     )
     return build_success_response(
         data=res.model_dump(mode="json"),

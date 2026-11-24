@@ -14,11 +14,19 @@ Handles:
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta, timezone
+from decimal import Decimal, ROUND_HALF_UP
 import uuid
 from typing import List, Optional
 
+IST = timezone(timedelta(hours=5, minutes=30))
+
+
+def _q2_dec(val: Decimal | float | int | str) -> Decimal:
+    return Decimal(str(val)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
 from fastapi import HTTPException, status
-from sqlalchemy import func, select, or_
+from sqlalchemy import func, or_, select, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.hrms.models import HrmsExpense, HrmsExpenseSettings
@@ -30,9 +38,10 @@ from app.hrms.schemas import (
 )
 from app.hrms.notifications import (
     notify_expense_decision,
+    notify_expense_reimbursed,
     notify_expense_submitted,
 )
-from app.users.models import User
+from app.users.models import EmploymentStatus, User
 
 
 class HrmsExpenseService:
@@ -47,9 +56,9 @@ class HrmsExpenseService:
                 approval_team_lead=True,
                 approval_manager=True,
                 approval_accounts=True,
-                max_claim_amount=50000.0,
+                max_claim_amount=Decimal("50000.00"),
                 receipt_required=True,
-                auto_approval_limit=500.0,
+                auto_approval_limit=Decimal("500.00"),
                 submission_window_days=30,
             )
             self.db.add(settings)
@@ -59,14 +68,16 @@ class HrmsExpenseService:
     def _validate_claim_policies(
         self,
         settings: HrmsExpenseSettings,
-        amount: float,
+        amount: Decimal | float,
         expense_date: date,
         receipt_url: Optional[str],
     ) -> None:
-        if amount > settings.max_claim_amount:
+        amt_dec = _q2_dec(amount)
+        max_dec = _q2_dec(settings.max_claim_amount)
+        if amt_dec > max_dec:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Expense claim amount ₹{amount:,.2f} exceeds configured maximum limit of ₹{settings.max_claim_amount:,.2f}.",
+                detail=f"Expense claim amount ₹{amt_dec:,.2f} exceeds configured maximum limit of ₹{max_dec:,.2f}.",
             )
 
         if settings.receipt_required and not receipt_url:
@@ -75,7 +86,7 @@ class HrmsExpenseService:
                 detail="Receipt attachment is mandatory for expense claim submission under current policy.",
             )
 
-        today = date.today()
+        today = datetime.now(IST).date()
         if expense_date > today:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -208,9 +219,14 @@ class HrmsExpenseService:
                 detail=f"Expense category '{payload.category.strip()}' is inactive.",
             )
 
-        # Verify employee exists and is active
+        # Verify employee exists and is active (not terminated/resigned)
         emp = await self.db.get(User, employee_id)
-        if not emp or not emp.is_active or emp.deleted_at is not None:
+        if (
+            not emp
+            or not emp.is_active
+            or emp.deleted_at is not None
+            or getattr(emp, "employment_status", None) in (EmploymentStatus.TERMINATED, EmploymentStatus.RESIGNED)
+        ):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Invalid employee account.",
@@ -218,36 +234,66 @@ class HrmsExpenseService:
 
         should_submit = is_submit or payload.is_submit
 
+        amt_dec = _q2_dec(payload.amount)
         settings = await self._get_settings()
         if should_submit:
             self._validate_claim_policies(
                 settings=settings,
-                amount=round(float(payload.amount), 2),
+                amount=amt_dec,
                 expense_date=payload.expense_date,
                 receipt_url=payload.receipt_url.strip() if payload.receipt_url else None,
             )
 
-        code = await self._generate_expense_code()
+        # Serialize concurrent expense code generation on PostgreSQL (HRMS-BUG-19)
+        if isinstance(self.db, AsyncSession):
+            bind = self.db.get_bind()
+            if bind is not None and bind.dialect.name == "postgresql":
+                await self.db.execute(
+                    text("SELECT pg_advisory_xact_lock(hashtext(:lock_key))"),
+                    {"lock_key": "hrms_expense_code_gen"},
+                )
 
         initial_status = "PENDING" if should_submit else "DRAFT"
         submitted_at = datetime.now(timezone.utc) if should_submit else None
 
-        expense = HrmsExpense(
-            expense_code=code,
-            employee_id=employee_id,
-            expense_date=payload.expense_date,
-            category=payload.category.strip(),
-            amount=round(float(payload.amount), 2),
-            currency="INR",
-            description=payload.description.strip(),
-            location_id=payload.location_id,
-            receipt_url=payload.receipt_url.strip() if payload.receipt_url else None,
-            receipt_filename=payload.receipt_filename.strip() if payload.receipt_filename else None,
-            status=initial_status,
-            submitted_at=submitted_at,
-        )
-        self.db.add(expense)
-        await self.db.flush()
+        expense: HrmsExpense | None = None
+        for attempt in range(5):
+            code = await self._generate_expense_code()
+            candidate = HrmsExpense(
+                expense_code=code,
+                employee_id=employee_id,
+                expense_date=payload.expense_date,
+                category=payload.category.strip(),
+                amount=amt_dec,
+                currency="INR",
+                description=payload.description.strip(),
+                location_id=payload.location_id,
+                receipt_url=payload.receipt_url.strip() if payload.receipt_url else None,
+                receipt_filename=payload.receipt_filename.strip() if payload.receipt_filename else None,
+                status=initial_status,
+                submitted_at=submitted_at,
+            )
+            if isinstance(self.db, AsyncSession):
+                try:
+                    async with self.db.begin_nested():
+                        self.db.add(candidate)
+                        await self.db.flush()
+                    expense = candidate
+                    break
+                except IntegrityError:
+                    if attempt == 4:
+                        raise HTTPException(
+                            status_code=status.HTTP_409_CONFLICT,
+                            detail="Unable to allocate a unique expense code due to high concurrency. Please retry.",
+                        )
+                    continue
+            else:
+                self.db.add(candidate)
+                await self.db.flush()
+                expense = candidate
+                break
+
+        assert expense is not None
         if should_submit:
             await notify_expense_submitted(
                 self.db,
@@ -257,6 +303,7 @@ class HrmsExpenseService:
                 amount=expense.amount,
                 currency=expense.currency or "INR",
                 actor_id=employee_id,
+                expense_id=expense.id,
             )
         await self.db.commit()
         await self.db.refresh(expense)
@@ -286,6 +333,8 @@ class HrmsExpenseService:
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail="You do not have approval permissions.",
                 )
+            # Private unsubmitted DRAFT claims MUST NEVER appear in the approvals queue (HRMS-BUG-18)
+            stmt = stmt.where(HrmsExpense.status != "DRAFT")
             if not is_admin and allowed_employee_ids is not None:
                 stmt = stmt.where(HrmsExpense.employee_id.in_(allowed_employee_ids))
             if status_filter and status_filter.upper() != "ALL":
@@ -341,6 +390,13 @@ class HrmsExpenseService:
                 detail="Expense claim not found.",
             )
 
+        # Private unsubmitted DRAFT expenses are visible ONLY to their owner (HRMS-BUG-18)
+        if expense.status == "DRAFT" and expense.employee_id != current_user_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Unsubmitted draft expense claims are private to the employee.",
+            )
+
         can_view = is_admin or (expense.employee_id == current_user_id) or (
             allowed_employee_ids is not None and expense.employee_id in allowed_employee_ids
         )
@@ -380,7 +436,7 @@ class HrmsExpenseService:
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="Expense amount must be greater than zero.",
                 )
-            expense.amount = round(float(payload.amount), 2)
+            expense.amount = _q2_dec(payload.amount)
 
         if payload.description is not None:
             if not payload.description.strip():
@@ -463,7 +519,7 @@ class HrmsExpenseService:
         settings = await self._get_settings()
         self._validate_claim_policies(
             settings=settings,
-            amount=round(float(expense.amount), 2),
+            amount=_q2_dec(expense.amount),
             expense_date=expense.expense_date,
             receipt_url=expense.receipt_url,
         )
@@ -476,9 +532,10 @@ class HrmsExpenseService:
             employee_id=expense.employee_id,
             expense_code=expense.expense_code,
             category=expense.category,
-            amount=expense.amount,
+            amount=float(expense.amount),
             currency=expense.currency or "INR",
             actor_id=current_user_id,
+            expense_id=expense.id,
         )
         await self.db.commit()
         await self.db.refresh(expense)
@@ -541,6 +598,7 @@ class HrmsExpenseService:
             expense_code=expense.expense_code,
             category=expense.category,
             actor_id=reviewer_id,
+            expense_id=expense.id,
         )
         await self.db.commit()
         await self.db.refresh(expense)
@@ -610,6 +668,7 @@ class HrmsExpenseService:
             expense_code=expense.expense_code,
             category=expense.category,
             actor_id=reviewer_id,
+            expense_id=expense.id,
         )
         await self.db.commit()
         await self.db.refresh(expense)
@@ -657,6 +716,16 @@ class HrmsExpenseService:
         expense.reimbursed_by = user_id
         expense.reimbursed_at = datetime.now(timezone.utc)
         expense.reimbursement_notes = notes.strip() if notes else None
+        await self.db.flush()
+        await notify_expense_reimbursed(
+            self.db,
+            employee_id=expense.employee_id,
+            expense_code=expense.expense_code,
+            amount=float(expense.amount),
+            currency=expense.currency or "INR",
+            actor_id=user_id,
+            expense_id=expense.id,
+        )
         await self.db.commit()
         await self.db.refresh(expense)
         return expense
@@ -674,7 +743,7 @@ class HrmsExpenseService:
             select(
                 HrmsExpense.status,
                 func.count(HrmsExpense.id),
-                func.coalesce(func.sum(HrmsExpense.amount), 0.0),
+                func.coalesce(func.sum(HrmsExpense.amount), Decimal("0.00")),
             )
             .where(HrmsExpense.deleted_at.is_(None))
             .group_by(HrmsExpense.status)
@@ -686,6 +755,8 @@ class HrmsExpenseService:
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail="You do not have permission to view approvals summary.",
                 )
+            # Exclude private unsubmitted DRAFTs from approvals summary (HRMS-BUG-18)
+            stmt = stmt.where(HrmsExpense.status != "DRAFT")
             if not is_admin and allowed_employee_ids is not None:
                 stmt = stmt.where(HrmsExpense.employee_id.in_(allowed_employee_ids))
         else:
@@ -694,13 +765,15 @@ class HrmsExpenseService:
         rows = (await self.db.execute(stmt)).all()
 
         summary = ExpenseSummaryRead()
+        total_amount_dec = Decimal("0.00")
         for status_val, count, amount in rows:
             st = (status_val or "").upper()
             cnt = int(count or 0)
-            amt = round(float(amount or 0.0), 2)
+            amt_dec = _q2_dec(amount or Decimal("0.00"))
+            amt = float(amt_dec)
 
             summary.total_count += cnt
-            summary.total_amount += amt
+            total_amount_dec += amt_dec
 
             if st == "DRAFT":
                 summary.draft_count = cnt
@@ -718,5 +791,5 @@ class HrmsExpenseService:
                 summary.reimbursed_count = cnt
                 summary.reimbursed_amount = amt
 
-        summary.total_amount = round(summary.total_amount, 2)
+        summary.total_amount = float(_q2_dec(total_amount_dec))
         return summary

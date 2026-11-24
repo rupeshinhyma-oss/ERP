@@ -6,6 +6,7 @@ interface ReactionPickerProps {
   onToggleReaction: (emoji: string) => Promise<void> | void;
   size?: "sm" | "md";
   className?: string;
+  disabled?: boolean;
 }
 
 const COMMON_EMOJIS = ["👍", "❤️", "👀", "🚀", "🎉", "🔥", "👏", "✅"];
@@ -15,6 +16,7 @@ export const ReactionPicker: React.FC<ReactionPickerProps> = ({
   onToggleReaction,
   size = "md",
   className = "",
+  disabled = false,
 }) => {
   const [showPicker, setShowPicker] = useState(false);
   const pickerRef = useRef<HTMLDivElement>(null);
@@ -49,11 +51,14 @@ export const ReactionPicker: React.FC<ReactionPickerProps> = ({
           <button
             key={r.emoji}
             type="button"
-            onClick={() => onToggleReaction(r.emoji)}
+            disabled={disabled}
+            onClick={() => !disabled && onToggleReaction(r.emoji)}
             className={`task-reaction-chip ${isReacted ? "reacted" : ""}`}
             style={{
               padding: isSmall ? "1.5px 6px" : "2.5px 8.5px",
               fontSize: isSmall ? "11px" : "12px",
+              cursor: disabled ? "default" : "pointer",
+              opacity: disabled ? 0.8 : 1,
             }}
             title={`${r.count} reaction${r.count > 1 ? "s" : ""}`}
           >
@@ -64,22 +69,24 @@ export const ReactionPicker: React.FC<ReactionPickerProps> = ({
       })}
 
       {/* Add Reaction Button */}
-      <button
-        type="button"
-        onClick={() => setShowPicker(!showPicker)}
-        className="task-reaction-add-btn"
-        style={{
-          padding: isSmall ? "1.5px 6px" : "2.5px 8.5px",
-          fontSize: isSmall ? "11px" : "12px",
-        }}
-        title="Add reaction"
-      >
-        <span style={{ fontSize: isSmall ? "12px" : "13px", lineHeight: 1, fontWeight: 700 }}>+</span>
-        <span style={{ fontSize: isSmall ? "11px" : "12px", marginLeft: "2px" }}>😀</span>
-      </button>
+      {!disabled && (
+        <button
+          type="button"
+          onClick={() => setShowPicker(!showPicker)}
+          className="task-reaction-add-btn"
+          style={{
+            padding: isSmall ? "1.5px 6px" : "2.5px 8.5px",
+            fontSize: isSmall ? "11px" : "12px",
+          }}
+          title="Add reaction"
+        >
+          <span style={{ fontSize: isSmall ? "12px" : "13px", lineHeight: 1, fontWeight: 700 }}>+</span>
+          <span style={{ fontSize: isSmall ? "11px" : "12px", marginLeft: "2px" }}>😀</span>
+        </button>
+      )}
 
       {/* Popover */}
-      {showPicker && (
+      {!disabled && showPicker && (
         <div className="task-reaction-popover">
           {COMMON_EMOJIS.map((emoji) => (
             <button

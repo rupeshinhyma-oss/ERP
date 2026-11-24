@@ -16,7 +16,7 @@ from datetime import date, datetime
 from enum import Enum
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, JSON, String, Text, UniqueConstraint, inspect
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Index, Integer, JSON, String, Text, UniqueConstraint, inspect, text
 from sqlalchemy import Enum as SAEnum
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -116,6 +116,20 @@ class Task(Base, UUIDPrimaryKeyMixin, TimestampMixin, VersionMixin, SoftDeleteMi
     """Main Task entity."""
 
     __tablename__ = "tasks"
+    __table_args__ = (
+        Index(
+            "uq_tasks_recurring_schedule_period",
+            "recurring_schedule_id",
+            "recurrence_period",
+            unique=True,
+            postgresql_where=text(
+                "recurring_schedule_id IS NOT NULL AND recurrence_period IS NOT NULL AND deleted_at IS NULL"
+            ),
+            sqlite_where=text(
+                "recurring_schedule_id IS NOT NULL AND recurrence_period IS NOT NULL AND deleted_at IS NULL"
+            ),
+        ),
+    )
 
     title: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -741,14 +755,22 @@ class TaskDependency(Base, UUIDPrimaryKeyMixin):
 
     @property
     def depends_on_task_title(self) -> str | None:
-        return self.depends_on_task.title if self.depends_on_task else None
+        state = inspect(self, raiseerr=False)
+        if state and "depends_on_task" in state.dict:
+            dep_task = state.dict.get("depends_on_task")
+            return dep_task.title if dep_task else None
+        return None
 
     @property
     def depends_on_task_status(self) -> str | None:
-        if not self.depends_on_task:
-            return None
-        st = self.depends_on_task.status
-        return getattr(st, "value", str(st))
+        state = inspect(self, raiseerr=False)
+        if state and "depends_on_task" in state.dict:
+            dep_task = state.dict.get("depends_on_task")
+            if not dep_task:
+                return None
+            st = dep_task.status
+            return getattr(st, "value", str(st))
+        return None
 
     def __repr__(self) -> str:
         return f"<TaskDependency task_id={self.task_id} relates={self.relationship_type} to={self.depends_on_task_id}>"

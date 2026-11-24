@@ -125,6 +125,8 @@ const STATUS_LABELS: Record<TaskStatus, string> = {
 const KANBAN_COLUMNS: { key: TaskStatus; label: string; color: string; bg: string }[] = [
   { key: "TODO", label: "To Do", color: "#64748b", bg: "#f1f5f9" },
   { key: "IN_PROGRESS", label: "In Progress", color: "#2563eb", bg: "#eff6ff" },
+  { key: "REVIEW", label: "In Review", color: "#0284c7", bg: "#f0f9ff" },
+  { key: "PENDING_APPROVAL", label: "Pending Approval", color: "#7c3aed", bg: "#faf5ff" },
   { key: "ON_HOLD", label: "On Hold", color: "#d97706", bg: "#fffbeb" },
   { key: "DONE", label: "Completed", color: "#16a34a", bg: "#f0fdf4" },
 ];
@@ -696,6 +698,11 @@ export const TasksPage: React.FC = () => {
   };
 
   const handleQuickStatusChange = async (taskId: string, newStatus: TaskStatus) => {
+    if (newStatus === "PENDING_APPROVAL") {
+      alert("To submit a task for approval, open the task details and use 'Submit for Approval' with a designated approver.");
+      setSelectedTaskId(taskId);
+      return;
+    }
     const previousTasks = [...tasks];
     setTasks((prev) =>
       prev.map((t) => (t.id === taskId ? { ...t, status: newStatus } : t))
@@ -705,7 +712,7 @@ export const TasksPage: React.FC = () => {
       void fetchTasks(true);
     } catch (err: any) {
       setTasks(previousTasks);
-      alert(err?.response?.data?.detail || "Failed to update status");
+      alert(err?.message || err?.response?.data?.detail || "Failed to update status");
     }
   };
 
@@ -866,9 +873,11 @@ export const TasksPage: React.FC = () => {
       <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "13.5px" }}>
         <thead>
           <tr style={{ background: "#f8fafc", borderBottom: "1px solid #e2e8f0", textAlign: "left" }}>
-            <th style={{ padding: "12px 14px", width: "36px", textAlign: "center" }}>
-              <div className="skeleton-box" style={{ width: 16, height: 16, borderRadius: 3, margin: "0 auto" }} />
-            </th>
+            {canManageBulk && (
+              <th style={{ padding: "12px 14px", width: "36px", textAlign: "center" }}>
+                <div className="skeleton-box" style={{ width: 16, height: 16, borderRadius: 3, margin: "0 auto" }} />
+              </th>
+            )}
             <th style={{ padding: "12px 14px", width: "95px", color: "#475569" }}><div className="skeleton-line" style={{ width: 45 }} /></th>
             <th style={{ padding: "12px 14px", color: "#475569" }}><div className="skeleton-line" style={{ width: 120 }} /></th>
             <th style={{ padding: "12px 14px", width: "90px", color: "#475569" }}><div className="skeleton-line" style={{ width: 50 }} /></th>
@@ -883,9 +892,11 @@ export const TasksPage: React.FC = () => {
         <tbody>
           {Array.from({ length: count }).map((_, index) => (
             <tr key={`tasks-skeleton-${index}`} className="table-skeleton-row" style={{ borderBottom: "1px solid #f1f5f9" }}>
-              <td style={{ padding: "12px 14px", textAlign: "center" }}>
-                <div className="skeleton-box" style={{ width: 16, height: 16, borderRadius: 3, margin: "0 auto" }} />
-              </td>
+              {canManageBulk && (
+                <td style={{ padding: "12px 14px", textAlign: "center" }}>
+                  <div className="skeleton-box" style={{ width: 16, height: 16, borderRadius: 3, margin: "0 auto" }} />
+                </td>
+              )}
               <td style={{ padding: "12px 14px" }}><div className="skeleton-badge" style={{ width: 60 }} /></td>
               <td style={{ padding: "12px 14px" }}>
                 <div className="skeleton-line" style={{ width: "70%", marginBottom: 4 }} />
@@ -920,23 +931,25 @@ export const TasksPage: React.FC = () => {
       <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "13.5px" }}>
         <thead>
           <tr style={{ background: "#f8fafc", borderBottom: "1px solid #e2e8f0", textAlign: "left" }}>
-            <th style={{ padding: "12px 14px", width: "36px", textAlign: "center" }}>
-              <input
-                type="checkbox"
-                checked={taskList.length > 0 && taskList.every((t) => selectedTaskIds.includes(t.id))}
-                onChange={() => {
-                  const allSelected = taskList.every((t) => selectedTaskIds.includes(t.id));
-                  if (allSelected) {
-                    setSelectedTaskIds((prev) => prev.filter((id) => !taskList.some((t) => t.id === id)));
-                  } else {
-                    const newIds = new Set([...selectedTaskIds, ...taskList.map((t) => t.id)]);
-                    setSelectedTaskIds(Array.from(newIds));
-                  }
-                }}
-                title="Select all tasks in table"
-                style={{ cursor: "pointer" }}
-              />
-            </th>
+            {canManageBulk && (
+              <th style={{ padding: "12px 14px", width: "36px", textAlign: "center" }}>
+                <input
+                  type="checkbox"
+                  checked={taskList.length > 0 && taskList.every((t) => selectedTaskIds.includes(t.id))}
+                  onChange={() => {
+                    const allSelected = taskList.every((t) => selectedTaskIds.includes(t.id));
+                    if (allSelected) {
+                      setSelectedTaskIds((prev) => prev.filter((id) => !taskList.some((t) => t.id === id)));
+                    } else {
+                      const newIds = new Set([...selectedTaskIds, ...taskList.map((t) => t.id)]);
+                      setSelectedTaskIds(Array.from(newIds));
+                    }
+                  }}
+                  title="Select all tasks in table"
+                  style={{ cursor: "pointer" }}
+                />
+              </th>
+            )}
             <th style={{ padding: "12px 14px", fontWeight: 600, color: "#475569", width: "95px" }}>Type</th>
             <th style={{ padding: "12px 14px", fontWeight: 600, color: "#475569" }}>Task</th>
             <th style={{ padding: "12px 14px", fontWeight: 600, color: "#475569", width: "90px" }}>Priority</th>
@@ -975,14 +988,16 @@ export const TasksPage: React.FC = () => {
                   if (!selectedTaskIds.includes(t.id)) e.currentTarget.style.background = "#ffffff";
                 }}
               >
-                <td style={{ padding: "12px 14px", textAlign: "center" }} onClick={(e) => e.stopPropagation()}>
-                  <input
-                    type="checkbox"
-                    checked={selectedTaskIds.includes(t.id)}
-                    onChange={() => handleToggleSelectTask(t.id)}
-                    style={{ cursor: "pointer" }}
-                  />
-                </td>
+                {canManageBulk && (
+                  <td style={{ padding: "12px 14px", textAlign: "center" }} onClick={(e) => e.stopPropagation()}>
+                    <input
+                      type="checkbox"
+                      checked={selectedTaskIds.includes(t.id)}
+                      onChange={() => handleToggleSelectTask(t.id)}
+                      style={{ cursor: "pointer" }}
+                    />
+                  </td>
+                )}
                 <td style={{ padding: "12px 14px" }}>
                   <span
                     style={{
@@ -1155,9 +1170,9 @@ export const TasksPage: React.FC = () => {
                       <span style={{ color: "#94a3b8", fontSize: "12px" }}>Unassigned</span>
                     ) : (
                       <>
-                        {assignees.slice(0, 3).map((a) => (
+                        {assignees.slice(0, 3).map((a, idx) => (
                           <span
-                            key={a.id}
+                            key={a.id || `${a.user_id}-${a.assignment_role}-${idx}`}
                             title={a.user?.full_name || "Assignee"}
                             style={{
                               width: "24px",
@@ -2015,6 +2030,23 @@ export const TasksPage: React.FC = () => {
           ) : isKanbanActive ? (
             /* TAB CONTENT: Kanban Board View */
             <div className="table-scroll" style={{ padding: "16px" }}>
+              {totalCount > tasks.length && (
+                <div
+                  data-testid="tasks-truncation-banner"
+                  style={{
+                    marginBottom: "12px",
+                    padding: "8px 12px",
+                    borderRadius: "6px",
+                    background: "#fffbeb",
+                    border: "1px solid #fde68a",
+                    color: "#92400e",
+                    fontSize: "12.5px",
+                    fontWeight: 500,
+                  }}
+                >
+                  Showing first {tasks.length} of {totalCount} matching tasks in Kanban view. Refine filters or switch to List view for full pagination.
+                </div>
+              )}
               <div className="kanban-board-grid">
                 {KANBAN_COLUMNS.map((col) => {
                   const colTasks = tasks.filter((t) => t.status === col.key);
@@ -2272,9 +2304,9 @@ export const TasksPage: React.FC = () => {
                                   </span>
 
                                   <div style={{ display: "flex", gap: "3px" }}>
-                                    {t.assignees.filter((a) => a.assignment_role !== "WATCHER").slice(0, 3).map((a) => (
+                                    {t.assignees.filter((a) => a.assignment_role !== "WATCHER").slice(0, 3).map((a, idx) => (
                                       <span
-                                        key={a.id}
+                                        key={a.id || `${a.user_id}-${a.assignment_role}-${idx}`}
                                         title={a.user?.full_name || "Assignee"}
                                         style={{
                                           width: "22px",
@@ -2308,6 +2340,23 @@ export const TasksPage: React.FC = () => {
           ) : isCalendarActive ? (
             /* TAB CONTENT: Redesigned ERP Card-Based Calendar View */
             <div style={{ padding: "16px" }}>
+              {totalCount > tasks.length && (
+                <div
+                  data-testid="tasks-truncation-banner"
+                  style={{
+                    marginBottom: "12px",
+                    padding: "8px 12px",
+                    borderRadius: "6px",
+                    background: "#fffbeb",
+                    border: "1px solid #fde68a",
+                    color: "#92400e",
+                    fontSize: "12.5px",
+                    fontWeight: 500,
+                  }}
+                >
+                  Showing first {tasks.length} of {totalCount} matching tasks in Calendar view. Refine filters or switch to List view for full pagination.
+                </div>
+              )}
               {/* Calendar Month Navigation & Legend Header */}
               <div
                 style={{
@@ -2629,12 +2678,31 @@ export const TasksPage: React.FC = () => {
               )}
             </div>
           ) : activeTab === "gantt" ? (
-            <TaskGanttView
-              tasks={tasks}
-              onSelectTask={(id) => setSelectedTaskId(id)}
-              availableUsers={availableUsers}
-              colorByDepartment={scopeView === "all"}
-            />
+            <div>
+              {totalCount > tasks.length && (
+                <div
+                  data-testid="tasks-truncation-banner"
+                  style={{
+                    margin: "16px 16px 0",
+                    padding: "8px 12px",
+                    borderRadius: "6px",
+                    background: "#fffbeb",
+                    border: "1px solid #fde68a",
+                    color: "#92400e",
+                    fontSize: "12.5px",
+                    fontWeight: 500,
+                  }}
+                >
+                  Showing first {tasks.length} of {totalCount} matching tasks in Gantt view. Refine filters or switch to List view for full pagination.
+                </div>
+              )}
+              <TaskGanttView
+                tasks={tasks}
+                onSelectTask={(id) => setSelectedTaskId(id)}
+                availableUsers={availableUsers}
+                colorByDepartment={scopeView === "all"}
+              />
+            </div>
           ) : activeTab === "recurring" ? (
             <div style={{ padding: "16px" }}>
               <RecurringTasksTab

@@ -14,6 +14,7 @@ from app.audit.service import AuditService
 from app.auth.dependencies import get_current_user
 from app.auth.service import CurrentUser
 from app.common.storage import save_uploaded_file
+from app.core.exceptions import BadRequestException
 from app.core.responses import build_success_response
 from app.database.session import get_db_session
 from app.notifications.repository import NotificationRepository
@@ -92,13 +93,18 @@ def get_task_service(db: AsyncSession = Depends(get_db_session)) -> TaskService:
     return TaskService(repository=repo, audit_service=audit, notification_service=notif)
 
 
+TASK_UPLOAD_MAX_BYTES = 10 * 1024 * 1024  # 10 MB per task attachment/voice note
+
+
 @router.post("/upload-file", summary="Upload a file or voice note recording")
 async def upload_file(
     request: Request,
     file: UploadFile = File(...),
     current_user: CurrentUser = Depends(require_permission("task.view")),
 ) -> dict:
-    content = await file.read()
+    content = await file.read(TASK_UPLOAD_MAX_BYTES + 1)
+    if len(content) > TASK_UPLOAD_MAX_BYTES:
+        raise BadRequestException("File size exceeds maximum allowed limit (10 MB).")
     public_url, stored_name = await save_uploaded_file(
         content=content,
         original_filename=file.filename or "upload",
@@ -180,7 +186,9 @@ async def create_task(
     service: TaskService = Depends(get_task_service),
 ) -> dict:
     task = await service.create_task(payload, current_user)
-    serialized = TaskRead.model_validate(task).model_dump()
+    serialized = TaskRead.model_validate(
+        task, context={"current_user_id": current_user.id}
+    ).model_dump()
     return build_success_response(
         data=serialized, request_id=getattr(request.state, "request_id", "-")
     )
@@ -189,7 +197,7 @@ async def create_task(
 @router.get("/escalate-options", summary="Get candidate users and managers for manual escalation")
 async def get_escalate_options(
     request: Request,
-    current_user: CurrentUser = Depends(require_permission("task.view")),
+    current_user: CurrentUser = Depends(require_any_permission("task.escalate", "task.manage")),
     service: TaskService = Depends(get_task_service),
 ) -> dict:
     data = await service.get_escalate_options(current_user.id)
@@ -472,6 +480,7 @@ async def create_recurring_schedule(
     schedule = await service.create_recurring_schedule(payload, current_user)
     # Check if first task can be generated immediately
     await service.generate_recurring_tasks(as_of_date=date.today(), schedule_id=schedule.id)
+    schedule = await service.get_recurring_schedule(schedule.id, current_user=current_user)
     return build_success_response(data=schedule.model_dump(), status_code=201, request_id=getattr(request.state, "request_id", "-"))
 
 
@@ -645,7 +654,9 @@ async def get_task_by_id(
     service: TaskService = Depends(get_task_service),
 ) -> dict:
     task = await service.get_task(id, current_user=current_user)
-    serialized = TaskRead.model_validate(task).model_dump()
+    serialized = TaskRead.model_validate(
+        task, context={"current_user_id": current_user.id}
+    ).model_dump()
     return build_success_response(data=serialized, request_id=getattr(request.state, "request_id", "-"))
 
 
@@ -658,7 +669,9 @@ async def update_task(
     service: TaskService = Depends(get_task_service),
 ) -> dict:
     task = await service.update_task(id, payload, current_user)
-    serialized = TaskRead.model_validate(task).model_dump()
+    serialized = TaskRead.model_validate(
+        task, context={"current_user_id": current_user.id}
+    ).model_dump()
     return build_success_response(data=serialized, request_id=getattr(request.state, "request_id", "-"))
 
 
@@ -686,7 +699,9 @@ async def assign_task(
     task = await service.assign_task(
         id, payload.user_ids, current_user, role=payload.assignment_role.value
     )
-    serialized = TaskRead.model_validate(task).model_dump()
+    serialized = TaskRead.model_validate(
+        task, context={"current_user_id": current_user.id}
+    ).model_dump()
     return build_success_response(data=serialized, request_id=getattr(request.state, "request_id", "-"))
 
 
@@ -706,7 +721,9 @@ async def add_task_comment(
         audio_url=payload.audio_url,
         attachments=attachments_data,
     )
-    serialized = TaskCommentRead.model_validate(comment).model_dump()
+    serialized = TaskCommentRead.model_validate(
+        comment, context={"current_user_id": current_user.id}
+    ).model_dump()
     return build_success_response(
         data=serialized, status_code=201, request_id=getattr(request.state, "request_id", "-")
     )
@@ -755,13 +772,14 @@ async def add_task_voice_note(
     current_user: CurrentUser = Depends(require_permission("task.view")),
     service: TaskService = Depends(get_task_service),
 ) -> dict:
+    resolved_title = payload.title or payload.file_name or "Voice Note"
     vn = await service.add_voice_note(
         id,
         audio_url=payload.audio_url,
         duration_seconds=payload.duration_seconds,
         file_size=payload.file_size,
         mime_type=payload.mime_type or "audio/webm",
-        title=payload.title,
+        title=resolved_title,
         current_user=current_user,
     )
     serialized = TaskVoiceNoteRead.model_validate(vn).model_dump()
@@ -1019,7 +1037,9 @@ async def duplicate_task(
 ) -> dict:
     task = await service.duplicate_task(id, payload, current_user)
     return build_success_response(
-        data=TaskRead.model_validate(task).model_dump(), status_code=201, request_id=getattr(request.state, "request_id", "-")
+        data=TaskRead.model_validate(task, context={"current_user_id": current_user.id}).model_dump(),
+        status_code=201,
+        request_id=getattr(request.state, "request_id", "-"),
     )
 
 
@@ -1061,7 +1081,8 @@ async def submit_approval(
 ) -> dict:
     task = await service.submit_for_approval(id, payload, current_user)
     return build_success_response(
-        data=TaskRead.model_validate(task).model_dump(), request_id=getattr(request.state, "request_id", "-")
+        data=TaskRead.model_validate(task, context={"current_user_id": current_user.id}).model_dump(),
+        request_id=getattr(request.state, "request_id", "-"),
     )
 
 
@@ -1076,5 +1097,6 @@ async def action_approval(
 ) -> dict:
     task = await service.action_approval(id, payload, current_user)
     return build_success_response(
-        data=TaskRead.model_validate(task).model_dump(), request_id=getattr(request.state, "request_id", "-")
+        data=TaskRead.model_validate(task, context={"current_user_id": current_user.id}).model_dump(),
+        request_id=getattr(request.state, "request_id", "-"),
     )

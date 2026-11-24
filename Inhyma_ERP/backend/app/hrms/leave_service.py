@@ -68,7 +68,7 @@ from app.hrms.schemas import (
     LeaveTypeUpdate,
 )
 from app.hrms.notifications import notify_leave_decision, notify_leave_requested
-from app.rbac.models import Permission, Role, RolePermission, UserRole
+from app.rbac.models import Permission, Role, RoleAssignmentStatus, RolePermission, UserPermission, UserRole
 from app.users.models import User
 
 
@@ -297,11 +297,15 @@ class HrmsLeaveService:
         )
         branch = loc_res.scalar_one_or_none() or "Thane"
 
-        # Department via primary or first assigned role
+        # Department via primary or first active non-deleted assigned role
         role_res = await self.db.execute(
             select(Role.name)
             .join(UserRole, UserRole.role_id == Role.id)
-            .where(UserRole.user_id == employee_id)
+            .where(
+                UserRole.user_id == employee_id,
+                UserRole.status == RoleAssignmentStatus.ACTIVE,
+                Role.deleted_at.is_(None),
+            )
             .order_by(Role.is_system.asc(), UserRole.is_primary.desc())
             .limit(1)
         )
@@ -312,20 +316,50 @@ class HrmsLeaveService:
     # -----------------------------------------------------------------------
     # Applicable Leave Types for Employee
     # -----------------------------------------------------------------------
+    @staticmethod
+    def _parse_applicability_tokens(raw_value: Optional[str]) -> list[str]:
+        if raw_value is None:
+            return []
+        normalized = str(raw_value).replace(";", ",")
+        return [tok.strip().lower() for tok in normalized.split(",") if tok.strip()]
+
     def _is_leave_type_applicable(self, lt: HrmsLeaveType, branch: str, department: str) -> bool:
-        app_to = (getattr(lt, "applicable_to", "ALL") or "ALL").upper()
+        app_to = (getattr(lt, "applicable_to", "ALL") or "ALL").strip().upper()
         if app_to == "ALL":
             return True
-        elif app_to == "DEPARTMENT":
-            dept_rule = (getattr(lt, "applicable_departments", "ALL") or "ALL").strip().lower()
-            if "all" in dept_rule or (department and department.lower() in [d.strip() for d in dept_rule.split(",")]):
+
+        def _matches_scope(raw_rule: Optional[str], emp_val: Optional[str], wildcard_tokens: set[str]) -> bool:
+            tokens = self._parse_applicability_tokens(raw_rule)
+            if not tokens:
+                return False
+            if any(t in wildcard_tokens for t in tokens):
                 return True
-            return False
+            if not emp_val or not emp_val.strip():
+                return False
+            return emp_val.strip().lower() in tokens
+
+        if app_to == "DEPARTMENT":
+            return _matches_scope(
+                getattr(lt, "applicable_departments", None),
+                department,
+                {"all", "all departments"},
+            )
         elif app_to == "BRANCH":
-            branch_rule = (getattr(lt, "applicable_branches", "ALL") or "ALL").strip().lower()
-            if "all" in branch_rule or (branch and branch.lower() in [b.strip() for b in branch_rule.split(",")]):
-                return True
-            return False
+            return _matches_scope(
+                getattr(lt, "applicable_branches", None),
+                branch,
+                {"all", "all branches"},
+            )
+        elif app_to == "CUSTOM":
+            dept_raw = getattr(lt, "applicable_departments", None)
+            branch_raw = getattr(lt, "applicable_branches", None)
+            dept_tokens = self._parse_applicability_tokens(dept_raw)
+            branch_tokens = self._parse_applicability_tokens(branch_raw)
+            if not dept_tokens and not branch_tokens:
+                return False
+            dept_ok = True if not dept_tokens else _matches_scope(dept_raw, department, {"all", "all departments"})
+            branch_ok = True if not branch_tokens else _matches_scope(branch_raw, branch, {"all", "all branches"})
+            return dept_ok and branch_ok
         return True
 
     async def get_applicable_leave_types(
@@ -337,7 +371,7 @@ class HrmsLeaveService:
         """
         await self.ensure_seeds()
         branch, department = await self.get_employee_org_context(employee_id)
-        ref_date = target_date or date.today()
+        ref_date = target_date or get_current_ist_date()
 
         applicable_plans = (
             await self.db.scalars(
@@ -367,8 +401,17 @@ class HrmsLeaveService:
             ).all()
             applicable_lt_ids.update(plan_types)
 
+        # Only exclude leave types that are bound to an ACTIVE, NON-DELETED leave plan (HRMS-BUG-16)
+        active_plan_lt_subq = (
+            select(HrmsLeavePlanType.leave_type_id)
+            .join(HrmsLeavePlan, HrmsLeavePlan.id == HrmsLeavePlanType.plan_id)
+            .where(
+                HrmsLeavePlan.deleted_at.is_(None),
+                HrmsLeavePlan.is_active.is_(True),
+            )
+        )
         filter_cond = and_(
-            HrmsLeaveType.id.notin_(select(HrmsLeavePlanType.leave_type_id)),
+            HrmsLeaveType.id.notin_(active_plan_lt_subq),
             not_(func.lower(HrmsLeaveType.name).like("%unassigned%")),
         )
         if applicable_plans and applicable_lt_ids:
@@ -412,6 +455,30 @@ class HrmsLeaveService:
                 detail=f"Leave type '{payload.name}' already exists.",
             )
 
+        raw_app_to = (payload.applicable_to or "ALL").strip().upper()
+        raw_depts = (payload.applicable_departments or "").strip()
+        raw_branches = (payload.applicable_branches or "").strip()
+        dept_tokens = self._parse_applicability_tokens(raw_depts)
+        branch_tokens = self._parse_applicability_tokens(raw_branches)
+        has_specific_depts = bool(dept_tokens) and not all(t in ("all", "all departments") for t in dept_tokens)
+        has_specific_branches = bool(branch_tokens) and not all(t in ("all", "all branches") for t in branch_tokens)
+
+        # If caller omitted applicable_to while supplying explicit department/branch restrictions, honor them
+        if "applicable_to" not in payload.model_fields_set and raw_app_to == "ALL":
+            if has_specific_depts and has_specific_branches:
+                raw_app_to = "CUSTOM"
+            elif has_specific_depts:
+                raw_app_to = "DEPARTMENT"
+            elif has_specific_branches:
+                raw_app_to = "BRANCH"
+
+        if raw_app_to == "ALL":
+            norm_depts = "ALL"
+            norm_branches = "ALL"
+        else:
+            norm_depts = raw_depts or None
+            norm_branches = raw_branches or None
+
         leave_type = HrmsLeaveType(
             name=payload.name.strip(),
             code=payload.code.strip() if payload.code else None,
@@ -436,9 +503,9 @@ class HrmsLeaveService:
             min_working_days=payload.min_working_days,
             allocation_unit=payload.allocation_unit or "DAYS",
             accrual_frequency=payload.accrual_frequency or "MONTHLY",
-            applicable_to=payload.applicable_to or "ALL",
-            applicable_departments=payload.applicable_departments or "ALL",
-            applicable_branches=payload.applicable_branches or "ALL",
+            applicable_to=raw_app_to,
+            applicable_departments=norm_depts,
+            applicable_branches=norm_branches,
             count_weekends_as_leave=payload.count_weekends_as_leave,
             count_holidays_as_leave=payload.count_holidays_as_leave,
             allow_negative_balance=payload.allow_negative_balance,
@@ -525,11 +592,26 @@ class HrmsLeaveService:
         if payload.accrual_frequency is not None:
             leave.accrual_frequency = payload.accrual_frequency
         if payload.applicable_to is not None:
-            leave.applicable_to = payload.applicable_to
+            leave.applicable_to = payload.applicable_to.strip().upper() or "ALL"
         if payload.applicable_departments is not None:
             leave.applicable_departments = payload.applicable_departments
         if payload.applicable_branches is not None:
             leave.applicable_branches = payload.applicable_branches
+        if (leave.applicable_to or "ALL").upper() == "ALL":
+            if "applicable_to" in payload.model_fields_set:
+                leave.applicable_departments = "ALL"
+                leave.applicable_branches = "ALL"
+            else:
+                d_toks = self._parse_applicability_tokens(leave.applicable_departments)
+                b_toks = self._parse_applicability_tokens(leave.applicable_branches)
+                has_d = bool(d_toks) and not all(t in ("all", "all departments") for t in d_toks)
+                has_b = bool(b_toks) and not all(t in ("all", "all branches") for t in b_toks)
+                if has_d and has_b:
+                    leave.applicable_to = "CUSTOM"
+                elif has_d:
+                    leave.applicable_to = "DEPARTMENT"
+                elif has_b:
+                    leave.applicable_to = "BRANCH"
         if payload.count_weekends_as_leave is not None:
             leave.count_weekends_as_leave = payload.count_weekends_as_leave
         if payload.count_holidays_as_leave is not None:
@@ -824,13 +906,20 @@ class HrmsLeaveService:
         to_date: date,
         employee_id: Optional[uuid.UUID] = None,
         leave_type_id: Optional[uuid.UUID] = None,
+        is_half_day: bool = False,
     ) -> float:
         """
         Calculates working leave duration between from_date and to_date inclusive.
-        Evaluates holidays by employee branch and weekly off days.
+        Evaluates holidays by employee branch, weekly off days, and half-day policy.
         """
         if from_date > to_date:
             raise HTTPException(status_code=400, detail="From Date cannot be after To Date.")
+
+        if is_half_day and from_date != to_date:
+            raise HTTPException(
+                status_code=400,
+                detail="Half-day leave can only be applied for a single date.",
+            )
 
         # Resolve employee branch
         branch = "Thane"
@@ -847,6 +936,11 @@ class HrmsLeaveService:
             is_paid = lt.is_paid
             max_consecutive = lt.max_consecutive_days
             is_special = lt.leave_type == "SPECIAL" or not is_paid
+            if is_half_day and not getattr(lt, "allow_half_day", True):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Half-day leave is not permitted for {lt.name}.",
+                )
 
         # Weekly off (default Sunday)
         policy_res = await self.db.execute(select(HrmsAttendancePolicy).limit(1))
@@ -904,6 +998,20 @@ class HrmsLeaveService:
                     detail="The selected date range falls entirely on holidays or weekly off days.",
                 )
             leave_days = float(working_days)
+
+        if is_half_day:
+            # For special/unpaid single-day half-day leave, still block weekly off/holiday unless policy allows
+            if is_special:
+                count_weekends = getattr(lt, "count_weekends_as_leave", False) if lt else False
+                count_holidays = getattr(lt, "count_holidays_as_leave", False) if lt else False
+                if (from_date.weekday() == off_day_idx and not count_weekends) or (
+                    from_date in holiday_dates and not count_holidays
+                ):
+                    raise HTTPException(
+                        status_code=400,
+                        detail="The selected date falls on a holiday or weekly off day.",
+                    )
+            leave_days = 0.5
 
         if max_consecutive and max_consecutive > 0 and leave_days > max_consecutive:
             lt_name = lt.name if lt else "this leave type"
@@ -1231,20 +1339,25 @@ class HrmsLeaveService:
             user_is_admin = await self.is_user_admin(user_id)
             if not user_is_admin:
                 managed_ids = await self.get_managed_employee_ids(user_id)
-                perm_codes = (
-                    await self.db.scalars(
-                        select(Permission.code)
-                        .join(RolePermission, RolePermission.permission_id == Permission.id)
-                        .join(UserRole, UserRole.role_id == RolePermission.role_id)
-                        .where(UserRole.user_id == user_id)
+                perm_set = await self._get_effective_permissions(user_id)
+                if "deny:hrms.leave" in perm_set or "block:hrms.leave" in perm_set:
+                    raise HTTPException(
+                        status_code=403,
+                        detail="Permission denied. You do not have access to the Leave module.",
                     )
-                ).all()
-                perm_set = set(perm_codes)
-                can_adjust = any(p in perm_set for p in ("hrms.adjust", "hrms.manage", "hrms:admin", "hrms.approve"))
+                can_adjust = (
+                    any(p in perm_set for p in ("hrms.adjust", "hrms.manage", "hrms:admin", "hrms.approve"))
+                    and "deny:hrms.adjust" not in perm_set
+                )
                 if not can_adjust and managed_ids == {user_id}:
                     raise HTTPException(
                         status_code=403,
                         detail="Employees cannot access organization-wide Leave Adjustment.",
+                    )
+                if employee_id and not can_adjust and employee_id not in managed_ids:
+                    raise HTTPException(
+                        status_code=403,
+                        detail="You cannot view leave balances outside your authorized team scope.",
                     )
                 emp_query = (
                     select(User)
@@ -1427,7 +1540,7 @@ class HrmsLeaveService:
                 HrmsEmployeeLeaveBalance.employee_id == payload.employee_id,
                 HrmsEmployeeLeaveBalance.leave_type_id == payload.leave_type_id,
                 HrmsEmployeeLeaveBalance.year == payload.year,
-            ).with_for_update()
+            ).with_for_update().execution_options(populate_existing=True)
         )
         if not balance:
             lt = await self.get_leave_type(payload.leave_type_id)
@@ -1492,7 +1605,7 @@ class HrmsLeaveService:
             reason=payload.reason.strip(),
             remarks=payload.remarks.strip() if payload.remarks else None,
             source="MANUAL",
-            effective_date=payload.effective_date or date.today(),
+            effective_date=payload.effective_date or get_current_ist_date(),
             adjusted_by=adjusted_by,
         )
         self.db.add(audit)
@@ -1649,8 +1762,39 @@ class HrmsLeaveService:
                 detail="You already have an overlapping leave request covering part of this period.",
             )
 
+        req_is_half_day = bool(getattr(payload, "is_half_day", False))
+        explicit_days = getattr(payload, "number_of_days", None)
+        if explicit_days is not None:
+            import math as _math
+            if not _math.isfinite(explicit_days) or explicit_days <= 0:
+                raise HTTPException(status_code=400, detail="Number of leave days must be a positive number.")
+            if abs(explicit_days - 0.5) < 1e-6:
+                req_is_half_day = True
+            elif req_is_half_day:
+                raise HTTPException(status_code=400, detail="Half-day leave requires number_of_days to be 0.5.")
+            elif not float(explicit_days).is_integer():
+                raise HTTPException(
+                    status_code=400,
+                    detail="Fractional leave days other than 0.5 (half-day) are not supported.",
+                )
+
+        raw_session = getattr(payload, "half_day_session", None)
+        if raw_session is not None and str(raw_session).strip():
+            norm_session = str(raw_session).strip().upper()
+            if norm_session not in ("FIRST_HALF", "SECOND_HALF"):
+                raise HTTPException(
+                    status_code=400,
+                    detail="Invalid half_day_session. Expected 'FIRST_HALF' or 'SECOND_HALF'.",
+                )
+            if not req_is_half_day:
+                req_is_half_day = True
+
         num_days = await self.calculate_leave_days(
-            payload.from_date, payload.to_date, employee_id=employee_id, leave_type_id=payload.leave_type_id
+            payload.from_date,
+            payload.to_date,
+            employee_id=employee_id,
+            leave_type_id=payload.leave_type_id,
+            is_half_day=req_is_half_day,
         )
 
         lt = await self.get_leave_type(payload.leave_type_id)
@@ -1658,7 +1802,7 @@ class HrmsLeaveService:
         # Configurable leave rules validation
         is_admin_caller = await self.is_user_admin(user_id)
         if not is_admin_caller:
-            today = date.today()
+            today = get_current_ist_date()
             if getattr(lt, "allow_backdated", True) is False and payload.from_date < today:
                 raise HTTPException(
                     status_code=400,
@@ -1696,6 +1840,7 @@ class HrmsLeaveService:
                 select(HrmsEmployeeLeaveBalance)
                 .where(HrmsEmployeeLeaveBalance.id == cur_bal_read.id)
                 .with_for_update()
+                .execution_options(populate_existing=True)
             )
             locked_bal = (await self.db.execute(lock_stmt)).scalar_one_or_none()
             if not locked_bal:
@@ -1752,6 +1897,7 @@ class HrmsLeaveService:
             to_date=req.to_date.isoformat(),
             number_of_days=num_days,
             actor_id=user_id,
+            request_id=req.id,
         )
         await self.db.commit()
         await self.db.refresh(req)
@@ -1765,16 +1911,52 @@ class HrmsLeaveService:
         return await self._to_leave_request_read(req)
 
     async def list_leave_requests(
-        self, employee_id: Optional[uuid.UUID] = None, status_filter: Optional[str] = None
+        self,
+        employee_id: Optional[uuid.UUID] = None,
+        status_filter: Optional[str] = None,
+        skip: int = 0,
+        limit: int = 200,
     ) -> List[LeaveRequestRead]:
         query = select(HrmsLeaveRequest).order_by(HrmsLeaveRequest.created_at.desc())
         if employee_id:
             query = query.where(HrmsLeaveRequest.employee_id == employee_id)
         if status_filter and status_filter.upper() != "ALL":
             query = query.where(HrmsLeaveRequest.status == status_filter.upper())
+        query = query.offset(skip).limit(limit)
 
-        requests = (await self.db.scalars(query)).all()
-        return [await self._to_leave_request_read(r) for r in requests]
+        requests = list((await self.db.scalars(query)).all())
+        return await self._to_leave_request_reads_batch(requests)
+
+    async def _get_effective_permissions(self, user_id: uuid.UUID) -> set[str]:
+        """Resolve effective permissions including active role grants and UserPermission overrides/denies."""
+        role_perms = set(
+            (
+                await self.db.scalars(
+                    select(Permission.code)
+                    .join(RolePermission, RolePermission.permission_id == Permission.id)
+                    .join(UserRole, UserRole.role_id == RolePermission.role_id)
+                    .join(Role, Role.id == RolePermission.role_id)
+                    .where(
+                        UserRole.user_id == user_id,
+                        UserRole.status == RoleAssignmentStatus.ACTIVE,
+                        Role.deleted_at.is_(None),
+                    )
+                )
+            ).all()
+        )
+        user_perm_rows = (
+            await self.db.execute(
+                select(Permission.code, UserPermission.is_granted)
+                .join(UserPermission, UserPermission.permission_id == Permission.id)
+                .where(UserPermission.user_id == user_id)
+            )
+        ).all()
+        grants = {code for code, is_granted in user_perm_rows if is_granted}
+        denies = {code for code, is_granted in user_perm_rows if not is_granted}
+        effective = (role_perms | grants) - denies
+        for d in denies:
+            effective.add(f"deny:{d}")
+        return effective
 
     async def is_user_admin(self, user_id: uuid.UUID) -> bool:
         user = await self.db.scalar(select(User).where(User.id == user_id))
@@ -1783,24 +1965,21 @@ class HrmsLeaveService:
         uname = (user.username or "").lower()
         if getattr(user, "is_super_admin", False) or uname in ("admin", "super_admin") or uname.startswith("admin"):
             return True
-        # Check permissions via user's roles
-        perm_codes = (
-            await self.db.scalars(
-                select(Permission.code)
-                .join(RolePermission, RolePermission.permission_id == Permission.id)
-                .join(UserRole, UserRole.role_id == RolePermission.role_id)
-                .where(UserRole.user_id == user_id)
-            )
-        ).all()
-        perm_set = set(perm_codes)
+        perm_set = await self._get_effective_permissions(user_id)
+        if "deny:hrms.leave" in perm_set or "block:hrms.leave" in perm_set:
+            return False
         if any(p in perm_set for p in ("*", "hrms.manage", "hrms:admin")):
             return True
-        # Check role names
+        # Check active non-deleted role names
         role_names = (
             await self.db.scalars(
                 select(Role.name)
                 .join(UserRole, UserRole.role_id == Role.id)
-                .where(UserRole.user_id == user_id)
+                .where(
+                    UserRole.user_id == user_id,
+                    UserRole.status == RoleAssignmentStatus.ACTIVE,
+                    Role.deleted_at.is_(None),
+                )
             )
         ).all()
         if any(r.lower() in ("admin", "super_admin", "super admin", "hrms admin") for r in role_names):
@@ -1808,21 +1987,15 @@ class HrmsLeaveService:
         return False
 
     async def is_user_authorized_to_adjust(self, user_id: uuid.UUID) -> bool:
+        perm_set = await self._get_effective_permissions(user_id)
+        if "deny:hrms.leave" in perm_set or "block:hrms.leave" in perm_set or "deny:hrms.adjust" in perm_set:
+            return False
         if await self.is_user_admin(user_id):
             return True
-        perm_codes = (
-            await self.db.scalars(
-                select(Permission.code)
-                .join(RolePermission, RolePermission.permission_id == Permission.id)
-                .join(UserRole, UserRole.role_id == RolePermission.role_id)
-                .where(UserRole.user_id == user_id)
-            )
-        ).all()
-        perm_set = set(perm_codes)
         return any(p in perm_set for p in ("hrms.adjust", "hrms.manage", "hrms:admin"))
 
     async def get_managed_employee_ids(self, manager_user_id: uuid.UUID) -> set[uuid.UUID]:
-        """Return IDs of employees reporting to this manager or in their department."""
+        """Return IDs of employees reporting to this manager (or in their department ONLY if caller is a manager)."""
         direct_reports = (
             await self.db.scalars(
                 select(User.id).where(User.manager_id == manager_user_id, User.deleted_at.is_(None))
@@ -1830,41 +2003,69 @@ class HrmsLeaveService:
         ).all()
         managed_ids = set(direct_reports)
 
-        _, dept = await self.get_employee_org_context(manager_user_id)
-        if dept and dept.lower() != "general":
-            dept_roles = (
-                await self.db.scalars(
-                    select(Role.id).where(func.lower(Role.name) == dept.lower())
+        role_names = (
+            await self.db.scalars(
+                select(Role.name)
+                .join(UserRole, UserRole.role_id == Role.id)
+                .where(
+                    UserRole.user_id == manager_user_id,
+                    UserRole.status == RoleAssignmentStatus.ACTIVE,
+                    Role.deleted_at.is_(None),
                 )
-            ).all()
-            if dept_roles:
-                dept_users = (
+            )
+        ).all()
+        # ONLY expand to department peers when caller holds an explicit Department Manager role (HRMS-BUG-21)
+        is_dept_manager = bool(
+            "department_manager" in role_names
+            or any("manager" in r.lower() for r in role_names)
+        )
+
+        if is_dept_manager:
+            dept = None
+            for r in role_names:
+                if r.lower() not in ("user", "super_admin", "admin", "department_manager", "employee") and "manager" not in r.lower():
+                    dept = r
+                    break
+            if not dept:
+                _, dept = await self.get_employee_org_context(manager_user_id)
+            if dept and dept.lower() not in ("general", "unassigned", "user", "employee", "department_manager"):
+                dept_roles = (
                     await self.db.scalars(
-                        select(UserRole.user_id).where(UserRole.role_id.in_(dept_roles))
+                        select(Role.id).where(func.lower(Role.name) == dept.lower(), Role.deleted_at.is_(None))
                     )
                 ).all()
-                managed_ids.update(dept_users)
+                if dept_roles:
+                    dept_users = (
+                        await self.db.scalars(
+                            select(UserRole.user_id).where(
+                                UserRole.role_id.in_(dept_roles),
+                                UserRole.status == RoleAssignmentStatus.ACTIVE,
+                            )
+                        )
+                    ).all()
+                    managed_ids.update(dept_users)
 
         managed_ids.add(manager_user_id)
         return managed_ids
 
     async def is_reviewer_authorized_for_employee(self, reviewer_id: uuid.UUID, employee_id: uuid.UUID) -> bool:
+        perm_set = await self._get_effective_permissions(reviewer_id)
+        if "deny:hrms.leave" in perm_set or "block:hrms.leave" in perm_set:
+            return False
+
         emp = await self.db.scalar(select(User).where(User.id == employee_id))
         if emp and emp.manager_id == reviewer_id:
             return True
-        managed_ids = await self.get_managed_employee_ids(reviewer_id)
-        if employee_id in managed_ids:
-            return True
-        perm_codes = (
-            await self.db.scalars(
-                select(Permission.code)
-                .join(RolePermission, RolePermission.permission_id == Permission.id)
-                .join(UserRole, UserRole.role_id == RolePermission.role_id)
-                .where(UserRole.user_id == reviewer_id)
-            )
-        ).all()
-        perm_set = set(perm_codes)
-        if any(p in perm_set for p in ("hrms.approve", "hrms:approval", "hrms.manage")):
+
+        if employee_id != reviewer_id:
+            managed_ids = await self.get_managed_employee_ids(reviewer_id)
+            if employee_id in managed_ids:
+                return True
+
+        if (
+            any(p in perm_set for p in ("hrms.approve", "hrms:approval", "hrms.manage"))
+            and "deny:hrms.approve" not in perm_set
+        ):
             return True
         return False
 
@@ -1877,6 +2078,8 @@ class HrmsLeaveService:
         to_date: Optional[date] = None,
         reviewer_id: Optional[uuid.UUID] = None,
         is_admin: bool = True,
+        skip: int = 0,
+        limit: int = 200,
     ) -> List[LeaveRequestRead]:
         query = select(HrmsLeaveRequest).order_by(HrmsLeaveRequest.created_at.desc())
 
@@ -1897,9 +2100,10 @@ class HrmsLeaveService:
             query = query.where(HrmsLeaveRequest.to_date >= from_date)
         if to_date:
             query = query.where(HrmsLeaveRequest.from_date <= to_date)
+        query = query.offset(skip).limit(limit)
 
-        requests = (await self.db.scalars(query)).all()
-        return [await self._to_leave_request_read(r) for r in requests]
+        requests = list((await self.db.scalars(query)).all())
+        return await self._to_leave_request_reads_batch(requests)
 
     async def _verify_leave_reviewer_authorization(
         self,
@@ -1918,15 +2122,7 @@ class HrmsLeaveService:
         if is_admin is True:
             return
 
-        perm_codes = (
-            await self.db.scalars(
-                select(Permission.code)
-                .join(RolePermission, RolePermission.permission_id == Permission.id)
-                .join(UserRole, UserRole.role_id == RolePermission.role_id)
-                .where(UserRole.user_id == reviewer_id)
-            )
-        ).all()
-        perm_set = set(perm_codes)
+        perm_set = await self._get_effective_permissions(reviewer_id)
 
         if is_admin is None:
             reviewer_user = await self.db.scalar(select(User).where(User.id == reviewer_id))
@@ -1935,7 +2131,11 @@ class HrmsLeaveService:
                 await self.db.scalars(
                     select(Role.name)
                     .join(UserRole, UserRole.role_id == Role.id)
-                    .where(UserRole.user_id == reviewer_id, Role.deleted_at.is_(None))
+                    .where(
+                        UserRole.user_id == reviewer_id,
+                        UserRole.status == RoleAssignmentStatus.ACTIVE,
+                        Role.deleted_at.is_(None),
+                    )
                 )
             ).all()
             if (
@@ -1947,13 +2147,20 @@ class HrmsLeaveService:
             ):
                 return
 
+        if "deny:hrms.leave" in perm_set or "block:hrms.leave" in perm_set:
+            raise HTTPException(
+                status_code=403,
+                detail=f"You do not have permission to {action_label} this leave request.",
+            )
+
         emp = await self.db.scalar(select(User).where(User.id == employee_id))
         if emp and emp.manager_id == reviewer_id:
             return
 
-        managed_ids = await self.get_managed_employee_ids(reviewer_id)
-        if employee_id in managed_ids:
-            return
+        if employee_id != reviewer_id:
+            managed_ids = await self.get_managed_employee_ids(reviewer_id)
+            if employee_id in managed_ids:
+                return
 
         has_hr_approval = (
             any(p in perm_set for p in ("hrms.approve", "hrms:approval", "hrms.manage"))
@@ -1989,7 +2196,10 @@ class HrmsLeaveService:
         can_self_approve: bool = False,
     ) -> LeaveRequestRead:
         req = await self.db.scalar(
-            select(HrmsLeaveRequest).where(HrmsLeaveRequest.id == request_id).with_for_update()
+            select(HrmsLeaveRequest)
+            .where(HrmsLeaveRequest.id == request_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
         )
         if not req:
             raise HTTPException(status_code=404, detail="Leave request not found.")
@@ -2005,13 +2215,15 @@ class HrmsLeaveService:
             is_admin=is_admin,
         )
 
-        if req.approval_status != "PENDING":
+        if req.approval_status != "PENDING" or req.status != "PENDING":
             raise HTTPException(
                 status_code=400,
                 detail=f"Leave request is already {req.approval_status}.",
             )
 
         # Deduct balance on approval within the same locked transaction (commit=False preserves FOR UPDATE lock)
+        # Re-read the locked balance with populate_existing=True so concurrent competing leave approvals
+        # serialize cleanly and never inspect stale identity-map values.
         balances = await self.get_or_create_employee_balances(
             req.employee_id, year=req.from_date.year, commit=False
         )
@@ -2021,6 +2233,7 @@ class HrmsLeaveService:
                 select(HrmsEmployeeLeaveBalance)
                 .where(HrmsEmployeeLeaveBalance.id == bal.id)
                 .with_for_update()
+                .execution_options(populate_existing=True)
             )
             if raw_bal:
                 lt = await self.get_leave_type(req.leave_type_id)
@@ -2063,6 +2276,7 @@ class HrmsLeaveService:
             to_date=req.to_date.isoformat(),
             number_of_days=req.number_of_days,
             actor_id=reviewer_id,
+            request_id=req.id,
         )
         await self.db.commit()
         await self.db.refresh(req)
@@ -2077,7 +2291,10 @@ class HrmsLeaveService:
         can_self_approve: bool = False,
     ) -> LeaveRequestRead:
         req = await self.db.scalar(
-            select(HrmsLeaveRequest).where(HrmsLeaveRequest.id == request_id).with_for_update()
+            select(HrmsLeaveRequest)
+            .where(HrmsLeaveRequest.id == request_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
         )
         if not req:
             raise HTTPException(status_code=404, detail="Leave request not found.")
@@ -2093,7 +2310,7 @@ class HrmsLeaveService:
             is_admin=is_admin,
         )
 
-        if req.approval_status != "PENDING":
+        if req.approval_status != "PENDING" or req.status != "PENDING":
             raise HTTPException(
                 status_code=400,
                 detail=f"Leave request is already {req.approval_status}.",
@@ -2113,6 +2330,7 @@ class HrmsLeaveService:
             to_date=req.to_date.isoformat(),
             number_of_days=req.number_of_days,
             actor_id=reviewer_id,
+            request_id=req.id,
         )
         await self.db.commit()
         await self.db.refresh(req)
@@ -2122,7 +2340,10 @@ class HrmsLeaveService:
         self, request_id: uuid.UUID, user_id: uuid.UUID, is_admin: bool = False
     ) -> LeaveRequestRead:
         req = await self.db.scalar(
-            select(HrmsLeaveRequest).where(HrmsLeaveRequest.id == request_id).with_for_update()
+            select(HrmsLeaveRequest)
+            .where(HrmsLeaveRequest.id == request_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
         )
         if not req:
             raise HTTPException(status_code=404, detail="Leave request not found.")
@@ -2145,7 +2366,7 @@ class HrmsLeaveService:
                     HrmsEmployeeLeaveBalance.employee_id == req.employee_id,
                     HrmsEmployeeLeaveBalance.leave_type_id == req.leave_type_id,
                     HrmsEmployeeLeaveBalance.year == req.from_date.year,
-                ).with_for_update()
+                ).with_for_update().execution_options(populate_existing=True)
             )
             if raw_bal:
                 prev_available = raw_bal.available
@@ -2325,6 +2546,103 @@ class HrmsLeaveService:
             "awarded_count": awarded_total,
             "details": details,
         }
+
+    async def _to_leave_request_reads_batch(self, reqs: List[HrmsLeaveRequest]) -> List[LeaveRequestRead]:
+        """Batch-hydrate LeaveRequestRead DTOs in 4 constant SQL queries (eliminates 5*N N+1 storm)."""
+        if not reqs:
+            return []
+
+        emp_ids = {r.employee_id for r in reqs}
+        all_user_ids = set(emp_ids)
+        for r in reqs:
+            if r.created_by:
+                all_user_ids.add(r.created_by)
+            if r.updated_by:
+                all_user_ids.add(r.updated_by)
+            if r.approved_by:
+                all_user_ids.add(r.approved_by)
+        lt_ids = {r.leave_type_id for r in reqs}
+
+        # 1. Batch users
+        users_map = {
+            u.id: u
+            for u in (await self.db.scalars(select(User).where(User.id.in_(all_user_ids)))).all()
+        }
+        # 2. Batch leave types
+        lts_map = {
+            lt.id: lt
+            for lt in (await self.db.scalars(select(HrmsLeaveType).where(HrmsLeaveType.id.in_(lt_ids)))).all()
+        }
+        # 3. Batch branches (primary location first)
+        loc_rows = (
+            await self.db.execute(
+                select(HrmsEmployeeLocation.user_id, HrmsLocation.name)
+                .join(HrmsLocation, HrmsLocation.id == HrmsEmployeeLocation.location_id)
+                .where(
+                    HrmsEmployeeLocation.user_id.in_(emp_ids),
+                    HrmsLocation.deleted_at.is_(None),
+                )
+                .order_by(HrmsEmployeeLocation.is_primary.desc(), HrmsLocation.name.asc())
+            )
+        ).all()
+        branch_map: dict[uuid.UUID, str] = {}
+        for uid, lname in loc_rows:
+            if uid not in branch_map:
+                branch_map[uid] = lname
+
+        # 4. Batch departments (non-system & primary role first)
+        role_rows = (
+            await self.db.execute(
+                select(UserRole.user_id, Role.name)
+                .join(Role, Role.id == UserRole.role_id)
+                .where(UserRole.user_id.in_(emp_ids))
+                .order_by(Role.is_system.asc(), UserRole.is_primary.desc())
+            )
+        ).all()
+        dept_map: dict[uuid.UUID, str] = {}
+        for uid, rname in role_rows:
+            if uid not in dept_map:
+                dept_map[uid] = "Admin" if rname == "super_admin" else ("User" if rname == "user" else (rname or "General"))
+
+        def _fmt_user(u: User | None, default: str) -> str:
+            if not u:
+                return default
+            return u.display_name or f"{u.first_name or ''} {u.last_name or ''}".strip() or u.username or default
+
+        results: List[LeaveRequestRead] = []
+        for req in reqs:
+            emp = users_map.get(req.employee_id)
+            lt = lts_map.get(req.leave_type_id)
+            results.append(
+                LeaveRequestRead(
+                    id=req.id,
+                    employee_id=req.employee_id,
+                    employee_name=_fmt_user(emp, "Employee"),
+                    employee_code=emp.employee_code if emp else None,
+                    branch=branch_map.get(req.employee_id, "Thane"),
+                    department=dept_map.get(req.employee_id, "General"),
+                    leave_type_id=req.leave_type_id,
+                    leave_type_name=lt.name if lt else "Leave",
+                    leave_type_code=lt.code if lt else None,
+                    from_date=req.from_date,
+                    to_date=req.to_date,
+                    number_of_days=req.number_of_days,
+                    reason=req.reason,
+                    attachment=req.attachment,
+                    status=req.status,
+                    approval_status=req.approval_status,
+                    created_by=req.created_by,
+                    created_by_name=_fmt_user(users_map.get(req.created_by), "User") if req.created_by else None,
+                    updated_by=req.updated_by,
+                    updated_by_name=_fmt_user(users_map.get(req.updated_by), "User") if req.updated_by else None,
+                    approved_by=req.approved_by,
+                    approved_by_name=_fmt_user(users_map.get(req.approved_by), "User") if req.approved_by else None,
+                    approval_remarks=req.approval_remarks,
+                    created_at=req.created_at,
+                    updated_at=req.updated_at,
+                )
+            )
+        return results
 
     async def _to_leave_request_read(self, req: HrmsLeaveRequest) -> LeaveRequestRead:
         emp = await self.db.scalar(select(User).where(User.id == req.employee_id))

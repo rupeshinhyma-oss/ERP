@@ -25,7 +25,8 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import delete, func, select, text, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from sqlalchemy.orm.attributes import flag_modified
@@ -36,8 +37,11 @@ from app.core.logging import get_logger
 from app.crm.assignment_service import CrmAssignmentEngineService
 from app.crm.company_linking import (
     AmbiguousCompanyMatchException,
+    batch_resolve_companies,
     normalize_company_name,
+    normalize_gstin,
     resolve_or_create_company,
+    validate_gstin,
 )
 from app.crm.models import (
     CrmActivity,
@@ -53,6 +57,7 @@ from app.crm.schemas import (
     CrmImportConfirmResponse,
     CrmImportPreviewResponse,
     CrmImportRowPreview,
+    validate_crm_email,
 )
 from app.org_structure.models import DepartmentLeadershipAssignment, OrgRecordStatus
 from app.rbac.models import Role, RoleAssignmentStatus, UserRole
@@ -65,12 +70,40 @@ MAX_CSV_FILE_SIZE_BYTES = 5 * 1024 * 1024  # 5 MB
 MAX_CSV_ROW_COUNT = 5000
 
 
+# Pure signed numeric / international phone pattern preserved without formula prefixing
+_SAFE_SIGNED_NUMBER_OR_PHONE_RE = re.compile(r"^[+-]\d[\d\s\-\(\)\.,]*$")
+
+
+def sanitize_formula_text(val: str | None) -> str | None:
+    """
+    Neutralize spreadsheet/CSV formula injection on user-entered text fields safely:
+    - Trims outer whitespace/control characters (spaces, tabs, CR/LF).
+    - Never double-prefixes values already neutralized with leading single-quote before a trigger.
+    - Neutralizes values starting with '=', '@', or non-numeric '+'/'-' formulas (e.g. +CMD|, -2+3+cmd|).
+    - Preserves legitimate international phone numbers (+91...) and pure signed numbers (-150.25).
+    """
+    if val is None:
+        return None
+    cleaned = str(val).strip()
+    if not cleaned:
+        return ""
+    if len(cleaned) >= 2 and cleaned[0] == "'" and cleaned[1] in ("=", "+", "-", "@"):
+        return cleaned
+    first = cleaned[0]
+    if first in ("=", "@"):
+        return f"'{cleaned}"
+    if first in ("+", "-"):
+        if _SAFE_SIGNED_NUMBER_OR_PHONE_RE.fullmatch(cleaned):
+            return cleaned
+        return f"'{cleaned}"
+    return cleaned
+
+
 def sanitize_csv_cell(val: Any) -> str:
-    """Protect exported CSV text from formula injection attacks."""
-    s = str(val or "")
-    if s and s[0] in ("=", "+", "-", "@", "\t", "\r"):
-        return f"'{s}"
-    return s
+    """Protect exported CSV text from formula injection attacks without double-prefixing."""
+    if val is None:
+        return ""
+    return sanitize_formula_text(str(val)) or ""
 
 
 def _get_failure_outcome(reason: str) -> str:
@@ -78,10 +111,16 @@ def _get_failure_outcome(reason: str) -> str:
     r_lower = reason.lower()
     if "phone" in r_lower or "digit" in r_lower:
         return "Invalid Phone"
+    if "email" in r_lower:
+        return "Invalid Email"
+    if "gstin" in r_lower or "gst" in r_lower:
+        return "Invalid GSTIN"
     if "name" in r_lower:
         return "Invalid Name"
     if "campaign" in r_lower:
         return "Invalid Campaign"
+    if "company" in r_lower or "ambiguous" in r_lower:
+        return "Company Match Conflict"
     if "malformed" in r_lower or "fewer columns" in r_lower or "columns" in r_lower:
         return "Malformed Row"
     return "Invalid Field"
@@ -96,6 +135,10 @@ def _get_remediation_guidance(reason: str) -> str:
         return "Provide a 10-digit Indian mobile number or valid E.164 phone number."
     if "campaign cannot be blank" in r_lower:
         return "Specify the origin marketing campaign or source tag."
+    if "email" in r_lower:
+        return "Provide a valid email address (e.g., name@company.com) or leave the Email column blank."
+    if "gstin" in r_lower or "gst" in r_lower:
+        return "Provide a valid 15-character Indian GSTIN matching the intended company or leave GSTIN blank."
     if "phone" in r_lower or "digit" in r_lower:
         return "Check phone number formatting. Use 10 digits or E.164 international format."
     if "malformed" in r_lower:
@@ -156,12 +199,7 @@ def normalize_phone_number(raw_phone: str | None) -> tuple[str | None, str | Non
 
 def _sanitize_formula_prefix(val: str) -> str:
     """Prepend single quote if string starts with formula triggers to prevent CSV/spreadsheet injection."""
-    cleaned = val.strip()
-    if cleaned and cleaned[0] in ("=", "@", "+", "-", "\t", "\r"):
-        if cleaned.startswith(("+", "-")) and any(c.isdigit() for c in cleaned):
-            return cleaned
-        return f"'{cleaned}"
-    return cleaned
+    return sanitize_formula_text(val) or ""
 
 
 class CrmImportService:
@@ -169,6 +207,43 @@ class CrmImportService:
 
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
+
+    @staticmethod
+    def _is_lead_in_actor_scope(
+        lead: CrmLead,
+        allowed_scope: set[uuid.UUID] | None,
+        *,
+        is_salesperson: bool,
+        unassigned_owners_map: dict[uuid.UUID, tuple[bool, uuid.UUID | None]] | None = None,
+    ) -> bool:
+        """
+        Evaluate whether an existing CRM lead is within the caller's authorized visibility scope.
+        Mirrors CrmLeadService's strict fail-closed ownership policy:
+        - Admin (`allowed_scope is None`): full visibility.
+        - Assigned lead (`assigned_to is not None`): current assignee must be inside `allowed_scope`
+          (former creator/department loses visibility after reassignment).
+        - Unassigned lead (`assigned_to is None`):
+          * If assignment history exists: NEVER consult `created_by`.
+            - Salesperson: ALWAYS False (former salespersons do not regain access).
+            - Manager: True iff latest history unambiguously identifies an owner in `allowed_scope`
+              (ambiguous or incomplete history fails closed).
+          * If never assigned (no history):
+            - `created_by is None`: ALWAYS False (Admin/SuperAdmin only; BLK-03).
+            - Otherwise: `created_by in allowed_scope`.
+        """
+        if allowed_scope is None:
+            return True
+        if lead.assigned_to is not None:
+            return lead.assigned_to in allowed_scope
+        if unassigned_owners_map is not None and lead.id in unassigned_owners_map:
+            has_history, unambiguous_owner_id = unassigned_owners_map[lead.id]
+            if has_history:
+                if is_salesperson:
+                    return False
+                return unambiguous_owner_id is not None and unambiguous_owner_id in allowed_scope
+        if lead.created_by is None:
+            return False
+        return lead.created_by in allowed_scope
 
     async def get_actor_scope(self, actor: CurrentUser) -> set[uuid.UUID] | None:
         """
@@ -312,23 +387,39 @@ class CrmImportService:
 
         raw_headers = rows[0]
         header_map: dict[str, int] = {}
+        raw_header_names: dict[str, str] = {}
         for idx, col in enumerate(raw_headers):
-            cleaned = col.strip().lower()
-            if cleaned:
-                header_map[cleaned] = idx
+            cleaned = re.sub(r"\s+", " ", col.strip().lower())
+            if not cleaned:
+                continue
+            if cleaned in header_map:
+                raise BadRequestException(
+                    f"Duplicate CSV header detected: '{col.strip()}' conflicts with column "
+                    f"'{raw_header_names[cleaned]}'. Please ensure all CSV column headers are unique."
+                )
+            header_map[cleaned] = idx
+            raw_header_names[cleaned] = col.strip()
 
-        # Allow flexible aliases for required columns
-        if "number" not in header_map:
-            for alt in ("phone", "mobile", "contact_number", "contact number", "phone_number", "phone number"):
-                if alt in header_map:
-                    header_map["number"] = header_map[alt]
-                    break
-
-        if "name" not in header_map:
-            for alt in ("contact_name", "contact name", "prospect_name", "prospect name", "lead_name", "lead name"):
-                if alt in header_map:
-                    header_map["name"] = header_map[alt]
-                    break
+        # Normalize canonical aliases and reject conflicting alias duplicates (e.g., Name + Contact Name)
+        canonical_alias_groups: dict[str, tuple[str, ...]] = {
+            "name": ("name", "contact_name", "contact name", "prospect_name", "prospect name", "lead_name", "lead name"),
+            "number": ("number", "phone", "mobile", "contact_number", "contact number", "phone_number", "phone number"),
+            "campaign": ("campaign",),
+            "priority": ("priority", "lead_priority", "lead priority"),
+            "company": ("company", "company_name", "company name"),
+            "email": ("email", "email_address", "email address", "contact_email", "contact email"),
+            "gstin": ("gstin", "gst_number", "gst number", "gst", "tax_id", "tax id", "tax_id_number", "tax id / gst number"),
+        }
+        for canonical, aliases in canonical_alias_groups.items():
+            matched_aliases = [alias for alias in aliases if alias in header_map]
+            if len(matched_aliases) > 1:
+                conflict_labels = ", ".join(f"'{raw_header_names[a]}'" for a in matched_aliases)
+                raise BadRequestException(
+                    f"Duplicate CSV header detected for '{canonical}': conflicting columns {conflict_labels}. "
+                    "Please keep only one column per field."
+                )
+            if len(matched_aliases) == 1 and canonical not in header_map:
+                header_map[canonical] = header_map[matched_aliases[0]]
 
         # Validate required columns
         required_cols = ("name", "number", "campaign")
@@ -418,21 +509,13 @@ class CrmImportService:
         number_idx = header_map["number"]
         campaign_idx = header_map["campaign"]
         priority_idx = header_map.get("priority")
-        if priority_idx is None:
-            priority_idx = header_map.get("lead_priority")
-        if priority_idx is None:
-            priority_idx = header_map.get("lead priority")
-
         company_idx = header_map.get("company")
-        if company_idx is None:
-            company_idx = header_map.get("company_name")
-        if company_idx is None:
-            company_idx = header_map.get("company name")
+        email_idx = header_map.get("email")
+        gstin_idx = header_map.get("gstin")
 
-        # First pass: parse rows and collect candidate normalized phones
+        # Pass 1 (in-memory only — zero per-row SQL): parse rows, validate fields, collect company/phone keys
         parsed_rows: list[dict[str, Any]] = []
-        valid_normalized_phones: set[str] = set()
-        proposed_new_companies: dict[str, int] = {}
+        company_lookup_inputs: list[tuple[str | None, str | None]] = []
 
         for idx, row in enumerate(data_rows, start=2):  # row 1 is header
             name_val = _sanitize_formula_prefix(row[name_idx]) if len(row) > name_idx else ""
@@ -443,6 +526,8 @@ class CrmImportService:
                 if company_idx is not None and len(row) > company_idx
                 else ""
             )
+            raw_email = row[email_idx].strip() if email_idx is not None and len(row) > email_idx else ""
+            raw_gstin = row[gstin_idx].strip() if gstin_idx is not None and len(row) > gstin_idx else ""
 
             # Check blank errors
             row_errors: list[str] = []
@@ -458,6 +543,21 @@ class CrmImportService:
                 norm_phone, phone_err = normalize_phone_number(number_val)
                 if phone_err:
                     row_errors.append(phone_err)
+
+            # Optional Email validation (LM-DEF-025)
+            norm_email: str | None = None
+            if raw_email:
+                try:
+                    norm_email = validate_crm_email(raw_email)
+                except ValueError as ve:
+                    row_errors.append(str(ve))
+
+            # Optional GSTIN validation (LM-DEF-023)
+            norm_gstin: str | None = None
+            if raw_gstin:
+                norm_gstin, gst_err = validate_gstin(raw_gstin)
+                if gst_err:
+                    row_errors.append(gst_err)
 
             # Optional Priority column validation with documented fallback to 'medium'
             priority_val = "medium"
@@ -476,50 +576,8 @@ class CrmImportService:
             if is_malformed:
                 row_errors.append("Malformed record: row has fewer columns than required.")
 
-            # Validate company matching / ambiguity in preview
-            matched_company_id: uuid.UUID | None = None
-            matched_company_name: str | None = None
-            company_action: str | None = None
-            company_resolution_note: str | None = None
-
-            if not company_val:
-                company_action = "NONE"
-                company_resolution_note = "No company provided (lead will not be linked to a company)"
-            elif not row_errors:
-                try:
-                    c_id, c_name, _ = await resolve_or_create_company(
-                        self.session,
-                        company_name=company_val,
-                        contact_name=name_val,
-                        auto_create=False,
-                    )
-                    if c_id:
-                        matched_company_id = c_id
-                        matched_company_name = c_name
-                        company_action = "EXISTING"
-                        company_resolution_note = f"Existing company '{c_name}' matched (will be reused)"
-                    else:
-                        norm_cname = normalize_company_name(company_val)
-                        if norm_cname in proposed_new_companies:
-                            first_row = proposed_new_companies[norm_cname]
-                            company_action = "NEW"
-                            matched_company_name = company_val
-                            company_resolution_note = f"Reuses proposed new company '{company_val}' (from row {first_row})"
-                        else:
-                            proposed_new_companies[norm_cname] = idx
-                            company_action = "NEW"
-                            matched_company_name = company_val
-                            company_resolution_note = f"New company '{company_val}' will be created upon confirmation"
-                except AmbiguousCompanyMatchException:
-                    company_action = "AMBIGUOUS"
-                    company_resolution_note = f"Ambiguous company match: multiple existing companies match '{company_val}'"
-                    row_errors.append(
-                        f"Ambiguous company match: multiple existing companies match '{company_val}'. "
-                        "Please specify the full company name or link manually."
-                    )
-
-            if norm_phone and not row_errors:
-                valid_normalized_phones.add(norm_phone)
+            if not row_errors and (company_val or norm_gstin):
+                company_lookup_inputs.append((company_val or None, norm_gstin))
 
             parsed_rows.append({
                 "row_number": idx,
@@ -527,29 +585,103 @@ class CrmImportService:
                 "original_phone": number_val,
                 "normalized_phone": norm_phone,
                 "campaign": campaign_val,
+                "email": norm_email,
+                "gstin": norm_gstin,
                 "company": company_val if company_val else None,
-                "company_id": matched_company_id,
-                "matched_company_name": matched_company_name,
-                "company_action": company_action,
-                "company_resolution_note": company_resolution_note,
+                "company_id": None,
+                "matched_company_name": None,
+                "company_action": None,
+                "company_resolution_note": None,
                 "priority": priority_val,
                 "errors": row_errors,
             })
 
+        # Single bounded batched DB resolution across all unique (company_name, gstin) inputs (LM-DEF-022 & LM-DEF-023)
+        batch_company_matches = (
+            await batch_resolve_companies(self.session, company_lookup_inputs)
+            if company_lookup_inputs
+            else {}
+        )
 
-        # Query existing CRM leads by normalized phone
+        valid_normalized_phones: set[str] = set()
+        proposed_new_companies: dict[str, int] = {}
+
+        for r in parsed_rows:
+            idx = r["row_number"]
+            company_val = r["company"] or ""
+            norm_gstin = r["gstin"]
+            row_errors = r["errors"]
+            norm_phone = r["normalized_phone"]
+
+            if not company_val and not norm_gstin:
+                r["company_action"] = "NONE"
+                r["company_resolution_note"] = "No company provided (lead will not be linked to a company)"
+            elif not row_errors:
+                lookup_key = (normalize_company_name(company_val).lower(), norm_gstin or "")
+                match_res = batch_company_matches.get(lookup_key)
+                if match_res and match_res.status == "EXISTING" and match_res.company_id is not None:
+                    r["company_id"] = match_res.company_id
+                    r["matched_company_name"] = match_res.company_name
+                    r["company_action"] = "EXISTING"
+                    r["company_resolution_note"] = match_res.message or (
+                        f"Existing company '{match_res.company_name}' matched (will be reused)"
+                    )
+                elif match_res and match_res.status in ("AMBIGUOUS", "CONFLICT"):
+                    r["company_action"] = "AMBIGUOUS"
+                    msg = match_res.message or f"Ambiguous company match: multiple existing companies match '{company_val}'"
+                    r["company_resolution_note"] = msg
+                    row_errors.append(
+                        f"{msg} Please specify the full company name/GSTIN or link manually."
+                    )
+                else:
+                    effective_label = company_val or r["name"]
+                    norm_cname = normalize_company_name(effective_label)
+                    dedup_key = f"gst:{norm_gstin}" if norm_gstin else f"name:{norm_cname.lower()}"
+                    if dedup_key in proposed_new_companies:
+                        first_row = proposed_new_companies[dedup_key]
+                        r["company_action"] = "NEW"
+                        r["matched_company_name"] = effective_label
+                        r["company_resolution_note"] = (
+                            f"Reuses proposed new company '{effective_label}' (from row {first_row})"
+                        )
+                    else:
+                        proposed_new_companies[dedup_key] = idx
+                        r["company_action"] = "NEW"
+                        r["matched_company_name"] = effective_label
+                        r["company_resolution_note"] = (
+                            f"New company '{effective_label}' will be created upon confirmation"
+                        )
+
+            if norm_phone and not row_errors:
+                valid_normalized_phones.add(norm_phone)
+
+        # Query existing CRM leads by normalized phone (chunked to stay bounded on max-size batches)
         existing_crm_leads: dict[str, CrmLead] = {}
         if valid_normalized_phones:
-            lead_stmt = (
-                select(CrmLead)
-                .where(
-                    CrmLead.normalized_phone.in_(list(valid_normalized_phones)),
-                    CrmLead.deleted_at.is_(None),
+            phone_list = list(valid_normalized_phones)
+            for i in range(0, len(phone_list), 1000):
+                phone_chunk = phone_list[i : i + 1000]
+                lead_stmt = (
+                    select(CrmLead)
+                    .where(
+                        CrmLead.normalized_phone.in_(phone_chunk),
+                        CrmLead.deleted_at.is_(None),
+                    )
                 )
+                leads = (await self.session.execute(lead_stmt)).scalars().all()
+                for l in leads:
+                    existing_crm_leads[l.normalized_phone] = l
+
+        unassigned_dup_ids = [
+            l.id for l in existing_crm_leads.values() if l.assigned_to is None
+        ]
+        unassigned_owners_map: dict[uuid.UUID, tuple[bool, uuid.UUID | None]] = {}
+        if unassigned_dup_ids and allowed_scope is not None:
+            from app.crm.lead_service import resolve_unassigned_leads_effective_owners
+
+            unassigned_owners_map = await resolve_unassigned_leads_effective_owners(
+                self.session, unassigned_dup_ids
             )
-            leads = (await self.session.execute(lead_stmt)).scalars().all()
-            for l in leads:
-                existing_crm_leads[l.normalized_phone] = l
 
         # Second pass: evaluate duplicates, conflicts, and outcomes
         file_seen_phones: dict[str, dict[str, Any]] = {}
@@ -584,6 +716,8 @@ class CrmImportService:
                         validation_message="; ".join(errors),
                         is_valid_candidate=False,
                         matched_lead_code=None,
+                        email=r.get("email"),
+                        gstin=r.get("gstin"),
                         company=r.get("company"),
                         company_id=r.get("company_id"),
                         matched_company_name=r.get("matched_company_name"),
@@ -663,19 +797,34 @@ class CrmImportService:
                 lead = existing_crm_leads[norm_phone]
                 duplicate_crm_count += 1
 
-                # Check caller scope for privacy
-                is_within_scope = (
-                    allowed_scope is None
-                    or lead.assigned_to in allowed_scope
-                    or lead.created_by in allowed_scope
+                # Check caller scope for privacy (consistent with reassignment ownership rules)
+                is_within_scope = self._is_lead_in_actor_scope(
+                    lead,
+                    allowed_scope,
+                    is_salesperson=(
+                        allowed_scope is not None
+                        and len(allowed_scope) == 1
+                        and actor.id in allowed_scope
+                    ),
+                    unassigned_owners_map=unassigned_owners_map,
                 )
 
                 if is_within_scope:
                     msg = f"Contact already exists in CRM (Lead Code: {lead.lead_code}). New campaign will be attributed."
                     matched_code = lead.lead_code
+                    row_priority = lead.priority or p_val
+                    row_company_id = r.get("company_id")
+                    row_matched_company_name = r.get("matched_company_name")
+                    row_company_action = r.get("company_action")
+                    row_company_resolution_note = r.get("company_resolution_note")
                 else:
                     msg = "Contact already exists in CRM. New campaign will be attributed."
                     matched_code = None
+                    row_priority = p_val
+                    row_company_id = None
+                    row_matched_company_name = None
+                    row_company_action = None
+                    row_company_resolution_note = None
 
                 preview_rows.append(
                     CrmImportRowPreview(
@@ -684,16 +833,18 @@ class CrmImportService:
                         original_phone=orig_phone,
                         normalized_phone=norm_phone,
                         campaign=camp,
-                        priority=lead.priority or p_val,
+                        priority=row_priority,
                         status="CRM_DUPLICATE",
                         validation_message=msg,
                         is_valid_candidate=False,
                         matched_lead_code=matched_code,
+                        email=r.get("email"),
+                        gstin=r.get("gstin"),
                         company=r.get("company"),
-                        company_id=r.get("company_id"),
-                        matched_company_name=r.get("matched_company_name"),
-                        company_action=r.get("company_action"),
-                        company_resolution_note=r.get("company_resolution_note"),
+                        company_id=row_company_id,
+                        matched_company_name=row_matched_company_name,
+                        company_action=row_company_action,
+                        company_resolution_note=row_company_resolution_note,
                     )
                 )
                 continue
@@ -712,6 +863,8 @@ class CrmImportService:
                     validation_message="Valid lead candidate ready for import.",
                     is_valid_candidate=True,
                     matched_lead_code=None,
+                    email=r.get("email"),
+                    gstin=r.get("gstin"),
                     company=r.get("company"),
                     company_id=r.get("company_id"),
                     matched_company_name=r.get("matched_company_name"),
@@ -895,10 +1048,32 @@ class CrmImportService:
         self.session.add(batch)
         await self.session.flush()
 
-        # Re-fetch existing CRM leads with lock inside transaction
-        candidate_phones = [
-            r.normalized_phone for r in preview.rows if r.normalized_phone and r.status in ("VALID", "CRM_DUPLICATE")
-        ]
+        # Deduplicate & deterministically sort candidate normalized phones BEFORE locking
+        # so concurrent multi-row CSV imports with overlapping phones in opposite row orders
+        # always acquire transaction-scoped advisory locks in the exact same order (deadlock-free)
+        # and share the identical lock namespace (`crm_lead_phone:<phone>`) with manual lead creation.
+        candidate_phones = sorted(
+            {
+                r.normalized_phone
+                for r in preview.rows
+                if r.normalized_phone and r.status in ("VALID", "CRM_DUPLICATE")
+            }
+        )
+        bind = self.session.get_bind()
+        is_pg = bind is not None and bind.dialect.name == "postgresql"
+        if is_pg and candidate_phones:
+            # Single batched advisory lock query preserving exact sorted ascending acquisition order
+            # and identical lock namespace (`crm_lead_phone:<phone>`) with manual lead creation.
+            await self.session.execute(
+                text(
+                    "SELECT pg_advisory_xact_lock(hashtext('crm_lead_phone:' || p)) "
+                    "FROM unnest(CAST(:phones AS text[])) WITH ORDINALITY AS t(p, ord) "
+                    "ORDER BY ord"
+                ),
+                {"phones": candidate_phones},
+            )
+
+        # Re-fetch existing CRM leads AFTER acquiring advisory locks (fresh READ COMMITTED view)
         existing_crm_leads: dict[str, CrmLead] = {}
         if candidate_phones:
             lead_stmt = (
@@ -907,11 +1082,108 @@ class CrmImportService:
                     CrmLead.normalized_phone.in_(candidate_phones),
                     CrmLead.deleted_at.is_(None),
                 )
+                .order_by(CrmLead.id.asc())
                 .with_for_update()
             )
             leads = (await self.session.execute(lead_stmt)).scalars().all()
             for l in leads:
                 existing_crm_leads[l.normalized_phone] = l
+
+        confirm_unassigned_dup_ids = [
+            l.id for l in existing_crm_leads.values() if l.assigned_to is None
+        ]
+        confirm_unassigned_owners_map: dict[uuid.UUID, tuple[bool, uuid.UUID | None]] = {}
+        if confirm_unassigned_dup_ids and allowed_scope is not None:
+            from app.crm.lead_service import resolve_unassigned_leads_effective_owners
+
+            confirm_unassigned_owners_map = await resolve_unassigned_leads_effective_owners(
+                self.session, confirm_unassigned_dup_ids
+            )
+
+        def _handle_existing_crm_duplicate(
+            existing_lead: CrmLead,
+            row: CrmImportRowPreview,
+            norm_phone: str,
+        ) -> CrmImportRowPreview:
+            """
+            Non-destructively attribute a new campaign touchpoint onto an existing lead
+            while preserving its owner, pipeline, stage, status, and Wave 1 privacy masking.
+            """
+            cf = dict(existing_lead.custom_fields or {})
+            camp_hist = list(cf.get("campaign_history") or [])
+            existing_camps = {
+                c.get("campaign", "").strip().lower()
+                for c in camp_hist
+                if isinstance(c, dict) and c.get("campaign")
+            }
+            if existing_lead.campaign:
+                existing_camps.add(existing_lead.campaign.strip().lower())
+
+            clean_campaign = (row.campaign or "").strip()
+            is_new_campaign = bool(clean_campaign and clean_campaign.lower() not in existing_camps)
+
+            if is_new_campaign:
+                camp_hist.append({
+                    "campaign": clean_campaign,
+                    "observed_at": datetime.now(timezone.utc).isoformat(),
+                    "batch_id": str(batch.id),
+                })
+                cf["campaign_history"] = camp_hist
+                existing_lead.custom_fields = cf
+                flag_modified(existing_lead, "custom_fields")
+
+                activity = CrmActivity(
+                    lead_id=existing_lead.id,
+                    activity_type="campaign",
+                    subject=f"Campaign Touchpoint: {clean_campaign}",
+                    description=f"Duplicate contact observed in CSV batch '{batch.batch_name}'",
+                    performed_by=actor.id,
+                )
+                self.session.add(activity)
+
+            is_within_scope = self._is_lead_in_actor_scope(
+                existing_lead,
+                allowed_scope,
+                is_salesperson=is_salesperson,
+                unassigned_owners_map=confirm_unassigned_owners_map,
+            )
+            row_input_priority = getattr(row, "priority", None) or "medium"
+            if is_within_scope:
+                matched_code = existing_lead.lead_code
+                res_priority = existing_lead.priority or row_input_priority
+                res_company_id = existing_lead.company_id or row.company_id
+                res_matched_company_name = existing_lead.company_name or row.matched_company_name
+                res_company_action = row.company_action or ("EXISTING" if existing_lead.company_id else "NONE")
+                res_company_resolution_note = row.company_resolution_note
+            else:
+                matched_code = None
+                res_priority = row_input_priority
+                res_company_id = None
+                res_matched_company_name = None
+                res_company_action = None
+                res_company_resolution_note = None
+
+            return CrmImportRowPreview(
+                row_number=row.row_number,
+                name=row.name,
+                original_phone=row.original_phone,
+                normalized_phone=norm_phone,
+                campaign=row.campaign,
+                priority=res_priority,
+                status="CRM_DUPLICATE",
+                validation_message=(
+                    f"Duplicate contact preserved. Attributed campaign '{clean_campaign}'."
+                    if is_new_campaign
+                    else f"Duplicate contact preserved. Campaign '{clean_campaign}' already recorded."
+                ),
+                is_valid_candidate=False,
+                matched_lead_code=matched_code,
+                company=row.company,
+                company_id=res_company_id,
+                matched_company_name=res_matched_company_name,
+                company_action=res_company_action,
+                company_resolution_note=res_company_resolution_note,
+            )
 
         success_count = 0
         skipped_count = 0
@@ -983,93 +1255,61 @@ class CrmImportService:
             if norm_phone in existing_crm_leads:
                 existing_lead = existing_crm_leads[norm_phone]
                 skipped_count += 1
-
-                # Preserve original campaign, owner, pipeline, stage, name!
-                # Record newly observed campaign attribution in custom_fields
-                cf = dict(existing_lead.custom_fields or {})
-                camp_hist = list(cf.get("campaign_history") or [])
-                existing_camps = {
-                    c.get("campaign", "").strip().lower()
-                    for c in camp_hist
-                    if isinstance(c, dict) and c.get("campaign")
-                }
-                if existing_lead.campaign:
-                    existing_camps.add(existing_lead.campaign.strip().lower())
-
-                clean_campaign = (row.campaign or "").strip()
-                is_new_campaign = bool(clean_campaign and clean_campaign.lower() not in existing_camps)
-
-                if is_new_campaign:
-                    camp_hist.append({
-                        "campaign": clean_campaign,
-                        "observed_at": datetime.now(timezone.utc).isoformat(),
-                        "batch_id": str(batch.id),
-                    })
-                    cf["campaign_history"] = camp_hist
-                    existing_lead.custom_fields = cf
-                    flag_modified(existing_lead, "custom_fields")
-
-                    # Record touchpoint activity for the duplicate encounter only for new campaigns
-                    activity = CrmActivity(
-                        lead_id=existing_lead.id,
-                        activity_type="campaign",
-                        subject=f"Campaign Touchpoint: {clean_campaign}",
-                        description=f"Duplicate contact observed in CSV batch '{batch.batch_name}'",
-                        performed_by=actor.id,
-                    )
-                    self.session.add(activity)
-
                 final_row_results.append(
-                    CrmImportRowPreview(
-                        row_number=row.row_number,
-                        name=row.name,
-                        original_phone=row.original_phone,
-                        normalized_phone=norm_phone,
-                        campaign=row.campaign,
-                        priority=existing_lead.priority,
-                        status="CRM_DUPLICATE",
-                        validation_message=(
-                            f"Duplicate contact preserved. Attributed campaign '{clean_campaign}'."
-                            if is_new_campaign
-                            else f"Duplicate contact preserved. Campaign '{clean_campaign}' already recorded."
-                        ),
-                        is_valid_candidate=False,
-                        matched_lead_code=existing_lead.lead_code,
-                        company=row.company,
-                        company_id=existing_lead.company_id or row.company_id,
-                        matched_company_name=existing_lead.company_name or row.matched_company_name,
-                        company_action=row.company_action or ("EXISTING" if existing_lead.company_id else "NONE"),
-                        company_resolution_note=row.company_resolution_note,
-                    )
+                    _handle_existing_crm_duplicate(existing_lead, row, norm_phone)
                 )
             else:
-                # Resolve or reuse company record
+                # Resolve or reuse company record (reuse preview's batched EXISTING match with zero redundant SQL)
                 cand_comp = getattr(row, "company", None)
+                row_gstin = normalize_gstin(getattr(row, "gstin", None))
                 comp_id: uuid.UUID | None = None
                 comp_name: str | None = None
                 created_new_comp: bool = False
-                if cand_comp and cand_comp.strip():
-                    norm_cname = normalize_company_name(cand_comp)
-                    if norm_cname in batch_companies:
-                        comp_id, comp_name, created_new_comp = batch_companies[norm_cname]
+                if (cand_comp and cand_comp.strip()) or row_gstin:
+                    effective_comp_name = cand_comp.strip() if (cand_comp and cand_comp.strip()) else row.name
+                    norm_cname = normalize_company_name(effective_comp_name)
+                    cache_key = f"gst:{row_gstin}" if row_gstin else f"name:{norm_cname.lower()}"
+                    if row.company_action == "EXISTING" and row.company_id is not None:
+                        comp_id = row.company_id
+                        comp_name = row.matched_company_name or effective_comp_name
+                        created_new_comp = False
+                        batch_companies[cache_key] = (comp_id, comp_name, False)
+                    elif cache_key in batch_companies:
+                        comp_id, comp_name, created_new_comp = batch_companies[cache_key]
                     else:
                         comp_id, comp_name, created_new_comp = await resolve_or_create_company(
                             self.session,
-                            company_name=cand_comp.strip(),
+                            company_name=effective_comp_name,
+                            tax_id=row_gstin,
                             contact_name=row.name,
                             contact_phone=norm_phone,
                             actor_id=actor.id,
                             auto_create=True,
+                            skip_partial_match=(row.company_action == "NEW"),
                         )
-                        batch_companies[norm_cname] = (comp_id, comp_name, created_new_comp)
+                        batch_companies[cache_key] = (comp_id, comp_name, created_new_comp)
 
-                # Valid new lead creation
-                success_count += 1
+                # Valid new lead creation with savepoint fallback for normalized-phone uniqueness
                 row_priority = getattr(row, "priority", None) or "medium"
+                lead_custom_fields: dict[str, Any] = {
+                    "batch_id": str(batch.id),
+                    "batch_name": batch.batch_name,
+                    "campaign_history": [
+                        {
+                            "campaign": row.campaign,
+                            "observed_at": datetime.now(timezone.utc).isoformat(),
+                            "batch_id": str(batch.id),
+                        }
+                    ],
+                }
+                if row_gstin:
+                    lead_custom_fields["gstin"] = row_gstin
+
                 new_lead = CrmLead(
                     name=row.name,
                     original_phone=row.original_phone,
                     normalized_phone=norm_phone,
+                    email=getattr(row, "email", None),
                     company_name=comp_name,
                     company_id=comp_id,
                     campaign=row.campaign,
@@ -1081,20 +1321,58 @@ class CrmImportService:
                     stage_id=initial_stage.id,
                     status="new",
                     priority=row_priority,
-                    custom_fields={
-                        "batch_id": str(batch.id),
-                        "batch_name": batch.batch_name,
-                        "campaign_history": [
-                            {
-                                "campaign": row.campaign,
-                                "observed_at": datetime.now(timezone.utc).isoformat(),
-                                "batch_id": str(batch.id),
-                            }
-                        ],
-                    },
+                    custom_fields=lead_custom_fields,
                 )
-                self.session.add(new_lead)
-                await self.session.flush()
+                try:
+                    async with self.session.begin_nested():
+                        self.session.add(new_lead)
+                        await self.session.flush()
+                except IntegrityError as exc:
+                    err_str = str(exc).lower()
+                    orig_code = getattr(getattr(exc, "orig", None), "sqlstate", None)
+                    is_phone_unique_conflict = (
+                        "uq_crm_leads_active_normalized_phone" in err_str
+                        or (
+                            orig_code == "23505"
+                            and "normalized_phone" in err_str
+                        )
+                    )
+                    if not is_phone_unique_conflict:
+                        raise
+
+                    # Concurrent writer won the phone uniqueness race; recover safely as CRM_DUPLICATE
+                    dup_winner = (
+                        await self.session.execute(
+                            select(CrmLead)
+                            .where(
+                                CrmLead.normalized_phone == norm_phone,
+                                CrmLead.deleted_at.is_(None),
+                            )
+                            .with_for_update()
+                        )
+                    ).scalar_one_or_none()
+                    if dup_winner is None:
+                        raise
+                    existing_crm_leads[norm_phone] = dup_winner
+                    if (
+                        dup_winner.assigned_to is None
+                        and allowed_scope is not None
+                        and dup_winner.id not in confirm_unassigned_owners_map
+                    ):
+                        from app.crm.lead_service import resolve_unassigned_leads_effective_owners
+
+                        confirm_unassigned_owners_map.update(
+                            await resolve_unassigned_leads_effective_owners(
+                                self.session, [dup_winner.id]
+                            )
+                        )
+                    skipped_count += 1
+                    final_row_results.append(
+                        _handle_existing_crm_duplicate(dup_winner, row, norm_phone)
+                    )
+                    continue
+
+                success_count += 1
 
                 # Add creation touchpoint activity
                 activity = CrmActivity(

@@ -2,7 +2,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { AppShell } from "@/components/AppShell";
 import { Breadcrumb } from "@/components/Breadcrumb";
 import { IconCreditCard, IconFileText, IconCoins, IconReceipt } from "@/components/icons";
-import { apiDelete, apiGet, apiPost, apiPostMultipart, apiPut, errorMessage } from "@/lib/api";
+import { API_BASE, apiDelete, apiGet, apiPost, apiPostMultipart, apiPut, errorMessage } from "@/lib/api";
+import { Auth } from "@/lib/auth";
 import { useAuth } from "@/lib/hooks";
 import { useToast } from "@/lib/toast";
 import "./hrms.css";
@@ -68,7 +69,7 @@ export const EXPENSE_CATEGORIES = [
 ] as const;
 
 const ALLOWED_RECEIPT_EXTENSIONS = ["png", "jpg", "jpeg", "webp", "pdf"];
-const MAX_RECEIPT_SIZE_BYTES = 50 * 1024 * 1024; // 50MB
+const MAX_RECEIPT_SIZE_BYTES = 10 * 1024 * 1024; // 10MB
 
 function ExpensesTableSkeletonRows({ viewMode = "my", rowCount = 5 }: { viewMode?: "my" | "approvals"; rowCount?: number }) {
   return (
@@ -287,12 +288,43 @@ export function ExpensesPage() {
       if (!ext || !ALLOWED_RECEIPT_EXTENSIONS.includes(ext)) {
         errors.receipt = `Invalid file type. Allowed formats: ${ALLOWED_RECEIPT_EXTENSIONS.join(", ")}`;
       } else if (formReceiptFile.size > MAX_RECEIPT_SIZE_BYTES) {
-        errors.receipt = "File size exceeds the 50MB limit.";
+        errors.receipt = "File size exceeds the 10MB limit.";
       }
     }
 
     setFormValidationErrors(errors);
     return Object.keys(errors).length === 0;
+  };
+
+  // ---------------------------------------------------------------------------
+  // Authenticated Receipt Viewer (Private Storage)
+  // ---------------------------------------------------------------------------
+
+  const handleOpenReceipt = async (exp: ExpenseItem) => {
+    try {
+      const token = Auth.getAccessToken();
+      const res = await fetch(`${API_BASE}/hrms/expenses/${exp.id}/receipt`, {
+        method: "GET",
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (!res.ok) {
+        let msg = `Unable to open receipt (HTTP ${res.status})`;
+        try {
+          const errJson = await res.json();
+          msg = errJson.detail || errJson.message || msg;
+        } catch {
+          // keep fallback
+        }
+        toast(msg, "error");
+        return;
+      }
+      const blob = await res.blob();
+      const blobUrl = window.URL.createObjectURL(blob);
+      window.open(blobUrl, "_blank", "noopener,noreferrer");
+      setTimeout(() => window.URL.revokeObjectURL(blobUrl), 60000);
+    } catch (err: unknown) {
+      toast(errorMessage(err) || "Failed to load expense receipt.", "error");
+    }
   };
 
   // ---------------------------------------------------------------------------
@@ -922,17 +954,16 @@ export function ExpensesPage() {
                       {/* Receipt */}
                       <td>
                         {exp.receipt_url ? (
-                          <a
-                            href={exp.receipt_url}
-                            target="_blank"
-                            rel="noopener noreferrer"
+                          <button
+                            type="button"
+                            onClick={() => handleOpenReceipt(exp)}
                             className="hrms-btn-action"
                             style={{ color: "var(--color-primary, #0061f2)", textDecoration: "none" }}
                             title={exp.receipt_filename || "View receipt"}
                           >
                             <IconReceipt style={{ width: "13px", height: "13px" }} />
                             Receipt
-                          </a>
+                          </button>
                         ) : (
                           <span style={{ color: "var(--color-muted, #94a3b8)", fontSize: "12px" }}>
                             —
@@ -1553,16 +1584,15 @@ export function ExpensesPage() {
                   </div>
                   {detailExpense.receipt_url ? (
                     <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                      <a
-                        href={detailExpense.receipt_url}
-                        target="_blank"
-                        rel="noopener noreferrer"
+                      <button
+                        type="button"
+                        onClick={() => handleOpenReceipt(detailExpense)}
                         className="btn btn-outline"
                         style={{ display: "inline-flex", alignItems: "center", gap: "6px", fontSize: "13px" }}
                       >
                         <IconReceipt style={{ width: "14px", height: "14px" }} />
                         Open Receipt Attachment
-                      </a>
+                      </button>
                       <span style={{ fontSize: "12px", color: "#64748b" }}>
                         ({detailExpense.receipt_filename || "receipt"})
                       </span>

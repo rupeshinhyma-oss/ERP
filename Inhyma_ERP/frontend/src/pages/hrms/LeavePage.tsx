@@ -333,6 +333,8 @@ export function LeavePage() {
   const [applyLeaveTypeId, setApplyLeaveTypeId] = useState<string>("");
   const [applyFromDate, setApplyFromDate] = useState<string>("");
   const [applyToDate, setApplyToDate] = useState<string>("");
+  const [applyIsHalfDay, setApplyIsHalfDay] = useState<boolean>(false);
+  const [applyHalfDaySession, setApplyHalfDaySession] = useState<"FIRST_HALF" | "SECOND_HALF">("FIRST_HALF");
   const [applyCalculatedDays, setApplyCalculatedDays] = useState<number>(0);
   const [applyReason, setApplyReason] = useState<string>("");
   const [applyAttachment, setApplyAttachment] = useState<string>("");
@@ -503,10 +505,25 @@ export function LeavePage() {
     }
   };
 
+  const canFetchOrgDirectories = Boolean(
+    canManageLeaveTypes || canAdjustBalances || canManageHolidays || isAdmin
+  );
+
+  const canReadRbacRoles = Boolean(
+    isSuperAdmin ||
+    profile?.role === "ADMIN" ||
+    profile?.role === "super_admin" ||
+    hasPermission?.("*") ||
+    hasPermission?.("rbac.view") ||
+    hasPermission?.("rbac.manage") ||
+    hasPermission?.("roles.view")
+  );
+
   const fetchOrgDepartmentsAndBranches = async () => {
+    if (!canFetchOrgDirectories) return;
     try {
       const [rolesRes, locsRes] = await Promise.allSettled([
-        apiGet<any>("/rbac/roles"),
+        canReadRbacRoles ? apiGet<any>("/rbac/roles") : Promise.resolve({ data: [] }),
         apiGet<any>("/hrms/setup/locations?active_only=true"),
       ]);
       if (rolesRes.status === "fulfilled") {
@@ -534,8 +551,14 @@ export function LeavePage() {
   // Initial load
   useEffect(() => {
     fetchLeaveTypes();
-    fetchOrgDepartmentsAndBranches();
   }, []);
+
+  // Load admin/HR org directory lists only for users with leave management rights (W3-10)
+  useEffect(() => {
+    if (canFetchOrgDirectories) {
+      fetchOrgDepartmentsAndBranches();
+    }
+  }, [canFetchOrgDirectories]);
 
   // Tab driven fetching
   useEffect(() => {
@@ -559,6 +582,16 @@ export function LeavePage() {
   // Automatic Working Days Calculation (Via Backend /hrms/leave/calculate-days)
   // -------------------------------------------------------------------------
 
+  // Auto-reset half-day toggle when range spans multiple days or selected leave type disallows half-day (W3-02)
+  useEffect(() => {
+    const selectedLt = applicableLeaveTypes.find((t) => t.id === applyLeaveTypeId) ||
+      leaveTypes.find((t) => t.id === applyLeaveTypeId);
+    const isSingleDay = Boolean(applyFromDate && applyToDate && applyFromDate === applyToDate);
+    if (applyIsHalfDay && (!isSingleDay || selectedLt?.allow_half_day === false)) {
+      setApplyIsHalfDay(false);
+    }
+  }, [applyFromDate, applyToDate, applyLeaveTypeId, applyIsHalfDay, applicableLeaveTypes, leaveTypes]);
+
   useEffect(() => {
     if (!applyFromDate || !applyToDate) {
       setApplyCalculatedDays(0);
@@ -574,6 +607,8 @@ export function LeavePage() {
     }
     setCalcError(null);
 
+    const effectiveHalfDay = Boolean(applyIsHalfDay && applyFromDate === applyToDate);
+
     let isMounted = true;
     const fetchCalc = async () => {
       try {
@@ -583,6 +618,7 @@ export function LeavePage() {
           to_date: applyToDate,
         });
         if (applyLeaveTypeId) params.append("leave_type_id", applyLeaveTypeId);
+        if (effectiveHalfDay) params.append("is_half_day", "true");
         const res = await apiGet<any>(`/hrms/leave/calculate-days?${params.toString()}`);
         if (isMounted) {
           const days = res.data?.number_of_days ?? res.data?.total_calendar_days ?? 0;
@@ -593,7 +629,7 @@ export function LeavePage() {
           // Calendar-day fallback
           const diffTime = Math.abs(to.getTime() - from.getTime());
           const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
-          setApplyCalculatedDays(diffDays);
+          setApplyCalculatedDays(effectiveHalfDay && diffDays === 1 ? 0.5 : diffDays);
         }
       } finally {
         if (isMounted) setCalculatingDays(false);
@@ -603,7 +639,7 @@ export function LeavePage() {
     return () => {
       isMounted = false;
     };
-  }, [applyFromDate, applyToDate, applyLeaveTypeId]);
+  }, [applyFromDate, applyToDate, applyLeaveTypeId, applyIsHalfDay]);
 
   // -------------------------------------------------------------------------
   // Action Handlers
@@ -680,16 +716,28 @@ export function LeavePage() {
 
     try {
       setLoading(true);
-      const payload = {
+      const effectiveHalfDay = Boolean(
+        applyIsHalfDay &&
+        applyFromDate === applyToDate &&
+        selectedLt.allow_half_day !== false
+      );
+      const payload: Record<string, any> = {
         leave_type_id: applyLeaveTypeId,
         from_date: applyFromDate,
         to_date: applyToDate,
         reason: applyReason.trim(),
         attachment: applyAttachment || null,
       };
+      if (effectiveHalfDay) {
+        payload.is_half_day = true;
+        payload.half_day_session = applyHalfDaySession;
+        payload.number_of_days = 0.5;
+      }
       await apiPost<LeaveRequest>("/hrms/leave/requests", payload);
       setSuccessMsg("Leave application submitted successfully.");
       setActiveModal(null);
+      setApplyIsHalfDay(false);
+      setApplyHalfDaySession("FIRST_HALF");
       setApplyReason("");
       setApplyAttachment("");
       setAttachmentFileName("");
@@ -2181,6 +2229,64 @@ export function LeavePage() {
                         />
                       </div>
                     </div>
+
+                    {/* Half-Day Leave Option (W3-02: Single-day + allow_half_day enabled) */}
+                    {applyFromDate && applyToDate && applyFromDate === applyToDate && (
+                      selectedLtInModal?.allow_half_day !== false ? (
+                        <div
+                          className="form-group"
+                          style={{
+                            marginBottom: 0,
+                            padding: "10px 12px",
+                            borderRadius: 6,
+                            background: "var(--color-bg-secondary, #f8fafc)",
+                            border: "1px solid var(--color-border, #e2e8f0)",
+                            display: "flex",
+                            flexDirection: "column",
+                            gap: 8,
+                          }}
+                        >
+                          <label
+                            htmlFor="apply-half-day-toggle"
+                            style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: 8,
+                              cursor: "pointer",
+                              fontSize: 13,
+                              fontWeight: 600,
+                              margin: 0,
+                            }}
+                          >
+                            <input
+                              id="apply-half-day-toggle"
+                              data-testid="apply-half-day-toggle"
+                              type="checkbox"
+                              checked={applyIsHalfDay}
+                              onChange={(e) => setApplyIsHalfDay(e.target.checked)}
+                            />
+                            <span>Apply as Half-Day Leave (0.5 Day)</span>
+                          </label>
+                          {applyIsHalfDay && (
+                            <select
+                              aria-label="Half-Day Session"
+                              data-testid="apply-half-day-session"
+                              className="form-control"
+                              style={{ width: "100%" }}
+                              value={applyHalfDaySession}
+                              onChange={(e) => setApplyHalfDaySession(e.target.value as "FIRST_HALF" | "SECOND_HALF")}
+                            >
+                              <option value="FIRST_HALF">First Half (Morning)</option>
+                              <option value="SECOND_HALF">Second Half (Afternoon)</option>
+                            </select>
+                          )}
+                        </div>
+                      ) : (
+                        <div style={{ fontSize: 12, color: "var(--color-muted, #64748b)" }}>
+                          Half-day leave is not enabled for {selectedLtInModal.name}.
+                        </div>
+                      )
+                    )}
 
                     {/* Number of Days (Calculated, read-only) */}
                     <div className="form-group" style={{ marginBottom: 0 }}>

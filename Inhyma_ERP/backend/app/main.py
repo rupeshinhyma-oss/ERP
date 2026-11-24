@@ -457,6 +457,15 @@ def create_application() -> FastAPI:
 
         clean_sub = sanitize_filename(subfolder)
         clean_file = sanitize_filename(filename)
+
+        # Confidential HRMS expense receipts and leave attachments require entity-level authorization
+        # and must not be exposed via a generic any-authenticated-user download route.
+        if clean_sub in ("expenses", "leave"):
+            raise HTTPException(
+                status_code=403,
+                detail="Confidential HRMS attachments must be accessed via the authorized HRMS endpoint.",
+            )
+
         target = (uploads_dir / "private" / clean_sub / clean_file).resolve()
         base_path = (uploads_dir / "private").resolve()
         if not str(target).startswith(str(base_path)):
@@ -480,12 +489,13 @@ def create_application() -> FastAPI:
             },
         )
 
-    # Public static uploads for product images, supplier media, branding logos, and expense receipts
-    (uploads_dir / "expenses").mkdir(parents=True, exist_ok=True)
+    # Private expense receipts directory (never mounted publicly)
+    (uploads_dir / "private" / "expenses").mkdir(parents=True, exist_ok=True)
+
+    # Public static uploads for product images, supplier media, and branding logos only
     (uploads_dir / "branding").mkdir(parents=True, exist_ok=True)
     app.mount("/uploads/products", StaticFiles(directory=uploads_dir / "products"), name="uploads_products")
     app.mount("/uploads/suppliers", StaticFiles(directory=uploads_dir / "suppliers"), name="uploads_suppliers")
-    app.mount("/uploads/expenses", StaticFiles(directory=uploads_dir / "expenses"), name="uploads_expenses")
     app.mount("/uploads/branding", StaticFiles(directory=uploads_dir / "branding"), name="uploads_branding")
     app.mount("/static/uploads", StaticFiles(directory=uploads_dir / "products"), name="static_uploads")
 

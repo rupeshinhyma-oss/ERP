@@ -13,10 +13,12 @@ Enforces the HRMS Access Model:
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 import uuid
 from dataclasses import dataclass, field
 from typing import Optional, Set
+
+IST = timezone(timedelta(hours=5, minutes=30))
 
 from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy import func, select
@@ -26,7 +28,7 @@ from app.auth.dependencies import get_auth_service
 from app.auth.service import AuthService
 from app.database.session import get_db_session
 from app.rbac.models import Role, RoleAssignmentStatus, UserRole
-from app.users.models import User, UserStatus
+from app.users.models import EmploymentStatus, User, UserStatus
 
 
 @dataclass
@@ -57,12 +59,16 @@ class HrmsUserContext:
         elif mod == "expense":
             mod = "expenses"
 
-        # Explicit deny / blocked tag
+        # Explicit deny / blocked tag (module-specific or global HRMS view deny)
         blocked_perms = {
             f"deny:hrms.{mod}",
             f"block:hrms.{mod}",
             f"deny:hrms.{mod}s",
             f"block:hrms.{mod}s",
+            "deny:hrms.view",
+            "block:hrms.view",
+            "deny:hrms",
+            "block:hrms",
         }
         if any(b in self.permissions for b in blocked_perms):
             return False
@@ -71,8 +77,10 @@ class HrmsUserContext:
         # HR has permissions seeded in role_permissions (hrms.attendance, hrms.leave, hrms.assets, hrms.expenses, hrms.site_visits, hrms.payroll).
         # If Admin explicitly revoked a module permission from HR, it is subtracted from self.permissions.
         if self.is_hr:
-            if mod == "payroll":
-                mod_perms = {"hrms.payroll", "hrms.payroll.view", "hrms.payroll.configure", "hrms.payroll.approve", "hrms.manage"}
+            if mod in ("setup", "payroll_setup"):
+                mod_perms = {"hrms.setup", "hrms.setup.view", "hrms.manage", "hrms.view"}
+            elif mod == "payroll":
+                mod_perms = {"hrms.payroll", "hrms.payroll.view", "hrms.payroll.configure", "hrms.payroll.approve"}
             else:
                 mod_perms = {f"hrms.{mod}", f"hrms.{mod}.view", f"hrms.{mod}s"}
             if not any(p in self.permissions for p in mod_perms):
@@ -84,12 +92,8 @@ class HrmsUserContext:
         if mod in ("attendance", "leave", "assets", "expenses", "site_visits", "payroll"):
             return True
 
-        # Setup / Global Configuration is strictly Admin / HR with manage
+        # Setup / Global Configuration is strictly Admin / HR with setup/manage
         if mod in ("setup", "payroll_setup"):
-            if self.is_admin:
-                return True
-            if self.is_hr and ("hrms.manage" in self.permissions or "hrms.setup" in self.permissions):
-                return True
             return False
 
         return False
@@ -100,6 +104,45 @@ class HrmsUserContext:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"Permission denied. You do not have access to the {module_name.replace('_', ' ').title()} module.",
+            )
+
+    def can_write_hrms(self, module_name: str, action: str = "create") -> bool:
+        """Verify whether caller can create/update/delete within an HRMS module (blocks read-only & explicit write denies)."""
+        if self.is_admin:
+            return True
+        if not self.can_access_module(module_name):
+            return False
+
+        mod = module_name.lower().replace("-", "_")
+        act = action.lower().strip()
+        write_denies = {
+            f"deny:hrms.{act}",
+            f"block:hrms.{act}",
+            f"deny:hrms.{mod}.{act}",
+            f"block:hrms.{mod}.{act}",
+        }
+        if act == "delete":
+            write_denies.update({"deny:hrms.update", "block:hrms.update"})
+        if any(d in self.permissions for d in write_denies):
+            return False
+
+        if any(r.lower() in ("read_only", "readonly", "viewer", "auditor", "hrms_viewer") for r in self.roles):
+            return False
+
+        # Users explicitly scoped to hrms.view without write permissions are read-only
+        if "hrms.view" in self.permissions and not any(
+            p in self.permissions for p in ("hrms.create", "hrms.update", "hrms.manage", "hrms.approve", "*")
+        ):
+            return False
+
+        return True
+
+    def require_write_access(self, module_name: str, action: str = "create") -> None:
+        """Raise 403 Forbidden if caller is read-only or explicitly denied write operations."""
+        if not self.can_write_hrms(module_name, action=action):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Permission denied. Read-only accounts cannot {action} records in {module_name.replace('_', ' ').title()}.",
             )
 
     def can_access_employee(self, target_employee_id: uuid.UUID) -> bool:
@@ -124,7 +167,12 @@ class HrmsUserContext:
         """Only Admin or HR with granted salary configuration permission."""
         if self.is_admin:
             return True
-        if "deny:hrms.payroll.configure" in self.permissions:
+        if (
+            "deny:hrms.payroll" in self.permissions
+            or "block:hrms.payroll" in self.permissions
+            or "deny:hrms.payroll.configure" in self.permissions
+            or "block:hrms.payroll.configure" in self.permissions
+        ):
             return False
         if self.is_hr and (
             "hrms.payroll.configure" in self.permissions or "hrms.manage" in self.permissions
@@ -136,7 +184,12 @@ class HrmsUserContext:
         """Only Admin or HR with granted payroll approval permission."""
         if self.is_admin:
             return True
-        if "deny:hrms.payroll.approve" in self.permissions:
+        if (
+            "deny:hrms.payroll" in self.permissions
+            or "block:hrms.payroll" in self.permissions
+            or "deny:hrms.payroll.approve" in self.permissions
+            or "block:hrms.payroll.approve" in self.permissions
+        ):
             return False
         if self.is_hr and (
             "hrms.payroll.approve" in self.permissions or "hrms.manage" in self.permissions
@@ -170,10 +223,16 @@ async def check_manager_availability(
         return False, "NO_MANAGER_ASSIGNED"
 
     manager = await db.get(User, manager_id)
-    if not manager or manager.deleted_at is not None or not manager.is_active:
+    if (
+        not manager
+        or manager.deleted_at is not None
+        or not manager.is_active
+        or manager.status in (UserStatus.INACTIVE, UserStatus.SUSPENDED)
+        or manager.employment_status in (EmploymentStatus.TERMINATED, EmploymentStatus.RESIGNED)
+    ):
         return False, "MANAGER_INACTIVE"
 
-    check_date = on_date or date.today()
+    check_date = on_date or datetime.now(IST).date()
     from app.hrms.models import HrmsLeaveRequest
     leave_stmt = (
         select(func.count(HrmsLeaveRequest.id))
@@ -241,7 +300,12 @@ async def verify_approval_authorization(
     if ctx.is_admin:
         return
 
-    # 2. Check if caller is the employee's responsible manager
+    # 2. Check Manager-First chain:
+    #    - If caller IS emp.manager_id (assigned direct manager) -> authorized immediately.
+    #    - If emp.manager_id is assigned and AVAILABLE, ONLY emp.manager_id (or Admin) can act
+    #      (secondary department managers and HR fallback cannot bypass the available assigned manager).
+    #    - If emp.manager_id is unassigned or unavailable, a Department Manager covering the employee
+    #      or authorized HR fallback can act.
     emp = await db.get(User, target_employee_id)
     if not emp:
         raise HTTPException(
@@ -249,9 +313,20 @@ async def verify_approval_authorization(
             detail=f"Employee record not found for approval validation.",
         )
 
-    is_direct_manager = (emp.manager_id == ctx.user_id) or (target_employee_id in ctx.managed_employee_ids)
-    if is_direct_manager:
-        # Caller is the assigned manager!
+    if emp.manager_id == ctx.user_id:
+        return
+
+    mgr_available = False
+    if emp.manager_id:
+        mgr_available, _ = await check_manager_availability(db, emp.manager_id)
+        if mgr_available:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"This request is routed to the employee's assigned manager first. Other managers or HR fallback can only act if the assigned manager is unassigned or unavailable.",
+            )
+
+    # Assigned manager is either unassigned or unavailable -> allow covering Dept Manager in scope
+    if ctx.is_manager and target_employee_id in ctx.managed_employee_ids:
         return
 
     # 3. Caller is NOT the manager. Check if caller qualifies as authorized HR Fallback.
@@ -266,14 +341,6 @@ async def verify_approval_authorization(
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=f"Permission denied. You are not authorized to {action_label} {module_name} requests for this employee.",
-        )
-
-    # 4. Caller is HR fallback. Verify manager availability:
-    mgr_available, reason = await check_manager_availability(db, emp.manager_id)
-    if mgr_available:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"This request is routed to the responsible manager first. HR fallback can only act if the manager is unassigned or unavailable.",
         )
 
     # Manager is unavailable / unassigned -> HR Fallback is authorized!
@@ -308,10 +375,17 @@ async def get_hrms_user_context(
         )
 
     user = await db.get(User, current_user.id)
-    if not user or user.deleted_at is not None or not user.is_active:
+    if (
+        not user
+        or user.deleted_at is not None
+        or not user.is_active
+        or user.status in (UserStatus.INACTIVE, UserStatus.SUSPENDED)
+        or user.employment_status in (EmploymentStatus.TERMINATED, EmploymentStatus.RESIGNED)
+        or not user.can_login
+    ):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="User account is inactive or not found.",
+            detail="User account is inactive, terminated, or not found.",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
@@ -362,14 +436,16 @@ async def get_hrms_user_context(
     for uid in (await db.execute(reports_stmt)).scalars().all():
         managed_ids.add(uid)
 
-    is_manager = bool(
+    # Distinguish genuine Department Managers (role-based) from employees who merely have direct reports:
+    # An employee with 1+ direct reports can manage ONLY their direct reports, NEVER the whole department!
+    is_dept_manager = bool(
         "department_manager" in roles
         or any("manager" in r.lower() for r in roles)
-        or len(managed_ids) > 1
     )
+    is_manager = bool(is_dept_manager or len(managed_ids) > 1)
 
-    # If department manager, add all active employees in their department
-    if is_manager and dept and dept.lower() != "general":
+    # ONLY expand to department peers when caller holds an explicit Department Manager role
+    if is_dept_manager and dept and dept.lower() != "general":
         dept_roles_stmt = select(Role.id).where(func.lower(Role.name) == dept.lower(), Role.deleted_at.is_(None))
         dept_role_ids = list((await db.execute(dept_roles_stmt)).scalars().all())
         if dept_role_ids:

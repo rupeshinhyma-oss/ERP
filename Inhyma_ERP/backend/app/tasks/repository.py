@@ -4,13 +4,14 @@ Task Module Repository.
 
 from __future__ import annotations
 
+import hashlib
 import uuid
 from datetime import date, datetime, timezone
 from typing import Any
 
-from sqlalchemy import and_, func, or_, select, update
+from sqlalchemy import and_, case, exists, func, or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import noload, selectinload
 
 from app.common.base_repository import BaseRepository
 from app.core.exceptions import ForbiddenException
@@ -274,6 +275,84 @@ class TaskRepository(BaseRepository[Task]):
         role_res = await self.session.execute(role_stmt)
         return role_res.scalars().first()
 
+    async def get_users_primary_departments(
+        self, user_ids: list[uuid.UUID]
+    ) -> dict[uuid.UUID, tuple[uuid.UUID | None, str | None]]:
+        """
+        Batched resolution of (primary_department_id, primary_department_name) for many users
+        in at most 2 SQL queries, preserving the exact precedence of `get_user_primary_department_id`.
+        """
+        unique_ids = list(dict.fromkeys(user_ids))
+        if not unique_ids:
+            return {}
+
+        from app.org_structure.models import LeadershipType
+        from app.rbac.models import RoleAssignmentType
+
+        result: dict[uuid.UUID, tuple[uuid.UUID | None, str | None]] = {}
+
+        # 1. Active leadership assignments ordered by leadership precedence
+        lead_stmt = (
+            select(
+                DepartmentLeadershipAssignment.employee_id,
+                DepartmentLeadershipAssignment.department_id,
+                Role.name,
+            )
+            .join(Role, DepartmentLeadershipAssignment.department_id == Role.id)
+            .where(
+                DepartmentLeadershipAssignment.employee_id.in_(unique_ids),
+                DepartmentLeadershipAssignment.status == OrgRecordStatus.ACTIVE,
+                Role.deleted_at.is_(None),
+            )
+            .order_by(
+                DepartmentLeadershipAssignment.employee_id,
+                case(
+                    (DepartmentLeadershipAssignment.leadership_type == LeadershipType.PRIMARY_MANAGER, 1),
+                    (DepartmentLeadershipAssignment.leadership_type == LeadershipType.DEPARTMENT_HEAD, 2),
+                    (DepartmentLeadershipAssignment.leadership_type == LeadershipType.ACTING_MANAGER, 3),
+                    (DepartmentLeadershipAssignment.leadership_type == LeadershipType.ASSISTANT_MANAGER, 4),
+                    else_=5,
+                ),
+                DepartmentLeadershipAssignment.department_id,
+            )
+        )
+        lead_res = await self.session.execute(lead_stmt)
+        for emp_id, dept_id, dept_name in lead_res.fetchall():
+            if emp_id not in result:
+                result[emp_id] = (dept_id, dept_name)
+
+        remaining_ids = [uid for uid in unique_ids if uid not in result]
+        if remaining_ids:
+            # 2. Active UserRole assignments ordered by is_primary, PRIMARY assignment_type, then role_id
+            role_stmt = (
+                select(
+                    UserRole.user_id,
+                    UserRole.role_id,
+                    Role.name,
+                )
+                .join(Role, UserRole.role_id == Role.id)
+                .where(
+                    UserRole.user_id.in_(remaining_ids),
+                    UserRole.status == RoleAssignmentStatus.ACTIVE,
+                    Role.deleted_at.is_(None),
+                )
+                .order_by(
+                    UserRole.user_id,
+                    UserRole.is_primary.desc(),
+                    case(
+                        (UserRole.assignment_type == RoleAssignmentType.PRIMARY, 1),
+                        else_=2,
+                    ),
+                    UserRole.role_id,
+                )
+            )
+            role_res = await self.session.execute(role_stmt)
+            for uid, role_id, role_name in role_res.fetchall():
+                if uid not in result:
+                    result[uid] = (role_id, role_name)
+
+        return result
+
     async def list_tasks(
         self,
         *,
@@ -459,12 +538,95 @@ class TaskRepository(BaseRepository[Task]):
         items = list(res.scalars().all())
         return items, total
 
+    def _is_postgres(self) -> bool:
+        try:
+            bind = self.session.bind or getattr(self.session, "get_bind", lambda: None)()
+            return bool(bind and getattr(bind.dialect, "name", "") == "postgresql")
+        except Exception:
+            return False
+
+    @staticmethod
+    def _advisory_lock_key(namespace: str, entity_id: uuid.UUID) -> int:
+        digest = hashlib.sha256(f"{namespace}:{entity_id}".encode("utf-8")).digest()
+        return int.from_bytes(digest[:8], byteorder="big", signed=True)
+
+    async def lock_task_row(self, task_id: uuid.UUID) -> uuid.UUID | None:
+        """Acquire a row-level FOR UPDATE lock on the task row in PostgreSQL."""
+        if not self._is_postgres():
+            return task_id
+        stmt = (
+            select(Task.id)
+            .where(Task.id == task_id, Task.deleted_at.is_(None))
+            .with_for_update()
+        )
+        res = await self.session.execute(stmt)
+        return res.scalar_one_or_none()
+
     async def get_task_by_id(self, task_id: uuid.UUID, *, include_deleted: bool = False) -> Task | None:
-        stmt = select(Task).where(Task.id == task_id).execution_options(populate_existing=True)
+        stmt = (
+            select(Task)
+            .where(Task.id == task_id)
+            .options(
+                selectinload(Task.creator),
+                selectinload(Task.parent_task),
+                selectinload(Task.child_tasks),
+                selectinload(Task.sprint),
+                selectinload(Task.approver),
+                selectinload(Task.assignees).selectinload(TaskAssignee.user),
+                selectinload(Task.subtasks).selectinload(TaskSubtask.assignee),
+                selectinload(Task.subtasks).selectinload(TaskSubtask.assignees).selectinload(TaskSubtaskAssignee.user),
+                selectinload(Task.comments).selectinload(TaskComment.user),
+                selectinload(Task.comments).selectinload(TaskComment.attachments),
+                selectinload(Task.comments).selectinload(TaskComment.reactions),
+                selectinload(Task.escalations).selectinload(TaskEscalation.from_user_rel),
+                selectinload(Task.escalations).selectinload(TaskEscalation.to_user_rel),
+                selectinload(Task.escalations).selectinload(TaskEscalation.comments).selectinload(TaskEscalationComment.user),
+                selectinload(Task.attachments).selectinload(TaskAttachment.uploader),
+                selectinload(Task.voice_notes).selectinload(TaskVoiceNote.uploader),
+                selectinload(Task.task_label_links).selectinload(TaskLabelLink.label),
+                selectinload(Task.labels),
+                selectinload(Task.dependencies).selectinload(TaskDependency.depends_on_task),
+                selectinload(Task.dependent_on),
+                selectinload(Task.reactions),
+            )
+            .execution_options(populate_existing=True)
+        )
         if not include_deleted:
             stmt = stmt.where(Task.deleted_at.is_(None))
         res = await self.session.execute(stmt)
         return res.scalar_one_or_none()
+
+    async def get_incomplete_blocking_task_titles(self, task_id: uuid.UUID) -> list[str]:
+        """Return titles of all active incomplete tasks blocking `task_id`."""
+        blocked_by_stmt = (
+            select(Task.title)
+            .join(TaskDependency, TaskDependency.depends_on_task_id == Task.id)
+            .where(
+                TaskDependency.task_id == task_id,
+                TaskDependency.relationship_type == DependencyType.BLOCKED_BY.value,
+                Task.deleted_at.is_(None),
+                Task.status != TaskStatus.DONE,
+            )
+        )
+        blocks_inverse_stmt = (
+            select(Task.title)
+            .join(TaskDependency, TaskDependency.task_id == Task.id)
+            .where(
+                TaskDependency.depends_on_task_id == task_id,
+                TaskDependency.relationship_type == DependencyType.BLOCKS.value,
+                Task.deleted_at.is_(None),
+                Task.status != TaskStatus.DONE,
+            )
+        )
+        res1 = await self.session.execute(blocked_by_stmt)
+        res2 = await self.session.execute(blocks_inverse_stmt)
+        titles: list[str] = []
+        seen: set[str] = set()
+        for t in list(res1.scalars().all()) + list(res2.scalars().all()):
+            if t and t not in seen:
+                seen.add(t)
+                titles.append(t)
+        return titles
 
     async def set_assignees(
         self,
@@ -474,6 +636,7 @@ class TaskRepository(BaseRepository[Task]):
         role: str = "ASSIGNEE",
     ) -> list[TaskAssignee]:
         """Replace assignees for a given role (or general assignees)."""
+        deduped_user_ids = list(dict.fromkeys(user_ids))
         stmt = select(TaskAssignee).where(
             TaskAssignee.task_id == task.id,
             TaskAssignee.assignment_role == role,
@@ -482,12 +645,16 @@ class TaskRepository(BaseRepository[Task]):
         existing_with_role = list(res.scalars().all())
         current_map = {a.user_id: a for a in existing_with_role}
 
+        deleted_any = False
         for uid, a in list(current_map.items()):
-            if uid not in user_ids:
+            if uid not in deduped_user_ids:
                 await self.session.delete(a)
+                deleted_any = True
+        if deleted_any:
+            await self.session.flush()
 
         new_assignees: list[TaskAssignee] = []
-        for uid in user_ids:
+        for uid in deduped_user_ids:
             if uid in current_map:
                 new_assignees.append(current_map[uid])
             else:
@@ -739,7 +906,12 @@ class TaskRepository(BaseRepository[Task]):
         return list(res.scalars().all())
 
     async def get_voice_note_by_id(self, voice_note_id: uuid.UUID) -> TaskVoiceNote | None:
-        stmt = select(TaskVoiceNote).where(TaskVoiceNote.id == voice_note_id)
+        stmt = (
+            select(TaskVoiceNote)
+            .where(TaskVoiceNote.id == voice_note_id)
+            .options(selectinload(TaskVoiceNote.uploader))
+            .execution_options(populate_existing=True)
+        )
         res = await self.session.execute(stmt)
         return res.scalar_one_or_none()
 
@@ -806,7 +978,49 @@ class TaskRepository(BaseRepository[Task]):
 
     # --- Escalation Collaboration (Independent Comments) ---
     async def get_escalation_by_id(self, escalation_id: uuid.UUID) -> TaskEscalation | None:
-        stmt = select(TaskEscalation).where(TaskEscalation.id == escalation_id)
+        stmt = (
+            select(TaskEscalation)
+            .where(TaskEscalation.id == escalation_id)
+            .options(
+                selectinload(TaskEscalation.from_user_rel),
+                selectinload(TaskEscalation.to_user_rel),
+                selectinload(TaskEscalation.comments).selectinload(TaskEscalationComment.user),
+            )
+            .execution_options(populate_existing=True)
+        )
+        res = await self.session.execute(stmt)
+        return res.scalar_one_or_none()
+
+    async def find_recent_identical_escalation(
+        self,
+        *,
+        task_id: uuid.UUID,
+        from_user: uuid.UUID,
+        to_user: uuid.UUID,
+        reason: str,
+        escalation_type: str,
+        due_date: date | None,
+        since: datetime,
+    ) -> TaskEscalation | None:
+        stmt = (
+            select(TaskEscalation)
+            .where(
+                TaskEscalation.task_id == task_id,
+                TaskEscalation.from_user == from_user,
+                TaskEscalation.to_user == to_user,
+                TaskEscalation.reason == reason,
+                TaskEscalation.escalation_type == escalation_type,
+                TaskEscalation.due_date == due_date,
+                TaskEscalation.created_at >= since,
+            )
+            .options(
+                selectinload(TaskEscalation.from_user_rel),
+                selectinload(TaskEscalation.to_user_rel),
+                selectinload(TaskEscalation.comments).selectinload(TaskEscalationComment.user),
+            )
+            .order_by(TaskEscalation.created_at.desc())
+            .limit(1)
+        )
         res = await self.session.execute(stmt)
         return res.scalar_one_or_none()
 
@@ -910,14 +1124,75 @@ class TaskRepository(BaseRepository[Task]):
 
     # --- Sprints ---
     async def list_sprints(self, status: SprintStatus | None = None) -> list[TaskSprint]:
-        stmt = select(TaskSprint).options(
-            selectinload(TaskSprint.tasks).selectinload(Task.assignees)
-        )
+        stmt = select(TaskSprint).options(noload(TaskSprint.creator))
         if status is not None:
             stmt = stmt.where(TaskSprint.status == status)
         stmt = stmt.order_by(TaskSprint.created_at.desc())
         res = await self.session.execute(stmt)
         return list(res.scalars().all())
+
+    async def get_sprint_task_counts(
+        self,
+        sprint_ids: list[uuid.UUID],
+        *,
+        can_view_all: bool = True,
+        actor_id: uuid.UUID | None = None,
+        scoped_dept_users: set[uuid.UUID] | None = None,
+    ) -> dict[uuid.UUID, tuple[int, int]]:
+        """
+        Return {sprint_id: (total_visible_tasks, completed_visible_tasks)} in a single SQL GROUP BY query
+        respecting exact role-based visibility scoping without hydrating Task ORM objects.
+        """
+        if not sprint_ids:
+            return {}
+        stmt = select(
+            Task.sprint_id,
+            func.count(Task.id).label("task_count"),
+            func.coalesce(
+                func.sum(case((Task.status == TaskStatus.DONE, 1), else_=0)),
+                0,
+            ).label("completed_count"),
+        ).where(
+            Task.sprint_id.in_(sprint_ids),
+            Task.deleted_at.is_(None),
+        )
+
+        if not can_view_all and actor_id is not None:
+            if scoped_dept_users is not None:
+                allowed = list(scoped_dept_users)
+                stmt = stmt.where(
+                    or_(
+                        Task.created_by.in_(allowed),
+                        Task.approver_id.in_(allowed),
+                        exists(
+                            select(1).where(
+                                TaskAssignee.task_id == Task.id,
+                                TaskAssignee.user_id.in_(allowed),
+                            )
+                        ),
+                    )
+                )
+            else:
+                stmt = stmt.where(
+                    or_(
+                        Task.created_by == actor_id,
+                        Task.approver_id == actor_id,
+                        exists(
+                            select(1).where(
+                                TaskAssignee.task_id == Task.id,
+                                TaskAssignee.user_id == actor_id,
+                            )
+                        ),
+                    )
+                )
+
+        stmt = stmt.group_by(Task.sprint_id)
+        res = await self.session.execute(stmt)
+        return {
+            row[0]: (int(row[1] or 0), int(row[2] or 0))
+            for row in res.fetchall()
+            if row[0] is not None
+        }
 
     async def get_sprint_by_id(self, sprint_id: uuid.UUID) -> TaskSprint | None:
         stmt = select(TaskSprint).where(TaskSprint.id == sprint_id)
@@ -1061,12 +1336,23 @@ class TaskRepository(BaseRepository[Task]):
                     queue.append(nxt)
         return False
 
+    async def get_dependency_by_id(self, dependency_id: uuid.UUID) -> TaskDependency | None:
+        stmt = (
+            select(TaskDependency)
+            .where(TaskDependency.id == dependency_id)
+            .options(selectinload(TaskDependency.depends_on_task))
+            .execution_options(populate_existing=True)
+        )
+        res = await self.session.execute(stmt)
+        return res.scalar_one_or_none()
+
     async def add_dependency(
         self,
         task_id: uuid.UUID,
         depends_on_task_id: uuid.UUID,
-        dependency_type: DependencyType = DependencyType.BLOCKS,
+        dependency_type: DependencyType | str = DependencyType.BLOCKS,
     ) -> TaskDependency:
+        dep_type_val = dependency_type.value if hasattr(dependency_type, "value") else str(dependency_type)
         stmt = select(TaskDependency).where(
             TaskDependency.task_id == task_id,
             TaskDependency.depends_on_task_id == depends_on_task_id,
@@ -1074,18 +1360,18 @@ class TaskRepository(BaseRepository[Task]):
         res = await self.session.execute(stmt)
         existing = res.scalar_one_or_none()
         if existing:
-            existing.dependency_type = dependency_type
+            existing.dependency_type = dep_type_val
             await self.session.flush()
-            return existing
+            return (await self.get_dependency_by_id(existing.id)) or existing
 
         dep = TaskDependency(
             task_id=task_id,
             depends_on_task_id=depends_on_task_id,
-            dependency_type=dependency_type,
+            dependency_type=dep_type_val,
         )
         self.session.add(dep)
         await self.session.flush()
-        return dep
+        return (await self.get_dependency_by_id(dep.id)) or dep
 
     async def remove_dependency(self, dependency_id: uuid.UUID) -> None:
         stmt = select(TaskDependency).where(TaskDependency.id == dependency_id)
@@ -1354,6 +1640,17 @@ class TaskRepository(BaseRepository[Task]):
         return 100 if task.status == TaskStatus.DONE else 0
 
     # --- Workload & Capacity ---
+    @staticmethod
+    def _format_user_display_name(
+        display_name: str | None,
+        first_name: str | None,
+        last_name: str | None,
+        username: str | None,
+        email: str | None,
+    ) -> str:
+        full = f"{first_name or ''} {last_name or ''}".strip()
+        return display_name or full or username or email or "Team Member"
+
     async def get_team_workload(
         self,
         department_id: uuid.UUID | None = None,
@@ -1361,7 +1658,14 @@ class TaskRepository(BaseRepository[Task]):
         department_ids: set[uuid.UUID] | list[uuid.UUID] | None = None,
         user_id: uuid.UUID | None = None,
     ) -> list[dict[str, Any]]:
-        user_stmt = select(User).where(User.is_active.is_(True), User.deleted_at.is_(None))
+        user_stmt = select(
+            User.id,
+            User.display_name,
+            User.first_name,
+            User.last_name,
+            User.username,
+            User.email,
+        ).where(User.is_active.is_(True), User.deleted_at.is_(None))
         if user_id is not None:
             user_stmt = user_stmt.where(User.id == user_id)
         elif department_id is not None:
@@ -1375,41 +1679,80 @@ class TaskRepository(BaseRepository[Task]):
                 return []
             user_stmt = user_stmt.where(User.id.in_(dept_uids))
         res = await self.session.execute(user_stmt)
-        users = list(res.scalars().all())
+        user_rows = res.fetchall()
+        if not user_rows:
+            return []
 
+        user_ids = [row[0] for row in user_rows]
         today = date.today()
+
+        agg_stmt = (
+            select(
+                TaskAssignee.user_id,
+                func.coalesce(func.sum(case((Task.status == TaskStatus.TODO, 1), else_=0)), 0),
+                func.coalesce(func.sum(case((Task.status == TaskStatus.IN_PROGRESS, 1), else_=0)), 0),
+                func.coalesce(func.sum(case((Task.status == TaskStatus.DONE, 1), else_=0)), 0),
+                func.coalesce(
+                    func.sum(
+                        case(
+                            (
+                                and_(
+                                    Task.due_date.is_not(None),
+                                    Task.due_date < today,
+                                    Task.status != TaskStatus.DONE,
+                                ),
+                                1,
+                            ),
+                            else_=0,
+                        )
+                    ),
+                    0,
+                ),
+                func.coalesce(
+                    func.sum(
+                        case(
+                            (
+                                and_(
+                                    Task.priority.in_([TaskPriority.HIGH, TaskPriority.CRITICAL]),
+                                    Task.status != TaskStatus.DONE,
+                                ),
+                                1,
+                            ),
+                            else_=0,
+                        )
+                    ),
+                    0,
+                ),
+            )
+            .join(Task, TaskAssignee.task_id == Task.id)
+            .where(
+                TaskAssignee.user_id.in_(user_ids),
+                TaskAssignee.assignment_role == "ASSIGNEE",
+                Task.deleted_at.is_(None),
+            )
+            .group_by(TaskAssignee.user_id)
+        )
+        agg_res = await self.session.execute(agg_stmt)
+        stats_by_user: dict[uuid.UUID, tuple[int, int, int, int, int]] = {
+            row[0]: (int(row[1]), int(row[2]), int(row[3]), int(row[4]), int(row[5]))
+            for row in agg_res.fetchall()
+        }
+
         workload: list[dict[str, Any]] = []
-        for u in users:
-            stmt = (
-                select(Task)
-                .join(TaskAssignee, TaskAssignee.task_id == Task.id)
-                .where(
-                    TaskAssignee.user_id == u.id,
-                    TaskAssignee.assignment_role == "ASSIGNEE",
-                    Task.deleted_at.is_(None),
-                )
+        for uid, dname, fname, lname, uname, email in user_rows:
+            open_cnt, in_prog_cnt, done_cnt, overdue_cnt, high_cnt = stats_by_user.get(
+                uid, (0, 0, 0, 0, 0)
             )
-            t_res = await self.session.execute(stmt)
-            tasks = list(t_res.scalars().all())
-
-            open_count = sum(1 for t in tasks if t.status == TaskStatus.TODO)
-            in_progress_count = sum(1 for t in tasks if t.status == TaskStatus.IN_PROGRESS)
-            completed_count = sum(1 for t in tasks if t.status == TaskStatus.DONE)
-            overdue_count = sum(1 for t in tasks if t.due_date and t.due_date < today and t.status != TaskStatus.DONE)
-            high_priority_count = sum(
-                1 for t in tasks if t.priority in (TaskPriority.HIGH, TaskPriority.CRITICAL) and t.status != TaskStatus.DONE
-            )
-
             workload.append({
-                "user_id": u.id,
-                "user_name": u.full_name or u.email,
-                "user_email": u.email,
+                "user_id": uid,
+                "user_name": self._format_user_display_name(dname, fname, lname, uname, email),
+                "user_email": email,
                 "department_name": None,
-                "open_tasks_count": open_count,
-                "in_progress_tasks_count": in_progress_count,
-                "overdue_tasks_count": overdue_count,
-                "completed_tasks_count": completed_count,
-                "high_priority_count": high_priority_count,
+                "open_tasks_count": open_cnt,
+                "in_progress_tasks_count": in_prog_cnt,
+                "overdue_tasks_count": overdue_cnt,
+                "completed_tasks_count": done_cnt,
+                "high_priority_count": high_cnt,
             })
 
         return workload
@@ -1423,7 +1766,14 @@ class TaskRepository(BaseRepository[Task]):
         department_ids: set[uuid.UUID] | list[uuid.UUID] | None = None,
         user_id: uuid.UUID | None = None,
     ) -> list[dict[str, Any]]:
-        user_stmt = select(User).where(User.is_active.is_(True), User.deleted_at.is_(None))
+        user_stmt = select(
+            User.id,
+            User.display_name,
+            User.first_name,
+            User.last_name,
+            User.username,
+            User.email,
+        ).where(User.is_active.is_(True), User.deleted_at.is_(None))
         if user_id is not None:
             user_stmt = user_stmt.where(User.id == user_id)
         elif department_id is not None:
@@ -1437,7 +1787,11 @@ class TaskRepository(BaseRepository[Task]):
                 return []
             user_stmt = user_stmt.where(User.id.in_(dept_uids))
         res = await self.session.execute(user_stmt)
-        users = list(res.scalars().all())
+        user_rows = res.fetchall()
+        if not user_rows:
+            return []
+
+        user_ids = [row[0] for row in user_rows]
 
         from datetime import timedelta
         days: list[date] = []
@@ -1446,35 +1800,43 @@ class TaskRepository(BaseRepository[Task]):
             days.append(curr)
             curr += timedelta(days=1)
 
-        result: list[dict[str, Any]] = []
-        for u in users:
-            stmt = (
-                select(Task)
-                .join(TaskAssignee, TaskAssignee.task_id == Task.id)
-                .where(
-                    TaskAssignee.user_id == u.id,
-                    TaskAssignee.assignment_role == "ASSIGNEE",
-                    Task.deleted_at.is_(None),
-                    Task.status != TaskStatus.DONE,
-                    or_(
-                        and_(Task.start_date.isnot(None), Task.start_date <= end_date, Task.due_date >= start_date),
-                        and_(Task.due_date >= start_date, Task.due_date <= end_date),
-                    ),
-                )
+        task_rows_stmt = (
+            select(
+                TaskAssignee.user_id,
+                Task.id,
+                Task.start_date,
+                Task.due_date,
             )
-            t_res = await self.session.execute(stmt)
-            tasks = list(t_res.scalars().all())
+            .join(Task, TaskAssignee.task_id == Task.id)
+            .where(
+                TaskAssignee.user_id.in_(user_ids),
+                TaskAssignee.assignment_role == "ASSIGNEE",
+                Task.deleted_at.is_(None),
+                Task.status != TaskStatus.DONE,
+                or_(
+                    and_(Task.start_date.is_not(None), Task.start_date <= end_date, Task.due_date >= start_date),
+                    and_(Task.due_date >= start_date, Task.due_date <= end_date),
+                ),
+            )
+        )
+        t_res = await self.session.execute(task_rows_stmt)
+        tasks_by_user: dict[uuid.UUID, list[tuple[uuid.UUID, date | None, date | None]]] = {}
+        for uid, tid, t_start, t_due in t_res.fetchall():
+            tasks_by_user.setdefault(uid, []).append((tid, t_start, t_due))
 
+        result: list[dict[str, Any]] = []
+        for uid, dname, fname, lname, uname, email in user_rows:
+            user_tasks = tasks_by_user.get(uid, [])
             allocations = []
             for d in days:
                 d_tasks = []
-                for t in tasks:
-                    t_start = t.start_date or t.due_date
-                    t_due = t.due_date or t.start_date
+                for tid, raw_start, raw_due in user_tasks:
+                    t_start = raw_start or raw_due
+                    t_due = raw_due or raw_start
                     if t_start and t_due and t_start <= d <= t_due:
-                        d_tasks.append(t.id)
+                        d_tasks.append(tid)
                     elif t_due and t_due == d:
-                        d_tasks.append(t.id)
+                        d_tasks.append(tid)
 
                 allocations.append({
                     "date": d,
@@ -1483,8 +1845,8 @@ class TaskRepository(BaseRepository[Task]):
                 })
 
             result.append({
-                "user_id": u.id,
-                "user_name": u.full_name or u.email,
+                "user_id": uid,
+                "user_name": self._format_user_display_name(dname, fname, lname, uname, email),
                 "allocations": allocations,
             })
 
@@ -1496,6 +1858,35 @@ class TaskRepository(BaseRepository[Task]):
         await self.session.commit()
         await self.session.refresh(schedule, ["assignee", "manager", "creator"])
         return schedule
+
+    async def lock_recurring_schedule(self, schedule_id: uuid.UUID) -> TaskRecurringSchedule | None:
+        """
+        Acquire per-schedule PostgreSQL transaction-scoped advisory lock AND row-level FOR UPDATE lock
+        so concurrent HTTP or worker generation runs cannot create duplicate tasks for the same period.
+        """
+        if self._is_postgres():
+            lock_id = self._advisory_lock_key("recurring_schedule", schedule_id)
+            await self.session.execute(
+                text("SELECT pg_advisory_xact_lock(:lock_id)"),
+                {"lock_id": lock_id},
+            )
+            stmt = (
+                select(TaskRecurringSchedule)
+                .where(
+                    TaskRecurringSchedule.id == schedule_id,
+                    TaskRecurringSchedule.deleted_at.is_(None),
+                )
+                .options(
+                    selectinload(TaskRecurringSchedule.assignee),
+                    selectinload(TaskRecurringSchedule.manager),
+                    selectinload(TaskRecurringSchedule.creator),
+                )
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+            res = await self.session.execute(stmt)
+            return res.scalar_one_or_none()
+        return await self.get_recurring_schedule(schedule_id)
 
     async def get_recurring_schedule(self, schedule_id: uuid.UUID) -> TaskRecurringSchedule | None:
         stmt = (

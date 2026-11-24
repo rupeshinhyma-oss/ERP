@@ -796,14 +796,52 @@ async def get_team_oversight(
 async def backfill_companies_endpoint(
     request: Request,
     service: CrmLeadService = Depends(get_crm_lead_service),
+    audit_service: AuditService = Depends(get_audit_service),
     current_user: CurrentUser = Depends(require_any_permission("crm.leads.manage")),
 ) -> dict:
     """
     Safely backfill company_id for legacy leads having a single reliable match in companies master.
-    Leaves ambiguous and unmatched legacy rows unmodified and reports them for resolution.
+    Restricted strictly to Administrators because it inspects and updates leads globally across
+    all departments. Leaves ambiguous and unmatched legacy rows unmodified and records an audit log.
     """
+    role_type, _ = await service.get_actor_role_and_scope(current_user)
+    if role_type != "admin":
+        raise ForbiddenException(
+            "Only administrators are authorized to run the global legacy company backfill."
+        )
+
     from app.crm.company_linking import backfill_legacy_lead_companies
     results = await backfill_legacy_lead_companies(service.session)
+
+    await audit_service.record(
+        action=AuditAction.UPDATE,
+        module="crm",
+        user_id=current_user.id,
+        username_snapshot=current_user.username,
+        entity_type="CrmLead",
+        entity_id=None,
+        new_values={
+            "total_examined": results.get("total_examined", 0),
+            "safely_linked": results.get("safely_linked", 0),
+            "ambiguous": results.get("ambiguous", 0),
+            "unmatched": results.get("unmatched", 0),
+        },
+        ip_address=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+        request_id=getattr(request.state, "request_id", "-"),
+        http_method=request.method,
+        endpoint=request.url.path,
+        response_status=status.HTTP_200_OK,
+        description=(
+            f"Executed global legacy CRM lead company backfill: "
+            f"examined={results.get('total_examined', 0)}, "
+            f"linked={results.get('safely_linked', 0)}, "
+            f"ambiguous={results.get('ambiguous', 0)}, "
+            f"unmatched={results.get('unmatched', 0)}"
+        ),
+    )
+    request.state.audit_logged = True
+
     return build_success_response(
         data=results,
         request_id=getattr(request.state, "request_id", "-"),

@@ -221,7 +221,7 @@ export const RecurringTasksTab: React.FC<RecurringTasksTabProps> = ({
         }}
       >
         {/* View Switcher Buttons */}
-        <div style={{ display: "flex", gap: "6px", background: "#f1f5f9", padding: "4px", borderRadius: "8px" }}>
+        <div style={{ display: "flex", gap: "6px", background: "#f1f5f9", padding: "4px", borderRadius: "8px", flexWrap: "wrap", maxWidth: "100%" }}>
           <button
             type="button"
             onClick={() => setSubView("schedules")}
@@ -278,7 +278,7 @@ export const RecurringTasksTab: React.FC<RecurringTasksTabProps> = ({
         </div>
 
         {/* Global Action Buttons */}
-        <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+        <div style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap", maxWidth: "100%" }}>
           <button
             type="button"
             onClick={handleTriggerGenerator}
@@ -342,7 +342,8 @@ export const RecurringTasksTab: React.FC<RecurringTasksTabProps> = ({
               onChange={(e) => setSearchQuery(e.target.value)}
               style={{
                 flex: 1,
-                minWidth: "220px",
+                minWidth: "160px",
+                maxWidth: "100%",
                 padding: "7px 12px",
                 borderRadius: "6px",
                 border: "1px solid #cbd5e1",
@@ -375,24 +376,25 @@ export const RecurringTasksTab: React.FC<RecurringTasksTabProps> = ({
               border: "1px solid #e2e8f0",
               borderRadius: "8px",
               background: "#ffffff",
+              maxWidth: "100%",
             }}
           >
-            <table style={{ width: "100%", borderCollapse: "collapse", textAlign: "left", fontSize: "13px" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", textAlign: "left", fontSize: "12px" }}>
               <thead>
-                <tr style={{ background: "#f8fafc", borderBottom: "1px solid #e2e8f0", color: "#64748b", fontSize: "12px" }}>
-                  <th style={{ padding: "10px 14px", fontWeight: 600 }}>SCHEDULE & FREQUENCY</th>
-                  <th style={{ padding: "10px 14px", fontWeight: 600 }}>RULE / CADENCE</th>
-                  <th style={{ padding: "10px 14px", fontWeight: 600 }}>ASSIGNEE</th>
-                  <th style={{ padding: "10px 14px", fontWeight: 600 }}>REVIEWER</th>
-                  <th style={{ padding: "10px 14px", fontWeight: 600 }}>NEXT DUE DATE</th>
-                  <th style={{ padding: "10px 14px", fontWeight: 600 }}>DEPARTMENT</th>
-                  <th style={{ padding: "10px 14px", fontWeight: 600 }}>STATUS</th>
-                  <th style={{ padding: "10px 14px", fontWeight: 600, textAlign: "right" }}>ACTIONS</th>
+                <tr style={{ background: "#f8fafc", borderBottom: "1px solid #e2e8f0", color: "#64748b", fontSize: "11px" }}>
+                  <th style={{ padding: "8px 6px", fontWeight: 600 }}>SCHEDULE &amp; FREQUENCY</th>
+                  <th style={{ padding: "8px 6px", fontWeight: 600 }}>RULE / CADENCE</th>
+                  <th style={{ padding: "8px 6px", fontWeight: 600 }}>ASSIGNEE</th>
+                  <th style={{ padding: "8px 6px", fontWeight: 600 }}>REVIEWER</th>
+                  <th style={{ padding: "8px 6px", fontWeight: 600, whiteSpace: "nowrap" }}>NEXT DUE DATE</th>
+                  <th style={{ padding: "8px 6px", fontWeight: 600 }}>DEPARTMENT</th>
+                  <th style={{ padding: "8px 6px", fontWeight: 600 }}>STATUS</th>
+                  <th style={{ padding: "8px 6px", fontWeight: 600, textAlign: "right", whiteSpace: "nowrap" }}>ACTIONS</th>
                 </tr>
               </thead>
               <tbody>
                 {schedulesLoading ? (
-                  <TableSkeletonRows colCount={8} rowCount={6} cellPadding="10px 14px" />
+                  <TableSkeletonRows colCount={8} rowCount={6} cellPadding="8px 8px" />
                 ) : schedules.length === 0 ? (
                   <tr>
                     <td colSpan={8} style={{ padding: "40px 20px", textAlign: "center", color: "#64748b" }}>
@@ -413,13 +415,13 @@ export const RecurringTasksTab: React.FC<RecurringTasksTabProps> = ({
                       }}
                     >
                       {/* Title & Frequency */}
-                      <td style={{ padding: "10px 14px" }}>
-                        <div style={{ fontWeight: 600, color: "#0f172a" }}>{s.title}</div>
-                        <div style={{ display: "flex", gap: "6px", marginTop: "3px" }}>
+                      <td style={{ padding: "8px 6px", maxWidth: "195px", whiteSpace: "normal", overflowWrap: "break-word" }}>
+                        <div style={{ fontWeight: 600, color: "#0f172a", lineHeight: 1.3 }}>{s.title}</div>
+                        <div style={{ display: "flex", gap: "4px", marginTop: "3px", flexWrap: "wrap" }}>
                           <span
                             style={{
-                              fontSize: "10.5px",
-                              padding: "1px 6px",
+                              fontSize: "10px",
+                              padding: "1px 5px",
                               borderRadius: "4px",
                               background:
                                 s.frequency === "MONTHLY"
@@ -440,8 +442,8 @@ export const RecurringTasksTab: React.FC<RecurringTasksTabProps> = ({
                           </span>
                           <span
                             style={{
-                              fontSize: "10.5px",
-                              padding: "1px 6px",
+                              fontSize: "10px",
+                              padding: "1px 5px",
                               borderRadius: "4px",
                               background:
                                 s.priority === "CRITICAL"
@@ -464,47 +466,47 @@ export const RecurringTasksTab: React.FC<RecurringTasksTabProps> = ({
                       </td>
 
                       {/* Rule / Cadence */}
-                      <td style={{ padding: "10px 14px", color: "#334155", fontSize: "12px" }}>
+                      <td style={{ padding: "8px 6px", color: "#334155", fontSize: "11.5px", maxWidth: "120px", whiteSpace: "normal", overflowWrap: "break-word", lineHeight: 1.3 }}>
                         {formatScheduleRule(s)}
                       </td>
 
                       {/* Assignee */}
-                      <td style={{ padding: "10px 14px", color: "#1e293b", fontSize: "12.5px" }}>
+                      <td style={{ padding: "8px 6px", color: "#1e293b", fontSize: "12px", maxWidth: "100px", whiteSpace: "normal", overflowWrap: "break-word", lineHeight: 1.3 }}>
                         {getUserName(s.assignee_id)}
                       </td>
 
                       {/* Reviewer */}
-                      <td style={{ padding: "10px 14px", color: "#475569", fontSize: "12.5px" }}>
+                      <td style={{ padding: "8px 6px", color: "#475569", fontSize: "12px", maxWidth: "100px", whiteSpace: "normal", overflowWrap: "break-word", lineHeight: 1.3 }}>
                         {getUserName(s.manager_id)}
                       </td>
 
                       {/* Next Due Date */}
-                      <td style={{ padding: "10px 14px", fontSize: "12.5px" }}>
-                        {s.next_due_date ? (
+                      <td style={{ padding: "8px 6px", fontSize: "12px", whiteSpace: "nowrap" }}>
+                        {s.next_due_date || s.next_run_date ? (
                           <span style={{ fontWeight: 600, color: "#0f172a" }}>
-                            {s.next_due_date}
+                            {s.next_due_date || s.next_run_date}
                           </span>
                         ) : (
                           <span style={{ color: "#94a3b8" }}>—</span>
                         )}
                         {s.next_period && (
-                          <div style={{ fontSize: "10.5px", color: "#64748b" }}>
+                          <div style={{ fontSize: "10px", color: "#64748b" }}>
                             Period: {s.next_period}
                           </div>
                         )}
                       </td>
 
                       {/* Department */}
-                      <td style={{ padding: "10px 14px" }}>
+                      <td style={{ padding: "8px 6px", maxWidth: "125px", whiteSpace: "normal", overflowWrap: "break-word" }}>
                         <DepartmentBadge department={s.department || "General"} />
                       </td>
 
                       {/* Status */}
-                      <td style={{ padding: "10px 14px" }}>
+                      <td style={{ padding: "8px 6px", whiteSpace: "nowrap" }}>
                         <span
                           style={{
-                            fontSize: "11px",
-                            padding: "2px 8px",
+                            fontSize: "10.5px",
+                            padding: "2px 6px",
                             borderRadius: "12px",
                             fontWeight: 700,
                             background:
@@ -526,8 +528,8 @@ export const RecurringTasksTab: React.FC<RecurringTasksTabProps> = ({
                       </td>
 
                       {/* Actions */}
-                      <td style={{ padding: "10px 14px", textAlign: "right" }}>
-                        <div style={{ display: "inline-flex", gap: "6px" }}>
+                      <td style={{ padding: "8px 8px", textAlign: "right", whiteSpace: "nowrap" }}>
+                        <div style={{ display: "inline-flex", gap: "3px", flexWrap: "nowrap", justifyContent: "flex-end" }}>
                           <button
                             type="button"
                             title={canManageTasks ? "Edit schedule" : "View schedule"}
@@ -539,9 +541,9 @@ export const RecurringTasksTab: React.FC<RecurringTasksTabProps> = ({
                               background: "#f8fafc",
                               border: "1px solid #cbd5e1",
                               borderRadius: "4px",
-                              padding: "4px 8px",
+                              padding: "3px 6px",
                               cursor: "pointer",
-                              fontSize: "12px",
+                              fontSize: "11.5px",
                             }}
                           >
                             ✏️ {canManageTasks ? "Edit" : "View"}
@@ -558,13 +560,13 @@ export const RecurringTasksTab: React.FC<RecurringTasksTabProps> = ({
                                   border: "1px solid #bfdbfe",
                                   color: "#1d4ed8",
                                   borderRadius: "4px",
-                                  padding: "4px 8px",
+                                  padding: "3px 6px",
                                   cursor: "pointer",
-                                  fontSize: "12px",
+                                  fontSize: "11.5px",
                                   fontWeight: 600,
                                   display: "inline-flex",
                                   alignItems: "center",
-                                  gap: "4px",
+                                  gap: "3px",
                                 }}
                               >
                                 ♻️ Restore
@@ -583,9 +585,9 @@ export const RecurringTasksTab: React.FC<RecurringTasksTabProps> = ({
                                       border: "1px solid #fde68a",
                                       color: "#b45309",
                                       borderRadius: "4px",
-                                      padding: "4px 8px",
+                                      padding: "3px 6px",
                                       cursor: "pointer",
-                                      fontSize: "12px",
+                                      fontSize: "11.5px",
                                     }}
                                   >
                                     ⏸️ Pause
@@ -600,9 +602,9 @@ export const RecurringTasksTab: React.FC<RecurringTasksTabProps> = ({
                                       border: "1px solid #bbf7d0",
                                       color: "#15803d",
                                       borderRadius: "4px",
-                                      padding: "4px 8px",
+                                      padding: "3px 6px",
                                       cursor: "pointer",
-                                      fontSize: "12px",
+                                      fontSize: "11.5px",
                                     }}
                                   >
                                     ▶️ Resume
@@ -618,9 +620,9 @@ export const RecurringTasksTab: React.FC<RecurringTasksTabProps> = ({
                                     border: "1px solid #cbd5e1",
                                     color: "#64748b",
                                     borderRadius: "4px",
-                                    padding: "4px 8px",
+                                    padding: "3px 6px",
                                     cursor: "pointer",
-                                    fontSize: "12px",
+                                    fontSize: "11.5px",
                                   }}
                                 >
                                   📦
@@ -639,9 +641,9 @@ export const RecurringTasksTab: React.FC<RecurringTasksTabProps> = ({
                                 border: "1px solid #fecaca",
                                 color: "#b91c1c",
                                 borderRadius: "4px",
-                                padding: "4px 8px",
+                                padding: "3px 6px",
                                 cursor: "pointer",
-                                fontSize: "12px",
+                                fontSize: "11.5px",
                               }}
                             >
                               🗑️

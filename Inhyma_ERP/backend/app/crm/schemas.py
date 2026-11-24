@@ -6,6 +6,7 @@ Contracts for CRM Pipelines and Stages setup and management.
 
 from __future__ import annotations
 
+import re
 import uuid
 from datetime import datetime
 from decimal import Decimal
@@ -16,6 +17,55 @@ from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
 from app.core.exceptions import BadRequestException
 
 VALID_STAGE_TYPES = {"open", "won", "lost"}
+
+_EMAIL_LOCAL_RE = re.compile(r"^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+$")
+_EMAIL_DOMAIN_LABEL_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$")
+_EMAIL_TLD_RE = re.compile(r"^[A-Za-z]{2,63}$")
+
+
+def validate_crm_email(val: Any) -> str | None:
+    """
+    Validate and normalize an optional CRM email address.
+    - Returns None for None or blank/whitespace-only inputs.
+    - Rejects malformed emails (missing @, multiple @, spaces, missing TLD, consecutive dots, etc.).
+    - Preserves local-part casing verbatim while lowercasing the domain part.
+    """
+    if val is None:
+        return None
+    s = str(val).strip()
+    if not s:
+        return None
+    if len(s) > 150:
+        raise ValueError("Email address cannot exceed 150 characters.")
+    if any(ch.isspace() for ch in s):
+        raise ValueError("Invalid email address format: whitespace is not allowed.")
+    if s.count("@") != 1:
+        raise ValueError("Invalid email address format.")
+    local, domain = s.split("@", 1)
+    if (
+        not local
+        or len(local) > 64
+        or local.startswith(".")
+        or local.endswith(".")
+        or ".." in local
+        or not _EMAIL_LOCAL_RE.fullmatch(local)
+    ):
+        raise ValueError("Invalid email address format.")
+    if (
+        not domain
+        or len(domain) > 253
+        or "." not in domain
+        or domain.startswith(".")
+        or domain.endswith(".")
+        or ".." in domain
+    ):
+        raise ValueError("Invalid email address format.")
+    labels = domain.split(".")
+    if any(not _EMAIL_DOMAIN_LABEL_RE.fullmatch(lbl) for lbl in labels):
+        raise ValueError("Invalid email address format.")
+    if not _EMAIL_TLD_RE.fullmatch(labels[-1]):
+        raise ValueError("Invalid email address format.")
+    return f"{local}@{domain.lower()}"
 
 
 def _strip_str(val: Any) -> str | None:
@@ -289,6 +339,8 @@ class CrmImportRowPreview(BaseModel):
     validation_message: str
     is_valid_candidate: bool
     matched_lead_code: str | None = None
+    email: str | None = None
+    gstin: str | None = None
     company: str | None = None
     company_id: uuid.UUID | None = None
     matched_company_name: str | None = None
@@ -462,6 +514,8 @@ class CrmLeadCreate(BaseModel):
     source_detail: str | None = Field(default=None, max_length=255)
     pipeline_id: uuid.UUID | None = None
     stage_id: uuid.UUID | None = None
+    gstin: str | None = Field(default=None, max_length=50, validation_alias=AliasChoices("gstin", "tax_id", "tax_id_number", "gst_number"))
+    lost_reason: str | None = Field(default=None, max_length=1000, description="Mandatory reason (minimum 3 characters) when creating a lead directly in a lost stage.")
     priority: str = Field(default="medium", description="Lead priority: low, medium, high, urgent")
     assigned_to: uuid.UUID | None = None
     notes: str | None = None
@@ -485,6 +539,11 @@ class CrmLeadCreate(BaseModel):
             raise ValueError("Phone number is required.")
         return s
 
+    @field_validator("email", mode="before")
+    @classmethod
+    def _validate_email(cls, v: Any) -> str | None:
+        return validate_crm_email(v)
+
     @field_validator("priority", mode="before")
     @classmethod
     def _validate_priority(cls, v: Any) -> str:
@@ -507,6 +566,7 @@ class CrmLeadUpdate(BaseModel):
     source_type: str | None = Field(default=None, max_length=50)
     source_detail: str | None = Field(default=None, max_length=255)
     priority: str | None = Field(default=None, description="Updated priority: low, medium, high, urgent. Preserved if omitted.")
+    gstin: str | None = Field(default=None, max_length=50, validation_alias=AliasChoices("gstin", "tax_id", "tax_id_number", "gst_number"))
     notes: str | None = None
     custom_fields: dict[str, Any] | None = None
 
@@ -521,6 +581,11 @@ class CrmLeadUpdate(BaseModel):
         if len(s) > 200:
             raise ValueError("Contact name cannot exceed 200 characters.")
         return s
+
+    @field_validator("email", mode="before")
+    @classmethod
+    def _validate_email(cls, v: Any) -> str | None:
+        return validate_crm_email(v)
 
     @field_validator("priority", mode="before")
     @classmethod

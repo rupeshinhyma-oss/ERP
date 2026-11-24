@@ -97,7 +97,9 @@ describe("HRMS Phase 1 — Foundation Tests", () => {
 
       // View Tab (Default)
       expect(screen.getByText("Punch Card Container")).toBeDefined();
-      expect(screen.getByText("Punch functionality will be available here.")).toBeDefined();
+      expect(
+        screen.getByText("Verify your office geofence and punch in to begin your daily shift.")
+      ).toBeDefined();
 
       // Switch to Approval Tab
       const approvalTabBtn = screen.getByRole("button", { name: /approval/i });
