@@ -15,6 +15,7 @@ export function BrandsPage() {
       permissionPrefix="brand"
       exportPermission="brand.export"
       bulkActionPermission="brand.bulk_action"
+      statusPermission="brand.status_edit"
       liveModule="brands"
       entityName="brand"
       heading="Brands"

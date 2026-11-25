@@ -15,14 +15,31 @@ vi.mock("@/components/AppShell", () => ({
   ),
 }));
 
-// The signed-in user is controlled per test
-const auth = vi.hoisted(() => ({ isSuperAdmin: false }));
+// The signed-in user is controlled per test (normal marketing user has non-admin Proforma permissions)
+const auth = vi.hoisted(() => ({
+  isSuperAdmin: false,
+  perms: [
+    "proforma.view",
+    "proforma.pending.view",
+    "proforma.admin_approved.view",
+    "proforma.confirmed.view",
+    "proforma.cancelled.view",
+    "proforma.create",
+    "proforma.action.view",
+    "proforma.download",
+    "proforma.details.view",
+    "proforma.update",
+    "proforma.confirm",
+    "proforma.cancel",
+    "proforma.delete",
+  ] as string[],
+}));
 vi.mock("@/lib/hooks", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/hooks")>()),
   useAuth: () => ({
     profile: { username: "marketing", full_name: "Marketing User" },
     isSuperAdmin: auth.isSuperAdmin,
-    hasPermission: () => false,
+    hasPermission: (code?: string | null) => !code || auth.isSuperAdmin || auth.perms.includes(code),
   }),
 }));
 

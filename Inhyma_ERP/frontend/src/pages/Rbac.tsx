@@ -32,6 +32,7 @@ import type {
 import {
   DEPRECATED_PERMISSION_CODES,
   filterActivePermissions,
+  filterNavPermissionSections,
   friendlyPermissionLabel,
   groupPermissionsByModule,
   MODULE_NAMES,
@@ -127,6 +128,7 @@ export function RbacPage() {
   const [rolesLoading, setRolesLoading] = useState(true);
   const [error, setError] = useState<unknown>(null);
   const [roleSearch, setRoleSearch] = useState("");
+  const [rolePermSearch, setRolePermSearch] = useState("");
   const [selectedRoleIds, setSelectedRoleIds] = useState<string[]>([]);
   const [rolePageSize, setRolePageSize] = useState(50);
 
@@ -274,6 +276,7 @@ export function RbacPage() {
     }
     setRolePermStatus("idle");
     setRoleMetaStatus("idle");
+    setRolePermSearch("");
     if (!role || !role.id) {
       // Create new role
       viewingRoleIdRef.current = "";
@@ -430,6 +433,7 @@ export function RbacPage() {
     roleMetaLastSavedRef.current = { roleId: "", name: "", description: "", code: "" };
     setRolePermStatus("idle");
     setRoleMetaStatus("idle");
+    setRolePermSearch("");
     setViewingRole(null);
     setRoleName("");
     setRoleDescription("");
@@ -519,9 +523,10 @@ export function RbacPage() {
     });
   }
 
-  function toggleModule(modKey: string) {
+  function toggleModule(modKey: string, visibleItems?: Permission[]) {
     if (viewingRoleIdRef.current ? !canManage : !canCreateRole) return;
-    const items = permissionGroups[modKey] || [];
+    const items = visibleItems || permissionGroups[modKey] || [];
+    if (items.length === 0) return;
     const prev = checkedCodesRef.current;
     const anyUnchecked = items.some((p) => !prev.has(p.code));
     const next = new Set(prev);
@@ -1870,71 +1875,154 @@ export function RbacPage() {
                         : "Select initial permissions, then click Save Department to create."}
                     </span>
                   </div>
-                  {(viewingRole.id ? canManage : canCreateRole) && (
-                    <button
-                      type="button"
-                      className="btn btn-secondary btn-small"
-                      onClick={toggleSelectAllPermissions}
-                    >
-                      {checkedCodes.size === allPermissions.length ? "Deselect All" : "Select All"}
-                    </button>
-                  )}
+                  <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap", flex: "1 1 auto", justifyContent: "flex-end" }}>
+                    <div style={{ position: "relative", minWidth: "220px", maxWidth: "300px", flex: "1 1 220px" }}>
+                      <input
+                        type="text"
+                        aria-label="Search permissions"
+                        placeholder="Search module or permission..."
+                        value={rolePermSearch}
+                        onChange={(e) => setRolePermSearch(e.target.value)}
+                        style={{
+                          width: "100%",
+                          padding: "6px 28px 6px 10px",
+                          border: "1px solid #cbd5e1",
+                          borderRadius: "6px",
+                          fontSize: "13px",
+                          background: "#ffffff",
+                          boxSizing: "border-box",
+                        }}
+                      />
+                      {rolePermSearch && (
+                        <button
+                          type="button"
+                          aria-label="Clear permission search"
+                          onClick={() => setRolePermSearch("")}
+                          style={{
+                            position: "absolute",
+                            right: "7px",
+                            top: "50%",
+                            transform: "translateY(-50%)",
+                            background: "none",
+                            border: "none",
+                            color: "#94a3b8",
+                            cursor: "pointer",
+                            fontSize: "13px",
+                            padding: 0,
+                            lineHeight: 1,
+                          }}
+                        >
+                          ✕
+                        </button>
+                      )}
+                    </div>
+                    {(viewingRole.id ? canManage : canCreateRole) && (
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-small"
+                        onClick={toggleSelectAllPermissions}
+                      >
+                        {checkedCodes.size === allPermissions.length ? "Deselect All" : "Select All"}
+                      </button>
+                    )}
+                  </div>
                 </div>
 
-                <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
-                  {Object.keys(permissionGroups)
-                    .sort()
-                    .map((modKey) => {
-                      const items = permissionGroups[modKey];
-                      const allCheckedInMod = items.every((p) => checkedCodes.has(p.code));
-                      const checkedCountInMod = items.filter((p) => checkedCodes.has(p.code)).length;
-                      const canEditPerms = viewingRole.id ? canManage : canCreateRole;
-
-                      return (
-                        <div className="permission-group" key={modKey}>
-                          <div className="permission-group-header">
-                            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                              <span className="permission-group-title">
-                                {MODULE_NAMES[modKey] || modKey.toUpperCase()}
-                              </span>
-                              <span style={{ fontSize: 11, background: "#e2e8f0", color: "#475569", padding: "1px 6px", borderRadius: 10, fontWeight: 600 }}>
-                                {checkedCountInMod} / {items.length} active
-                              </span>
-                            </div>
-                            {canEditPerms && (
-                              <button
-                                type="button"
-                                className="toggle-btn"
-                                onClick={() => toggleModule(modKey)}
-                              >
-                                {allCheckedInMod ? "Deselect Group" : "Select Group"}
-                              </button>
-                            )}
+                {(() => {
+                  const orderedSections = filterNavPermissionSections(permissionGroups, rolePermSearch);
+                  if (orderedSections.length === 0) {
+                    return (
+                      <div className="muted" style={{ textAlign: "center", padding: "36px 16px", fontSize: "13.5px" }}>
+                        No permissions match &ldquo;{rolePermSearch.trim()}&rdquo;.
+                        {" "}
+                        <button
+                          type="button"
+                          className="toggle-btn"
+                          style={{ marginLeft: "6px" }}
+                          onClick={() => setRolePermSearch("")}
+                        >
+                          Clear search
+                        </button>
+                      </div>
+                    );
+                  }
+                  return (
+                    <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+                      {orderedSections.map((section) => (
+                        <div
+                          key={section.id}
+                          data-nav-section={section.id}
+                          style={{ display: "flex", flexDirection: "column", gap: "10px" }}
+                        >
+                          <div
+                            style={{
+                              fontSize: "11px",
+                              fontWeight: 700,
+                              letterSpacing: "0.08em",
+                              textTransform: "uppercase",
+                              color: "#475569",
+                              background: "#f1f5f9",
+                              borderLeft: "3px solid #0061f2",
+                              padding: "5px 10px",
+                              borderRadius: "4px",
+                            }}
+                          >
+                            {section.title}
                           </div>
-                          <div className="permission-checks">
-                            {items.map((p) => (
-                              <label key={p.code}>
-                                <input
-                                  type="checkbox"
-                                  checked={checkedCodes.has(p.code)}
-                                  disabled={!canEditPerms}
-                                  onChange={() => toggleCode(p.code)}
-                                />
-                                <div style={{ flex: 1, minWidth: 0 }}>
-                                  <div style={{ fontSize: 13, fontWeight: 600, color: "#1e293b" }}>
-                                    {friendlyPermissionLabel(p.code)}
+                          {section.modules.map(({ modKey, items }) => {
+                            const allCheckedInMod = items.every((p) => checkedCodes.has(p.code));
+                            const checkedCountInMod = items.filter((p) => checkedCodes.has(p.code)).length;
+                            const canEditPerms = viewingRole.id ? canManage : canCreateRole;
+
+                            return (
+                              <div className="permission-group" key={modKey}>
+                                <div className="permission-group-header">
+                                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                                    <span className="permission-group-title">
+                                      {MODULE_NAMES[modKey] || modKey.toUpperCase()}
+                                    </span>
+                                    <span style={{ fontSize: 11, background: "#e2e8f0", color: "#475569", padding: "1px 6px", borderRadius: 10, fontWeight: 600 }}>
+                                      {checkedCountInMod} / {items.length} active
+                                    </span>
                                   </div>
-                                  <div style={{ fontSize: 11, color: "#64748b", fontFamily: "monospace", marginTop: 2 }}>
-                                    {p.code}
-                                  </div>
+                                  {canEditPerms && (
+                                    <button
+                                      type="button"
+                                      className="toggle-btn"
+                                      onClick={() => toggleModule(modKey, items)}
+                                    >
+                                      {allCheckedInMod ? "Deselect Group" : "Select Group"}
+                                    </button>
+                                  )}
                                 </div>
-                              </label>
-                            ))}
-                          </div>
+                                <div className="permission-checks">
+                                  {items.map((p) => (
+                                    <label key={p.code}>
+                                      <input
+                                        type="checkbox"
+                                        checked={checkedCodes.has(p.code)}
+                                        disabled={!canEditPerms}
+                                        onChange={() => toggleCode(p.code)}
+                                      />
+                                      <div style={{ flex: 1, minWidth: 0 }}>
+                                        <div style={{ fontSize: 13, fontWeight: 600, color: "#1e293b" }}>
+                                          {friendlyPermissionLabel(p.code)}
+                                        </div>
+                                        <div style={{ fontSize: 11, color: "#64748b", fontFamily: "monospace", marginTop: 2 }}>
+                                          {p.code}
+                                        </div>
+                                      </div>
+                                    </label>
+                                  ))}
+                                </div>
+                              </div>
+                            );
+                          })}
                         </div>
-                      );
-                    })}
-                </div>
+                      ))}
+                    </div>
+                  );
+                })()}
               </div>
             </div>
           </div>
@@ -2506,22 +2594,10 @@ export function RbacPage() {
                   (p) => p.module !== "feed" && !p.code.startsWith("feed.")
                 );
                 const groups = groupPermissionsByModule(assignablePermissions);
-                const q = overridesSearch.trim().toLowerCase();
                 const roleGranted = new Set(overridesBreakdown.role_permissions || []);
-                const modKeys = Object.keys(groups)
-                  .sort()
-                  .filter((modKey) =>
-                    !q
-                      ? true
-                      : groups[modKey].some(
-                        (p) =>
-                          p.code.toLowerCase().includes(q) ||
-                          (p.description || "").toLowerCase().includes(q) ||
-                          modKey.toLowerCase().includes(q)
-                      )
-                  );
+                const orderedSections = filterNavPermissionSections(groups, overridesSearch);
 
-                if (modKeys.length === 0) {
+                if (orderedSections.length === 0) {
                   return (
                     <div className="muted" style={{ textAlign: "center", padding: "40px" }}>
                       No permissions match your search query.
@@ -2529,15 +2605,28 @@ export function RbacPage() {
                   );
                 }
 
-                return modKeys.map((modKey) => {
-                  const items = q
-                    ? groups[modKey].filter(
-                      (p) =>
-                        p.code.toLowerCase().includes(q) ||
-                        (p.description || "").toLowerCase().includes(q) ||
-                        modKey.toLowerCase().includes(q)
-                    )
-                    : groups[modKey];
+                return orderedSections.map((section) => (
+                  <div
+                    key={section.id}
+                    data-nav-section={section.id}
+                    style={{ display: "flex", flexDirection: "column", gap: "10px", marginBottom: "14px" }}
+                  >
+                    <div
+                      style={{
+                        fontSize: "11px",
+                        fontWeight: 700,
+                        letterSpacing: "0.08em",
+                        textTransform: "uppercase",
+                        color: "#475569",
+                        background: "#f1f5f9",
+                        borderLeft: "3px solid #0061f2",
+                        padding: "5px 10px",
+                        borderRadius: "4px",
+                      }}
+                    >
+                      {section.title}
+                    </div>
+                    {section.modules.map(({ modKey, items }) => {
                   const allCheckedInMod = items.every((p) => overridesChecked.has(p.code));
                   const checkedCountInMod = items.filter((p) => overridesChecked.has(p.code)).length;
 
@@ -2632,7 +2721,9 @@ export function RbacPage() {
                       </div>
                     </div>
                   );
-                });
+                })}
+                  </div>
+                ));
               })()}
             </div>
 

@@ -288,3 +288,7 @@ In `src/lib/nav.ts`, sidebar links declare their required permission. Items for 
 - Navigating to `/rbac` displays all cards and permission grids instantly at **0ms** without blank screen loading flickers.
 - Silent background revalidation updates the UI if server data has changed.
 
+### 9.3 Left-Sidebar Navigation Alignment (`permissionLabels.ts` & `PermissionMatrixEditor.tsx`)
+- Both `/rbac` (Department editor) and `/users` (User Permission Overrides modal) render sections and module accordions using `PERMISSION_SECTIONS` in `frontend/src/lib/permissionLabels.ts`, aligned top-to-bottom with `frontend/src/lib/nav.ts` (`Contact` -> `Inventory` -> `Sale` -> `Purchase` -> `Planning` -> `Finance` -> `User Management` -> `Settings — Masters` -> `Settings — System`, plus `Other` fallback for unmapped modules).
+- Inside each module card, `groupPermissionsByModule` applies `sortModulePermissions` (`View` -> stage views -> `Create` -> actions/stages -> `Edit` -> `Delete` -> `Import` -> `Export` -> `Bulk Actions` -> `Manage All`), and section/module search queries match and display all permissions inside matched cards.
+

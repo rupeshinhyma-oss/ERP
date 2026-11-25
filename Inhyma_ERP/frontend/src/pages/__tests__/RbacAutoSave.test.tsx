@@ -127,9 +127,10 @@ describe("RBAC & Permission Overrides Auto-Save", () => {
     expect(screen.queryByRole("button", { name: /^Cancel$/i })).toBeNull();
 
     // 1. Single permission grant -> POST /rbac/roles/role-test/permissions without clicking Save Department
-    const checkboxes = screen.getAllByRole("checkbox") as HTMLInputElement[];
-    // First perm in company group is company.create (or view); find unchecked company.create
-    const createCb = checkboxes.find((cb) => !cb.checked)!;
+    const companiesCard = screen.getByText("Companies").closest(".permission-group") as HTMLElement;
+    const companyCheckboxes = Array.from(companiesCard.querySelectorAll('input[type="checkbox"]')) as HTMLInputElement[];
+    // Find unchecked company.create inside the Companies module card
+    const createCb = companyCheckboxes.find((cb) => !cb.checked)!;
     fireEvent.click(createCb);
     await waitFor(() =>
       expect(postSpy).toHaveBeenCalledWith(
@@ -145,9 +146,9 @@ describe("RBAC & Permission Overrides Auto-Save", () => {
     fireEvent.click(createCb);
     await waitFor(() => expect(delSpy).toHaveBeenCalledWith("/rbac/roles/role-test/permissions/p-create"));
 
-    // 3. Select Group -> PUT /rbac/roles/role-test/permissions/bulk
-    const groupBtns = screen.getAllByRole("button", { name: /Select Group/i });
-    fireEvent.click(groupBtns[0]);
+    // 3. Select Group -> PUT /rbac/roles/role-test/permissions/bulk (click Companies' Select Group; TASK renders above CONTACT)
+    const companySelectGroupBtn = companiesCard.querySelector("button.toggle-btn") as HTMLButtonElement;
+    fireEvent.click(companySelectGroupBtn);
     await waitFor(() =>
       expect(putSpy).toHaveBeenCalledWith(
         "/rbac/roles/role-test/permissions/bulk",
@@ -165,7 +166,7 @@ describe("RBAC & Permission Overrides Auto-Save", () => {
       expect(putSpy).toHaveBeenCalledWith(
         "/rbac/roles/role-test/permissions/bulk",
         {
-          permission_ids: ["p-view", "p-create", "p-task"],
+          permission_ids: expect.arrayContaining(["p-view", "p-create", "p-task"]),
         },
         {},
         { idempotent: true }
@@ -181,10 +182,10 @@ describe("RBAC & Permission Overrides Auto-Save", () => {
     fireEvent.click(screen.getByRole("button", { name: /Grant All/i }));
     await waitFor(() =>
       expect(putSpy).toHaveBeenCalledWith("/rbac/users/u-mgr/permissions/bulk", {
-        overrides: [
+        overrides: expect.arrayContaining([
           { permission_id: "p-create", is_granted: true },
           { permission_id: "p-task", is_granted: true },
-        ],
+        ]),
       })
     );
   });

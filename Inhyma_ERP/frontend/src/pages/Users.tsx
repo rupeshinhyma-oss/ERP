@@ -25,6 +25,7 @@ import { syncUserPermissionOverrides, type AutoSaveStatus } from "@/lib/rbacOver
 import {
   DEPRECATED_PERMISSION_CODES,
   filterActivePermissions,
+  filterNavPermissionSections,
   friendlyPermissionLabel,
   groupPermissionsByModule,
   MODULE_NAMES,
@@ -2388,22 +2389,10 @@ export function UsersPage() {
                   (p) => p.module !== "feed" && !p.code.startsWith("feed.")
                 );
                 const groups = groupPermissionsByModule(assignablePermissions);
-                const q = overridesSearch.trim().toLowerCase();
                 const roleGranted = new Set(overridesBreakdown.role_permissions || []);
-                const modKeys = Object.keys(groups)
-                  .sort()
-                  .filter((modKey) =>
-                    !q
-                      ? true
-                      : groups[modKey].some(
-                        (p) =>
-                          p.code.toLowerCase().includes(q) ||
-                          (p.description || "").toLowerCase().includes(q) ||
-                          modKey.toLowerCase().includes(q)
-                      )
-                  );
+                const orderedSections = filterNavPermissionSections(groups, overridesSearch);
 
-                if (modKeys.length === 0) {
+                if (orderedSections.length === 0) {
                   return (
                     <div className="muted" style={{ textAlign: "center", padding: "40px" }}>
                       No permissions match your search query.
@@ -2411,15 +2400,28 @@ export function UsersPage() {
                   );
                 }
 
-                return modKeys.map((modKey) => {
-                  const items = q
-                    ? groups[modKey].filter(
-                      (p) =>
-                        p.code.toLowerCase().includes(q) ||
-                        (p.description || "").toLowerCase().includes(q) ||
-                        modKey.toLowerCase().includes(q)
-                    )
-                    : groups[modKey];
+                return orderedSections.map((section) => (
+                  <div
+                    key={section.id}
+                    data-nav-section={section.id}
+                    style={{ display: "flex", flexDirection: "column", gap: "10px", marginBottom: "14px" }}
+                  >
+                    <div
+                      style={{
+                        fontSize: "11px",
+                        fontWeight: 700,
+                        letterSpacing: "0.08em",
+                        textTransform: "uppercase",
+                        color: "#475569",
+                        background: "#f1f5f9",
+                        borderLeft: "3px solid #0061f2",
+                        padding: "5px 10px",
+                        borderRadius: "4px",
+                      }}
+                    >
+                      {section.title}
+                    </div>
+                    {section.modules.map(({ modKey, items }) => {
                   const allCheckedInMod = items.every((p) => overridesChecked.has(p.code));
                   const checkedCountInMod = items.filter((p) => overridesChecked.has(p.code)).length;
 
@@ -2514,7 +2516,9 @@ export function UsersPage() {
                       </div>
                     </div>
                   );
-                });
+                })}
+                  </div>
+                ));
               })()}
             </div>
 

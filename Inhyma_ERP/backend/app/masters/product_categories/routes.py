@@ -35,7 +35,7 @@ from app.masters.product_categories.schemas import (
     ProductCategoryUpdate,
 )
 from app.masters.product_categories.service import ProductCategoryService
-from app.rbac.dependencies import require_permission
+from app.rbac.dependencies import require_any_permission
 
 router = APIRouter(prefix="/masters/product-categories", tags=["Masters - Product Categories"])
 
@@ -97,7 +97,7 @@ async def create_category(
     payload: ProductCategoryCreate,
     request: Request,
     service: ProductCategoryService = Depends(get_product_category_service),
-    current_user: CurrentUser = Depends(require_permission("category.create")),
+    current_user: CurrentUser = Depends(require_any_permission("category.create", "category.manage")),
     audit_service: AuditService = Depends(get_audit_service),
     db: AsyncSession = Depends(get_db_session),
     dispatcher: EventDispatcher = Depends(get_event_dispatcher),
@@ -130,7 +130,7 @@ async def list_categories(
     request: Request,
     query: ListQueryParams = Depends(get_list_query_params),
     service: ProductCategoryService = Depends(get_product_category_service),
-    _current_user: CurrentUser = Depends(require_permission("category.view")),
+    _current_user: CurrentUser = Depends(require_any_permission("category.view", "category.manage")),
 ) -> dict:
     """List product categories, with search/sort/filter/pagination."""
     categories, total = await service.list_paginated(query)
@@ -176,7 +176,7 @@ async def export_categories(
     request: Request,
     format: str = "csv",
     service: ProductCategoryService = Depends(get_product_category_service),
-    current_user: CurrentUser = Depends(require_permission("category.export")),
+    current_user: CurrentUser = Depends(require_any_permission("category.export", "category.manage")),
     audit_service: AuditService = Depends(get_audit_service),
 ) -> Response:
     """Export every product category as a CSV or XLSX file."""
@@ -202,7 +202,7 @@ async def import_categories(
     request: Request,
     file: UploadFile = File(...),
     service: ProductCategoryService = Depends(get_product_category_service),
-    current_user: CurrentUser = Depends(require_permission("category.import")),
+    current_user: CurrentUser = Depends(require_any_permission("category.import", "category.manage")),
     audit_service: AuditService = Depends(get_audit_service),
 ) -> dict:
     """Import product categories from an uploaded CSV/XLSX file, validating every row."""
@@ -240,7 +240,7 @@ async def update_category(
     payload: ProductCategoryUpdate,
     request: Request,
     service: ProductCategoryService = Depends(get_product_category_service),
-    current_user: CurrentUser = Depends(require_permission("category.update")),
+    current_user: CurrentUser = Depends(require_any_permission("category.update", "category.manage")),
     audit_service: AuditService = Depends(get_audit_service),
     db: AsyncSession = Depends(get_db_session),
     dispatcher: EventDispatcher = Depends(get_event_dispatcher),
@@ -274,7 +274,7 @@ async def activate_category(
     category_id: uuid.UUID,
     request: Request,
     service: ProductCategoryService = Depends(get_product_category_service),
-    current_user: CurrentUser = Depends(require_permission("category.update")),
+    current_user: CurrentUser = Depends(require_any_permission("category.update", "category.status_edit", "category.bulk_action", "category.manage")),
     audit_service: AuditService = Depends(get_audit_service),
     db: AsyncSession = Depends(get_db_session),
     dispatcher: EventDispatcher = Depends(get_event_dispatcher),
@@ -307,7 +307,7 @@ async def deactivate_category(
     category_id: uuid.UUID,
     request: Request,
     service: ProductCategoryService = Depends(get_product_category_service),
-    current_user: CurrentUser = Depends(require_permission("category.update")),
+    current_user: CurrentUser = Depends(require_any_permission("category.update", "category.status_edit", "category.bulk_action", "category.manage")),
     audit_service: AuditService = Depends(get_audit_service),
     db: AsyncSession = Depends(get_db_session),
     dispatcher: EventDispatcher = Depends(get_event_dispatcher),
@@ -339,7 +339,7 @@ async def delete_category(
     category_id: uuid.UUID,
     request: Request,
     service: ProductCategoryService = Depends(get_product_category_service),
-    current_user: CurrentUser = Depends(require_permission("category.delete")),
+    current_user: CurrentUser = Depends(require_any_permission("category.delete", "category.manage")),
     audit_service: AuditService = Depends(get_audit_service),
     db: AsyncSession = Depends(get_db_session),
     dispatcher: EventDispatcher = Depends(get_event_dispatcher),

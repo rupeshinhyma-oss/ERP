@@ -87,7 +87,9 @@ def _authorize_channel(channel: str, current_user: CurrentUser) -> str | None:
     if current_user.is_super_admin or current_user.username == "admin" or "*" in current_user.permissions:
         return None
     if required_permission not in current_user.permissions:
-        return f"This channel requires the {required_permission!r} permission."
+        manage_fallback = f"{required_permission[:-5]}.manage" if required_permission.endswith(".view") else None
+        if not manage_fallback or manage_fallback not in current_user.permissions:
+            return f"This channel requires the {required_permission!r} permission."
     return None
 
 

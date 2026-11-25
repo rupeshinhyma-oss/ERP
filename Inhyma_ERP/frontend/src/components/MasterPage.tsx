@@ -170,6 +170,12 @@ export interface MasterPageProps<T extends MasterRecord> {
    */
   bulkActionPermission?: string;
   /**
+   * Permission code gating the inline Status toggle switch independently from
+   * `${permissionPrefix}.update`. Optional and backward-compatible: when
+   * omitted, inline Status toggling continues to require `canUpdate`.
+   */
+  statusPermission?: string;
+  /**
    * When true, loads full catalog in-memory once and executes instant sub-millisecond
    * client-side search, multi-field filtering, and local pagination (0ms DataTables-style).
    */
@@ -531,6 +537,7 @@ export function MasterPage<T extends MasterRecord>({
   liveModule,
   exportPermission,
   bulkActionPermission,
+  statusPermission,
   clientSideSearch = false,
   customSearchMatcher,
   onItemsLoaded,
@@ -542,12 +549,14 @@ export function MasterPage<T extends MasterRecord>({
 }: MasterPageProps<T>) {
   const { hasPermission } = useAuth();
 
-  const canCreate = hasPermission(`${permissionPrefix}.create`);
-  const canUpdate = hasPermission(`${permissionPrefix}.update`);
-  const canDelete = hasPermission(`${permissionPrefix}.delete`);
-  const canImport = hasPermission(`${permissionPrefix}.import`);
-  const canExport = exportPermission ? hasPermission(exportPermission) : hasPermission(`${permissionPrefix}.export`);
-  const canBulkAction = bulkActionPermission ? hasPermission(bulkActionPermission) : hasPermission(`${permissionPrefix}.bulk_action`);
+  const canManageAll = hasPermission(`${permissionPrefix}.manage`);
+  const canCreate = canManageAll || hasPermission(`${permissionPrefix}.create`);
+  const canUpdate = canManageAll || hasPermission(`${permissionPrefix}.update`);
+  const canDelete = canManageAll || hasPermission(`${permissionPrefix}.delete`);
+  const canImport = canManageAll || hasPermission(`${permissionPrefix}.import`);
+  const canExport = canManageAll || (exportPermission ? hasPermission(exportPermission) : hasPermission(`${permissionPrefix}.export`));
+  const canBulkAction = canManageAll || (bulkActionPermission ? hasPermission(bulkActionPermission) : hasPermission(`${permissionPrefix}.bulk_action`));
+  const canToggleStatus = canManageAll || (statusPermission ? hasPermission(statusPermission) : canUpdate);
 
   const [rows, setRows] = useState<T[]>([]);
   const [allRecords, setAllRecords] = useState<T[]>([]);
@@ -558,7 +567,7 @@ export function MasterPage<T extends MasterRecord>({
   const [togglingId, setTogglingId] = useState<string | null>(null);
 
   const handleToggleStatus = async (item: T, newStatus: "active" | "inactive") => {
-    if (!canUpdate) return;
+    if (!canToggleStatus) return;
     if (togglingId === item.id) return;
 
     const previousStatus = (item as any).status;
@@ -728,8 +737,12 @@ export function MasterPage<T extends MasterRecord>({
 
 
   const displayOrder = useMemo(() => {
-    return Array.from({ length: colCount }, (_, i) => i);
-  }, [colCount]);
+    return Array.from({ length: colCount }, (_, i) => i).filter((idx) => {
+      if (idx === 0 && !canBulkAction) return false;
+      if (idx === colCount - 1 && !canUpdate && !canDelete) return false;
+      return true;
+    });
+  }, [colCount, canBulkAction, canUpdate, canDelete]);
 
   const getFreezeStyle = useCallback((_colIdx: number, _isHeader = false): React.CSSProperties => {
     return {};
@@ -972,6 +985,7 @@ export function MasterPage<T extends MasterRecord>({
 
   /* --- Modal --- */
   function openModal(item: T | null) {
+    if (item ? !canUpdate : !canCreate) return;
     setEditingId(item ? item.id : "");
     setEditingItem(item);
     setForm(fillForm(item));
@@ -1105,6 +1119,7 @@ export function MasterPage<T extends MasterRecord>({
 
   /* --- Row actions --- */
   async function handleEdit(id: string) {
+    if (!canUpdate) return;
     try {
       const { data } = await apiGet<T>(`${apiBase}/${id}`);
       openModal(data);
@@ -1122,6 +1137,7 @@ export function MasterPage<T extends MasterRecord>({
   }, []);
 
   async function handleDelete(id: string) {
+    if (!canDelete) return;
     const targetItem = rows.find((r) => r.id === id);
     if (targetItem && canDeleteItem) {
       const check = canDeleteItem(targetItem);
@@ -1148,6 +1164,7 @@ export function MasterPage<T extends MasterRecord>({
   }
 
   async function handleExport(format: "csv" | "xlsx") {
+    if (!canExport) return;
     try {
       await downloadExport(apiBase, format, entityName);
     } catch (err) {
@@ -1156,7 +1173,7 @@ export function MasterPage<T extends MasterRecord>({
   }
 
   async function handleBulkActivate() {
-    if (!selectedIds.length) return;
+    if ((!canBulkAction && !canToggleStatus && !canUpdate) || !selectedIds.length) return;
     try {
       await Promise.all(selectedIds.map((id) => toggleMasterStatus(apiBase, id, "active")));
       setRows((prev) => prev.map((row) => (selectedIds.includes(row.id) ? { ...row, status: "active" } : row)));
@@ -1168,7 +1185,7 @@ export function MasterPage<T extends MasterRecord>({
   }
 
   async function handleBulkDeactivate() {
-    if (!selectedIds.length) return;
+    if ((!canBulkAction && !canToggleStatus && !canUpdate) || !selectedIds.length) return;
     try {
       await Promise.all(selectedIds.map((id) => toggleMasterStatus(apiBase, id, "inactive")));
       setRows((prev) => prev.map((row) => (selectedIds.includes(row.id) ? { ...row, status: "inactive" } : row)));
@@ -1180,7 +1197,7 @@ export function MasterPage<T extends MasterRecord>({
   }
 
   async function handleBulkDelete() {
-    if (!selectedIds.length) return;
+    if (!canDelete || !canBulkAction || !selectedIds.length) return;
     let idsToDelete = selectedIds;
     if (canDeleteItem) {
       const blockedItems = selectedIds
@@ -1226,7 +1243,7 @@ export function MasterPage<T extends MasterRecord>({
   // page -- so page 2 continues at 21, 22, 23... rather than restarting at 1.
   const startingSrNo = (currentPage - 1) * pageSize + 1;
 
-  if (isImportOpen) {
+  if (isImportOpen && canImport) {
     return (
       <AppShell activeKey={activeKey}>
         <main className="page">
@@ -1968,10 +1985,10 @@ export function MasterPage<T extends MasterRecord>({
         >
           <StatusToggle
             checked={isActive}
-            disabled={!canUpdate}
+            disabled={!canToggleStatus}
             loading={togglingId === item.id}
             title={
-              canUpdate
+              canToggleStatus
                 ? isActive
                   ? "Active — Click to turn off (inactive)"
                   : "Inactive — Click to turn on (active)"
@@ -2073,8 +2090,8 @@ export function MasterPage<T extends MasterRecord>({
             {canBulkAction && (
               <BulkActionsDropdown
                 selectedCount={selectedIds.length}
-                onBulkActivate={canUpdate ? handleBulkActivate : undefined}
-                onBulkDeactivate={canUpdate ? handleBulkDeactivate : undefined}
+                onBulkActivate={handleBulkActivate}
+                onBulkDeactivate={handleBulkDeactivate}
                 onBulkDelete={canDelete ? handleBulkDelete : undefined}
               />
             )}
@@ -2249,7 +2266,7 @@ export function MasterPage<T extends MasterRecord>({
                     columns={columns}
                   />
                 ) : displayedRows.length === 0 ? (
-                  <TableMessageRow colSpan={colCount}>No Data</TableMessageRow>
+                  <TableMessageRow colSpan={displayOrder.length}>No Data</TableMessageRow>
                 ) : (
                   displayedRows.map((item, index) => (
                     <tr

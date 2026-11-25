@@ -4,6 +4,7 @@ import {
   MODULE_NAMES,
   MODULE_ICONS,
   PERMISSION_SECTIONS,
+  type PermissionSectionId,
   friendlyPermissionLabel,
   friendlyActionIcon,
   groupPermissionsByModule,
@@ -20,7 +21,7 @@ export interface PermissionMatrixEditorProps {
   isReadOnly?: boolean;
 }
 
-type TabFilter = "all" | "core" | "inventory" | "finance" | "admin" | "masters" | "overridden";
+type TabFilter = "all" | PermissionSectionId | "other" | "overridden";
 
 export const PermissionMatrixEditor: React.FC<PermissionMatrixEditorProps> = ({
   allPermissions,
@@ -75,7 +76,28 @@ export const PermissionMatrixEditor: React.FC<PermissionMatrixEditorProps> = ({
   const q = search.trim().toLowerCase();
 
   const renderedSections = useMemo(() => {
-    return PERMISSION_SECTIONS.map((section) => {
+    const seen = new Set<string>();
+    const sections = PERMISSION_SECTIONS.map((sec) => {
+      sec.modules.forEach((m) => seen.add(m));
+      return sec;
+    });
+    const unlistedMods = Object.keys(moduleGroups).filter((m) => !seen.has(m)).sort();
+    const allSections =
+      unlistedMods.length > 0
+        ? [
+            ...sections,
+            {
+              id: "other" as const,
+              title: "OTHER MODULES",
+              pillLabel: "Other",
+              icon: "📁",
+              description: "Additional modules",
+              modules: unlistedMods,
+            },
+          ]
+        : sections;
+
+    return allSections.map((section) => {
       // Filter modules belonging to this section
       let mods = section.modules.filter((modKey) => Boolean(moduleGroups[modKey]));
 
@@ -90,6 +112,7 @@ export const PermissionMatrixEditor: React.FC<PermissionMatrixEditorProps> = ({
           const modName = MODULE_NAMES[modKey] || modKey;
           const items = moduleGroups[modKey] || [];
           return (
+            section.title.toLowerCase().includes(q) ||
             modName.toLowerCase().includes(q) ||
             modKey.toLowerCase().includes(q) ||
             items.some(
@@ -197,7 +220,7 @@ export const PermissionMatrixEditor: React.FC<PermissionMatrixEditorProps> = ({
                 transition: "all 0.15s ease",
               }}
             >
-              <span>{sec.icon} {sec.title.split("&")[0].trim()}</span>
+              <span>{sec.icon} {sec.pillLabel}</span>
               <span
                 style={{
                   fontSize: "11px",
@@ -440,14 +463,22 @@ export const PermissionMatrixEditor: React.FC<PermissionMatrixEditorProps> = ({
               {!isCollapsed && (
                 <div style={{ padding: "14px 16px", display: "flex", flexDirection: "column", gap: "12px" }}>
                   {sec.matchingModules.map((modKey) => {
+                    const modIcon = MODULE_ICONS[modKey] || "📁";
+                    const modName = MODULE_NAMES[modKey] || modKey.toUpperCase();
                     let items = moduleGroups[modKey] || [];
                     if (q) {
-                      items = items.filter(
-                        (p) =>
-                          p.code.toLowerCase().includes(q) ||
-                          (p.description || "").toLowerCase().includes(q) ||
-                          friendlyPermissionLabel(p.code).toLowerCase().includes(q)
-                      );
+                      const groupMatches =
+                        sec.title.toLowerCase().includes(q) ||
+                        modName.toLowerCase().includes(q) ||
+                        modKey.toLowerCase().includes(q);
+                      if (!groupMatches) {
+                        items = items.filter(
+                          (p) =>
+                            p.code.toLowerCase().includes(q) ||
+                            (p.description || "").toLowerCase().includes(q) ||
+                            friendlyPermissionLabel(p.code).toLowerCase().includes(q)
+                        );
+                      }
                     }
                     if (activeTab === "overridden" && isUserOverridesMode) {
                       items = items.filter((p) => checkedCodes.has(p.code) !== roleGranted.has(p.code));
@@ -456,8 +487,6 @@ export const PermissionMatrixEditor: React.FC<PermissionMatrixEditorProps> = ({
 
                     const allCheckedInMod = items.every((p) => checkedCodes.has(p.code));
                     const checkedCountInMod = items.filter((p) => checkedCodes.has(p.code)).length;
-                    const modIcon = MODULE_ICONS[modKey] || "📁";
-                    const modName = MODULE_NAMES[modKey] || modKey.toUpperCase();
 
                     return (
                       <div

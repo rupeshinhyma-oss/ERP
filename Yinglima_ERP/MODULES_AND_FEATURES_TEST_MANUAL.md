@@ -3418,9 +3418,10 @@ Manage complete vendor team directory:
 
 - **DAG Cycle Detection:** Server-side validation prevents circular hierarchies (e.g. A -> B -> A or A -> B -> C -> A) and returns HTTP 409 Conflict with an alert.
 
-- **Permission Matrix Grid:**
+- **Permission Matrix Grid (`PermissionMatrixEditor.tsx` & `permissionLabels.ts`):**
 
-  - Grouped by module cards: `Dashboard`, `Contact`, `Inventory`, `Inquiries & Quotations`, `Product Prices`, `Local Purchase`, `Sale`, `Planning`, `User Management`, `Configurations`, `Audit`, `Trash`.
+  - Sections and module cards follow the exact Left Sidebar Navigation (`nav.ts`) top-to-bottom order via `PERMISSION_SECTIONS`: `CONTACT` (`Suppliers`, `Buyers`) -> `INVENTORY` (`Product Stock`, `Stock Adjustment`, `Stock Transfer`, `Product Master`, `Product Gallery`) -> `SALE` (`Quotations`, `Proforma Invoices`, `Sale Process`, `Payment Modes & Terms`) -> `PURCHASE` (`Local Purchase`, `Inquiries & Quotations`, `Product Prices`) -> `PLANNING` (`Shipment Planning`) -> `FINANCE` (`Finance`) -> `USER MANAGEMENT` (`Users`, `Departments & Permissions`) -> `SETTINGS — MASTERS` (`Cities`, `States`, `Countries`, `Currencies`, `Units of Measurement`, `HSN / SAC Codes`, `Product Categories`, `Product Sub-Categories`, `Brands`, `Supplier Types`, `Buyer Types`, `Organizations`, `Payment Modes`, `Warehouses`) -> `SETTINGS — SYSTEM` (`Notification Rules`, `Settings`, `Audit Log`, `Trash`), plus an `Other Permissions` fallback for any unmapped modules.
+  - Within each module card, permissions are semantically ordered via `sortModulePermissions` (`View` -> stage/tab views -> `Create` -> action/stage transitions -> `Edit` -> `Delete` -> `Import` -> `Export` -> `Bulk Actions` -> `Manage All`). Searching by section title or module display name expands and shows all permissions within the matched module card.
 
   - `Select All` / `Deselect All` toggles per module card.
 

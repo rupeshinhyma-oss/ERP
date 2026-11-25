@@ -41,6 +41,7 @@ import {
   type SheetRow,
 } from "@/components/ImportWizard";
 import { apiGet, apiPatch, apiPost, apiPostMultipart, downloadExport, errorMessage, API_ORIGIN } from "@/lib/api";
+import { useAuth } from "@/lib/hooks";
 import { useLookup } from "@/lib/lookups";
 import { useLiveModule } from "@/lib/live/useLive";
 import type {
@@ -741,6 +742,14 @@ export function ProductSkeletonRows({
 }
 
 export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: { defaultAdd?: boolean; defaultFilterOpen?: boolean } = {}) {
+  const { hasPermission } = useAuth();
+  const canManageAll = hasPermission("product.manage");
+  const canCreate = canManageAll || hasPermission("product.create");
+  const canUpdate = canManageAll || hasPermission("product.update");
+  const canDelete = canManageAll || hasPermission("product.delete");
+  const canExport = canManageAll || hasPermission("product.export");
+  const canImport = canManageAll || hasPermission("product.import");
+  const canBulkAction = canManageAll || hasPermission("product.bulk_action");
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
   const location = useLocation();
@@ -898,7 +907,15 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
   };
 
   // Dynamic Column Freezing removed per user request
-  const displayOrder = useMemo(() => Array.from({ length: 13 }, (_, i) => i), []);
+  const displayOrder = useMemo(
+    () =>
+      Array.from({ length: 13 }, (_, i) => i).filter((idx) => {
+        if (idx === 0 && !canBulkAction) return false;
+        if (idx === 12 && !canUpdate) return false;
+        return true;
+      }),
+    [canBulkAction, canUpdate]
+  );
   const tableRef = useRef<HTMLTableElement>(null);
 
   useEffect(() => {
@@ -928,7 +945,9 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
 
 
   // Add / Edit Form State
-  const [isFormOpen, setIsFormOpen] = useState(defaultAdd || (typeof window !== "undefined" && window.location.pathname.toLowerCase().includes("add")));
+  const [isFormOpen, setIsFormOpen] = useState(
+    () => canCreate && (defaultAdd || (typeof window !== "undefined" && window.location.pathname.toLowerCase().includes("add")))
+  );
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [formState, setFormState] = useState<Record<string, any>>({});
   const [nameSuggestionsOpen, setNameSuggestionsOpen] = useState(false);
@@ -1445,6 +1464,7 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
 
   // Open Create Form
   const handleOpenCreate = () => {
+    if (!canCreate) return;
     setEditingProduct(null);
     const activeTaxes = allTaxes.filter((t) => (t.status || "active").toLowerCase() !== "inactive");
     const activeCategories = allCategories.filter((c) => (c.status || "active").toLowerCase() !== "inactive");
@@ -1496,6 +1516,7 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
 
   // Open Edit Form
   const handleOpenEdit = (p: Product) => {
+    if (!canUpdate) return;
     setEditingProduct(p);
     const activeTaxesForEdit = allTaxes.filter((t) => (t.status || "active").toLowerCase() !== "inactive");
     const resolvedTax =
@@ -1868,7 +1889,7 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
 
   // Bulk Actions
   const handleBulkActivate = async () => {
-    if (selectedIds.length === 0) return;
+    if ((!canBulkAction && !canUpdate) || selectedIds.length === 0) return;
     for (const id of selectedIds) {
       apiPatch(`/masters/products/${id}/activate`, {}).catch(() => { });
     }
@@ -1879,7 +1900,7 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
   };
 
   const handleBulkDeactivate = async () => {
-    if (selectedIds.length === 0) return;
+    if ((!canBulkAction && !canUpdate) || selectedIds.length === 0) return;
     for (const id of selectedIds) {
       apiPatch(`/masters/products/${id}/deactivate`, {}).catch(() => { });
     }
@@ -1890,7 +1911,7 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
   };
 
   const handleBulkDelete = async () => {
-    if (selectedIds.length === 0) return;
+    if (!canDelete || !canBulkAction || selectedIds.length === 0) return;
     // Strict zero-stock lock: check if any selected product has current_stock > 0
     const stockItems = products.filter((p) => selectedIds.includes(p.id) && (p.current_stock ?? 0) > 0);
     if (stockItems.length > 0) {
@@ -1917,7 +1938,7 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
   };
 
   // Full-page Add/Edit Form view
-  if (isFormOpen) {
+  if (isFormOpen && (editingProduct ? canUpdate : canCreate)) {
     return (
       <AppShell activeKey="masters-products">
         <div className="pm-form-page">
@@ -2811,18 +2832,20 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
         subtitle={drawerProduct.product_name_tally || drawerProduct.product_name || ""}
         maxWidth="min(900px, 95vw)"
         headerActions={
-          <button
-            type="button"
-            className="pm-btn-add"
-            style={{ fontSize: "13px", padding: "7px 16px", fontWeight: 600 }}
-            onClick={() => {
-              const prod = drawerProduct;
-              setDrawerProduct(null);
-              handleOpenEdit(prod);
-            }}
-          >
-            Edit Product
-          </button>
+          canUpdate ? (
+            <button
+              type="button"
+              className="pm-btn-add"
+              style={{ fontSize: "13px", padding: "7px 16px", fontWeight: 600 }}
+              onClick={() => {
+                const prod = drawerProduct;
+                setDrawerProduct(null);
+                handleOpenEdit(prod);
+              }}
+            >
+              Edit Product
+            </button>
+          ) : undefined
         }
       >
         <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
@@ -3056,51 +3079,55 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
                     {drawerSelectedSpares.length} Selected
                   </span>
                 </h4>
-                <button
-                  type="button"
-                  style={{
-                    background: "none",
-                    border: "none",
-                    color: "#0061f2",
-                    fontSize: "13px",
-                    fontWeight: 600,
-                    cursor: "pointer",
-                    padding: "2px 6px",
-                  }}
-                  onClick={() => {
-                    const machine = drawerProduct;
-                    setDrawerProduct(null);
-                    handleOpenMachineSpares(machine);
-                  }}
-                  title={`Manage spare parts of ${drawerProduct.product_name_tally || drawerProduct.product_name || "Machine"}`}
-                >
-                  Manage Spare Parts →
-                </button>
-              </div>
-
-              {drawerSelectedSpares.length === 0 ? (
-                <div style={{ fontSize: "13px", color: "#64748b", padding: "10px 0", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "10px" }}>
-                  <span>No spare parts currently selected for this machine.</span>
+                {(canUpdate || drawerSelectedSpares.length > 0) && (
                   <button
                     type="button"
                     style={{
-                      background: "#0061f2",
-                      color: "#ffffff",
+                      background: "none",
                       border: "none",
-                      padding: "6px 14px",
-                      borderRadius: "4px",
-                      fontSize: "12.5px",
+                      color: "#0061f2",
+                      fontSize: "13px",
                       fontWeight: 600,
                       cursor: "pointer",
+                      padding: "2px 6px",
                     }}
                     onClick={() => {
                       const machine = drawerProduct;
                       setDrawerProduct(null);
                       handleOpenMachineSpares(machine);
                     }}
+                    title={`${canUpdate ? "Manage" : "View"} spare parts of ${drawerProduct.product_name_tally || drawerProduct.product_name || "Machine"}`}
                   >
-                    + Select Spare Parts
+                    {canUpdate ? "Manage Spare Parts →" : "View Spare Parts →"}
                   </button>
+                )}
+              </div>
+
+              {drawerSelectedSpares.length === 0 ? (
+                <div style={{ fontSize: "13px", color: "#64748b", padding: "10px 0", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "10px" }}>
+                  <span>No spare parts currently selected for this machine.</span>
+                  {canUpdate && (
+                    <button
+                      type="button"
+                      style={{
+                        background: "#0061f2",
+                        color: "#ffffff",
+                        border: "none",
+                        padding: "6px 14px",
+                        borderRadius: "4px",
+                        fontSize: "12.5px",
+                        fontWeight: 600,
+                        cursor: "pointer",
+                      }}
+                      onClick={() => {
+                        const machine = drawerProduct;
+                        setDrawerProduct(null);
+                        handleOpenMachineSpares(machine);
+                      }}
+                    >
+                      + Select Spare Parts
+                    </button>
+                  )}
                 </div>
               ) : (
                 <div style={{ overflowX: "auto" }}>
@@ -3286,54 +3313,56 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
             <h1 className="pm-spares-title" data-testid="machine-spares-title">
               Spare Parts of {machineName}
             </h1>
-            <div>
-              {activeSparesTab === "selected" ? (
-                <button
-                  type="button"
-                  className="pm-spares-action-btn"
-                  data-testid="remove-spares-btn"
-                  disabled={selectedSpareRowIds.length === 0 || spareActionLoading}
-                  onClick={handleRemoveSelectedSpares}
-                  style={{
-                    backgroundColor: selectedSpareRowIds.length === 0 ? "#94a3b8" : "#0061f2",
-                    borderColor: selectedSpareRowIds.length === 0 ? "#94a3b8" : "#0061f2",
-                  }}
-                  title={
-                    selectedSpareRowIds.length === 0
-                      ? "Select one or more spare parts below to remove"
-                      : `Remove ${selectedSpareRowIds.length} selected spare part(s)`
-                  }
-                >
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                    <polyline points="3 6 5 6 21 6"></polyline>
-                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-                  </svg>
-                  {spareActionLoading ? "PROCESSING..." : "REMOVE DATA"}
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  className="pm-spares-action-btn"
-                  data-testid="select-spares-btn"
-                  disabled={selectedSpareRowIds.length === 0 || spareActionLoading}
-                  onClick={handleAddSelectedSpares}
-                  style={{
-                    backgroundColor: selectedSpareRowIds.length === 0 ? "#94a3b8" : "#0061f2",
-                    borderColor: selectedSpareRowIds.length === 0 ? "#94a3b8" : "#0061f2",
-                  }}
-                  title={
-                    selectedSpareRowIds.length === 0
-                      ? "Select one or more spare parts below to link"
-                      : `Link ${selectedSpareRowIds.length} selected spare part(s) to this machine`
-                  }
-                >
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                    <polyline points="20 6 9 17 4 12"></polyline>
-                  </svg>
-                  {spareActionLoading ? "PROCESSING..." : "SELECT DATA"}
-                </button>
-              )}
-            </div>
+            {canUpdate && (
+              <div>
+                {activeSparesTab === "selected" ? (
+                  <button
+                    type="button"
+                    className="pm-spares-action-btn"
+                    data-testid="remove-spares-btn"
+                    disabled={selectedSpareRowIds.length === 0 || spareActionLoading}
+                    onClick={handleRemoveSelectedSpares}
+                    style={{
+                      backgroundColor: selectedSpareRowIds.length === 0 ? "#94a3b8" : "#0061f2",
+                      borderColor: selectedSpareRowIds.length === 0 ? "#94a3b8" : "#0061f2",
+                    }}
+                    title={
+                      selectedSpareRowIds.length === 0
+                        ? "Select one or more spare parts below to remove"
+                        : `Remove ${selectedSpareRowIds.length} selected spare part(s)`
+                    }
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="3 6 5 6 21 6"></polyline>
+                      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                    </svg>
+                    {spareActionLoading ? "PROCESSING..." : "REMOVE DATA"}
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    className="pm-spares-action-btn"
+                    data-testid="select-spares-btn"
+                    disabled={selectedSpareRowIds.length === 0 || spareActionLoading}
+                    onClick={handleAddSelectedSpares}
+                    style={{
+                      backgroundColor: selectedSpareRowIds.length === 0 ? "#94a3b8" : "#0061f2",
+                      borderColor: selectedSpareRowIds.length === 0 ? "#94a3b8" : "#0061f2",
+                    }}
+                    title={
+                      selectedSpareRowIds.length === 0
+                        ? "Select one or more spare parts below to link"
+                        : `Link ${selectedSpareRowIds.length} selected spare part(s) to this machine`
+                    }
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="20 6 9 17 4 12"></polyline>
+                    </svg>
+                    {spareActionLoading ? "PROCESSING..." : "SELECT DATA"}
+                  </button>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Card containing Tabs, Search/Pagination controls, and Table */}
@@ -3567,7 +3596,7 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
     );
   }
 
-  if (isImportOpen) {
+  if (isImportOpen && canImport) {
     return (
       <AppShell activeKey="masters-products" pageClassName="page-product-master">
         <main className="page" style={{ width: "100%", padding: "16px 24px", boxSizing: "border-box" }}>
@@ -3981,14 +4010,16 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
                 </button>
 
                 {/* + ADD NEW Button */}
-                <button
-                  id="btn-add-product"
-                  type="button"
-                  className="btn btn-add-new"
-                  onClick={handleOpenCreate}
-                >
-                  + ADD NEW
-                </button>
+                {canCreate && (
+                  <button
+                    id="btn-add-product"
+                    type="button"
+                    className="btn btn-add-new"
+                    onClick={handleOpenCreate}
+                  >
+                    + ADD NEW
+                  </button>
+                )}
 
                 {/* Imp / Exp Dropdown */}
                 <ImpExpDropdown
@@ -4007,17 +4038,19 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
                   onExportCsv={() => {
                     downloadExport("/masters/products", "csv", "products");
                   }}
-                  showImport={true}
-                  showExport={true}
+                  showImport={canImport}
+                  showExport={canExport}
                 />
 
                 {/* Bulk Actions Dropdown */}
-                <BulkActionsDropdown
-                  selectedCount={selectedIds.length}
-                  onBulkActivate={handleBulkActivate}
-                  onBulkDeactivate={handleBulkDeactivate}
-                  onBulkDelete={handleBulkDelete}
-                />
+                {canBulkAction && (
+                  <BulkActionsDropdown
+                    selectedCount={selectedIds.length}
+                    onBulkActivate={handleBulkActivate}
+                    onBulkDeactivate={handleBulkDeactivate}
+                    onBulkDelete={canDelete ? handleBulkDelete : undefined}
+                  />
+                )}
               </div>
             </div>
 
@@ -4607,38 +4640,40 @@ export function ProductsPage({ defaultAdd = false, defaultFilterOpen = false }: 
                                   return (
                                     <td key="cell-12" className="actions" style={{ width: "70px", minWidth: "70px", textAlign: "center", ...getFreezeStyle(12, false) }}>
                                       <div style={{ display: "inline-flex", gap: "6px", alignItems: "center", justifyContent: "center" }}>
-                                        <button
-                                          type="button"
-                                          className="btn"
-                                          style={{
-                                            background: "#0061f2",
-                                            color: "#ffffff",
-                                            padding: "6px 8px",
-                                            borderRadius: "4px",
-                                            border: "none",
-                                            cursor: "pointer",
-                                            display: "inline-flex",
-                                            alignItems: "center",
-                                            justifyContent: "center",
-                                          }}
-                                          onClick={() => handleOpenEdit(p)}
-                                          title="Edit Product"
-                                          aria-label={`Edit ${name}`}
-                                        >
-                                          <svg
-                                            width="14"
-                                            height="14"
-                                            viewBox="0 0 24 24"
-                                            fill="none"
-                                            stroke="currentColor"
-                                            strokeWidth="2"
-                                            strokeLinecap="round"
-                                            strokeLinejoin="round"
+                                        {canUpdate && (
+                                          <button
+                                            type="button"
+                                            className="btn"
+                                            style={{
+                                              background: "#0061f2",
+                                              color: "#ffffff",
+                                              padding: "6px 8px",
+                                              borderRadius: "4px",
+                                              border: "none",
+                                              cursor: "pointer",
+                                              display: "inline-flex",
+                                              alignItems: "center",
+                                              justifyContent: "center",
+                                            }}
+                                            onClick={() => handleOpenEdit(p)}
+                                            title="Edit Product"
+                                            aria-label={`Edit ${name}`}
                                           >
-                                            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-                                            <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
-                                          </svg>
-                                        </button>
+                                            <svg
+                                              width="14"
+                                              height="14"
+                                              viewBox="0 0 24 24"
+                                              fill="none"
+                                              stroke="currentColor"
+                                              strokeWidth="2"
+                                              strokeLinecap="round"
+                                              strokeLinejoin="round"
+                                            >
+                                              <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                                              <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                                            </svg>
+                                          </button>
+                                        )}
                                       </div>
                                     </td>
                                   );

@@ -51,7 +51,7 @@ router = APIRouter(
     tags=["Inventory & Stock Management"],
     dependencies=[Depends(get_current_user)],  # require authentication globally; routes below enforce module permissions
 )
-_REQUIRE_PRODUCT_VIEW = Depends(require_permission("product.view"))
+_REQUIRE_PRODUCT_VIEW = Depends(require_any_permission("product.view", "product.manage"))
 _REQUIRE_PRODUCT_STOCK_VIEW = Depends(
     require_any_permission(
         "product_stock.view",
@@ -61,10 +61,12 @@ _REQUIRE_PRODUCT_STOCK_VIEW = Depends(
         "stock_transfer.create",
         "stock_transfer.manage",
         "product.view",
+        "product.manage",
         "report.view",
         "proforma.view",
         "proforma.create",
         "proforma.update",
+        "proforma.manage",
         "saleorder.view",
         "saleorder.create",
         "saleorder.update",

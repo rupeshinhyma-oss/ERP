@@ -13,13 +13,17 @@ import type { Permission } from "@/types";
 /** Friendly category names for permission modules. */
 export const MODULE_NAMES: Record<string, string> = {
   dashboard: "Dashboard",
+  feed: "Feed",
   organizationlist: "Organization List",
-  buyer: "Agents & Buyers",
+  buyer: "Agents & Buyers (Legacy)",
   buyertype: "Buyer Types",
   company: "Companies",
+  agent: "Agents",
+  zone: "Industrial Zones",
+  crm: "CRM & Lead Management",
   supplier: "Suppliers",
   suppliertype: "Supplier Types",
-  product: "Products Master",
+  product: "Product Master",
   productgallery: "Product Gallery",
   product_stock: "Product Stock",
   stock_adjustment: "Stock Adjustment",
@@ -27,15 +31,32 @@ export const MODULE_NAMES: Record<string, string> = {
   category: "Categories",
   subcategory: "Sub-Categories",
   brand: "Brands",
+  tax: "Taxes & HSN",
   hsn: "HSN Codes",
   uom: "Units of Measurement (UOM)",
   currency: "Currencies",
   country: "Countries",
   state: "States & Provinces",
+  district: "Districts",
   city: "Cities",
+  additionalcharge: "Additional Charges",
+  socialmedia: "Social Media",
+  agenttype: "Agent Types",
+  companycategory: "Company Categories",
+  companysector: "Company Sectors",
+  warehouse: "Warehouses",
+  billingcompany: "Billing Companies",
+  bank: "Banks",
+  transport: "Transport",
+  payment_term: "Payment Terms",
+  lead_source: "Lead Sources",
+  adjustment_purpose: "Adjustment Purposes",
+  call_type: "Call Types",
   user: "Users & Accounts",
-  organization: "Organizations",
-  audit: "System Audit Logs",
+  position: "Positions",
+  reporting: "Reporting & Org Chart",
+  organization: "ERP Settings",
+  audit: "Audit Log",
   trash: "Trash",
   roles_permissions: "Departments & Permissions",
   hrms: "HRMS & Workforce",
@@ -43,6 +64,11 @@ export const MODULE_NAMES: Record<string, string> = {
   technicaltask: "Technical Tasks",
   payment: "Payments",
   technician_operations: "Technician Gatepass & Wallet Management",
+  inquiry: "Inquiries & Quotations",
+  proforma: "Proforma Invoices",
+  saleorder: "Sales Process & Orders",
+  localpurchase: "Local Purchase",
+  purchase: "Purchase Orders",
   report: "Reports & Analytics",
   cargo_overview: "Cargo Overview",
 };
@@ -146,6 +172,41 @@ const FULL_CODE_LABELS: Record<string, string> = {
   "company.grade_edit": "Grade Edit",
   "company.potential_edit": "Potential Edit",
   "company.manage": "Manage All",
+  "product.view": "View",
+  "product.create": "+ Add New (Create)",
+  "product.update": "Action: Edit",
+  "product.delete": "Delete (Bulk)",
+  "product.export": "Export",
+  "product.import": "Import (Sample + Import)",
+  "product.bulk_action": "Bulk Actions",
+  "product.manage": "Manage All",
+  "category.view": "View",
+  "category.create": "+ Add New (Create)",
+  "category.update": "Action: Edit",
+  "category.delete": "Action: Delete",
+  "category.export": "Export",
+  "category.import": "Import (Sample + Import)",
+  "category.bulk_action": "Bulk Actions",
+  "category.status_edit": "Status",
+  "category.manage": "Manage All",
+  "subcategory.view": "View",
+  "subcategory.create": "+ Add New (Create)",
+  "subcategory.update": "Action: Edit",
+  "subcategory.delete": "Action: Delete",
+  "subcategory.export": "Export",
+  "subcategory.import": "Import (Sample + Import)",
+  "subcategory.bulk_action": "Bulk Actions",
+  "subcategory.status_edit": "Status",
+  "subcategory.manage": "Manage All",
+  "brand.view": "View",
+  "brand.create": "+ Add New (Create)",
+  "brand.update": "Action: Edit",
+  "brand.delete": "Action: Delete",
+  "brand.export": "Export",
+  "brand.import": "Import (Sample + Import)",
+  "brand.bulk_action": "Bulk Actions",
+  "brand.status_edit": "Status",
+  "brand.manage": "Manage All",
   "product_stock.view": "View",
   "product_stock.export": "Export",
   "product_stock.manage": "Manage All",
@@ -170,6 +231,51 @@ const FULL_CODE_LABELS: Record<string, string> = {
   "stock_transfer.confirmed": "Stage: Confirmed",
   "stock_transfer.received": "Stage: Received",
   "stock_transfer.manage": "Manage All",
+  // Proforma Invoices
+  "proforma.view": "View",
+  "proforma.pending.view": "View Pending Stage",
+  "proforma.admin_approved.view": "View Admin Approved Stage",
+  "proforma.confirmed.view": "View Confirmed Stage",
+  "proforma.cancelled.view": "View Cancelled Stage",
+  "proforma.create": "+ Add New (Create)",
+  "proforma.action.view": "View Action Column (⋮)",
+  "proforma.download": "Action: Download / View PDF",
+  "proforma.details.view": "Action: View Details",
+  "proforma.update": "Action: Edit",
+  "proforma.approve": "Stage: Admin Approved (Approve)",
+  "proforma.confirm": "Stage: Confirmed (Confirm & Create SO)",
+  "proforma.cancel": "Stage: Cancelled (Cancel)",
+  "proforma.delete": "Action: Delete",
+  "proforma.manage": "Manage All",
+  // Sales Process & Orders
+  "saleorder.view": "View",
+  "saleorder.pending.view": "View Pending Stage",
+  "saleorder.sales_confirmed.view": "View Sales Confirmed Stage",
+  "saleorder.admin_approved.view": "View Admin Approved Stage",
+  "saleorder.acc_confirmed.view": "View Acc. Confirmed Stage",
+  "saleorder.gatepass_created.view": "View Gatepass Created Stage",
+  "saleorder.dispatched.view": "View Dispatched Stage",
+  "saleorder.gatepass_cancelled.view": "View Gatepass Cancelled Stage",
+  "saleorder.lr.view": "View LR Stage",
+  "saleorder.cancelled.view": "View Cancelled Stage",
+  "saleorder.create": "+ Add New (Create)",
+  "saleorder.export": "Export",
+  "saleorder.details.view": "Action: View Details",
+  "saleorder.action.view": "View Action Column (⋮)",
+  "saleorder.update": "Action: Edit",
+  "saleorder.duplicate": "Action: Duplicate",
+  "saleorder.download": "Action: Download Gatepass / PDF",
+  "saleorder.files": "Action: SO Files",
+  "saleorder.confirm": "Stage: Sales Confirmed (Confirm)",
+  "saleorder.approve": "Stage: Admin Approved (Approve)",
+  "saleorder.accounts": "Stage: Acc. Confirmed (Accounts)",
+  "saleorder.warehouse": "Stage: Gatepass / Dispatch / LR (Warehouse)",
+  "saleorder.cancel": "Action: Cancel",
+  "saleorder.delete": "Action: Delete",
+  "saleorder.manage": "Manage All",
+  // Local Purchase
+  "localpurchase.update": "Action: Edit (Pending Stage)",
+  "localpurchase.confirm": "Action: Confirm (Add Stock)",
 };
 
 /** "product.create" -> "Create"; unknown actions fall back to the raw code. */
@@ -202,6 +308,114 @@ export function filterActivePermissions(permissions: Permission[]): Permission[]
   return permissions.filter((p) => !DEPRECATED_PERMISSION_CODES.has(p.code));
 }
 
+export interface NavPermissionSection {
+  id: string;
+  title: string;
+  modules: string[];
+}
+
+/**
+ * Left-sidebar navigation section order (`nav.ts` -> `NAV_SECTIONS`), used by
+ * `/rbac` and `/users` permission matrices so cards match the left sidebar top-to-bottom.
+ */
+export const NAV_PERMISSION_SECTIONS: NavPermissionSection[] = [
+  { id: "dashboard", title: "DASHBOARD", modules: ["feed", "dashboard"] },
+  { id: "task", title: "TASK", modules: ["task", "technicaltask", "payment", "technician_operations"] },
+  { id: "contact", title: "CONTACT", modules: ["company", "agent", "zone", "buyer"] },
+  { id: "crm", title: "CRM", modules: ["crm"] },
+  {
+    id: "inventory",
+    title: "INVENTORY",
+    modules: ["product_stock", "stock_adjustment", "stock_transfer", "product", "productgallery", "category", "subcategory", "brand"],
+  },
+  { id: "sale", title: "SALE", modules: ["proforma", "saleorder", "inquiry"] },
+  { id: "purchase", title: "PURCHASE", modules: ["localpurchase", "purchase", "supplier"] },
+  { id: "reports", title: "REPORTS", modules: ["report", "cargo_overview"] },
+  { id: "hrms", title: "HRMS", modules: ["hrms"] },
+  { id: "user_management", title: "USER MANAGEMENT", modules: ["user", "position", "roles_permissions", "reporting"] },
+  {
+    id: "settings_masters",
+    title: "SETTINGS — MASTERS",
+    modules: [
+      "city",
+      "district",
+      "state",
+      "country",
+      "currency",
+      "tax",
+      "hsn",
+      "additionalcharge",
+      "socialmedia",
+      "agenttype",
+      "companycategory",
+      "companysector",
+      "suppliertype",
+      "buyertype",
+      "warehouse",
+      "uom",
+      "billingcompany",
+      "organizationlist",
+      "bank",
+      "transport",
+      "payment_term",
+      "lead_source",
+      "adjustment_purpose",
+      "call_type",
+    ],
+  },
+  { id: "settings_system", title: "SETTINGS — SYSTEM", modules: ["organization", "audit", "trash"] },
+];
+
+const _SEMANTIC_LAST_SEGMENT_RANK: Record<string, number> = {
+  view: 0,
+  read: 0,
+  create: 2,
+  quick_add: 2,
+  import: 3,
+  export: 3,
+  bulk_action: 3,
+  download: 4,
+  details: 4,
+  files: 4,
+  duplicate: 4,
+  status_edit: 4,
+  grade_edit: 4,
+  potential_edit: 4,
+  currentstatus: 4,
+  potential: 4,
+  clientgrade: 4,
+  action: 4,
+  approve: 5,
+  accounts: 5,
+  confirm: 5,
+  confirmed: 5,
+  received: 5,
+  warehouse: 5,
+  complete: 5,
+  reopen: 5,
+  pending: 5,
+  cancel: 5,
+  update: 6,
+  delete: 7,
+  manage: 8,
+};
+
+function _permissionSortRank(code: string): number {
+  const parts = code.split(".");
+  if (parts.length >= 3 && parts[parts.length - 1] === "view") {
+    return parts[parts.length - 2] === "action" ? 4 : 1;
+  }
+  const last = parts[parts.length - 1];
+  return _SEMANTIC_LAST_SEGMENT_RANK[last] ?? 5;
+}
+
+export function sortModulePermissions(items: Permission[]): Permission[] {
+  return [...items].sort((a, b) => {
+    const rankDiff = _permissionSortRank(a.code) - _permissionSortRank(b.code);
+    return rankDiff !== 0 ? rankDiff : a.code.localeCompare(b.code);
+  });
+}
+
 export function groupPermissionsByModule(permissions: Permission[]): Record<string, Permission[]> {
   const groups: Record<string, Permission[]> = {};
   for (const p of permissions) {
@@ -210,7 +424,109 @@ export function groupPermissionsByModule(permissions: Permission[]): Record<stri
     if (!groups[modKey]) groups[modKey] = [];
     groups[modKey].push(p);
   }
+  for (const modKey of Object.keys(groups)) {
+    groups[modKey] = sortModulePermissions(groups[modKey]);
+  }
   return groups;
+}
+
+export interface OrderedPermissionSection {
+  id: string;
+  title: string;
+  moduleKeys: string[];
+}
+
+/** Order grouped permission module keys according to left-sidebar navigation sections. */
+export function groupPermissionsIntoNavSections(
+  groups: Record<string, Permission[]>,
+  allowedModKeys?: string[]
+): OrderedPermissionSection[] {
+  const allowedSet = allowedModKeys ? new Set(allowedModKeys) : null;
+  const hasMod = (modKey: string) => Boolean(groups[modKey]?.length) && (!allowedSet || allowedSet.has(modKey));
+
+  const seen = new Set<string>();
+  const sections: OrderedPermissionSection[] = [];
+
+  for (const sec of NAV_PERMISSION_SECTIONS) {
+    const moduleKeys: string[] = [];
+    for (const modKey of sec.modules) {
+      if (hasMod(modKey) && !seen.has(modKey)) {
+        seen.add(modKey);
+        moduleKeys.push(modKey);
+      }
+    }
+    if (moduleKeys.length > 0) {
+      sections.push({ id: sec.id, title: sec.title, moduleKeys });
+    }
+  }
+
+  const remaining = Object.keys(groups)
+    .filter((modKey) => hasMod(modKey) && !seen.has(modKey))
+    .sort();
+  if (remaining.length > 0) {
+    sections.push({ id: "other", title: "OTHER", moduleKeys: remaining });
+  }
+
+  return sections;
+}
+
+export interface FilteredPermissionModule {
+  modKey: string;
+  items: Permission[];
+}
+
+export interface FilteredPermissionSection {
+  id: string;
+  title: string;
+  modules: FilteredPermissionModule[];
+}
+
+/**
+ * Filter nav-ordered permission sections and module items by a free-text query
+ * (matches section title, module label/key, permission code, friendly label, or description).
+ */
+export function filterNavPermissionSections(
+  groups: Record<string, Permission[]>,
+  query: string,
+  allowedModKeys?: string[]
+): FilteredPermissionSection[] {
+  const sections = groupPermissionsIntoNavSections(groups, allowedModKeys);
+  const q = query.trim().toLowerCase();
+
+  if (!q) {
+    return sections.map((sec) => ({
+      id: sec.id,
+      title: sec.title,
+      modules: sec.moduleKeys.map((modKey) => ({ modKey, items: groups[modKey] })),
+    }));
+  }
+
+  const out: FilteredPermissionSection[] = [];
+  for (const sec of sections) {
+    const sectionMatch = sec.title.toLowerCase().includes(q);
+    const matchedModules: FilteredPermissionModule[] = [];
+
+    for (const modKey of sec.moduleKeys) {
+      const modName = (MODULE_NAMES[modKey] || modKey).toLowerCase();
+      const moduleMatch = sectionMatch || modName.includes(q) || modKey.toLowerCase().includes(q);
+      const items = moduleMatch
+        ? groups[modKey]
+        : groups[modKey].filter(
+            (p) =>
+              p.code.toLowerCase().includes(q) ||
+              friendlyPermissionLabel(p.code).toLowerCase().includes(q) ||
+              (p.description || "").toLowerCase().includes(q)
+          );
+      if (items.length > 0) {
+        matchedModules.push({ modKey, items });
+      }
+    }
+
+    if (matchedModules.length > 0) {
+      out.push({ id: sec.id, title: sec.title, modules: matchedModules });
+    }
+  }
+  return out;
 }
 
 /**

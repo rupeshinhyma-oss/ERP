@@ -353,7 +353,7 @@ type GalleryTab = "all" | "products" | "suppliers" | "quotations";
 
 export function ProductGalleryPage() {
   const { hasPermission } = useAuth();
-  const canDeleteProductMedia = hasPermission("product.update");
+  const canDeleteProductMedia = hasPermission("product.manage") || hasPermission("product.update");
   const canDeleteSupplierMedia = hasPermission("supplier.update");
 
   const [products, setProducts] = useState<Product[]>([]);

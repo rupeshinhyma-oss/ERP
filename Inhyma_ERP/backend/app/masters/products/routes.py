@@ -143,7 +143,7 @@ async def create_product(
     payload: ProductCreate,
     request: Request,
     service: ProductService = Depends(get_product_service),
-    current_user: CurrentUser = Depends(require_permission("product.create")),
+    current_user: CurrentUser = Depends(require_any_permission("product.create", "product.manage")),
     audit_service: AuditService = Depends(get_audit_service),
     db: AsyncSession = Depends(get_db_session),
     dispatcher: EventDispatcher = Depends(get_event_dispatcher),
@@ -190,7 +190,7 @@ async def list_products(
     request: Request,
     query: ListQueryParams = Depends(get_list_query_params),
     service: ProductService = Depends(get_product_service),
-    _current_user: CurrentUser = Depends(require_permission("product.view")),
+    _current_user: CurrentUser = Depends(require_any_permission("product.view", "product.manage")),
 ) -> dict:
     """List products, with search/sort/filter/pagination."""
     products, total = await service.list_paginated(query)
@@ -205,7 +205,7 @@ async def export_products(
     request: Request,
     format: str = "csv",
     service: ProductService = Depends(get_product_service),
-    current_user: CurrentUser = Depends(require_permission("product.export")),
+    current_user: CurrentUser = Depends(require_any_permission("product.export", "product.manage")),
     audit_service: AuditService = Depends(get_audit_service),
 ) -> Response:
     """Export every product as a CSV or XLSX file."""
@@ -234,7 +234,7 @@ async def import_products(
     file: UploadFile = File(...),
     update_existing: bool = False,
     service: ProductService = Depends(get_product_service),
-    current_user: CurrentUser = Depends(require_permission("product.import")),
+    current_user: CurrentUser = Depends(require_any_permission("product.import", "product.manage")),
     audit_service: AuditService = Depends(get_audit_service),
 ) -> dict:
     """Import products from an uploaded CSV/XLSX file, validating every row."""
@@ -263,7 +263,7 @@ async def import_products(
 @router.post("/upload-image", summary="Upload product image to Supabase Storage")
 async def upload_product_image(
     file: UploadFile = File(...),
-    _current_user: CurrentUser = Depends(require_permission("product.create")),
+    _current_user: CurrentUser = Depends(require_any_permission("product.create", "product.update", "product.manage")),
 ) -> dict:
     """
     Upload a product image to Supabase Storage (bucket 'product-images'),
@@ -311,7 +311,7 @@ async def upload_product_specification_document(
     file: UploadFile = File(...),
     product_id: str | None = Form(None),
     db: AsyncSession = Depends(get_db_session),
-    current_user: CurrentUser = Depends(require_any_permission("product.create", "product.update")),
+    current_user: CurrentUser = Depends(require_any_permission("product.create", "product.update", "product.manage")),
 ) -> dict:
     """
     Store any uploaded Product Specification document directly in the database.
@@ -426,9 +426,9 @@ async def bulk_delete_products(
     payload: BulkDeletePayload,
     request: Request,
     service: ProductService = Depends(get_product_service),
-    current_user: CurrentUser = Depends(require_permission("product.delete")),
+    current_user: CurrentUser = Depends(require_any_permission("product.delete", "product.manage")),
     # Spec: Bulk Delete is admin level -> needs the Bulk Actions permission as well as the delete permission.
-    _bulk_allowed: CurrentUser = Depends(require_permission("product.bulk_action")),
+    _bulk_allowed: CurrentUser = Depends(require_any_permission("product.bulk_action", "product.manage")),
     audit_service: AuditService = Depends(get_audit_service),
     db: AsyncSession = Depends(get_db_session),
     dispatcher: EventDispatcher = Depends(get_event_dispatcher),
@@ -460,7 +460,7 @@ async def get_machine_spares_universal_view(
     request: Request,
     search: str | None = None,
     service: ProductService = Depends(get_product_service),
-    _current_user: CurrentUser = Depends(require_permission("product.view")),
+    _current_user: CurrentUser = Depends(require_any_permission("product.view", "product.manage")),
 ) -> dict:
     """Return machine-wise spare parts mapping."""
     data = await service.get_machine_spares_universal_view(search=search)
@@ -472,7 +472,7 @@ async def map_machine_spare(
     payload: MachineSpareMappingIn,
     request: Request,
     service: ProductService = Depends(get_product_service),
-    _current_user: CurrentUser = Depends(require_permission("product.update")),
+    _current_user: CurrentUser = Depends(require_any_permission("product.update", "product.manage")),
 ) -> dict:
     """Link a spare part to a machine."""
     mapping = await service.map_machine_spare(
@@ -489,7 +489,7 @@ async def unmap_machine_spare(
     payload: MachineSpareUnmapIn,
     request: Request,
     service: ProductService = Depends(get_product_service),
-    _current_user: CurrentUser = Depends(require_permission("product.update")),
+    _current_user: CurrentUser = Depends(require_any_permission("product.update", "product.manage")),
 ) -> dict:
     """Unlink a spare part from a machine."""
     success = await service.unmap_machine_spare(
@@ -504,7 +504,7 @@ async def get_package_dimensions_report(
     request: Request,
     search: str | None = None,
     service: ProductService = Depends(get_product_service),
-    _current_user: CurrentUser = Depends(require_permission("product.view")),
+    _current_user: CurrentUser = Depends(require_any_permission("product.view", "product.manage")),
 ) -> dict:
     """Return dimensions and weights for each package across multi-package products."""
     data = await service.get_package_dimensions_report(search=search)
@@ -516,7 +516,7 @@ async def export_package_dimensions(
     format: str = "csv",
     search: str | None = None,
     service: ProductService = Depends(get_product_service),
-    _current_user: CurrentUser = Depends(require_permission("product.export")),
+    _current_user: CurrentUser = Depends(require_any_permission("product.export", "product.manage")),
 ) -> Response:
     """Export package dimensions to CSV or Excel."""
     rows = await service.get_package_dimensions_report(search=search)
@@ -574,7 +574,7 @@ async def update_product(
     payload: ProductUpdate,
     request: Request,
     service: ProductService = Depends(get_product_service),
-    current_user: CurrentUser = Depends(require_permission("product.update")),
+    current_user: CurrentUser = Depends(require_any_permission("product.update", "product.manage")),
     audit_service: AuditService = Depends(get_audit_service),
     db: AsyncSession = Depends(get_db_session),
     dispatcher: EventDispatcher = Depends(get_event_dispatcher),
@@ -621,7 +621,7 @@ async def activate_product(
     product_id: uuid.UUID,
     request: Request,
     service: ProductService = Depends(get_product_service),
-    current_user: CurrentUser = Depends(require_permission("product.update")),
+    current_user: CurrentUser = Depends(require_any_permission("product.update", "product.bulk_action", "product.manage")),
     audit_service: AuditService = Depends(get_audit_service),
     db: AsyncSession = Depends(get_db_session),
     dispatcher: EventDispatcher = Depends(get_event_dispatcher),
@@ -654,7 +654,7 @@ async def deactivate_product(
     product_id: uuid.UUID,
     request: Request,
     service: ProductService = Depends(get_product_service),
-    current_user: CurrentUser = Depends(require_permission("product.update")),
+    current_user: CurrentUser = Depends(require_any_permission("product.update", "product.bulk_action", "product.manage")),
     audit_service: AuditService = Depends(get_audit_service),
     db: AsyncSession = Depends(get_db_session),
     dispatcher: EventDispatcher = Depends(get_event_dispatcher),
@@ -686,7 +686,7 @@ async def delete_product(
     product_id: uuid.UUID,
     request: Request,
     service: ProductService = Depends(get_product_service),
-    current_user: CurrentUser = Depends(require_permission("product.delete")),
+    current_user: CurrentUser = Depends(require_any_permission("product.delete", "product.manage")),
     audit_service: AuditService = Depends(get_audit_service),
     db: AsyncSession = Depends(get_db_session),
     dispatcher: EventDispatcher = Depends(get_event_dispatcher),

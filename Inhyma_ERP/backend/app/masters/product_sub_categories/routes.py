@@ -36,7 +36,7 @@ from app.masters.product_sub_categories.schemas import (
     ProductSubCategoryUpdate,
 )
 from app.masters.product_sub_categories.service import ProductSubCategoryService
-from app.rbac.dependencies import require_permission
+from app.rbac.dependencies import require_any_permission
 
 router = APIRouter(prefix="/masters/product-sub-categories", tags=["Masters - Product Sub-Categories"])
 
@@ -98,7 +98,7 @@ async def create_sub_category(
     payload: ProductSubCategoryCreate,
     request: Request,
     service: ProductSubCategoryService = Depends(get_product_sub_category_service),
-    current_user: CurrentUser = Depends(require_permission("subcategory.create")),
+    current_user: CurrentUser = Depends(require_any_permission("subcategory.create", "subcategory.manage")),
     audit_service: AuditService = Depends(get_audit_service),
     db: AsyncSession = Depends(get_db_session),
     dispatcher: EventDispatcher = Depends(get_event_dispatcher),
@@ -131,7 +131,7 @@ async def list_sub_categories(
     request: Request,
     query: ListQueryParams = Depends(get_list_query_params),
     service: ProductSubCategoryService = Depends(get_product_sub_category_service),
-    _current_user: CurrentUser = Depends(require_permission("subcategory.view")),
+    _current_user: CurrentUser = Depends(require_any_permission("subcategory.view", "subcategory.manage")),
 ) -> dict:
     """List product sub-categories, with search/sort/filter/pagination."""
     sub_categories, total = await service.list_paginated(query)
@@ -168,7 +168,7 @@ async def export_sub_categories(
     request: Request,
     format: str = "csv",
     service: ProductSubCategoryService = Depends(get_product_sub_category_service),
-    current_user: CurrentUser = Depends(require_permission("subcategory.export")),
+    current_user: CurrentUser = Depends(require_any_permission("subcategory.export", "subcategory.manage")),
     audit_service: AuditService = Depends(get_audit_service),
 ) -> Response:
     """Export every product sub-category as a CSV or XLSX file."""
@@ -194,7 +194,7 @@ async def import_sub_categories(
     request: Request,
     file: UploadFile = File(...),
     service: ProductSubCategoryService = Depends(get_product_sub_category_service),
-    current_user: CurrentUser = Depends(require_permission("subcategory.import")),
+    current_user: CurrentUser = Depends(require_any_permission("subcategory.import", "subcategory.manage")),
     audit_service: AuditService = Depends(get_audit_service),
 ) -> dict:
     """Import product sub-categories from an uploaded CSV/XLSX file, validating every row."""
@@ -232,7 +232,7 @@ async def update_sub_category(
     payload: ProductSubCategoryUpdate,
     request: Request,
     service: ProductSubCategoryService = Depends(get_product_sub_category_service),
-    current_user: CurrentUser = Depends(require_permission("subcategory.update")),
+    current_user: CurrentUser = Depends(require_any_permission("subcategory.update", "subcategory.manage")),
     audit_service: AuditService = Depends(get_audit_service),
     db: AsyncSession = Depends(get_db_session),
     dispatcher: EventDispatcher = Depends(get_event_dispatcher),
@@ -266,7 +266,7 @@ async def activate_sub_category(
     sub_category_id: uuid.UUID,
     request: Request,
     service: ProductSubCategoryService = Depends(get_product_sub_category_service),
-    current_user: CurrentUser = Depends(require_permission("subcategory.update")),
+    current_user: CurrentUser = Depends(require_any_permission("subcategory.update", "subcategory.status_edit", "subcategory.bulk_action", "subcategory.manage")),
     audit_service: AuditService = Depends(get_audit_service),
     db: AsyncSession = Depends(get_db_session),
     dispatcher: EventDispatcher = Depends(get_event_dispatcher),
@@ -299,7 +299,7 @@ async def deactivate_sub_category(
     sub_category_id: uuid.UUID,
     request: Request,
     service: ProductSubCategoryService = Depends(get_product_sub_category_service),
-    current_user: CurrentUser = Depends(require_permission("subcategory.update")),
+    current_user: CurrentUser = Depends(require_any_permission("subcategory.update", "subcategory.status_edit", "subcategory.bulk_action", "subcategory.manage")),
     audit_service: AuditService = Depends(get_audit_service),
     db: AsyncSession = Depends(get_db_session),
     dispatcher: EventDispatcher = Depends(get_event_dispatcher),
@@ -331,7 +331,7 @@ async def delete_sub_category(
     sub_category_id: uuid.UUID,
     request: Request,
     service: ProductSubCategoryService = Depends(get_product_sub_category_service),
-    current_user: CurrentUser = Depends(require_permission("subcategory.delete")),
+    current_user: CurrentUser = Depends(require_any_permission("subcategory.delete", "subcategory.manage")),
     audit_service: AuditService = Depends(get_audit_service),
     db: AsyncSession = Depends(get_db_session),
     dispatcher: EventDispatcher = Depends(get_event_dispatcher),
