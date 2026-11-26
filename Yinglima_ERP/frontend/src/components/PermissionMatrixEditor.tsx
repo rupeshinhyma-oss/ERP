@@ -19,6 +19,7 @@ export interface PermissionMatrixEditorProps {
   onSetAllCodes: (codes: Set<string>) => void;
   rolePermissions?: Set<string>; // if provided, enables User Overrides mode
   isReadOnly?: boolean;
+  stickyHeaderTop?: number;
 }
 
 type TabFilter = "all" | PermissionSectionId | "other" | "overridden";
@@ -32,6 +33,7 @@ export const PermissionMatrixEditor: React.FC<PermissionMatrixEditorProps> = ({
   onSetAllCodes,
   rolePermissions,
   isReadOnly = false,
+  stickyHeaderTop,
 }) => {
   const [activeTab, setActiveTab] = useState<TabFilter>("all");
   const [search, setSearch] = useState("");
@@ -155,6 +157,25 @@ export const PermissionMatrixEditor: React.FC<PermissionMatrixEditorProps> = ({
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+      <div
+        style={
+          stickyHeaderTop !== undefined
+            ? {
+                position: "sticky",
+                top: stickyHeaderTop,
+                zIndex: 35,
+                background: "#ffffff",
+                display: "flex",
+                flexDirection: "column",
+                gap: "12px",
+                paddingTop: "8px",
+                paddingBottom: "10px",
+                marginTop: "-8px",
+                borderBottom: "1px solid #e2e8f0",
+              }
+            : { display: "flex", flexDirection: "column", gap: "14px" }
+        }
+      >
       {/* 1. Category Filter Pills */}
       <div
         style={{
@@ -372,6 +393,7 @@ export const PermissionMatrixEditor: React.FC<PermissionMatrixEditorProps> = ({
             </button>
           </div>
         </div>
+      </div>
       </div>
 
       {/* 3. Rendered Sections */}

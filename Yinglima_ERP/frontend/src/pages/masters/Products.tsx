@@ -2558,7 +2558,7 @@ export function ProductsPage() {
             bottom: 0,
             backgroundColor: "rgba(15, 23, 42, 0.85)",
             backdropFilter: "blur(4px)",
-            zIndex: 9999,
+            zIndex: 10100,
             display: "flex",
             alignItems: "center",
             justifyContent: "center",

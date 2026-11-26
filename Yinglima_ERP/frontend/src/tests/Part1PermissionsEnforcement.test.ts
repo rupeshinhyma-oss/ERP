@@ -17,7 +17,9 @@ function getVisibleNavKeys(profile: Profile | null): string[] {
         if (item.children) {
           const visibleChildren = item.children.filter((child) => {
             if (child.superAdminOnly && !isSuperAdmin) return false;
-            return !child.permission || Auth.hasPermission(child.permission);
+            if (child.permission && !Auth.hasPermission(child.permission)) return false;
+            if (child.anyPermissions && !child.anyPermissions.some((p) => Auth.hasPermission(p))) return false;
+            return true;
           });
           return { ...item, children: visibleChildren };
         }
@@ -26,7 +28,9 @@ function getVisibleNavKeys(profile: Profile | null): string[] {
       .filter((item) => {
         if (item.children) return item.children.length > 0;
         if (item.superAdminOnly && !isSuperAdmin) return false;
-        return !item.permission || Auth.hasPermission(item.permission);
+        if (item.permission && !Auth.hasPermission(item.permission)) return false;
+        if (item.anyPermissions && !item.anyPermissions.some((p) => Auth.hasPermission(p))) return false;
+        return true;
       }),
   })).filter((section) => section.items.length > 0);
 
@@ -107,6 +111,7 @@ describe("Part 1: Dynamic Permission-Based Visibility Testing", () => {
       permissions: [
         "sale_process.view",
         "stock_movement.view",
+        "stock_movement.inward.view",
         "notification_settings.view",
         "position.view",
       ],
@@ -224,6 +229,7 @@ describe("Part 1: Dynamic Permission-Based Visibility Testing", () => {
       roles: ["user"],
       permissions: [
         "stock_movement.view",
+        "stock_movement.inward.view",
         "stock_movement.create",
       ],
     };

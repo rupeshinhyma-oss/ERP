@@ -3,6 +3,10 @@
 **System:** Yinglima_ERP (China Procurement)  
 **Scope:** Functional updates, schema changes, UI hardening, and bug fixes.
 
+### 36. Sticky Department Action Bar & Permission Toolbar in RBAC (`Rbac.tsx`, `PermissionMatrixEditor.tsx`)
+- **Sticky Department Header (`Rbac.tsx`):** Pinned the Department edit header (`← Back to Departments`, `Department: ...`, `Cancel`, `Save Department`) at `top: 64px` (right below the ERP topbar) so `Save Department` stays accessible while scrolling through permissions.
+- **Sticky Permission Matrix Toolbar (`PermissionMatrixEditor.tsx`):** Added `stickyHeaderTop` prop (set to `124px` in `Rbac.tsx`) to keep the module category filter pills, search input, and `Grant All` / `Deny All` / `Expand All` / `Collapse All` buttons pinned while scrolling.
+
 ### 35. VAT Return Row Action Menu Fix (`VatReturn.tsx`)
 - **Portal `ActionDropdown` & `ACTION` Column:** Replaced the custom inline `position: absolute` 3-dot (`⋮`) menu in `VatReturn.tsx` (which stretched/clipped inside the `overflowX: auto` table container and added `paddingBottom` jumps) with the standard portal-based `<ActionDropdown iconOnly />`, and widened the last column from `3.5%` (`ACT`) to `5%` (`ACTION`).
 

@@ -757,7 +757,19 @@ export function RbacPage() {
         {viewingRole ? (
           /* Merged View / Edit Department Screen */
           <div className="view-edit-role-container">
-            <div className="page-header" style={{ marginBottom: "16px" }}>
+            <div
+              className="page-header"
+              style={{
+                position: "sticky",
+                top: 64,
+                zIndex: 45,
+                background: "var(--color-bg)",
+                padding: "12px 0",
+                marginTop: "-12px",
+                marginBottom: "16px",
+                borderBottom: "1px solid var(--color-border)",
+              }}
+            >
               <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
                 <button
                   type="button"
@@ -1553,6 +1565,7 @@ export function RbacPage() {
                 <PermissionMatrixEditor
                   allPermissions={allPermissions}
                   checkedCodes={checkedCodes}
+                  stickyHeaderTop={124}
                   onToggleCode={toggleCode}
                   onSelectAllInModule={(modKey, selectAll) => {
                     const items = permissionGroups[modKey] || [];

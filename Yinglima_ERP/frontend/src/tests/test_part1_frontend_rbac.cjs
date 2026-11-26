@@ -15,13 +15,27 @@ console.log("--> Testing Frontend RBAC Navigation & Matrix Configuration...");
 const navSrc = fs.readFileSync(path.join(__dirname, "../lib/nav.ts"), "utf8");
 
 const requiredNavGates = [
-  { key: "stock-movement", perm: "stock_movement.view" },
+  {
+    key: "stock-movement",
+    anyPerms: ["stock_movement.inward.view", "stock_movement.outward.view", "stock_movement.ledger.view"],
+  },
   { key: "sale-process", perm: "sale_process.view" },
   { key: "notification-settings", perm: "notification_settings.view" },
   { key: "positions", perm: "position.view" },
 ];
 
 for (const gate of requiredNavGates) {
+  if (gate.anyPerms) {
+    const anyRegex = new RegExp(`key:\\s*["']${gate.key}["'][^}]+anyPermissions:\\s*\\[([^\\]]+)\\]`);
+    const match = navSrc.match(anyRegex);
+    const hasAll = match && gate.anyPerms.every((p) => match[1].includes(p));
+    if (hasAll) {
+      console.log(`[PASS] nav.ts correctly gates item '${gate.key}' with anyPermissions [${gate.anyPerms.join(", ")}]`);
+    } else {
+      throw new Error(`[FAIL] nav.ts failed to gate '${gate.key}' with anyPermissions [${gate.anyPerms.join(", ")}]`);
+    }
+    continue;
+  }
   const regex = new RegExp(`key:\\s*["']${gate.key}["'][^}]+permission:\\s*["']${gate.perm}["']`);
   if (regex.test(navSrc)) {
     console.log(`[PASS] nav.ts correctly gates item '${gate.key}' with permission '${gate.perm}'`);

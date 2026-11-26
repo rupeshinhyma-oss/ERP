@@ -641,7 +641,9 @@ function Sidebar({
             if (item.children) {
               const visibleChildren = item.children.filter((child) => {
                 if (child.superAdminOnly && !isSuperAdmin) return false;
-                return !child.permission || hasPermission(child.permission);
+                if (child.permission && !hasPermission(child.permission)) return false;
+                if (child.anyPermissions && !child.anyPermissions.some((p) => hasPermission(p))) return false;
+                return true;
               });
               return { ...item, children: visibleChildren };
             }
