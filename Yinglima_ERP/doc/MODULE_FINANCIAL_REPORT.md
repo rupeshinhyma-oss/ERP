@@ -11,6 +11,10 @@ The **Financial Report & Payment Planner** module (`/finance/report`) provides a
   - **`Pending`**: `Balance Amount > 0` (payment is pending or partially completed).
   - **`Cleared`**: `Balance Amount <= 0` (`100%` of the invoice/order amount has been paid/received).
   - **`All`**: Combined view of both stages.
+- **Top Filter Options (`Filter` Panel)**:
+  - **Party (Supplier / Buyer)**: Uses `SearchableDropdown` with grouped sections (**SUPPLIERS** bold header followed by suppliers, **BUYERS** bold header followed by buyers), backed by `/suppliers/lookup`, `/buyers?page_size=200`, and active report rows.
+  - **Consignment Code**: Uses `SearchableDropdown` backed by `/inquiries/consignment-codes` and active report rows.
+  - **Date From / Date To**: Date pickers for date-range filtering.
 
 ---
 
@@ -19,7 +23,7 @@ The **Financial Report & Payment Planner** module (`/finance/report`) provides a
   - Keyed by `(source_type, source_id)` (`unique`), where `source_type` is `'local_purchase'` or `'sale_order'`.
   - Stores `payment_terms`, `expected_dispatch_date`, `due_date`, `delivery_status`, `attachment_url`, `remarks`, `tt_received_date`, `expected_stuffing_date`, `bl_details`, `bl_status`, `bill_status`, `agent_name`, `agent_local_charge`, `agent_freight_charge`, `agent_inv_amount`, and `agent_payment_date`.
 - **`finance_payments`**:
-  - Stores individual payment installments linked to `(source_type, source_id)`: `payment_date`, `amount`, `currency`, `payment_mode` (`RMB A/C`, `USD Transaction A/C`, `USD Capital A/C`, `TT / Wire Transfer`, etc.), `bank_charges`, `reference_no`, `attachment_url`, `remarks`, `created_by_id`, `created_by_name`, `deleted_at`.
+  - Stores individual payment installments linked to `(source_type, source_id)`: `payment_date`, `amount`, `currency`, `payment_mode` (dynamically fetched from **Settings → Masters → Payment Modes** `/api/v1/masters/payment-modes`), `bank_charges`, `reference_no`, `attachment_url`, `remarks`, `created_by_id`, `created_by_name`, `deleted_at`.
 
 ---
 

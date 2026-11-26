@@ -49,7 +49,25 @@ TABLES = [
     UnitOfMeasurement.__table__,
 ]
 
-NORMAL = CurrentUser(id=uuid.uuid4(), username="marketing")
+NORMAL = CurrentUser(
+    id=uuid.uuid4(),
+    username="marketing",
+    permissions={
+        "proforma.view",
+        "proforma.pending.view",
+        "proforma.admin_approved.view",
+        "proforma.confirmed.view",
+        "proforma.cancelled.view",
+        "proforma.create",
+        "proforma.action.view",
+        "proforma.download",
+        "proforma.details.view",
+        "proforma.update",
+        "proforma.confirm",
+        "proforma.cancel",
+        "proforma.delete",
+    },
+)
 ADMIN = CurrentUser(id=uuid.uuid4(), username="boss", is_super_admin=True)
 
 
@@ -368,3 +386,78 @@ async def test_company_lookup_returns_address_city_and_state_for_prefill():
     assert res.status_code == 200, res.text
     row = res.json()["data"][0]
     assert (row["address"], row["pincode"], row["city_name"], row["state_name"]) == ("12 MG Road", "411001", "Pune", "Maharashtra")
+
+
+@pytest.mark.asyncio
+async def test_proforma_granular_rbac_permissions(factory):
+    from scripts.seed import BOOTSTRAP_PERMISSIONS
+
+    seeded_proforma_codes = {row[0] for row in BOOTSTRAP_PERMISSIONS if row[1] == "proforma"}
+    assert seeded_proforma_codes == {
+        "proforma.view",
+        "proforma.pending.view",
+        "proforma.admin_approved.view",
+        "proforma.confirmed.view",
+        "proforma.cancelled.view",
+        "proforma.create",
+        "proforma.action.view",
+        "proforma.download",
+        "proforma.details.view",
+        "proforma.update",
+        "proforma.approve",
+        "proforma.confirm",
+        "proforma.cancel",
+        "proforma.delete",
+        "proforma.manage",
+    }
+
+    async with _client(factory, ADMIN) as admin:
+        pi_pending = await _create(admin)
+        pi_approved = await _create(admin)
+        await admin.patch(f"/proforma-invoice/{pi_approved['id']}/status", json={"status": "admin_approved"})
+
+    # 1. Zero proforma permissions -> 403 on all routes
+    zero = CurrentUser(id=uuid.uuid4(), username="zero", permissions=set())
+    async with _client(factory, zero) as c:
+        assert (await c.get("/proforma-invoice/list")).status_code == 403
+        assert (await c.get(f"/proforma-invoice/{pi_pending['id']}")).status_code == 403
+        assert (await c.post("/proforma-invoice", json=_payload())).status_code == 403
+        assert (await c.patch(f"/proforma-invoice/{pi_pending['id']}", json={"remark": "x"})).status_code == 403
+        assert (await c.patch(f"/proforma-invoice/{pi_pending['id']}/status", json={"status": "cancelled", "reason": "x"})).status_code == 403
+        assert (await c.delete(f"/proforma-invoice/{pi_pending['id']}")).status_code == 403
+
+    # 2. Stage view isolation (only pending.view sees pending, 403 on ?status=confirmed)
+    pending_viewer = CurrentUser(id=uuid.uuid4(), username="pview", permissions={"proforma.pending.view"})
+    async with _client(factory, pending_viewer) as c:
+        res_all = await c.get("/proforma-invoice/list")
+        assert res_all.status_code == 200
+        data_all = res_all.json()["data"]
+        assert {i["id"] for i in data_all["items"]} == {pi_pending["id"]}
+        assert data_all["tab_counts"]["pending"]["count"] == 1
+        assert data_all["tab_counts"]["admin_approved"]["count"] == 0
+        assert (await c.get("/proforma-invoice/list", params={"status": "confirmed"})).status_code == 403
+        assert (await c.get(f"/proforma-invoice/{pi_pending['id']}")).status_code == 200
+        assert (await c.get(f"/proforma-invoice/{pi_approved['id']}")).status_code == 403
+
+    # 3. proforma.download can fetch single proforma PDF data without list permissions
+    downloader = CurrentUser(id=uuid.uuid4(), username="dl", permissions={"proforma.download"})
+    async with _client(factory, downloader) as c:
+        assert (await c.get(f"/proforma-invoice/{pi_approved['id']}")).status_code == 200
+        assert (await c.get("/proforma-invoice/list")).status_code == 403
+
+    # 4. Stage actions isolated: confirm cannot approve/cancel; cancel cannot confirm
+    confirmer = CurrentUser(id=uuid.uuid4(), username="conf", permissions={"proforma.confirm"})
+    async with _client(factory, confirmer) as c:
+        assert (await c.patch(f"/proforma-invoice/{pi_pending['id']}/status", json={"status": "admin_approved"})).status_code == 403
+        assert (await c.patch(f"/proforma-invoice/{pi_approved['id']}/status", json={"status": "cancelled", "reason": "no"})).status_code == 403
+        assert (await c.patch(f"/proforma-invoice/{pi_approved['id']}/status", json={"status": "confirmed"})).status_code == 200
+
+    # 5. proforma.manage grants full access across view, create, update (including admin_approved), approve, confirm, cancel, delete
+    mgr = CurrentUser(id=uuid.uuid4(), username="mgr", permissions={"proforma.manage"})
+    async with _client(factory, mgr) as c:
+        assert (await c.get("/proforma-invoice/list", params={"status": "confirmed"})).status_code == 200
+        created = await _create(c)
+        assert (await c.patch(f"/proforma-invoice/{created['id']}/status", json={"status": "admin_approved"})).status_code == 200
+        assert (await c.patch(f"/proforma-invoice/{created['id']}", json={"remark": "mgr edit"})).status_code == 200
+        assert (await c.patch(f"/proforma-invoice/{created['id']}/status", json={"status": "cancelled", "reason": "done"})).status_code == 200
+        assert (await c.delete(f"/proforma-invoice/{created['id']}")).status_code == 200

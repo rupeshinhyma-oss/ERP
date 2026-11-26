@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { apiGet, apiPost, errorMessage } from "@/lib/api";
 import { DetailSkeleton } from "@/components/Skeleton";
+import { SelectField } from "@/components/fields";
 import { useToast } from "@/lib/toast";
 import type { SaleOrder } from "@/types/saleProcess";
 import { getSaleOrderDetailCache, updateSaleOrderInCache } from "@/lib/saleProcessCache";
@@ -323,12 +324,11 @@ export function SaleProcessOutwardModal({
                   <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#334155", marginBottom: "4px" }}>
                     Destination Warehouse *
                   </label>
-                  <select
+                  <SelectField
                     required
                     value={warehouseLocation}
-                    onChange={(e) => setWarehouseLocation(e.target.value)}
-                    style={{
-                      width: "100%",
+                    onChange={(val) => setWarehouseLocation(val)}
+                    triggerStyle={{
                       padding: "8px 10px",
                       borderRadius: "6px",
                       border: "1px solid #cbd5e1",
@@ -343,7 +343,7 @@ export function SaleProcessOutwardModal({
                         {wh.name}
                       </option>
                     ))}
-                  </select>
+                  </SelectField>
                 </div>
 
                 <div>

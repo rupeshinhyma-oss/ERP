@@ -15,6 +15,7 @@ export function CategoriesPage() {
       permissionPrefix="category"
       exportPermission="category.export"
       bulkActionPermission="category.bulk_action"
+      statusPermission="category.status_edit"
       liveModule="categories"
       entityName="category"
       heading="Product Categories"

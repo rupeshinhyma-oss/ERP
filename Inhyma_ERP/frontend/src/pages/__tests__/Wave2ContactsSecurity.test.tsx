@@ -53,7 +53,7 @@ describe("Wave 1 & Wave 2 Route Security Guards (BUG-001, BUG-002, BUG-005)", ()
   it("renders 403 Forbidden for authenticated employee lacking agent.view or zone.view", async () => {
     const getSpy = vi.spyOn(apiMod, "apiGet").mockResolvedValue({ data: { unread_count: 0 } } as any);
     Auth.setSession(
-      { access_token: "synth-token", refresh_token: "synth-refresh", token_type: "bearer" },
+      { access_token: "synth-token", refresh_token: "synth-refresh" },
       {
         id: "00000000-0000-0000-0000-000000000099",
         username: "basic_emp",
@@ -111,7 +111,7 @@ describe("Wave 1 & Wave 2 Route Security Guards (BUG-001, BUG-002, BUG-005)", ()
     });
 
     Auth.setSession(
-      { access_token: "synth-token-auth", refresh_token: "synth-refresh-auth", token_type: "bearer" },
+      { access_token: "synth-token-auth", refresh_token: "synth-refresh-auth" },
       {
         id: "00000000-0000-0000-0000-000000000088",
         username: "contacts_mgr",

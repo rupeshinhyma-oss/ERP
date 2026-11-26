@@ -150,8 +150,68 @@ describe("PaymentsPage", () => {
           <PaymentsPage />
         </MemoryRouter>
       );
+      await waitFor(() => {
+        expect(screen.getByRole("button", { name: /All \(13\)/i })).toBeTruthy();
+      });
       expect(screen.queryByRole("button", { name: /\+ ADD NEW/i })).toBeNull();
       expect(screen.queryByRole("button", { name: /DELETE/i })).toBeNull();
+      expect(screen.queryByRole("button", { name: /Pending \(5\)/i })).toBeNull();
+      expect(screen.queryByRole("button", { name: /Completed \(8\)/i })).toBeNull();
+      expect(screen.queryByRole("columnheader", { name: /Action/i })).toBeNull();
+      expect(screen.queryByRole("button", { name: "⋮" })).toBeNull();
+    } finally {
+      authState.isSuperAdmin = true;
+      authState.perms = [];
+    }
+  });
+
+  it("enforces granular tab, Action column, View Details, and Record Payment permissions", async () => {
+    const fetchSpy = vi.spyOn(technicalTasksApi, "fetchTechnicalTasks");
+    authState.isSuperAdmin = false;
+    authState.perms = ["payment.view", "payment.pending.view", "payment.action.view", "payment.details.view"];
+    try {
+      const { unmount } = render(
+        <MemoryRouter>
+          <PaymentsPage />
+        </MemoryRouter>
+      );
+
+      await waitFor(() => {
+        expect(fetchSpy).toHaveBeenCalledWith(expect.objectContaining({ payment_collected: "pending" }));
+      });
+      expect(screen.getByRole("button", { name: /All \(13\)/i })).toBeTruthy();
+      expect(screen.getByRole("button", { name: /Pending \(5\)/i })).toBeTruthy();
+      expect(screen.queryByRole("button", { name: /Completed \(8\)/i })).toBeNull();
+      expect(screen.getByRole("columnheader", { name: /Action/i })).toBeTruthy();
+
+      fireEvent.click(screen.getByRole("button", { name: "⋮" }));
+      expect(screen.queryByRole("button", { name: /Record Payment/i })).toBeNull();
+      const viewDetailsBtn = screen.getByRole("button", { name: /View Details/i });
+      fireEvent.click(viewDetailsBtn);
+
+      await waitFor(() => {
+        expect(screen.getByText("Payment Details — SUN PHARMA LTD")).toBeTruthy();
+      });
+      expect(screen.getByRole("button", { name: "Close" })).toBeTruthy();
+      expect(screen.queryByRole("button", { name: "Record Payment" })).toBeNull();
+      unmount();
+
+      authState.perms = ["payment.view", "payment.completed.view", "payment.action.view", "payment.update"];
+      render(
+        <MemoryRouter>
+          <PaymentsPage />
+        </MemoryRouter>
+      );
+
+      await waitFor(() => {
+        expect(fetchSpy).toHaveBeenCalledWith(expect.objectContaining({ payment_collected: "completed" }));
+      });
+      expect(screen.queryByRole("button", { name: /Pending \(5\)/i })).toBeNull();
+      expect(screen.getByRole("button", { name: /Completed \(8\)/i })).toBeTruthy();
+
+      fireEvent.click(screen.getByRole("button", { name: "⋮" }));
+      expect(screen.getByRole("button", { name: /Record Payment/i })).toBeTruthy();
+      expect(screen.queryByRole("button", { name: /View Details/i })).toBeNull();
     } finally {
       authState.isSuperAdmin = true;
       authState.perms = [];

@@ -367,6 +367,7 @@ svg {
   flex: 1;
   margin-left: var(--sidebar-width);
   min-width: 0;
+  max-width: 100%;
   display: flex;
   flex-direction: column;
 }
@@ -499,6 +500,8 @@ svg {
 .page {
   max-width: 100%;
   width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
   margin: 0;
   padding: 12px 20px;
 }
@@ -1621,6 +1624,13 @@ textarea.form-control {
 /* ==========================================================================
    Tables
    ========================================================================== */
+
+.table-responsive {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  box-sizing: border-box;
+}
 
 .table-scroll {
   overflow-x: auto;

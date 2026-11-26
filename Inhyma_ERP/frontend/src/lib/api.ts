@@ -126,9 +126,15 @@ export function isAbortError(err: unknown): boolean {
  */
 type UnauthorizedHandler = () => void;
 let unauthorizedHandler: UnauthorizedHandler | null = null;
+type ForbiddenHandler = () => void;
+let forbiddenHandler: ForbiddenHandler | null = null;
 
 export function setUnauthorizedHandler(handler: UnauthorizedHandler | null): void {
   unauthorizedHandler = handler;
+}
+
+export function setForbiddenHandler(handler: ForbiddenHandler | null): void {
+  forbiddenHandler = handler;
 }
 
 export function handleSessionExpired(force = true): void {
@@ -382,6 +388,10 @@ async function performRequestOnce<T>(path: string, options: RequestInit): Promis
     }
     const message = body?.message || defaultMessageForStatus(401);
     throw new ApiError(message, 401, body?.errors || []);
+  }
+
+  if (response.status === 403 && !isLoginFlowPath(path) && !path.startsWith("/auth/profile")) {
+    forbiddenHandler?.();
   }
 
   if (response.status === 204) {
@@ -1204,4 +1214,4 @@ export const DeletedOrdersApi = {
   async restoreDeletedOrder(id: string) {
     return apiPost<any>(`/sales/deleted-orders/${encodeURIComponent(id)}/restore`, {});
   },
-};
+};

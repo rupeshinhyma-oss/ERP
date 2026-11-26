@@ -6,7 +6,7 @@ import uuid
 from datetime import date
 from typing import Any
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.service import CurrentUser
@@ -24,11 +24,69 @@ from app.technician_operations.service import TechnicianOperationsService
 
 router = APIRouter(prefix="/technician-operations", tags=["Technician Operations"])
 
-_VIEW_PERMS = ("technician_operations.view", "technician_operations.manage")
-_CREATE_PERMS = ("technician_operations.create", "technician_operations.manage")
-_UPDATE_PERMS = ("technician_operations.update", "technician_operations.manage")
-_SO_BRIDGE_PERMS = (*_VIEW_PERMS, "saleorder.view", "saleorder.create", "saleorder.update")
-_LINK_SO_PERMS = (*_UPDATE_PERMS, "saleorder.create", "saleorder.update")
+_MODULE_VIEW_PERMS = (
+    "technician_operations.view",
+    "technician_operations.gatepasses.view",
+    "technician_operations.wallets.view",
+    "technician_operations.warranty.view",
+    "technician_operations.manage",
+)
+_GATEPASS_VIEW_PERMS = ("technician_operations.gatepasses.view", "technician_operations.manage")
+_GATEPASS_CREATE_PERMS = ("technician_operations.gatepass.create", "technician_operations.manage")
+_GATEPASS_RETURN_PERMS = ("technician_operations.gatepass.return", "technician_operations.update", "technician_operations.manage")
+_GATEPASS_DETAILS_PERMS = (
+    "technician_operations.gatepass.details",
+    "technician_operations.gatepass.draft_so",
+    "technician_operations.manage",
+    "saleorder.view",
+    "saleorder.create",
+    "saleorder.update",
+)
+_DRAFT_SO_PERMS = (
+    "technician_operations.gatepass.draft_so",
+    "technician_operations.gatepass.create_so",
+    "technician_operations.manage",
+    "saleorder.view",
+    "saleorder.create",
+    "saleorder.update",
+)
+_LINK_SO_PERMS = (
+    "technician_operations.gatepass.link_so",
+    "technician_operations.update",
+    "technician_operations.manage",
+    "saleorder.create",
+    "saleorder.update",
+)
+_WALLET_VIEW_PERMS = ("technician_operations.wallets.view", "technician_operations.manage")
+_WALLET_BALANCES_PERMS = ("technician_operations.wallet.balances.view", "technician_operations.manage")
+_WALLET_CREATE_ANY_PERMS = (
+    "technician_operations.wallet.create",
+    "technician_operations.wallet.collect",
+    "technician_operations.wallet.handover",
+    "technician_operations.wallet.expense",
+    "technician_operations.manage",
+)
+_WALLET_TYPE_PERM_MAP = {
+    "COLLECTION": "technician_operations.wallet.collect",
+    "HANDOVER_DEPOSIT": "technician_operations.wallet.handover",
+    "FIELD_EXPENSE": "technician_operations.wallet.expense",
+}
+_WARRANTY_VIEW_PERMS = ("technician_operations.warranty.view", "technician_operations.manage")
+_WARRANTY_CREATE_PERMS = ("technician_operations.warranty.create", "technician_operations.manage")
+_WARRANTY_VALIDATE_PERMS = (
+    "technician_operations.warranty.validate",
+    "technician_operations.gatepass.create",
+    "technician_operations.manage",
+    "saleorder.view",
+    "saleorder.create",
+    "saleorder.update",
+)
+
+
+def _user_has_any_perm(user: CurrentUser, *codes: str) -> bool:
+    if user.is_super_admin or "*" in user.permissions:
+        return True
+    return any(code in user.permissions for code in codes)
 
 
 def get_service(session: AsyncSession = Depends(get_db_session)) -> TechnicianOperationsService:
@@ -55,7 +113,7 @@ def _pagination_meta(page: int, page_size: int, total: int) -> dict[str, Any]:
 @router.get("/lookups", summary="Get master-driven dropdown lookups and live stock")
 async def get_lookups(
     service: TechnicianOperationsService = Depends(get_service),
-    current_user: CurrentUser = Depends(require_any_permission(*_VIEW_PERMS)),
+    current_user: CurrentUser = Depends(require_any_permission(*_MODULE_VIEW_PERMS)),
 ) -> dict[str, Any]:
     lookups = await service.get_lookups()
     return build_success_response(data=lookups.model_dump(mode="json"))
@@ -64,7 +122,7 @@ async def get_lookups(
 @router.get("/metrics", summary="Get high-level operations KPI metrics")
 async def get_metrics(
     service: TechnicianOperationsService = Depends(get_service),
-    current_user: CurrentUser = Depends(require_any_permission(*_VIEW_PERMS)),
+    current_user: CurrentUser = Depends(require_any_permission(*_MODULE_VIEW_PERMS)),
 ) -> dict[str, Any]:
     metrics = await service.get_metrics()
     return build_success_response(data=metrics.model_dump(mode="json"))
@@ -81,7 +139,7 @@ async def list_warranties(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, ge=1, le=200),
     service: TechnicianOperationsService = Depends(get_service),
-    current_user: CurrentUser = Depends(require_any_permission(*_VIEW_PERMS)),
+    current_user: CurrentUser = Depends(require_any_permission(*_WARRANTY_VIEW_PERMS)),
 ) -> dict[str, Any]:
     items, total = await service.list_warranties(
         search=search,
@@ -99,7 +157,7 @@ async def list_warranties(
 async def register_warranty(
     payload: WarrantyRegisterPayload,
     service: TechnicianOperationsService = Depends(get_service),
-    current_user: CurrentUser = Depends(require_any_permission(*_CREATE_PERMS)),
+    current_user: CurrentUser = Depends(require_any_permission(*_WARRANTY_CREATE_PERMS)),
 ) -> dict[str, Any]:
     warranty = await service.register_warranty(payload)
     return build_success_response(
@@ -112,7 +170,7 @@ async def register_warranty(
 async def validate_serial(
     serial: str = Query(..., min_length=1, description="Machine Serial Number"),
     service: TechnicianOperationsService = Depends(get_service),
-    current_user: CurrentUser = Depends(require_any_permission(*_SO_BRIDGE_PERMS)),
+    current_user: CurrentUser = Depends(require_any_permission(*_WARRANTY_VALIDATE_PERMS)),
 ) -> dict[str, Any]:
     result = await service.validate_serial(serial)
     return build_success_response(data=result.model_dump(mode="json"))
@@ -130,7 +188,7 @@ async def list_gatepasses(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, ge=1, le=200),
     service: TechnicianOperationsService = Depends(get_service),
-    current_user: CurrentUser = Depends(require_any_permission(*_VIEW_PERMS)),
+    current_user: CurrentUser = Depends(require_any_permission(*_GATEPASS_VIEW_PERMS)),
 ) -> dict[str, Any]:
     items, total = await service.list_gatepasses(
         technician_name=technician_name,
@@ -149,7 +207,7 @@ async def list_gatepasses(
 async def create_gatepass(
     payload: GatepassCreate,
     service: TechnicianOperationsService = Depends(get_service),
-    current_user: CurrentUser = Depends(require_any_permission(*_CREATE_PERMS)),
+    current_user: CurrentUser = Depends(require_any_permission(*_GATEPASS_CREATE_PERMS)),
 ) -> dict[str, Any]:
     gatepass = await service.create_gatepass(payload, current_user=current_user)
     return build_success_response(
@@ -162,7 +220,7 @@ async def create_gatepass(
 async def get_gatepass(
     gatepass_id: uuid.UUID,
     service: TechnicianOperationsService = Depends(get_service),
-    current_user: CurrentUser = Depends(require_any_permission(*_SO_BRIDGE_PERMS)),
+    current_user: CurrentUser = Depends(require_any_permission(*_GATEPASS_DETAILS_PERMS)),
 ) -> dict[str, Any]:
     gatepass = await service.get_gatepass(gatepass_id)
     return build_success_response(data=gatepass.model_dump(mode="json"))
@@ -173,7 +231,7 @@ async def record_parts_return(
     gatepass_id: uuid.UUID,
     payload: GatepassReturnPayload,
     service: TechnicianOperationsService = Depends(get_service),
-    current_user: CurrentUser = Depends(require_any_permission(*_UPDATE_PERMS)),
+    current_user: CurrentUser = Depends(require_any_permission(*_GATEPASS_RETURN_PERMS)),
 ) -> dict[str, Any]:
     updated_gp = await service.record_parts_return(gatepass_id, payload)
     return build_success_response(
@@ -200,7 +258,7 @@ async def link_sales_order(
 async def get_draft_so(
     gatepass_id: uuid.UUID,
     service: TechnicianOperationsService = Depends(get_service),
-    current_user: CurrentUser = Depends(require_any_permission(*_SO_BRIDGE_PERMS)),
+    current_user: CurrentUser = Depends(require_any_permission(*_DRAFT_SO_PERMS)),
 ) -> dict[str, Any]:
     draft = await service.get_draft_so_payload(gatepass_id)
     return build_success_response(data=draft.model_dump(mode="json"))
@@ -213,7 +271,7 @@ async def get_draft_so(
 @router.get("/wallet/summaries", summary="Get technician wallet cash in hand balances")
 async def get_wallet_summaries(
     service: TechnicianOperationsService = Depends(get_service),
-    current_user: CurrentUser = Depends(require_any_permission(*_VIEW_PERMS)),
+    current_user: CurrentUser = Depends(require_any_permission(*_WALLET_BALANCES_PERMS)),
 ) -> dict[str, Any]:
     summaries = await service.get_technician_wallet_summaries()
     return build_success_response(data=[s.model_dump(mode="json") for s in summaries])
@@ -228,7 +286,7 @@ async def list_wallet_transactions(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, ge=1, le=200),
     service: TechnicianOperationsService = Depends(get_service),
-    current_user: CurrentUser = Depends(require_any_permission(*_VIEW_PERMS)),
+    current_user: CurrentUser = Depends(require_any_permission(*_WALLET_VIEW_PERMS)),
 ) -> dict[str, Any]:
     items, total = await service.list_wallet_transactions(
         technician_name=technician_name,
@@ -248,8 +306,19 @@ async def list_wallet_transactions(
 async def record_wallet_transaction(
     payload: WalletTransactionCreate,
     service: TechnicianOperationsService = Depends(get_service),
-    current_user: CurrentUser = Depends(require_any_permission(*_CREATE_PERMS)),
+    current_user: CurrentUser = Depends(require_any_permission(*_WALLET_CREATE_ANY_PERMS)),
 ) -> dict[str, Any]:
+    specific_perm = _WALLET_TYPE_PERM_MAP.get(payload.transaction_type)
+    allowed_for_type = (
+        "technician_operations.wallet.create",
+        "technician_operations.manage",
+        *( (specific_perm,) if specific_perm else () ),
+    )
+    if not _user_has_any_perm(current_user, *allowed_for_type):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Permission denied: missing permission to record '{payload.transaction_type}' wallet transaction",
+        )
     txn = await service.record_wallet_transaction(payload, current_user=current_user)
     return build_success_response(
         data=txn.model_dump(mode="json"),

@@ -512,7 +512,106 @@ export function SaleProcessListPage() {
   const [perPage, setPerPage] = useState<number>(50);
   const [currentPage, setCurrentPage] = useState<number>(1);
   const [search, setSearch] = useState("");
-  const { profile } = useAuth();
+  const { profile, isSuperAdmin, hasPermission } = useAuth();
+
+  const canManage = isSuperAdmin || profile?.username === "admin" || hasPermission("saleorder.manage");
+  const canViewAll = canManage || hasPermission("saleorder.view");
+  const hasExplicitStageView =
+    hasPermission("saleorder.pending.view") ||
+    hasPermission("saleorder.sales_confirmed.view") ||
+    hasPermission("saleorder.admin_approved.view") ||
+    hasPermission("saleorder.acc_confirmed.view") ||
+    hasPermission("saleorder.gatepass_created.view") ||
+    hasPermission("saleorder.dispatched.view") ||
+    hasPermission("saleorder.gatepass_cancelled.view") ||
+    hasPermission("saleorder.lr.view") ||
+    hasPermission("saleorder.cancelled.view");
+  const canConfirm = canManage || hasPermission("saleorder.confirm");
+  const canApprove = canManage || hasPermission("saleorder.approve");
+  const canAccounts = canManage || hasPermission("saleorder.accounts");
+  const canWarehouse = canManage || hasPermission("saleorder.warehouse");
+  const canCancel = canManage || hasPermission("saleorder.cancel");
+  const canDelete = canManage || hasPermission("saleorder.delete");
+  const canCreate = canManage || hasPermission("saleorder.create");
+  const canExport = canManage || hasPermission("saleorder.export");
+  const canViewDetails = canManage || hasPermission("saleorder.details.view");
+  const canViewActionColumn = canManage || hasPermission("saleorder.action.view");
+  const canUpdate = canManage || hasPermission("saleorder.update");
+  const canDuplicate = canManage || hasPermission("saleorder.duplicate");
+  const canDownload = canManage || hasPermission("saleorder.download");
+  const canFiles = canManage || hasPermission("saleorder.files");
+
+  const isLegacyApproveQueue = !hasPermission("saleorder.view") && !hasExplicitStageView && canApprove;
+  const isLegacyAccountsQueue = !hasPermission("saleorder.view") && !hasExplicitStageView && !canApprove && canAccounts;
+  const isLegacyWarehouseQueue = !hasPermission("saleorder.view") && !hasExplicitStageView && !canApprove && !canAccounts && canWarehouse;
+
+  const canViewStage = useCallback(
+    (tabKey: string): boolean => {
+      const k = (tabKey || "").toLowerCase().trim();
+      if (canManage) return true;
+      if (k === "all" || k === "admin_confirmed_to_lr") {
+        return canViewAll || isLegacyApproveQueue;
+      }
+      if (hasPermission(`saleorder.${k}.view`)) return true;
+      if (isLegacyApproveQueue) return true;
+      if (isLegacyAccountsQueue) {
+        return ["sales_confirmed", "admin_approved", "acc_confirmed", "gatepass_created", "dispatched", "lr"].includes(k);
+      }
+      if (isLegacyWarehouseQueue) {
+        return ["sales_confirmed", "admin_approved", "acc_confirmed", "gatepass_created", "dispatched", "gatepass_cancelled", "lr"].includes(k);
+      }
+      return false;
+    },
+    [canManage, canViewAll, isLegacyApproveQueue, isLegacyAccountsQueue, isLegacyWarehouseQueue, hasPermission]
+  );
+
+  const canTransitionTo = useCallback(
+    (targetStatus: string): boolean => {
+      if (canManage) return true;
+      switch (targetStatus.toLowerCase().trim()) {
+        case "sales_confirmed":
+          return canConfirm;
+        case "admin_approved":
+          return canApprove;
+        case "acc_confirmed":
+          return canAccounts;
+        case "gatepass_created":
+        case "dispatched":
+        case "gatepass_cancelled":
+        case "lr":
+          return canWarehouse;
+        case "cancelled":
+          return canCancel;
+        default:
+          return false;
+      }
+    },
+    [canManage, canConfirm, canApprove, canAccounts, canWarehouse, canCancel]
+  );
+
+  const getAllowedNextStatuses = useCallback(
+    (currentStatus: string): string[] => {
+      const cur = (currentStatus || "pending").toLowerCase().trim();
+      const rawNext: string[] =
+        cur === "pending"
+          ? ["sales_confirmed", "cancelled"]
+          : cur === "sales_confirmed"
+          ? ["admin_approved", "cancelled"]
+          : cur === "admin_approved"
+          ? ["acc_confirmed", "cancelled"]
+          : cur === "acc_confirmed"
+          ? ["gatepass_created"]
+          : cur === "gatepass_created"
+          ? ["dispatched", "gatepass_cancelled"]
+          : cur === "gatepass_cancelled"
+          ? ["gatepass_created", "cancelled"]
+          : cur === "dispatched"
+          ? ["lr", "gatepass_cancelled"]
+          : [];
+      return rawNext.filter((st) => canTransitionTo(st));
+    },
+    [canTransitionTo]
+  );
 
   // Filter criteria
   const [orderDateRange, setOrderDateRange] = useState("");
@@ -980,22 +1079,8 @@ export function SaleProcessListPage() {
 
   const openStatusDrawer = (order: SaleOrder) => {
     const cur = (order.status || "pending").toLowerCase().trim();
-    const nextStatus =
-      cur === "pending"
-        ? "sales_confirmed"
-        : cur === "sales_confirmed"
-        ? "admin_approved"
-        : cur === "admin_approved"
-        ? "acc_confirmed"
-        : cur === "acc_confirmed"
-        ? "gatepass_created"
-        : cur === "gatepass_created"
-        ? "dispatched"
-        : cur === "gatepass_cancelled"
-        ? "gatepass_created"
-        : cur === "dispatched"
-        ? "lr"
-        : cur;
+    const allowedNext = getAllowedNextStatuses(cur);
+    const nextStatus = allowedNext[0] || cur;
 
     setEditingStatusOrder(order);
     setDrawerTargetStatus(nextStatus);
@@ -1573,6 +1658,11 @@ export function SaleProcessListPage() {
     { key: "cancelled", label: "Cancelled", count: effectiveMetrics.cancelled?.count ?? 0 },
   ], [effectiveMetrics, isTestMode]);
 
+  const visibleTabs = useMemo(
+    () => tabs.filter((t) => canViewStage(t.key)),
+    [tabs, canViewStage]
+  );
+
   // Top 6 Summary KPI Cards
   const kpiCards = useMemo(() => [
     {
@@ -1613,9 +1703,23 @@ export function SaleProcessListPage() {
     },
   ], [effectiveMetrics, isTestMode]);
 
+  const visibleKpiCards = useMemo(
+    () => kpiCards.filter((card) => canViewStage(card.key)),
+    [kpiCards, canViewStage]
+  );
+
+  useEffect(() => {
+    if (visibleTabs.length > 0 && !canViewStage(activeTab)) {
+      setActiveTabState(visibleTabs[0].key);
+    }
+  }, [visibleTabs, activeTab, canViewStage]);
+
   // Filtered orders list
   const filteredOrders = useMemo(() => {
     return orders.filter((o) => {
+      if (!canViewAll && !canViewStage(o.status || "pending")) {
+        return false;
+      }
       // Status tab filter
       if (activeTab === "admin_confirmed_to_lr") {
         const st = (o.status || "").toLowerCase().trim();
@@ -1729,6 +1833,8 @@ export function SaleProcessListPage() {
     activeTab,
     appliedFilters,
     search,
+    canViewAll,
+    canViewStage,
   ]);
 
   const [sortColIndex, setSortColIndex] = useState<number | null>(null);
@@ -1965,6 +2071,7 @@ export function SaleProcessListPage() {
 
     const displayTimestamp =
       formatStatusTimestamp(timestamp) || formatStatusTimestamp(order?.updated_at || order?.created_at);
+    const canOpenDrawer = getAllowedNextStatuses(s).length > 0;
 
     return (
       <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "2px" }}>
@@ -1972,45 +2079,47 @@ export function SaleProcessListPage() {
           <span style={badgeStyle}>
             <span>{label}</span>
           </span>
-          <button
-            type="button"
-            title="Update Status"
-            aria-label="Update Status"
-            onClick={(e) => {
-              e.stopPropagation();
-              if (order) {
-                openStatusDrawer(order);
-              }
-            }}
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              justifyContent: "center",
-              width: "22px",
-              height: "22px",
-              borderRadius: "4px",
-              border: "1px solid #3b82f6",
-              background: "#ffffff",
-              color: "#2563eb",
-              cursor: "pointer",
-              padding: 0,
-              boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
-              transition: "all 0.15s ease",
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.background = "#eff6ff";
-              e.currentTarget.style.borderColor = "#1d4ed8";
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.background = "#ffffff";
-              e.currentTarget.style.borderColor = "#3b82f6";
-            }}
-          >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-              <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
-            </svg>
-          </button>
+          {canOpenDrawer && (
+            <button
+              type="button"
+              title="Update Status"
+              aria-label="Update Status"
+              onClick={(e) => {
+                e.stopPropagation();
+                if (order) {
+                  openStatusDrawer(order);
+                }
+              }}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                width: "22px",
+                height: "22px",
+                borderRadius: "4px",
+                border: "1px solid #3b82f6",
+                background: "#ffffff",
+                color: "#2563eb",
+                cursor: "pointer",
+                padding: 0,
+                boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
+                transition: "all 0.15s ease",
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = "#eff6ff";
+                e.currentTarget.style.borderColor = "#1d4ed8";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = "#ffffff";
+                e.currentTarget.style.borderColor = "#3b82f6";
+              }}
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+              </svg>
+            </button>
+          )}
           {order?.po_file_url && !["acc_confirmed", "gatepass_created", "dispatched", "lr"].includes(s) && (
             <a
               href={resolveSaleFileHref(order.po_file_url)}
@@ -2125,60 +2234,64 @@ export function SaleProcessListPage() {
             </button>
 
             {/* + ADD NEW Button */}
-            <Link
-              to="/sales/process/add"
-              className="btn btn-add-new"
-              style={{
-                backgroundColor: "#0061f2",
-                color: "#ffffff",
-                border: "none",
-                borderRadius: "6px",
-                padding: "8px 16px",
-                fontSize: "12.5px",
-                fontWeight: 700,
-                cursor: "pointer",
-                display: "inline-flex",
-                alignItems: "center",
-                gap: "4px",
-                textDecoration: "none",
-                boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
-              }}
-            >
-              + ADD NEW
-            </Link>
+            {canCreate && (
+              <Link
+                to="/sales/process/add"
+                className="btn btn-add-new"
+                style={{
+                  backgroundColor: "#0061f2",
+                  color: "#ffffff",
+                  border: "none",
+                  borderRadius: "6px",
+                  padding: "8px 16px",
+                  fontSize: "12.5px",
+                  fontWeight: 700,
+                  cursor: "pointer",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "4px",
+                  textDecoration: "none",
+                  boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
+                }}
+              >
+                + ADD NEW
+              </Link>
+            )}
 
             {/* Export Button (matches Companies, Product Stock, Stock Adjustment & Stock Transfer) */}
-            <button
-              type="button"
-              className="btn btn-imp-exp"
-              title="Export sale process orders"
-              onClick={handleExport}
-              style={{
-                border: "none",
-                cursor: "pointer",
-                display: "inline-flex",
-                alignItems: "center",
-                gap: "6px",
-                boxShadow: "0 1px 2px rgba(0, 0, 0, 0.05)",
-              }}
-            >
-              <svg
-                width="14"
-                height="14"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2.2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                aria-hidden="true"
+            {canExport && (
+              <button
+                type="button"
+                className="btn btn-imp-exp"
+                title="Export sale process orders"
+                onClick={handleExport}
+                style={{
+                  border: "none",
+                  cursor: "pointer",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  boxShadow: "0 1px 2px rgba(0, 0, 0, 0.05)",
+                }}
               >
-                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                <polyline points="7 10 12 15 17 10" />
-                <line x1="12" y1="15" x2="12" y2="3" />
-              </svg>
-              <span>Export</span>
-            </button>
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                  <polyline points="7 10 12 15 17 10" />
+                  <line x1="12" y1="15" x2="12" y2="3" />
+                </svg>
+                <span>Export</span>
+              </button>
+            )}
           </div>
         </div>
 
@@ -2538,7 +2651,7 @@ export function SaleProcessListPage() {
             marginBottom: "16px",
           }}
         >
-          {kpiCards.map((card) => {
+          {visibleKpiCards.map((card) => {
             const isSelected = activeTab === card.key;
             return (
               <div
@@ -2604,7 +2717,7 @@ export function SaleProcessListPage() {
             scrollbarWidth: "thin",
           }}
         >
-          {tabs.map((t) => {
+          {visibleTabs.map((t) => {
             const isActive = activeTab === t.key;
             return (
               <button
@@ -2751,9 +2864,11 @@ export function SaleProcessListPage() {
                   <th style={{ padding: "10px 12px", borderBottom: "1px solid #e2e8f0", fontWeight: 700, textAlign: "center" }}>
                     Gatepass
                   </th>
-                  <th style={{ padding: "10px 12px", borderBottom: "1px solid #e2e8f0", fontWeight: 700, textAlign: "center", width: "40px" }}>
-                    Action
-                  </th>
+                  {canViewActionColumn && (
+                    <th style={{ padding: "10px 12px", borderBottom: "1px solid #e2e8f0", fontWeight: 700, textAlign: "center", width: "40px" }}>
+                      Action
+                    </th>
+                  )}
                 </tr>
               </thead>
               <tbody>
@@ -2761,7 +2876,7 @@ export function SaleProcessListPage() {
                   <SaleProcessSkeletonRows count={8} />
                 ) : paginatedOrders.length === 0 ? (
                   <tr>
-                    <td colSpan={14} style={{ textAlign: "center", padding: "40px", color: "#64748b" }}>
+                    <td colSpan={canViewActionColumn ? 14 : 13} style={{ textAlign: "center", padding: "40px", color: "#64748b" }}>
                       No Data
                     </td>
                   </tr>
@@ -2778,28 +2893,34 @@ export function SaleProcessListPage() {
                     >
                       {/* Order No + Date */}
                       <td style={{ padding: "8px 12px" }}>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            console.log("Order button clicked for:", o.id);
-                            setDetailOrderId(o.id);
-                          }}
-                          style={{
-                            background: "none",
-                            border: "none",
-                            padding: 0,
-                            color: "#0061f2",
-                            fontWeight: 600,
-                            textDecoration: "none",
-                            cursor: "pointer",
-                            fontSize: "12.5px",
-                            textAlign: "left",
-                          }}
-                          onMouseEnter={(e) => (e.currentTarget.style.textDecoration = "underline")}
-                          onMouseLeave={(e) => (e.currentTarget.style.textDecoration = "none")}
-                        >
-                          {o.order_no}
-                        </button>
+                        {canViewDetails ? (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              console.log("Order button clicked for:", o.id);
+                              setDetailOrderId(o.id);
+                            }}
+                            style={{
+                              background: "none",
+                              border: "none",
+                              padding: 0,
+                              color: "#0061f2",
+                              fontWeight: 600,
+                              textDecoration: "none",
+                              cursor: "pointer",
+                              fontSize: "12.5px",
+                              textAlign: "left",
+                            }}
+                            onMouseEnter={(e) => (e.currentTarget.style.textDecoration = "underline")}
+                            onMouseLeave={(e) => (e.currentTarget.style.textDecoration = "none")}
+                          >
+                            {o.order_no}
+                          </button>
+                        ) : (
+                          <div style={{ fontWeight: 600, color: "#1e293b", fontSize: "12.5px" }}>
+                            {o.order_no}
+                          </div>
+                        )}
                         <div style={{ fontSize: "11px", color: "#64748b" }}>{o.order_date}</div>
                         {(o.allocated_consignment || o.consignment_code) && (
                           <div style={{ fontSize: "11px", color: "#d97706", fontWeight: 600, marginTop: "2px" }} title="Allocated Transit Consignment">
@@ -3094,21 +3215,27 @@ export function SaleProcessListPage() {
                       <td style={{ padding: "8px 12px", textAlign: "center", color: "#334155", fontWeight: 500 }}>
                         {o.gatepass_no ? (
                           <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "2px" }}>
-                            <Link
-                              to={`/sales/gatepass-pdf/${o.id}`}
-                              target="_blank"
-                              style={{
-                                color: "#0061f2",
-                                fontWeight: 700,
-                                textDecoration: "none",
-                                fontSize: "12px",
-                              }}
-                              onMouseEnter={(e) => (e.currentTarget.style.textDecoration = "underline")}
-                              onMouseLeave={(e) => (e.currentTarget.style.textDecoration = "none")}
-                              title="Click to view & print official Gate Pass PDF"
-                            >
-                              📄 {o.gatepass_no}
-                            </Link>
+                            {canDownload ? (
+                              <Link
+                                to={`/sales/gatepass-pdf/${o.id}`}
+                                target="_blank"
+                                style={{
+                                  color: "#0061f2",
+                                  fontWeight: 700,
+                                  textDecoration: "none",
+                                  fontSize: "12px",
+                                }}
+                                onMouseEnter={(e) => (e.currentTarget.style.textDecoration = "underline")}
+                                onMouseLeave={(e) => (e.currentTarget.style.textDecoration = "none")}
+                                title="Click to view & print official Gate Pass PDF"
+                              >
+                                📄 {o.gatepass_no}
+                              </Link>
+                            ) : (
+                              <span style={{ color: "#334155", fontWeight: 600, fontSize: "12px" }}>
+                                📄 {o.gatepass_no}
+                              </span>
+                            )}
                             {o.gatepass_date && (
                               <span style={{ fontSize: "10.5px", color: "#64748b" }}>{o.gatepass_date}</span>
                             )}
@@ -3119,6 +3246,7 @@ export function SaleProcessListPage() {
                       </td>
 
                       {/* Action Menu (⋮) */}
+                      {canViewActionColumn && (
                       <td style={{ padding: "8px 12px", textAlign: "center", position: "relative", zIndex: openActionId === o.id ? 50 : 1 }}>
                         <button
                           type="button"
@@ -3159,22 +3287,23 @@ export function SaleProcessListPage() {
                         {openActionId === o.id && actionMenuPos && (() => {
                           const st = (o.status || "pending").toLowerCase().trim();
 
-                          // User-defined action menu capabilities per order status:
-                          // - pending: Edit, SO Files, Delete
-                          // - sales_confirmed: Edit, SO Files, Cancel, Delete
-                          // - admin_approved: SO Files, Cancel, Delete
-                          // - acc_confirmed: SO Files, Delete
-                          // - gatepass_created: Download Gatepass, SO Files, Delete
-                          // - dispatched: Download Gatepass, SO Files, Delete
-                          // - gatepass_cancelled: SO Files, Cancel, Delete
-                          // - lr: Duplicate, Download Gatepass, Delete
-                          // - cancelled: Delete
-                          const showEdit = st === "pending" || st === "sales_confirmed";
-                          const showDuplicate = st === "lr";
-                          const showDownloadGatepass = st === "gatepass_created" || st === "dispatched" || st === "lr";
-                          const showSoFiles = st !== "lr" && st !== "cancelled";
-                          const showCancel = st === "sales_confirmed" || st === "admin_approved" || st === "gatepass_cancelled";
-                          const showDelete = true;
+                          // Stage rules + RBAC per-button gating
+                          const showEdit = (st === "pending" || st === "sales_confirmed") && canUpdate;
+                          const showDuplicate = st === "lr" && canDuplicate;
+                          const showDownloadGatepass =
+                            (st === "gatepass_created" || st === "dispatched" || st === "lr") && canDownload;
+                          const showSoFiles = st !== "lr" && st !== "cancelled" && canFiles;
+                          const showCancel =
+                            (st === "sales_confirmed" || st === "admin_approved" || st === "gatepass_cancelled") &&
+                            canCancel;
+                          const showDelete = canDelete;
+                          const hasAnyAction =
+                            showEdit ||
+                            showDuplicate ||
+                            showDownloadGatepass ||
+                            showSoFiles ||
+                            showCancel ||
+                            showDelete;
 
                           return (
                           <div
@@ -3506,10 +3635,16 @@ export function SaleProcessListPage() {
                                 Delete
                               </button>
                             )}
+                            {!hasAnyAction && (
+                              <div style={{ padding: "8px 12px", fontSize: "12px", color: "#94a3b8" }}>
+                                No permitted actions
+                              </div>
+                            )}
                           </div>
                           );
                         })()}
                       </td>
+                      )}
                     </tr>
                   ))
                 )}
@@ -3960,43 +4095,43 @@ export function SaleProcessListPage() {
                 >
                   {editingStatusOrder.status.toLowerCase() === "pending" && (
                     <>
-                      <option value="sales_confirmed">Sales Confirmed</option>
-                      <option value="cancelled">Cancel</option>
+                      {canTransitionTo("sales_confirmed") && <option value="sales_confirmed">Sales Confirmed</option>}
+                      {canTransitionTo("cancelled") && <option value="cancelled">Cancel</option>}
                     </>
                   )}
                   {editingStatusOrder.status.toLowerCase() === "sales_confirmed" && (
                     <>
-                      <option value="admin_approved">Admin Approved</option>
-                      <option value="cancelled">Cancel</option>
+                      {canTransitionTo("admin_approved") && <option value="admin_approved">Admin Approved</option>}
+                      {canTransitionTo("cancelled") && <option value="cancelled">Cancel</option>}
                     </>
                   )}
                   {editingStatusOrder.status.toLowerCase() === "admin_approved" && (
                     <>
-                      <option value="acc_confirmed">Acc. Confirmed</option>
-                      <option value="cancelled">Cancel</option>
+                      {canTransitionTo("acc_confirmed") && <option value="acc_confirmed">Acc. Confirmed</option>}
+                      {canTransitionTo("cancelled") && <option value="cancelled">Cancel</option>}
                     </>
                   )}
                   {editingStatusOrder.status.toLowerCase() === "acc_confirmed" && (
                     <>
-                      <option value="gatepass_created">Gatepass Created</option>
+                      {canTransitionTo("gatepass_created") && <option value="gatepass_created">Gatepass Created</option>}
                     </>
                   )}
                   {editingStatusOrder.status.toLowerCase() === "gatepass_created" && (
                     <>
-                      <option value="dispatched">Dispatched</option>
-                      <option value="gatepass_cancelled">Gatepass Cancelled</option>
+                      {canTransitionTo("dispatched") && <option value="dispatched">Dispatched</option>}
+                      {canTransitionTo("gatepass_cancelled") && <option value="gatepass_cancelled">Gatepass Cancelled</option>}
                     </>
                   )}
                   {editingStatusOrder.status.toLowerCase() === "gatepass_cancelled" && (
                     <>
-                      <option value="gatepass_created">Gatepass Created</option>
-                      <option value="cancelled">Cancel</option>
+                      {canTransitionTo("gatepass_created") && <option value="gatepass_created">Gatepass Created</option>}
+                      {canTransitionTo("cancelled") && <option value="cancelled">Cancel</option>}
                     </>
                   )}
                   {editingStatusOrder.status.toLowerCase() === "dispatched" && (
                     <>
-                      <option value="lr">LR</option>
-                      <option value="gatepass_cancelled">Gatepass Cancel</option>
+                      {canTransitionTo("lr") && <option value="lr">LR</option>}
+                      {canTransitionTo("gatepass_cancelled") && <option value="gatepass_cancelled">Gatepass Cancel</option>}
                     </>
                   )}
                   {![

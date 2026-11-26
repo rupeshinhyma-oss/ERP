@@ -170,7 +170,7 @@ function ActionMenuItem({ label, color, onClick }: { label: string; color?: stri
   );
 }
 
-const ProformaSkeletonRows: React.FC<{ count?: number }> = ({ count = 8 }) => (
+const ProformaSkeletonRows: React.FC<{ count?: number; showActionColumn?: boolean }> = ({ count = 8, showActionColumn = true }) => (
   <>
     {Array.from({ length: count }).map((_, index) => (
       <tr key={`proforma-skeleton-${index}`} className="table-skeleton-row">
@@ -207,9 +207,11 @@ const ProformaSkeletonRows: React.FC<{ count?: number }> = ({ count = 8 }) => (
         <td style={{ textAlign: "center", padding: "8px 10px", borderBottom: "1px solid #e2e8f0", borderRight: "1px solid #e2e8f0", height: "38px" }}>
           <div className="skeleton-badge" style={{ width: 70, margin: "0 auto" }} />
         </td>
-        <td style={{ textAlign: "center", padding: "8px 10px", borderBottom: "1px solid #e2e8f0", height: "38px" }}>
-          <div className="skeleton-box" style={{ width: 26, height: 26, borderRadius: 4, margin: "0 auto" }} />
-        </td>
+        {showActionColumn && (
+          <td style={{ textAlign: "center", padding: "8px 10px", borderBottom: "1px solid #e2e8f0", height: "38px" }}>
+            <div className="skeleton-box" style={{ width: 26, height: 26, borderRadius: 4, margin: "0 auto" }} />
+          </td>
+        )}
       </tr>
     ))}
   </>
@@ -286,6 +288,44 @@ export function ProformaInvoicesPage({
   const navigate = useNavigate();
   const { id: routeId } = useParams<{ id: string }>();
 
+  const { profile, isSuperAdmin, hasPermission } = useAuth();
+  const canManage = isSuperAdmin || profile?.username === "admin" || hasPermission("proforma.manage");
+  const isAdmin = canManage || hasPermission("proforma.approve");
+  const canViewAll = canManage || hasPermission("proforma.view");
+  const canViewPendingTab = canManage || hasPermission("proforma.pending.view");
+  const canViewAdminApprovedTab = canManage || hasPermission("proforma.admin_approved.view");
+  const canViewConfirmedTab = canManage || hasPermission("proforma.confirmed.view");
+  const canViewCancelledTab = canManage || hasPermission("proforma.cancelled.view");
+  const canCreate = canManage || hasPermission("proforma.create");
+  const canViewActionColumn = canManage || hasPermission("proforma.action.view");
+  const canDownload = canManage || hasPermission("proforma.download");
+  const canViewDetails = canManage || hasPermission("proforma.details.view");
+  const canUpdate = canManage || hasPermission("proforma.update");
+  const canApprove = canManage || hasPermission("proforma.approve");
+  const canConfirm = canManage || hasPermission("proforma.confirm");
+  const canCancel = canManage || hasPermission("proforma.cancel");
+  const canDeletePerm = canManage || hasPermission("proforma.delete");
+
+  const isStageTabPermitted = useCallback(
+    (tabKey: string) => {
+      switch (tabKey) {
+        case "all":
+          return canViewAll;
+        case "pending":
+          return canViewPendingTab;
+        case "admin_approved":
+          return canViewAdminApprovedTab;
+        case "confirmed":
+          return canViewConfirmedTab;
+        case "cancelled":
+          return canViewCancelledTab;
+        default:
+          return canViewAll;
+      }
+    },
+    [canViewAll, canViewPendingTab, canViewAdminApprovedTab, canViewConfirmedTab, canViewCancelledTab]
+  );
+
   const [items, setItems] = useState<ProformaInvoice[]>([]);
   const [tabCounts, setTabCounts] = useState<ProformaTabCounts>({});
   const [activeTab, setActiveTabState] = useState<string>(() => sessionStorage.getItem("proforma_active_tab") || "all");
@@ -308,6 +348,16 @@ export function ProformaInvoicesPage({
       })),
     [optionGroups]
   );
+  const visibleStatusTabs = useMemo(
+    () => STATUS_TABS.filter((tab) => isStageTabPermitted(tab.key)),
+    [STATUS_TABS, isStageTabPermitted]
+  );
+
+  useEffect(() => {
+    if (visibleStatusTabs.length > 0 && !isStageTabPermitted(activeTab)) {
+      setActiveTab(visibleStatusTabs[0].key);
+    }
+  }, [activeTab, visibleStatusTabs, isStageTabPermitted]);
   const THIRD_PARTY_OPTIONS = useMemo(() => (optionGroups["common.yes_no"] || []).map((o) => o.value), [optionGroups]);
   const DELIVERY_TYPE_OPTIONS = useMemo(() => (optionGroups["delivery.type"] || []).map((o) => o.value), [optionGroups]);
   const DELIVERY_CHARGE_OPTIONS = useMemo(() => (optionGroups["delivery.charge"] || []).map((o) => o.value), [optionGroups]);
@@ -394,9 +444,6 @@ export function ProformaInvoicesPage({
   const [isFormOpen, setIsFormOpen] = useState(defaultAdd);
   const [formSubmitting, setFormSubmitting] = useState(false);
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
-
-  const { profile, isSuperAdmin, hasPermission } = useAuth();
-  const isAdmin = isSuperAdmin || profile?.username === "admin" || hasPermission("proforma.approve");
   const loggedInUserName = useMemo(() => {
     if (!profile) return "";
     return (
@@ -949,6 +996,7 @@ export function ProformaInvoicesPage({
   };
 
   const handleOpenCreate = () => {
+    if (!canCreate) return;
     setErrorMessage(null);
     setFormErrors({});
     setEditingId(null);
@@ -959,6 +1007,7 @@ export function ProformaInvoicesPage({
   };
 
   const handleOpenEdit = (p: ProformaInvoice) => {
+    if (!canUpdate) return;
     setErrorMessage(null);
     setFormErrors({});
     setEditingId(p.id);
@@ -1219,17 +1268,25 @@ export function ProformaInvoicesPage({
   // ---- workflow actions (rules come from the database) ----
   const rulesFor = (p: ProformaInvoice) => statusRules[p.status];
   const canEdit = (p: ProformaInvoice) => {
+    if (!canUpdate) return false;
     const mode = rulesFor(p)?.edit;
     return mode === "any" || (mode === "admin" && isAdmin);
   };
-  const canDelete = (p: ProformaInvoice) => !!rulesFor(p)?.delete;
+  const canDelete = (p: ProformaInvoice) => canDeletePerm && !!rulesFor(p)?.delete;
+  const isStageTransitionPermitted = (target: string) => {
+    if (target === "admin_approved") return canApprove;
+    if (target === "confirmed") return canConfirm;
+    if (target === "cancelled") return canCancel;
+    return canManage;
+  };
   const availableTransitions = (p: ProformaInvoice) => {
     const r = rulesFor(p);
     if (!r) return [];
-    return r.next.filter((t) => !(r.admin_only_to || []).includes(t) || isAdmin);
+    return r.next.filter((t) => (!(r.admin_only_to || []).includes(t) || isAdmin) && isStageTransitionPermitted(t));
   };
 
   const applyTransition = async (p: ProformaInvoice, target: string, reason?: string) => {
+    if (!isStageTransitionPermitted(target)) return;
     try {
       setErrorMessage(null);
       setSuccessMessage(null);
@@ -1258,6 +1315,7 @@ export function ProformaInvoicesPage({
   };
 
   const handleDeleteProforma = async (p: ProformaInvoice) => {
+    if (!canDeletePerm) return;
     setOpenActionId(null);
     setActionMenuPos(null);
     if (!window.confirm(`Delete proforma ${p.proforma_no}?`)) return;
@@ -2674,9 +2732,11 @@ export function ProformaInvoicesPage({
               )}
             </button>
 
-            <button type="button" className="btn btn-add-new" onClick={handleOpenCreate}>
-              + ADD NEW
-            </button>
+            {canCreate && (
+              <button type="button" className="btn btn-add-new" onClick={handleOpenCreate}>
+                + ADD NEW
+              </button>
+            )}
           </div>
         </div>
 
@@ -2917,8 +2977,9 @@ export function ProformaInvoicesPage({
         )}
 
         {/* Summary cards: ALL / PENDING / ADMIN APPROVED / CONFIRMED / CANCELLED */}
+        {visibleStatusTabs.length > 0 && (
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "12px", marginBottom: "16px" }}>
-          {STATUS_TABS.map((card) => {
+          {visibleStatusTabs.map((card) => {
             const c = tabCounts[card.key] || { count: 0, amount: 0 };
             return (
               <div
@@ -2948,12 +3009,13 @@ export function ProformaInvoicesPage({
             );
           })}
         </div>
+        )}
 
         {/* Main Data Card (Aligned with Companies UI Design) */}
         <div className="card" style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "8px", boxShadow: "0 1px 3px rgba(0,0,0,0.04)", padding: 0, overflow: "hidden" }}>
           {/* Status tabs inside Card Header */}
           <div style={{ display: "flex", gap: "20px", borderBottom: "1px solid #e2e8f0", padding: "6px 16px 0", background: "#ffffff" }}>
-            {STATUS_TABS.map((tab) => {
+            {visibleStatusTabs.map((tab) => {
               const c = tabCounts[tab.key] || { count: 0, amount: 0 };
               const isActive = activeTab === tab.key;
               return (
@@ -3075,17 +3137,19 @@ export function ProformaInvoicesPage({
                   <th style={{ textAlign: "center", padding: "8px 10px", fontSize: "11.5px", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.03em", color: "#1e293b", backgroundColor: "#f1f5f9", borderBottom: "1px solid #cbd5e1", borderRight: "1px solid #cbd5e1", whiteSpace: "nowrap" }}>
                     <SortHeader label="Status" isSorted={sortColIndex === 10} sortDirection={sortDirection} onSort={() => handleHeaderSort(10)} align="center" />
                   </th>
-                  <th style={{ textAlign: "center", width: "60px", padding: "8px 10px", fontSize: "11.5px", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.03em", color: "#1e293b", backgroundColor: "#f1f5f9", borderBottom: "1px solid #cbd5e1", whiteSpace: "nowrap" }}>
-                    Action
-                  </th>
+                  {canViewActionColumn && (
+                    <th style={{ textAlign: "center", width: "60px", padding: "8px 10px", fontSize: "11.5px", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.03em", color: "#1e293b", backgroundColor: "#f1f5f9", borderBottom: "1px solid #cbd5e1", whiteSpace: "nowrap" }}>
+                      Action
+                    </th>
+                  )}
                 </tr>
               </thead>
               <tbody>
                 {loading ? (
-                  <ProformaSkeletonRows count={perPage > 10 ? 8 : perPage} />
+                  <ProformaSkeletonRows count={perPage > 10 ? 8 : perPage} showActionColumn={canViewActionColumn} />
                 ) : filteredItems.length === 0 ? (
                   <tr>
-                    <td colSpan={12} style={{ textAlign: "center", padding: "28px", color: "#64748b", height: "50px", backgroundColor: "#ffffff" }}>
+                    <td colSpan={canViewActionColumn ? 12 : 11} style={{ textAlign: "center", padding: "28px", color: "#64748b", height: "50px", backgroundColor: "#ffffff" }}>
                       No Data
                     </td>
                   </tr>
@@ -3101,19 +3165,23 @@ export function ProformaInvoicesPage({
                         {(currentPage - 1) * perPage + idx + 1}
                       </td>
                       <td style={{ padding: "8px 10px", borderBottom: "1px solid #e2e8f0", borderRight: "1px solid #e2e8f0", height: "38px" }}>
-                        <a
-                          href={`/proforma-invoice/download-proforma-invoice/${p.id}`}
-                          onClick={(e) => {
-                            e.preventDefault();
-                            window.open(`/proforma-invoice/download-proforma-invoice/${p.id}`, "_blank");
-                          }}
-                          style={{ color: "#0061f2", fontWeight: 600, textDecoration: "none", cursor: "pointer" }}
-                          onMouseEnter={(e) => (e.currentTarget.style.textDecoration = "underline")}
-                          onMouseLeave={(e) => (e.currentTarget.style.textDecoration = "none")}
-                          title={`Open PDF for ${p.proforma_no}`}
-                        >
-                          {p.proforma_no}
-                        </a>
+                        {canDownload ? (
+                          <a
+                            href={`/proforma-invoice/download-proforma-invoice/${p.id}`}
+                            onClick={(e) => {
+                              e.preventDefault();
+                              window.open(`/proforma-invoice/download-proforma-invoice/${p.id}`, "_blank");
+                            }}
+                            style={{ color: "#0061f2", fontWeight: 600, textDecoration: "none", cursor: "pointer" }}
+                            onMouseEnter={(e) => (e.currentTarget.style.textDecoration = "underline")}
+                            onMouseLeave={(e) => (e.currentTarget.style.textDecoration = "none")}
+                            title={`Open PDF for ${p.proforma_no}`}
+                          >
+                            {p.proforma_no}
+                          </a>
+                        ) : (
+                          <span style={{ color: "#1e293b", fontWeight: 600 }}>{p.proforma_no}</span>
+                        )}
                         <div style={{ fontSize: "11.5px", color: "#64748b" }}>{p.proforma_date}</div>
                       </td>
                       <td style={{ padding: "8px 10px", borderBottom: "1px solid #e2e8f0", borderRight: "1px solid #e2e8f0", height: "38px" }}>{p.warehouse}</td>
@@ -3153,6 +3221,7 @@ export function ProformaInvoicesPage({
                         )}
                         {p.remark && <div style={{ fontSize: "11px", color: "#dc2626", marginTop: "2px" }}>{p.remark}</div>}
                       </td>
+                      {canViewActionColumn && (
                       <td style={{ textAlign: "center", position: "relative", zIndex: openActionId === p.id ? 50 : 1, padding: "8px 10px", borderBottom: "1px solid #e2e8f0", height: "38px" }}>
                         <button
                           type="button"
@@ -3189,116 +3258,132 @@ export function ProformaInvoicesPage({
                         >
                           ⋮
                         </button>
-                        {openActionId === p.id && actionMenuPos && (
-                          <div
-                            onClick={(e) => e.stopPropagation()}
-                            style={{
-                              position: "fixed",
-                              right: `${actionMenuPos.right}px`,
-                              top: actionMenuPos.openUpward ? "auto" : `${actionMenuPos.top}px`,
-                              bottom: actionMenuPos.openUpward ? `${actionMenuPos.bottom}px` : "auto",
-                              background: "#ffffff",
-                              border: "1px solid #cbd5e1",
-                              borderRadius: "6px",
-                              boxShadow: actionMenuPos.openUpward ? "0 -6px 20px rgba(0,0,0,0.15)" : "0 6px 20px rgba(0,0,0,0.15)",
-                              zIndex: 9999,
-                              minWidth: "150px",
-                              textAlign: "left",
-                              overflow: "hidden",
-                            }}
-                          >
-                            <button
-                              type="button"
-                              onClick={() => {
-                                window.open(`/proforma-invoice/download-proforma-invoice/${p.id}`, "_blank");
-                                setOpenActionId(null);
-                                setActionMenuPos(null);
-                              }}
+                        {openActionId === p.id && actionMenuPos && (() => {
+                          const transitions = availableTransitions(p);
+                          const showEdit = canEdit(p);
+                          const showDelete = canDelete(p);
+                          const hasAnyAction = canDownload || canViewDetails || showEdit || transitions.length > 0 || showDelete;
+                          return (
+                            <div
+                              onClick={(e) => e.stopPropagation()}
                               style={{
-                                width: "100%",
-                                padding: "8px 12px",
-                                background: "none",
-                                border: "none",
+                                position: "fixed",
+                                right: `${actionMenuPos.right}px`,
+                                top: actionMenuPos.openUpward ? "auto" : `${actionMenuPos.top}px`,
+                                bottom: actionMenuPos.openUpward ? `${actionMenuPos.bottom}px` : "auto",
+                                background: "#ffffff",
+                                border: "1px solid #cbd5e1",
+                                borderRadius: "6px",
+                                boxShadow: actionMenuPos.openUpward ? "0 -6px 20px rgba(0,0,0,0.15)" : "0 6px 20px rgba(0,0,0,0.15)",
+                                zIndex: 9999,
+                                minWidth: "150px",
                                 textAlign: "left",
-                                fontSize: "12.5px",
-                                cursor: "pointer",
-                                color: "#1e293b",
-                                display: "flex",
-                                alignItems: "center",
-                                gap: "6px",
+                                overflow: "hidden",
                               }}
-                              onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#f1f5f9")}
-                              onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "transparent")}
                             >
-                              📄 Download / View PDF
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setSelectedProforma(p);
-                                setOpenActionId(null);
-                                setActionMenuPos(null);
-                              }}
-                              style={{
-                                width: "100%",
-                                padding: "8px 12px",
-                                background: "none",
-                                border: "none",
-                                textAlign: "left",
-                                fontSize: "12.5px",
-                                cursor: "pointer",
-                                color: "#1e293b",
-                                display: "flex",
-                                alignItems: "center",
-                                gap: "6px",
-                              }}
-                              onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#f1f5f9")}
-                              onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "transparent")}
-                            >
-                              👁️ View Details
-                            </button>
-                            {canEdit(p) && (
-                              <ActionMenuItem
-                                label="✏️ Edit"
-                                color="#2563eb"
-                                onClick={() => {
-                                  setOpenActionId(null);
-                                  setActionMenuPos(null);
-                                  handleOpenEdit(p);
-                                }}
-                              />
-                            )}
-                            {availableTransitions(p).map((target) => {
-                              const tab = STATUS_TABS.find((t) => t.key === target);
-                              const label =
-                                target === "confirmed"
-                                  ? "✅ Confirm & Create SO"
-                                  : tab?.actionLabel || tab?.label || target;
-                              return (
-                                <ActionMenuItem
-                                  key={target}
-                                  label={label}
-                                  color={target === "confirmed" ? "#16a34a" : tab?.actionColor}
+                              {canDownload && (
+                                <button
+                                  type="button"
                                   onClick={() => {
+                                    window.open(`/proforma-invoice/download-proforma-invoice/${p.id}`, "_blank");
+                                    setOpenActionId(null);
                                     setActionMenuPos(null);
-                                    startTransition(p, target);
+                                  }}
+                                  style={{
+                                    width: "100%",
+                                    padding: "8px 12px",
+                                    background: "none",
+                                    border: "none",
+                                    textAlign: "left",
+                                    fontSize: "12.5px",
+                                    cursor: "pointer",
+                                    color: "#1e293b",
+                                    display: "flex",
+                                    alignItems: "center",
+                                    gap: "6px",
+                                  }}
+                                  onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#f1f5f9")}
+                                  onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "transparent")}
+                                >
+                                  📄 Download / View PDF
+                                </button>
+                              )}
+                              {canViewDetails && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setSelectedProforma(p);
+                                    setOpenActionId(null);
+                                    setActionMenuPos(null);
+                                  }}
+                                  style={{
+                                    width: "100%",
+                                    padding: "8px 12px",
+                                    background: "none",
+                                    border: "none",
+                                    textAlign: "left",
+                                    fontSize: "12.5px",
+                                    cursor: "pointer",
+                                    color: "#1e293b",
+                                    display: "flex",
+                                    alignItems: "center",
+                                    gap: "6px",
+                                  }}
+                                  onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#f1f5f9")}
+                                  onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "transparent")}
+                                >
+                                  👁️ View Details
+                                </button>
+                              )}
+                              {showEdit && (
+                                <ActionMenuItem
+                                  label="✏️ Edit"
+                                  color="#2563eb"
+                                  onClick={() => {
+                                    setOpenActionId(null);
+                                    setActionMenuPos(null);
+                                    handleOpenEdit(p);
                                   }}
                                 />
-                              );
-                            })}
-                            {canDelete(p) && (
-                              <ActionMenuItem
-                                label="🗑️ Delete"
-                                color="#dc2626"
-                                onClick={() => {
-                                  setActionMenuPos(null);
-                                  void handleDeleteProforma(p);
-                                }}
-                              />
-                            )}
-                          </div>
-                        )}
+                              )}
+                              {transitions.map((target) => {
+                                const tab = STATUS_TABS.find((t) => t.key === target);
+                                const label =
+                                  target === "confirmed"
+                                    ? "✅ Confirm & Create SO"
+                                    : tab?.actionLabel || tab?.label || target;
+                                return (
+                                  <ActionMenuItem
+                                    key={target}
+                                    label={label}
+                                    color={target === "confirmed" ? "#16a34a" : tab?.actionColor}
+                                    onClick={() => {
+                                      setActionMenuPos(null);
+                                      startTransition(p, target);
+                                    }}
+                                  />
+                                );
+                              })}
+                              {showDelete && (
+                                <ActionMenuItem
+                                  label="🗑️ Delete"
+                                  color="#dc2626"
+                                  onClick={() => {
+                                    setActionMenuPos(null);
+                                    void handleDeleteProforma(p);
+                                  }}
+                                />
+                              )}
+                              {!hasAnyAction && (
+                                <div style={{ padding: "10px 12px", fontSize: "12px", color: "#64748b", fontStyle: "italic" }}>
+                                  No actions permitted
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })()}
                       </td>
+                      )}
                     </tr>
                   ))
                 )}
@@ -3329,16 +3414,18 @@ export function ProformaInvoicesPage({
         >
           {selectedProforma && (
             <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
-              <div style={{ display: "flex", justifyContent: "flex-end" }}>
-                <button
-                  type="button"
-                  onClick={() => window.open(`/proforma-invoice/download-proforma-invoice/${selectedProforma.id}`, "_blank")}
-                  className="btn btn-secondary"
-                  style={{ display: "inline-flex", alignItems: "center", gap: "6px", fontSize: "12px", padding: "6px 14px", cursor: "pointer" }}
-                >
-                  📄 Open / Download PDF
-                </button>
-              </div>
+              {canDownload && (
+                <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                  <button
+                    type="button"
+                    onClick={() => window.open(`/proforma-invoice/download-proforma-invoice/${selectedProforma.id}`, "_blank")}
+                    className="btn btn-secondary"
+                    style={{ display: "inline-flex", alignItems: "center", gap: "6px", fontSize: "12px", padding: "6px 14px", cursor: "pointer" }}
+                  >
+                    📄 Open / Download PDF
+                  </button>
+                </div>
+              )}
               <div className="card" style={{ margin: 0 }}>
                 <h4 style={{ fontSize: "14px", fontWeight: 700, marginBottom: "10px" }}>Invoice Header</h4>
                 <DetailFieldGrid

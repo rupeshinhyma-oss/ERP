@@ -14,7 +14,8 @@
  *     - Live machine serial validator widget.
  */
 
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
 import { Breadcrumb } from "@/components/Breadcrumb";
@@ -252,6 +253,680 @@ export interface TechnicianOpsLookups {
     is_covered: boolean;
     source?: string;
   }>;
+}
+
+type SparePartLookupItem = TechnicianOpsLookups["spare_parts"][number];
+
+function SparePartCombobox({
+  value,
+  selectedProductId,
+  compatibleParts,
+  otherParts,
+  machineLabel,
+  warehouseName,
+  ariaLabel,
+  placeholder = "Select or type spare part...",
+  onTypeValue,
+  onSelectPart,
+}: {
+  value: string;
+  selectedProductId?: string | null;
+  compatibleParts: SparePartLookupItem[];
+  otherParts: SparePartLookupItem[];
+  machineLabel: string;
+  warehouseName: string;
+  ariaLabel: string;
+  placeholder?: string;
+  onTypeValue: (text: string) => void;
+  onSelectPart: (part: SparePartLookupItem) => void;
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [isTyping, setIsTyping] = useState(false);
+  const [highlightedIndex, setHighlightedIndex] = useState(-1);
+  const [menuRect, setMenuRect] = useState<{
+    left: number;
+    top: number;
+    width: number;
+    maxHeight: number;
+    openUpward: boolean;
+  } | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  const query = isTyping ? value.trim().toLowerCase() : "";
+
+  const matchesQuery = useCallback(
+    (sp: SparePartLookupItem) => {
+      if (!query) return true;
+      return (
+        sp.product_name.toLowerCase().includes(query) ||
+        (sp.product_code || "").toLowerCase().includes(query)
+      );
+    },
+    [query]
+  );
+
+  const filteredCompatible = useMemo(
+    () => compatibleParts.filter(matchesQuery),
+    [compatibleParts, matchesQuery]
+  );
+  const filteredOther = useMemo(
+    () => otherParts.filter(matchesQuery),
+    [otherParts, matchesQuery]
+  );
+  const flatOptions = useMemo(
+    () => [...filteredCompatible, ...filteredOther],
+    [filteredCompatible, filteredOther]
+  );
+
+  const updatePosition = useCallback(() => {
+    if (!containerRef.current) return;
+    const rect = containerRef.current.getBoundingClientRect();
+    const spaceBelow = window.innerHeight - rect.bottom - 12;
+    const spaceAbove = rect.top - 12;
+    const openUpward = spaceBelow < 180 && spaceAbove > spaceBelow;
+    const maxHeight = Math.max(140, Math.min(240, openUpward ? spaceAbove : spaceBelow));
+    setMenuRect({
+      left: rect.left,
+      top: openUpward ? rect.top - 4 : rect.bottom + 4,
+      width: Math.max(rect.width, 280),
+      maxHeight,
+      openUpward,
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    updatePosition();
+    const handleOutside = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if (
+        containerRef.current &&
+        !containerRef.current.contains(target) &&
+        (!menuRef.current || !menuRef.current.contains(target))
+      ) {
+        setIsOpen(false);
+        setIsTyping(false);
+      }
+    };
+    const handleReposition = () => updatePosition();
+    document.addEventListener("mousedown", handleOutside);
+    window.addEventListener("scroll", handleReposition, true);
+    window.addEventListener("resize", handleReposition);
+    return () => {
+      document.removeEventListener("mousedown", handleOutside);
+      window.removeEventListener("scroll", handleReposition, true);
+      window.removeEventListener("resize", handleReposition);
+    };
+  }, [isOpen, updatePosition]);
+
+  const handleSelect = (part: SparePartLookupItem) => {
+    onSelectPart(part);
+    setIsTyping(false);
+    setIsOpen(false);
+    setHighlightedIndex(-1);
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      if (!isOpen) {
+        setIsOpen(true);
+        setHighlightedIndex(0);
+      } else if (flatOptions.length > 0) {
+        setHighlightedIndex((prev) => (prev < flatOptions.length - 1 ? prev + 1 : 0));
+      }
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      if (!isOpen) {
+        setIsOpen(true);
+        setHighlightedIndex(flatOptions.length - 1);
+      } else if (flatOptions.length > 0) {
+        setHighlightedIndex((prev) => (prev > 0 ? prev - 1 : flatOptions.length - 1));
+      }
+    } else if (e.key === "Enter") {
+      if (isOpen && highlightedIndex >= 0 && highlightedIndex < flatOptions.length) {
+        e.preventDefault();
+        handleSelect(flatOptions[highlightedIndex]);
+      } else if (isOpen) {
+        setIsOpen(false);
+        setIsTyping(false);
+      }
+    } else if (e.key === "Escape") {
+      setIsOpen(false);
+      setIsTyping(false);
+    }
+  };
+
+  const trimmedValue = value.trim();
+  const hasExactMatch =
+    trimmedValue.length > 0 &&
+    flatOptions.some((sp) => sp.product_name.toLowerCase() === trimmedValue.toLowerCase());
+
+  const renderOptionButton = (sp: SparePartLookupItem, flatIdx: number) => {
+    const avail = warehouseName ? (sp.stock_by_warehouse?.[warehouseName] ?? 0) : null;
+    const isSelected = selectedProductId === sp.id;
+    const isHighlighted = highlightedIndex === flatIdx;
+    return (
+      <button
+        key={sp.id}
+        type="button"
+        onMouseDown={(e) => {
+          e.preventDefault();
+          handleSelect(sp);
+        }}
+        onMouseEnter={() => setHighlightedIndex(flatIdx)}
+        style={{
+          width: "100%",
+          textAlign: "left",
+          padding: "7px 10px",
+          border: "none",
+          background: isHighlighted ? "#eff6ff" : isSelected ? "#f0fdf4" : "#ffffff",
+          color: "#1e293b",
+          fontSize: "12px",
+          cursor: "pointer",
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          gap: "8px",
+        }}
+      >
+        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {sp.product_code ? (
+            <strong style={{ color: "#475569", marginRight: "5px" }}>[{sp.product_code}]</strong>
+          ) : null}
+          <span>{sp.product_name}</span>
+        </span>
+        {avail !== null && (
+          <span
+            style={{
+              flexShrink: 0,
+              fontSize: "11px",
+              fontWeight: 600,
+              color: avail > 0 ? "#15803d" : "#dc2626",
+            }}
+          >
+            Avail: {avail} {sp.uom}
+          </span>
+        )}
+      </button>
+    );
+  };
+
+  const dropdownNode =
+    isOpen && menuRect
+      ? createPortal(
+          <div
+            ref={menuRef}
+            role="listbox"
+            aria-label={`${ariaLabel} options`}
+            style={{
+              position: "fixed",
+              left: `${menuRect.left}px`,
+              top: `${menuRect.top}px`,
+              transform: menuRect.openUpward ? "translateY(-100%)" : undefined,
+              width: `${menuRect.width}px`,
+              maxHeight: `${menuRect.maxHeight}px`,
+              overflowY: "auto",
+              background: "#ffffff",
+              border: "1px solid #cbd5e1",
+              borderRadius: "6px",
+              boxShadow: "0 10px 25px rgba(15, 23, 42, 0.16)",
+              zIndex: 9999,
+            }}
+          >
+            {filteredCompatible.length > 0 && (
+              <div>
+                <div
+                  style={{
+                    padding: "5px 10px",
+                    fontSize: "10.5px",
+                    fontWeight: 700,
+                    color: "#1d4ed8",
+                    background: "#eff6ff",
+                    borderBottom: "1px solid #dbeafe",
+                    textTransform: "uppercase",
+                  }}
+                >
+                  Compatible with {machineLabel || "Selected Machine"}
+                </div>
+                {filteredCompatible.map((sp, i) => renderOptionButton(sp, i))}
+              </div>
+            )}
+
+            {filteredOther.length > 0 && (
+              <div>
+                <div
+                  style={{
+                    padding: "5px 10px",
+                    fontSize: "10.5px",
+                    fontWeight: 700,
+                    color: "#475569",
+                    background: "#f8fafc",
+                    borderBottom: "1px solid #e2e8f0",
+                    textTransform: "uppercase",
+                  }}
+                >
+                  {compatibleParts.length > 0
+                    ? "Other Spare Parts & Products"
+                    : "Master Spare Parts & Products"}
+                </div>
+                {filteredOther.map((sp, i) =>
+                  renderOptionButton(sp, filteredCompatible.length + i)
+                )}
+              </div>
+            )}
+
+            {flatOptions.length === 0 && (
+              <div style={{ padding: "9px 10px", fontSize: "12px", color: "#64748b" }}>
+                {trimmedValue
+                  ? `No catalog match — "${trimmedValue}" will be saved as custom part`
+                  : "Type a part name to add a custom spare part"}
+              </div>
+            )}
+
+            {flatOptions.length > 0 && trimmedValue && !hasExactMatch && (
+              <button
+                type="button"
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  onTypeValue(trimmedValue);
+                  setIsOpen(false);
+                  setIsTyping(false);
+                }}
+                style={{
+                  width: "100%",
+                  textAlign: "left",
+                  padding: "7px 10px",
+                  border: "none",
+                  borderTop: "1px solid #e2e8f0",
+                  background: "#f8fafc",
+                  color: "#334155",
+                  fontSize: "11.5px",
+                  fontWeight: 600,
+                  cursor: "pointer",
+                }}
+              >
+                Use custom part: &ldquo;{trimmedValue}&rdquo;
+              </button>
+            )}
+          </div>,
+          document.body
+        )
+      : null;
+
+  return (
+    <div ref={containerRef} style={{ position: "relative", width: "100%", minWidth: 0 }}>
+      <div style={{ position: "relative", display: "flex", alignItems: "center", width: "100%" }}>
+        <input
+          type="text"
+          required
+          role="combobox"
+          aria-expanded={isOpen}
+          aria-autocomplete="list"
+          aria-label={ariaLabel}
+          placeholder={placeholder}
+          value={value}
+          onChange={(e) => {
+            setIsTyping(true);
+            onTypeValue(e.target.value);
+            if (!isOpen) setIsOpen(true);
+            setHighlightedIndex(-1);
+          }}
+          onFocus={() => {
+            setIsOpen(true);
+          }}
+          onClick={() => {
+            if (!isOpen) setIsOpen(true);
+          }}
+          onKeyDown={handleKeyDown}
+          className="form-control form-control-sm"
+          style={{ width: "100%", minWidth: 0, paddingRight: "28px" }}
+        />
+        <button
+          type="button"
+          tabIndex={-1}
+          aria-label={`Toggle ${ariaLabel} dropdown`}
+          onMouseDown={(e) => {
+            e.preventDefault();
+            setIsTyping(false);
+            setIsOpen((prev) => !prev);
+          }}
+          style={{
+            position: "absolute",
+            right: "4px",
+            top: "50%",
+            transform: "translateY(-50%)",
+            background: "transparent",
+            border: "none",
+            padding: "2px 4px",
+            cursor: "pointer",
+            color: "#64748b",
+            display: "inline-flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          <svg
+            width="13"
+            height="13"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+            style={{
+              transform: isOpen ? "rotate(180deg)" : "rotate(0deg)",
+              transition: "transform 0.15s ease",
+            }}
+          >
+            <polyline points="6 9 12 15 18 9" />
+          </svg>
+        </button>
+      </div>
+      {dropdownNode}
+    </div>
+  );
+}
+
+interface TypableLookupOption {
+  value: string;
+  label?: string;
+  sublabel?: string;
+}
+
+function TypableLookupCombobox({
+  value,
+  onChange,
+  options,
+  placeholder = "Select or type...",
+  ariaLabel,
+  required,
+  className = "form-control",
+  containerStyle,
+  inputStyle,
+  emptyText = "No matching options — custom text will be used",
+  onKeyDownExtra,
+}: {
+  value: string;
+  onChange: (val: string) => void;
+  options: TypableLookupOption[];
+  placeholder?: string;
+  ariaLabel?: string;
+  required?: boolean;
+  className?: string;
+  containerStyle?: React.CSSProperties;
+  inputStyle?: React.CSSProperties;
+  emptyText?: string;
+  onKeyDownExtra?: (e: React.KeyboardEvent<HTMLInputElement>) => void;
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [isTyping, setIsTyping] = useState(false);
+  const [highlightedIndex, setHighlightedIndex] = useState(-1);
+  const [menuRect, setMenuRect] = useState<{
+    left: number;
+    top: number;
+    width: number;
+    maxHeight: number;
+    openUpward: boolean;
+  } | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  const uniqueOptions = useMemo(() => {
+    const seen = new Set<string>();
+    const res: TypableLookupOption[] = [];
+    for (const opt of options) {
+      const v = (opt.value || "").trim();
+      if (!v) continue;
+      const key = v.toLowerCase();
+      if (!seen.has(key)) {
+        seen.add(key);
+        res.push({ ...opt, value: v });
+      }
+    }
+    return res;
+  }, [options]);
+
+  const query = isTyping ? value.trim().toLowerCase() : "";
+  const filteredOptions = useMemo(() => {
+    if (!query) return uniqueOptions;
+    return uniqueOptions.filter(
+      (opt) =>
+        opt.value.toLowerCase().includes(query) ||
+        (opt.label || "").toLowerCase().includes(query) ||
+        (opt.sublabel || "").toLowerCase().includes(query)
+    );
+  }, [uniqueOptions, query]);
+
+  const updatePosition = useCallback(() => {
+    if (!containerRef.current) return;
+    const rect = containerRef.current.getBoundingClientRect();
+    const spaceBelow = window.innerHeight - rect.bottom - 12;
+    const spaceAbove = rect.top - 12;
+    const openUpward = spaceBelow < 180 && spaceAbove > spaceBelow;
+    const maxHeight = Math.max(140, Math.min(240, openUpward ? spaceAbove : spaceBelow));
+    setMenuRect({
+      left: rect.left,
+      top: openUpward ? rect.top - 4 : rect.bottom + 4,
+      width: Math.max(rect.width, 220),
+      maxHeight,
+      openUpward,
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    updatePosition();
+    const handleOutside = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if (
+        containerRef.current &&
+        !containerRef.current.contains(target) &&
+        (!menuRef.current || !menuRef.current.contains(target))
+      ) {
+        setIsOpen(false);
+        setIsTyping(false);
+      }
+    };
+    const handleReposition = () => updatePosition();
+    document.addEventListener("mousedown", handleOutside);
+    window.addEventListener("scroll", handleReposition, true);
+    window.addEventListener("resize", handleReposition);
+    return () => {
+      document.removeEventListener("mousedown", handleOutside);
+      window.removeEventListener("scroll", handleReposition, true);
+      window.removeEventListener("resize", handleReposition);
+    };
+  }, [isOpen, updatePosition]);
+
+  const handleSelect = (val: string) => {
+    onChange(val);
+    setIsTyping(false);
+    setIsOpen(false);
+    setHighlightedIndex(-1);
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      if (!isOpen) {
+        setIsOpen(true);
+        setHighlightedIndex(0);
+      } else if (filteredOptions.length > 0) {
+        setHighlightedIndex((prev) => (prev < filteredOptions.length - 1 ? prev + 1 : 0));
+      }
+      return;
+    }
+    if (e.key === "ArrowUp") {
+      e.preventDefault();
+      if (!isOpen) {
+        setIsOpen(true);
+        setHighlightedIndex(filteredOptions.length - 1);
+      } else if (filteredOptions.length > 0) {
+        setHighlightedIndex((prev) => (prev > 0 ? prev - 1 : filteredOptions.length - 1));
+      }
+      return;
+    }
+    if (e.key === "Enter" && isOpen && highlightedIndex >= 0 && highlightedIndex < filteredOptions.length) {
+      e.preventDefault();
+      handleSelect(filteredOptions[highlightedIndex].value);
+      return;
+    }
+    if (e.key === "Escape") {
+      setIsOpen(false);
+      setIsTyping(false);
+      return;
+    }
+    onKeyDownExtra?.(e);
+  };
+
+  const dropdownNode =
+    isOpen && menuRect
+      ? createPortal(
+          <div
+            ref={menuRef}
+            role="listbox"
+            aria-label={ariaLabel ? `${ariaLabel} options` : "Options"}
+            style={{
+              position: "fixed",
+              left: `${menuRect.left}px`,
+              top: `${menuRect.top}px`,
+              transform: menuRect.openUpward ? "translateY(-100%)" : undefined,
+              width: `${menuRect.width}px`,
+              maxHeight: `${menuRect.maxHeight}px`,
+              overflowY: "auto",
+              background: "#ffffff",
+              border: "1px solid #cbd5e1",
+              borderRadius: "6px",
+              boxShadow: "0 10px 25px rgba(15, 23, 42, 0.16)",
+              zIndex: 9999,
+            }}
+          >
+            {filteredOptions.length > 0 ? (
+              filteredOptions.map((opt, idx) => {
+                const isSelected = value.trim().toLowerCase() === opt.value.toLowerCase();
+                const isHighlighted = highlightedIndex === idx;
+                return (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      handleSelect(opt.value);
+                    }}
+                    onMouseEnter={() => setHighlightedIndex(idx)}
+                    style={{
+                      width: "100%",
+                      textAlign: "left",
+                      padding: "8px 11px",
+                      border: "none",
+                      borderBottom: idx < filteredOptions.length - 1 ? "1px solid #f1f5f9" : "none",
+                      background: isHighlighted ? "#eff6ff" : isSelected ? "#f0fdf4" : "#ffffff",
+                      color: "#1e293b",
+                      fontSize: "12.5px",
+                      cursor: "pointer",
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      gap: "10px",
+                    }}
+                  >
+                    <span style={{ fontWeight: isSelected ? 600 : 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {opt.label || opt.value}
+                    </span>
+                    {opt.sublabel ? (
+                      <span style={{ fontSize: "11px", color: "#64748b", flexShrink: 0 }}>
+                        {opt.sublabel}
+                      </span>
+                    ) : null}
+                  </button>
+                );
+              })
+            ) : (
+              <div style={{ padding: "9px 11px", fontSize: "12px", color: "#64748b" }}>
+                {emptyText}
+              </div>
+            )}
+          </div>,
+          document.body
+        )
+      : null;
+
+  return (
+    <div ref={containerRef} style={{ position: "relative", width: "100%", minWidth: 0, ...containerStyle }}>
+      <div style={{ position: "relative", display: "flex", alignItems: "center", width: "100%" }}>
+        <input
+          type="text"
+          required={required}
+          role="combobox"
+          aria-expanded={isOpen}
+          aria-autocomplete="list"
+          aria-label={ariaLabel}
+          placeholder={placeholder}
+          value={value}
+          onChange={(e) => {
+            setIsTyping(true);
+            onChange(e.target.value);
+            if (!isOpen) setIsOpen(true);
+            setHighlightedIndex(-1);
+          }}
+          onFocus={() => setIsOpen(true)}
+          onClick={() => {
+            if (!isOpen) setIsOpen(true);
+          }}
+          onKeyDown={handleKeyDown}
+          className={className}
+          style={{ width: "100%", minWidth: 0, paddingRight: "30px", ...inputStyle }}
+        />
+        <button
+          type="button"
+          tabIndex={-1}
+          aria-label={ariaLabel ? `Toggle ${ariaLabel} dropdown` : "Toggle dropdown"}
+          onMouseDown={(e) => {
+            e.preventDefault();
+            setIsTyping(false);
+            setIsOpen((prev) => !prev);
+          }}
+          style={{
+            position: "absolute",
+            right: "4px",
+            top: "50%",
+            transform: "translateY(-50%)",
+            background: "transparent",
+            border: "none",
+            padding: "2px 5px",
+            cursor: "pointer",
+            color: "#64748b",
+            display: "inline-flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          <svg
+            width="13"
+            height="13"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+            style={{
+              transform: isOpen ? "rotate(180deg)" : "rotate(0deg)",
+              transition: "transform 0.15s ease",
+            }}
+          >
+            <polyline points="6 9 12 15 18 9" />
+          </svg>
+        </button>
+      </div>
+      {dropdownNode}
+    </div>
+  );
 }
 
 const EMPTY_LOOKUPS: TechnicianOpsLookups = {
@@ -654,7 +1329,10 @@ function formatCurrency(amount: number | null | undefined): string {
   });
 }
 
-const GatepassTableSkeletonRows: React.FC<{ count?: number }> = ({ count = 6 }) => (
+const GatepassTableSkeletonRows: React.FC<{ count?: number; showActionColumn?: boolean }> = ({
+  count = 6,
+  showActionColumn = true,
+}) => (
   <>
     {Array.from({ length: count }).map((_, index) => (
       <tr key={`gp-skeleton-${index}`} className="table-skeleton-row" style={{ verticalAlign: "middle" }}>
@@ -664,12 +1342,15 @@ const GatepassTableSkeletonRows: React.FC<{ count?: number }> = ({ count = 6 }) 
         </td>
         <td style={{ padding: "12px 14px" }}><div className="skeleton-line" style={{ width: "70%" }} /></td>
         <td style={{ padding: "12px 14px" }}><div className="skeleton-line" style={{ width: "60%" }} /></td>
+        <td style={{ padding: "12px 14px" }}><div className="skeleton-line" style={{ width: "55%" }} /></td>
         <td style={{ padding: "12px 14px", textAlign: "center" }}><div className="skeleton-badge" style={{ width: 45, margin: "0 auto" }} /></td>
         <td style={{ padding: "12px 14px", textAlign: "center" }}><div className="skeleton-line" style={{ width: 50, margin: "0 auto" }} /></td>
         <td style={{ padding: "12px 14px" }}><div className="skeleton-badge" style={{ width: 80 }} /></td>
-        <td style={{ padding: "12px 14px", textAlign: "right" }}>
-          <div className="skeleton-box" style={{ width: 28, height: 28, borderRadius: 4, marginLeft: "auto" }} />
-        </td>
+        {showActionColumn && (
+          <td style={{ padding: "12px 14px", textAlign: "right" }}>
+            <div className="skeleton-box" style={{ width: 28, height: 28, borderRadius: 4, marginLeft: "auto" }} />
+          </td>
+        )}
       </tr>
     ))}
   </>
@@ -711,19 +1392,64 @@ const WarrantyTableSkeletonRows: React.FC<{ count?: number }> = ({ count = 6 }) 
 export function TechnicianOperationsPage() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const currentTab = searchParams.get("tab") || "gatepasses";
+  const requestedTab = searchParams.get("tab") || "gatepasses";
   const { isSuperAdmin, hasPermission } = useAuth();
 
   const canManageAll = isSuperAdmin || hasPermission("technician_operations.manage");
-  const canCreate = canManageAll || hasPermission("technician_operations.create");
-  const canUpdate = canManageAll || hasPermission("technician_operations.update");
-  const canMutate = canCreate || canUpdate;
+  const canLegacyUpdate = canManageAll || hasPermission("technician_operations.update");
 
-  const canLinkSO = useMemo(
-    () => Boolean(canUpdate || hasPermission("saleorder.create") || hasPermission("saleorder.update")),
-    [canUpdate, hasPermission]
-  );
-  const canCreateSO = canLinkSO;
+  // Granular Tab Permissions
+  const canViewGatepassesTab = canManageAll || hasPermission("technician_operations.gatepasses.view");
+  const canViewWalletsTab = canManageAll || hasPermission("technician_operations.wallets.view");
+  const canViewWarrantyTab = canManageAll || hasPermission("technician_operations.warranty.view");
+
+  // Header CTAs
+  const canCreateGatepass = canManageAll || hasPermission("technician_operations.gatepass.create");
+  const canCreateWallet = canManageAll || hasPermission("technician_operations.wallet.create");
+  const canCreateWarranty = canManageAll || hasPermission("technician_operations.warranty.create");
+
+  // Gatepass Table Row Action Buttons
+  const canReturnParts = canManageAll || canLegacyUpdate || hasPermission("technician_operations.gatepass.return");
+  const canViewDraftSO = canManageAll || hasPermission("technician_operations.gatepass.draft_so");
+  const canCreateSO = canManageAll || hasPermission("technician_operations.gatepass.create_so");
+  const canLinkSO = canManageAll || canLegacyUpdate || hasPermission("technician_operations.gatepass.link_so");
+  const canPrintSlip = canManageAll || hasPermission("technician_operations.gatepass.print");
+  const canViewGpDetails = canManageAll || hasPermission("technician_operations.gatepass.details");
+  const canViewAnyGpAction =
+    canReturnParts || canViewDraftSO || canCreateSO || canLinkSO || canPrintSlip || canViewGpDetails;
+
+  // Wallets Balances Section & Card Buttons
+  const canViewWalletBalances = canManageAll || hasPermission("technician_operations.wallet.balances.view");
+  const canWalletCollect = canManageAll || hasPermission("technician_operations.wallet.collect");
+  const canWalletHandover = canManageAll || hasPermission("technician_operations.wallet.handover");
+  const canWalletExpense = canManageAll || hasPermission("technician_operations.wallet.expense");
+
+  // Warranty Live Serial Validator
+  const canValidateWarranty = canManageAll || hasPermission("technician_operations.warranty.validate");
+
+  const canMutate =
+    canCreateGatepass ||
+    canCreateWallet ||
+    canCreateWarranty ||
+    canReturnParts ||
+    canCreateSO ||
+    canLinkSO ||
+    canWalletCollect ||
+    canWalletHandover ||
+    canWalletExpense;
+
+  const allowedTabs = useMemo(() => {
+    const tabs: string[] = [];
+    if (canViewGatepassesTab) tabs.push("gatepasses");
+    if (canViewWalletsTab) tabs.push("wallets");
+    if (canViewWarrantyTab) tabs.push("warranty");
+    return tabs;
+  }, [canViewGatepassesTab, canViewWalletsTab, canViewWarrantyTab]);
+
+  const currentTab = useMemo(() => {
+    if (allowedTabs.includes(requestedTab)) return requestedTab;
+    return allowedTabs[0] || "";
+  }, [allowedTabs, requestedTab]);
 
   // --- Global State, Lookups & Metrics ---
   const [lookups, setLookups] = useState<TechnicianOpsLookups>(EMPTY_LOOKUPS);
@@ -978,10 +1704,14 @@ export function TechnicianOperationsPage() {
   const fetchWalletData = useCallback(async () => {
     setLoading(true);
     try {
-      // 1. Fetch live technician summaries
-      const sumRes = await apiGet<TechnicianWalletSummary[]>("/technician-operations/wallet/summaries");
-      if (sumRes && sumRes.data) {
-        setWalletSummaries(sumRes.data);
+      // 1. Fetch live technician summaries only if Live Wallet Balances section is permitted
+      if (canViewWalletBalances) {
+        const sumRes = await apiGet<TechnicianWalletSummary[]>("/technician-operations/wallet/summaries");
+        if (sumRes && sumRes.data) {
+          setWalletSummaries(sumRes.data);
+        }
+      } else {
+        setWalletSummaries([]);
       }
 
       // 2. Fetch transactions ledger
@@ -1008,7 +1738,7 @@ export function TechnicianOperationsPage() {
     } finally {
       setLoading(false);
     }
-  }, [walletFilterTech, walletFilterType, walletPage]);
+  }, [canViewWalletBalances, walletFilterTech, walletFilterType, walletPage]);
 
   const fetchWarranties = useCallback(async () => {
     setLoading(true);
@@ -1045,14 +1775,22 @@ export function TechnicianOperationsPage() {
   }, [fetchMetrics, fetchLookups]);
 
   useEffect(() => {
-    if (currentTab === "gatepasses") {
+    if (currentTab === "gatepasses" && canViewGatepassesTab) {
       fetchGatepasses();
-    } else if (currentTab === "wallets") {
+    } else if (currentTab === "wallets" && canViewWalletsTab) {
       fetchWalletData();
-    } else if (currentTab === "warranty") {
+    } else if (currentTab === "warranty" && canViewWarrantyTab) {
       fetchWarranties();
     }
-  }, [currentTab, fetchGatepasses, fetchWalletData, fetchWarranties]);
+  }, [
+    currentTab,
+    canViewGatepassesTab,
+    canViewWalletsTab,
+    canViewWarrantyTab,
+    fetchGatepasses,
+    fetchWalletData,
+    fetchWarranties,
+  ]);
 
   // Tab switch handler
   const handleTabChange = (tabKey: string) => {
@@ -1571,7 +2309,7 @@ export function TechnicianOperationsPage() {
               </span>
             )}
 
-            {canCreate && currentTab === "gatepasses" && (
+            {canCreateGatepass && currentTab === "gatepasses" && (
               <button
                 type="button"
                 className="btn btn-primary"
@@ -1592,7 +2330,7 @@ export function TechnicianOperationsPage() {
               </button>
             )}
 
-            {canCreate && currentTab === "wallets" && (
+            {canCreateWallet && currentTab === "wallets" && (
               <button
                 type="button"
                 className="btn btn-primary"
@@ -1621,7 +2359,7 @@ export function TechnicianOperationsPage() {
               </button>
             )}
 
-            {canCreate && currentTab === "warranty" && (
+            {canCreateWarranty && currentTab === "warranty" && (
               <button
                 type="button"
                 className="btn btn-primary"
@@ -1831,83 +2569,105 @@ export function TechnicianOperationsPage() {
             marginBottom: "20px",
           }}
         >
-          <button
-            type="button"
-            onClick={() => handleTabChange("gatepasses")}
-            style={{
-              padding: "10px 18px",
-              border: "none",
-              background: "none",
-              borderBottom: currentTab === "gatepasses" ? "3px solid #2563eb" : "3px solid transparent",
-              color: currentTab === "gatepasses" ? "#2563eb" : "#64748b",
-              fontWeight: currentTab === "gatepasses" ? 700 : 500,
-              fontSize: "14px",
-              cursor: "pointer",
-              display: "inline-flex",
-              alignItems: "center",
-              gap: "8px",
-            }}
-          >
-            <TechOpsIconPackage size={16} />
-            <span>Spare Parts Gatepass &amp; Returns</span>
-            {metrics?.pending_sales_orders ? (
-              <span
-                style={{
-                  background: "#fef3c7",
-                  color: "#b45309",
-                  padding: "2px 8px",
-                  borderRadius: "12px",
-                  fontSize: "11px",
-                  fontWeight: 700,
-                }}
-              >
-                {metrics.pending_sales_orders} SO needed
-              </span>
-            ) : null}
-          </button>
+          {canViewGatepassesTab && (
+            <button
+              type="button"
+              onClick={() => handleTabChange("gatepasses")}
+              style={{
+                padding: "10px 18px",
+                border: "none",
+                background: "none",
+                borderBottom: currentTab === "gatepasses" ? "3px solid #2563eb" : "3px solid transparent",
+                color: currentTab === "gatepasses" ? "#2563eb" : "#64748b",
+                fontWeight: currentTab === "gatepasses" ? 700 : 500,
+                fontSize: "14px",
+                cursor: "pointer",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "8px",
+              }}
+            >
+              <TechOpsIconPackage size={16} />
+              <span>Spare Parts Gatepass &amp; Returns</span>
+              {metrics?.pending_sales_orders ? (
+                <span
+                  style={{
+                    background: "#fef3c7",
+                    color: "#b45309",
+                    padding: "2px 8px",
+                    borderRadius: "12px",
+                    fontSize: "11px",
+                    fontWeight: 700,
+                  }}
+                >
+                  {metrics.pending_sales_orders} SO needed
+                </span>
+              ) : null}
+            </button>
+          )}
 
-          <button
-            type="button"
-            onClick={() => handleTabChange("wallets")}
-            style={{
-              padding: "10px 18px",
-              border: "none",
-              background: "none",
-              borderBottom: currentTab === "wallets" ? "3px solid #2563eb" : "3px solid transparent",
-              color: currentTab === "wallets" ? "#2563eb" : "#64748b",
-              fontWeight: currentTab === "wallets" ? 700 : 500,
-              fontSize: "14px",
-              cursor: "pointer",
-              display: "inline-flex",
-              alignItems: "center",
-              gap: "8px",
-            }}
-          >
-            <TechOpsIconWallet size={16} />
-            <span>Technician Wallets &amp; Field Collections</span>
-          </button>
+          {canViewWalletsTab && (
+            <button
+              type="button"
+              onClick={() => handleTabChange("wallets")}
+              style={{
+                padding: "10px 18px",
+                border: "none",
+                background: "none",
+                borderBottom: currentTab === "wallets" ? "3px solid #2563eb" : "3px solid transparent",
+                color: currentTab === "wallets" ? "#2563eb" : "#64748b",
+                fontWeight: currentTab === "wallets" ? 700 : 500,
+                fontSize: "14px",
+                cursor: "pointer",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "8px",
+              }}
+            >
+              <TechOpsIconWallet size={16} />
+              <span>Technician Wallets &amp; Field Collections</span>
+            </button>
+          )}
 
-          <button
-            type="button"
-            onClick={() => handleTabChange("warranty")}
-            style={{
-              padding: "10px 18px",
-              border: "none",
-              background: "none",
-              borderBottom: currentTab === "warranty" ? "3px solid #2563eb" : "3px solid transparent",
-              color: currentTab === "warranty" ? "#2563eb" : "#64748b",
-              fontWeight: currentTab === "warranty" ? 700 : 500,
-              fontSize: "14px",
-              cursor: "pointer",
-              display: "inline-flex",
-              alignItems: "center",
-              gap: "8px",
-            }}
-          >
-            <TechOpsIconShieldCheck size={16} />
-            <span>Machine Warranty Registry &amp; Validator</span>
-          </button>
+          {canViewWarrantyTab && (
+            <button
+              type="button"
+              onClick={() => handleTabChange("warranty")}
+              style={{
+                padding: "10px 18px",
+                border: "none",
+                background: "none",
+                borderBottom: currentTab === "warranty" ? "3px solid #2563eb" : "3px solid transparent",
+                color: currentTab === "warranty" ? "#2563eb" : "#64748b",
+                fontWeight: currentTab === "warranty" ? 700 : 500,
+                fontSize: "14px",
+                cursor: "pointer",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "8px",
+              }}
+            >
+              <TechOpsIconShieldCheck size={16} />
+              <span>Machine Warranty Registry &amp; Validator</span>
+            </button>
+          )}
         </div>
+
+        {allowedTabs.length === 0 && (
+          <div
+            style={{
+              background: "#f8fafc",
+              border: "1px solid #e2e8f0",
+              borderRadius: "8px",
+              padding: "28px 20px",
+              textAlign: "center",
+              color: "#64748b",
+              fontSize: "14px",
+            }}
+          >
+            No Technician Operations section tabs are enabled for your role. Contact an administrator to grant tab access.
+          </div>
+        )}
 
         {/* ================================================================= */}
         {/* TAB 1: SPARE PARTS GATEPASS & RETURNS                            */}
@@ -1980,7 +2740,17 @@ export function TechnicianOperationsPage() {
             </div>
 
             {/* Gatepass Table */}
-            <div className="table-responsive" style={{ background: "#fff", borderRadius: "8px", border: "1px solid #e2e8f0" }}>
+            <div
+              className="table-responsive"
+              style={{
+                background: "#fff",
+                borderRadius: "8px",
+                border: "1px solid #e2e8f0",
+                width: "100%",
+                maxWidth: "100%",
+                overflowX: "auto",
+              }}
+            >
               <table className="table table-hover" style={{ margin: 0, fontSize: "13px" }}>
                 <thead style={{ background: "#f8fafc", borderBottom: "2px solid #e2e8f0" }}>
                   <tr>
@@ -1991,15 +2761,17 @@ export function TechnicianOperationsPage() {
                     <th style={{ padding: "12px 14px", fontWeight: 600, textAlign: "center" }}>Parts Issued</th>
                     <th style={{ padding: "12px 14px", fontWeight: 600, textAlign: "center" }}>Returned / Consumed</th>
                     <th style={{ padding: "12px 14px", fontWeight: 600 }}>SO &amp; Reconciliation Status</th>
-                    <th style={{ padding: "12px 14px", fontWeight: 600, textAlign: "right" }}>Actions</th>
+                    {canViewAnyGpAction && (
+                      <th style={{ padding: "12px 14px", fontWeight: 600, textAlign: "right" }}>Actions</th>
+                    )}
                   </tr>
                 </thead>
                 <tbody>
                   {loading ? (
-                    <GatepassTableSkeletonRows count={8} />
+                    <GatepassTableSkeletonRows count={8} showActionColumn={canViewAnyGpAction} />
                   ) : gatepasses.length === 0 ? (
                     <tr>
-                      <td colSpan={8} style={{ textAlign: "center", padding: "40px", color: "#64748b" }}>
+                      <td colSpan={canViewAnyGpAction ? 8 : 7} style={{ textAlign: "center", padding: "40px", color: "#64748b" }}>
                         No spare parts gatepasses found. Click <b>"Issue Outward Gatepass"</b> to create one.
                       </td>
                     </tr>
@@ -2055,7 +2827,7 @@ export function TechnicianOperationsPage() {
                           </td>
 
                           {/* Customer & Machine Serial */}
-                          <td style={{ padding: "12px 14px" }}>
+                          <td style={{ padding: "12px 14px", whiteSpace: "normal", minWidth: "180px", maxWidth: "260px" }}>
                             <div style={{ fontWeight: 600 }}>{gp.customer_name || "—"}</div>
                             {gp.machine_model && (
                               <div style={{ fontSize: "11px", color: "#475569" }}>{gp.machine_model}</div>
@@ -2237,122 +3009,128 @@ export function TechnicianOperationsPage() {
                           </td>
 
                           {/* Row Actions */}
-                          <td style={{ padding: "12px 14px", textAlign: "right", whiteSpace: "nowrap" }}>
-                            <div style={{ display: "inline-flex", gap: "6px", alignItems: "center" }}>
-                              {/* Record Return */}
-                              {canUpdate && gp.status !== "CLOSED" && (
-                                <button
-                                  type="button"
-                                  className="btn btn-sm btn-outline-primary"
-                                  onClick={() => handleOpenReturnModal(gp)}
-                                  title="Record unused spare parts return or consumed parts"
-                                  style={{
-                                    fontSize: "12px",
-                                    padding: "4px 8px",
-                                    display: "inline-flex",
-                                    alignItems: "center",
-                                    gap: "5px",
-                                  }}
-                                >
-                                  <TechOpsIconRotateCcw size={13} />
-                                  <span>Return</span>
-                                </button>
-                              )}
+                          {canViewAnyGpAction && (
+                            <td style={{ padding: "12px 14px", textAlign: "right", whiteSpace: "nowrap" }}>
+                              <div style={{ display: "inline-flex", gap: "6px", alignItems: "center" }}>
+                                {/* Record Return */}
+                                {canReturnParts && gp.status !== "CLOSED" && (
+                                  <button
+                                    type="button"
+                                    className="btn btn-sm btn-outline-primary"
+                                    onClick={() => handleOpenReturnModal(gp)}
+                                    title="Record unused spare parts return or consumed parts"
+                                    style={{
+                                      fontSize: "12px",
+                                      padding: "4px 8px",
+                                      display: "inline-flex",
+                                      alignItems: "center",
+                                      gap: "5px",
+                                    }}
+                                  >
+                                    <TechOpsIconRotateCcw size={13} />
+                                    <span>Return</span>
+                                  </button>
+                                )}
 
-                              {/* View / Copy Draft SO if parts consumed */}
-                              {gp.total_consumed > 0 && !gp.is_warranty_service && (
-                                <button
-                                  type="button"
-                                  className="btn btn-sm btn-outline-warning"
-                                  onClick={() => handleViewDraftSO(gp)}
-                                  title="View draft Sales Order details for salesperson"
-                                  style={{
-                                    fontSize: "12px",
-                                    padding: "4px 8px",
-                                    display: "inline-flex",
-                                    alignItems: "center",
-                                    gap: "5px",
-                                  }}
-                                >
-                                  <TechOpsIconFileText size={13} />
-                                  <span>Draft SO</span>
-                                </button>
-                              )}
+                                {/* View / Copy Draft SO if parts consumed */}
+                                {canViewDraftSO && gp.total_consumed > 0 && !gp.is_warranty_service && (
+                                  <button
+                                    type="button"
+                                    className="btn btn-sm btn-outline-warning"
+                                    onClick={() => handleViewDraftSO(gp)}
+                                    title="View draft Sales Order details for salesperson"
+                                    style={{
+                                      fontSize: "12px",
+                                      padding: "4px 8px",
+                                      display: "inline-flex",
+                                      alignItems: "center",
+                                      gap: "5px",
+                                    }}
+                                  >
+                                    <TechOpsIconFileText size={13} />
+                                    <span>Draft SO</span>
+                                  </button>
+                                )}
 
-                              {/* Direct Create SO in Sales Process */}
-                              {isPendingSO && canCreateSO && (
-                                <button
-                                  type="button"
-                                  className="btn btn-sm btn-primary"
-                                  onClick={() => navigate(`/sales/process/add?gatepass_id=${gp.id}`)}
-                                  title="Open Sales Order form pre-filled with consumed spare parts"
-                                  style={{
-                                    fontSize: "12px",
-                                    padding: "4px 8px",
-                                    fontWeight: 600,
-                                    display: "inline-flex",
-                                    alignItems: "center",
-                                    gap: "5px",
-                                  }}
-                                >
-                                  <TechOpsIconShoppingCart size={13} />
-                                  <span>Create SO</span>
-                                </button>
-                              )}
+                                {/* Direct Create SO in Sales Process */}
+                                {isPendingSO && canCreateSO && (
+                                  <button
+                                    type="button"
+                                    className="btn btn-sm btn-primary"
+                                    onClick={() => navigate(`/sales/process/add?gatepass_id=${gp.id}`)}
+                                    title="Open Sales Order form pre-filled with consumed spare parts"
+                                    style={{
+                                      fontSize: "12px",
+                                      padding: "4px 8px",
+                                      fontWeight: 600,
+                                      display: "inline-flex",
+                                      alignItems: "center",
+                                      gap: "5px",
+                                    }}
+                                  >
+                                    <TechOpsIconShoppingCart size={13} />
+                                    <span>Create SO</span>
+                                  </button>
+                                )}
 
-                              {/* Link SO button */}
-                              {isPendingSO && canLinkSO && (
-                                <button
-                                  type="button"
-                                  className="btn btn-sm btn-warning"
-                                  onClick={() => handleOpenLinkSOModal(gp)}
-                                  title="Link existing Sales Order number created for consumed parts"
-                                  style={{
-                                    fontSize: "12px",
-                                    padding: "4px 8px",
-                                    fontWeight: 600,
-                                    display: "inline-flex",
-                                    alignItems: "center",
-                                    gap: "5px",
-                                  }}
-                                >
-                                  <TechOpsIconLink size={13} />
-                                  <span>Link SO</span>
-                                </button>
-                              )}
+                                {/* Link SO button */}
+                                {isPendingSO && canLinkSO && (
+                                  <button
+                                    type="button"
+                                    className="btn btn-sm btn-warning"
+                                    onClick={() => handleOpenLinkSOModal(gp)}
+                                    title="Link existing Sales Order number created for consumed parts"
+                                    style={{
+                                      fontSize: "12px",
+                                      padding: "4px 8px",
+                                      fontWeight: 600,
+                                      display: "inline-flex",
+                                      alignItems: "center",
+                                      gap: "5px",
+                                    }}
+                                  >
+                                    <TechOpsIconLink size={13} />
+                                    <span>Link SO</span>
+                                  </button>
+                                )}
 
-                              {/* Print Gatepass Slip */}
-                              <button
-                                type="button"
-                                className="btn btn-sm btn-secondary"
-                                aria-label="Print Gatepass Slip"
-                                onClick={() => printGatepassSlip(gp)}
-                                title="Print Outward / Return Gatepass Slip"
-                                style={{
-                                  fontSize: "12px",
-                                  padding: "5px 8px",
-                                  display: "inline-flex",
-                                  alignItems: "center",
-                                  justifyContent: "center",
-                                }}
-                              >
-                                <TechOpsIconPrinter size={14} />
-                              </button>
+                                {/* Print Gatepass Slip */}
+                                {canPrintSlip && (
+                                  <button
+                                    type="button"
+                                    className="btn btn-sm btn-secondary"
+                                    aria-label="Print Gatepass Slip"
+                                    onClick={() => printGatepassSlip(gp)}
+                                    title="Print Outward / Return Gatepass Slip"
+                                    style={{
+                                      fontSize: "12px",
+                                      padding: "5px 8px",
+                                      display: "inline-flex",
+                                      alignItems: "center",
+                                      justifyContent: "center",
+                                    }}
+                                  >
+                                    <TechOpsIconPrinter size={14} />
+                                  </button>
+                                )}
 
-                              {/* Detail Drawer */}
-                              <button
-                                type="button"
-                                className="btn btn-sm btn-secondary"
-                                onClick={() => {
-                                  setActiveGpDetail(gp);
-                                  setOpenDetailDrawer(true);
-                                }}
-                                style={{ fontSize: "12px", padding: "4px 8px" }}
-                              >
-                                Details
-                              </button>
-                            </div>
-                          </td>
+                                {/* Detail Drawer */}
+                                {canViewGpDetails && (
+                                  <button
+                                    type="button"
+                                    className="btn btn-sm btn-secondary"
+                                    onClick={() => {
+                                      setActiveGpDetail(gp);
+                                      setOpenDetailDrawer(true);
+                                    }}
+                                    style={{ fontSize: "12px", padding: "4px 8px" }}
+                                  >
+                                    Details
+                                  </button>
+                                )}
+                              </div>
+                            </td>
+                          )}
                         </tr>
                       );
                     })
@@ -2385,10 +3163,11 @@ export function TechnicianOperationsPage() {
         {currentTab === "wallets" && (
           <div>
             {/* Top: Technician Cash-in-Hand Cards */}
-            <div style={{ marginBottom: "24px" }}>
-              <h2 style={{ fontSize: "16px", fontWeight: 700, color: "#1e293b", marginBottom: "12px" }}>
-                Technician Live Wallet Balances (Cash in Hand)
-              </h2>
+            {canViewWalletBalances && (
+              <div style={{ marginBottom: "24px" }}>
+                <h2 style={{ fontSize: "16px", fontWeight: 700, color: "#1e293b", marginBottom: "12px" }}>
+                  Technician Live Wallet Balances (Cash in Hand)
+                </h2>
 
               <div
                 style={{
@@ -2520,62 +3299,68 @@ export function TechnicianOperationsPage() {
                         </div>
 
                         {/* Quick action buttons */}
-                        {canCreate && (
+                        {(canWalletCollect || canWalletHandover || canWalletExpense) && (
                           <div style={{ display: "flex", gap: "6px" }}>
-                            <button
-                              type="button"
-                              className="btn btn-sm btn-outline-success"
-                              onClick={() => handleQuickTxn(tech.technician_name, "COLLECTION")}
-                              style={{
-                                flex: 1,
-                                fontSize: "11px",
-                                padding: "5px 6px",
-                                display: "inline-flex",
-                                alignItems: "center",
-                                justifyContent: "center",
-                                gap: "4px",
-                                fontWeight: 600,
-                              }}
-                            >
-                              <TechOpsIconPlus size={12} />
-                              <span>Collect</span>
-                            </button>
-                            <button
-                              type="button"
-                              className="btn btn-sm btn-outline-primary"
-                              onClick={() => handleQuickTxn(tech.technician_name, "HANDOVER_DEPOSIT")}
-                              style={{
-                                flex: 1,
-                                fontSize: "11px",
-                                padding: "5px 6px",
-                                display: "inline-flex",
-                                alignItems: "center",
-                                justifyContent: "center",
-                                gap: "4px",
-                                fontWeight: 600,
-                              }}
-                            >
-                              <TechOpsIconArrowUpRight size={12} />
-                              <span>Handover</span>
-                            </button>
-                            <button
-                              type="button"
-                              className="btn btn-sm btn-outline-secondary"
-                              onClick={() => handleQuickTxn(tech.technician_name, "FIELD_EXPENSE")}
-                              style={{
-                                flex: 1,
-                                fontSize: "11px",
-                                padding: "5px 6px",
-                                display: "inline-flex",
-                                alignItems: "center",
-                                justifyContent: "center",
-                                gap: "4px",
-                                fontWeight: 600,
-                              }}
-                            >
-                              <TechOpsIconReceipt size={12} />
-                              <span>Expense</span>
-                            </button>
+                            {canWalletCollect && (
+                              <button
+                                type="button"
+                                className="btn btn-sm btn-outline-success"
+                                onClick={() => handleQuickTxn(tech.technician_name, "COLLECTION")}
+                                style={{
+                                  flex: 1,
+                                  fontSize: "11px",
+                                  padding: "5px 6px",
+                                  display: "inline-flex",
+                                  alignItems: "center",
+                                  justifyContent: "center",
+                                  gap: "4px",
+                                  fontWeight: 600,
+                                }}
+                              >
+                                <TechOpsIconPlus size={12} />
+                                <span>Collect</span>
+                              </button>
+                            )}
+                            {canWalletHandover && (
+                              <button
+                                type="button"
+                                className="btn btn-sm btn-outline-primary"
+                                onClick={() => handleQuickTxn(tech.technician_name, "HANDOVER_DEPOSIT")}
+                                style={{
+                                  flex: 1,
+                                  fontSize: "11px",
+                                  padding: "5px 6px",
+                                  display: "inline-flex",
+                                  alignItems: "center",
+                                  justifyContent: "center",
+                                  gap: "4px",
+                                  fontWeight: 600,
+                                }}
+                              >
+                                <TechOpsIconArrowUpRight size={12} />
+                                <span>Handover</span>
+                              </button>
+                            )}
+                            {canWalletExpense && (
+                              <button
+                                type="button"
+                                className="btn btn-sm btn-outline-secondary"
+                                onClick={() => handleQuickTxn(tech.technician_name, "FIELD_EXPENSE")}
+                                style={{
+                                  flex: 1,
+                                  fontSize: "11px",
+                                  padding: "5px 6px",
+                                  display: "inline-flex",
+                                  alignItems: "center",
+                                  justifyContent: "center",
+                                  gap: "4px",
+                                  fontWeight: 600,
+                                }}
+                              >
+                                <TechOpsIconReceipt size={12} />
+                                <span>Expense</span>
+                              </button>
+                            )}
                           </div>
                         )}
                       </div>
@@ -2583,7 +3368,8 @@ export function TechnicianOperationsPage() {
                   })
                 )}
               </div>
-            </div>
+              </div>
+            )}
 
             {/* Bottom: Transaction History Ledger */}
             <div>
@@ -2602,17 +3388,20 @@ export function TechnicianOperationsPage() {
                 </h2>
 
                 <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
-                  <input
-                    type="text"
-                    list="tech-ops-tech-datalist"
-                    placeholder="Filter by technician..."
+                  <TypableLookupCombobox
                     value={walletFilterTech}
-                    onChange={(e) => {
-                      setWalletFilterTech(e.target.value);
+                    onChange={(val) => {
+                      setWalletFilterTech(val);
                       setWalletPage(1);
                     }}
-                    className="form-control"
-                    style={{ width: "200px", fontSize: "12px" }}
+                    options={lookups.technicians.map((t) => ({
+                      value: t.name,
+                      sublabel: [t.mobile, t.city].filter(Boolean).join(" • ") || undefined,
+                    }))}
+                    placeholder="Filter by technician..."
+                    ariaLabel="Filter by technician"
+                    containerStyle={{ width: "200px" }}
+                    inputStyle={{ fontSize: "12px" }}
                   />
 
                   <select
@@ -2809,16 +3598,17 @@ export function TechnicianOperationsPage() {
         {currentTab === "warranty" && (
           <div>
             {/* Quick Serial Validator Widget */}
-            <div
-              style={{
-                background: "linear-gradient(135deg, #f8fafc 0%, #ffffff 100%)",
-                border: "1px solid #cbd5e1",
-                borderRadius: "10px",
-                padding: "20px",
-                marginBottom: "24px",
-                boxShadow: "0 2px 4px rgba(0,0,0,0.03)",
-              }}
-            >
+            {canValidateWarranty && (
+              <div
+                style={{
+                  background: "linear-gradient(135deg, #f8fafc 0%, #ffffff 100%)",
+                  border: "1px solid #cbd5e1",
+                  borderRadius: "10px",
+                  padding: "20px",
+                  marginBottom: "24px",
+                  boxShadow: "0 2px 4px rgba(0,0,0,0.03)",
+                }}
+              >
               <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "8px" }}>
                 <div
                   style={{
@@ -2845,15 +3635,19 @@ export function TechnicianOperationsPage() {
               </p>
 
               <div style={{ display: "flex", gap: "10px", maxWidth: "600px" }}>
-                <input
-                  type="text"
-                  list="tech-ops-serial-datalist"
-                  placeholder="Enter Serial Number (e.g. SN-INHYMA-1001)..."
+                <TypableLookupCombobox
                   value={validatorSerialInput}
-                  onChange={(e) => setValidatorSerialInput(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && handleValidateSerial()}
-                  className="form-control"
-                  style={{ fontSize: "14px", fontWeight: 600 }}
+                  onChange={setValidatorSerialInput}
+                  options={lookups.serial_registry.map((s) => ({
+                    value: s.serial_number,
+                    sublabel: [s.machine_model, s.company_name].filter(Boolean).join(" • ") || undefined,
+                  }))}
+                  placeholder="Enter Serial Number (e.g. SN-INHYMA-1001)..."
+                  ariaLabel="Warranty Serial Validator"
+                  inputStyle={{ fontSize: "14px", fontWeight: 600 }}
+                  onKeyDownExtra={(e) => {
+                    if (e.key === "Enter") handleValidateSerial();
+                  }}
                 />
                 <button
                   type="button"
@@ -2924,7 +3718,8 @@ export function TechnicianOperationsPage() {
                   )}
                 </div>
               )}
-            </div>
+              </div>
+            )}
 
             {/* Warranty Registry Table */}
             <div>
@@ -3082,61 +3877,6 @@ export function TechnicianOperationsPage() {
         )}
 
         {/* ================================================================= */}
-        {/* SHARED MASTER DATALISTS                                          */}
-        {/* ================================================================= */}
-        <datalist id="tech-ops-tech-datalist">
-          {lookups.technicians.map((t) => (
-            <option key={t.id} value={t.name}>
-              {t.mobile ? `${t.mobile}${t.city ? ` • ${t.city}` : ""}` : t.city || ""}
-            </option>
-          ))}
-        </datalist>
-
-        <datalist id="tech-ops-company-datalist">
-          {lookups.companies.map((c) => (
-            <option key={c.id} value={c.company_name}>
-              {[c.city, c.state].filter(Boolean).join(", ")}
-            </option>
-          ))}
-        </datalist>
-
-        <datalist id="tech-ops-machine-datalist">
-          {lookups.machines.map((m) => (
-            <option key={m.id} value={m.product_name}>
-              {m.product_code || m.product_type}
-            </option>
-          ))}
-        </datalist>
-
-        <datalist id="tech-ops-serial-datalist">
-          {lookups.serial_registry.map((s) => (
-            <option key={s.serial_number} value={s.serial_number}>
-              {[s.machine_model, s.company_name, s.is_covered ? "Under Warranty" : "Out of Warranty"]
-                .filter(Boolean)
-                .join(" • ")}
-            </option>
-          ))}
-        </datalist>
-
-        <datalist id="tech-ops-city-datalist">
-          {lookups.cities.map((ct) => (
-            <option key={ct.id} value={ct.name}>
-              {ct.state || ""}
-            </option>
-          ))}
-        </datalist>
-
-        <datalist id="tech-ops-so-datalist">
-          {candidateSaleOrdersForLink.map((so) => (
-            <option key={so.id} value={so.order_no}>
-              {[so.company_name, so.status, so.total_amount != null ? `₹${so.total_amount}` : ""]
-                .filter(Boolean)
-                .join(" • ")}
-            </option>
-          ))}
-        </datalist>
-
-        {/* ================================================================= */}
         {/* MODAL: ISSUE OUTWARD GATEPASS                                    */}
         {/* ================================================================= */}
         <Modal
@@ -3209,14 +3949,16 @@ export function TechnicianOperationsPage() {
                 <label style={{ fontSize: "12px", fontWeight: 600, display: "block", marginBottom: "4px" }}>
                   Technician Name *
                 </label>
-                <input
-                  type="text"
+                <TypableLookupCombobox
                   required
-                  list="tech-ops-tech-datalist"
+                  ariaLabel="Technician Name"
                   placeholder="Select or type technician name"
                   value={newGpTechName}
-                  onChange={(e) => {
-                    const val = e.target.value;
+                  options={lookups.technicians.map((t) => ({
+                    value: t.name,
+                    sublabel: [t.mobile, t.city].filter(Boolean).join(" • ") || undefined,
+                  }))}
+                  onChange={(val) => {
                     setNewGpTechName(val);
                     const matched = lookups.technicians.find(
                       (t) => t.name.toLowerCase() === val.trim().toLowerCase()
@@ -3226,7 +3968,6 @@ export function TechnicianOperationsPage() {
                       setNewGpTechMobile(matched.mobile);
                     }
                   }}
-                  className="form-control"
                 />
               </div>
 
@@ -3250,20 +3991,21 @@ export function TechnicianOperationsPage() {
                 <label style={{ fontSize: "12px", fontWeight: 600, display: "block", marginBottom: "4px" }}>
                   Customer Company
                 </label>
-                <input
-                  type="text"
-                  list="tech-ops-company-datalist"
+                <TypableLookupCombobox
+                  ariaLabel="Customer Company"
                   placeholder="Select or type customer"
                   value={newGpCustomer}
-                  onChange={(e) => {
-                    const val = e.target.value;
+                  options={lookups.companies.map((c) => ({
+                    value: c.company_name,
+                    sublabel: [c.city, c.state].filter(Boolean).join(", ") || undefined,
+                  }))}
+                  onChange={(val) => {
                     setNewGpCustomer(val);
                     const comp = lookups.companies.find(
                       (c) => c.company_name.toLowerCase() === val.trim().toLowerCase()
                     );
                     setNewGpCompanyId(comp?.id || "");
                   }}
-                  className="form-control"
                 />
               </div>
 
@@ -3271,20 +4013,21 @@ export function TechnicianOperationsPage() {
                 <label style={{ fontSize: "12px", fontWeight: 600, display: "block", marginBottom: "4px" }}>
                   Machine Model
                 </label>
-                <input
-                  type="text"
-                  list="tech-ops-machine-datalist"
+                <TypableLookupCombobox
+                  ariaLabel="Machine Model"
                   placeholder="Select machine (filters compatible parts)"
                   value={newGpMachineModel}
-                  onChange={(e) => {
-                    const val = e.target.value;
+                  options={lookups.machines.map((m) => ({
+                    value: m.product_name,
+                    sublabel: m.product_code || m.product_type || undefined,
+                  }))}
+                  onChange={(val) => {
                     setNewGpMachineModel(val);
                     const mc = lookups.machines.find(
                       (m) => m.product_name.toLowerCase() === val.trim().toLowerCase()
                     );
                     setNewGpMachineId(mc?.id || "");
                   }}
-                  className="form-control"
                 />
               </div>
 
@@ -3293,13 +4036,15 @@ export function TechnicianOperationsPage() {
                   Machine Serial Number
                 </label>
                 <div style={{ display: "flex", gap: "6px" }}>
-                  <input
-                    type="text"
-                    list="tech-ops-serial-datalist"
+                  <TypableLookupCombobox
+                    ariaLabel="Machine Serial Number"
                     placeholder="e.g. SN-INHYMA-1001"
                     value={newGpSerial}
-                    onChange={(e) => {
-                      const val = e.target.value;
+                    options={lookups.serial_registry.map((s) => ({
+                      value: s.serial_number,
+                      sublabel: [s.machine_model, s.company_name].filter(Boolean).join(" • ") || undefined,
+                    }))}
+                    onChange={(val) => {
                       setNewGpSerial(val);
                       const known = lookups.serial_registry.find(
                         (s) => s.serial_number.toLowerCase() === val.trim().toLowerCase()
@@ -3309,7 +4054,6 @@ export function TechnicianOperationsPage() {
                         if (known.machine_model && !newGpMachineModel.trim()) setNewGpMachineModel(known.machine_model);
                       }
                     }}
-                    className="form-control"
                   />
                   <button
                     type="button"
@@ -3449,85 +4193,39 @@ export function TechnicianOperationsPage() {
                       return (
                         <tr key={idx}>
                           <td style={{ whiteSpace: "normal", verticalAlign: "top", padding: "8px 10px" }}>
-                            <div style={{ display: "flex", flexDirection: "column", gap: "6px", width: "100%" }}>
-                              {lookups.spare_parts.length > 0 && (
-                                <select
-                                  aria-label={`Select Catalog Part ${idx + 1}`}
-                                  value={item.product_id || ""}
-                                  onChange={(e) => {
-                                    const prodId = e.target.value;
-                                    const copy = [...newGpItems];
-                                    if (!prodId) {
-                                      copy[idx].product_id = null;
-                                    } else {
-                                      const sp = lookups.spare_parts.find((p) => p.id === prodId);
-                                      if (sp) {
-                                        copy[idx].product_id = sp.id;
-                                        copy[idx].product_name = sp.product_name;
-                                        copy[idx].product_code = sp.product_code || "";
-                                        copy[idx].uom = sp.uom || "NOS";
-                                        copy[idx].unit_rate = Number(sp.unit_rate || 0);
-                                      }
-                                    }
-                                    setNewGpItems(copy);
-                                  }}
-                                  className="form-control form-control-sm"
-                                  style={{ fontSize: "11.5px", width: "100%", minWidth: 0 }}
-                                >
-                                  <option value="">-- Select Spare Part from Master Catalog --</option>
-                                  {compatibleParts.length > 0 && (
-                                    <optgroup label={`Compatible with ${newGpMachineModel || "Selected Machine"}`}>
-                                      {compatibleParts.map((sp) => {
-                                        const st = newGpWarehouse
-                                          ? (sp.stock_by_warehouse?.[newGpWarehouse] ?? 0)
-                                          : null;
-                                        return (
-                                          <option key={sp.id} value={sp.id}>
-                                            {sp.product_code ? `[${sp.product_code}] ` : ""}
-                                            {sp.product_name}
-                                            {st !== null ? ` (Avail: ${st} ${sp.uom})` : ""}
-                                          </option>
-                                        );
-                                      })}
-                                    </optgroup>
-                                  )}
-                                  <optgroup
-                                    label={
-                                      compatibleParts.length > 0
-                                        ? "Other Spare Parts & Products"
-                                        : "Master Spare Parts & Products"
-                                    }
-                                  >
-                                    {otherParts.map((sp) => {
-                                      const st = newGpWarehouse
-                                        ? (sp.stock_by_warehouse?.[newGpWarehouse] ?? 0)
-                                        : null;
-                                      return (
-                                        <option key={sp.id} value={sp.id}>
-                                          {sp.product_code ? `[${sp.product_code}] ` : ""}
-                                          {sp.product_name}
-                                          {st !== null ? ` (Avail: ${st} ${sp.uom})` : ""}
-                                        </option>
-                                      );
-                                    })}
-                                  </optgroup>
-                                </select>
-                              )}
-                              <input
-                                type="text"
-                                required
-                                aria-label={`Part Name ${idx + 1}`}
-                                placeholder="e.g. Heating Element"
-                                value={item.product_name}
-                                onChange={(e) => {
-                                  const copy = [...newGpItems];
-                                  copy[idx].product_name = e.target.value;
-                                  setNewGpItems(copy);
-                                }}
-                                className="form-control form-control-sm"
-                                style={{ width: "100%", minWidth: 0 }}
-                              />
-                            </div>
+                            <SparePartCombobox
+                              value={item.product_name}
+                              selectedProductId={item.product_id}
+                              compatibleParts={compatibleParts}
+                              otherParts={otherParts}
+                              machineLabel={newGpMachineModel || "Selected Machine"}
+                              warehouseName={newGpWarehouse}
+                              ariaLabel={`Select Catalog Part ${idx + 1}`}
+                              placeholder="Select or type spare part..."
+                              onTypeValue={(text) => {
+                                const copy = [...newGpItems];
+                                const selectedSp = copy[idx].product_id
+                                  ? lookups.spare_parts.find((p) => p.id === copy[idx].product_id)
+                                  : undefined;
+                                copy[idx].product_name = text;
+                                if (
+                                  selectedSp &&
+                                  selectedSp.product_name.toLowerCase() !== text.trim().toLowerCase()
+                                ) {
+                                  copy[idx].product_id = null;
+                                }
+                                setNewGpItems(copy);
+                              }}
+                              onSelectPart={(sp) => {
+                                const copy = [...newGpItems];
+                                copy[idx].product_id = sp.id;
+                                copy[idx].product_name = sp.product_name;
+                                copy[idx].product_code = sp.product_code || "";
+                                copy[idx].uom = sp.uom || "NOS";
+                                copy[idx].unit_rate = Number(sp.unit_rate || 0);
+                                setNewGpItems(copy);
+                              }}
+                            />
                           </td>
                           <td style={{ whiteSpace: "normal", verticalAlign: "top", padding: "8px 10px" }}>
                             <div style={{ display: "flex", flexDirection: "column", gap: "4px", width: "100%" }}>
@@ -3980,14 +4678,18 @@ export function TechnicianOperationsPage() {
               <label style={{ fontSize: "12px", fontWeight: 600, display: "block", marginBottom: "4px" }}>
                 Sales Order Number *
               </label>
-              <input
-                type="text"
+              <TypableLookupCombobox
                 required
-                list="tech-ops-so-datalist"
+                ariaLabel="Sales Order Number"
                 placeholder="e.g. SO-2026-0842"
                 value={soNumberInput}
-                onChange={(e) => setSoNumberInput(e.target.value)}
-                className="form-control"
+                onChange={setSoNumberInput}
+                options={candidateSaleOrdersForLink.map((so) => ({
+                  value: so.order_no,
+                  sublabel: [so.company_name, so.status, so.total_amount != null ? `₹${so.total_amount}` : ""]
+                    .filter(Boolean)
+                    .join(" • ") || undefined,
+                }))}
               />
             </div>
 
@@ -4161,13 +4863,16 @@ export function TechnicianOperationsPage() {
                     Link Existing Sales Order
                   </label>
                   <div style={{ display: "flex", gap: "8px" }}>
-                    <input
-                      type="text"
-                      list="tech-ops-so-datalist"
+                    <TypableLookupCombobox
+                      ariaLabel="Draft SO Link Number"
                       placeholder="e.g. SO-2026-0842"
                       value={soNumberInput}
-                      onChange={(e) => setSoNumberInput(e.target.value)}
+                      onChange={setSoNumberInput}
                       className="form-control form-control-sm"
+                      options={candidateSaleOrdersForLink.map((so) => ({
+                        value: so.order_no,
+                        sublabel: [so.company_name, so.status].filter(Boolean).join(" • ") || undefined,
+                      }))}
                     />
                     <button
                       type="button"
@@ -4208,17 +4913,19 @@ export function TechnicianOperationsPage() {
         >
           {activeGpDetail && (
             <div style={{ padding: "16px", fontSize: "13px" }}>
-              <div style={{ marginBottom: "12px", display: "flex", justifyContent: "flex-end" }}>
-                <button
-                  type="button"
-                  className="btn btn-sm btn-outline-primary"
-                  onClick={() => printGatepassSlip(activeGpDetail)}
-                  style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}
-                >
-                  <TechOpsIconPrinter size={14} />
-                  <span>Print Gatepass Slip</span>
-                </button>
-              </div>
+              {canPrintSlip && (
+                <div style={{ marginBottom: "12px", display: "flex", justifyContent: "flex-end" }}>
+                  <button
+                    type="button"
+                    className="btn btn-sm btn-outline-primary"
+                    onClick={() => printGatepassSlip(activeGpDetail)}
+                    style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}
+                  >
+                    <TechOpsIconPrinter size={14} />
+                    <span>Print Gatepass Slip</span>
+                  </button>
+                </div>
+              )}
 
               <div style={{ marginBottom: "14px", display: "grid", gap: "4px" }}>
                 <div><b>Technician:</b> {activeGpDetail.technician_name}</div>
@@ -4296,21 +5003,22 @@ export function TechnicianOperationsPage() {
               <label style={{ fontSize: "12px", fontWeight: 600, display: "block", marginBottom: "4px" }}>
                 Technician Name *
               </label>
-              <input
-                type="text"
+              <TypableLookupCombobox
                 required
-                list="tech-ops-tech-datalist"
+                ariaLabel="Wallet Technician Name"
                 placeholder="Select or type technician name"
                 value={txnTechName}
-                onChange={(e) => {
-                  const val = e.target.value;
+                options={lookups.technicians.map((t) => ({
+                  value: t.name,
+                  sublabel: [t.mobile, t.city].filter(Boolean).join(" • ") || undefined,
+                }))}
+                onChange={(val) => {
                   setTxnTechName(val);
                   const matched = lookups.technicians.find(
                     (t) => t.name.toLowerCase() === val.trim().toLowerCase()
                   );
                   setTxnTechId(matched?.id || "");
                 }}
-                className="form-control"
               />
             </div>
 
@@ -4324,9 +5032,15 @@ export function TechnicianOperationsPage() {
                   onChange={(e) => setTxnType(e.target.value as any)}
                   className="form-control"
                 >
-                  <option value="COLLECTION">Field Collection (from Customer)</option>
-                  <option value="HANDOVER_DEPOSIT">Handover Deposit (to Accounts)</option>
-                  <option value="FIELD_EXPENSE">Approved Field Expense</option>
+                  {(canCreateWallet || canWalletCollect) && (
+                    <option value="COLLECTION">Field Collection (from Customer)</option>
+                  )}
+                  {(canCreateWallet || canWalletHandover) && (
+                    <option value="HANDOVER_DEPOSIT">Handover Deposit (to Accounts)</option>
+                  )}
+                  {(canCreateWallet || canWalletExpense) && (
+                    <option value="FIELD_EXPENSE">Approved Field Expense</option>
+                  )}
                 </select>
               </div>
 
@@ -4384,13 +5098,15 @@ export function TechnicianOperationsPage() {
                 <label style={{ fontSize: "12px", fontWeight: 600, display: "block", marginBottom: "4px" }}>
                   Customer Name
                 </label>
-                <input
-                  type="text"
-                  list="tech-ops-company-datalist"
+                <TypableLookupCombobox
+                  ariaLabel="Wallet Customer Name"
                   placeholder="Select or type customer company"
                   value={txnCustomer}
-                  onChange={(e) => setTxnCustomer(e.target.value)}
-                  className="form-control"
+                  onChange={setTxnCustomer}
+                  options={lookups.companies.map((c) => ({
+                    value: c.company_name,
+                    sublabel: [c.city, c.state].filter(Boolean).join(", ") || undefined,
+                  }))}
                 />
               </div>
             )}
@@ -4498,14 +5214,16 @@ export function TechnicianOperationsPage() {
                 <label style={{ fontSize: "12px", fontWeight: 600, display: "block", marginBottom: "4px" }}>
                   Machine Serial Number *
                 </label>
-                <input
-                  type="text"
+                <TypableLookupCombobox
                   required
-                  list="tech-ops-serial-datalist"
+                  ariaLabel="Warranty Machine Serial Number"
                   placeholder="e.g. SN-INHYMA-1001"
                   value={regSerial}
-                  onChange={(e) => setRegSerial(e.target.value)}
-                  className="form-control"
+                  onChange={setRegSerial}
+                  options={lookups.serial_registry.map((s) => ({
+                    value: s.serial_number,
+                    sublabel: [s.machine_model, s.company_name].filter(Boolean).join(" • ") || undefined,
+                  }))}
                 />
               </div>
 
@@ -4513,21 +5231,22 @@ export function TechnicianOperationsPage() {
                 <label style={{ fontSize: "12px", fontWeight: 600, display: "block", marginBottom: "4px" }}>
                   Machine Model *
                 </label>
-                <input
-                  type="text"
+                <TypableLookupCombobox
                   required
-                  list="tech-ops-machine-datalist"
+                  ariaLabel="Warranty Machine Model"
                   placeholder="Select or type machine model"
                   value={regModel}
-                  onChange={(e) => {
-                    const val = e.target.value;
+                  options={lookups.machines.map((m) => ({
+                    value: m.product_name,
+                    sublabel: m.product_code || m.product_type || undefined,
+                  }))}
+                  onChange={(val) => {
                     setRegModel(val);
                     const mc = lookups.machines.find(
                       (m) => m.product_name.toLowerCase() === val.trim().toLowerCase()
                     );
                     setRegProductId(mc?.id || "");
                   }}
-                  className="form-control"
                 />
               </div>
             </div>
@@ -4536,14 +5255,16 @@ export function TechnicianOperationsPage() {
               <label style={{ fontSize: "12px", fontWeight: 600, display: "block", marginBottom: "4px" }}>
                 Customer Company Name *
               </label>
-              <input
-                type="text"
+              <TypableLookupCombobox
                 required
-                list="tech-ops-company-datalist"
+                ariaLabel="Warranty Customer Company Name"
                 placeholder="Select or type customer company"
                 value={regCompany}
-                onChange={(e) => {
-                  const val = e.target.value;
+                options={lookups.companies.map((c) => ({
+                  value: c.company_name,
+                  sublabel: [c.city, c.state].filter(Boolean).join(", ") || undefined,
+                }))}
+                onChange={(val) => {
                   setRegCompany(val);
                   const comp = lookups.companies.find(
                     (c) => c.company_name.toLowerCase() === val.trim().toLowerCase()
@@ -4555,7 +5276,6 @@ export function TechnicianOperationsPage() {
                     if (comp.city && !regCity.trim()) setRegCity(comp.city);
                   }
                 }}
-                className="form-control"
               />
             </div>
 
@@ -4633,13 +5353,15 @@ export function TechnicianOperationsPage() {
                 <label style={{ fontSize: "12px", fontWeight: 600, display: "block", marginBottom: "4px" }}>
                   Installation City
                 </label>
-                <input
-                  type="text"
-                  list="tech-ops-city-datalist"
+                <TypableLookupCombobox
+                  ariaLabel="Installation City"
                   placeholder="e.g. Ahmedabad"
                   value={regCity}
-                  onChange={(e) => setRegCity(e.target.value)}
-                  className="form-control"
+                  onChange={setRegCity}
+                  options={lookups.cities.map((ct) => ({
+                    value: ct.name,
+                    sublabel: ct.state || undefined,
+                  }))}
                 />
               </div>
             </div>

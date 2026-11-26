@@ -23,7 +23,7 @@ from sqlalchemy.orm import selectinload
 
 from app.auth.dependencies import get_current_user
 from app.auth.service import CurrentUser
-from app.core.exceptions import AppException, BadRequestException, ConflictException, NotFoundException
+from app.core.exceptions import AppException, BadRequestException, ConflictException, ForbiddenException, NotFoundException
 from app.core.responses import build_success_response
 from app.database.session import get_db_session
 from app.rbac.dependencies import require_any_permission
@@ -172,6 +172,47 @@ def _apply_priced_lines(record: ProformaInvoice, priced) -> None:
     record.below_min_price = priced.below_min_price
 
 
+_PROFORMA_VIEW_PERMS = (
+    "proforma.view",
+    "proforma.pending.view",
+    "proforma.admin_approved.view",
+    "proforma.confirmed.view",
+    "proforma.cancelled.view",
+    "proforma.manage",
+)
+_REQUIRE_PROFORMA_LIST = Depends(require_any_permission(*_PROFORMA_VIEW_PERMS))
+_REQUIRE_PROFORMA_GET = Depends(
+    require_any_permission(
+        *_PROFORMA_VIEW_PERMS,
+        "proforma.download",
+        "proforma.details.view",
+        "proforma.update",
+    )
+)
+_REQUIRE_PROFORMA_CREATE = Depends(require_any_permission("proforma.create", "proforma.manage"))
+_REQUIRE_PROFORMA_STATUS = Depends(
+    require_any_permission("proforma.approve", "proforma.confirm", "proforma.cancel", "proforma.manage")
+)
+_REQUIRE_PROFORMA_UPDATE = Depends(require_any_permission("proforma.update", "proforma.manage"))
+_REQUIRE_PROFORMA_DELETE = Depends(require_any_permission("proforma.delete", "proforma.manage"))
+
+PROFORMA_STAGE_ACTION_PERMS: dict[str, str] = {
+    "admin_approved": "proforma.approve",
+    "confirmed": "proforma.confirm",
+    "cancelled": "proforma.cancel",
+}
+
+
+def _is_proforma_privileged(user: CurrentUser) -> bool:
+    perms = set(user.permissions or ())
+    return bool(
+        user.is_super_admin
+        or user.username == "admin"
+        or "*" in perms
+        or "proforma.manage" in perms
+    )
+
+
 @router.get("/proforma-invoice/list", summary="List proforma invoices")
 @router.get("/sales/proforma-invoices", summary="Alias for proforma invoice list")
 async def list_proforma_invoices(
@@ -188,10 +229,22 @@ async def list_proforma_invoices(
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=500),
     db: AsyncSession = Depends(get_db_session),
-    _user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = _REQUIRE_PROFORMA_LIST,
 ) -> dict:
     """Return paginated proforma invoices with per-status tab counts and totals."""
     rules = await load_status_rules(db)
+    perms = set(current_user.permissions or ())
+    is_priv = _is_proforma_privileged(current_user)
+    can_view_all = is_priv or "proforma.view" in perms
+    allowed_stages = [st for st in rules if can_view_all or f"proforma.{st}.view" in perms]
+
+    req_status = (status_filter or "").strip().lower()
+    if req_status and req_status != "all":
+        if not is_priv and f"proforma.{req_status}.view" not in perms:
+            raise ForbiddenException(
+                f"Viewing the '{req_status}' stage requires the 'proforma.{req_status}.view' permission."
+            )
+
     base_stmt = select(ProformaInvoice).where(ProformaInvoice.deleted_at.is_(None))
 
     # Tab counts + amount totals across every status, computed once up front (unfiltered by
@@ -205,15 +258,26 @@ async def list_proforma_invoices(
         ).one()
         return int(row[0] or 0), float(row[1] or 0.0)
 
-    all_count, all_amount = await _count_and_sum(base_stmt)
+    if can_view_all:
+        all_count, all_amount = await _count_and_sum(base_stmt)
+    else:
+        all_count, all_amount = 0, 0.0
     tab_counts = {"all": {"count": all_count, "amount": all_amount}}
     for st in rules:
-        c, a = await _count_and_sum(base_stmt.where(ProformaInvoice.status == st))
+        if is_priv or f"proforma.{st}.view" in perms:
+            c, a = await _count_and_sum(base_stmt.where(ProformaInvoice.status == st))
+        else:
+            c, a = 0, 0.0
         tab_counts[st] = {"count": c, "amount": a}
 
     query_stmt = base_stmt.options(selectinload(ProformaInvoice.items))
-    if status_filter and status_filter.lower() != "all":
-        query_stmt = query_stmt.where(ProformaInvoice.status == status_filter.strip().lower())
+    if req_status and req_status != "all":
+        query_stmt = query_stmt.where(ProformaInvoice.status == req_status)
+    elif not can_view_all:
+        if allowed_stages:
+            query_stmt = query_stmt.where(ProformaInvoice.status.in_(allowed_stages))
+        else:
+            query_stmt = query_stmt.where(ProformaInvoice.id.is_(None))
     if warehouse and warehouse != "All":
         query_stmt = query_stmt.where(func.lower(ProformaInvoice.warehouse) == warehouse.strip().lower())
     if proforma_no:
@@ -264,10 +328,18 @@ async def get_proforma_invoice(
     proforma_id: str,
     request: Request,
     db: AsyncSession = Depends(get_db_session),
-    _user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = _REQUIRE_PROFORMA_GET,
 ) -> dict:
     """Fetch a single proforma invoice by ID or proforma number."""
     record = await _resolve_proforma(db, proforma_id)
+    perms = set(current_user.permissions or ())
+    st_lower = (record.status or "").strip().lower()
+    if not (
+        _is_proforma_privileged(current_user)
+        or {"proforma.view", "proforma.download", "proforma.details.view", "proforma.update"} & perms
+        or (st_lower and f"proforma.{st_lower}.view" in perms)
+    ):
+        raise ForbiddenException(f"Viewing this '{record.status}' proforma invoice requires permission.")
     return build_success_response(data=_serialize_proforma(record), request_id=_rid(request))
 
 
@@ -283,7 +355,7 @@ async def create_proforma_invoice(
     payload: ProformaInvoiceCreate,
     request: Request,
     db: AsyncSession = Depends(get_db_session),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = _REQUIRE_PROFORMA_CREATE,
 ) -> dict:
     """Insert a new proforma invoice: server-priced, sequentially numbered, starting in the initial status."""
     if not payload.items:
@@ -323,12 +395,17 @@ async def update_proforma_status(
     payload: ProformaStatusUpdate,
     request: Request,
     db: AsyncSession = Depends(get_db_session),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = _REQUIRE_PROFORMA_STATUS,
 ) -> dict:
     """Apply a workflow transition; allowed steps, admin-only steps and reason requirements come from the DB."""
     record = await _resolve_proforma(db, proforma_id)
     rules = await load_status_rules(db)
     target = payload.status.strip().lower()
+    if target not in rules:
+        raise BadRequestException(f"Unknown status '{target}'.")
+    req_stage_perm = PROFORMA_STAGE_ACTION_PERMS.get(target)
+    if req_stage_perm and not (_is_proforma_privileged(current_user) or req_stage_perm in (current_user.permissions or ())):
+        raise ForbiddenException(f"This action requires the {req_stage_perm!r} permission.")
     check_transition(rules, record.status, target, current_user, payload.reason)
 
     now = datetime.now(timezone.utc)
@@ -452,7 +529,7 @@ async def update_proforma_invoice(
     payload: ProformaInvoiceUpdate,
     request: Request,
     db: AsyncSession = Depends(get_db_session),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = _REQUIRE_PROFORMA_UPDATE,
 ) -> dict:
     """Edit a proforma invoice (allowed only at stages the DB rules permit); line items are re-priced."""
     record = await _resolve_proforma(db, proforma_id)
@@ -481,7 +558,7 @@ async def delete_proforma_invoice(
     proforma_id: str,
     request: Request,
     db: AsyncSession = Depends(get_db_session),
-    _user: CurrentUser = Depends(get_current_user),
+    _user: CurrentUser = _REQUIRE_PROFORMA_DELETE,
 ) -> dict:
     """Soft-delete a proforma invoice (only at stages the DB rules permit)."""
     record = await _resolve_proforma(db, proforma_id)
@@ -835,7 +912,7 @@ _DISCOUNT_PAYMENT_VIEW_PERMS = (
     "saleorder.accounts",
     "saleorder.approve",
     "saleorder.delete",
-    "proforma.approve",
+    "saleorder.manage",
     "crm.leads.view",
     "crm.leads.manage",
     "report.view",
@@ -845,7 +922,7 @@ _DISCOUNT_PAYMENT_WRITE_PERMS = (
     "saleorder.update",
     "saleorder.accounts",
     "saleorder.approve",
-    "proforma.approve",
+    "saleorder.manage",
     "crm.leads.manage",
 )
 _DELETED_ORDERS_VIEW_PERMS = (
@@ -854,10 +931,12 @@ _DELETED_ORDERS_VIEW_PERMS = (
     "saleorder.view",
     "saleorder.approve",
     "saleorder.delete",
+    "saleorder.manage",
 )
 _DELETED_ORDERS_RESTORE_PERMS = (
     "saleorder.approve",
     "saleorder.delete",
+    "saleorder.manage",
 )
 
 

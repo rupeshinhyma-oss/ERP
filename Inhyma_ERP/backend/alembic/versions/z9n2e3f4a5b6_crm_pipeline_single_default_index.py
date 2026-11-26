@@ -1,7 +1,7 @@
 """crm_pipeline_single_default_index
 
-Revision ID: z7f8a9b0c1d2
-Revises: z6e7f8a9b0c1
+Revision ID: z9n2e3f4a5b6
+Revises: z9m1d2e3f4a5
 Create Date: 2026-11-21 13:15:00.000000
 
 Lead Management Phase 2 / Wave 2 (LM-DEF-007):
@@ -21,8 +21,8 @@ from typing import Sequence, Union
 import sqlalchemy as sa
 from alembic import op
 
-revision: str = "z7f8a9b0c1d2"
-down_revision: Union[str, Sequence[str], None] = "z6e7f8a9b0c1"
+revision: str = "z9n2e3f4a5b6"
+down_revision: Union[str, Sequence[str], None] = "z9m1d2e3f4a5"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

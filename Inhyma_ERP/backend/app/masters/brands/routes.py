@@ -28,7 +28,7 @@ from app.events.dispatcher import EventDispatcher
 from app.masters.brands.dependencies import get_brand_service
 from app.masters.brands.schemas import BrandRead, BrandCreate, BrandUpdate, ImportSummaryRead
 from app.masters.brands.service import BrandService
-from app.rbac.dependencies import require_permission
+from app.rbac.dependencies import require_any_permission
 
 router = APIRouter(prefix="/masters/brands", tags=["Masters - Brands"])
 
@@ -90,7 +90,7 @@ async def create_brand(
     payload: BrandCreate,
     request: Request,
     service: BrandService = Depends(get_brand_service),
-    current_user: CurrentUser = Depends(require_permission("brand.create")),
+    current_user: CurrentUser = Depends(require_any_permission("brand.create", "brand.manage")),
     audit_service: AuditService = Depends(get_audit_service),
     db: AsyncSession = Depends(get_db_session),
     dispatcher: EventDispatcher = Depends(get_event_dispatcher),
@@ -120,7 +120,7 @@ async def list_brands(
     request: Request,
     query: ListQueryParams = Depends(get_list_query_params),
     service: BrandService = Depends(get_brand_service),
-    _current_user: CurrentUser = Depends(require_permission("brand.view")),
+    _current_user: CurrentUser = Depends(require_any_permission("brand.view", "brand.manage")),
 ) -> dict:
     """List brands, with search/sort/filter/pagination."""
     brands, total = await service.list_paginated(query)
@@ -134,7 +134,7 @@ async def export_brands(
     request: Request,
     format: str = "csv",
     service: BrandService = Depends(get_brand_service),
-    current_user: CurrentUser = Depends(require_permission("brand.export")),
+    current_user: CurrentUser = Depends(require_any_permission("brand.export", "brand.manage")),
     audit_service: AuditService = Depends(get_audit_service),
 ) -> Response:
     """Export every brand as a CSV or XLSX file."""
@@ -157,7 +157,7 @@ async def import_brands(
     request: Request,
     file: UploadFile = File(...),
     service: BrandService = Depends(get_brand_service),
-    current_user: CurrentUser = Depends(require_permission("brand.import")),
+    current_user: CurrentUser = Depends(require_any_permission("brand.import", "brand.manage")),
     audit_service: AuditService = Depends(get_audit_service),
 ) -> dict:
     """Import brands from an uploaded CSV/XLSX file, validating every row."""
@@ -192,7 +192,7 @@ async def update_brand(
     payload: BrandUpdate,
     request: Request,
     service: BrandService = Depends(get_brand_service),
-    current_user: CurrentUser = Depends(require_permission("brand.update")),
+    current_user: CurrentUser = Depends(require_any_permission("brand.update", "brand.manage")),
     audit_service: AuditService = Depends(get_audit_service),
     db: AsyncSession = Depends(get_db_session),
     dispatcher: EventDispatcher = Depends(get_event_dispatcher),
@@ -220,7 +220,7 @@ async def activate_brand(
     brand_id: uuid.UUID,
     request: Request,
     service: BrandService = Depends(get_brand_service),
-    current_user: CurrentUser = Depends(require_permission("brand.update")),
+    current_user: CurrentUser = Depends(require_any_permission("brand.update", "brand.status_edit", "brand.bulk_action", "brand.manage")),
     audit_service: AuditService = Depends(get_audit_service),
     db: AsyncSession = Depends(get_db_session),
     dispatcher: EventDispatcher = Depends(get_event_dispatcher),
@@ -247,7 +247,7 @@ async def deactivate_brand(
     brand_id: uuid.UUID,
     request: Request,
     service: BrandService = Depends(get_brand_service),
-    current_user: CurrentUser = Depends(require_permission("brand.update")),
+    current_user: CurrentUser = Depends(require_any_permission("brand.update", "brand.status_edit", "brand.bulk_action", "brand.manage")),
     audit_service: AuditService = Depends(get_audit_service),
     db: AsyncSession = Depends(get_db_session),
     dispatcher: EventDispatcher = Depends(get_event_dispatcher),
@@ -273,7 +273,7 @@ async def delete_brand(
     brand_id: uuid.UUID,
     request: Request,
     service: BrandService = Depends(get_brand_service),
-    current_user: CurrentUser = Depends(require_permission("brand.delete")),
+    current_user: CurrentUser = Depends(require_any_permission("brand.delete", "brand.manage")),
     audit_service: AuditService = Depends(get_audit_service),
     db: AsyncSession = Depends(get_db_session),
     dispatcher: EventDispatcher = Depends(get_event_dispatcher),

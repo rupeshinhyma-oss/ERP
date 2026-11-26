@@ -13,6 +13,26 @@ vi.mock("@/components/AppShell", () => ({
   ),
 }));
 
+const authState = vi.hoisted(() => ({
+  perms: ["product_stock.view", "product_stock.export", "product_stock.manage"] as string[],
+}));
+
+vi.mock("@/lib/hooks", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/hooks")>();
+  return {
+    ...actual,
+    useAuth: () => ({
+      profile: { id: "u-1", username: "testuser", display_name: "Test User" },
+      isSuperAdmin: false,
+      hasPermission: (code?: string | null) =>
+        !code ||
+        authState.perms.includes("*") ||
+        authState.perms.includes(code) ||
+        (code.endsWith(".view") && authState.perms.includes(code.replace(/\.view$/, ".manage"))),
+    }),
+  };
+});
+
 // Mock xlsx library
 vi.mock("xlsx", () => ({
   utils: {
@@ -30,6 +50,7 @@ describe("ProductStockPage", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    authState.perms = ["product_stock.view", "product_stock.export", "product_stock.manage"];
     vi.spyOn(InventoryApi, "listProductStock").mockResolvedValue({
       data: { items: INITIAL_STOCK_ITEMS },
     } as any);
@@ -499,6 +520,32 @@ describe("ProductStockPage", () => {
     await waitFor(() => {
       expect(screen.getByTestId("ledger-route-target")).toBeTruthy();
     });
+  });
+
+  it("hides Export button when only product_stock.view is granted, and shows it for product_stock.export or product_stock.manage", () => {
+    authState.perms = ["product_stock.view"];
+    const { rerender } = render(
+      <BrowserRouter>
+        <ProductStockPage />
+      </BrowserRouter>
+    );
+    expect(screen.queryByTitle("Export to Excel")).toBeNull();
+
+    authState.perms = ["product_stock.view", "product_stock.export"];
+    rerender(
+      <BrowserRouter>
+        <ProductStockPage />
+      </BrowserRouter>
+    );
+    expect(screen.getByTitle("Export to Excel")).toBeTruthy();
+
+    authState.perms = ["product_stock.manage"];
+    rerender(
+      <BrowserRouter>
+        <ProductStockPage />
+      </BrowserRouter>
+    );
+    expect(screen.getByTitle("Export to Excel")).toBeTruthy();
   });
 });
 

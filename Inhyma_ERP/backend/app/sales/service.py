@@ -26,6 +26,7 @@ from app.common import workflow as wf
 from app.core.exceptions import (
     BadRequestException,
     ConflictException,
+    ForbiddenException,
     NotFoundException,
     ValidationException,
 )
@@ -49,7 +50,29 @@ from app.sales.schemas import (
 STATUS_GROUP = "sale.order.status"
 # permission that lets a user see Accounts / Warehouse queues only (see ``visibility``)
 APPROVE_PERMISSION = "saleorder.approve"
+MANAGE_PERMISSION = "saleorder.manage"
 RESTRICTED_VIEW_PERMISSIONS = {"saleorder.accounts", "saleorder.warehouse"}
+ALL_SALEORDER_STAGES: tuple[str, ...] = (
+    "pending",
+    "sales_confirmed",
+    "admin_approved",
+    "acc_confirmed",
+    "gatepass_created",
+    "dispatched",
+    "gatepass_cancelled",
+    "lr",
+    "cancelled",
+)
+SALEORDER_STAGE_ACTION_PERMS: dict[str, str] = {
+    "sales_confirmed": "saleorder.confirm",
+    "admin_approved": "saleorder.approve",
+    "acc_confirmed": "saleorder.accounts",
+    "gatepass_created": "saleorder.warehouse",
+    "dispatched": "saleorder.warehouse",
+    "gatepass_cancelled": "saleorder.warehouse",
+    "lr": "saleorder.warehouse",
+    "cancelled": "saleorder.cancel",
+}
 
 
 IST = timezone(timedelta(hours=5, minutes=30))
@@ -323,28 +346,52 @@ class SaleService:
     async def visible_filters(self, user: CurrentUser) -> dict[str, Any]:
         """Spec: Accounts and Warehouse staff do not see orders against Transit / Ordered warehouses, nor unconfirmed ones.
 
-        Anyone who is an administrator, or who may approve orders, sees everything. Users holding only the accounts /
-        warehouse permissions are limited to confirmed orders in physical warehouses.
+        Additionally enforces per-stage ``saleorder.<stage>.view`` scoping when a user lacks
+        ``saleorder.view`` / ``saleorder.manage`` / ``saleorder.approve`` / legacy accounts/warehouse access.
         """
-        if wf.is_admin(user) or APPROVE_PERMISSION in user.permissions:
+        perms = set(user.permissions or ())
+        if wf.is_admin(user, admin_permission=MANAGE_PERMISSION):
             return {}
-        if not (RESTRICTED_VIEW_PERMISSIONS & set(user.permissions)):
-            return {}
-        from app.core.constants import RecordStatus
-        from app.masters.warehouses.models import Warehouse
 
-        names = (
-            await self.session.execute(
-                select(Warehouse.name).where(
-                    Warehouse.main_warehouse_id.is_(None),
-                    Warehouse.deleted_at.is_(None),
-                    Warehouse.status == RecordStatus.ACTIVE,
+        stage_views = {st for st in ALL_SALEORDER_STAGES if f"saleorder.{st}.view" in perms}
+        has_full_queue = (
+            "saleorder.view" in perms
+            or APPROVE_PERMISSION in perms
+            or "saleorder.details.view" in perms
+            or "saleorder.download" in perms
+            or "saleorder.update" in perms
+        )
+        has_restricted_queue = bool(RESTRICTED_VIEW_PERMISSIONS & perms)
+
+        warehouses_filter: list[str] | None = None
+        exclude_statuses: set[str] = set()
+
+        if has_restricted_queue and not (has_full_queue or APPROVE_PERMISSION in perms):
+            from app.core.constants import RecordStatus
+            from app.masters.warehouses.models import Warehouse
+
+            names = (
+                await self.session.execute(
+                    select(Warehouse.name).where(
+                        Warehouse.main_warehouse_id.is_(None),
+                        Warehouse.deleted_at.is_(None),
+                        Warehouse.status == RecordStatus.ACTIVE,
+                    )
                 )
-            )
-        ).scalars().all()
-        rules = await self.load_status_rules()
-        hidden = [k for k, r in rules.items() if r.get("initial")] + [k for k, r in rules.items() if not r.get("stock_out")]
-        return {"warehouses": list(names), "exclude_statuses": sorted(set(hidden))}
+            ).scalars().all()
+            warehouses_filter = list(names)
+            rules = await self.load_status_rules()
+            hidden = [k for k, r in rules.items() if r.get("initial")] + [k for k, r in rules.items() if not r.get("stock_out")]
+            exclude_statuses.update(hidden)
+        elif not has_full_queue and stage_views:
+            exclude_statuses.update(st for st in ALL_SALEORDER_STAGES if st not in stage_views)
+
+        filters: dict[str, Any] = {}
+        if warehouses_filter is not None:
+            filters["warehouses"] = warehouses_filter
+        if exclude_statuses:
+            filters["exclude_statuses"] = sorted(exclude_statuses)
+        return filters
 
     # -----------------------------------------------------------------------
     # Shipment Planning Integration
@@ -981,13 +1028,17 @@ class SaleService:
         order_id: uuid.UUID,
         payload: SaleOrderUpdate,
         current_user: CurrentUser | None = None,
+        *,
+        files_only: bool = False,
     ) -> SaleOrder:
         order = await self.repo.get_by_id(order_id)
         if not order:
             raise NotFoundException(f"Sale order {order_id} not found.")
         rules = await self.load_status_rules()
-        if current_user is not None:
-            wf.check_editable(rules, order.status, current_user)
+        if current_user is not None and not files_only:
+            wf.check_editable(rules, order.status, current_user, admin_permission=MANAGE_PERMISSION)
+        elif files_only and (order.status or "").lower().strip() in ("lr", "cancelled"):
+            raise ConflictException(f"Order files cannot be edited once it is '{order.status}'.")
         # ``payload.status`` is deliberately ignored: status changes go through the status endpoint, which applies the rules.
         stock_relevant = (payload.items is not None) or (payload.warehouse is not None and payload.warehouse != order.warehouse)
         if stock_relevant:
@@ -1160,7 +1211,13 @@ class SaleService:
         target = self.canonical_status(rules, payload.status)
         reason = (payload.remarks or "").strip() or None
 
-        wf.check_transition(rules, order.status, target, current_user, reason)
+        wf.check_transition(rules, order.status, target, current_user, reason, admin_permission=MANAGE_PERMISSION)
+        if not wf.is_admin(current_user, admin_permission=MANAGE_PERMISSION):
+            req_perm = SALEORDER_STAGE_ACTION_PERMS.get(target)
+            if req_perm and req_perm not in set(current_user.permissions or ()):
+                raise ForbiddenException(
+                    f"Moving a sales order to '{target}' requires the '{req_perm}' permission."
+                )
 
         # Orders in Transit / Ordered warehouses can only be cancelled (spec: status options exist for physical warehouses only)
         if target in rules[order.status].get("physical_only_to", []) and not await self._is_physical(order.warehouse):
@@ -1320,7 +1377,7 @@ class SaleService:
         if not order:
             raise NotFoundException(f"Sale order {order_id} not found.")
         rules = await self.load_status_rules()
-        wf.check_deletable(rules, order.status, current_user)
+        wf.check_deletable(rules, order.status, current_user, admin_permission=MANAGE_PERMISSION)
         await self._release_stock(order)
         await self._rehold_and_unlink_gatepass_for_order(order)
         await self.repo.soft_delete(order, deleted_by=current_user.display_name or current_user.full_name or current_user.username)
@@ -1342,8 +1399,8 @@ class SaleService:
             pass
 
     async def restore_order(self, order_id: uuid.UUID, current_user: CurrentUser) -> None:
-        """Bring a deleted order back (administrators only); its stock is taken again if its status holds stock."""
-        if not wf.is_admin(current_user):
+        """Bring a deleted order back (administrators or saleorder.manage); its stock is taken again if its status holds stock."""
+        if not wf.is_admin(current_user, admin_permission=MANAGE_PERMISSION):
             from app.core.exceptions import ForbiddenException
 
             raise ForbiddenException("Only an administrator can restore a deleted order.")

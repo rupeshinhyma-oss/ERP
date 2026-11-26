@@ -107,6 +107,29 @@ vi.mock("@/lib/api", () => ({
   API_ORIGIN: "http://localhost:8000",
 }));
 
+// Mock Auth with full product permissions for functional ProductMaster specs
+vi.mock("@/lib/hooks", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/hooks")>();
+  const perms = new Set([
+    "product.view",
+    "product.create",
+    "product.update",
+    "product.delete",
+    "product.export",
+    "product.import",
+    "product.bulk_action",
+    "product.manage",
+  ]);
+  return {
+    ...actual,
+    useAuth: () => ({
+      profile: { id: "u-1", username: "testuser", display_name: "Test User" },
+      isSuperAdmin: false,
+      hasPermission: (code?: string | null) => !code || perms.has(code),
+    }),
+  };
+});
+
 // Mock Lookups
 vi.mock("@/lib/lookups", () => ({
   useLookup: (url: string) => {

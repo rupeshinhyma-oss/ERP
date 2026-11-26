@@ -58,7 +58,8 @@ class AuditService:
         failed (the failure itself is logged, never raised).
         """
         try:
-            return await self.audit_repository.create(
+            session = getattr(self.audit_repository, "session", None)
+            kwargs = dict(
                 action=action,
                 module=module,
                 user_id=user_id,
@@ -75,6 +76,10 @@ class AuditService:
                 response_status=response_status,
                 description=description,
             )
+            if session is not None and hasattr(session, "begin_nested") and callable(getattr(session, "in_transaction", None)) and session.in_transaction():
+                async with session.begin_nested():
+                    return await self.audit_repository.create(**kwargs)
+            return await self.audit_repository.create(**kwargs)
         except Exception:  # noqa: BLE001 - audit logging must never break the caller's request.
             logger.exception(
                 "Failed to write audit log entry.",

@@ -10,6 +10,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
 import { AppShell } from "@/components/AppShell";
+import { SelectField } from "@/components/fields";
 import { TableSkeletonRows } from "@/components/Skeleton";
 import { apiDelete, apiGet, apiPatch, downloadExport, errorMessage } from "@/lib/api";
 import { useLookup } from "@/lib/lookups";
@@ -531,14 +532,13 @@ export function LocalPurchasesPage() {
                 <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px" }}>
                   Supplier
                 </label>
-                <select
+                <SelectField
                   value={selectedSupplierId}
-                  onChange={(e) => {
-                    setSelectedSupplierId(e.target.value);
+                  onChange={(val) => {
+                    setSelectedSupplierId(val);
                     setPage(1);
                   }}
-                  style={{
-                    width: "100%",
+                  triggerStyle={{
                     height: "38px",
                     padding: "7px 10px",
                     borderRadius: "6px",
@@ -555,7 +555,7 @@ export function LocalPurchasesPage() {
                       {s.company_name}
                     </option>
                   ))}
-                </select>
+                </SelectField>
               </div>
 
               {/* Status Filter */}

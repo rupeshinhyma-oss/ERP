@@ -1,7 +1,7 @@
 """seed_task_all_view_permission
 
-Revision ID: z5d6e7f8a9b0
-Revises: z4c5d6e7f8a9
+Revision ID: z9l0c1d2e3f4
+Revises: z9k9b0c1d2e3
 Create Date: 2026-11-19 17:25:00.000000
 
 Idempotently seeds the dedicated read-only ``task.all_view`` permission in
@@ -24,8 +24,8 @@ import sqlalchemy as sa
 from alembic import op
 from sqlalchemy import inspect
 
-revision: str = "z5d6e7f8a9b0"
-down_revision: Union[str, Sequence[str], None] = "z4c5d6e7f8a9"
+revision: str = "z9l0c1d2e3f4"
+down_revision: Union[str, Sequence[str], None] = "z9k9b0c1d2e3"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

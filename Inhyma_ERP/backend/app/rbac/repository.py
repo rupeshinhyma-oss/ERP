@@ -12,7 +12,8 @@ from __future__ import annotations
 import uuid
 from datetime import date
 
-from sqlalchemy import and_, delete, func, or_, select
+from sqlalchemy import and_, delete, func, or_, select, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -46,6 +47,14 @@ class PermissionRepository(BaseRepository[Permission]):
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 
+    async def list_by_ids(self, permission_ids: list[uuid.UUID]) -> list[Permission]:
+        """Fetch permissions matching the provided IDs in a single query."""
+        if not permission_ids:
+            return []
+        stmt = select(Permission).where(Permission.id.in_(permission_ids))
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+
     async def list_all(self) -> list[Permission]:
         """Return every active (non-deprecated) permission, ordered by module then code."""
         stmt = (
@@ -55,6 +64,19 @@ class PermissionRepository(BaseRepository[Permission]):
         )
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
+
+
+async def _serialize_writers(session: AsyncSession, key: str) -> None:
+    """
+    Make concurrent writers of the same permission set take turns.
+
+    Takes a transaction-scoped Postgres advisory lock named ``key``: a second request for the same role/user waits here
+    until the first one commits, then runs on top of its result. Without it, two overlapping "replace all permissions"
+    requests both insert the same rows and one fails with a unique-constraint error (HTTP 500). Different roles/users
+    never block each other. No-op on non-Postgres databases (SQLite in tests), where writers are already serialised.
+    """
+    if session.get_bind().dialect.name == "postgresql":
+        await session.execute(text("SELECT pg_advisory_xact_lock(hashtextextended(:k, 0))"), {"k": key})
 
 
 class RoleRepository(BaseRepository[Role]):
@@ -446,7 +468,7 @@ class RoleRepository(BaseRepository[Role]):
         }
 
     async def add_permission(self, role: Role, permission: Permission) -> RolePermission:
-        """Grant a permission to a role, if not already granted."""
+        """Grant a permission to a role, if not already granted (concurrency-safe)."""
         stmt = select(RolePermission).where(
             RolePermission.role_id == role.id, RolePermission.permission_id == permission.id
         )
@@ -454,9 +476,16 @@ class RoleRepository(BaseRepository[Role]):
         if existing is not None:
             return existing
         link = RolePermission(role_id=role.id, permission_id=permission.id)
-        self.session.add(link)
-        await self.session.flush()
-        return link
+        try:
+            async with self.session.begin_nested():
+                self.session.add(link)
+                await self.session.flush()
+            return link
+        except IntegrityError:
+            existing = (await self.session.execute(stmt)).scalar_one_or_none()
+            if existing is not None:
+                return existing
+            raise
 
     async def remove_permission(self, role: Role, permission_id: uuid.UUID) -> bool:
         """Revoke a permission from a role. Returns True if a link was removed."""
@@ -469,6 +498,28 @@ class RoleRepository(BaseRepository[Role]):
         await self.session.delete(link)
         await self.session.flush()
         return True
+
+    async def set_permissions_bulk(self, role: Role, permission_ids: list[uuid.UUID]) -> None:
+        """Replace all direct permission links for a role with the provided permission IDs."""
+        await _serialize_writers(self.session, f"role_permissions:{role.id}")
+        wanted = list(dict.fromkeys(permission_ids))
+        existing_rows = await self.session.execute(
+            select(RolePermission.permission_id).where(RolePermission.role_id == role.id)
+        )
+        existing = set(existing_rows.scalars().all())
+        # Only touch what actually changed (a toggle changes one row, not the whole set).
+        to_remove = existing - set(wanted)
+        if to_remove:
+            await self.session.execute(
+                delete(RolePermission).where(
+                    RolePermission.role_id == role.id, RolePermission.permission_id.in_(to_remove)
+                )
+            )
+        for perm_id in wanted:
+            if perm_id not in existing:
+                self.session.add(RolePermission(role_id=role.id, permission_id=perm_id))
+        await self.session.flush()
+        self.session.expire(role, ["permission_links"])
 
 
 class UserRoleRepository(BaseRepository[UserRole]):
@@ -493,6 +544,12 @@ class UserRoleRepository(BaseRepository[UserRole]):
     async def list_for_role(self, role_id: uuid.UUID) -> list[UserRole]:
         """List every assignment for a role, with the user eagerly loaded."""
         stmt = select(UserRole).where(UserRole.role_id == role_id).options(selectinload(UserRole.user))
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+
+    async def list_user_ids_for_role(self, role_id: uuid.UUID) -> list[uuid.UUID]:
+        """Return only user IDs assigned to a role without loading full User rows."""
+        stmt = select(UserRole.user_id).where(UserRole.role_id == role_id)
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 
@@ -532,9 +589,19 @@ class UserPermissionRepository(BaseRepository[UserPermission]):
         link = UserPermission(
             user_id=user_id, permission_id=permission_id, is_granted=is_granted, granted_by=granted_by
         )
-        self.session.add(link)
-        await self.session.flush()
-        return link
+        try:
+            async with self.session.begin_nested():
+                self.session.add(link)
+                await self.session.flush()
+            return link
+        except IntegrityError:
+            existing = (await self.session.execute(stmt)).scalar_one_or_none()
+            if existing is not None:
+                existing.is_granted = is_granted
+                existing.granted_by = granted_by
+                await self.session.flush()
+                return existing
+            raise
 
     async def remove_permission(self, user_id: uuid.UUID, permission_id: uuid.UUID) -> bool:
         stmt = select(UserPermission).where(
@@ -555,6 +622,7 @@ class UserPermissionRepository(BaseRepository[UserPermission]):
         granted_by: uuid.UUID | None = None,
     ) -> None:
         """Replace all direct permission overrides for a user with the provided list."""
+        await _serialize_writers(self.session, f"user_permissions:{user_id}")
         stmt_del = delete(UserPermission).where(UserPermission.user_id == user_id)
         await self.session.execute(stmt_del)
         for perm_id, is_granted in overrides:

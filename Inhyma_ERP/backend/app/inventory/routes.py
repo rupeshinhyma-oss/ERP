@@ -23,7 +23,7 @@ from app.auth.service import CurrentUser
 from app.core.constants import RecordStatus
 from app.core.logging import get_logger
 from app.inventory import stock_service
-from app.rbac.dependencies import require_permission
+from app.rbac.dependencies import require_any_permission, require_permission
 from app.core.responses import build_success_response
 from app.database.session import get_db_session
 from app.inventory.models import (
@@ -49,8 +49,57 @@ from app.inventory.schemas import (
 
 router = APIRouter(
     tags=["Inventory & Stock Management"],
-    dependencies=[Depends(require_permission("product.view"))],  # was open to everyone, even without a login
+    dependencies=[Depends(get_current_user)],  # require authentication globally; routes below enforce module permissions
 )
+_REQUIRE_PRODUCT_VIEW = Depends(require_any_permission("product.view", "product.manage"))
+_REQUIRE_PRODUCT_STOCK_VIEW = Depends(
+    require_any_permission(
+        "product_stock.view",
+        "product_stock.manage",
+        "stock_adjustment.create",
+        "stock_adjustment.manage",
+        "stock_transfer.create",
+        "stock_transfer.manage",
+        "product.view",
+        "product.manage",
+        "report.view",
+        "proforma.view",
+        "proforma.create",
+        "proforma.update",
+        "proforma.manage",
+        "saleorder.view",
+        "saleorder.create",
+        "saleorder.update",
+    )
+)
+_REQUIRE_STOCK_ADJUSTMENT_VIEW = Depends(require_any_permission("stock_adjustment.view", "stock_adjustment.manage"))
+_REQUIRE_STOCK_ADJUSTMENT_DETAIL = Depends(
+    require_any_permission("stock_adjustment.view", "stock_adjustment.download", "stock_adjustment.manage")
+)
+_REQUIRE_STOCK_ADJUSTMENT_CREATE = Depends(require_any_permission("stock_adjustment.create", "stock_adjustment.manage"))
+_REQUIRE_STOCK_ADJUSTMENT_DELETE = Depends(require_any_permission("stock_adjustment.delete", "stock_adjustment.manage"))
+_REQUIRE_STOCK_TRANSFER_LIST = Depends(
+    require_any_permission(
+        "stock_transfer.view",
+        "stock_transfer.pending.view",
+        "stock_transfer.confirmed.view",
+        "stock_transfer.received.view",
+        "stock_transfer.cancel.view",
+        "stock_transfer.download",
+        "stock_transfer.manage",
+    )
+)
+_REQUIRE_STOCK_TRANSFER_CREATE = Depends(require_any_permission("stock_transfer.create", "stock_transfer.manage"))
+_REQUIRE_STOCK_TRANSFER_STATUS = Depends(
+    require_any_permission(
+        "stock_transfer.pending",
+        "stock_transfer.confirmed",
+        "stock_transfer.received",
+        "stock_transfer.cancel",
+        "stock_transfer.manage",
+    )
+)
+_REQUIRE_STOCK_TRANSFER_RECEIVE = Depends(require_any_permission("stock_transfer.received", "stock_transfer.manage"))
 logger = get_logger(__name__)
 
 # ==============================================================================
@@ -191,10 +240,10 @@ async def _next_adjustment_no(db: AsyncSession) -> str:
 # Product Stock Endpoints
 # ==============================================================================
 
-@router.get("/inventory/product-stock", summary="List product stock across warehouses")
-@router.get("/product-stock/list", summary="Alias for product stock list")
-@router.get("/transaction_report/list", summary="Alias for Stock Transactions report")
-@router.get("/transaction-report/list", summary="Alias for Stock Transactions report")
+@router.get("/inventory/product-stock", summary="List product stock across warehouses", dependencies=[_REQUIRE_PRODUCT_STOCK_VIEW])
+@router.get("/product-stock/list", summary="Alias for product stock list", dependencies=[_REQUIRE_PRODUCT_STOCK_VIEW])
+@router.get("/transaction_report/list", summary="Alias for Stock Transactions report", dependencies=[_REQUIRE_PRODUCT_STOCK_VIEW])
+@router.get("/transaction-report/list", summary="Alias for Stock Transactions report", dependencies=[_REQUIRE_PRODUCT_STOCK_VIEW])
 async def list_product_stock(
     request: Request,
     category: Optional[str] = Query(None, description="Category filter"),
@@ -537,8 +586,8 @@ async def _compute_breakup_flags(db: AsyncSession, product_names: list[str]) -> 
     return {k: sorted(v) for k, v in flags.items()}
 
 
-@router.get("/inventory/product-reorder", summary="List product re-order table records")
-@router.get("/product-reorder/list", summary="Alias for product re-order table records")
+@router.get("/inventory/product-reorder", summary="List product re-order table records", dependencies=[_REQUIRE_PRODUCT_VIEW])
+@router.get("/product-reorder/list", summary="Alias for product re-order table records", dependencies=[_REQUIRE_PRODUCT_VIEW])
 async def list_product_reorder(
     request: Request,
     category: Optional[str] = Query(None, description="Category filter"),
@@ -806,7 +855,7 @@ async def list_product_reorder(
     )
 
 
-@router.patch("/inventory/product-reorder/{product_id}", summary="Update reorder level and MOQ for product")
+@router.patch("/inventory/product-reorder/{product_id}", summary="Update reorder level and MOQ for product", dependencies=[_REQUIRE_PRODUCT_VIEW])
 async def update_product_reorder(
     product_id: str,
     payload: ProductReorderUpdateSchema,
@@ -887,7 +936,7 @@ async def update_product_reorder(
     )
 
 
-@router.get("/inventory/product-stock/breakup", summary="Get order / transit / physical stock breakup for product")
+@router.get("/inventory/product-stock/breakup", summary="Get order / transit / physical stock breakup for product", dependencies=[_REQUIRE_PRODUCT_STOCK_VIEW])
 async def get_product_stock_breakup(
     product_name: str = Query(..., description="Product name"),
     warehouse: str = Query(..., description="City name e.g. Mumbai, Ahmedabad, Indore"),
@@ -1084,7 +1133,7 @@ async def get_product_stock_breakup(
     )
 
 
-@router.get("/inventory/goods-expected-report", summary="Goods Expected Date Report for Marketing")
+@router.get("/inventory/goods-expected-report", summary="Goods Expected Date Report for Marketing", dependencies=[_REQUIRE_PRODUCT_VIEW])
 async def get_goods_expected_report(
     request: Request,
     machine: Optional[str] = Query(None, description="Machine lookup by product name, code, container or supplier"),
@@ -1267,10 +1316,10 @@ def _find_timeline_event(timeline: Any, target_keys: set[str]) -> Optional[dict]
     return None
 
 
-@router.get("/inventory/stock-transactions/{product_ref}", summary="Per-product stock transaction ledger")
-@router.get("/stock-transaction/list/{product_ref}", summary="Alias for per-product stock transaction ledger")
-@router.get("/stock_transaction/list/{product_ref}", summary="Alias for per-product stock transaction ledger")
-@router.get("/inventory/product-stock/{product_ref}/transactions", summary="Alias for per-product stock transaction ledger")
+@router.get("/inventory/stock-transactions/{product_ref}", summary="Per-product stock transaction ledger", dependencies=[_REQUIRE_PRODUCT_STOCK_VIEW])
+@router.get("/stock-transaction/list/{product_ref}", summary="Alias for per-product stock transaction ledger", dependencies=[_REQUIRE_PRODUCT_STOCK_VIEW])
+@router.get("/stock_transaction/list/{product_ref}", summary="Alias for per-product stock transaction ledger", dependencies=[_REQUIRE_PRODUCT_STOCK_VIEW])
+@router.get("/inventory/product-stock/{product_ref}/transactions", summary="Alias for per-product stock transaction ledger", dependencies=[_REQUIRE_PRODUCT_STOCK_VIEW])
 async def get_product_stock_transactions(
     product_ref: str,
     request: Request,
@@ -1937,7 +1986,7 @@ async def get_product_stock_transactions(
     )
 
 
-@router.get("/inventory/product-stock/{stock_id}", summary="Get product stock details by ID")
+@router.get("/inventory/product-stock/{stock_id}", summary="Get product stock details by ID", dependencies=[_REQUIRE_PRODUCT_STOCK_VIEW])
 async def get_product_stock(stock_id: str, request: Request, db: AsyncSession = Depends(get_db_session)) -> dict:
     """Single product stock entry (by stock ID, product ID, product code or exact name)."""
     from app.masters.products.models import Product
@@ -2002,8 +2051,8 @@ async def get_product_stock(stock_id: str, request: Request, db: AsyncSession = 
 # Stock Adjustment Endpoints
 # ==============================================================================
 
-@router.get("/inventory/stock-adjustment", summary="List stock adjustments")
-@router.get("/adjustment/list", summary="Alias for adjustment list")
+@router.get("/inventory/stock-adjustment", summary="List stock adjustments", dependencies=[_REQUIRE_STOCK_ADJUSTMENT_VIEW])
+@router.get("/adjustment/list", summary="Alias for adjustment list", dependencies=[_REQUIRE_STOCK_ADJUSTMENT_VIEW])
 async def list_stock_adjustments(
     request: Request,
     date_range: Optional[str] = Query(None, description="'MM/DD/YYYY - MM/DD/YYYY'"),
@@ -2057,8 +2106,8 @@ async def list_stock_adjustments(
     )
 
 
-@router.get("/inventory/stock-adjustment/{adjustment_id}", summary="Get stock adjustment details")
-@router.get("/adjustment/{adjustment_id}", summary="Alias for single adjustment details")
+@router.get("/inventory/stock-adjustment/{adjustment_id}", summary="Get stock adjustment details", dependencies=[_REQUIRE_STOCK_ADJUSTMENT_DETAIL])
+@router.get("/adjustment/{adjustment_id}", summary="Alias for single adjustment details", dependencies=[_REQUIRE_STOCK_ADJUSTMENT_DETAIL])
 async def get_stock_adjustment(adjustment_id: str, request: Request, db: AsyncSession = Depends(get_db_session)) -> dict:
     """One adjustment (by id or adjustment number)."""
     stmt = select(StockAdjustment).options(selectinload(StockAdjustment.items)).where(StockAdjustment.deleted_at.is_(None))
@@ -2072,8 +2121,8 @@ async def get_stock_adjustment(adjustment_id: str, request: Request, db: AsyncSe
     return build_success_response(data=_adjustment_record(r), request_id=getattr(request.state, "request_id", "-"))
 
 
-@router.post("/inventory/stock-adjustment", status_code=status.HTTP_201_CREATED, summary="Create stock adjustment")
-@router.post("/adjustment", status_code=status.HTTP_201_CREATED, summary="Alias to create adjustment")
+@router.post("/inventory/stock-adjustment", status_code=status.HTTP_201_CREATED, summary="Create stock adjustment", dependencies=[_REQUIRE_STOCK_ADJUSTMENT_CREATE])
+@router.post("/adjustment", status_code=status.HTTP_201_CREATED, summary="Alias to create adjustment", dependencies=[_REQUIRE_STOCK_ADJUSTMENT_CREATE])
 async def create_stock_adjustment(
     payload: StockAdjustmentCreate,
     request: Request,
@@ -2136,8 +2185,8 @@ async def create_stock_adjustment(
     )
 
 
-@router.delete("/inventory/stock-adjustment/{adjustment_id}", summary="Delete a stock adjustment")
-@router.delete("/adjustment/{adjustment_id}", summary="Alias to delete adjustment")
+@router.delete("/inventory/stock-adjustment/{adjustment_id}", summary="Delete a stock adjustment", dependencies=[_REQUIRE_STOCK_ADJUSTMENT_DELETE])
+@router.delete("/adjustment/{adjustment_id}", summary="Alias to delete adjustment", dependencies=[_REQUIRE_STOCK_ADJUSTMENT_DELETE])
 async def delete_stock_adjustment(
     adjustment_id: str,
     request: Request,
@@ -2177,8 +2226,8 @@ async def delete_stock_adjustment(
 # Stock Transfer Endpoints (Matches erp.inhymasolutions.com/transfer/list)
 # ==============================================================================
 
-@router.get("/inventory/stock-transfer", summary="List stock transfers")
-@router.get("/transfer/list", summary="Legacy alias for stock transfer list")
+@router.get("/inventory/stock-transfer", summary="List stock transfers", dependencies=[_REQUIRE_STOCK_TRANSFER_LIST])
+@router.get("/transfer/list", summary="Legacy alias for stock transfer list", dependencies=[_REQUIRE_STOCK_TRANSFER_LIST])
 async def list_stock_transfers(
     request: Request,
     status_filter: Optional[str] = Query(None, alias="status", description="Status filter (All, Pending, Confirmed, Received, Cancel)"),
@@ -2188,25 +2237,43 @@ async def list_stock_transfers(
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=500),
     db: AsyncSession = Depends(get_db_session),
+    current_user: CurrentUser = Depends(get_current_user),
 ) -> dict:
     """Return paginated stock transfers from PostgreSQL database with tab counts breakdown."""
+    perms = set(current_user.permissions or ())
+    can_view_all = current_user.is_super_admin or bool(
+        {"stock_transfer.manage", "stock_transfer.view", "stock_transfer.download"} & perms
+    )
+    allowed_stages = [
+        stage
+        for stage in ("pending", "confirmed", "received", "cancel")
+        if can_view_all or f"stock_transfer.{stage}.view" in perms
+    ]
+    req_status = (status_filter or "").strip().lower()
+    if req_status and req_status != "all":
+        if not can_view_all and f"stock_transfer.{req_status}.view" not in perms:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Permission denied: stock_transfer.{req_status}.view required.",
+            )
+
     try:
         base_stmt = select(StockTransfer).where(StockTransfer.deleted_at.is_(None))
 
         # Compute exact tab counts across all statuses for top pill tabs
-        all_count = (await db.execute(select(func.count()).select_from(base_stmt.subquery()))).scalar() or 0
+        all_count = (await db.execute(select(func.count()).select_from(base_stmt.subquery()))).scalar() or 0 if can_view_all else 0
         pending_count = (await db.execute(
             select(func.count()).select_from(base_stmt.where(func.lower(StockTransfer.status) == "pending").subquery())
-        )).scalar() or 0
+        )).scalar() or 0 if (can_view_all or "pending" in allowed_stages) else 0
         confirmed_count = (await db.execute(
             select(func.count()).select_from(base_stmt.where(func.lower(StockTransfer.status) == "confirmed").subquery())
-        )).scalar() or 0
+        )).scalar() or 0 if (can_view_all or "confirmed" in allowed_stages) else 0
         received_count = (await db.execute(
             select(func.count()).select_from(base_stmt.where(func.lower(StockTransfer.status) == "received").subquery())
-        )).scalar() or 0
+        )).scalar() or 0 if (can_view_all or "received" in allowed_stages) else 0
         cancel_count = (await db.execute(
             select(func.count()).select_from(base_stmt.where(func.lower(StockTransfer.status) == "cancel").subquery())
-        )).scalar() or 0
+        )).scalar() or 0 if (can_view_all or "cancel" in allowed_stages) else 0
 
         tab_counts = {
             "all": all_count,
@@ -2219,7 +2286,12 @@ async def list_stock_transfers(
         # Apply filtering
         query_stmt = base_stmt.options(selectinload(StockTransfer.items))
         if status_filter and status_filter.lower() != "all":
-            query_stmt = query_stmt.where(func.lower(StockTransfer.status) == status_filter.strip().lower())
+            query_stmt = query_stmt.where(func.lower(StockTransfer.status) == req_status)
+        elif not can_view_all:
+            if allowed_stages:
+                query_stmt = query_stmt.where(func.lower(StockTransfer.status).in_(allowed_stages))
+            else:
+                query_stmt = query_stmt.where(text("1=0"))
         if from_warehouse and from_warehouse != "All":
             query_stmt = query_stmt.where(func.lower(StockTransfer.from_warehouse) == from_warehouse.strip().lower())
         if to_warehouse and to_warehouse != "All":
@@ -2288,11 +2360,12 @@ async def list_stock_transfers(
         )
 
 
-@router.get("/inventory/stock-transfer/{transfer_id}", summary="Get stock transfer detail")
+@router.get("/inventory/stock-transfer/{transfer_id}", summary="Get stock transfer detail", dependencies=[_REQUIRE_STOCK_TRANSFER_LIST])
 async def get_stock_transfer(
     transfer_id: str,
     request: Request,
     db: AsyncSession = Depends(get_db_session),
+    current_user: CurrentUser = Depends(get_current_user),
 ) -> dict:
     """Fetch single stock transfer with line items."""
     stmt = (
@@ -2312,6 +2385,18 @@ async def get_stock_transfer(
     transfer = (await db.execute(stmt)).scalars().first()
     if not transfer:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Stock transfer record not found")
+
+    perms = set(current_user.permissions or ())
+    st_lower = (transfer.status or "").strip().lower()
+    if not (
+        current_user.is_super_admin
+        or {"stock_transfer.manage", "stock_transfer.view", "stock_transfer.download"} & perms
+        or (st_lower and f"stock_transfer.{st_lower}.view" in perms)
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Permission denied to view {transfer.status} stock transfer.",
+        )
 
     return build_success_response(
         data={
@@ -2368,7 +2453,7 @@ def _recompute_total_stock(prod: ProductStock) -> None:
     )
 
 
-@router.post("/inventory/stock-transfer", status_code=status.HTTP_201_CREATED, summary="Create stock transfer")
+@router.post("/inventory/stock-transfer", status_code=status.HTTP_201_CREATED, summary="Create stock transfer", dependencies=[_REQUIRE_STOCK_TRANSFER_CREATE])
 async def create_stock_transfer(
     payload: StockTransferCreate,
     request: Request,
@@ -2516,14 +2601,35 @@ async def create_stock_transfer(
     )
 
 
-@router.patch("/inventory/stock-transfer/{transfer_id}/status", summary="Update transfer status")
+@router.patch("/inventory/stock-transfer/{transfer_id}/status", summary="Update transfer status", dependencies=[_REQUIRE_STOCK_TRANSFER_STATUS])
 async def update_stock_transfer_status(
     transfer_id: str,
     payload: StockTransferUpdateStatus,
     request: Request,
     db: AsyncSession = Depends(get_db_session),
+    current_user: CurrentUser = Depends(get_current_user),
 ) -> dict:
-    """Update status of a transfer (e.g. Cancel or Received) with Downstream Sales check."""
+    """Update status of a transfer (Pending, Confirmed, Received, Cancel) with Downstream Sales & stage RBAC checks."""
+    target_lower = (payload.status or "").strip().lower()
+    stage_perm_map = {
+        "pending": "stock_transfer.pending",
+        "confirmed": "stock_transfer.confirmed",
+        "received": "stock_transfer.received",
+        "cancel": "stock_transfer.cancel",
+    }
+    required_stage_perm = stage_perm_map.get(target_lower)
+    if not required_stage_perm:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Unsupported stock transfer status '{payload.status}'.",
+        )
+    perms = set(current_user.permissions or ())
+    if not (current_user.is_super_admin or "stock_transfer.manage" in perms or required_stage_perm in perms):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Permission denied: {required_stage_perm} required.",
+        )
+
     stmt = (
         select(StockTransfer)
         .options(selectinload(StockTransfer.items))
@@ -2619,11 +2725,12 @@ async def update_stock_transfer_status(
     )
 
 
-@router.post("/inventory/stock-transfer/{transfer_id}/receive-to-main", summary="Receive transit transfer into physical main warehouse")
+@router.post("/inventory/stock-transfer/{transfer_id}/receive-to-main", summary="Receive transit transfer into physical main warehouse", dependencies=[_REQUIRE_STOCK_TRANSFER_RECEIVE])
 async def receive_stock_transfer_to_main(
     transfer_id: str,
     request: Request,
     db: AsyncSession = Depends(get_db_session),
+    current_user: CurrentUser = Depends(get_current_user),
 ) -> dict:
     """Explicitly converts transit transfer to Received in physical destination warehouse (Point 69)."""
     return await update_stock_transfer_status(
@@ -2631,4 +2738,5 @@ async def receive_stock_transfer_to_main(
         payload=StockTransferUpdateStatus(status="Received"),
         request=request,
         db=db,
+        current_user=current_user,
     )

@@ -43,6 +43,7 @@ export const MODULE_NAMES: Record<string, string> = {
   stock_movement: "Stock Movement",
   notification_settings: "Notification Rules",
   warehouse: "Warehouses",
+  payment_mode: "Payment Modes / Bank Accounts",
   finance_report: "Financial Report",
   consignment_overview: "Consignment Overview",
   vat_return: "VAT Return",
@@ -76,6 +77,7 @@ export const MODULE_ICONS: Record<string, string> = {
   suppliertype: "🏭",
   buyertype: "🏢",
   organizationlist: "🏛️",
+  payment_mode: "🏦",
   warehouse: "🏭",
   finance_report: "💰",
   consignment_overview: "📋",
@@ -86,48 +88,93 @@ export const MODULE_ICONS: Record<string, string> = {
   dashboard: "📊",
 };
 
+export type PermissionSectionId =
+  | "contact"
+  | "inventory"
+  | "sale"
+  | "purchase"
+  | "planning"
+  | "finance"
+  | "user_management"
+  | "settings_masters"
+  | "settings_system";
+
 export interface PermissionSection {
-  id: "core" | "inventory" | "finance" | "admin" | "masters";
+  id: PermissionSectionId;
   title: string;
+  pillLabel: string;
   icon: string;
   description: string;
   modules: string[];
 }
 
+/**
+ * Left-sidebar navigation section & module order (`nav.ts` -> `NAV_SECTIONS`),
+ * rendered top-to-bottom in PermissionMatrixEditor (`/rbac` and `/users`).
+ */
 export const PERMISSION_SECTIONS: PermissionSection[] = [
   {
-    id: "core",
-    title: "Core Business & Operations",
-    icon: "🏢",
-    description: "Suppliers, Buyers, Sale Process, Planning, Inquiries, and Local Purchase",
-    modules: ["supplier", "buyer", "sale_process", "planning", "inquiry", "local_purchase"],
+    id: "contact",
+    title: "CONTACT",
+    pillLabel: "CONTACT",
+    icon: "🤝",
+    description: "Suppliers and Buyers",
+    modules: ["supplier", "buyer"],
   },
   {
     id: "inventory",
-    title: "Inventory & Catalog",
+    title: "INVENTORY",
+    pillLabel: "INVENTORY",
     icon: "📦",
-    description: "Product Master, Product Prices, Gallery, and Stock Movements",
+    description: "Product Master, Product Prices, Product Gallery, and Stock Movement",
     modules: ["product", "product_price", "productgallery", "stock_movement"],
   },
   {
+    id: "sale",
+    title: "SALE",
+    pillLabel: "SALE",
+    icon: "🛒",
+    description: "Sale Process and Inquiries",
+    modules: ["sale_process", "inquiry"],
+  },
+  {
+    id: "purchase",
+    title: "PURCHASE",
+    pillLabel: "PURCHASE",
+    icon: "🛍️",
+    description: "Local Purchase",
+    modules: ["local_purchase"],
+  },
+  {
+    id: "planning",
+    title: "PLANNING",
+    pillLabel: "PLANNING",
+    icon: "🚢",
+    description: "Shipment Planning",
+    modules: ["planning"],
+  },
+  {
     id: "finance",
-    title: "Finance & Export",
+    title: "FINANCE",
+    pillLabel: "FINANCE",
     icon: "💰",
-    description: "Financial Report, Consignment Overview (Finance, Gallery, Cargo Status, Product Summary), and VAT Return",
+    description: "Financial Report, Consignment Overview, and VAT Return",
     modules: ["finance_report", "consignment_overview", "vat_return"],
   },
   {
-    id: "admin",
-    title: "User & Department Management",
+    id: "user_management",
+    title: "USER MANAGEMENT",
+    pillLabel: "USER MANAGEMENT",
     icon: "👥",
-    description: "User Accounts, Designations, and Department Permissions",
+    description: "Users, Positions, and Departments & Permissions",
     modules: ["user", "position", "roles_permissions"],
   },
   {
-    id: "masters",
-    title: "Settings & Masters",
-    icon: "⚙️",
-    description: "13 Lookup Tables (including Warehouses), Notification Rules, Organization Profile, Audit Logs, and Trash",
+    id: "settings_masters",
+    title: "SETTINGS — Masters",
+    pillLabel: "Masters",
+    icon: "🗄️",
+    description: "Cities, Provinces, Countries, Currencies, UOM, HSN, Categories, Brands, Types, Payment Modes, and Warehouses",
     modules: [
       "city",
       "state",
@@ -141,20 +188,25 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
       "suppliertype",
       "buyertype",
       "organizationlist",
+      "payment_mode",
       "warehouse",
-      "notification_settings",
-      "organization",
-      "audit",
-      "trash",
     ],
+  },
+  {
+    id: "settings_system",
+    title: "SETTINGS — System",
+    pillLabel: "System",
+    icon: "⚙️",
+    description: "Notification Rules, ERP Settings, Audit Log, and Trash",
+    modules: ["notification_settings", "organization", "audit", "trash"],
   },
 ];
 
-export function getSectionForModule(modKey: string): "core" | "inventory" | "finance" | "admin" | "masters" {
+export function getSectionForModule(modKey: string): PermissionSectionId {
   for (const s of PERMISSION_SECTIONS) {
     if (s.modules.includes(modKey)) return s.id;
   }
-  return "masters";
+  return "settings_system";
 }
 
 const ACTION_LABELS: Record<string, string> = {
@@ -299,12 +351,58 @@ export function friendlyActionIcon(code: string): string {
   return ACTION_ICONS[action] || "🔹";
 }
 
+const _SEMANTIC_LAST_SEGMENT_RANK: Record<string, number> = {
+  view: 0,
+  read: 0,
+  create: 2,
+  import: 3,
+  export: 3,
+  bulk_action: 3,
+  action: 4,
+  inward: 4,
+  price_history: 4,
+  trade_history: 4,
+  currentstatus: 4,
+  potential: 4,
+  clientgrade: 4,
+  grade_edit: 4,
+  potential_edit: 4,
+  approve: 5,
+  send_message: 5,
+  receipt: 5,
+  cancel: 5,
+  update: 6,
+  edit: 6,
+  delete: 7,
+  restore: 7,
+  manage: 8,
+};
+
+function _permissionSortRank(code: string): number {
+  const parts = code.split(".");
+  if (parts.length >= 3 && parts[parts.length - 1] === "view") {
+    return 1;
+  }
+  const last = parts[parts.length - 1];
+  return _SEMANTIC_LAST_SEGMENT_RANK[last] ?? 5;
+}
+
+export function sortModulePermissions(items: Permission[]): Permission[] {
+  return [...items].sort((a, b) => {
+    const rankDiff = _permissionSortRank(a.code) - _permissionSortRank(b.code);
+    return rankDiff !== 0 ? rankDiff : a.code.localeCompare(b.code);
+  });
+}
+
 export function groupPermissionsByModule(permissions: Permission[]): Record<string, Permission[]> {
   const groups: Record<string, Permission[]> = {};
   for (const p of permissions) {
     const modKey = p.module || p.code.split(".")[0];
     if (!groups[modKey]) groups[modKey] = [];
     groups[modKey].push(p);
+  }
+  for (const modKey of Object.keys(groups)) {
+    groups[modKey] = sortModulePermissions(groups[modKey]);
   }
   return groups;
 }

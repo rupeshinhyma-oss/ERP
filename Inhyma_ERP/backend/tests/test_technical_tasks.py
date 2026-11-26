@@ -667,18 +667,39 @@ async def test_technical_task_rbac_permissions(test_db: AsyncSession, test_clien
     seeded_payment_codes = {row[0] for row in BOOTSTRAP_PERMISSIONS if row[1] == "payment"}
     assert seeded_payment_codes == {
         "payment.view",
+        "payment.pending.view",
+        "payment.completed.view",
         "payment.create",
-        "payment.update",
         "payment.delete",
+        "payment.action.view",
+        "payment.details.view",
+        "payment.update",
         "payment.manage",
     }
     seeded_tech_ops_codes = {row[0] for row in BOOTSTRAP_PERMISSIONS if row[1] == "technician_operations"}
     assert seeded_tech_ops_codes == {
         "technician_operations.view",
-        "technician_operations.create",
+        "technician_operations.gatepasses.view",
+        "technician_operations.gatepass.create",
+        "technician_operations.gatepass.return",
+        "technician_operations.gatepass.draft_so",
+        "technician_operations.gatepass.create_so",
+        "technician_operations.gatepass.link_so",
+        "technician_operations.gatepass.print",
+        "technician_operations.gatepass.details",
+        "technician_operations.wallets.view",
+        "technician_operations.wallet.create",
+        "technician_operations.wallet.balances.view",
+        "technician_operations.wallet.collect",
+        "technician_operations.wallet.handover",
+        "technician_operations.wallet.expense",
+        "technician_operations.warranty.view",
+        "technician_operations.warranty.create",
+        "technician_operations.warranty.validate",
         "technician_operations.update",
         "technician_operations.manage",
     }
+    assert not any(row[1] == "planning" or row[0].startswith("planning.") for row in BOOTSTRAP_PERMISSIONS)
 
     task = await _create(test_client, company_name="RBAC Corp")
     tid = task["id"]
@@ -783,13 +804,16 @@ async def test_technical_task_rbac_permissions(test_db: AsyncSession, test_clien
         ).status_code == 403
         assert (await client.delete(f"/api/v1/technical-tasks/{tid}")).status_code == 200
 
-        # 6. payment.view -> Payments summary & Chargeable list only, 403 on Technical Tasks routes & mutations
+        # 6. payment.view -> Payments summary & All Chargeable list only, 403 on unpermitted Pending/Completed tabs & Technical Tasks routes
         active_perms.clear()
         active_perms.update({"payment.view"})
         assert (await client.get("/api/v1/technical-tasks/payment-summary")).status_code == 200
         pay_list = await client.get("/api/v1/technical-tasks?service_type=Chargeable")
         assert pay_list.status_code == 200
         assert all(row["service_type"] == "Chargeable" for row in pay_list.json()["data"])
+        assert (await client.get("/api/v1/technical-tasks?service_type=Chargeable&payment_collected=all")).status_code == 200
+        assert (await client.get("/api/v1/technical-tasks?service_type=Chargeable&payment_collected=pending")).status_code == 403
+        assert (await client.get("/api/v1/technical-tasks?service_type=Chargeable&payment_collected=yes")).status_code == 403
         assert (await client.get("/api/v1/technical-tasks/counts")).status_code == 403
         assert (await client.get(f"/api/v1/technical-tasks/{cid}")).status_code == 403
         assert (
@@ -798,6 +822,13 @@ async def test_technical_task_rbac_permissions(test_db: AsyncSession, test_clien
                 json={"amount": 1000, "payment_mode": "Company Acc"},
             )
         ).status_code == 403
+
+        # 6b. payment.pending.view & payment.completed.view unlock their respective tabs
+        active_perms.add("payment.pending.view")
+        assert (await client.get("/api/v1/technical-tasks?service_type=Chargeable&payment_collected=pending")).status_code == 200
+        assert (await client.get("/api/v1/technical-tasks?service_type=Chargeable&payment_collected=yes")).status_code == 403
+        active_perms.add("payment.completed.view")
+        assert (await client.get("/api/v1/technical-tasks?service_type=Chargeable&payment_collected=yes")).status_code == 200
 
         # 7. payment.update -> can record payment, cannot mutate Technical Task fields directly
         active_perms.clear()

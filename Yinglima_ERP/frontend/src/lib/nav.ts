@@ -124,6 +124,7 @@ export const NAV_SECTIONS: NavSection[] = [
           { key: "masters-supplier-types", label: "Supplier Types", path: "/masters/supplier-types", permission: "suppliertype.view" },
           { key: "masters-buyer-types", label: "Buyer Types", path: "/masters/buyer-types", permission: "buyertype.view" },
           { key: "masters-company-list", label: "Organization List", path: "/masters/company-list", permission: "organizationlist.view" },
+          { key: "masters-payment-modes", label: "Payment Modes", path: "/masters/payment-modes", permission: "payment_mode.view" },
           { key: "masters-warehouses", label: "Warehouses", path: "/masters/warehouses", permission: "warehouse.view" },
         ],
       },

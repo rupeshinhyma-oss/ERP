@@ -56,7 +56,19 @@ TABLES = [
     ProductSubCategory.__table__, ProductDimensionRow.__table__,
 ]
 
-SALES = CurrentUser(id=uuid.uuid4(), username="marketing")
+SALES = CurrentUser(
+    id=uuid.uuid4(),
+    username="marketing",
+    permissions={
+        "saleorder.view",
+        "saleorder.create",
+        "saleorder.update",
+        "saleorder.confirm",
+        "saleorder.cancel",
+        "saleorder.export",
+        "saleorder.files",
+    },
+)
 APPROVER = CurrentUser(id=uuid.uuid4(), username="manager", permissions={"saleorder.approve"})
 ACCOUNTS = CurrentUser(id=uuid.uuid4(), username="accounts", permissions={"saleorder.accounts"})
 WAREHOUSE = CurrentUser(id=uuid.uuid4(), username="godown", permissions={"saleorder.warehouse"})

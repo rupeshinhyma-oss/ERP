@@ -3,7 +3,7 @@
 **Service Base URL:** `http://localhost:8002/api/v1`  
 **Authentication Scheme:** Bearer JWT (HS256) & WebSocket Query Tokens  
 **Standard Response Envelope:** `{ "success": true, "data": ..., "meta": ..., "error": null }`  
-**Last Updated:** November 17, 2026
+**Last Updated:** November 23, 2026
 
 > **Universal Cross-Module Active-Only Extraction & Filtering Convention:**
 > - **Management Lists vs Cross-Module Lookups:** Unfiltered management endpoints (`GET /api/v1/masters/*`, `/companies`, `/suppliers`, `/buyers`, `/users`, `/positions`, and `/hrms/setup/*` with default `active_only=false`) return **both** `Active` and `Inactive` rows so each module's own `Active` / `Inactive` tabs and status toggles remain functional. Conversely, every cross-module picker/lookup endpoint (`/api/v1/masters/*/lookup`, `/api/v1/masters/*/dropdown`, `/companies/lookup`, `/companies/sales-persons`, `/users/all?active_only=true`, `/positions/all?active_only=true`, `/inquiries/consignment-codes`, `/inquiries/companies`, `/hrms/setup/*?active_only=true`, `/products/machine-spares/universal-view`, and `/search`) returns **`Active` records only**.
@@ -16,18 +16,19 @@
 
 | Method | Endpoint URI | Description | Permission Gate |
 | :--- | :--- | :--- | :--- |
-| `GET` | `/api/v1/companies` | List paginated companies with grade, potential, status (`?status=active\|inactive` / `?is_active=true\|false`), and search filters | `company.view` |
-| `GET` | `/api/v1/companies/lookup` | Lightweight active-only company autocomplete lookup (`active_only=true` default) for commercial & service forms | Authenticated |
-| `GET` | `/api/v1/companies/sales-persons` | List active salespersons (`User.status == ACTIVE`) returning `{ id, display_name, full_name, username }` with `display_name`-first resolution for Proforma, Sales Process, and Company filters | Authenticated |
-| `POST` | `/api/v1/companies` | Create company account with extended intelligence fields & contacts | `company.create` |
-| `GET` | `/api/v1/companies/{id}` | Inspect detailed profile (extended fields, social media matrix, Direct Import from China cluster) | `company.view` |
-| `PATCH` | `/api/v1/companies/{id}` | Update company details, credit terms, turnover, import volume, and intelligence | `company.update` |
-| `DELETE`| `/api/v1/companies/{id}` | Soft-delete company record and linked contacts | `company.delete` |
-| `PATCH` | `/api/v1/companies/{id}/grade` | Inline update corporate grade (A, B, C, D) | `company.update` |
-| `PATCH` | `/api/v1/companies/{id}/potential` | Inline update revenue potential rating (Yes / No; requires `potential_reason` if No, allows `potential_business_per_month` if Yes) | `company.update` |
-| `POST` | `/api/v1/companies/{id}/contacts` | Add sub-contact person with birth_date & anniversary_date | `company.update` |
-| `POST` | `/api/v1/companies/import` | Bulk Excel/CSV import wizard | `company.import` |
-| `GET` | `/api/v1/companies/export` | Export company records to Excel/CSV | `company.export` |
+| `GET` | `/api/v1/companies` | List paginated companies with grade, potential, status (`?status=active\|inactive` / `?is_active=true\|false`), and search filters | `company.view \| company.manage` |
+| `GET` | `/api/v1/companies/lookup` | Lightweight active-only company autocomplete lookup (`active_only=true` default) for commercial & service forms | `company.{view,create,quick_add,update,manage} \| supplier.{view,create} \| crm.leads.{view,manage}` |
+| `GET` | `/api/v1/companies/sales-persons` | List active salespersons (`User.status == ACTIVE`) returning `{ id, display_name, full_name, username }` with `display_name`-first resolution for Proforma, Sales Process, and Company filters | `company.{view,create,quick_add,update,manage} \| supplier.{view,create} \| crm.leads.{view,create,manage}` |
+| `POST` | `/api/v1/companies` | Create company account with extended intelligence fields & contacts (`+ QUICK ADD` / `+ ADD NEW`) | `company.create \| company.quick_add \| company.manage` |
+| `GET` | `/api/v1/companies/{id}` | Inspect detailed profile (extended fields, social media matrix, Direct Import from China cluster) | `company.view \| company.update \| company.manage` |
+| `PATCH` | `/api/v1/companies/{id}` | Update company details, credit terms, turnover, import volume, and intelligence | `company.update \| company.manage` |
+| `DELETE`| `/api/v1/companies/{id}` | Soft-delete company record and linked contacts | `company.delete \| company.manage` |
+| `PATCH` | `/api/v1/companies/{id}/grade` | Inline update corporate grade (A, B, C) | `company.grade_edit \| company.manage` |
+| `PATCH` | `/api/v1/companies/{id}/potential` | Inline update revenue potential rating (Yes / No; requires `potential_reason` if No, allows `potential_business_per_month` if Yes) | `company.potential_edit \| company.manage` |
+| `POST` | `/api/v1/companies/{id}/activate` & `/deactivate` | Activate / deactivate company status (single or Bulk Actions) | `company.update \| company.bulk_action \| company.manage` |
+| `POST` | `/api/v1/companies/{id}/contacts` | Add sub-contact person with birth_date & anniversary_date | `company.update \| company.manage` |
+| `POST` | `/api/v1/companies/import` | Bulk Excel/CSV import wizard | `company.import \| company.manage` |
+| `GET` | `/api/v1/companies/export` | Export company records to Excel/CSV | `company.export \| company.manage` |
 
 > **Company Spec Extensions:**
 > - `monthly_turnover`: Monthly sales band (active when Business Type is selected).
@@ -59,45 +60,48 @@
 
 | Method | Endpoint URI | Description | Permission Gate |
 | :--- | :--- | :--- | :--- |
-| `GET` | `/api/v1/inventory/product-stock` | Master-joined 9-warehouse Product Stock & Stock Transactions list restricted strictly to `Active` products (`Product.status == RecordStatus.ACTIVE`; `limit` up to `5000`, `category`, `sub_category`, `brand`, `warehouse`, `negative_stock`, `low_stock`, `machine_id`, `search`; returns active-only `filter_options` & `breakup_flags`) | `product.view` |
-| `GET` | `/api/v1/inventory/product-stock/{id}` | Inspect single product's multi-warehouse stock record (resolves either `ProductStock.id` or `Product.id` with zero-stock fallback) | `product.view` |
-| `GET` | `/api/v1/inventory/product-stock/breakup` | Inspect warehouse cell breakup (`physical` adjustments/transfers, or `transit` / `ordered` expected consignments + FIFO `booked_orders` queue) | `product.view` |
-| `GET` | `/api/v1/inventory/stock-transactions/{product_ref}` | Chronological 5-source Per-Product Stock Transaction Ledger (`Sale`, `Stock IN`, `Stock OUT`, `Local Purchase`, `Import Purchase`, `Transfer IN`, `Transfer OUT`) with `available_qty`, `warehouse`, `tx_type`, `date_from`, `date_to`, and `search` filters. Aliased at `/api/v1/stock-transaction/list/{product_ref}`, `/api/v1/stock_transaction/list/{product_ref}`, and `/api/v1/inventory/product-stock/{product_ref}/transactions` | `product.view` |
-| `GET` | `/api/v1/inventory/product-reorder` | 16-column branch-scoped Product Re-Order matrix for `Active` products (`Product.status == RecordStatus.ACTIVE`, `warehouse=Mumbai|Ahmedabad|Indore|All`, `category`, `sub_category`, `brand`, `shortfall`, `reorder`, `search`) | `product.view` |
+| `GET` | `/api/v1/inventory/product-stock` | Master-joined 9-warehouse Product Stock & Stock Transactions list restricted strictly to `Active` products (`Product.status == RecordStatus.ACTIVE`; `limit` up to `5000`, `category`, `sub_category`, `brand`, `warehouse`, `negative_stock`, `low_stock`, `machine_id`, `search`; returns active-only `filter_options` & `breakup_flags`) | `product_stock.{view,manage} \| stock_adjustment.{create,manage} \| stock_transfer.{create,manage} \| product.view \| report.view \| proforma.{view,create,update} \| saleorder.{view,create,update}` |
+| `GET` | `/api/v1/inventory/product-stock/{id}` | Inspect single product's multi-warehouse stock record (resolves either `ProductStock.id` or `Product.id` with zero-stock fallback) | `product_stock.{view,manage} \| stock_adjustment.{create,manage} \| stock_transfer.{create,manage} \| product.view \| report.view \| proforma.{view,create,update} \| saleorder.{view,create,update}` |
+| `GET` | `/api/v1/inventory/product-stock/breakup` | Inspect warehouse cell breakup (`physical` adjustments/transfers, or `transit` / `ordered` expected consignments + FIFO `booked_orders` queue) | `product_stock.{view,manage} \| product.view \| report.view` |
+| `GET` | `/api/v1/inventory/stock-transactions/{product_ref}` | Chronological 5-source Per-Product Stock Transaction Ledger (`Sale`, `Stock IN`, `Stock OUT`, `Local Purchase`, `Import Purchase`, `Transfer IN`, `Transfer OUT`) with `available_qty`, `warehouse`, `tx_type`, `date_from`, `date_to`, and `search` filters. Aliased at `/api/v1/stock-transaction/list/{product_ref}`, `/api/v1/stock_transaction/list/{product_ref}`, and `/api/v1/inventory/product-stock/{product_ref}/transactions` | `product_stock.{view,manage} \| product.view \| report.view` |
+| `GET` | `/api/v1/inventory/product-reorder` | 16-column branch-scoped Product Re-Order matrix for `Active` products (`Product.status == RecordStatus.ACTIVE`, `warehouse=Mumbai\|Ahmedabad\|Indore\|All`, `category`, `sub_category`, `brand`, `shortfall`, `reorder`, `search`) | `product.view` |
 | `PATCH` | `/api/v1/inventory/product-reorder/{product_id}` | Inline update `reorder_level` (`Re-Order`) and/or `minimum_order_quantity` (`MOQ`) on `Product` master | `product.update` |
 | `GET` | `/api/v1/inventory/goods-expected-report` | Expected incoming consignments report across Import Purchases and Shipment Planning | `product.view` |
-| `GET` | `/api/v1/inventory/stock-adjustment` | Paginated stock adjustment vouchers with type/date filters | `product.view` |
-| `GET` | `/api/v1/inventory/stock-adjustment/{id}` | Detailed voucher with multi-product line items | `product.view` |
-| `POST` | `/api/v1/inventory/stock-adjustment` | Create adjustment voucher and update warehouse balances (enforces active Warehouse & active Product validation) | `product.create` |
-| `DELETE`| `/api/v1/inventory/stock-adjustment/{id}`| Soft-delete voucher and reverse inventory adjustments | `product.delete` |
-| `GET` | `/api/v1/adjustment/adjustment-order-pdf/{id}` | Stream A4 adjustment order PDF document | `product.view` |
-| `GET` | `/api/v1/inventory/stock-transfer` | Paginated inter-warehouse stock transfer orders | `product.view` |
-| `POST` | `/api/v1/inventory/stock-transfer` | Create atomic inter-warehouse stock transfer (`from_warehouse` -> `to_warehouse`; enforces active source/destination Warehouses & active Products) | `product.create` |
+| `GET` | `/api/v1/inventory/stock-adjustment` | Paginated stock adjustment vouchers with type/date filters (aliased at `/api/v1/adjustment/list`) | `stock_adjustment.view \| stock_adjustment.manage` |
+| `GET` | `/api/v1/inventory/stock-adjustment/{id}` | Detailed voucher with multi-product line items (aliased at `/api/v1/adjustment/{id}`) | `stock_adjustment.view \| stock_adjustment.download \| stock_adjustment.manage` |
+| `POST` | `/api/v1/inventory/stock-adjustment` | Create adjustment voucher and update warehouse balances (enforces active Warehouse & active Product validation; aliased at `/api/v1/adjustment`) | `stock_adjustment.create \| stock_adjustment.manage` |
+| `DELETE`| `/api/v1/inventory/stock-adjustment/{id}`| Soft-delete voucher and reverse inventory adjustments (aliased at `/api/v1/adjustment/{id}`) | `stock_adjustment.delete \| stock_adjustment.manage` |
+| `GET` | `/api/v1/adjustment/adjustment-order-pdf/{id}` | Stream A4 adjustment order PDF document | `stock_adjustment.download \| stock_adjustment.manage` |
+| `GET` | `/api/v1/inventory/stock-transfer` | Paginated inter-warehouse stock transfer orders with per-stage view filtering and tab counts (aliased at `/api/v1/transfer/list`) | `stock_transfer.{view,pending.view,confirmed.view,received.view,cancel.view,download,manage}` |
+| `GET` | `/api/v1/inventory/stock-transfer/{id}` | Inspect single stock transfer order and line items | `stock_transfer.{view,<stage>.view,download,manage}` |
+| `POST` | `/api/v1/inventory/stock-transfer` | Create atomic inter-warehouse stock transfer (`from_warehouse` -> `to_warehouse`; enforces active source/destination Warehouses & active Products) | `stock_transfer.create \| stock_transfer.manage` |
+| `PATCH` | `/api/v1/inventory/stock-transfer/{id}/status` | Transition transfer status (`Pending`, `Confirmed`, `Received`, `Cancel`) with Downstream Sales & stage RBAC checks | `stock_transfer.{pending,confirmed,received,cancel,manage}` (per target stage) |
+| `POST` | `/api/v1/inventory/stock-transfer/{id}/receive-to-main` | Receive in-transit stock transfer into physical destination main warehouse | `stock_transfer.received \| stock_transfer.manage` |
 
 ---
 
-## 4. Technical Tasks & Field Service Dispatch (`/technical-tasks`)
+## 4. Technical Tasks & Field Service Dispatch (`/technical-tasks`, `/payments`)
 
 | Method | Endpoint URI | Description | Permission Gate |
 | :--- | :--- | :--- | :--- |
-| `GET` | `/api/v1/technical-tasks` | List paginated service tickets with status tab (`all`, `Pending`, `Approved`, `Completed`, `Cancel`; legacy `Payment Pending` rows normalized into `Completed`), `task_type`, `service_type`, `call_type`, `priority`, `city`, `third_party_city`, `task_allotted_to`, date range, and payment stage (`payment_collected=all\|pending\|completed`, strictly excluding cancelled tasks in `/payments` mode) | `technicaltask.view \| technicaltask.manage` |
+| `GET` | `/api/v1/technical-tasks` | List paginated service tickets with status tab (`all`, `Pending`, `Approved`, `Completed`, `Cancel`; legacy `Payment Pending` rows normalized into `Completed`), `task_type`, `service_type`, `call_type`, `priority`, `city`, `third_party_city`, `task_allotted_to`, date range, and payment stage (`payment_collected=all\|pending\|completed`, strictly excluding cancelled tasks in `/payments` mode) | `technicaltask.{view,pending.view,approved.view,completed.view,cancel.view,manage} \| payment.{view,pending.view,completed.view,manage}` |
 | `GET` | `/api/v1/technical-tasks/counts` | Status tab badge counts (`all`, `pending`, `approved`, `completed`, `cancel`) | `technicaltask.view \| technicaltask.manage` |
-| `GET` | `/api/v1/technical-tasks/payment-summary` | Real-time financial KPIs (`total_payment`, `paid`, `due`, `all_count`, `pending_count`, `completed_count`) across active (non-cancelled) `Chargeable` tasks using NULL-safe `coalesce` SQL predicates | `technicaltask.view \| technicaltask.manage` |
+| `GET` | `/api/v1/technical-tasks/payment-summary` | Real-time financial KPIs (`total_payment`, `paid`, `due`, `all_count`, `pending_count`, `completed_count`) across active (non-cancelled) `Chargeable` tasks using NULL-safe `coalesce` SQL predicates | `payment.view \| payment.manage \| technicaltask.view \| technicaltask.manage` |
 | `GET` | `/api/v1/technical-tasks/call-log-report` | Paginated cross-ticket technician call/visit log analytics report | `technicaltask.view \| technicaltask.manage \| report.view` |
 | `GET` | `/api/v1/technical-tasks/monthly-summary` | Monthly technician service call & resolution summary metrics | `technicaltask.view \| technicaltask.manage \| report.view` |
 | `GET` | `/api/v1/technical-tasks/lookup/serial/{serial_number}` | Lookup machine model, warranty status, customer details, and historical ticket count by machine serial number | `technicaltask.view \| technicaltask.create \| technicaltask.manage` |
-| `POST` | `/api/v1/technical-tasks` | Create field service ticket with sequential `task_number` and initial `Create Technical Task` audit log | `technicaltask.create \| technicaltask.manage` |
-| `GET` | `/api/v1/technical-tasks/{id}` | Inspect detailed service ticket (accepts either UUID `id` or sequential integer `task_number`) | `technicaltask.view \| technicaltask.manage` |
-| `GET` | `/api/v1/technical-tasks/{id}/call-logs` | List chronological technician `Telecall` / `Physical Visit` call logs (resolves UUID or `task_number`) | `technicaltask.view \| technicaltask.manage` |
+| `POST` | `/api/v1/technical-tasks` | Create field service ticket with sequential `task_number` and initial `Create Technical Task` audit log (Payments-only callers restricted to `Chargeable`) | `technicaltask.create \| technicaltask.manage \| payment.create \| payment.manage` |
+| `GET` | `/api/v1/technical-tasks/{id}` | Inspect detailed service ticket (accepts either UUID `id` or sequential integer `task_number`) | `technicaltask.{view,call_logs.view,manage} \| payment.{view,details.view,manage}` |
+| `GET` | `/api/v1/technical-tasks/{id}/call-logs` | List chronological technician `Telecall` / `Physical Visit` call logs (resolves UUID or `task_number`) | `technicaltask.{view,call_logs.view,manage} \| payment.{view,details.view,manage}` |
 | `POST` | `/api/v1/technical-tasks/{id}/call-logs` | Append technician call log (`task_type`: `Telecall` or `Physical Visit`, `remarks`) (resolves UUID or `task_number`) | `technicaltask.update \| technicaltask.create \| technicaltask.manage` |
-| `GET` | `/api/v1/technical-tasks/{id}/task-logs` | List immutable lifecycle task logs (`Create Technical Task`, `Approve Technical Task`, `Complete Technical Task`, `Cancel Technical Task`, `Reopen Technical Task`, `Record Task Payment`, `Update Technical Task`) | `technicaltask.view \| technicaltask.manage` |
+| `GET` | `/api/v1/technical-tasks/{id}/task-logs` | List immutable lifecycle task logs (`Create Technical Task`, `Approve Technical Task`, `Complete Technical Task`, `Cancel Technical Task`, `Reopen Technical Task`, `Record Task Payment`, `Update Technical Task`) | `technicaltask.{view,call_logs.view,manage} \| payment.{view,details.view,manage}` |
 | `PATCH` | `/api/v1/technical-tasks/{id}` | Update machine details, problem notes, contact person, payment fields, or scheduled visit | `technicaltask.update \| technicaltask.manage` |
-| `PATCH` | `/api/v1/technical-tasks/{id}/status` | Transition ticket status (`Approved` enforces mandatory `task_allotted_to` & `technicaltask.approve \| technicaltask.manage`; `Completed` moves both Free and Chargeable tickets to `status="Completed"` with `payment_status="Pending"` when unpaid—tracked in `/payments`—or `payment_status="Paid"` + `Self collect` wallet sync when paid; `Cancel` enforces mandatory `cancel_remarks` and reverses any `Self collect` wallet entry) | `technicaltask.approve \| technicaltask.update \| technicaltask.manage` |
-| `POST` | `/api/v1/technical-tasks/{id}/reopen` | Reopen/reassign cancelled or completed ticket back to `Approved` with technician allotment | `technicaltask.approve \| technicaltask.update \| technicaltask.manage` |
-| `POST` | `/api/v1/technical-tasks/{id}/record-payment` | Atomically record collected payment (`amount_collected`, `payment_mode`, `payment_screenshot`, `payment_reference`, `payment_date`, `remarks`), normalize any legacy `Payment Pending` status to `Completed`, update `payment_status` (`Paid` / `Pending`), and auto-sync `Self collect` into `technician_wallet_transactions` (`VERIFIED` `COLLECTION`) | `technicaltask.update \| technicaltask.manage` |
-| `POST` | `/api/v1/technical-tasks/upload-screenshot` | Upload payment screenshot / receipt image (`.jpg`, `.png`, `.webp`) or `.pdf` | `technicaltask.update \| technicaltask.create \| technicaltask.manage` |
-| `POST` | `/api/v1/technical-tasks/bulk-delete` | Bulk soft-delete technical tasks by array of IDs and reverse linked `Self collect` technician wallet entries | `technicaltask.bulk_action \| technicaltask.delete \| technicaltask.manage` |
-| `DELETE`| `/api/v1/technical-tasks/{id}` | Soft-delete technical service task and reverse any linked `Self collect` technician wallet entries | `technicaltask.delete \| technicaltask.manage` |
+| `PATCH` | `/api/v1/technical-tasks/{id}/status` | Transition ticket status (`Approved` enforces mandatory `task_allotted_to` & `technicaltask.approve`; `Completed` enforces `technicaltask.complete`; `Cancel` enforces mandatory `cancel_remarks`, `technicaltask.cancel` & reverses any `Self collect` wallet entry) | `technicaltask.{approve,complete,cancel,update,manage}` |
+| `POST` | `/api/v1/technical-tasks/{id}/reopen` | Reopen/reassign cancelled or completed ticket back to `Approved` with technician allotment | `technicaltask.reopen \| technicaltask.approve \| technicaltask.update \| technicaltask.manage` |
+| `POST` | `/api/v1/technical-tasks/{id}/record-payment` | Atomically record collected payment (`amount_collected`, `payment_mode`, `payment_screenshot`, `payment_reference`, `payment_date`, `remarks`), normalize any legacy `Payment Pending` status to `Completed`, update `payment_status` (`Paid` / `Pending`), and auto-sync `Self collect` into `technician_wallet_transactions` (`VERIFIED` `COLLECTION`) | `payment.update \| payment.manage \| technicaltask.update \| technicaltask.manage` |
+| `POST` | `/api/v1/technical-tasks/upload-screenshot` | Upload payment screenshot / receipt image (`.jpg`, `.png`, `.webp`) or `.pdf` | `technicaltask.{create,update,manage} \| payment.{create,update,manage} \| technician_operations.{wallet.*,warranty.create,manage}` |
+| `POST` | `/api/v1/technical-tasks/bulk-delete` | Bulk soft-delete technical tasks by array of IDs and reverse linked `Self collect` technician wallet entries | `technicaltask.bulk_action \| technicaltask.delete \| technicaltask.manage \| payment.delete \| payment.manage` |
+| `DELETE`| `/api/v1/technical-tasks/{id}` | Soft-delete technical service task and reverse any linked `Self collect` technician wallet entries | `technicaltask.delete \| technicaltask.manage \| payment.delete \| payment.manage` |
 
 ---
 
@@ -420,7 +424,7 @@ Machine-to-machine internal service endpoints invoked by `ERP_Main` over authent
 > **HRMS Setup Active-Only Extraction, Seed Idempotency & RBAC Bootstrap Notes:**
 > - **Cross-Module `?active_only=true` vs Setup Management (`active_only=false`):** HRMS Setup endpoints (`/api/v1/hrms/setup/{locations,leave-types,expense-categories,holidays,leave-plans}`) return both active and inactive rows by default (`active_only=false`) for `/hrms/setup`, and accept `?active_only=true` when consumed by Leave (`/hrms/leave`), Asset Management (`/hrms/assets`), and Expense Management (`/hrms/expenses`), backed by server-side active-status validation on mutations.
 > - **Soft-Delete Non-Recreation (`ensure_seeds()`):** HRMS setup endpoints inspect total row counts including soft-deleted rows (`deleted_at IS NOT NULL`) so user-deleted defaults never re-create on subsequent calls.
-> - **Canonical RBAC System Roles (`/api/v1/rbac/roles`):** Bootstrap seeding (`scripts/seed.py`) provisions strictly three `is_system=True` roles—`super_admin` (`Admin`, holding all `325/325` unique permissions), `user` (`User`), and `technician` (`Technician`, fixed field-service department to which admins assign `User` accounts)—with zero hardcoded business departments.
+> - **Canonical RBAC System Roles (`/api/v1/rbac/roles`):** Bootstrap seeding (`scripts/seed.py`) provisions strictly three `is_system=True` roles—`super_admin` (`Admin`, holding all `349/349` unique permissions), `user` (`User`), and `technician` (`Technician`, fixed field-service department to which admins assign `User` accounts)—with zero hardcoded business departments. All permission grant/revoke/bulk mutations (`POST`/`DELETE /rbac/roles/{id}/permissions`, `PUT /rbac/roles/{id}/permissions/bulk`, `PUT /rbac/users/{id}/permissions/bulk`, `/rbac/clone`, and `POST`/`DELETE /users/{id}/roles`) commit and publish `PERMISSIONS_UPDATED` over WebSocket (`user:{id}`) so connected clients sync `/auth/profile` immediately, while `AuthService.verify_access_token` prevents zero-permission DB users from inheriting stale JWT claims.
 
 ---
 
@@ -428,20 +432,20 @@ Machine-to-machine internal service endpoints invoked by `ERP_Main` over authent
 
 | Method | Endpoint URI | Description | Permission Gate |
 | :--- | :--- | :--- | :--- |
-| `GET` | `/api/v1/technician-operations/lookups` | Unified active lookups (`Technician` department Users, `companies`, physical `warehouses`, `machines`, `spare_parts` with `compatible_machine_ids` & `stock_by_warehouse`, `cities`, open `technical_tasks`, non-cancelled `sale_orders`, and `serials`) | `technician_operations.view \| technician_operations.manage` |
-| `GET` | `/api/v1/technician-operations/metrics` | Top KPI ribbon counters (`active_gatepasses`, `pending_sales_orders`, `cash_in_hand`, `active_warranties`) | `technician_operations.view \| technician_operations.manage` |
-| `GET` | `/api/v1/technician-operations/gatepasses` | Paginated technician spare-parts outward gatepasses (`status`, `search`, `page`, `page_size`) | `technician_operations.view \| technician_operations.manage` |
-| `POST` | `/api/v1/technician-operations/gatepasses` | Issue outward spare-parts gatepass (`GP-TECH-YYYY-NNNN`) and deduct physical warehouse stock (`409 Conflict` if insufficient stock) | `technician_operations.create \| technician_operations.manage` |
-| `GET` | `/api/v1/technician-operations/gatepasses/{id}` | Inspect detailed technician gatepass header, issued/returned/consumed items, and reconciliation metadata | `technician_operations.view \| technician_operations.manage \| saleorder.view \| saleorder.create \| saleorder.update` |
-| `POST` | `/api/v1/technician-operations/gatepasses/{id}/return` | Reconcile returned vs consumed parts (`returned + consumed <= issued`), restore `RETURNED_GOOD` to physical warehouse, quarantine `RETURNED_DEFECTIVE`, and set `so_required=True` on non-warranty consumed spares | `technician_operations.update \| technician_operations.manage` |
-| `GET` | `/api/v1/technician-operations/gatepasses/{id}/draft-so` | Generate pre-filled Draft Sales Order payload (`warehouse`, `company`, `addresses`, `remarks`, consumed `items` with `hsn_code` & `gst_percent`) for `SaleProcessForm.tsx` | `technician_operations.view \| technician_operations.manage \| saleorder.view \| saleorder.create \| saleorder.update` |
-| `POST` | `/api/v1/technician-operations/gatepasses/{id}/link-so` | Verify and link an existing non-cancelled `SaleOrder` (`sale_order_id` or `so_number`), release gatepass-held stock if `order.stock_applied` is true, and close reconciliation | `technician_operations.update \| technician_operations.manage \| saleorder.create \| saleorder.update` |
-| `GET` | `/api/v1/technician-operations/wallet/summaries` | Live per-technician wallet balances across `Technician` department Users (`total_collected`, `total_deposited`, `total_expenses`, `net_cash_in_hand`) | `technician_operations.view \| technician_operations.manage` |
-| `GET` | `/api/v1/technician-operations/wallet/transactions` | Paginated technician wallet ledger (`COLLECTION`, `HANDOVER_DEPOSIT`, `FIELD_EXPENSE`, including auto-synced `Self collect` `Task Sync` entries and uploaded `receipt_url` vouchers) | `technician_operations.view \| technician_operations.manage` |
-| `POST` | `/api/v1/technician-operations/wallet/transactions` | Record manual wallet collection, cash handover deposit, or field expense (`WTX-YYYY-NNNN`) with optional uploaded receipt URL | `technician_operations.create \| technician_operations.manage` |
-| `GET` | `/api/v1/technician-operations/warranty` | Paginated Machine Warranty Registry (`machine_warranties` + auto-synced Sales Order machine serials) | `technician_operations.view \| technician_operations.manage` |
-| `POST` | `/api/v1/technician-operations/warranty` | Register or update a Machine Warranty Policy (`serial_number`, `machine_model`, `customer_name`, `warranty_months`, `start_date`, `end_date`) | `technician_operations.create \| technician_operations.manage` |
-| `GET` | `/api/v1/technician-operations/warranty/validate` | Live serial coverage check (`?serial_number=...`) across both `MachineWarranty` policies and historical `SaleOrderItem.serial_numbers` | `technician_operations.view \| technician_operations.manage \| saleorder.view \| saleorder.create \| saleorder.update` |
+| `GET` | `/api/v1/technician-operations/lookups` | Unified active lookups (`Technician` department Users, `companies`, physical `warehouses`, `machines`, `spare_parts` with `compatible_machine_ids` & `stock_by_warehouse`, `cities`, open `technical_tasks`, non-cancelled `sale_orders`, and `serials`) | `technician_operations.{view,gatepasses.view,wallets.view,warranty.view,manage}` |
+| `GET` | `/api/v1/technician-operations/metrics` | Top KPI ribbon counters (`active_gatepasses`, `pending_sales_orders`, `cash_in_hand`, `active_warranties`) | `technician_operations.{view,gatepasses.view,wallets.view,warranty.view,manage}` |
+| `GET` | `/api/v1/technician-operations/gatepasses` | Paginated technician spare-parts outward gatepasses (`status`, `search`, `page`, `page_size`) | `technician_operations.gatepasses.view \| technician_operations.manage` |
+| `POST` | `/api/v1/technician-operations/gatepasses` | Issue outward spare-parts gatepass (`GP-TECH-YYYY-NNNN`) and deduct physical warehouse stock (`409 Conflict` if insufficient stock) | `technician_operations.gatepass.create \| technician_operations.manage` |
+| `GET` | `/api/v1/technician-operations/gatepasses/{id}` | Inspect detailed technician gatepass header, issued/returned/consumed items, and reconciliation metadata | `technician_operations.gatepass.details \| .draft_so \| .manage \| saleorder.{view,create,update}` |
+| `POST` | `/api/v1/technician-operations/gatepasses/{id}/return` | Reconcile returned vs consumed parts (`returned + consumed <= issued`), restore `RETURNED_GOOD` to physical warehouse, quarantine `RETURNED_DEFECTIVE`, and set `so_required=True` on non-warranty consumed spares | `technician_operations.gatepass.return \| .update \| .manage` |
+| `GET` | `/api/v1/technician-operations/gatepasses/{id}/draft-so` | Generate pre-filled Draft Sales Order payload (`warehouse`, `company`, `addresses`, `remarks`, consumed `items` with `hsn_code` & `gst_percent`) for `SaleProcessForm.tsx` | `technician_operations.gatepass.{draft_so,create_so} \| .manage \| saleorder.{view,create,update}` |
+| `POST` | `/api/v1/technician-operations/gatepasses/{id}/link-so` | Verify and link an existing non-cancelled `SaleOrder` (`sale_order_id` or `so_number`), release gatepass-held stock if `order.stock_applied` is true, and close reconciliation | `technician_operations.gatepass.link_so \| .update \| .manage \| saleorder.{create,update}` |
+| `GET` | `/api/v1/technician-operations/wallet/summaries` | Live per-technician wallet balances across `Technician` department Users (`total_collected`, `total_deposited`, `total_expenses`, `net_cash_in_hand`) | `technician_operations.wallet.balances.view \| technician_operations.manage` |
+| `GET` | `/api/v1/technician-operations/wallet/transactions` | Paginated technician wallet ledger (`COLLECTION`, `HANDOVER_DEPOSIT`, `FIELD_EXPENSE`, including auto-synced `Self collect` `Task Sync` entries and uploaded `receipt_url` vouchers) | `technician_operations.wallets.view \| technician_operations.manage` |
+| `POST` | `/api/v1/technician-operations/wallet/transactions` | Record manual wallet collection, cash handover deposit, or field expense (`WTX-YYYY-NNNN`) with optional uploaded receipt URL (type-checked per `transaction_type`) | `technician_operations.wallet.{create,collect,handover,expense} \| .manage` |
+| `GET` | `/api/v1/technician-operations/warranty` | Paginated Machine Warranty Registry (`machine_warranties` + auto-synced Sales Order machine serials) | `technician_operations.warranty.view \| technician_operations.manage` |
+| `POST` | `/api/v1/technician-operations/warranty` | Register or update a Machine Warranty Policy (`serial_number`, `machine_model`, `customer_name`, `warranty_months`, `start_date`, `end_date`) | `technician_operations.warranty.create \| technician_operations.manage` |
+| `GET` | `/api/v1/technician-operations/warranty/validate` | Live serial coverage check (`?serial_number=...`) across both `MachineWarranty` policies and historical `SaleOrderItem.serial_numbers` | `technician_operations.warranty.validate \| .gatepass.create \| .manage \| saleorder.{view,create,update}` |
 
 ---
 
@@ -468,6 +472,19 @@ Machine-to-machine internal service endpoints invoked by `ERP_Main` over authent
 | `POST` | `/api/v1/cargo-overview/documents` | Multipart upload to one of the 22 Consignment Gallery slots (`?key=...&slot_key=...`) via `save_uploaded_file` (`cargo-overview` Supabase bucket or `/uploads/private/cargo_overview/`) | `cargo_overview.gallery.upload \| report.view` |
 | `DELETE` | `/api/v1/cargo-overview/documents` | Delete a manually uploaded document from a Consignment Gallery slot (`?key=...&slot_key=...`) and clean up stored file | `cargo_overview.gallery.delete \| report.view` |
 | `GET` | `/api/v1/cargo-overview/export` | Export filtered Cargo Overview list summary as UTF-8 BOM `.csv` | `cargo_overview.view \| report.view` |
+
+---
+
+## 24. RBAC Auto-Save Bulk Sync & Live Permission Broadcast (`/rbac`, `/users/{id}/roles`)
+
+| Method | Endpoint URI | Description | Permission Gate |
+| :--- | :--- | :--- | :--- |
+| `GET` | `/api/v1/rbac/permissions` | List all active (non-deprecated) permission definitions (`planning.*`, `technician_operations.create`, `task.organization_view` excluded) | `roles_permissions.view` |
+| `POST` | `/api/v1/rbac/roles/{role_id}/permissions` | Immediately grant one permission to a department and publish `PERMISSIONS_UPDATED` to assigned users | `roles_permissions.action` |
+| `DELETE` | `/api/v1/rbac/roles/{role_id}/permissions/{permission_id}` | Immediately revoke one permission from a department and publish `PERMISSIONS_UPDATED` to assigned users | `roles_permissions.action` |
+| `PUT` | `/api/v1/rbac/roles/{role_id}/permissions/bulk` | Atomically replace all direct permissions on a department (`Select Group` / `Deselect Group` / `Select All` / `Deselect All`; rejects `super_admin` and deprecated codes) and publish `PERMISSIONS_UPDATED` | `roles_permissions.action` |
+| `PUT` | `/api/v1/rbac/users/{user_id}/permissions/bulk` | Atomically replace per-user direct `ALLOW`/`DENY` overrides (`GRANT`/`DENY` diff vs role defaults) and publish `PERMISSIONS_UPDATED` | `roles_permissions.action` |
+| `POST` / `DELETE` | `/api/v1/users/{user_id}/roles` (`/{role_id}`) | Assign or remove a department role on a user, commit, and publish `PERMISSIONS_UPDATED` on `user:{user_id}` | `user.action` |
 
 
 

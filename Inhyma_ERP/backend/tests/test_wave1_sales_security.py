@@ -344,3 +344,52 @@ def test_bug001_openapi_declares_security_on_all_sales_discount_and_deleted_orde
     for route_path, method in expected_protected:
         op = paths[route_path][method]
         assert op.get("security"), f"OpenAPI missing security on {method.upper()} {route_path}"
+
+
+@pytest.mark.asyncio
+async def test_proforma_permissions_do_not_grant_discount_payments(sales_sec_env):
+    client: AsyncClient = sales_sec_env["client"]
+    proforma_only_user = CurrentUser(
+        id=uuid.uuid4(),
+        username="proforma_manager",
+        display_name="Proforma Manager",
+        permissions={
+            "proforma.view",
+            "proforma.pending.view",
+            "proforma.admin_approved.view",
+            "proforma.confirmed.view",
+            "proforma.cancelled.view",
+            "proforma.create",
+            "proforma.action.view",
+            "proforma.download",
+            "proforma.details.view",
+            "proforma.update",
+            "proforma.approve",
+            "proforma.confirm",
+            "proforma.cancel",
+            "proforma.delete",
+            "proforma.manage",
+        },
+        is_super_admin=False,
+    )
+    sales_sec_env["set_user"](proforma_only_user)
+
+    assert (await client.get("/api/v1/sales/discount-payments")).status_code == 403
+    assert (
+        await client.post(
+            "/api/v1/sales/discount-payments",
+            json={
+                "order_ref": "SO-SYNTH-9999",
+                "customer_name": "Synthetic QA Corp",
+                "sales_person": "QA",
+                "total_order_amount": 10000.0,
+                "discount_percent": 5.0,
+            },
+        )
+    ).status_code == 403
+    assert (
+        await client.patch(
+            f"/api/v1/sales/discount-payments/{uuid.uuid4()}",
+            json={"amount": 100.0},
+        )
+    ).status_code == 403

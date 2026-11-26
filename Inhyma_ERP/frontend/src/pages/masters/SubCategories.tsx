@@ -31,6 +31,7 @@ export function SubCategoriesPage() {
       permissionPrefix="subcategory"
       exportPermission="subcategory.export"
       bulkActionPermission="subcategory.bulk_action"
+      statusPermission="subcategory.status_edit"
       liveModule="subcategories"
       entityName="sub-category"
       heading="Product Sub-Categories"

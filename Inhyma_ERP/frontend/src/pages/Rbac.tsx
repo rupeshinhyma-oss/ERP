@@ -8,17 +8,17 @@
  * 3. Clone Role Permissions.
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AppShell } from "@/components/AppShell";
 import { Breadcrumb } from "@/components/Breadcrumb";
 import { ActionDropdown, type ActionDropdownEntry } from "@/components/ActionDropdown";
 import { Banner, Modal } from "@/components/ui";
 import { TextField } from "@/components/fields";
-import { apiDelete, apiGet, apiPatch, apiPost, apiPut } from "@/lib/api";
+import { apiDelete, apiGet, apiPatch, apiPost, apiPut, errorMessage } from "@/lib/api";
 import { useAuth, usePendingGuard } from "@/lib/hooks";
 import { useToast } from "@/lib/toast";
+import { syncUserPermissionOverrides, type AutoSaveStatus } from "@/lib/rbacOverrides";
 import type {
-  BulkPermissionOverrideItem,
   DepartmentHierarchy,
   EffectivePermissionsBreakdown,
   ItemsPage,
@@ -32,6 +32,7 @@ import type {
 import {
   DEPRECATED_PERMISSION_CODES,
   filterActivePermissions,
+  filterNavPermissionSections,
   friendlyPermissionLabel,
   groupPermissionsByModule,
   MODULE_NAMES,
@@ -127,6 +128,7 @@ export function RbacPage() {
   const [rolesLoading, setRolesLoading] = useState(true);
   const [error, setError] = useState<unknown>(null);
   const [roleSearch, setRoleSearch] = useState("");
+  const [rolePermSearch, setRolePermSearch] = useState("");
   const [selectedRoleIds, setSelectedRoleIds] = useState<string[]>([]);
   const [rolePageSize, setRolePageSize] = useState(50);
 
@@ -178,8 +180,30 @@ export function RbacPage() {
   const [overridesChecked, setOverridesChecked] = useState<Set<string>>(new Set());
   const [overridesSearch, setOverridesSearch] = useState("");
   const [overridesLoading, setOverridesLoading] = useState(false);
-  const [overridesSaving, setOverridesSaving] = useState(false);
+  const [overridesSaveStatus, setOverridesSaveStatus] = useState<AutoSaveStatus>("idle");
   const [managerActionLoading, setManagerActionLoading] = useState(false);
+
+  const checkedCodesRef = useRef<Set<string>>(new Set());
+  const viewingRoleIdRef = useRef<string>("");
+  const rolePermQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const rolePermInFlightRef = useRef<number>(0);
+  // Bulk saves send the full permission set, so only the newest queued one needs to run.
+  const rolePermBulkSeqRef = useRef<number>(0);
+  const [rolePermStatus, setRolePermStatus] = useState<AutoSaveStatus>("idle");
+
+  const roleMetaTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const roleMetaLastSavedRef = useRef<{ roleId: string; name: string; description: string; code: string }>({
+    roleId: "",
+    name: "",
+    description: "",
+    code: "",
+  });
+  const [roleMetaStatus, setRoleMetaStatus] = useState<AutoSaveStatus>("idle");
+
+  const overridesCheckedRef = useRef<Set<string>>(new Set());
+  const overridesUserIdRef = useRef<string | null>(null);
+  const overridesQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const overridesInFlightRef = useRef<number>(0);
 
   /* Clone modal */
   const [cloneOpen, setCloneOpen] = useState(false);
@@ -246,8 +270,18 @@ export function RbacPage() {
 
   /* --- Open Role in View / Edit Permission screen --- */
   function openRoleView(role: Role | null) {
+    if (roleMetaTimerRef.current) {
+      clearTimeout(roleMetaTimerRef.current);
+      roleMetaTimerRef.current = null;
+    }
+    setRolePermStatus("idle");
+    setRoleMetaStatus("idle");
+    setRolePermSearch("");
     if (!role || !role.id) {
       // Create new role
+      viewingRoleIdRef.current = "";
+      checkedCodesRef.current = new Set();
+      roleMetaLastSavedRef.current = { roleId: "", name: "", description: "", code: "" };
       setViewingRole({
         id: "",
         name: "",
@@ -263,12 +297,21 @@ export function RbacPage() {
       setParentDepartments([]);
       setChildDepartments([]);
     } else {
+      const initial = new Set(role.permissions || []);
+      viewingRoleIdRef.current = role.id;
+      checkedCodesRef.current = initial;
+      roleMetaLastSavedRef.current = {
+        roleId: role.id,
+        name: (role.name || "").trim(),
+        description: (role.description || "").trim(),
+        code: (role.code || "").trim(),
+      };
       setViewingRole(role);
       setRoleName(role.name || "");
       setRoleDescription(role.description || "");
       setRoleCode(role.code || "");
       setRoleParentId(role.parent_department_id || "");
-      setCheckedCodes(new Set(role.permissions || []));
+      setCheckedCodes(initial);
       loadHierarchy(role.id);
     }
     setSelectedUserToAdd("");
@@ -277,7 +320,120 @@ export function RbacPage() {
     setSelectedChildToAdd("");
   }
 
+  const persistRoleDetails = useCallback(
+    async (roleId: string, isSystem: boolean, nextName: string, nextDesc: string, nextCode: string) => {
+      const trimmedName = nextName.trim();
+      const trimmedDesc = nextDesc.trim();
+      const trimmedCode = nextCode.trim();
+      const last = roleMetaLastSavedRef.current;
+      if (last.roleId !== roleId) return;
+      if (!trimmedName) return;
+      if (
+        trimmedName === last.name &&
+        trimmedDesc === last.description &&
+        trimmedCode === last.code
+      ) {
+        return;
+      }
+      setRoleMetaStatus("saving");
+      try {
+        const res = await apiPatch<Role>(`/rbac/roles/${roleId}`, {
+          ...(isSystem ? {} : { name: trimmedName }),
+          description: trimmedDesc || undefined,
+          code: trimmedCode,
+        });
+        const saved = res.data;
+        roleMetaLastSavedRef.current = {
+          roleId,
+          name: (saved?.name ?? trimmedName).trim(),
+          description: (saved?.description ?? trimmedDesc).trim(),
+          code: (saved?.code ?? trimmedCode).trim(),
+        };
+        setAllRoles((prev) =>
+          prev.map((r) =>
+            r.id === roleId
+              ? {
+                ...r,
+                name: saved?.name ?? (isSystem ? r.name : trimmedName),
+                description: saved?.description ?? trimmedDesc,
+                code: saved?.code ?? trimmedCode,
+              }
+              : r
+          )
+        );
+        if (viewingRoleIdRef.current === roleId) {
+          setViewingRole((prev) =>
+            prev && prev.id === roleId
+              ? {
+                ...prev,
+                name: saved?.name ?? (isSystem ? prev.name : trimmedName),
+                description: saved?.description ?? trimmedDesc,
+                code: saved?.code ?? trimmedCode,
+              }
+              : prev
+          );
+          setRoleMetaStatus("saved");
+        }
+      } catch (err) {
+        showToast(errorMessage(err) || "Failed to update department details.", "error");
+        setError(err);
+        if (viewingRoleIdRef.current === roleId) {
+          setRoleMetaStatus("error");
+        }
+      }
+    },
+    [showToast]
+  );
+
+  useEffect(() => {
+    const roleId = viewingRole?.id || "";
+    if (!roleId || !canManage) return;
+    const trimmedName = roleName.trim();
+    const trimmedDesc = roleDescription.trim();
+    const trimmedCode = roleCode.trim();
+    const last = roleMetaLastSavedRef.current;
+    if (last.roleId !== roleId || !trimmedName) return;
+    if (
+      trimmedName === last.name &&
+      trimmedDesc === last.description &&
+      trimmedCode === last.code
+    ) {
+      return;
+    }
+    if (roleMetaTimerRef.current) clearTimeout(roleMetaTimerRef.current);
+    const isSystem = Boolean(viewingRole?.is_system);
+    roleMetaTimerRef.current = setTimeout(() => {
+      roleMetaTimerRef.current = null;
+      void persistRoleDetails(roleId, isSystem, roleName, roleDescription, roleCode);
+    }, 600);
+    return () => {
+      if (roleMetaTimerRef.current) {
+        clearTimeout(roleMetaTimerRef.current);
+        roleMetaTimerRef.current = null;
+      }
+    };
+  }, [viewingRole?.id, viewingRole?.is_system, roleName, roleDescription, roleCode, canManage, persistRoleDetails]);
+
   function closeRoleView() {
+    if (roleMetaTimerRef.current) {
+      clearTimeout(roleMetaTimerRef.current);
+      roleMetaTimerRef.current = null;
+      if (viewingRole?.id && canManage) {
+        void persistRoleDetails(
+          viewingRole.id,
+          Boolean(viewingRole.is_system),
+          roleName,
+          roleDescription,
+          roleCode
+        );
+      }
+    }
+    viewingRoleIdRef.current = "";
+    checkedCodesRef.current = new Set();
+    roleMetaLastSavedRef.current = { roleId: "", name: "", description: "", code: "" };
+    setRolePermStatus("idle");
+    setRoleMetaStatus("idle");
+    setRolePermSearch("");
     setViewingRole(null);
     setRoleName("");
     setRoleDescription("");
@@ -292,34 +448,114 @@ export function RbacPage() {
     setSelectedChildToAdd("");
   }
 
+  function applyRolePermissionUpdate(
+    nextCodes: Set<string>,
+    persistTask: (roleId: string) => Promise<void>
+  ) {
+    checkedCodesRef.current = nextCodes;
+    setCheckedCodes(nextCodes);
+
+    const targetRoleId = viewingRoleIdRef.current;
+    if (!targetRoleId || !canManage) return;
+
+    rolePermInFlightRef.current += 1;
+    setRolePermStatus("saving");
+    rolePermQueueRef.current = rolePermQueueRef.current
+      .catch(() => { })
+      .then(async () => {
+        let failed = false;
+        try {
+          await persistTask(targetRoleId);
+          const updatedList = Array.from(checkedCodesRef.current);
+          setAllRoles((prev) =>
+            prev.map((r) => (r.id === targetRoleId ? { ...r, permissions: updatedList } : r))
+          );
+          if (viewingRoleIdRef.current === targetRoleId) {
+            setViewingRole((prev) =>
+              prev && prev.id === targetRoleId ? { ...prev, permissions: updatedList } : prev
+            );
+          }
+        } catch (err) {
+          failed = true;
+          showToast(errorMessage(err) || "Failed to update department permission.", "error");
+          setError(err);
+          try {
+            const roleRes = await apiGet<Role>(`/rbac/roles/${targetRoleId}`);
+            const serverPerms = roleRes.data.permissions || [];
+            setAllRoles((prev) =>
+              prev.map((r) => (r.id === targetRoleId ? { ...r, permissions: serverPerms } : r))
+            );
+            if (viewingRoleIdRef.current === targetRoleId) {
+              const serverSet = new Set(serverPerms);
+              checkedCodesRef.current = serverSet;
+              setCheckedCodes(serverSet);
+              setViewingRole((prev) =>
+                prev && prev.id === targetRoleId ? { ...prev, permissions: serverPerms } : prev
+              );
+            }
+          } catch {
+            // Keep existing surfaced error
+          }
+        } finally {
+          rolePermInFlightRef.current = Math.max(0, rolePermInFlightRef.current - 1);
+          if (rolePermInFlightRef.current === 0 && viewingRoleIdRef.current === targetRoleId) {
+            setRolePermStatus(failed ? "error" : "saved");
+          }
+        }
+      });
+  }
+
   function toggleCode(code: string) {
-    setCheckedCodes((prev) => {
-      const next = new Set(prev);
-      if (next.has(code)) next.delete(code);
-      else next.add(code);
-      return next;
+    if (viewingRoleIdRef.current ? !canManage : !canCreateRole) return;
+    const prev = checkedCodesRef.current;
+    const willGrant = !prev.has(code);
+    const next = new Set(prev);
+    if (willGrant) next.add(code);
+    else next.delete(code);
+    applyRolePermissionUpdate(next, async (roleId) => {
+      const permId = codeToId[code];
+      if (!permId) return;
+      if (willGrant) {
+        await apiPost(`/rbac/roles/${roleId}/permissions`, { permission_id: permId }, {}, { idempotent: true });
+      } else {
+        await apiDelete(`/rbac/roles/${roleId}/permissions/${permId}`);
+      }
     });
   }
 
-  function toggleModule(modKey: string) {
-    const items = permissionGroups[modKey] || [];
-    const anyUnchecked = items.some((p) => !checkedCodes.has(p.code));
-    setCheckedCodes((prev) => {
-      const next = new Set(prev);
-      items.forEach((p) => {
-        if (anyUnchecked) next.add(p.code);
-        else next.delete(p.code);
-      });
-      return next;
+  function toggleModule(modKey: string, visibleItems?: Permission[]) {
+    if (viewingRoleIdRef.current ? !canManage : !canCreateRole) return;
+    const items = visibleItems || permissionGroups[modKey] || [];
+    if (items.length === 0) return;
+    const prev = checkedCodesRef.current;
+    const anyUnchecked = items.some((p) => !prev.has(p.code));
+    const next = new Set(prev);
+    items.forEach((p) => {
+      if (anyUnchecked) next.add(p.code);
+      else next.delete(p.code);
+    });
+    const bulkSeq = ++rolePermBulkSeqRef.current;
+    applyRolePermissionUpdate(next, async (roleId) => {
+      // A newer bulk change is already queued and will send the complete, latest state -- skip this one.
+      if (bulkSeq !== rolePermBulkSeqRef.current) return;
+      const permission_ids = Array.from(checkedCodesRef.current).map((c) => codeToId[c]).filter(Boolean);
+      await apiPut(`/rbac/roles/${roleId}/permissions/bulk`, { permission_ids }, {}, { idempotent: true });
     });
   }
 
   function toggleSelectAllPermissions() {
-    if (checkedCodes.size === allPermissions.length) {
-      setCheckedCodes(new Set());
-    } else {
-      setCheckedCodes(new Set(allPermissions.map((p) => p.code)));
-    }
+    if (viewingRoleIdRef.current ? !canManage : !canCreateRole) return;
+    const prev = checkedCodesRef.current;
+    const next =
+      prev.size === allPermissions.length
+        ? new Set<string>()
+        : new Set(allPermissions.map((p) => p.code));
+    const bulkSeq = ++rolePermBulkSeqRef.current;
+    applyRolePermissionUpdate(next, async (roleId) => {
+      if (bulkSeq !== rolePermBulkSeqRef.current) return;
+      const permission_ids = Array.from(checkedCodesRef.current).map((c) => codeToId[c]).filter(Boolean);
+      await apiPut(`/rbac/roles/${roleId}/permissions/bulk`, { permission_ids }, {}, { idempotent: true });
+    });
   }
 
   /* Users currently assigned to viewingRole */
@@ -450,44 +686,49 @@ export function RbacPage() {
    * override-resolution logic: checked = explicit GRANT, or
    * department-inherited and not explicitly DENYed).
    */
+  async function reloadOverridesState(userId: string) {
+    const [effRes, userPermsRes] = await Promise.all([
+      apiGet<EffectivePermissionsBreakdown>(`/rbac/users/${userId}/effective-permissions`),
+      apiGet<UserPermissionOverride[]>(`/rbac/users/${userId}/permissions`),
+    ]);
+    if (overridesUserIdRef.current !== userId) return;
+    setOverridesBreakdown(effRes.data);
+
+    const overrideMap = new Map(
+      (userPermsRes.data || [])
+        .filter((o) => !DEPRECATED_PERMISSION_CODES.has(o.code))
+        .map((o) => [o.code, o.is_granted])
+    );
+    const roleGranted = new Set(
+      (effRes.data.role_permissions || []).filter((c) => !DEPRECATED_PERMISSION_CODES.has(c))
+    );
+    const initialChecked = new Set<string>();
+    for (const code of new Set([...overrideMap.keys(), ...roleGranted])) {
+      if (DEPRECATED_PERMISSION_CODES.has(code)) continue;
+      const override = overrideMap.get(code);
+      const checked = override === true || (override === undefined && roleGranted.has(code));
+      if (checked) initialChecked.add(code);
+    }
+    overridesCheckedRef.current = initialChecked;
+    setOverridesChecked(initialChecked);
+  }
+
   async function openUserOverridesModal(userId: string, userLabel: string) {
+    overridesUserIdRef.current = userId;
+    overridesCheckedRef.current = new Set();
     setOverridesUserId(userId);
     setOverridesUsername(userLabel);
     setOverridesSearch("");
     setOverridesLoading(true);
+    setOverridesSaveStatus("idle");
     setOverridesBreakdown(null);
     setOverridesChecked(new Set());
     try {
-      let perms = allPermissions;
-      if (!perms || perms.length === 0) {
+      if (!allPermissions || allPermissions.length === 0) {
         const permsRes = await apiGet<Permission[]>("/rbac/permissions");
-        perms = filterActivePermissions(permsRes.data || []);
-        setAllPermissions(perms);
-      } else {
-        perms = filterActivePermissions(perms);
+        setAllPermissions(filterActivePermissions(permsRes.data || []));
       }
-      const [effRes, userPermsRes] = await Promise.all([
-        apiGet<EffectivePermissionsBreakdown>(`/rbac/users/${userId}/effective-permissions`),
-        apiGet<UserPermissionOverride[]>(`/rbac/users/${userId}/permissions`),
-      ]);
-      setOverridesBreakdown(effRes.data);
-
-      const overrideMap = new Map(
-        (userPermsRes.data || [])
-          .filter((o) => !DEPRECATED_PERMISSION_CODES.has(o.code))
-          .map((o) => [o.code, o.is_granted])
-      );
-      const roleGranted = new Set(
-        (effRes.data.role_permissions || []).filter((c) => !DEPRECATED_PERMISSION_CODES.has(c))
-      );
-      const initialChecked = new Set<string>();
-      for (const code of new Set([...overrideMap.keys(), ...roleGranted])) {
-        if (DEPRECATED_PERMISSION_CODES.has(code)) continue;
-        const override = overrideMap.get(code);
-        const checked = override === true || (override === undefined && roleGranted.has(code));
-        if (checked) initialChecked.add(code);
-      }
-      setOverridesChecked(initialChecked);
+      await reloadOverridesState(userId);
     } catch (err) {
       setError(err);
     } finally {
@@ -495,30 +736,41 @@ export function RbacPage() {
     }
   }
 
-  /** Bulk-diff save: only sends an override for codes that differ from the department-inherited default, ported from Users.tsx. */
-  async function handleSaveUserOverrides() {
-    if (!overridesUserId || !overridesBreakdown) return;
-    setOverridesSaving(true);
-    try {
-      const roleGranted = new Set(overridesBreakdown.role_permissions || []);
-      const overrides: BulkPermissionOverrideItem[] = [];
-      for (const p of allPermissions) {
-        const checked = overridesChecked.has(p.code);
-        const isRoleGranted = roleGranted.has(p.code);
-        if (checked && !isRoleGranted) {
-          overrides.push({ permission_id: p.id, is_granted: true });
-        } else if (!checked && isRoleGranted) {
-          overrides.push({ permission_id: p.id, is_granted: false });
+  /** Optimistically update overrides and persist immediately without a Save button. */
+  function applyOverridesUpdate(nextChecked: Set<string>) {
+    overridesCheckedRef.current = nextChecked;
+    setOverridesChecked(nextChecked);
+
+    const targetUserId = overridesUserIdRef.current;
+    const breakdown = overridesBreakdown;
+    if (!targetUserId || !breakdown) return;
+
+    overridesInFlightRef.current += 1;
+    setOverridesSaveStatus("saving");
+    const rolePerms = breakdown.role_permissions || [];
+    const permsSnapshot = allPermissions;
+    overridesQueueRef.current = overridesQueueRef.current
+      .catch(() => { })
+      .then(async () => {
+        let failed = false;
+        try {
+          await syncUserPermissionOverrides(targetUserId, permsSnapshot, nextChecked, rolePerms);
+        } catch (err) {
+          failed = true;
+          showToast(errorMessage(err) || "Failed to update permission override.", "error");
+          setError(err);
+          try {
+            await reloadOverridesState(targetUserId);
+          } catch {
+            // Keep surfaced error intact
+          }
+        } finally {
+          overridesInFlightRef.current = Math.max(0, overridesInFlightRef.current - 1);
+          if (overridesInFlightRef.current === 0 && overridesUserIdRef.current === targetUserId) {
+            setOverridesSaveStatus(failed ? "error" : "saved");
+          }
         }
-      }
-      await apiPut(`/rbac/users/${overridesUserId}/permissions/bulk`, { overrides });
-      showToast("Permissions updated for user.", "success");
-      setOverridesUserId(null);
-    } catch (err) {
-      setError(err);
-    } finally {
-      setOverridesSaving(false);
-    }
+      });
   }
 
   async function handleAddParentDepartment(parentId?: string) {
@@ -616,39 +868,23 @@ export function RbacPage() {
       const description = roleDescription.trim() || undefined;
       const code = roleCode.trim() || undefined;
       const parent_department_id = roleParentId ? roleParentId : null;
-      const desiredCodes = checkedCodes;
+      const desiredCodes = checkedCodesRef.current;
 
-      let roleId = viewingRole?.id || "";
+      const roleId = viewingRole?.id || "";
       if (roleId) {
-        // Update existing role
+        await rolePermQueueRef.current;
         await apiPatch(`/rbac/roles/${roleId}`, { name, description, code, parent_department_id });
       } else {
-        // Create new role
-        const newRole = await apiPost<Role>("/rbac/roles", {
+        await apiPost<Role>("/rbac/roles", {
           name,
           description,
           code,
           parent_department_id: roleParentId || undefined,
-          permission_codes: [],
+          permission_codes: Array.from(desiredCodes),
         });
-        roleId = newRole.data.id;
       }
 
-      // Reconcile permissions
-      const roleRes = await apiGet<Role>(`/rbac/roles/${roleId}`);
-      const currentCodes = new Set(roleRes.data.permissions || []);
-      for (const code of [...desiredCodes].filter((c) => !currentCodes.has(c))) {
-        if (codeToId[code]) {
-          await apiPost(`/rbac/roles/${roleId}/permissions`, { permission_id: codeToId[code] });
-        }
-      }
-      for (const code of [...currentCodes].filter((c) => !desiredCodes.has(c))) {
-        if (codeToId[code]) {
-          await apiDelete(`/rbac/roles/${roleId}/permissions/${codeToId[code]}`);
-        }
-      }
-
-      showToast("Department and permissions saved successfully!", "success");
+      showToast("Department saved successfully!", "success");
       await loadRoles();
       await loadUsers();
       closeRoleView();
@@ -786,21 +1022,23 @@ export function RbacPage() {
                   </h1>
                 </div>
               </div>
-              <div style={{ display: "flex", gap: "8px" }}>
-                <button type="button" className="btn btn-secondary" onClick={closeRoleView}>
-                  Cancel
-                </button>
-                {canManageOrCreate && (
-                  <button
-                    type="button"
-                    className="btn btn-primary"
-                    disabled={roleSaving}
-                    onClick={handleSaveRoleView}
-                  >
-                    {roleSaving ? "Saving..." : "Save Department"}
+              {!viewingRole.id && (
+                <div style={{ display: "flex", gap: "8px" }}>
+                  <button type="button" className="btn btn-secondary" onClick={closeRoleView}>
+                    Cancel
                   </button>
-                )}
-              </div>
+                  {canCreateRole && (
+                    <button
+                      type="button"
+                      className="btn btn-primary"
+                      disabled={roleSaving}
+                      onClick={handleSaveRoleView}
+                    >
+                      {roleSaving ? "Creating..." : "Create Department"}
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
 
             <Banner error={error} />
@@ -809,7 +1047,37 @@ export function RbacPage() {
               {/* Left Column: Department Details & Users */}
               <div style={{ display: "flex", flexDirection: "column", gap: "16px", minWidth: 0 }}>
                 <div className="card" style={{ padding: "20px" }}>
-                  <h3 style={{ fontSize: "15px", fontWeight: 600, margin: "0 0 16px" }}>Department Details</h3>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", margin: "0 0 16px" }}>
+                    <h3 style={{ fontSize: "15px", fontWeight: 600, margin: 0 }}>Department Details</h3>
+                    {viewingRole.id && canManage && roleMetaStatus !== "idle" && (
+                      <span
+                        style={{
+                          fontSize: "11px",
+                          fontWeight: 600,
+                          padding: "2px 8px",
+                          borderRadius: "10px",
+                          background:
+                            roleMetaStatus === "saving"
+                              ? "#fef3c7"
+                              : roleMetaStatus === "error"
+                                ? "#fee2e2"
+                                : "#dcfce7",
+                          color:
+                            roleMetaStatus === "saving"
+                              ? "#92400e"
+                              : roleMetaStatus === "error"
+                                ? "#991b1b"
+                                : "#166534",
+                        }}
+                      >
+                        {roleMetaStatus === "saving"
+                          ? "Saving..."
+                          : roleMetaStatus === "error"
+                            ? "Save failed"
+                            : "Auto-saved"}
+                      </span>
+                    )}
+                  </div>
                   <div className="field" style={{ marginBottom: "14px" }}>
                     <TextField
                       id="role-name-input"
@@ -1566,77 +1834,195 @@ export function RbacPage() {
               <div className="card" style={{ padding: "20px" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px", flexWrap: "wrap", gap: "8px" }}>
                   <div>
-                    <h3 style={{ fontSize: "15px", fontWeight: 600, margin: 0 }}>
-                      Assigned Permissions ({checkedCodes.size} / {allPermissions.length})
-                    </h3>
+                    <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                      <h3 style={{ fontSize: "15px", fontWeight: 600, margin: 0 }}>
+                        Assigned Permissions ({checkedCodes.size} / {allPermissions.length})
+                      </h3>
+                      {viewingRole.id && canManage && (
+                        <span
+                          style={{
+                            fontSize: "11px",
+                            fontWeight: 600,
+                            padding: "2px 8px",
+                            borderRadius: "10px",
+                            background:
+                              rolePermStatus === "saving"
+                                ? "#fef3c7"
+                                : rolePermStatus === "error"
+                                  ? "#fee2e2"
+                                  : "#dcfce7",
+                            color:
+                              rolePermStatus === "saving"
+                                ? "#92400e"
+                                : rolePermStatus === "error"
+                                  ? "#991b1b"
+                                  : "#166534",
+                          }}
+                        >
+                          {rolePermStatus === "saving"
+                            ? "Saving..."
+                            : rolePermStatus === "error"
+                              ? "Save failed"
+                              : rolePermStatus === "saved"
+                                ? "Auto-saved"
+                                : "Auto-saves on change"}
+                        </span>
+                      )}
+                    </div>
                     <span className="muted" style={{ fontSize: "12.5px" }}>
-                      Toggle permissions granted to anyone in this department.
+                      {viewingRole.id
+                        ? "Toggle permissions granted to anyone in this department. Changes apply automatically — no Save needed."
+                        : "Select initial permissions, then click Save Department to create."}
                     </span>
                   </div>
-                  {canManageOrCreate && (
-                    <button
-                      type="button"
-                      className="btn btn-secondary btn-small"
-                      onClick={toggleSelectAllPermissions}
-                    >
-                      {checkedCodes.size === allPermissions.length ? "Deselect All" : "Select All"}
-                    </button>
-                  )}
+                  <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap", flex: "1 1 auto", justifyContent: "flex-end" }}>
+                    <div style={{ position: "relative", minWidth: "220px", maxWidth: "300px", flex: "1 1 220px" }}>
+                      <input
+                        type="text"
+                        aria-label="Search permissions"
+                        placeholder="Search module or permission..."
+                        value={rolePermSearch}
+                        onChange={(e) => setRolePermSearch(e.target.value)}
+                        style={{
+                          width: "100%",
+                          padding: "6px 28px 6px 10px",
+                          border: "1px solid #cbd5e1",
+                          borderRadius: "6px",
+                          fontSize: "13px",
+                          background: "#ffffff",
+                          boxSizing: "border-box",
+                        }}
+                      />
+                      {rolePermSearch && (
+                        <button
+                          type="button"
+                          aria-label="Clear permission search"
+                          onClick={() => setRolePermSearch("")}
+                          style={{
+                            position: "absolute",
+                            right: "7px",
+                            top: "50%",
+                            transform: "translateY(-50%)",
+                            background: "none",
+                            border: "none",
+                            color: "#94a3b8",
+                            cursor: "pointer",
+                            fontSize: "13px",
+                            padding: 0,
+                            lineHeight: 1,
+                          }}
+                        >
+                          ✕
+                        </button>
+                      )}
+                    </div>
+                    {(viewingRole.id ? canManage : canCreateRole) && (
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-small"
+                        onClick={toggleSelectAllPermissions}
+                      >
+                        {checkedCodes.size === allPermissions.length ? "Deselect All" : "Select All"}
+                      </button>
+                    )}
+                  </div>
                 </div>
 
-                <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
-                  {Object.keys(permissionGroups)
-                    .sort()
-                    .map((modKey) => {
-                      const items = permissionGroups[modKey];
-                      const allCheckedInMod = items.every((p) => checkedCodes.has(p.code));
-                      const checkedCountInMod = items.filter((p) => checkedCodes.has(p.code)).length;
-
-                      return (
-                        <div className="permission-group" key={modKey}>
-                          <div className="permission-group-header">
-                            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                              <span className="permission-group-title">
-                                {MODULE_NAMES[modKey] || modKey.toUpperCase()}
-                              </span>
-                              <span style={{ fontSize: 11, background: "#e2e8f0", color: "#475569", padding: "1px 6px", borderRadius: 10, fontWeight: 600 }}>
-                                {checkedCountInMod} / {items.length} active
-                              </span>
-                            </div>
-                            {canManageOrCreate && (
-                              <button
-                                type="button"
-                                className="toggle-btn"
-                                onClick={() => toggleModule(modKey)}
-                              >
-                                {allCheckedInMod ? "Deselect Group" : "Select Group"}
-                              </button>
-                            )}
+                {(() => {
+                  const orderedSections = filterNavPermissionSections(permissionGroups, rolePermSearch);
+                  if (orderedSections.length === 0) {
+                    return (
+                      <div className="muted" style={{ textAlign: "center", padding: "36px 16px", fontSize: "13.5px" }}>
+                        No permissions match &ldquo;{rolePermSearch.trim()}&rdquo;.
+                        {" "}
+                        <button
+                          type="button"
+                          className="toggle-btn"
+                          style={{ marginLeft: "6px" }}
+                          onClick={() => setRolePermSearch("")}
+                        >
+                          Clear search
+                        </button>
+                      </div>
+                    );
+                  }
+                  return (
+                    <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+                      {orderedSections.map((section) => (
+                        <div
+                          key={section.id}
+                          data-nav-section={section.id}
+                          style={{ display: "flex", flexDirection: "column", gap: "10px" }}
+                        >
+                          <div
+                            style={{
+                              fontSize: "11px",
+                              fontWeight: 700,
+                              letterSpacing: "0.08em",
+                              textTransform: "uppercase",
+                              color: "#475569",
+                              background: "#f1f5f9",
+                              borderLeft: "3px solid #0061f2",
+                              padding: "5px 10px",
+                              borderRadius: "4px",
+                            }}
+                          >
+                            {section.title}
                           </div>
-                          <div className="permission-checks">
-                            {items.map((p) => (
-                              <label key={p.code}>
-                                <input
-                                  type="checkbox"
-                                  checked={checkedCodes.has(p.code)}
-                                  disabled={!canManageOrCreate}
-                                  onChange={() => toggleCode(p.code)}
-                                />
-                                <div style={{ flex: 1, minWidth: 0 }}>
-                                  <div style={{ fontSize: 13, fontWeight: 600, color: "#1e293b" }}>
-                                    {friendlyPermissionLabel(p.code)}
+                          {section.modules.map(({ modKey, items }) => {
+                            const allCheckedInMod = items.every((p) => checkedCodes.has(p.code));
+                            const checkedCountInMod = items.filter((p) => checkedCodes.has(p.code)).length;
+                            const canEditPerms = viewingRole.id ? canManage : canCreateRole;
+
+                            return (
+                              <div className="permission-group" key={modKey}>
+                                <div className="permission-group-header">
+                                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                                    <span className="permission-group-title">
+                                      {MODULE_NAMES[modKey] || modKey.toUpperCase()}
+                                    </span>
+                                    <span style={{ fontSize: 11, background: "#e2e8f0", color: "#475569", padding: "1px 6px", borderRadius: 10, fontWeight: 600 }}>
+                                      {checkedCountInMod} / {items.length} active
+                                    </span>
                                   </div>
-                                  <div style={{ fontSize: 11, color: "#64748b", fontFamily: "monospace", marginTop: 2 }}>
-                                    {p.code}
-                                  </div>
+                                  {canEditPerms && (
+                                    <button
+                                      type="button"
+                                      className="toggle-btn"
+                                      onClick={() => toggleModule(modKey, items)}
+                                    >
+                                      {allCheckedInMod ? "Deselect Group" : "Select Group"}
+                                    </button>
+                                  )}
                                 </div>
-                              </label>
-                            ))}
-                          </div>
+                                <div className="permission-checks">
+                                  {items.map((p) => (
+                                    <label key={p.code}>
+                                      <input
+                                        type="checkbox"
+                                        checked={checkedCodes.has(p.code)}
+                                        disabled={!canEditPerms}
+                                        onChange={() => toggleCode(p.code)}
+                                      />
+                                      <div style={{ flex: 1, minWidth: 0 }}>
+                                        <div style={{ fontSize: 13, fontWeight: 600, color: "#1e293b" }}>
+                                          {friendlyPermissionLabel(p.code)}
+                                        </div>
+                                        <div style={{ fontSize: 11, color: "#64748b", fontFamily: "monospace", marginTop: 2 }}>
+                                          {p.code}
+                                        </div>
+                                      </div>
+                                    </label>
+                                  ))}
+                                </div>
+                              </div>
+                            );
+                          })}
                         </div>
-                      );
-                    })}
-                </div>
+                      ))}
+                    </div>
+                  );
+                })()}
               </div>
             </div>
           </div>
@@ -2078,7 +2464,10 @@ export function RbacPage() {
       <Modal
         open={Boolean(overridesUserId)}
         title={`🔑 Manage Permission Overrides — ${overridesUsername}`}
-        onClose={() => setOverridesUserId(null)}
+        onClose={() => {
+          overridesUserIdRef.current = null;
+          setOverridesUserId(null);
+        }}
         cardStyle={{ maxWidth: "820px", width: "100%", height: "100vh", maxHeight: "100vh", display: "flex", flexDirection: "column", padding: 0 }}
       >
         {overridesLoading || !overridesBreakdown ? (
@@ -2174,7 +2563,7 @@ export function RbacPage() {
                     type="button"
                     className="btn btn-small"
                     style={{ background: "#dcfce7", color: "#166534", border: "1px solid #bbf7d0", fontWeight: 600 }}
-                    onClick={() => setOverridesChecked(new Set(allPermissions.map((p) => p.code)))}
+                    onClick={() => applyOverridesUpdate(new Set(allPermissions.map((p) => p.code)))}
                   >
                     🟢 Grant All
                   </button>
@@ -2182,7 +2571,7 @@ export function RbacPage() {
                     type="button"
                     className="btn btn-small"
                     style={{ background: "#fee2e2", color: "#991b1b", border: "1px solid #fca5a5", fontWeight: 600 }}
-                    onClick={() => setOverridesChecked(new Set())}
+                    onClick={() => applyOverridesUpdate(new Set())}
                   >
                     🔴 Deny All
                   </button>
@@ -2191,7 +2580,7 @@ export function RbacPage() {
                     className="btn btn-small"
                     style={{ background: "#f1f5f9", color: "#475569", border: "1px solid #cbd5e1", fontWeight: 600 }}
                     onClick={() => {
-                      setOverridesChecked(new Set(overridesBreakdown.role_permissions || []));
+                      applyOverridesUpdate(new Set(overridesBreakdown.role_permissions || []));
                     }}
                   >
                     🔄 Reset to Departments
@@ -2205,22 +2594,10 @@ export function RbacPage() {
                   (p) => p.module !== "feed" && !p.code.startsWith("feed.")
                 );
                 const groups = groupPermissionsByModule(assignablePermissions);
-                const q = overridesSearch.trim().toLowerCase();
                 const roleGranted = new Set(overridesBreakdown.role_permissions || []);
-                const modKeys = Object.keys(groups)
-                  .sort()
-                  .filter((modKey) =>
-                    !q
-                      ? true
-                      : groups[modKey].some(
-                        (p) =>
-                          p.code.toLowerCase().includes(q) ||
-                          (p.description || "").toLowerCase().includes(q) ||
-                          modKey.toLowerCase().includes(q)
-                      )
-                  );
+                const orderedSections = filterNavPermissionSections(groups, overridesSearch);
 
-                if (modKeys.length === 0) {
+                if (orderedSections.length === 0) {
                   return (
                     <div className="muted" style={{ textAlign: "center", padding: "40px" }}>
                       No permissions match your search query.
@@ -2228,15 +2605,28 @@ export function RbacPage() {
                   );
                 }
 
-                return modKeys.map((modKey) => {
-                  const items = q
-                    ? groups[modKey].filter(
-                      (p) =>
-                        p.code.toLowerCase().includes(q) ||
-                        (p.description || "").toLowerCase().includes(q) ||
-                        modKey.toLowerCase().includes(q)
-                    )
-                    : groups[modKey];
+                return orderedSections.map((section) => (
+                  <div
+                    key={section.id}
+                    data-nav-section={section.id}
+                    style={{ display: "flex", flexDirection: "column", gap: "10px", marginBottom: "14px" }}
+                  >
+                    <div
+                      style={{
+                        fontSize: "11px",
+                        fontWeight: 700,
+                        letterSpacing: "0.08em",
+                        textTransform: "uppercase",
+                        color: "#475569",
+                        background: "#f1f5f9",
+                        borderLeft: "3px solid #0061f2",
+                        padding: "5px 10px",
+                        borderRadius: "4px",
+                      }}
+                    >
+                      {section.title}
+                    </div>
+                    {section.modules.map(({ modKey, items }) => {
                   const allCheckedInMod = items.every((p) => overridesChecked.has(p.code));
                   const checkedCountInMod = items.filter((p) => overridesChecked.has(p.code)).length;
 
@@ -2255,14 +2645,12 @@ export function RbacPage() {
                           type="button"
                           className="toggle-btn"
                           onClick={() => {
-                            setOverridesChecked((prev) => {
-                              const next = new Set(prev);
-                              items.forEach((p) => {
-                                if (allCheckedInMod) next.delete(p.code);
-                                else next.add(p.code);
-                              });
-                              return next;
+                            const next = new Set(overridesCheckedRef.current);
+                            items.forEach((p) => {
+                              if (allCheckedInMod) next.delete(p.code);
+                              else next.add(p.code);
                             });
+                            applyOverridesUpdate(next);
                           }}
                         >
                           {allCheckedInMod ? "Deselect Group" : "Select Group"}
@@ -2296,12 +2684,10 @@ export function RbacPage() {
                                 type="checkbox"
                                 checked={checked}
                                 onChange={() => {
-                                  setOverridesChecked((prev) => {
-                                    const next = new Set(prev);
-                                    if (next.has(p.code)) next.delete(p.code);
-                                    else next.add(p.code);
-                                    return next;
-                                  });
+                                  const next = new Set(overridesCheckedRef.current);
+                                  if (next.has(p.code)) next.delete(p.code);
+                                  else next.add(p.code);
+                                  applyOverridesUpdate(next);
                                 }}
                               />
                               <div style={{ flex: 1, minWidth: 0 }}>
@@ -2335,7 +2721,9 @@ export function RbacPage() {
                       </div>
                     </div>
                   );
-                });
+                })}
+                  </div>
+                ));
               })()}
             </div>
 
@@ -2386,17 +2774,44 @@ export function RbacPage() {
                       </span>
                     )}
                   </div>
-                  <div style={{ display: "flex", gap: 12 }}>
-                    <button type="button" className="btn" onClick={() => setOverridesUserId(null)}>
-                      Cancel
-                    </button>
+                  <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+                    <span
+                      style={{
+                        fontSize: "12px",
+                        fontWeight: 600,
+                        padding: "4px 10px",
+                        borderRadius: "12px",
+                        background:
+                          overridesSaveStatus === "saving"
+                            ? "#fef3c7"
+                            : overridesSaveStatus === "error"
+                              ? "#fee2e2"
+                              : "#dcfce7",
+                        color:
+                          overridesSaveStatus === "saving"
+                            ? "#92400e"
+                            : overridesSaveStatus === "error"
+                              ? "#991b1b"
+                              : "#166534",
+                      }}
+                    >
+                      {overridesSaveStatus === "saving"
+                        ? "Saving..."
+                        : overridesSaveStatus === "error"
+                          ? "Save failed"
+                          : overridesSaveStatus === "saved"
+                            ? "Auto-saved"
+                            : "Auto-saves on change"}
+                    </span>
                     <button
                       type="button"
                       className="btn btn-primary"
-                      disabled={overridesSaving}
-                      onClick={() => void handleSaveUserOverrides()}
+                      onClick={() => {
+                        overridesUserIdRef.current = null;
+                        setOverridesUserId(null);
+                      }}
                     >
-                      {overridesSaving ? "Saving..." : "Save Permission Overrides"}
+                      Done
                     </button>
                   </div>
                 </div>

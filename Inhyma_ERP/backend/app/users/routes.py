@@ -25,6 +25,10 @@ from app.core.exceptions import BadRequestException, ForbiddenException
 from app.federation.erp_main_client import push_password_to_erp_main, push_profile_to_erp_main
 from app.core.responses import build_success_response
 from app.database.session import get_db_session
+from app.events.channels import user_channel
+from app.events.dependencies import get_event_dispatcher
+from app.events.dispatcher import EventDispatcher
+from app.events.models import Event
 from app.integration.jobs import enqueue_dispatch
 from app.integration.repository import IntegrationOutboxRepository
 from app.integration.service import IntegrationService
@@ -598,6 +602,7 @@ async def assign_role(
     rbac_service: RBACService = Depends(get_rbac_service),
     current_user: CurrentUser = Depends(require_permission("user.action")),
     audit_service: AuditService = Depends(get_audit_service),
+    event_dispatcher: EventDispatcher = Depends(get_event_dispatcher),
 ) -> dict:
     """Assign a role to a user."""
     role = await rbac_service.get_role_or_raise(payload.role_id)
@@ -616,6 +621,11 @@ async def assign_role(
         description=f"Assigned role {role.name!r} to user.",
         new_values={"role_id": str(payload.role_id), "role_name": role.name},
     )
+    await rbac_service.role_repository.session.commit()
+    await event_dispatcher.publish(
+        user_channel(user_id),
+        Event(event_type="PERMISSIONS_UPDATED", entity="user_roles", entity_id=str(user_id)),
+    )
     return build_success_response(data={"assigned": True}, request_id=request.state.request_id)
 
 
@@ -628,6 +638,7 @@ async def remove_role(
     rbac_service: RBACService = Depends(get_rbac_service),
     current_user: CurrentUser = Depends(require_permission("user.action")),
     audit_service: AuditService = Depends(get_audit_service),
+    event_dispatcher: EventDispatcher = Depends(get_event_dispatcher),
 ) -> dict:
     """Remove a role assignment from a user."""
     role = await rbac_service.get_role_or_raise(role_id)
@@ -641,6 +652,11 @@ async def remove_role(
         target_user_id=user_id,
         description=f"Removed role {role.name!r} from user.",
         new_values={"role_id": str(role_id), "role_name": role.name},
+    )
+    await rbac_service.role_repository.session.commit()
+    await event_dispatcher.publish(
+        user_channel(user_id),
+        Event(event_type="PERMISSIONS_UPDATED", entity="user_roles", entity_id=str(user_id)),
     )
     return build_success_response(data={"removed": True}, request_id=request.state.request_id)
 

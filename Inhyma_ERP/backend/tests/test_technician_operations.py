@@ -889,13 +889,82 @@ async def test_rbac_enforcement_on_technician_operations(env):
             )
         ).status_code == 403
 
-    # Read-only viewer (technician_operations.view) -> 200 on GET, 403 on POST mutations
+    # Module base viewer (technician_operations.view) -> 200 on lookups/metrics, 403 on tab-gated endpoints & mutations
     async with AsyncClient(transport=ASGITransport(app=build_app(TECH_OPS_VIEWER)), base_url="http://test") as viewer:
-        assert (await viewer.get("/api/v1/technician-operations/gatepasses")).status_code == 200
         assert (await viewer.get("/api/v1/technician-operations/lookups")).status_code == 200
+        assert (await viewer.get("/api/v1/technician-operations/metrics")).status_code == 200
+        assert (await viewer.get("/api/v1/technician-operations/gatepasses")).status_code == 403
+        assert (await viewer.get("/api/v1/technician-operations/wallet/summaries")).status_code == 403
+        assert (await viewer.get("/api/v1/technician-operations/wallet/transactions")).status_code == 403
+        assert (await viewer.get("/api/v1/technician-operations/warranty")).status_code == 403
         assert (
             await viewer.post(
                 "/api/v1/technician-operations/wallet/transactions",
                 json={"technician_name": "Ramesh Kumar", "transaction_type": "COLLECTION", "amount": 500},
+            )
+        ).status_code == 403
+
+    # Granular tab + wallet card type enforcement
+    gp_tab_viewer = CurrentUser(
+        id=uuid.uuid4(),
+        username="gp_tab_viewer",
+        permissions={"technician_operations.view", "technician_operations.gatepasses.view"},
+    )
+    async with AsyncClient(transport=ASGITransport(app=build_app(gp_tab_viewer)), base_url="http://test") as gp_client:
+        assert (await gp_client.get("/api/v1/technician-operations/gatepasses")).status_code == 200
+        assert (await gp_client.get("/api/v1/technician-operations/wallet/transactions")).status_code == 403
+        assert (await gp_client.get("/api/v1/technician-operations/warranty")).status_code == 403
+        assert (await gp_client.get("/api/v1/technician-operations/warranty/validate?serial=SN-1")).status_code == 403
+
+    wallet_collector = CurrentUser(
+        id=uuid.uuid4(),
+        username="wallet_collector",
+        permissions={
+            "technician_operations.wallets.view",
+            "technician_operations.wallet.balances.view",
+            "technician_operations.wallet.collect",
+        },
+    )
+    async with AsyncClient(transport=ASGITransport(app=build_app(wallet_collector)), base_url="http://test") as w_client:
+        assert (await w_client.get("/api/v1/technician-operations/wallet/summaries")).status_code == 200
+        assert (await w_client.get("/api/v1/technician-operations/wallet/transactions")).status_code == 200
+        # Allowed COLLECTION, blocked HANDOVER_DEPOSIT / FIELD_EXPENSE
+        assert (
+            await w_client.post(
+                "/api/v1/technician-operations/wallet/transactions",
+                json={"technician_name": "Ramesh Kumar", "transaction_type": "COLLECTION", "amount": 500},
+            )
+        ).status_code == 201
+        assert (
+            await w_client.post(
+                "/api/v1/technician-operations/wallet/transactions",
+                json={"technician_name": "Ramesh Kumar", "transaction_type": "HANDOVER_DEPOSIT", "amount": 500},
+            )
+        ).status_code == 403
+        assert (
+            await w_client.post(
+                "/api/v1/technician-operations/wallet/transactions",
+                json={"technician_name": "Ramesh Kumar", "transaction_type": "FIELD_EXPENSE", "amount": 500},
+            )
+        ).status_code == 403
+
+    warranty_validator = CurrentUser(
+        id=uuid.uuid4(),
+        username="warranty_validator",
+        permissions={"technician_operations.warranty.view", "technician_operations.warranty.validate"},
+    )
+    async with AsyncClient(transport=ASGITransport(app=build_app(warranty_validator)), base_url="http://test") as wr_client:
+        assert (await wr_client.get("/api/v1/technician-operations/warranty")).status_code == 200
+        assert (await wr_client.get("/api/v1/technician-operations/warranty/validate?serial=SN-1")).status_code == 200
+        assert (
+            await wr_client.post(
+                "/api/v1/technician-operations/warranty",
+                json={
+                    "serial_number": "SN-DENIED-1",
+                    "machine_model": "Band Sealer 900",
+                    "customer_name": "Apex Packaging Ltd",
+                    "invoice_date": date.today().isoformat(),
+                    "warranty_months": 12,
+                },
             )
         ).status_code == 403

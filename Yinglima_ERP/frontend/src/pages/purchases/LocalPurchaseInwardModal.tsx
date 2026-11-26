@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { apiGet, apiPost, errorMessage } from "@/lib/api";
 import { DetailSkeleton } from "@/components/Skeleton";
+import { SelectField } from "@/components/fields";
 import { useToast } from "@/lib/toast";
 import type { LocalPurchaseDetail } from "@/types/localPurchase";
 import { getLocalPurchaseDetailCache, updateLocalPurchaseInCache } from "@/lib/localPurchaseCache";
@@ -324,11 +325,10 @@ export function LocalPurchaseInwardModal({
                     <label style={{ fontSize: "11.5px", fontWeight: 700, color: "#475569", display: "block", marginBottom: "4px" }}>
                       Destination Warehouse *
                     </label>
-                    <select
+                    <SelectField
                       value={warehouseLocation}
-                      onChange={(e) => setWarehouseLocation(e.target.value)}
-                      style={{
-                        width: "100%",
+                      onChange={(val) => setWarehouseLocation(val)}
+                      triggerStyle={{
                         padding: "7px 10px",
                         fontSize: "13px",
                         borderRadius: "6px",
@@ -343,10 +343,7 @@ export function LocalPurchaseInwardModal({
                           {wh.name}
                         </option>
                       ))}
-
-
-
-                    </select>
+                    </SelectField>
                   </div>
 
                   <div>

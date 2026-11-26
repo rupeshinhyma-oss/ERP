@@ -10,7 +10,7 @@
 
 > **Strict Policy:** When developing or modifying features, no existing module, form, or field listed in this document may be removed, broken, or regressed.  
 
-> **Last Updated:** September 16, 2026 (Added End-to-End Granular RBAC Permissions for Inquiries, Product Prices & Local Purchases) (Synchronized with Version 1.1.0 & Local Purchases Domestic Procurement Engine, Universal Live Duplicate Blockers & 100% Fluid Layout Standard)
+> **Last Updated:** November 19, 2026 (Upgraded all data-fetched dropdowns across Local Purchases, Sale Process, Product Prices, Inquiries, Effective Permissions, and Departments & Permissions to searchable `SelectField` menus; left small hardcoded static dropdowns unchanged)
 
 
 
@@ -3418,9 +3418,10 @@ Manage complete vendor team directory:
 
 - **DAG Cycle Detection:** Server-side validation prevents circular hierarchies (e.g. A -> B -> A or A -> B -> C -> A) and returns HTTP 409 Conflict with an alert.
 
-- **Permission Matrix Grid:**
+- **Permission Matrix Grid (`PermissionMatrixEditor.tsx` & `permissionLabels.ts`):**
 
-  - Grouped by module cards: `Dashboard`, `Contact`, `Inventory`, `Inquiries & Quotations`, `Product Prices`, `Local Purchase`, `Sale`, `Planning`, `User Management`, `Configurations`, `Audit`, `Trash`.
+  - Sections and module cards follow the exact Left Sidebar Navigation (`nav.ts`) top-to-bottom order via `PERMISSION_SECTIONS`: `CONTACT` (`Suppliers`, `Buyers`) -> `INVENTORY` (`Product Stock`, `Stock Adjustment`, `Stock Transfer`, `Product Master`, `Product Gallery`) -> `SALE` (`Quotations`, `Proforma Invoices`, `Sale Process`, `Payment Modes & Terms`) -> `PURCHASE` (`Local Purchase`, `Inquiries & Quotations`, `Product Prices`) -> `PLANNING` (`Shipment Planning`) -> `FINANCE` (`Finance`) -> `USER MANAGEMENT` (`Users`, `Departments & Permissions`) -> `SETTINGS — MASTERS` (`Cities`, `States`, `Countries`, `Currencies`, `Units of Measurement`, `HSN / SAC Codes`, `Product Categories`, `Product Sub-Categories`, `Brands`, `Supplier Types`, `Buyer Types`, `Organizations`, `Payment Modes`, `Warehouses`) -> `SETTINGS — SYSTEM` (`Notification Rules`, `Settings`, `Audit Log`, `Trash`), plus an `Other Permissions` fallback for any unmapped modules.
+  - Within each module card, permissions are semantically ordered via `sortModulePermissions` (`View` -> stage/tab views -> `Create` -> action/stage transitions -> `Edit` -> `Delete` -> `Import` -> `Export` -> `Bulk Actions` -> `Manage All`). Searching by section title or module display name expands and shows all permissions within the matched module card.
 
   - `Select All` / `Deselect All` toggles per module card.
 
@@ -4805,6 +4806,14 @@ A standardized suite of 8 production-grade Excel (`.xlsx`) files is maintained d
    - Click `Export` in the top-right header -> verify a 4-sheet `.xlsx` workbook (`Financial Summary`, `Local Purchase (Suppliers)`, `Sales & Agent Schedule`, `Payment Transactions`) downloads cleanly.
 6. **6-KPI Card Active Border & Stage Filter Sync (`handleKpiSelect`)**:
    - Click each of the 6 KPI summary cards (`LOCAL PURCHASE — ALL`, `LOCAL PURCHASE — PAID`, `LOCAL PURCHASE — BALANCE`, `SALES PROCESS — ALL`, `SALES PROCESS — RECEIVED`, `SALES PROCESS — BALANCE`) -> verify the blue active border (`1.5px solid #3b82f6`) moves to the exact KPI card clicked and the table below switches to the matching section and stage (`All`, `Cleared`, `Pending`).
+7. **Top Filter Searchable Dropdowns (`Filter` -> `Party (Supplier / Buyer)` & `Consignment Code`)**:
+   - Click `Filter` to open `Filter Options`.
+   - Open **Party (Supplier / Buyer)** -> verify options are grouped under a bold **`SUPPLIERS`** header followed by suppliers, and a bold **`BUYERS`** header followed by buyers, and typing filters across both groups.
+   - Open **Consignment Code** -> verify consignment codes are listed and searchable, and selecting either filter updates the KPI cards and table rows (clearing with `✕` or `Reset Filters` restores all records).
+8. **Dynamic Payment Modes / Bank Accounts Master (`Settings → Masters → Payment Modes` & `Record Payment Installment`)**:
+   - Open **Settings → Masters → Payment Modes** (`/masters/payment-modes`) -> verify the 7 seeded payment modes (`RMB A/C`, `USD Transaction A/C`, `USD Capital A/C`, `TT / Wire Transfer`, `Alipay / WeChat Pay`, `Cash`, `Other Bank A/C`) are listed.
+   - Create a new active payment mode (e.g. `ICBC RMB A/C`), then open **Financial Report → `⋮` → Add Payment** -> verify `ICBC RMB A/C` appears in the **Payment Mode / Bank Account** dropdown (and disappears if deactivated).
+   - Verify **Departments & Permissions** includes **Payment Modes / Bank Accounts** (`payment_mode.*`) and gates `/masters/payment-modes` and CRUD actions properly.
 
 
 ### Test Case LP-BILL-01: Local Purchase Bill PDF Upload & Edit Persistence in Supabase Storage

@@ -12,7 +12,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { AppShell } from "@/components/AppShell";
 import { ActionDropdown, type ActionDropdownEntry } from "@/components/ActionDropdown";
 import { Banner, Modal } from "@/components/ui";
-import { TextField } from "@/components/fields";
+import { SelectField, TextField } from "@/components/fields";
 import { apiDelete, apiGet, apiPatch, apiPost, apiPut } from "@/lib/api";
 import { useAuth, usePendingGuard } from "@/lib/hooks";
 import { useToast } from "@/lib/toast";
@@ -951,10 +951,10 @@ export function RbacPage() {
                         )}
                       </div>
                     ) : (
-                      <select
+                      <SelectField
                         id="role-parent-input"
                         value={roleParentId}
-                        onChange={(e) => setRoleParentId(e.target.value)}
+                        onChange={(val) => setRoleParentId(val)}
                         disabled={!canManageOrCreate}
                       >
                         <option value="">-- None (top-level) --</option>
@@ -965,7 +965,7 @@ export function RbacPage() {
                               {r.name}
                             </option>
                           ))}
-                      </select>
+                      </SelectField>
                     )}
 
                     <span className="muted" style={{ fontSize: "12px", marginTop: "4px", display: "block" }}>
@@ -1365,32 +1365,20 @@ export function RbacPage() {
 
                     {canManageOrCreate && (
                       <div style={{ display: "flex", gap: "8px", marginBottom: "16px", alignItems: "center", width: "100%" }}>
-                        <select
+                        <SelectField
                           id="add-child-to-role-select"
                           value={selectedChildToAdd}
-                          onChange={(e) => setSelectedChildToAdd(e.target.value)}
-                          style={{
-                            flex: 1,
-                            minWidth: 0,
+                          onChange={(val) => setSelectedChildToAdd(val)}
+                          style={{ flex: 1, minWidth: 0 }}
+                          triggerStyle={{
                             height: "38px",
-                            paddingLeft: "10px",
-                            paddingRight: "34px",
+                            padding: "0 12px",
                             borderRadius: "6px",
                             border: "1px solid #cbd5e1",
                             fontSize: "13px",
                             background: "#ffffff",
                             color: "#1e293b",
-                            outline: "none",
                             boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
-                            cursor: "pointer",
-                            textOverflow: "ellipsis",
-                            overflow: "hidden",
-                            appearance: "none",
-                            WebkitAppearance: "none",
-                            MozAppearance: "none",
-                            backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E")`,
-                            backgroundRepeat: "no-repeat",
-                            backgroundPosition: "right 14px center",
                           }}
                         >
                           <option value="">-- Select child department to add --</option>
@@ -1407,7 +1395,7 @@ export function RbacPage() {
                                 {roleDisplayName(r.name)} {r.code ? `(${r.code})` : ""}
                               </option>
                             ))}
-                        </select>
+                        </SelectField>
                         <button
                           type="button"
                           className="btn btn-primary"
@@ -1844,11 +1832,11 @@ export function RbacPage() {
           <div style={{ padding: "20px 24px" }}>
             <div className="field" style={{ marginBottom: "16px" }}>
               <label htmlFor="cloneSourceId">Source Department (Copy From) *</label>
-              <select
+              <SelectField
                 id="cloneSourceId"
                 required
                 value={cloneSourceId}
-                onChange={(e) => setCloneSourceId(e.target.value)}
+                onChange={(val) => setCloneSourceId(val)}
               >
                 <option value="">-- Select Source Department --</option>
                 {allRoles.map((r) => (
@@ -1856,16 +1844,16 @@ export function RbacPage() {
                     {roleDisplayName(r.name) + (r.is_system ? " (System)" : "")}
                   </option>
                 ))}
-              </select>
+              </SelectField>
             </div>
 
             <div className="field">
               <label htmlFor="cloneTargetId">Target Department (Apply To) *</label>
-              <select
+              <SelectField
                 id="cloneTargetId"
                 required
                 value={cloneTargetId}
-                onChange={(e) => setCloneTargetId(e.target.value)}
+                onChange={(val) => setCloneTargetId(val)}
               >
                 <option value="">-- Select Target Department --</option>
                 {allRoles
@@ -1875,7 +1863,7 @@ export function RbacPage() {
                       {roleDisplayName(r.name)}
                     </option>
                   ))}
-              </select>
+              </SelectField>
               <span className="muted" style={{ fontSize: "12px", marginTop: "4px", display: "block" }}>
                 System departments (Admin, User) cannot be overwritten as a clone target.
               </span>
@@ -1966,16 +1954,14 @@ export function RbacPage() {
                 <label htmlFor="reassignToRoleId" style={{ fontWeight: 600, fontSize: "13px", color: "#1e293b", marginBottom: "6px", display: "block" }}>
                   Move these users to *
                 </label>
-                <select
+                <SelectField
                   id="reassignToRoleId"
                   required
                   value={reassignToRoleId}
-                  onChange={(e) => setReassignToRoleId(e.target.value)}
-                  style={{
-                    width: "100%",
+                  onChange={(val) => setReassignToRoleId(val)}
+                  triggerStyle={{
                     height: "38px",
-                    paddingLeft: "12px",
-                    paddingRight: "34px",
+                    padding: "0 12px",
                     borderRadius: "6px",
                     border: "1px solid #cbd5e1",
                     fontSize: "13px",
@@ -1991,7 +1977,7 @@ export function RbacPage() {
                         {roleDisplayName(r.name) + (RESERVED_ROLE_NAMES.has(r.name) ? " (System)" : "")}
                       </option>
                     ))}
-                </select>
+                </SelectField>
                 <span className="muted" style={{ fontSize: "12px", marginTop: "4px", display: "block" }}>
                   Defaults to the "User" department -- the standard fallback for anyone who loses a department.
                 </span>

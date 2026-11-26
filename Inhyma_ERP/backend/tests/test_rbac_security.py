@@ -328,5 +328,259 @@ async def test_technician_system_department_reserved_and_lookup():
     await engine.dispose()
 
 
+async def test_role_permissions_bulk_endpoint_and_guards():
+    """Verify PUT /api/v1/rbac/roles/{role_id}/permissions/bulk atomically replaces permissions and preserves RBAC guards."""
+    from httpx import ASGITransport, AsyncClient
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+    from app.audit.dependencies import get_audit_service
+    from app.audit.models import AuditLog
+    from app.auth.dependencies import get_current_user
+    from app.cache.dependency import get_cache_manager
+    from app.database.base import Base
+    from app.database.session import get_db_session
+    from app.main import create_application
+    from app.rbac.models import DepartmentHierarchy, Permission, Role, RolePermission, UserPermission, UserRole
+
+    class _NoAudit:
+        async def record(self, *args, **kwargs):
+            return None
+
+    class _NoCache:
+        async def delete_pattern(self, *args, **kwargs):
+            return 0
+
+        async def delete(self, *args, **kwargs):
+            return 0
+
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:", connect_args={"check_same_thread": False})
+    async with engine.begin() as conn:
+        await conn.run_sync(
+            lambda c: Base.metadata.create_all(
+                c,
+                tables=[
+                    User.__table__,
+                    Permission.__table__,
+                    Role.__table__,
+                    DepartmentHierarchy.__table__,
+                    RolePermission.__table__,
+                    UserRole.__table__,
+                    UserPermission.__table__,
+                    AuditLog.__table__,
+                ],
+            )
+        )
+
+    maker = async_sessionmaker(engine, expire_on_commit=False)
+    async with maker() as s:
+        p1 = Permission(code="company.view", module="company", page="companies", action="view", scope="ALL", description="View companies")
+        p2 = Permission(code="company.create", module="company", page="companies", action="create", scope="ALL", description="Create companies")
+        p3 = Permission(code="company.export", module="company", page="companies", action="export", scope="ALL", description="Export companies")
+        custom_role = Role(name="Test Dept", description="Test department", is_system=False)
+        super_role = Role(name="super_admin", description="Admin", is_system=True)
+        actor = User(username="rbac_mgr", email="mgr@example.com", password_hash="x", is_active=True, status=UserStatus.ACTIVE)
+        s.add_all([p1, p2, p3, custom_role, super_role, actor])
+        await s.flush()
+        s.add(RolePermission(role_id=custom_role.id, permission_id=p1.id))
+        await s.commit()
+
+        active_perms: set[str] = set()
+        app = create_application()
+
+        async def _db():
+            async with maker() as req_session:
+                try:
+                    yield req_session
+                    await req_session.commit()
+                except Exception:
+                    await req_session.rollback()
+                    raise
+
+        app.dependency_overrides[get_db_session] = _db
+        app.dependency_overrides[get_current_user] = lambda: CurrentUser(
+            id=actor.id, username="rbac_mgr", permissions=set(active_perms)
+        )
+        app.dependency_overrides[get_audit_service] = lambda: _NoAudit()
+        app.dependency_overrides[get_cache_manager] = lambda: _NoCache()
+
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as ac:
+            # Missing roles_permissions.action -> 403
+            active_perms.update({"roles_permissions.view"})
+            assert (
+                await ac.put(
+                    f"/api/v1/rbac/roles/{custom_role.id}/permissions/bulk",
+                    json={"permission_ids": [str(p2.id)]},
+                )
+            ).status_code == 403
+
+            # With roles_permissions.action -> atomically replaces [p1] with [p2, p3]
+            active_perms.update({"roles_permissions.action"})
+            res = await ac.put(
+                f"/api/v1/rbac/roles/{custom_role.id}/permissions/bulk",
+                json={"permission_ids": [str(p2.id), str(p3.id)]},
+            )
+            assert res.status_code == 200
+            assert res.json()["data"]["count"] == 2
+
+            role_res = await ac.get(f"/api/v1/rbac/roles/{custom_role.id}")
+            assert role_res.status_code == 200
+            assert set(role_res.json()["data"]["permissions"]) == {"company.create", "company.export"}
+
+            # Non-super_admin cannot bulk-modify super_admin permissions
+            assert (
+                await ac.put(
+                    f"/api/v1/rbac/roles/{super_role.id}/permissions/bulk",
+                    json={"permission_ids": [str(p1.id)]},
+                )
+            ).status_code == 403
+
+    await engine.dispose()
+
+
+async def test_zero_permission_db_user_never_resurrects_stale_jwt_claims():
+    """Verify verify_access_token never restores stale JWT permissions or admin access when DB effective permissions are 0."""
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+    from app.auth.models import Session as AuthSession, TokenBlacklist
+    from app.auth.repository import PasswordHistoryRepository, SessionRepository, TokenBlacklistRepository
+    from app.auth.security import create_access_token
+    from app.auth.service import AuthService
+    from app.cache.in_memory import InMemoryCacheBackend
+    from app.database.base import Base
+    from app.rbac.models import DepartmentHierarchy, Permission, Role, RolePermission, UserPermission, UserRole
+    from app.rbac.repository import RoleRepository
+    from app.users.repository import UserRepository
+
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:", connect_args={"check_same_thread": False})
+    async with engine.begin() as conn:
+        await conn.run_sync(
+            lambda c: Base.metadata.create_all(
+                c,
+                tables=[
+                    User.__table__,
+                    AuthSession.__table__,
+                    TokenBlacklist.__table__,
+                    Permission.__table__,
+                    Role.__table__,
+                    DepartmentHierarchy.__table__,
+                    RolePermission.__table__,
+                    UserRole.__table__,
+                    UserPermission.__table__,
+                ],
+            )
+        )
+
+    maker = async_sessionmaker(engine, expire_on_commit=False)
+    async with maker() as s:
+        empty_dept = Role(name="Test", description="No perms", is_system=False)
+        user_a = User(
+            username="usera",
+            email="usera@gmail.com",
+            password_hash="x",
+            is_active=True,
+            status=UserStatus.ACTIVE,
+        )
+        s.add_all([empty_dept, user_a])
+        await s.flush()
+        s.add(UserRole(user_id=user_a.id, role_id=empty_dept.id))
+        await s.commit()
+
+        # Stale JWT still carries revoked company.view and "*" from an old login
+        stale_jwt = create_access_token(user_a.id, permissions=["company.view", "*"]).token
+
+        auth_service = AuthService(
+            user_repository=UserRepository(s),
+            role_repository=RoleRepository(s),
+            session_repository=SessionRepository(s),
+            token_blacklist_repository=TokenBlacklistRepository(s),
+            password_history_repository=PasswordHistoryRepository(s),
+            cache=InMemoryCacheBackend(),
+        )
+        resolved = await auth_service.verify_access_token(stale_jwt)
+        assert resolved.is_super_admin is False
+        assert resolved.permissions == set()
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_interface_error_returns_503_and_grant_permission_idempotent_and_audit_isolated():
+    """Verify DB InterfaceError maps to 503, add_permission is idempotent, and failed audit flush never poisons session."""
+    from fastapi import FastAPI
+    from httpx import ASGITransport, AsyncClient
+    from sqlalchemy.exc import InterfaceError
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+    from sqlalchemy.pool import StaticPool
+    from unittest.mock import AsyncMock
+
+    from app.audit.constants import AuditAction
+    from app.audit.repository import AuditRepository
+    from app.audit.service import AuditService
+    from app.core.exception_handlers import register_exception_handlers
+    from app.database.base import Base
+    from app.rbac.models import DepartmentHierarchy, Permission, Role, RolePermission
+    from app.rbac.repository import RoleRepository
+
+    # 1. InterfaceError maps to 503 Service Unavailable (not raw 500)
+    mini_app = FastAPI()
+    register_exception_handlers(mini_app)
+
+    @mini_app.get("/boom-interface")
+    async def _boom_interface():
+        raise InterfaceError("SELECT 1", {}, Exception("connection is closed"))
+
+    async with AsyncClient(transport=ASGITransport(app=mini_app), base_url="http://test") as ac:
+        res = await ac.get("/boom-interface")
+        assert res.status_code == 503
+        assert res.json()["errors"][0]["code"] == "SERVICE_UNAVAILABLE"
+
+    # 2. RoleRepository.add_permission is idempotent and AuditService failure is isolated by savepoint
+    engine = create_async_engine(
+        "sqlite+aiosqlite://",
+        poolclass=StaticPool,
+        connect_args={"check_same_thread": False},
+    )
+    async with engine.begin() as conn:
+        await conn.run_sync(
+            lambda c: Base.metadata.create_all(
+                c,
+                tables=[
+                    Permission.__table__,
+                    Role.__table__,
+                    DepartmentHierarchy.__table__,
+                    RolePermission.__table__,
+                ],
+            )
+        )
+
+    maker = async_sessionmaker(engine, expire_on_commit=False)
+    async with maker() as s:
+        role = Role(name="ResilientDept", is_system=False)
+        perm = Permission(code="company.create", module="company", page="companies", action="create")
+        s.add_all([role, perm])
+        await s.flush()
+
+        role_repo = RoleRepository(s)
+        link1 = await role_repo.add_permission(role, perm)
+        link2 = await role_repo.add_permission(role, perm)
+        assert link1.id == link2.id
+
+        audit_repo = AuditRepository(s)
+        audit_repo.create = AsyncMock(side_effect=RuntimeError("audit write failed"))  # type: ignore[method-assign]
+        audit_service = AuditService(audit_repo)
+        recorded = await audit_service.record(
+            action=AuditAction.PERMISSION_ASSIGNED,
+            module="rbac",
+            entity_type="Role",
+            entity_id=str(role.id),
+        )
+        assert recorded is None
+        # Session remains healthy and committable after swallowed audit failure
+        await s.commit()
+
+    await engine.dispose()
+
+
+
+
+
 
 

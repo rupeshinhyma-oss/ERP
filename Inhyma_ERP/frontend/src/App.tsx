@@ -20,6 +20,7 @@ import { setUnauthorizedHandler } from "@/lib/api";
 import { LEGACY_REDIRECTS } from "@/lib/nav";
 
 import { auth } from "@/lib/auth";
+import { useAuth } from "@/lib/hooks";
 import { LoginPage } from "@/pages/Login";
 import { AuthCallbackPage } from "@/pages/AuthCallback";
 import { DashboardPage } from "@/pages/Dashboard";
@@ -35,13 +36,14 @@ function HrmsRouteGuard({
   anyPermissions?: string[];
   children: React.ReactNode;
 }) {
+  const { hasPermission } = useAuth();
   if (!auth.isLoggedIn()) {
     return <ForbiddenPage />;
   }
-  if (permission && !auth.hasPermission(permission)) {
+  if (permission && !hasPermission(permission)) {
     return <ForbiddenPage />;
   }
-  if (anyPermissions && anyPermissions.length > 0 && !anyPermissions.some((p) => auth.hasPermission(p))) {
+  if (anyPermissions && anyPermissions.length > 0 && !anyPermissions.some((p) => hasPermission(p))) {
     return <ForbiddenPage />;
   }
   return <>{children}</>;
@@ -207,12 +209,12 @@ export function App() {
           {/* Employee was merged into User -- /employees is now an alias for the same page. */}
           <Route path="/employees" element={<HrmsRouteGuard><UsersPage /></HrmsRouteGuard>} />
           <Route path="/positions" element={<HrmsRouteGuard><PositionsPage /></HrmsRouteGuard>} />
-          <Route path="/companies" element={<HrmsRouteGuard><CompaniesPage /></HrmsRouteGuard>} />
-          <Route path="/companies/add" element={<HrmsRouteGuard><CompaniesPage defaultAdd={true} /></HrmsRouteGuard>} />
-          <Route path="/companies/addedit" element={<HrmsRouteGuard><CompaniesPage defaultAdd={true} /></HrmsRouteGuard>} />
-          <Route path="/companies/addedit/:id" element={<HrmsRouteGuard><CompaniesPage defaultAdd={true} /></HrmsRouteGuard>} />
-          <Route path="/user/addEdit" element={<HrmsRouteGuard><CompaniesPage defaultAdd={true} /></HrmsRouteGuard>} />
-          <Route path="/user/addedit" element={<HrmsRouteGuard><CompaniesPage defaultAdd={true} /></HrmsRouteGuard>} />
+          <Route path="/companies" element={<HrmsRouteGuard anyPermissions={["company.view", "company.manage"]}><CompaniesPage /></HrmsRouteGuard>} />
+          <Route path="/companies/add" element={<HrmsRouteGuard anyPermissions={["company.view", "company.create", "company.manage"]}><CompaniesPage defaultAdd={true} /></HrmsRouteGuard>} />
+          <Route path="/companies/addedit" element={<HrmsRouteGuard anyPermissions={["company.view", "company.create", "company.update", "company.manage"]}><CompaniesPage defaultAdd={true} /></HrmsRouteGuard>} />
+          <Route path="/companies/addedit/:id" element={<HrmsRouteGuard anyPermissions={["company.view", "company.update", "company.manage"]}><CompaniesPage defaultAdd={true} /></HrmsRouteGuard>} />
+          <Route path="/user/addEdit" element={<HrmsRouteGuard anyPermissions={["company.view", "company.create", "company.update", "company.manage"]}><CompaniesPage defaultAdd={true} /></HrmsRouteGuard>} />
+          <Route path="/user/addedit" element={<HrmsRouteGuard anyPermissions={["company.view", "company.create", "company.update", "company.manage"]}><CompaniesPage defaultAdd={true} /></HrmsRouteGuard>} />
 
           {/* AGENTS routes */}
           <Route path="/agents" element={<HrmsRouteGuard permission="agent.view"><AgentsPage /></HrmsRouteGuard>} />
@@ -238,40 +240,40 @@ export function App() {
           <Route path="/suppliers/addedit" element={<Navigate to="/purchase/suppliers/addedit" replace />} />
 
           <Route path="/inquiries" element={<Navigate to="/proforma-invoice/list" replace />} />
-          <Route path="/proforma-invoice/list" element={<HrmsRouteGuard><ProformaInvoicesPage /></HrmsRouteGuard>} />
-          <Route path="/proforma-invoice/add" element={<HrmsRouteGuard><ProformaInvoicesPage defaultAdd={true} /></HrmsRouteGuard>} />
-          <Route path="/proforma-invoice/addedit" element={<HrmsRouteGuard><ProformaInvoicesPage defaultAdd={true} /></HrmsRouteGuard>} />
-          <Route path="/proforma-invoice/addedit/:id" element={<HrmsRouteGuard><ProformaInvoicesPage defaultAdd={true} /></HrmsRouteGuard>} />
-          <Route path="/proforma-invoice/download-proforma-invoice/:id" element={<HrmsRouteGuard><ProformaInvoicePdfPage /></HrmsRouteGuard>} />
-          <Route path="/proforma-invoice/download-proforma-invoice" element={<HrmsRouteGuard><ProformaInvoicePdfPage /></HrmsRouteGuard>} />
-          <Route path="/proforma-invoice/pdf/:id" element={<HrmsRouteGuard><ProformaInvoicePdfPage /></HrmsRouteGuard>} />
-          <Route path="/proforma-invoice/pdf" element={<HrmsRouteGuard><ProformaInvoicePdfPage /></HrmsRouteGuard>} />
+          <Route path="/proforma-invoice/list" element={<HrmsRouteGuard anyPermissions={["proforma.view", "proforma.pending.view", "proforma.admin_approved.view", "proforma.confirmed.view", "proforma.cancelled.view", "proforma.manage"]}><ProformaInvoicesPage /></HrmsRouteGuard>} />
+          <Route path="/proforma-invoice/add" element={<HrmsRouteGuard anyPermissions={["proforma.create", "proforma.manage"]}><ProformaInvoicesPage defaultAdd={true} /></HrmsRouteGuard>} />
+          <Route path="/proforma-invoice/addedit" element={<HrmsRouteGuard anyPermissions={["proforma.create", "proforma.manage"]}><ProformaInvoicesPage defaultAdd={true} /></HrmsRouteGuard>} />
+          <Route path="/proforma-invoice/addedit/:id" element={<HrmsRouteGuard anyPermissions={["proforma.update", "proforma.manage"]}><ProformaInvoicesPage defaultAdd={true} /></HrmsRouteGuard>} />
+          <Route path="/proforma-invoice/download-proforma-invoice/:id" element={<HrmsRouteGuard anyPermissions={["proforma.download", "proforma.manage"]}><ProformaInvoicePdfPage /></HrmsRouteGuard>} />
+          <Route path="/proforma-invoice/download-proforma-invoice" element={<HrmsRouteGuard anyPermissions={["proforma.download", "proforma.manage"]}><ProformaInvoicePdfPage /></HrmsRouteGuard>} />
+          <Route path="/proforma-invoice/pdf/:id" element={<HrmsRouteGuard anyPermissions={["proforma.download", "proforma.manage"]}><ProformaInvoicePdfPage /></HrmsRouteGuard>} />
+          <Route path="/proforma-invoice/pdf" element={<HrmsRouteGuard anyPermissions={["proforma.download", "proforma.manage"]}><ProformaInvoicePdfPage /></HrmsRouteGuard>} />
           <Route path="/proforma-invoice" element={<Navigate to="/proforma-invoice/list" replace />} />
-          <Route path="/sales/process" element={<HrmsRouteGuard><SaleProcessListPage /></HrmsRouteGuard>} />
-          <Route path="/sales/process/add" element={<HrmsRouteGuard><SaleProcessFormPage /></HrmsRouteGuard>} />
-          <Route path="/sales/process/edit/:id" element={<HrmsRouteGuard><SaleProcessFormPage /></HrmsRouteGuard>} />
+          <Route path="/sales/process" element={<HrmsRouteGuard anyPermissions={["saleorder.view", "saleorder.pending.view", "saleorder.sales_confirmed.view", "saleorder.admin_approved.view", "saleorder.acc_confirmed.view", "saleorder.gatepass_created.view", "saleorder.dispatched.view", "saleorder.gatepass_cancelled.view", "saleorder.lr.view", "saleorder.cancelled.view", "saleorder.approve", "saleorder.accounts", "saleorder.warehouse", "saleorder.manage"]}><SaleProcessListPage /></HrmsRouteGuard>} />
+          <Route path="/sales/process/add" element={<HrmsRouteGuard anyPermissions={["saleorder.create", "saleorder.duplicate", "saleorder.manage", "technician_operations.gatepass.create_so", "technician_operations.manage"]}><SaleProcessFormPage /></HrmsRouteGuard>} />
+          <Route path="/sales/process/edit/:id" element={<HrmsRouteGuard anyPermissions={["saleorder.update", "saleorder.manage"]}><SaleProcessFormPage /></HrmsRouteGuard>} />
           <Route path="/sale-process/list" element={<Navigate to="/sales/process" replace />} />
           <Route path="/sales-process/list" element={<Navigate to="/sales/process" replace />} />
-          <Route path="/sale-order/list" element={<HrmsRouteGuard><SaleProcessListPage /></HrmsRouteGuard>} />
-          <Route path="/sale-order/add" element={<HrmsRouteGuard><SaleProcessFormPage /></HrmsRouteGuard>} />
-          <Route path="/sale-order/addedit" element={<HrmsRouteGuard><SaleProcessFormPage /></HrmsRouteGuard>} />
-          <Route path="/sale-order/addedit/:id" element={<HrmsRouteGuard><SaleProcessFormPage /></HrmsRouteGuard>} />
-          <Route path="/sale-order/invoice/:id" element={<HrmsRouteGuard><SalesOrderPdfPage /></HrmsRouteGuard>} />
-          <Route path="/sale-order/invoice" element={<HrmsRouteGuard><SalesOrderPdfPage /></HrmsRouteGuard>} />
-          <Route path="/sale-order/download-sale-order/:id" element={<HrmsRouteGuard><SalesOrderPdfPage /></HrmsRouteGuard>} />
-          <Route path="/sale-order/download-sale-order" element={<HrmsRouteGuard><SalesOrderPdfPage /></HrmsRouteGuard>} />
-          <Route path="/sale-order/pdf/:id" element={<HrmsRouteGuard><SalesOrderPdfPage /></HrmsRouteGuard>} />
-          <Route path="/sale-order/pdf" element={<HrmsRouteGuard><SalesOrderPdfPage /></HrmsRouteGuard>} />
-          <Route path="/sales/process/pdf/:id" element={<HrmsRouteGuard><SalesOrderPdfPage /></HrmsRouteGuard>} />
-          <Route path="/sales/process/pdf" element={<HrmsRouteGuard><SalesOrderPdfPage /></HrmsRouteGuard>} />
-          <Route path="/sale-order/gatepass-pdf/:id" element={<HrmsRouteGuard><GatePassPdfPage /></HrmsRouteGuard>} />
-          <Route path="/sale-order/gatepass-pdf" element={<HrmsRouteGuard><GatePassPdfPage /></HrmsRouteGuard>} />
-          <Route path="/sales/gatepass-pdf/:id" element={<HrmsRouteGuard><GatePassPdfPage /></HrmsRouteGuard>} />
-          <Route path="/sales/gatepass-pdf" element={<HrmsRouteGuard><GatePassPdfPage /></HrmsRouteGuard>} />
+          <Route path="/sale-order/list" element={<HrmsRouteGuard anyPermissions={["saleorder.view", "saleorder.pending.view", "saleorder.sales_confirmed.view", "saleorder.admin_approved.view", "saleorder.acc_confirmed.view", "saleorder.gatepass_created.view", "saleorder.dispatched.view", "saleorder.gatepass_cancelled.view", "saleorder.lr.view", "saleorder.cancelled.view", "saleorder.approve", "saleorder.accounts", "saleorder.warehouse", "saleorder.manage"]}><SaleProcessListPage /></HrmsRouteGuard>} />
+          <Route path="/sale-order/add" element={<HrmsRouteGuard anyPermissions={["saleorder.create", "saleorder.duplicate", "saleorder.manage", "technician_operations.gatepass.create_so", "technician_operations.manage"]}><SaleProcessFormPage /></HrmsRouteGuard>} />
+          <Route path="/sale-order/addedit" element={<HrmsRouteGuard anyPermissions={["saleorder.create", "saleorder.duplicate", "saleorder.manage", "technician_operations.gatepass.create_so", "technician_operations.manage"]}><SaleProcessFormPage /></HrmsRouteGuard>} />
+          <Route path="/sale-order/addedit/:id" element={<HrmsRouteGuard anyPermissions={["saleorder.update", "saleorder.manage"]}><SaleProcessFormPage /></HrmsRouteGuard>} />
+          <Route path="/sale-order/invoice/:id" element={<HrmsRouteGuard anyPermissions={["saleorder.download", "saleorder.details.view", "saleorder.manage"]}><SalesOrderPdfPage /></HrmsRouteGuard>} />
+          <Route path="/sale-order/invoice" element={<HrmsRouteGuard anyPermissions={["saleorder.download", "saleorder.details.view", "saleorder.manage"]}><SalesOrderPdfPage /></HrmsRouteGuard>} />
+          <Route path="/sale-order/download-sale-order/:id" element={<HrmsRouteGuard anyPermissions={["saleorder.download", "saleorder.details.view", "saleorder.manage"]}><SalesOrderPdfPage /></HrmsRouteGuard>} />
+          <Route path="/sale-order/download-sale-order" element={<HrmsRouteGuard anyPermissions={["saleorder.download", "saleorder.details.view", "saleorder.manage"]}><SalesOrderPdfPage /></HrmsRouteGuard>} />
+          <Route path="/sale-order/pdf/:id" element={<HrmsRouteGuard anyPermissions={["saleorder.download", "saleorder.details.view", "saleorder.manage"]}><SalesOrderPdfPage /></HrmsRouteGuard>} />
+          <Route path="/sale-order/pdf" element={<HrmsRouteGuard anyPermissions={["saleorder.download", "saleorder.details.view", "saleorder.manage"]}><SalesOrderPdfPage /></HrmsRouteGuard>} />
+          <Route path="/sales/process/pdf/:id" element={<HrmsRouteGuard anyPermissions={["saleorder.download", "saleorder.details.view", "saleorder.manage"]}><SalesOrderPdfPage /></HrmsRouteGuard>} />
+          <Route path="/sales/process/pdf" element={<HrmsRouteGuard anyPermissions={["saleorder.download", "saleorder.details.view", "saleorder.manage"]}><SalesOrderPdfPage /></HrmsRouteGuard>} />
+          <Route path="/sale-order/gatepass-pdf/:id" element={<HrmsRouteGuard anyPermissions={["saleorder.download", "saleorder.manage"]}><GatePassPdfPage /></HrmsRouteGuard>} />
+          <Route path="/sale-order/gatepass-pdf" element={<HrmsRouteGuard anyPermissions={["saleorder.download", "saleorder.manage"]}><GatePassPdfPage /></HrmsRouteGuard>} />
+          <Route path="/sales/gatepass-pdf/:id" element={<HrmsRouteGuard anyPermissions={["saleorder.download", "saleorder.manage"]}><GatePassPdfPage /></HrmsRouteGuard>} />
+          <Route path="/sales/gatepass-pdf" element={<HrmsRouteGuard anyPermissions={["saleorder.download", "saleorder.manage"]}><GatePassPdfPage /></HrmsRouteGuard>} />
           <Route path="/sale-order" element={<Navigate to="/sale-order/list" replace />} />
-          <Route path="/discount-payments/list" element={<HrmsRouteGuard anyPermissions={["saleorder.view", "saleorder.create", "saleorder.update", "saleorder.accounts", "saleorder.approve", "saleorder.delete", "proforma.approve", "crm.leads.view", "crm.leads.manage", "report.view"]}><DiscountPaymentsPage /></HrmsRouteGuard>} />
+          <Route path="/discount-payments/list" element={<HrmsRouteGuard anyPermissions={["saleorder.view", "saleorder.create", "saleorder.update", "saleorder.accounts", "saleorder.approve", "saleorder.delete", "crm.leads.view", "crm.leads.manage", "report.view"]}><DiscountPaymentsPage /></HrmsRouteGuard>} />
           <Route path="/discount-payments" element={<Navigate to="/discount-payments/list" replace />} />
-          <Route path="/sale-discount/list" element={<HrmsRouteGuard anyPermissions={["saleorder.view", "saleorder.create", "saleorder.update", "saleorder.accounts", "saleorder.approve", "saleorder.delete", "proforma.approve", "crm.leads.view", "crm.leads.manage", "report.view"]}><DiscountPaymentsPage /></HrmsRouteGuard>} />
+          <Route path="/sale-discount/list" element={<HrmsRouteGuard anyPermissions={["saleorder.view", "saleorder.create", "saleorder.update", "saleorder.accounts", "saleorder.approve", "saleorder.delete", "crm.leads.view", "crm.leads.manage", "report.view"]}><DiscountPaymentsPage /></HrmsRouteGuard>} />
           <Route path="/sale-discount" element={<Navigate to="/sale-discount/list" replace />} />
 
           {/* LOCAL PURCHASE routes under /purchase/localpurchase */}
@@ -369,11 +371,11 @@ export function App() {
           <Route path="/technical-tasks/detail/:id" element={<HrmsRouteGuard><TechnicalTaskDetailPage /></HrmsRouteGuard>} />
           <Route path="/technical-tasks" element={<Navigate to="/technical-task/list" replace />} />
           <Route path="/technical-task/call-logs" element={<Navigate to="/reports/general?tab=call-logs" replace />} />
-          <Route path="/payments" element={<HrmsRouteGuard><PaymentsPage /></HrmsRouteGuard>} />
+          <Route path="/payments" element={<HrmsRouteGuard anyPermissions={["payment.view", "payment.manage"]}><PaymentsPage /></HrmsRouteGuard>} />
           <Route path="/task-payments" element={<Navigate to="/payments" replace />} />
           <Route path="/technical-task/payments" element={<Navigate to="/payments" replace />} />
           <Route path="/masters/technical-task-types" element={<HrmsRouteGuard><TechnicalTaskTypesPage /></HrmsRouteGuard>} />
-          <Route path="/technician-operations" element={<HrmsRouteGuard><TechnicianOperationsPage /></HrmsRouteGuard>} />
+          <Route path="/technician-operations" element={<HrmsRouteGuard anyPermissions={["technician_operations.view", "technician_operations.gatepasses.view", "technician_operations.wallets.view", "technician_operations.warranty.view", "technician_operations.manage"]}><TechnicianOperationsPage /></HrmsRouteGuard>} />
           <Route path="/technicians/gatepass" element={<Navigate to="/technician-operations?tab=gatepasses" replace />} />
           <Route path="/technicians/wallet" element={<Navigate to="/technician-operations?tab=wallets" replace />} />
           <Route path="/technician-gatepass/list" element={<Navigate to="/technician-operations?tab=gatepasses" replace />} />
@@ -414,24 +416,24 @@ export function App() {
           <Route path="/masters/cities" element={<HrmsRouteGuard><CitiesPage /></HrmsRouteGuard>} />
           <Route path="/masters/currencies" element={<HrmsRouteGuard><CurrenciesPage /></HrmsRouteGuard>} />
           <Route path="/masters/uom" element={<HrmsRouteGuard><UomPage /></HrmsRouteGuard>} />
-          <Route path="/masters/brands" element={<HrmsRouteGuard><BrandsPage /></HrmsRouteGuard>} />
+          <Route path="/masters/brands" element={<HrmsRouteGuard anyPermissions={["brand.view", "brand.manage"]}><BrandsPage /></HrmsRouteGuard>} />
           <Route path="/masters/supplier-types" element={<HrmsRouteGuard><SupplierTypesPage /></HrmsRouteGuard>} />
           <Route path="/masters/buyer-types" element={<HrmsRouteGuard><BuyerTypesPage /></HrmsRouteGuard>} />
-          <Route path="/masters/categories" element={<HrmsRouteGuard><CategoriesPage /></HrmsRouteGuard>} />
-          <Route path="/masters/subcategories" element={<HrmsRouteGuard><SubCategoriesPage /></HrmsRouteGuard>} />
-          <Route path="/masters/products" element={<HrmsRouteGuard><ProductsPage /></HrmsRouteGuard>} />
-          <Route path="/masters/price-list" element={<HrmsRouteGuard><PriceListPage /></HrmsRouteGuard>} />
+          <Route path="/masters/categories" element={<HrmsRouteGuard anyPermissions={["category.view", "category.manage"]}><CategoriesPage /></HrmsRouteGuard>} />
+          <Route path="/masters/subcategories" element={<HrmsRouteGuard anyPermissions={["subcategory.view", "subcategory.manage"]}><SubCategoriesPage /></HrmsRouteGuard>} />
+          <Route path="/masters/products" element={<HrmsRouteGuard anyPermissions={["product.view", "product.manage"]}><ProductsPage /></HrmsRouteGuard>} />
+          <Route path="/masters/price-list" element={<HrmsRouteGuard anyPermissions={["product.view", "product.manage"]}><PriceListPage /></HrmsRouteGuard>} />
           <Route path="/price-list" element={<Navigate to="/masters/price-list" replace />} />
           <Route path="/product-prices" element={<Navigate to="/masters/price-list" replace />} />
           <Route path="/inventory/price-list" element={<Navigate to="/masters/price-list" replace />} />
           <Route path="/inventory/product-prices" element={<Navigate to="/masters/price-list" replace />} />
-          <Route path="/product/list" element={<HrmsRouteGuard><ProductsPage /></HrmsRouteGuard>} />
+          <Route path="/product/list" element={<HrmsRouteGuard anyPermissions={["product.view", "product.manage"]}><ProductsPage /></HrmsRouteGuard>} />
           <Route path="/product" element={<Navigate to="/product/list" replace />} />
-          <Route path="/product/addEdit" element={<HrmsRouteGuard><ProductsPage defaultAdd={true} /></HrmsRouteGuard>} />
-          <Route path="/product/addedit" element={<HrmsRouteGuard><ProductsPage defaultAdd={true} /></HrmsRouteGuard>} />
-          <Route path="/product/add" element={<HrmsRouteGuard><ProductsPage defaultAdd={true} /></HrmsRouteGuard>} />
-          <Route path="/product/create" element={<HrmsRouteGuard><ProductsPage defaultAdd={true} /></HrmsRouteGuard>} />
-          <Route path="/product-stock/list" element={<HrmsRouteGuard><ProductStockPage /></HrmsRouteGuard>} />
+          <Route path="/product/addEdit" element={<HrmsRouteGuard anyPermissions={["product.view", "product.create", "product.update", "product.manage"]}><ProductsPage defaultAdd={true} /></HrmsRouteGuard>} />
+          <Route path="/product/addedit" element={<HrmsRouteGuard anyPermissions={["product.view", "product.create", "product.update", "product.manage"]}><ProductsPage defaultAdd={true} /></HrmsRouteGuard>} />
+          <Route path="/product/add" element={<HrmsRouteGuard anyPermissions={["product.view", "product.create", "product.manage"]}><ProductsPage defaultAdd={true} /></HrmsRouteGuard>} />
+          <Route path="/product/create" element={<HrmsRouteGuard anyPermissions={["product.view", "product.create", "product.manage"]}><ProductsPage defaultAdd={true} /></HrmsRouteGuard>} />
+          <Route path="/product-stock/list" element={<HrmsRouteGuard anyPermissions={["product_stock.view", "product_stock.manage"]}><ProductStockPage /></HrmsRouteGuard>} />
           <Route path="/product-stock" element={<Navigate to="/product-stock/list" replace />} />
           <Route path="/product_stock/list" element={<Navigate to="/product-stock/list" replace />} />
           <Route path="/product_stock" element={<Navigate to="/product-stock/list" replace />} />
@@ -439,30 +441,30 @@ export function App() {
           <Route path="/product-reorder" element={<Navigate to="/product-reorder/list" replace />} />
           <Route path="/product_reorder/list" element={<Navigate to="/product-reorder/list" replace />} />
           <Route path="/product_reorder" element={<Navigate to="/product-reorder/list" replace />} />
-          <Route path="/stock-adjustment" element={<HrmsRouteGuard><StockAdjustmentPage /></HrmsRouteGuard>} />
-          <Route path="/stock-adjustment/add" element={<HrmsRouteGuard><AddAdjustmentOrderPage /></HrmsRouteGuard>} />
-          <Route path="/adjustment/list" element={<HrmsRouteGuard><StockAdjustmentPage /></HrmsRouteGuard>} />
-          <Route path="/adjustment/addEdit" element={<HrmsRouteGuard><AddAdjustmentOrderPage /></HrmsRouteGuard>} />
-          <Route path="/adjustment/addedit" element={<HrmsRouteGuard><AddAdjustmentOrderPage /></HrmsRouteGuard>} />
-          <Route path="/adjustment/add" element={<HrmsRouteGuard><AddAdjustmentOrderPage /></HrmsRouteGuard>} />
+          <Route path="/stock-adjustment" element={<HrmsRouteGuard anyPermissions={["stock_adjustment.view", "stock_adjustment.manage"]}><StockAdjustmentPage /></HrmsRouteGuard>} />
+          <Route path="/stock-adjustment/add" element={<HrmsRouteGuard anyPermissions={["stock_adjustment.create", "stock_adjustment.manage"]}><AddAdjustmentOrderPage /></HrmsRouteGuard>} />
+          <Route path="/adjustment/list" element={<HrmsRouteGuard anyPermissions={["stock_adjustment.view", "stock_adjustment.manage"]}><StockAdjustmentPage /></HrmsRouteGuard>} />
+          <Route path="/adjustment/addEdit" element={<HrmsRouteGuard anyPermissions={["stock_adjustment.create", "stock_adjustment.manage"]}><AddAdjustmentOrderPage /></HrmsRouteGuard>} />
+          <Route path="/adjustment/addedit" element={<HrmsRouteGuard anyPermissions={["stock_adjustment.create", "stock_adjustment.manage"]}><AddAdjustmentOrderPage /></HrmsRouteGuard>} />
+          <Route path="/adjustment/add" element={<HrmsRouteGuard anyPermissions={["stock_adjustment.create", "stock_adjustment.manage"]}><AddAdjustmentOrderPage /></HrmsRouteGuard>} />
           <Route path="/adjustment" element={<Navigate to="/adjustment/list" replace />} />
-          <Route path="/adjustment/adjustment-order-pdf/:id" element={<HrmsRouteGuard><AdjustmentOrderPdfPage /></HrmsRouteGuard>} />
-          <Route path="/stock-transfer" element={<HrmsRouteGuard><StockTransferPage /></HrmsRouteGuard>} />
-          <Route path="/stock-transfer/list" element={<HrmsRouteGuard><StockTransferPage /></HrmsRouteGuard>} />
-          <Route path="/transfer/list" element={<HrmsRouteGuard><StockTransferPage /></HrmsRouteGuard>} />
-          <Route path="/transfer/addEdit" element={<HrmsRouteGuard><AddTransferOrderPage /></HrmsRouteGuard>} />
-          <Route path="/transfer/addedit" element={<HrmsRouteGuard><AddTransferOrderPage /></HrmsRouteGuard>} />
-          <Route path="/transfer/add" element={<HrmsRouteGuard><AddTransferOrderPage /></HrmsRouteGuard>} />
-          <Route path="/stock-transfer/add" element={<HrmsRouteGuard><AddTransferOrderPage /></HrmsRouteGuard>} />
-          <Route path="/stock-transfer/addEdit" element={<HrmsRouteGuard><AddTransferOrderPage /></HrmsRouteGuard>} />
-          <Route path="/transfer/transfer-order-pdf/:id" element={<HrmsRouteGuard><TransferOrderPdfPage /></HrmsRouteGuard>} />
-          <Route path="/transfer/transfer-order-pdf" element={<HrmsRouteGuard><TransferOrderPdfPage /></HrmsRouteGuard>} />
-          <Route path="/transfer/transfer_order_pdf/:id" element={<HrmsRouteGuard><TransferOrderPdfPage /></HrmsRouteGuard>} />
-          <Route path="/transfer/transfer_order_pdf" element={<HrmsRouteGuard><TransferOrderPdfPage /></HrmsRouteGuard>} />
-          <Route path="/transfer/transfer-order_pdf/:id" element={<HrmsRouteGuard><TransferOrderPdfPage /></HrmsRouteGuard>} />
-          <Route path="/transfer/transfer-order_pdf" element={<HrmsRouteGuard><TransferOrderPdfPage /></HrmsRouteGuard>} />
-          <Route path="/stock-transfer/transfer-order-pdf/:id" element={<HrmsRouteGuard><TransferOrderPdfPage /></HrmsRouteGuard>} />
-          <Route path="/stock-transfer/transfer-order-pdf" element={<HrmsRouteGuard><TransferOrderPdfPage /></HrmsRouteGuard>} />
+          <Route path="/adjustment/adjustment-order-pdf/:id" element={<HrmsRouteGuard anyPermissions={["stock_adjustment.download", "stock_adjustment.manage"]}><AdjustmentOrderPdfPage /></HrmsRouteGuard>} />
+          <Route path="/stock-transfer" element={<HrmsRouteGuard anyPermissions={["stock_transfer.view", "stock_transfer.pending.view", "stock_transfer.confirmed.view", "stock_transfer.received.view", "stock_transfer.cancel.view", "stock_transfer.manage"]}><StockTransferPage /></HrmsRouteGuard>} />
+          <Route path="/stock-transfer/list" element={<HrmsRouteGuard anyPermissions={["stock_transfer.view", "stock_transfer.pending.view", "stock_transfer.confirmed.view", "stock_transfer.received.view", "stock_transfer.cancel.view", "stock_transfer.manage"]}><StockTransferPage /></HrmsRouteGuard>} />
+          <Route path="/transfer/list" element={<HrmsRouteGuard anyPermissions={["stock_transfer.view", "stock_transfer.pending.view", "stock_transfer.confirmed.view", "stock_transfer.received.view", "stock_transfer.cancel.view", "stock_transfer.manage"]}><StockTransferPage /></HrmsRouteGuard>} />
+          <Route path="/transfer/addEdit" element={<HrmsRouteGuard anyPermissions={["stock_transfer.create", "stock_transfer.manage"]}><AddTransferOrderPage /></HrmsRouteGuard>} />
+          <Route path="/transfer/addedit" element={<HrmsRouteGuard anyPermissions={["stock_transfer.create", "stock_transfer.manage"]}><AddTransferOrderPage /></HrmsRouteGuard>} />
+          <Route path="/transfer/add" element={<HrmsRouteGuard anyPermissions={["stock_transfer.create", "stock_transfer.manage"]}><AddTransferOrderPage /></HrmsRouteGuard>} />
+          <Route path="/stock-transfer/add" element={<HrmsRouteGuard anyPermissions={["stock_transfer.create", "stock_transfer.manage"]}><AddTransferOrderPage /></HrmsRouteGuard>} />
+          <Route path="/stock-transfer/addEdit" element={<HrmsRouteGuard anyPermissions={["stock_transfer.create", "stock_transfer.manage"]}><AddTransferOrderPage /></HrmsRouteGuard>} />
+          <Route path="/transfer/transfer-order-pdf/:id" element={<HrmsRouteGuard anyPermissions={["stock_transfer.download", "stock_transfer.manage"]}><TransferOrderPdfPage /></HrmsRouteGuard>} />
+          <Route path="/transfer/transfer-order-pdf" element={<HrmsRouteGuard anyPermissions={["stock_transfer.download", "stock_transfer.manage"]}><TransferOrderPdfPage /></HrmsRouteGuard>} />
+          <Route path="/transfer/transfer_order_pdf/:id" element={<HrmsRouteGuard anyPermissions={["stock_transfer.download", "stock_transfer.manage"]}><TransferOrderPdfPage /></HrmsRouteGuard>} />
+          <Route path="/transfer/transfer_order_pdf" element={<HrmsRouteGuard anyPermissions={["stock_transfer.download", "stock_transfer.manage"]}><TransferOrderPdfPage /></HrmsRouteGuard>} />
+          <Route path="/transfer/transfer-order_pdf/:id" element={<HrmsRouteGuard anyPermissions={["stock_transfer.download", "stock_transfer.manage"]}><TransferOrderPdfPage /></HrmsRouteGuard>} />
+          <Route path="/transfer/transfer-order_pdf" element={<HrmsRouteGuard anyPermissions={["stock_transfer.download", "stock_transfer.manage"]}><TransferOrderPdfPage /></HrmsRouteGuard>} />
+          <Route path="/stock-transfer/transfer-order-pdf/:id" element={<HrmsRouteGuard anyPermissions={["stock_transfer.download", "stock_transfer.manage"]}><TransferOrderPdfPage /></HrmsRouteGuard>} />
+          <Route path="/stock-transfer/transfer-order-pdf" element={<HrmsRouteGuard anyPermissions={["stock_transfer.download", "stock_transfer.manage"]}><TransferOrderPdfPage /></HrmsRouteGuard>} />
           <Route path="/transfer" element={<Navigate to="/transfer/list" replace />} />
           <Route path="/product-gallery" element={<HrmsRouteGuard><ProductGalleryPage /></HrmsRouteGuard>} />
           <Route path="/product_gallery" element={<Navigate to="/product-gallery" replace />} />

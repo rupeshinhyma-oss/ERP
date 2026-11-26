@@ -1,7 +1,7 @@
 """hrms_monetary_numeric_and_integrity_indexes
 
-Revision ID: z6e7f8a9b0c1
-Revises: z5d6e7f8a9b0
+Revision ID: z9m1d2e3f4a5
+Revises: z9l0c1d2e3f4
 Create Date: 2026-11-20 15:00:00.000000
 
 Wave 3 HRMS P2/P3 Schema Hardening:
@@ -27,8 +27,8 @@ from typing import Sequence, Union
 import sqlalchemy as sa
 from alembic import op
 
-revision: str = "z6e7f8a9b0c1"
-down_revision: Union[str, Sequence[str], None] = "z5d6e7f8a9b0"
+revision: str = "z9m1d2e3f4a5"
+down_revision: Union[str, Sequence[str], None] = "z9l0c1d2e3f4"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

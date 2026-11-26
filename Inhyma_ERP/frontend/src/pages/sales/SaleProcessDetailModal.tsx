@@ -15,6 +15,7 @@
 
 import React, { useEffect, useState, useRef } from "react";
 import { apiGet, apiPatch, errorMessage } from "@/lib/api";
+import { useAuth } from "@/lib/hooks";
 import { DetailSkeleton } from "@/components/Skeleton";
 import { useToast } from "@/lib/toast";
 import type { SaleOrder, SaleOrderStatus } from "@/types/saleProcess";
@@ -58,6 +59,30 @@ export function SaleProcessDetailModal({
   onStatusUpdated,
 }: SaleProcessDetailModalProps) {
   console.log("SaleProcessDetailModal rendered with orderId:", orderId);
+  const { profile, isSuperAdmin, hasPermission } = useAuth();
+  const canManage = isSuperAdmin || profile?.username === "admin" || hasPermission("saleorder.manage");
+  const canFiles = canManage || hasPermission("saleorder.files");
+  const canDownload = canManage || hasPermission("saleorder.download");
+  const canTransitionTo = (st: SaleOrderStatus): boolean => {
+    if (canManage) return true;
+    switch (st) {
+      case "sales_confirmed":
+        return hasPermission("saleorder.confirm");
+      case "admin_approved":
+        return hasPermission("saleorder.approve");
+      case "acc_confirmed":
+        return hasPermission("saleorder.accounts");
+      case "gatepass_created":
+      case "dispatched":
+      case "gatepass_cancelled":
+      case "lr":
+        return hasPermission("saleorder.warehouse");
+      case "cancelled":
+        return hasPermission("saleorder.cancel");
+      default:
+        return false;
+    }
+  };
   const toast = useToast();
   const isTestMode = import.meta.env.MODE === "test";
   const initialOrder = isTestMode ? INITIAL_SALE_ORDERS?.find((it) => it.id === orderId) || null : null;
@@ -1092,34 +1117,36 @@ export function SaleProcessDetailModal({
                     <span>Attached Files & Documents ({attachedFiles.length})</span>
                   </div>
 
-                  <div>
-                    <input
-                      type="file"
-                      ref={fileInputRef}
-                      style={{ display: "none" }}
-                      onChange={handleFileUpload}
-                      multiple
-                    />
-                    <button
-                      type="button"
-                      onClick={() => fileInputRef.current?.click()}
-                      style={{
-                        background: "#ffffff",
-                        border: "1px solid #cbd5e1",
-                        borderRadius: "4px",
-                        padding: "4px 10px",
-                        fontSize: "11.5px",
-                        fontWeight: 600,
-                        color: "#0061f2",
-                        cursor: "pointer",
-                        display: "inline-flex",
-                        alignItems: "center",
-                        gap: "4px",
-                      }}
-                    >
-                      + Upload File
-                    </button>
-                  </div>
+                  {canFiles && (
+                    <div>
+                      <input
+                        type="file"
+                        ref={fileInputRef}
+                        style={{ display: "none" }}
+                        onChange={handleFileUpload}
+                        multiple
+                      />
+                      <button
+                        type="button"
+                        onClick={() => fileInputRef.current?.click()}
+                        style={{
+                          background: "#ffffff",
+                          border: "1px solid #cbd5e1",
+                          borderRadius: "4px",
+                          padding: "4px 10px",
+                          fontSize: "11.5px",
+                          fontWeight: 600,
+                          color: "#0061f2",
+                          cursor: "pointer",
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: "4px",
+                        }}
+                      >
+                        + Upload File
+                      </button>
+                    </div>
+                  )}
                 </div>
 
                 <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
@@ -1143,39 +1170,41 @@ export function SaleProcessDetailModal({
                         <span style={{ color: "#64748b", fontSize: "11px" }}>({file.size})</span>
                       </div>
 
-                      <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                        <button
-                          type="button"
-                          onClick={() => handleDownloadFile(file.name, file.url)}
-                          style={{
-                            background: "none",
-                            border: "none",
-                            padding: 0,
-                            color: "#0061f2",
-                            cursor: "pointer",
-                            fontSize: "11.5px",
-                            fontWeight: 600,
-                            textDecoration: "underline",
-                          }}
-                        >
-                          Download
-                        </button>
-                        <button
-                          type="button"
-                          onClick={handlePrint}
-                          style={{
-                            background: "none",
-                            border: "none",
-                            padding: 0,
-                            color: "#475569",
-                            cursor: "pointer",
-                            fontSize: "11.5px",
-                            textDecoration: "underline",
-                          }}
-                        >
-                          Print
-                        </button>
-                      </div>
+                      {canDownload && (
+                        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                          <button
+                            type="button"
+                            onClick={() => handleDownloadFile(file.name, file.url)}
+                            style={{
+                              background: "none",
+                              border: "none",
+                              padding: 0,
+                              color: "#0061f2",
+                              cursor: "pointer",
+                              fontSize: "11.5px",
+                              fontWeight: 600,
+                              textDecoration: "underline",
+                            }}
+                          >
+                            Download
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handlePrint}
+                            style={{
+                              background: "none",
+                              border: "none",
+                              padding: 0,
+                              color: "#475569",
+                              cursor: "pointer",
+                              fontSize: "11.5px",
+                              textDecoration: "underline",
+                            }}
+                          >
+                            Print
+                          </button>
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -1244,7 +1273,9 @@ export function SaleProcessDetailModal({
                       "gatepass_cancelled",
                       "cancelled",
                     ] as SaleOrderStatus[]
-                  ).map((st) => (
+                  )
+                    .filter((st) => order?.status === st || canTransitionTo(st))
+                    .map((st) => (
                     <button
                       key={st}
                       type="button"

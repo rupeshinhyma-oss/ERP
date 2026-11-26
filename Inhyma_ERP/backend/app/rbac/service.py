@@ -437,6 +437,31 @@ class RBACService:
             raise NotFoundException("The role does not have that permission.")
         await self.invalidate_user_permissions_cache()
 
+    async def set_role_permissions_bulk(
+        self,
+        role_id: uuid.UUID,
+        permission_ids: list[uuid.UUID],
+        *,
+        actor_user_id: uuid.UUID | None = None,
+    ) -> int:
+        """Atomically replace all permissions granted to a role with the provided permission IDs."""
+        role = await self.get_role_or_raise(role_id)
+        if role.name == "super_admin" and actor_user_id:
+            roles = await self.list_roles_for_user(actor_user_id)
+            if not any(r.name == "super_admin" for r in roles):
+                raise ForbiddenException("Only Super Administrators can modify Super Administrator permissions.")
+        unique_ids = list(dict.fromkeys(permission_ids))
+        permissions = await self.permission_repository.list_by_ids(unique_ids)
+        found_by_id = {p.id: p for p in permissions}
+        for perm_id in unique_ids:
+            permission = found_by_id.get(perm_id)
+            if permission is None:
+                raise NotFoundException(f"Unknown permission id: {perm_id!r}.")
+            self._assert_permission_not_deprecated(permission.code)
+        await self.role_repository.set_permissions_bulk(role, unique_ids)
+        await self.invalidate_user_permissions_cache()
+        return len(unique_ids)
+
     # --- Individual User Permissions ------------------------------------------------
     async def list_user_permissions(self, user_id: uuid.UUID) -> list[UserPermission]:
         return await self.user_permission_repository.list_for_user(user_id)

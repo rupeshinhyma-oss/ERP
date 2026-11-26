@@ -37,6 +37,13 @@ NUMBERING_GROUP = "proforma.numbering"
 # The workflow engine is shared with the Purchase modules (app.common.workflow); the
 # Proforma-specific parts are just the group names and the approval permission.
 APPROVE_PERMISSION = "proforma.approve"
+MANAGE_PERMISSION = "proforma.manage"
+
+
+def _admin_perm(user: CurrentUser | None) -> str:
+    if user is not None and MANAGE_PERMISSION in user.permissions:
+        return MANAGE_PERMISSION
+    return APPROVE_PERMISSION
 
 
 async def _group_rows(db: AsyncSession, group: str) -> list[OptionList]:
@@ -49,19 +56,19 @@ async def load_status_rules(db: AsyncSession) -> dict[str, dict[str, Any]]:
 
 
 def user_is_admin(user: CurrentUser) -> bool:
-    return wf.is_admin(user, APPROVE_PERMISSION)
+    return wf.is_admin(user, APPROVE_PERMISSION) or wf.is_admin(user, MANAGE_PERMISSION)
 
 
 def check_transition(rules: dict[str, dict], current: str, target: str, user: CurrentUser, reason: str | None) -> None:
-    wf.check_transition(rules, current, target, user, reason, admin_permission=APPROVE_PERMISSION)
+    wf.check_transition(rules, current, target, user, reason, admin_permission=_admin_perm(user))
 
 
 def check_editable(rules: dict[str, dict], status: str, user: CurrentUser) -> None:
-    wf.check_editable(rules, status, user, admin_permission=APPROVE_PERMISSION)
+    wf.check_editable(rules, status, user, admin_permission=_admin_perm(user))
 
 
 def check_deletable(rules: dict[str, dict], status: str, user: CurrentUser | None = None) -> None:
-    wf.check_deletable(rules, status, user, admin_permission=APPROVE_PERMISSION)
+    wf.check_deletable(rules, status, user, admin_permission=_admin_perm(user))
 
 
 # -------------------------------------------------------------------------- numbering

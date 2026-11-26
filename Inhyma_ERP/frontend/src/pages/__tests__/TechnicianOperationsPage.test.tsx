@@ -1,5 +1,5 @@
 import React from "react";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TechnicianOperationsPage } from "../TechnicianOperationsPage";
@@ -309,15 +309,31 @@ describe("TechnicianOperationsPage", () => {
     const whSelect = (await screen.findByLabelText("Dispatch Warehouse")) as HTMLSelectElement;
     expect(whSelect.value).toBe("Main Warehouse");
 
+    // Select Technician from custom TypableLookupCombobox dropdown and verify mobile auto-fill
+    const techInput = screen.getByLabelText("Technician Name") as HTMLInputElement;
+    fireEvent.focus(techInput);
+    const techListbox = await screen.findByRole("listbox", { name: "Technician Name options" });
+    fireEvent.mouseDown(within(techListbox).getByText("Ramesh Kumar"));
+    expect(techInput.value).toBe("Ramesh Kumar");
+
     // Select linked technical task to auto-fill technician, customer, machine, serial
     fireEvent.change(screen.getByLabelText("Link Technical Task"), {
       target: { value: "task-1" },
     });
 
-    // Select compatible catalog spare part (Avail: 5)
-    fireEvent.change(screen.getByLabelText("Select Catalog Part 1"), {
-      target: { value: "sp-1" },
-    });
+    // Open typable spare-part combobox dropdown and select compatible catalog spare part (Avail: 5)
+    const partInput = screen.getByLabelText("Select Catalog Part 1") as HTMLInputElement;
+    fireEvent.focus(partInput);
+    const partOption = await screen.findByText("Heating Element 500W");
+    fireEvent.mouseDown(partOption);
+    expect(partInput.value).toBe("Heating Element 500W");
+    expect(screen.getByText("Avail: 5 NOS")).toBeTruthy();
+
+    // Verify typing a custom part name also works seamlessly
+    fireEvent.change(partInput, { target: { value: "Custom Gasket" } });
+    expect(partInput.value).toBe("Custom Gasket");
+    fireEvent.change(partInput, { target: { value: "Heating" } });
+    fireEvent.mouseDown(await screen.findByText("Heating Element 500W"));
     expect(screen.getByText("Avail: 5 NOS")).toBeTruthy();
 
     // Request 8 units (> 5 available)
@@ -413,9 +429,9 @@ describe("TechnicianOperationsPage", () => {
     });
   });
 
-  it("enforces read-only RBAC mode when user only has technician_operations.view (or unrelated technicaltask.manage) permission", async () => {
+  it("enforces read-only RBAC mode when user only has technician_operations.view + gatepasses.view (and ignores unrelated technicaltask.manage)", async () => {
     authState.isSuperAdmin = false;
-    authState.perms = ["technician_operations.view", "technicaltask.manage"];
+    authState.perms = ["technician_operations.view", "technician_operations.gatepasses.view", "technicaltask.manage"];
 
     render(
       <MemoryRouter initialEntries={["/technician-operations"]}>
@@ -428,8 +444,73 @@ describe("TechnicianOperationsPage", () => {
       expect(screen.getByText("GP-TECH-2026-0001")).toBeTruthy();
     });
 
+    // Other tabs & CTAs & Action buttons remain hidden
+    expect(screen.queryByRole("button", { name: /Technician Wallets/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Machine Warranty Registry/i })).toBeNull();
     expect(screen.queryByRole("button", { name: /Issue Outward Gatepass/i })).toBeNull();
     expect(screen.queryByRole("button", { name: /^Return$/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Draft SO$/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Create SO$/i })).toBeNull();
     expect(screen.queryByRole("button", { name: /^Link SO$/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Print Gatepass Slip/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Details$/i })).toBeNull();
+    expect(screen.queryByText("Actions")).toBeNull();
+  });
+
+  it("controls each Gatepass Action button, Wallet Balances cards, and Warranty Validator independently via granular permissions", async () => {
+    authState.isSuperAdmin = false;
+    authState.perms = [
+      "technician_operations.view",
+      "technician_operations.gatepasses.view",
+      "technician_operations.gatepass.create",
+      "technician_operations.gatepass.draft_so",
+      "technician_operations.gatepass.print",
+      "technician_operations.wallets.view",
+      "technician_operations.wallet.balances.view",
+      "technician_operations.wallet.collect",
+      "technician_operations.warranty.view",
+      "technician_operations.warranty.validate",
+    ];
+
+    const { rerender } = render(
+      <MemoryRouter initialEntries={["/technician-operations?tab=gatepasses"]}>
+        <TechnicianOperationsPage />
+      </MemoryRouter>
+    );
+
+    await waitFor(() => expect(screen.getByText("GP-TECH-2026-0001")).toBeTruthy());
+    expect(screen.getByRole("button", { name: /Issue Outward Gatepass/i })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /^Draft SO$/i })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Print Gatepass Slip/i })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /^Return$/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Create SO$/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Link SO$/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Details$/i })).toBeNull();
+
+    // Wallets tab shows Live Balances & only + Collect (no Handover / Expense / Record Wallet Transaction CTA)
+    fireEvent.click(screen.getByRole("button", { name: /Technician Wallets & Field Collections/i }));
+    await waitFor(() => expect(screen.getByText("Technician Live Wallet Balances (Cash in Hand)")).toBeTruthy());
+    expect(screen.queryByRole("button", { name: /Record Wallet Transaction/i })).toBeNull();
+    expect(screen.getByRole("button", { name: /^Collect$/i })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /^Handover$/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Expense$/i })).toBeNull();
+
+    // Warranty tab shows Validator, hides Register Machine Warranty CTA
+    fireEvent.click(screen.getByRole("button", { name: /Machine Warranty Registry & Validator/i }));
+    await waitFor(() => expect(screen.getByText("Live Machine Serial Warranty Validator")).toBeTruthy());
+    expect(screen.getByRole("button", { name: /Verify Serial/i })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Register Machine Warranty/i })).toBeNull();
+
+    // Verify wallets.view without wallet.balances.view hides balances cards & skips /wallet/summaries call
+    authState.perms = ["technician_operations.view", "technician_operations.wallets.view"];
+    vi.mocked(api.apiGet).mockClear();
+    rerender(
+      <MemoryRouter initialEntries={["/technician-operations?tab=wallets"]}>
+        <TechnicianOperationsPage />
+      </MemoryRouter>
+    );
+    await waitFor(() => expect(screen.getByText("WTX-2026-0001")).toBeTruthy());
+    expect(screen.queryByText("Technician Live Wallet Balances (Cash in Hand)")).toBeNull();
+    expect(vi.mocked(api.apiGet).mock.calls.some(([u]) => u.includes("/wallet/summaries"))).toBe(false);
   });
 });

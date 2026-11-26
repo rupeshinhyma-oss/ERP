@@ -484,6 +484,102 @@ async def test_inventory_api_needs_a_login_and_product_view(db):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
         assert (await c.get("/api/v1/inventory/product-stock")).status_code == 200
 
+    for stock_perm in ("product_stock.view", "product_stock.manage"):
+        stock_user = CurrentUser(id=uuid.uuid4(), username="stock_user", permissions={stock_perm})
+        app.dependency_overrides[get_current_user] = lambda u=stock_user: u
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            assert (await c.get("/api/v1/inventory/product-stock")).status_code == 200
+            assert (await c.get("/api/v1/product-stock/list")).status_code == 200
+            assert (await c.get("/api/v1/inventory/stock-adjustment")).status_code == 403
+            assert (await c.get("/api/v1/inventory/product-reorder")).status_code == 403
+
+    # Granular Stock Adjustment RBAC
+    adj_viewer = CurrentUser(id=uuid.uuid4(), username="adj_view", permissions={"stock_adjustment.view"})
+    app.dependency_overrides[get_current_user] = lambda: adj_viewer
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        assert (await c.get("/api/v1/inventory/stock-adjustment")).status_code == 200
+        assert (await c.post("/api/v1/inventory/stock-adjustment", json=adj_body())).status_code == 403
+        assert (await c.delete(f"/api/v1/inventory/stock-adjustment/{uuid.uuid4()}")).status_code == 403
+
+    adj_creator = CurrentUser(id=uuid.uuid4(), username="adj_create", permissions={"stock_adjustment.create"})
+    app.dependency_overrides[get_current_user] = lambda: adj_creator
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        assert (await c.get("/api/v1/inventory/product-stock")).status_code == 200
+        assert (await c.post("/api/v1/inventory/stock-adjustment", json=adj_body())).status_code != 403
+        assert (await c.delete(f"/api/v1/inventory/stock-adjustment/{uuid.uuid4()}")).status_code == 403
+
+    adj_deleter = CurrentUser(id=uuid.uuid4(), username="adj_del", permissions={"stock_adjustment.delete"})
+    app.dependency_overrides[get_current_user] = lambda: adj_deleter
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        assert (await c.delete(f"/api/v1/inventory/stock-adjustment/{uuid.uuid4()}")).status_code == 404
+
+    adj_manager = CurrentUser(id=uuid.uuid4(), username="adj_mgr", permissions={"stock_adjustment.manage"})
+    app.dependency_overrides[get_current_user] = lambda: adj_manager
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        assert (await c.get("/api/v1/inventory/stock-adjustment")).status_code == 200
+        assert (await c.post("/api/v1/inventory/stock-adjustment", json=adj_body())).status_code != 403
+        assert (await c.delete(f"/api/v1/inventory/stock-adjustment/{uuid.uuid4()}")).status_code == 404
+
+    # Granular Stock Transfer RBAC (view, stage views, create, stages, cancel, manage)
+    trf_bare = CurrentUser(id=uuid.uuid4(), username="trf_bare", permissions=set())
+    app.dependency_overrides[get_current_user] = lambda: trf_bare
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        assert (await c.get("/api/v1/inventory/stock-transfer")).status_code == 403
+        assert (await c.get("/api/v1/transfer/list")).status_code == 403
+        assert (await c.post("/api/v1/inventory/stock-transfer", json={})).status_code == 403
+        assert (await c.patch(f"/api/v1/inventory/stock-transfer/{uuid.uuid4()}/status", json={"status": "Confirmed"})).status_code == 403
+        assert (await c.post(f"/api/v1/inventory/stock-transfer/{uuid.uuid4()}/receive-to-main")).status_code == 403
+
+    trf_viewer = CurrentUser(id=uuid.uuid4(), username="trf_view", permissions={"stock_transfer.view"})
+    app.dependency_overrides[get_current_user] = lambda: trf_viewer
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        assert (await c.get("/api/v1/inventory/stock-transfer")).status_code == 200
+        assert (await c.get("/api/v1/transfer/list")).status_code == 200
+        assert (await c.post("/api/v1/inventory/stock-transfer", json={})).status_code == 403
+        assert (await c.patch(f"/api/v1/inventory/stock-transfer/{uuid.uuid4()}/status", json={"status": "Cancel"})).status_code == 403
+        assert (await c.post(f"/api/v1/inventory/stock-transfer/{uuid.uuid4()}/receive-to-main")).status_code == 403
+
+    trf_pending_view = CurrentUser(id=uuid.uuid4(), username="trf_pend_v", permissions={"stock_transfer.pending.view"})
+    app.dependency_overrides[get_current_user] = lambda: trf_pending_view
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        assert (await c.get("/api/v1/inventory/stock-transfer?status=Pending")).status_code == 200
+        assert (await c.get("/api/v1/inventory/stock-transfer?status=Confirmed")).status_code == 403
+
+    trf_creator = CurrentUser(id=uuid.uuid4(), username="trf_create", permissions={"stock_transfer.create"})
+    app.dependency_overrides[get_current_user] = lambda: trf_creator
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        assert (await c.get("/api/v1/inventory/product-stock")).status_code == 200
+        assert (await c.post("/api/v1/inventory/stock-transfer", json={})).status_code == 422
+        assert (await c.patch(f"/api/v1/inventory/stock-transfer/{uuid.uuid4()}/status", json={"status": "Confirmed"})).status_code == 403
+
+    trf_confirmer = CurrentUser(id=uuid.uuid4(), username="trf_conf", permissions={"stock_transfer.confirmed"})
+    app.dependency_overrides[get_current_user] = lambda: trf_confirmer
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        assert (await c.patch(f"/api/v1/inventory/stock-transfer/{uuid.uuid4()}/status", json={"status": "Confirmed"})).status_code == 404
+        assert (await c.patch(f"/api/v1/inventory/stock-transfer/{uuid.uuid4()}/status", json={"status": "Received"})).status_code == 403
+        assert (await c.post(f"/api/v1/inventory/stock-transfer/{uuid.uuid4()}/receive-to-main")).status_code == 403
+
+    trf_receiver = CurrentUser(id=uuid.uuid4(), username="trf_recv", permissions={"stock_transfer.received"})
+    app.dependency_overrides[get_current_user] = lambda: trf_receiver
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        assert (await c.post(f"/api/v1/inventory/stock-transfer/{uuid.uuid4()}/receive-to-main")).status_code == 404
+        assert (await c.patch(f"/api/v1/inventory/stock-transfer/{uuid.uuid4()}/status", json={"status": "Received"})).status_code == 404
+        assert (await c.patch(f"/api/v1/inventory/stock-transfer/{uuid.uuid4()}/status", json={"status": "Cancel"})).status_code == 403
+
+    trf_canceller = CurrentUser(id=uuid.uuid4(), username="trf_canc", permissions={"stock_transfer.cancel"})
+    app.dependency_overrides[get_current_user] = lambda: trf_canceller
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        assert (await c.patch(f"/api/v1/inventory/stock-transfer/{uuid.uuid4()}/status", json={"status": "Cancel"})).status_code == 404
+        assert (await c.patch(f"/api/v1/inventory/stock-transfer/{uuid.uuid4()}/status", json={"status": "Pending"})).status_code == 403
+
+    trf_manager = CurrentUser(id=uuid.uuid4(), username="trf_mgr", permissions={"stock_transfer.manage"})
+    app.dependency_overrides[get_current_user] = lambda: trf_manager
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        assert (await c.get("/api/v1/inventory/stock-transfer?status=Confirmed")).status_code == 200
+        assert (await c.post("/api/v1/inventory/stock-transfer", json={})).status_code == 422
+        assert (await c.post(f"/api/v1/inventory/stock-transfer/{uuid.uuid4()}/receive-to-main")).status_code == 404
+        assert (await c.patch(f"/api/v1/inventory/stock-transfer/{uuid.uuid4()}/status", json={"status": "Cancel"})).status_code == 404
+
 
 async def test_product_bulk_delete_needs_the_bulk_actions_permission_as_well(db):
     app = create_application()
@@ -499,6 +595,355 @@ async def test_product_bulk_delete_needs_the_bulk_actions_permission_as_well(db)
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
             code = (await c.post("/api/v1/masters/products/bulk-delete", json=body)).status_code
         assert (code != 403) == allowed, (perms, code)
+
+
+async def test_product_master_granular_rbac_permissions(db):
+    from io import BytesIO
+    from scripts.seed import BOOTSTRAP_PERMISSIONS
+
+    seeded_product_codes = {row[0] for row in BOOTSTRAP_PERMISSIONS if row[1] == "product"}
+    assert seeded_product_codes == {
+        "product.view",
+        "product.create",
+        "product.update",
+        "product.delete",
+        "product.export",
+        "product.import",
+        "product.bulk_action",
+        "product.manage",
+    }
+
+    app = create_application()
+
+    async def _db():
+        yield db
+
+    app.dependency_overrides[get_db_session] = _db
+    active_perms: set[str] = set()
+    app.dependency_overrides[get_current_user] = lambda: CurrentUser(
+        id=uuid.uuid4(), username="prod_rbac", permissions=set(active_perms)
+    )
+
+    pid = uuid.uuid4()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        # 1. View-only cannot mutate/import/export/bulk-delete
+        active_perms.update({"product.view"})
+        assert (await c.get("/api/v1/masters/products")).status_code == 200
+        assert (await c.post("/api/v1/masters/products", json={})).status_code == 403
+        assert (await c.patch(f"/api/v1/masters/products/{pid}", json={})).status_code == 403
+        assert (await c.get("/api/v1/masters/products/export")).status_code == 403
+        assert (await c.post("/api/v1/masters/products/import", files={"file": ("p.csv", BytesIO(b"a\n1\n"), "text/csv")})).status_code == 403
+        assert (await c.post(f"/api/v1/masters/products/{pid}/activate")).status_code == 403
+        assert (await c.post("/api/v1/masters/products/bulk-delete", json={"product_ids": [str(pid)]})).status_code == 403
+
+        # 2. Independent create, update, bulk_action, import, export
+        active_perms.clear()
+        active_perms.update({"product.view", "product.create"})
+        assert (await c.post("/api/v1/masters/products", json={})).status_code != 403
+        assert (await c.patch(f"/api/v1/masters/products/{pid}", json={})).status_code == 403
+
+        active_perms.clear()
+        active_perms.update({"product.view", "product.update"})
+        assert (await c.patch(f"/api/v1/masters/products/{pid}", json={})).status_code != 403
+        assert (await c.post("/api/v1/masters/products", json={})).status_code == 403
+        assert (await c.post("/api/v1/masters/products/bulk-delete", json={"product_ids": [str(pid)]})).status_code == 403
+
+        active_perms.clear()
+        active_perms.update({"product.view", "product.bulk_action"})
+        assert (await c.post(f"/api/v1/masters/products/{pid}/activate")).status_code != 403
+        assert (await c.post(f"/api/v1/masters/products/{pid}/deactivate")).status_code != 403
+        assert (await c.patch(f"/api/v1/masters/products/{pid}", json={})).status_code == 403
+        assert (await c.post("/api/v1/masters/products/bulk-delete", json={"product_ids": [str(pid)]})).status_code == 403
+
+        active_perms.clear()
+        active_perms.update({"product.view", "product.import"})
+        assert (await c.post("/api/v1/masters/products/import", files={"file": ("p.csv", BytesIO(b"Product Name (As Per Tally)\nX\n"), "text/csv")})).status_code != 403
+        assert (await c.get("/api/v1/masters/products/export")).status_code == 403
+
+        active_perms.clear()
+        active_perms.update({"product.view", "product.export"})
+        assert (await c.get("/api/v1/masters/products/export")).status_code != 403
+        assert (await c.post("/api/v1/masters/products/import", files={"file": ("p.csv", BytesIO(b"a\n1\n"), "text/csv")})).status_code == 403
+
+        # 3. product.manage grants everything
+        active_perms.clear()
+        active_perms.add("product.manage")
+        assert (await c.get("/api/v1/masters/products")).status_code == 200
+        assert (await c.post("/api/v1/masters/products", json={})).status_code != 403
+        assert (await c.patch(f"/api/v1/masters/products/{pid}", json={})).status_code != 403
+        assert (await c.get("/api/v1/masters/products/export")).status_code != 403
+        assert (await c.post("/api/v1/masters/products/import", files={"file": ("p.csv", BytesIO(b"Product Name (As Per Tally)\nX\n"), "text/csv")})).status_code != 403
+        assert (await c.post(f"/api/v1/masters/products/{pid}/activate")).status_code != 403
+        assert (await c.post(f"/api/v1/masters/products/{pid}/deactivate")).status_code != 403
+        assert (await c.post("/api/v1/masters/products/bulk-delete", json={"product_ids": [str(pid)]})).status_code != 403
+
+
+async def test_product_categories_granular_rbac_permissions(db):
+    from io import BytesIO
+    from scripts.seed import BOOTSTRAP_PERMISSIONS
+
+    seeded_cat_codes = {row[0] for row in BOOTSTRAP_PERMISSIONS if row[1] == "category"}
+    assert seeded_cat_codes == {
+        "category.view",
+        "category.create",
+        "category.update",
+        "category.delete",
+        "category.export",
+        "category.import",
+        "category.bulk_action",
+        "category.status_edit",
+        "category.manage",
+    }
+
+    app = create_application()
+
+    async def _db():
+        yield db
+
+    app.dependency_overrides[get_db_session] = _db
+    active_perms: set[str] = set()
+    app.dependency_overrides[get_current_user] = lambda: CurrentUser(
+        id=uuid.uuid4(), username="cat_rbac", permissions=set(active_perms)
+    )
+
+    cid = uuid.uuid4()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        # 1. View-only cannot mutate/import/export/toggle/delete
+        active_perms.update({"category.view"})
+        assert (await c.get("/api/v1/masters/product-categories")).status_code == 200
+        assert (await c.post("/api/v1/masters/product-categories", json={"name": "X"})).status_code == 403
+        assert (await c.patch(f"/api/v1/masters/product-categories/{cid}", json={"name": "Y"})).status_code == 403
+        assert (await c.post(f"/api/v1/masters/product-categories/{cid}/activate")).status_code == 403
+        assert (await c.post(f"/api/v1/masters/product-categories/{cid}/deactivate")).status_code == 403
+        assert (await c.delete(f"/api/v1/masters/product-categories/{cid}")).status_code == 403
+        assert (await c.get("/api/v1/masters/product-categories/export")).status_code == 403
+        assert (await c.post("/api/v1/masters/product-categories/import", files={"file": ("c.csv", BytesIO(b"Category Name\nX\n"), "text/csv")})).status_code == 403
+
+        # 2. status_edit & bulk_action toggle activate/deactivate, NOT full PATCH/DELETE
+        for perm in ("category.status_edit", "category.bulk_action"):
+            active_perms.clear()
+            active_perms.update({"category.view", perm})
+            assert (await c.post(f"/api/v1/masters/product-categories/{cid}/activate")).status_code != 403
+            assert (await c.post(f"/api/v1/masters/product-categories/{cid}/deactivate")).status_code != 403
+            assert (await c.patch(f"/api/v1/masters/product-categories/{cid}", json={"name": "Y"})).status_code == 403
+            assert (await c.delete(f"/api/v1/masters/product-categories/{cid}")).status_code == 403
+
+        # 3. Independent create, update, delete, import, export
+        active_perms.clear()
+        active_perms.update({"category.view", "category.create"})
+        assert (await c.post("/api/v1/masters/product-categories", json={"name": "NewCat"})).status_code != 403
+        assert (await c.patch(f"/api/v1/masters/product-categories/{cid}", json={"name": "Y"})).status_code == 403
+
+        active_perms.clear()
+        active_perms.update({"category.view", "category.update"})
+        assert (await c.patch(f"/api/v1/masters/product-categories/{cid}", json={"name": "Y"})).status_code != 403
+        assert (await c.delete(f"/api/v1/masters/product-categories/{cid}")).status_code == 403
+
+        active_perms.clear()
+        active_perms.update({"category.view", "category.delete"})
+        assert (await c.delete(f"/api/v1/masters/product-categories/{cid}")).status_code != 403
+        assert (await c.patch(f"/api/v1/masters/product-categories/{cid}", json={"name": "Y"})).status_code == 403
+
+        active_perms.clear()
+        active_perms.update({"category.view", "category.import"})
+        assert (await c.post("/api/v1/masters/product-categories/import", files={"file": ("c.csv", BytesIO(b"Category Name\nX\n"), "text/csv")})).status_code != 403
+        assert (await c.get("/api/v1/masters/product-categories/export")).status_code == 403
+
+        active_perms.clear()
+        active_perms.update({"category.view", "category.export"})
+        assert (await c.get("/api/v1/masters/product-categories/export")).status_code != 403
+        assert (await c.post("/api/v1/masters/product-categories/import", files={"file": ("c.csv", BytesIO(b"Category Name\nX\n"), "text/csv")})).status_code == 403
+
+        # 4. category.manage grants everything
+        active_perms.clear()
+        active_perms.add("category.manage")
+        assert (await c.get("/api/v1/masters/product-categories")).status_code == 200
+        assert (await c.post("/api/v1/masters/product-categories", json={"name": "MgrCat"})).status_code != 403
+        assert (await c.patch(f"/api/v1/masters/product-categories/{cid}", json={"name": "Y"})).status_code != 403
+        assert (await c.post(f"/api/v1/masters/product-categories/{cid}/activate")).status_code != 403
+        assert (await c.post(f"/api/v1/masters/product-categories/{cid}/deactivate")).status_code != 403
+        assert (await c.delete(f"/api/v1/masters/product-categories/{cid}")).status_code != 403
+        assert (await c.get("/api/v1/masters/product-categories/export")).status_code != 403
+        assert (await c.post("/api/v1/masters/product-categories/import", files={"file": ("c.csv", BytesIO(b"Category Name\nZ\n"), "text/csv")})).status_code != 403
+
+
+async def test_product_sub_categories_granular_rbac_permissions(db):
+    from io import BytesIO
+    from scripts.seed import BOOTSTRAP_PERMISSIONS
+
+    seeded_sub_codes = {row[0] for row in BOOTSTRAP_PERMISSIONS if row[1] == "subcategory"}
+    assert seeded_sub_codes == {
+        "subcategory.view",
+        "subcategory.create",
+        "subcategory.update",
+        "subcategory.delete",
+        "subcategory.export",
+        "subcategory.import",
+        "subcategory.bulk_action",
+        "subcategory.status_edit",
+        "subcategory.manage",
+    }
+
+    app = create_application()
+
+    async def _db():
+        yield db
+
+    app.dependency_overrides[get_db_session] = _db
+    active_perms: set[str] = set()
+    app.dependency_overrides[get_current_user] = lambda: CurrentUser(
+        id=uuid.uuid4(), username="sub_rbac", permissions=set(active_perms)
+    )
+
+    sid = uuid.uuid4()
+    cat_id = uuid.uuid4()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        # 1. View-only cannot mutate/import/export/toggle/delete
+        active_perms.update({"subcategory.view"})
+        assert (await c.get("/api/v1/masters/product-sub-categories")).status_code == 200
+        assert (await c.post("/api/v1/masters/product-sub-categories", json={"category_id": str(cat_id), "name": "X"})).status_code == 403
+        assert (await c.patch(f"/api/v1/masters/product-sub-categories/{sid}", json={"name": "Y"})).status_code == 403
+        assert (await c.post(f"/api/v1/masters/product-sub-categories/{sid}/activate")).status_code == 403
+        assert (await c.post(f"/api/v1/masters/product-sub-categories/{sid}/deactivate")).status_code == 403
+        assert (await c.delete(f"/api/v1/masters/product-sub-categories/{sid}")).status_code == 403
+        assert (await c.get("/api/v1/masters/product-sub-categories/export")).status_code == 403
+        assert (await c.post("/api/v1/masters/product-sub-categories/import", files={"file": ("s.csv", BytesIO(b"Category Name,Sub-Category Name\nC,S\n"), "text/csv")})).status_code == 403
+
+        # 2. status_edit & bulk_action toggle activate/deactivate, NOT full PATCH/DELETE
+        for perm in ("subcategory.status_edit", "subcategory.bulk_action"):
+            active_perms.clear()
+            active_perms.update({"subcategory.view", perm})
+            assert (await c.post(f"/api/v1/masters/product-sub-categories/{sid}/activate")).status_code != 403
+            assert (await c.post(f"/api/v1/masters/product-sub-categories/{sid}/deactivate")).status_code != 403
+            assert (await c.patch(f"/api/v1/masters/product-sub-categories/{sid}", json={"name": "Y"})).status_code == 403
+            assert (await c.delete(f"/api/v1/masters/product-sub-categories/{sid}")).status_code == 403
+
+        # 3. Independent create, update, delete, import, export
+        active_perms.clear()
+        active_perms.update({"subcategory.view", "subcategory.create"})
+        assert (await c.post("/api/v1/masters/product-sub-categories", json={"category_id": str(cat_id), "name": "NewSub"})).status_code != 403
+        assert (await c.patch(f"/api/v1/masters/product-sub-categories/{sid}", json={"name": "Y"})).status_code == 403
+
+        active_perms.clear()
+        active_perms.update({"subcategory.view", "subcategory.update"})
+        assert (await c.patch(f"/api/v1/masters/product-sub-categories/{sid}", json={"name": "Y"})).status_code != 403
+        assert (await c.delete(f"/api/v1/masters/product-sub-categories/{sid}")).status_code == 403
+
+        active_perms.clear()
+        active_perms.update({"subcategory.view", "subcategory.delete"})
+        assert (await c.delete(f"/api/v1/masters/product-sub-categories/{sid}")).status_code != 403
+        assert (await c.patch(f"/api/v1/masters/product-sub-categories/{sid}", json={"name": "Y"})).status_code == 403
+
+        active_perms.clear()
+        active_perms.update({"subcategory.view", "subcategory.import"})
+        assert (await c.post("/api/v1/masters/product-sub-categories/import", files={"file": ("s.csv", BytesIO(b"Category Name,Sub-Category Name\nC,S\n"), "text/csv")})).status_code != 403
+        assert (await c.get("/api/v1/masters/product-sub-categories/export")).status_code == 403
+
+        active_perms.clear()
+        active_perms.update({"subcategory.view", "subcategory.export"})
+        assert (await c.get("/api/v1/masters/product-sub-categories/export")).status_code != 403
+        assert (await c.post("/api/v1/masters/product-sub-categories/import", files={"file": ("s.csv", BytesIO(b"Category Name,Sub-Category Name\nC,S\n"), "text/csv")})).status_code == 403
+
+        # 4. subcategory.manage grants everything
+        active_perms.clear()
+        active_perms.add("subcategory.manage")
+        assert (await c.get("/api/v1/masters/product-sub-categories")).status_code == 200
+        assert (await c.post("/api/v1/masters/product-sub-categories", json={"category_id": str(cat_id), "name": "MgrSub"})).status_code != 403
+        assert (await c.patch(f"/api/v1/masters/product-sub-categories/{sid}", json={"name": "Y"})).status_code != 403
+        assert (await c.post(f"/api/v1/masters/product-sub-categories/{sid}/activate")).status_code != 403
+        assert (await c.post(f"/api/v1/masters/product-sub-categories/{sid}/deactivate")).status_code != 403
+        assert (await c.delete(f"/api/v1/masters/product-sub-categories/{sid}")).status_code != 403
+        assert (await c.get("/api/v1/masters/product-sub-categories/export")).status_code != 403
+        assert (await c.post("/api/v1/masters/product-sub-categories/import", files={"file": ("s.csv", BytesIO(b"Category Name,Sub-Category Name\nC,S\n"), "text/csv")})).status_code != 403
+
+
+async def test_brands_granular_rbac_permissions(db):
+    from io import BytesIO
+    from scripts.seed import BOOTSTRAP_PERMISSIONS
+
+    seeded_brand_codes = {row[0] for row in BOOTSTRAP_PERMISSIONS if row[1] == "brand"}
+    assert seeded_brand_codes == {
+        "brand.view",
+        "brand.create",
+        "brand.update",
+        "brand.delete",
+        "brand.export",
+        "brand.import",
+        "brand.bulk_action",
+        "brand.status_edit",
+        "brand.manage",
+    }
+
+    app = create_application()
+
+    async def _db():
+        yield db
+
+    app.dependency_overrides[get_db_session] = _db
+    active_perms: set[str] = set()
+    app.dependency_overrides[get_current_user] = lambda: CurrentUser(
+        id=uuid.uuid4(), username="brand_rbac", permissions=set(active_perms)
+    )
+
+    bid = uuid.uuid4()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        # 1. View-only cannot mutate/import/export/toggle/delete
+        active_perms.update({"brand.view"})
+        assert (await c.get("/api/v1/masters/brands")).status_code == 200
+        assert (await c.post("/api/v1/masters/brands", json={"name": "X"})).status_code == 403
+        assert (await c.patch(f"/api/v1/masters/brands/{bid}", json={"name": "Y"})).status_code == 403
+        assert (await c.post(f"/api/v1/masters/brands/{bid}/activate")).status_code == 403
+        assert (await c.post(f"/api/v1/masters/brands/{bid}/deactivate")).status_code == 403
+        assert (await c.delete(f"/api/v1/masters/brands/{bid}")).status_code == 403
+        assert (await c.get("/api/v1/masters/brands/export")).status_code == 403
+        assert (await c.post("/api/v1/masters/brands/import", files={"file": ("b.csv", BytesIO(b"Brand Name\nX\n"), "text/csv")})).status_code == 403
+
+        # 2. status_edit & bulk_action toggle activate/deactivate, NOT full PATCH/DELETE
+        for perm in ("brand.status_edit", "brand.bulk_action"):
+            active_perms.clear()
+            active_perms.update({"brand.view", perm})
+            assert (await c.post(f"/api/v1/masters/brands/{bid}/activate")).status_code != 403
+            assert (await c.post(f"/api/v1/masters/brands/{bid}/deactivate")).status_code != 403
+            assert (await c.patch(f"/api/v1/masters/brands/{bid}", json={"name": "Y"})).status_code == 403
+            assert (await c.delete(f"/api/v1/masters/brands/{bid}")).status_code == 403
+
+        # 3. Independent create, update, delete, import, export
+        active_perms.clear()
+        active_perms.update({"brand.view", "brand.create"})
+        assert (await c.post("/api/v1/masters/brands", json={"name": "NewBrand"})).status_code != 403
+        assert (await c.patch(f"/api/v1/masters/brands/{bid}", json={"name": "Y"})).status_code == 403
+
+        active_perms.clear()
+        active_perms.update({"brand.view", "brand.update"})
+        assert (await c.patch(f"/api/v1/masters/brands/{bid}", json={"name": "Y"})).status_code != 403
+        assert (await c.delete(f"/api/v1/masters/brands/{bid}")).status_code == 403
+
+        active_perms.clear()
+        active_perms.update({"brand.view", "brand.delete"})
+        assert (await c.delete(f"/api/v1/masters/brands/{bid}")).status_code != 403
+        assert (await c.patch(f"/api/v1/masters/brands/{bid}", json={"name": "Y"})).status_code == 403
+
+        active_perms.clear()
+        active_perms.update({"brand.view", "brand.import"})
+        assert (await c.post("/api/v1/masters/brands/import", files={"file": ("b.csv", BytesIO(b"Brand Name\nX\n"), "text/csv")})).status_code != 403
+        assert (await c.get("/api/v1/masters/brands/export")).status_code == 403
+
+        active_perms.clear()
+        active_perms.update({"brand.view", "brand.export"})
+        assert (await c.get("/api/v1/masters/brands/export")).status_code != 403
+        assert (await c.post("/api/v1/masters/brands/import", files={"file": ("b.csv", BytesIO(b"Brand Name\nX\n"), "text/csv")})).status_code == 403
+
+        # 4. brand.manage grants everything
+        active_perms.clear()
+        active_perms.add("brand.manage")
+        assert (await c.get("/api/v1/masters/brands")).status_code == 200
+        assert (await c.post("/api/v1/masters/brands", json={"name": "MgrBrand"})).status_code != 403
+        assert (await c.patch(f"/api/v1/masters/brands/{bid}", json={"name": "Y"})).status_code != 403
+        assert (await c.post(f"/api/v1/masters/brands/{bid}/activate")).status_code != 403
+        assert (await c.post(f"/api/v1/masters/brands/{bid}/deactivate")).status_code != 403
+        assert (await c.delete(f"/api/v1/masters/brands/{bid}")).status_code != 403
+        assert (await c.get("/api/v1/masters/brands/export")).status_code != 403
+        assert (await c.post("/api/v1/masters/brands/import", files={"file": ("b.csv", BytesIO(b"Brand Name\nX\n"), "text/csv")})).status_code != 403
 
 
 # ------------------------------------------------------------------------------------------------ product bulk import duplicates

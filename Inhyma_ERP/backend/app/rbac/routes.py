@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from app.audit.constants import AuditAction
 from app.audit.dependencies import get_audit_service
@@ -26,10 +26,16 @@ from app.audit.service import AuditService
 from app.auth.dependencies import get_current_user
 from app.auth.service import CurrentUser
 from app.core.responses import build_success_response
+from app.events.channels import user_channel
+from app.events.dependencies import get_event_dispatcher
+from app.events.dispatcher import EventDispatcher
+from app.events.models import Event
 from app.rbac.dependencies import get_rbac_service, require_any_permission, require_permission
+from app.rbac.models import Role
 from app.rbac.schemas import (
     AddHierarchyLinkRequest,
     AssignUserPermissionRequest,
+    BulkRolePermissionsRequest,
     BulkUserPermissionsRequest,
     ClonePermissionSetRequest,
     DeleteRoleRequest,
@@ -52,6 +58,26 @@ async def _role_with_permissions(role: Role, rbac_service: RBACService) -> RoleW
     """Shape a ``Role`` ORM instance into the response schema, with granted permission codes expanded."""
     codes = await rbac_service.get_permission_codes_for_role(role.id)
     return RoleWithPermissions(**RoleRead.model_validate(role).model_dump(), permissions=codes)
+
+
+async def _publish_permissions_updated(
+    event_dispatcher: EventDispatcher, user_ids: list[uuid.UUID] | set[uuid.UUID]
+) -> None:
+    """Broadcast PERMISSIONS_UPDATED to each affected user's private WebSocket channel."""
+    for uid in dict.fromkeys(user_ids):
+        await event_dispatcher.publish(
+            user_channel(uid),
+            Event(
+                event_type="PERMISSIONS_UPDATED",
+                entity="user_permissions",
+                entity_id=str(uid),
+            ),
+        )
+
+
+async def _user_ids_for_role(rbac_service: RBACService, role_id: uuid.UUID) -> list[uuid.UUID]:
+    """Return all user IDs currently assigned to a given role/department."""
+    return await rbac_service.user_role_repository.list_user_ids_for_role(role_id)
 
 
 @router.get("/permissions", summary="List every permission (admin)")
@@ -436,6 +462,7 @@ async def grant_permission(
     rbac_service: RBACService = Depends(get_rbac_service),
     current_user: CurrentUser = Depends(require_permission("roles_permissions.action")),
     audit_service: AuditService = Depends(get_audit_service),
+    event_dispatcher: EventDispatcher = Depends(get_event_dispatcher),
 ) -> dict:
     """Grant a permission to a role, if not already granted."""
     await rbac_service.grant_permission(role_id, payload.permission_id, actor_user_id=current_user.id)
@@ -455,7 +482,10 @@ async def grant_permission(
         response_status=status.HTTP_200_OK,
         description=f"Granted permission {payload.permission_id} to role.",
     )
+    affected_users = await _user_ids_for_role(rbac_service, role_id)
+    await rbac_service.role_repository.session.commit()
     request.state.audit_logged = True
+    await _publish_permissions_updated(event_dispatcher, affected_users)
     return build_success_response(data={"granted": True}, request_id=request.state.request_id)
 
 
@@ -467,6 +497,7 @@ async def revoke_permission(
     rbac_service: RBACService = Depends(get_rbac_service),
     current_user: CurrentUser = Depends(require_permission("roles_permissions.action")),
     audit_service: AuditService = Depends(get_audit_service),
+    event_dispatcher: EventDispatcher = Depends(get_event_dispatcher),
 ) -> dict:
     """Revoke a permission from a role."""
     await rbac_service.revoke_permission(role_id, permission_id, actor_user_id=current_user.id)
@@ -486,8 +517,48 @@ async def revoke_permission(
         response_status=status.HTTP_200_OK,
         description=f"Revoked permission {permission_id} from role.",
     )
+    affected_users = await _user_ids_for_role(rbac_service, role_id)
+    await rbac_service.role_repository.session.commit()
     request.state.audit_logged = True
+    await _publish_permissions_updated(event_dispatcher, affected_users)
     return build_success_response(data={"revoked": True}, request_id=request.state.request_id)
+
+
+@router.put("/roles/{role_id}/permissions/bulk", summary="Set bulk role permissions (admin)")
+async def set_role_permissions_bulk(
+    role_id: uuid.UUID,
+    payload: BulkRolePermissionsRequest,
+    request: Request,
+    rbac_service: RBACService = Depends(get_rbac_service),
+    current_user: CurrentUser = Depends(require_permission("roles_permissions.action")),
+    audit_service: AuditService = Depends(get_audit_service),
+    event_dispatcher: EventDispatcher = Depends(get_event_dispatcher),
+) -> dict:
+    """Replace all permissions granted to a role in a single atomic request."""
+    count = await rbac_service.set_role_permissions_bulk(
+        role_id, payload.permission_ids, actor_user_id=current_user.id
+    )
+    await audit_service.record(
+        action=AuditAction.PERMISSION_CHANGED,
+        module="rbac",
+        user_id=current_user.id,
+        username_snapshot=current_user.username,
+        entity_type="Role",
+        entity_id=str(role_id),
+        new_values={"permission_count": count},
+        ip_address=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+        request_id=request.state.request_id,
+        http_method=request.method,
+        endpoint=request.url.path,
+        response_status=status.HTTP_200_OK,
+        description=f"Updated {count} permissions for role {role_id}.",
+    )
+    affected_users = await _user_ids_for_role(rbac_service, role_id)
+    await rbac_service.role_repository.session.commit()
+    request.state.audit_logged = True
+    await _publish_permissions_updated(event_dispatcher, affected_users)
+    return build_success_response(data={"count": count}, request_id=request.state.request_id)
 
 
 # --- Individual User Permissions ---------------------------------------------
@@ -517,6 +588,7 @@ async def assign_user_permission(
     rbac_service: RBACService = Depends(get_rbac_service),
     current_user: CurrentUser = Depends(require_any_permission("roles_permissions.action", "user.action")),
     audit_service: AuditService = Depends(get_audit_service),
+    event_dispatcher: EventDispatcher = Depends(get_event_dispatcher),
 ) -> dict:
     if user_id == current_user.id and not current_user.is_super_admin:
         raise HTTPException(
@@ -542,7 +614,9 @@ async def assign_user_permission(
         response_status=status.HTTP_200_OK,
         description=f"Assigned user permission override (is_granted={payload.is_granted}) to user {user_id}.",
     )
+    await rbac_service.role_repository.session.commit()
     request.state.audit_logged = True
+    await _publish_permissions_updated(event_dispatcher, [user_id])
     return build_success_response(data={"assigned": True}, request_id=request.state.request_id)
 
 
@@ -554,6 +628,7 @@ async def remove_user_permission(
     rbac_service: RBACService = Depends(get_rbac_service),
     current_user: CurrentUser = Depends(require_any_permission("roles_permissions.action", "user.action")),
     audit_service: AuditService = Depends(get_audit_service),
+    event_dispatcher: EventDispatcher = Depends(get_event_dispatcher),
 ) -> dict:
     if user_id == current_user.id and not current_user.is_super_admin:
         raise HTTPException(
@@ -577,7 +652,9 @@ async def remove_user_permission(
         response_status=status.HTTP_200_OK,
         description=f"Removed user permission override from user {user_id}.",
     )
+    await rbac_service.role_repository.session.commit()
     request.state.audit_logged = True
+    await _publish_permissions_updated(event_dispatcher, [user_id])
     return build_success_response(data={"removed": True}, request_id=request.state.request_id)
 
 
@@ -589,6 +666,7 @@ async def set_user_permissions_bulk(
     rbac_service: RBACService = Depends(get_rbac_service),
     current_user: CurrentUser = Depends(require_any_permission("roles_permissions.action", "user.action")),
     audit_service: AuditService = Depends(get_audit_service),
+    event_dispatcher: EventDispatcher = Depends(get_event_dispatcher),
 ) -> dict:
     if user_id == current_user.id and not current_user.is_super_admin:
         raise HTTPException(
@@ -615,7 +693,9 @@ async def set_user_permissions_bulk(
         response_status=status.HTTP_200_OK,
         description=f"Updated {count} direct permission overrides for user {user_id}.",
     )
+    await rbac_service.role_repository.session.commit()
     request.state.audit_logged = True
+    await _publish_permissions_updated(event_dispatcher, [user_id])
     return build_success_response(data={"count": count}, request_id=request.state.request_id)
 
 
@@ -639,6 +719,7 @@ async def clone_permission_set(
     rbac_service: RBACService = Depends(get_rbac_service),
     current_user: CurrentUser = Depends(require_permission("roles_permissions.create")),
     audit_service: AuditService = Depends(get_audit_service),
+    event_dispatcher: EventDispatcher = Depends(get_event_dispatcher),
 ) -> dict:
     cloned_count = await rbac_service.clone_permission_set(
         source_type=payload.source_type,
@@ -667,5 +748,12 @@ async def clone_permission_set(
         response_status=status.HTTP_200_OK,
         description=f"Cloned {cloned_count} permission(s) from {payload.source_type} ({payload.source_id}) to {payload.target_type} ({payload.target_id}).",
     )
+    affected_users = (
+        [payload.target_id]
+        if payload.target_type == "user"
+        else await _user_ids_for_role(rbac_service, payload.target_id)
+    )
+    await rbac_service.role_repository.session.commit()
     request.state.audit_logged = True
+    await _publish_permissions_updated(event_dispatcher, affected_users)
     return build_success_response(data={"cloned_count": cloned_count}, request_id=request.state.request_id)

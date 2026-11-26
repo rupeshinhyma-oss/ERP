@@ -11,6 +11,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
 import { Can } from "@/components/ui";
+import { SelectField } from "@/components/fields";
 import { TableSkeletonRows } from "@/components/Skeleton";
 import { apiDelete, apiGet, apiPatch, downloadExport, errorMessage } from "@/lib/api";
 import { useLookup } from "@/lib/lookups";
@@ -671,14 +672,13 @@ export function SaleProcessListPage() {
                 <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px" }}>
                   Buyer Company
                 </label>
-                <select
+                <SelectField
                   value={selectedBuyerId}
-                  onChange={(e) => {
-                    setSelectedBuyerId(e.target.value);
+                  onChange={(val) => {
+                    setSelectedBuyerId(val);
                     setPage(1);
                   }}
-                  style={{
-                    width: "100%",
+                  triggerStyle={{
                     height: "38px",
                     padding: "7px 10px",
                     borderRadius: "6px",
@@ -694,7 +694,7 @@ export function SaleProcessListPage() {
                       {b.company_name || b.name}
                     </option>
                   ))}
-                </select>
+                </SelectField>
               </div>
 
               {/* Consignment Code Filter */}

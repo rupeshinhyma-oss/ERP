@@ -1,7 +1,7 @@
 """Drop redundant ix_lead_sources_name unique index (uq_lead_sources_name already enforces unique btree index on name).
 
-Revision ID: z8a9b0c1d2e3
-Revises: z7f8a9b0c1d2
+Revision ID: z9o3f4a5b6c7
+Revises: z9n2e3f4a5b6
 Create Date: 2026-11-21
 """
 
@@ -10,8 +10,8 @@ from __future__ import annotations
 from alembic import op
 import sqlalchemy as sa
 
-revision = "z8a9b0c1d2e3"
-down_revision = "z7f8a9b0c1d2"
+revision = "z9o3f4a5b6c7"
+down_revision = "z9n2e3f4a5b6"
 branch_labels = None
 depends_on = None
 

@@ -3096,23 +3096,23 @@ function ItemsView({
                             />
                             {/* Quick Supplier Picker if known WeChat contacts exist */}
                             {uniqueSuppliersInWechat.length > 0 && (
-                              <select
-                                onChange={(e) => {
-                                  if (e.target.value) {
-                                    setWechatComposerTo(e.target.value);
+                              <SelectField
+                                value=""
+                                onChange={(val) => {
+                                  if (val) {
+                                    setWechatComposerTo(val);
                                   }
                                 }}
-                                style={{
+                                style={{ minWidth: "200px" }}
+                                triggerStyle={{
                                   padding: "6px 10px",
                                   border: "1px solid #86efac",
                                   borderRadius: "6px",
                                   fontSize: "12px",
                                   color: "#166534",
                                   background: "#f0fdf4",
-                                  cursor: "pointer",
                                   fontWeight: 600,
                                 }}
-                                defaultValue=""
                               >
                                 <option value="" disabled>-- Pick Chatted Supplier --</option>
                                 {uniqueSuppliersInWechat.map((s, idx) => (
@@ -3120,7 +3120,7 @@ function ItemsView({
                                     {s.name} ({s.contact})
                                   </option>
                                 ))}
-                              </select>
+                              </SelectField>
                             )}
                           </div>
                         </div>
@@ -3317,10 +3317,11 @@ function ItemsView({
                     <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
                       {/* Supplier Filter Dropdown if multiple suppliers replied */}
                       {uniqueSuppliersInEmails.length > 1 && (
-                        <select
+                        <SelectField
                           value={emailSupplierFilter}
-                          onChange={(e) => setEmailSupplierFilter(e.target.value)}
-                          style={{
+                          onChange={(val) => setEmailSupplierFilter(val)}
+                          style={{ minWidth: "180px" }}
+                          triggerStyle={{
                             padding: "5px 10px",
                             borderRadius: "6px",
                             border: "1px solid #93c5fd",
@@ -3328,7 +3329,6 @@ function ItemsView({
                             fontSize: "12px",
                             fontWeight: 600,
                             color: "#1e40af",
-                            cursor: "pointer",
                             boxShadow: "0 1px 2px rgba(0,0,0,0.04)",
                           }}
                         >
@@ -3338,7 +3338,7 @@ function ItemsView({
                               🏢 {s.name}
                             </option>
                           ))}
-                        </select>
+                        </SelectField>
                       )}
 
                       {/* Product vs Consignment Filter Toggle */}
@@ -3595,22 +3595,22 @@ function ItemsView({
                             />
                             {/* Quick Supplier Picker */}
                             {uniqueSuppliersInEmails.length > 0 && (
-                              <select
-                                onChange={(e) => {
-                                  if (e.target.value) {
-                                    setComposerTo(e.target.value);
+                              <SelectField
+                                value=""
+                                onChange={(val) => {
+                                  if (val) {
+                                    setComposerTo(val);
                                   }
                                 }}
-                                style={{
+                                style={{ minWidth: "200px" }}
+                                triggerStyle={{
                                   padding: "6px 10px",
                                   border: "1px solid #cbd5e1",
                                   borderRadius: "6px",
                                   fontSize: "12px",
                                   color: "#334155",
                                   background: "#f8fafc",
-                                  cursor: "pointer",
                                 }}
-                                defaultValue=""
                               >
                                 <option value="" disabled>-- Quick Select Supplier --</option>
                                 {uniqueSuppliersInEmails.map((s) => (
@@ -3618,7 +3618,7 @@ function ItemsView({
                                     {s.name} {s.email ? `(${s.email})` : ""}
                                   </option>
                                 ))}
-                              </select>
+                              </SelectField>
                             )}
                           </div>
                         </div>
@@ -3906,10 +3906,11 @@ function ItemsView({
                     <option value="50">50 items</option>
                   </select>
 
-                  <select
+                  <SelectField
                     value={quotationSupplierFilter}
-                    onChange={(e) => setQuotationSupplierFilter(e.target.value)}
-                    style={{
+                    onChange={(val) => setQuotationSupplierFilter(val)}
+                    style={{ minWidth: "180px" }}
+                    triggerStyle={{
                       padding: "6px 10px",
                       borderRadius: "6px",
                       border: "1px solid #cbd5e1",
@@ -3921,7 +3922,7 @@ function ItemsView({
                     {quotationSuppliers.map((s) => (
                       <option key={s.id} value={s.id}>{s.name}</option>
                     ))}
-                  </select>
+                  </SelectField>
                 </div>
 
                 <div style={{ position: "relative", width: "240px", maxWidth: "100%" }}>

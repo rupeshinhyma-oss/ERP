@@ -485,3 +485,115 @@ async def test_contact_age_is_computed_on_the_server_for_both_date_formats(clien
         assert d.get("age") is not None and int(d["age"]) >= 35, (birth, d.get("age"))
     rows = (await client.get(f"/api/v1/companies/{c['id']}/contacts")).json()["data"]
     assert all(r.get("age") is not None for r in rows if r.get("birth_date"))
+
+
+async def test_company_granular_rbac_permissions(test_db: AsyncSession):
+    """Verify Companies RBAC matrix: view, quick_add, create, grade_edit, potential_edit, import, export, bulk_action, update, delete, manage, and isolation from supplier.*."""
+    from io import BytesIO
+    from app.masters.product_categories.models import ProductCategory
+    from app.masters.product_sub_categories.models import ProductSubCategory
+    from app.masters.products.models import Product
+    from scripts.seed import BOOTSTRAP_PERMISSIONS
+
+    conn = await test_db.connection()
+    await conn.run_sync(
+        lambda c: Base.metadata.create_all(
+            c, tables=[ProductCategory.__table__, ProductSubCategory.__table__, Product.__table__]
+        )
+    )
+    await test_db.commit()
+
+    seeded_company_codes = {row[0] for row in BOOTSTRAP_PERMISSIONS if row[1] == "company"}
+    assert seeded_company_codes == {
+        "company.view",
+        "company.quick_add",
+        "company.create",
+        "company.update",
+        "company.delete",
+        "company.export",
+        "company.import",
+        "company.bulk_action",
+        "company.grade_edit",
+        "company.potential_edit",
+        "company.manage",
+    }
+
+    active_perms: set[str] = set()
+    app = create_application()
+
+    async def _db():
+        yield test_db
+
+    app.dependency_overrides[get_db_session] = _db
+    app.dependency_overrides[get_current_user] = lambda: CurrentUser(
+        id=uuid.uuid4(), username="rbac_comp_user", permissions=set(active_perms)
+    )
+    app.dependency_overrides[get_audit_service] = lambda: _NoAudit()
+    app.dependency_overrides[get_event_dispatcher] = lambda: _NoEvents()
+    app.dependency_overrides[get_cache_manager] = lambda: _NoCache()
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as ac:
+        # 1. Seed a sample company using company.manage
+        active_perms.update({"company.manage"})
+        seeded = await _create(ac, company_name="RBAC Company One")
+        cid = seeded["id"]
+
+        # 2. Supplier-only permissions must NOT grant access to Companies endpoints
+        active_perms.clear()
+        active_perms.update({"supplier.view", "supplier.create", "supplier.update", "supplier.grade_edit"})
+        assert (await ac.get("/api/v1/companies")).status_code == 403
+        assert (await ac.post("/api/v1/companies", json=_body(company_name="Supplier Denied"))).status_code == 403
+        assert (await ac.patch(f"/api/v1/companies/{cid}/grade", json={"company_grade": "A"})).status_code == 403
+
+        # 3. View-only cannot mutate
+        active_perms.clear()
+        active_perms.add("company.view")
+        assert (await ac.get("/api/v1/companies")).status_code == 200
+        assert (await ac.post("/api/v1/companies", json=_body(company_name="View Denied"))).status_code == 403
+        assert (await ac.patch(f"/api/v1/companies/{cid}", json={"area": "Test"})).status_code == 403
+        assert (await ac.patch(f"/api/v1/companies/{cid}/grade", json={"company_grade": "A"})).status_code == 403
+        assert (await ac.patch(f"/api/v1/companies/{cid}/potential", json={"potential": "yes"})).status_code == 403
+        assert (await ac.get("/api/v1/companies/export?format=csv")).status_code == 403
+        assert (await ac.post("/api/v1/companies/import", files={"file": ("c.csv", BytesIO(b"Company Name\nX\n"), "text/csv")})).status_code == 403
+
+        # 4. company.update CANNOT edit Grade or Potential, and CANNOT import/export/delete
+        active_perms.clear()
+        active_perms.update({"company.view", "company.update"})
+        assert (await ac.patch(f"/api/v1/companies/{cid}", json={"area": "Updated Area"})).status_code == 200
+        assert (await ac.patch(f"/api/v1/companies/{cid}/grade", json={"company_grade": "A"})).status_code == 403
+        assert (await ac.patch(f"/api/v1/companies/{cid}/potential", json={"potential": "yes"})).status_code == 403
+        assert (await ac.post("/api/v1/companies/import", files={"file": ("c.csv", BytesIO(b"Company Name\nX\n"), "text/csv")})).status_code == 403
+
+        # 5. company.quick_add allows POST /companies, blocks PATCH /import /export
+        active_perms.clear()
+        active_perms.update({"company.view", "company.quick_add"})
+        assert (await ac.post("/api/v1/companies", json=_body(company_name="Quick Add Co"))).status_code == 201
+        assert (await ac.patch(f"/api/v1/companies/{cid}", json={"area": "Blocked"})).status_code == 403
+        assert (await ac.post("/api/v1/companies/import", files={"file": ("c.csv", BytesIO(b"Company Name\nX\n"), "text/csv")})).status_code == 403
+
+        # 6. Independent grade_edit, potential_edit, import, export, bulk_action
+        active_perms.clear()
+        active_perms.update({"company.view", "company.grade_edit"})
+        assert (await ac.patch(f"/api/v1/companies/{cid}/grade", json={"company_grade": "B"})).status_code == 200
+        assert (await ac.patch(f"/api/v1/companies/{cid}/potential", json={"potential": "yes"})).status_code == 403
+
+        active_perms.clear()
+        active_perms.update({"company.view", "company.potential_edit"})
+        assert (await ac.patch(f"/api/v1/companies/{cid}/potential", json={"potential": "yes"})).status_code == 200
+        assert (await ac.patch(f"/api/v1/companies/{cid}/grade", json={"company_grade": "C"})).status_code == 403
+
+        active_perms.clear()
+        active_perms.update({"company.view", "company.import"})
+        csv_bytes = b"Company Name,Country,State / Province,City\nImported Co,India,Gujarat,Ahmedabad City\n"
+        assert (await ac.post("/api/v1/companies/import", files={"file": ("c.csv", BytesIO(csv_bytes), "text/csv")})).status_code == 200
+        assert (await ac.get("/api/v1/companies/export?format=csv")).status_code == 403
+
+        active_perms.clear()
+        active_perms.update({"company.view", "company.export"})
+        assert (await ac.get("/api/v1/companies/export?format=csv")).status_code == 200
+
+        active_perms.clear()
+        active_perms.update({"company.view", "company.bulk_action"})
+        assert (await ac.post(f"/api/v1/companies/{cid}/deactivate")).status_code == 200
+        assert (await ac.post(f"/api/v1/companies/{cid}/activate")).status_code == 200
+        assert (await ac.delete(f"/api/v1/companies/{cid}")).status_code == 403

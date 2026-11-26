@@ -1,7 +1,7 @@
 """tasks_recurring_period_uniqueness
 
-Revision ID: z4c5d6e7f8a9
-Revises: z3b4c5d6e7f8
+Revision ID: z9k9b0c1d2e3
+Revises: z9j8a9b0c1d2
 Create Date: 2026-11-19 16:26:00.000000
 
 Enforces database-level idempotency for recurring task generation (BUG-03):
@@ -17,8 +17,8 @@ from typing import Sequence, Union
 import sqlalchemy as sa
 from alembic import op
 
-revision: str = "z4c5d6e7f8a9"
-down_revision: Union[str, Sequence[str], None] = "z3b4c5d6e7f8"
+revision: str = "z9k9b0c1d2e3"
+down_revision: Union[str, Sequence[str], None] = "z9j8a9b0c1d2"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

@@ -4,7 +4,7 @@
 > **Location:** Root Workspace (`/MODULES_AND_FEATURES_TEST_MANUAL.md`)  
 > **Purpose:** Exhaustive reference catalog detailing every single module, page layout, table column, action button, modal window, drawer, form tab, and form field across the entire ERP. Designed for developers, QA testers, and autonomous AI agents to execute manual and automated regression tests before and after code changes.  
 > **Strict Policy:** When developing or modifying features, no existing module, form, or field listed in this document may be removed, broken, or regressed.  
-> **Last Updated:** November 18, 2026
+> **Last Updated:** November 21, 2026
 
 ---
 
@@ -23,7 +23,7 @@
 11. [INVENTORY: Supplier Types Master Module](#11-inventory-supplier-types-master-module)
 12. [INVENTORY: Buyer Types Master Module](#12-inventory-buyer-types-master-module)
 13. [SALE: Inquiries & Proforma Workflow Module](#13-sale-inquiries--proforma-workflow-module)
-14. [PLANNING: Master Shipment Planning Grid Module](#14-planning-master-shipment-planning-grid-module)
+14. [PLANNING: Master Shipment Planning Grid Module *(Removed in `Inhyma_ERP` — `z6e7f8a9b0c1`)*](#14-planning-master-shipment-planning-grid-module-removed-in-inhyma_erp--z6e7f8a9b0c1)
 15. [USER MANAGEMENT: Users Module](#15-user-management-users-module)
 16. [USER MANAGEMENT: Departments & Permissions (RBAC) Module](#16-user-management-departments--permissions-rbac-module)
 17. [CONFIGURATIONS: HSN Codes Master Module](#17-configurations-hsn-codes-master-module)
@@ -109,18 +109,18 @@
 | **DASHBOARD** | Dashboard | `/dashboard` | `dashboard` | `dashboard` | Public Authenticated |
 | **CONTACT** | Companies | `/companies` | `companies` | `building` | `company.view` |
 | **CONTACT** | Buyers | `/buyers` | `buyers` | `shoppingBag` | `buyer.view` |
-| **INVENTORY** | Product Stock | `/product-stock/list` | `product-stock` | `stock` | `product.view` |
-| **INVENTORY** | Stock Adjustment | `/stock-adjustment` | `stock-adjustment` | `sliders` | `product.view` |
-| **INVENTORY** | Stock Transfer | `/stock-transfer` | `stock-transfer` | `truck` | `product.view` |
-| **INVENTORY** | Product Master | `/masters/products` | `masters-products` | `box` | `product.view` |
+| **INVENTORY** | Product Stock | `/product-stock/list` | `product-stock` | `stock` | `product_stock.view` (or `product_stock.manage`) |
+| **INVENTORY** | Stock Adjustment | `/stock-adjustment` | `stock-adjustment` | `sliders` | `stock_adjustment.view` (or `stock_adjustment.manage`) |
+| **INVENTORY** | Stock Transfer | `/stock-transfer` | `stock-transfer` | `truck` | Any of `stock_transfer.view`, `stock_transfer.{pending,confirmed,received,cancel}.view`, `stock_transfer.manage` |
+| **INVENTORY** | Product Master | `/product/list` (`/masters/products`) | `masters-products` | `box` | `product.view` (or `product.manage`) |
 | **INVENTORY** | Product Gallery | `/product-gallery` | `product-gallery` | `image` | `productgallery.view` |
-| **INVENTORY** | Categories | `/masters/categories` | `masters-categories` | `layers` | `category.view` |
-| **INVENTORY** | Sub Categories | `/masters/subcategories` | `masters-subcategories` | `folderTree` | `subcategory.view` |
-| **INVENTORY** | Brands | `/masters/brands` | `masters-brands` | `award` | `brand.view` |
+| **INVENTORY** | Categories | `/masters/categories` | `masters-categories` | `layers` | `category.view` (or `category.manage`) |
+| **INVENTORY** | Sub Categories | `/masters/subcategories` | `masters-subcategories` | `folderTree` | `subcategory.view` (or `subcategory.manage`) |
+| **INVENTORY** | Brands | `/masters/brands` | `masters-brands` | `award` | `brand.view` (or `brand.manage`) |
 | **INVENTORY** | Supplier Types | `/masters/supplier-types` | `masters-supplier-types` | `network` | `suppliertype.view` |
 | **INVENTORY** | Buyer Types | `/masters/buyer-types` | `masters-buyer-types` | `idCard` | `buyertype.view` |
 | **SALE** | Inquiries | `/inquiries` | `inquiries` | `fileText` | Public Authenticated / `inquiry.view` |
-| **SALE** | Proforma Invoices | `/proforma-invoice/list` | `proforma` | `fileText` | `sale.pi.view` |
+| **SALE** | Proforma Invoices | `/proforma-invoice/list` | `proforma` | `fileText` | `proforma.view` / `proforma.<stage>.view` / `proforma.manage` |
 | **SALE** | Sales Process | `/sales/process` | `sale-process` | `shoppingCart` | `saleorder.view` |
 | **SALE** | Add Sales Order | `/sales/process/add` | `sale-process-add` | `plusCircle` | `saleorder.create` |
 | **SALE** | Discount Payments | `/discount-payments` | `discount-payments` | `creditCard` | `saleorder.view` |
@@ -509,6 +509,7 @@ Manage complete vendor team directory:
 - [ ] Create a product, enter Length: `100`, Width: `50`, Height: `40`. Verify CBM calculates to `0.200000`.
 - [ ] Select HSN code with 13% Refund VAT and confirm Refund VAT % field auto-populates with `13`.
 - [ ] Click "Download PDF Datasheet" (`GET /api/v1/products/{id}/datasheet-pdf`) and verify ReportLab PDF generates.
+- [ ] Verify granular RBAC gating on `/product/list` (`/masters/products`): with `product.view` only, `+ ADD NEW`, `Imp / Exp`, `Bulk Actions`, row checkboxes, and the `Action` column (`Edit Product` button + detail drawer `Edit Product` + machine-spare `SELECT DATA`/`REMOVE DATA`) are all hidden; `product.create` reveals `+ ADD NEW`; `product.import` reveals `Import` (`SAMPLE FILE` + `IMPORT`); `product.export` reveals `Export` (`EXPORT`); `product.import` + `product.export` renders `Imp / Exp`; `product.bulk_action` reveals selection checkboxes and `Bulk Actions` (`Bulk Activate` / `Bulk Inactive`, with `Bulk Delete` gated additionally by `product.delete`); `product.update` reveals `Action` > `Edit`; and `product.manage` grants all Product Master controls and endpoints.
 - [ ] Open Product Master table and verify the `ACTION` column contains View (`👁️`), Edit (`✏️`), and Datasheet (`📄`), with no `Delete` button present.
 - [ ] Open a Machine product's detail drawer and verify:
   - `Edit Product` button is rendered at the top-right header next to the close (`✕`) button.
@@ -575,6 +576,7 @@ Manage complete vendor team directory:
 
 - **Route:** `/masters/brands`
 - **Add / Edit Form Fields:** Brand Name (*Required*), Brand Code, Manufacturer / Country Description, Status (`Active`/`Inactive`).
+- **Granular RBAC (`z9h6a7b8c9d0`):** Enforces 9 independent `brand.*` permissions (`brand.view` -> `View`, `brand.create` -> `+ Add New (Create)`, `brand.import` -> `Import (Sample + Import)`, `brand.export` -> `Export`, `brand.bulk_action` -> `Bulk Actions`, `brand.status_edit` -> `Status`, `brand.update` -> `Action: Edit`, `brand.delete` -> `Action: Delete` / `Bulk Delete`, `brand.manage` -> `Manage All`). With `brand.view` only, header CTAs, checkboxes, and `ACTION` column are hidden and the `STATUS` switch is disabled; `/activate` & `/deactivate` accept `brand.update | brand.status_edit | brand.bulk_action | brand.manage`.
 
 ---
 
@@ -712,10 +714,10 @@ Manage complete vendor team directory:
 
 ---
 
-## 14. PLANNING: Master Shipment Planning Grid Module
+## 14. PLANNING: Master Shipment Planning Grid Module *(Removed in `Inhyma_ERP` — `z6e7f8a9b0c1`)*
 
-- **Route:** `/planning`
-- **Purpose:** Interactive spreadsheet-like shipment planning workbook for branch logistics, dynamic column configuration, container CBM optimization, and audit logging.
+- **Route:** `/planning` *(redirects cleanly to `/dashboard`; Shipment Planning UI (`Planning.tsx`, `types/planning.ts`), API router (`/api/v1/planning/*`), and all `9` `planning.*` RBAC permissions were removed in `Inhyma_ERP`).*
+- **Note:** Only legacy `app/planning` SQLAlchemy models remain referenced internally by `sales/service.py` (`/sales/planning-consignments`) and `trash/service.py` for database schema compatibility.
 
 ### 14.1. Workbook Features & Sheet Architecture
 1. **Branch Sheet Tabs:**
@@ -931,8 +933,9 @@ Manage complete vendor team directory:
 - [ ] **Bi-Directional Password Sync**: Change a user's password locally in Inhyma. Verify that `ERP_Main` receives the update via `POST /api/v1/auth/internal/sync-password` and propagates it to Yinglima without errors.
 - [ ] Click `✏️ Edit Profile` on a user row. Verify:
   - Drawer opens with identity, HR attributes, and dynamically populated **Position** dropdown.
-  - **Department & Role Assignments** section is displayed directly inside the drawer.
-  - Adding or removing departments updates the user's role assignments immediately with live table sync.
+  - **Department & Role Assignments section** is displayed directly inside the drawer.
+  - Adding or removing departments updates the user's role assignments immediately with live table sync and publishes `PERMISSIONS_UPDATED`.
+- [ ] **User Permission Overrides Instant Auto-Save (No Save Button):** Click `🔑 Permission Overrides` for a user -> toggle a single checkbox, click `Select Group` / `Deselect Group`, `Grant All`, `Deny All`, or `Reset to Departments` -> verify no manual Save/Cancel buttons render, `Saving...` transitions to `Auto-saved`, closing via `Done` and reopening preserves every change (`PUT /api/v1/rbac/users/{id}/permissions/bulk`), and if the backend returns an error the checkbox state reverts automatically.
 
 ---
 
@@ -945,7 +948,7 @@ Manage complete vendor team directory:
 - **Columns:** Checkbox, Sr. No., Department Name, Created Date, Actions.
 - **Header Actions:** `+ ADD NEW`, `DELETE` (bulk delete selected custom departments), `Clone Department Permissions`.
 - **Canonical System Roles vs. Custom Organizational Departments:**
-  - Strictly **two** bootstrap roles carry the `SYSTEM` badge (`is_system=True`): **`Admin`** (`super_admin`, full `306/306` permission access, reserved for the bootstrap admin) and **`User`** (`user`, default fallback role). Their row checkboxes are disabled and they cannot be renamed or deleted.
+  - Strictly **three** bootstrap roles carry the `SYSTEM` badge (`is_system=True`): **`Admin`** (`super_admin`, full permission access across all `377` bootstrap permissions, reserved for the bootstrap admin), **`User`** (`user`, default fallback role), and **`Technician`** (`technician`, fixed field-service technician department). Their row checkboxes are disabled and they cannot be renamed or deleted.
   - Zero business departments (`Sales`, `HR`, `Operations`, `Engineering`, `Sales Manager`, etc.) are hardcoded or auto-seeded; every organizational department is created dynamically by administrators (`is_system=False`) and can be edited, nested, or deleted without ever re-creating automatically.
 
 ### 16.2. Department View / Edit Modal
@@ -976,9 +979,11 @@ Manage complete vendor team directory:
 - **Bidirectional Live Auto-Sync:** Connecting a child department under a parent (e.g. Sales under Operations) immediately updates both departments' rosters so Operations lists Sales as a child, and Sales lists Operations as a parent.
 - **DAG Cycle Detection:** Server-side validation prevents circular hierarchies (e.g. A -> B -> A or A -> B -> C -> A) and returns HTTP 409 Conflict with an alert.
 - **Permission Matrix Grid:**
-  - Grouped by module cards (`325` unique permissions across all modules, including `Technical Tasks` with `16` permissions: `technicaltask.view`, `technicaltask.pending.view`, `technicaltask.approved.view`, `technicaltask.completed.view`, `technicaltask.cancel.view`, `technicaltask.create`, `technicaltask.bulk_action`, `technicaltask.action.view`, `technicaltask.call_logs.view`, `technicaltask.approve`, `technicaltask.complete`, `technicaltask.cancel`, `technicaltask.reopen`, `technicaltask.update`, `technicaltask.delete`, `technicaltask.manage`; `Payments` with `5` independent permissions: `payment.view`, `payment.create`, `payment.update`, `payment.delete`, `payment.manage`; and `Technician Gatepass & Wallet Management` with `4` independent permissions: `technician_operations.view`, `technician_operations.create`, `technician_operations.update`, `technician_operations.manage`; the `Technicians` Master module and `technician.*` permissions were removed in favor of the fixed `Technician` `SYSTEM` department).
+  - **Left-Sidebar Navigation Section Alignment & Search (`permissionLabels.ts` -> `NAV_PERMISSION_SECTIONS`, `filterNavPermissionSections`):** Module cards on `/rbac` (Department editor & Manager overrides modal) and `/users` (User Permission Overrides modal) are grouped under left-sidebar section headings (`DASHBOARD` -> `TASK` -> `CONTACT` -> `CRM` -> `INVENTORY` -> `SALE` -> `PURCHASE` -> `REPORTS` -> `HRMS` -> `USER MANAGEMENT` -> `SETTINGS — MASTERS` -> `SETTINGS — SYSTEM`) matching `nav.ts` item-for-item (with an `OTHER` fallback section if an unmapped module exists in the database), using friendly `MODULE_NAMES` (e.g., `Sale Orders`, `Social Media`, `Local Purchase`) and semantic intra-module sorting (`View` -> stage views -> `Create` -> actions/stages -> `Edit` -> `Delete` -> `Import` -> `Export` -> `Bulk Actions` -> `Manage All`). The Department Permissions header renders an inline search bar (`Search module or permission...` with `✕` clear button) right beside `Select All`, filtering sections, module cards, and individual checkboxes in real time just like the Override modals.
+  - Grouped by module cards (`398` bootstrap permissions across all modules, including `Product Master` with `8` permissions: `product.view`, `product.create`, `product.update`, `product.delete`, `product.export`, `product.import`, `product.bulk_action`, `product.manage`; `Categories` (Product Categories) with `9` permissions: `category.view`, `category.create`, `category.update`, `category.delete`, `category.export`, `category.import`, `category.bulk_action`, `category.status_edit`, `category.manage`; `Sub-Categories` (Product Sub-Categories) with `9` permissions: `subcategory.view`, `subcategory.create`, `subcategory.update`, `subcategory.delete`, `subcategory.export`, `subcategory.import`, `subcategory.bulk_action`, `subcategory.status_edit`, `subcategory.manage`; `Brands` with `9` permissions: `brand.view`, `brand.create`, `brand.update`, `brand.delete`, `brand.export`, `brand.import`, `brand.bulk_action`, `brand.status_edit`, `brand.manage`; `Proforma Invoices` with `15` permissions: `proforma.view`, `proforma.pending.view`, `proforma.admin_approved.view`, `proforma.confirmed.view`, `proforma.cancelled.view`, `proforma.create`, `proforma.action.view`, `proforma.download`, `proforma.details.view`, `proforma.update`, `proforma.approve`, `proforma.confirm`, `proforma.cancel`, `proforma.delete`, `proforma.manage`; `Sales Process & Orders` with `25` permissions: `saleorder.view`, `saleorder.pending.view`, `saleorder.sales_confirmed.view`, `saleorder.admin_approved.view`, `saleorder.acc_confirmed.view`, `saleorder.gatepass_created.view`, `saleorder.dispatched.view`, `saleorder.gatepass_cancelled.view`, `saleorder.lr.view`, `saleorder.cancelled.view`, `saleorder.create`, `saleorder.export`, `saleorder.details.view`, `saleorder.action.view`, `saleorder.update`, `saleorder.duplicate`, `saleorder.download`, `saleorder.files`, `saleorder.confirm`, `saleorder.approve`, `saleorder.accounts`, `saleorder.warehouse`, `saleorder.cancel`, `saleorder.delete`, `saleorder.manage`; `Product Stock` with `3` permissions: `product_stock.view`, `product_stock.export`, `product_stock.manage`; `Stock Adjustment` with `6` permissions: `stock_adjustment.view`, `stock_adjustment.create`, `stock_adjustment.export`, `stock_adjustment.delete`, `stock_adjustment.download`, `stock_adjustment.manage`; `Stock Transfer` with `14` permissions: `stock_transfer.view`, `stock_transfer.create`, `stock_transfer.export`, `stock_transfer.bulk_action`, `stock_transfer.cancel`, `stock_transfer.download`, `stock_transfer.pending.view`, `stock_transfer.confirmed.view`, `stock_transfer.received.view`, `stock_transfer.cancel.view`, `stock_transfer.pending`, `stock_transfer.confirmed`, `stock_transfer.received`, `stock_transfer.manage`; `Companies` with `11` permissions: `company.view`, `company.quick_add`, `company.create`, `company.update`, `company.delete`, `company.export`, `company.import`, `company.bulk_action`, `company.grade_edit`, `company.potential_edit`, `company.manage`; `Technical Tasks` with `16` permissions: `technicaltask.view`, `technicaltask.pending.view`, `technicaltask.approved.view`, `technicaltask.completed.view`, `technicaltask.cancel.view`, `technicaltask.create`, `technicaltask.bulk_action`, `technicaltask.action.view`, `technicaltask.call_logs.view`, `technicaltask.approve`, `technicaltask.complete`, `technicaltask.cancel`, `technicaltask.reopen`, `technicaltask.update`, `technicaltask.delete`, `technicaltask.manage`; `Payments` with `9` independent permissions: `payment.view`, `payment.pending.view`, `payment.completed.view`, `payment.create`, `payment.delete`, `payment.action.view`, `payment.details.view`, `payment.update`, `payment.manage`; and `Technician Gatepass & Wallet Management` with `20` independent permissions: `technician_operations.view`, `technician_operations.gatepasses.view`, `technician_operations.gatepass.create`, `technician_operations.gatepass.return`, `technician_operations.gatepass.draft_so`, `technician_operations.gatepass.create_so`, `technician_operations.gatepass.link_so`, `technician_operations.gatepass.print`, `technician_operations.gatepass.details`, `technician_operations.wallets.view`, `technician_operations.wallet.create`, `technician_operations.wallet.balances.view`, `technician_operations.wallet.collect`, `technician_operations.wallet.handover`, `technician_operations.wallet.expense`, `technician_operations.warranty.view`, `technician_operations.warranty.create`, `technician_operations.warranty.validate`, `technician_operations.update`, `technician_operations.manage`; the `Technicians` Master module (`technician.*`), the unused `Shipment Planning` module (`planning.*`, migration `z6e7f8a9b0c1`), and redundant `technician_operations.create` (`z7f8a9b0c1d2`) have been removed).
   - `Select All` / `Select Group` toggles per module.
   - Checkboxes for granular permissions (`.view`, `.create`, `.update`, `.approve`, `.delete`, `.export`, `.import`, `.bulk_action`, `.manage`, etc.).
+  - **Instant Auto-Save (No Save Button Needed):** When editing an existing department on `/rbac` or managing **User Permission Overrides** (in `/users` -> `🔑 Permission Overrides` or `/rbac` -> Manager `🔑 Edit permissions`), every single-checkbox toggle, `Select Group`/`Deselect Group`, `Select All`/`Deselect All`, `Grant All`, `Deny All`, and `Reset to Departments` persists immediately to the backend with a live `Saving...` / `Auto-saved` badge, automatic bounded retry (`{ idempotent: true }`) on transient errors for `POST /rbac/roles/{id}/permissions` and `PUT /rbac/roles/{id}/permissions/bulk`, and automatic server rollback on persistent error; Department Details (`Name`, `Description`, `Code`) on existing departments also auto-save cleanly, and both `Save Department` and `Cancel` buttons are hidden when editing an existing department (`Create Department` appears only when creating a new department; Overrides modals close via `Done`).
 - **Clone Department Button:** Creates a copy of the department with all permissions pre-checked.
 - **Safe Delete with Reassignment Modal:** If users exist in a department scheduled for deletion, prompts administrator to select a replacement department to reassign those employees before deletion proceeds.
 
@@ -993,8 +998,12 @@ Manage complete vendor team directory:
 - [ ] In `Sales`, select another parent department (e.g. `Executive Management`) and click `+ Add Parent`. Verify `Sales` now lists multiple parents (`Operations` and `Executive Management`).
 - [ ] Attempt to add `Operations` as a child department of `Sales`. Verify cycle detection triggers and rejects the circular connection with the error: *"This would create a circular department hierarchy."*
 - [ ] In `Operations` -> Child Departments, click `Remove` next to `Sales`. Verify `Sales` is unlinked and no longer appears under Child Departments or as Sales's parent.
-- [ ] In any department on `/rbac` (and in User Direct Permission Overrides), verify the **TECHNICAL TASKS** permission group (`0 / 16 active`: `View`, `View Pending Tab`, `View Approved Tab`, `View Completed Tab`, `View Cancel Tab`, `+ Add New (Create)`, `Bulk Actions`, `View Action Column (⋮)`, `Action: View Call Logs`, `Action: Approved (Pending Stage)`, `Action: Completed (Approved Stage)`, `Action: Cancel (Approved Stage)`, `Action: Reopen / Reassign (Cancel Stage)`, `Action: Edit`, `Action: Delete`, `Manage All`), the **PAYMENTS** permission group (`0 / 5 active`: `View` `payment.view`, `Create` `payment.create`, `Edit` `payment.update`, `Delete` `payment.delete`, `Manage All` `payment.manage`), and the **TECHNICIAN GATEPASS & WALLET MANAGEMENT** permission group (`0 / 4 active`: `View` `technician_operations.view`, `Create` `technician_operations.create`, `Edit` `technician_operations.update`, `Manage All` `technician_operations.manage`) are displayed as separate groups, verify the **TECHNICIAN** Master group is absent, verify `Admin` (`super_admin`), `User` (`user`), and `Technician` (`technician`) carry the `SYSTEM` badge (protected from rename/deletion), and verify total assigned permissions denominator reflects `325`.
+- [ ] In any department on `/rbac` (and in User Direct Permission Overrides), verify the **PRODUCT MASTER** permission group (`0 / 8 active`: `View` `product.view`, `+ Add New (Create)` `product.create`, `Action: Edit` `product.update`, `Delete (Bulk)` `product.delete`, `Export` `product.export`, `Import (Sample + Import)` `product.import`, `Bulk Actions` `product.bulk_action`, `Manage All` `product.manage`), the **CATEGORIES** permission group (`0 / 9 active`: `View` `category.view`, `+ Add New (Create)` `category.create`, `Action: Edit` `category.update`, `Action: Delete` `category.delete`, `Export` `category.export`, `Import (Sample + Import)` `category.import`, `Bulk Actions` `category.bulk_action`, `Status` `category.status_edit`, `Manage All` `category.manage`), the **SUB-CATEGORIES** permission group (`0 / 9 active`: `View` `subcategory.view`, `+ Add New (Create)` `subcategory.create`, `Action: Edit` `subcategory.update`, `Action: Delete` `subcategory.delete`, `Export` `subcategory.export`, `Import (Sample + Import)` `subcategory.import`, `Bulk Actions` `subcategory.bulk_action`, `Status` `subcategory.status_edit`, `Manage All` `subcategory.manage`), the **BRANDS** permission group (`0 / 9 active`: `View` `brand.view`, `+ Add New (Create)` `brand.create`, `Action: Edit` `brand.update`, `Action: Delete` `brand.delete`, `Export` `brand.export`, `Import (Sample + Import)` `brand.import`, `Bulk Actions` `brand.bulk_action`, `Status` `brand.status_edit`, `Manage All` `brand.manage`), the **PROFORMA INVOICES** permission group (`0 / 15 active`: `View` `proforma.view`, `View Pending Stage` `proforma.pending.view`, `View Admin Approved Stage` `proforma.admin_approved.view`, `View Confirmed Stage` `proforma.confirmed.view`, `View Cancelled Stage` `proforma.cancelled.view`, `+ Add New (Create)` `proforma.create`, `View Action Column (⋮)` `proforma.action.view`, `Action: Download / View PDF` `proforma.download`, `Action: View Details` `proforma.details.view`, `Action: Edit` `proforma.update`, `Stage: Admin Approved (Approve)` `proforma.approve`, `Stage: Confirmed (Confirm & Create SO)` `proforma.confirm`, `Stage: Cancelled (Cancel)` `proforma.cancel`, `Action: Delete` `proforma.delete`, `Manage All` `proforma.manage`), the **PRODUCT STOCK** permission group (`0 / 3 active`: `View` `product_stock.view`, `Export` `product_stock.export`, `Manage All` `product_stock.manage`), the **STOCK ADJUSTMENT** permission group (`0 / 6 active`: `View` `stock_adjustment.view`, `Add New (Stock In, Stock Out)` `stock_adjustment.create`, `Export` `stock_adjustment.export`, `Delete` `stock_adjustment.delete`, `Downloads` `stock_adjustment.download`, `Manage All` `stock_adjustment.manage`), the **STOCK TRANSFER** permission group (`0 / 14 active`: `View` `stock_transfer.view`, `+ Add New` `stock_transfer.create`, `Export` `stock_transfer.export`, `Bulk Actions` `stock_transfer.bulk_action`, `Action: Cancel` `stock_transfer.cancel`, `Action: Download` `stock_transfer.download`, `View Pending Stage` `stock_transfer.pending.view`, `View Confirmed Stage` `stock_transfer.confirmed.view`, `View Received Stage` `stock_transfer.received.view`, `View Cancel Stage` `stock_transfer.cancel.view`, `Stage: Pending` `stock_transfer.pending`, `Stage: Confirmed` `stock_transfer.confirmed`, `Stage: Received` `stock_transfer.received`, `Manage All` `stock_transfer.manage`), the **TECHNICAL TASKS** permission group (`0 / 16 active`: `View`, `View Pending Tab`, `View Approved Tab`, `View Completed Tab`, `View Cancel Tab`, `+ Add New (Create)`, `Bulk Actions`, `View Action Column (⋮)`, `Action: View Call Logs`, `Action: Approved (Pending Stage)`, `Action: Completed (Approved Stage)`, `Action: Cancel (Approved Stage)`, `Action: Reopen / Reassign (Cancel Stage)`, `Action: Edit`, `Action: Delete`, `Manage All`), the **PAYMENTS** permission group (`0 / 9 active`: `View` `payment.view`, `View Pending Tab` `payment.pending.view`, `View Completed Tab` `payment.completed.view`, `+ Add New (Create)` `payment.create`, `Delete` `payment.delete`, `View Action Column (⋮)` `payment.action.view`, `Action: View Details` `payment.details.view`, `Action: Record Payment` `payment.update`, `Manage All` `payment.manage`), the **TECHNICIAN GATEPASS & WALLET MANAGEMENT** permission group (`0 / 20 active`: `View`, `View Tab: Gatepasses & Returns`, `+ Issue Outward Gatepass`, `Action: Return Parts`, `Action: Draft SO`, `Action: Create SO`, `Action: Link SO`, `Action: Print Slip`, `Action: View Details`, `View Tab: Wallets & Collections`, `Record Wallet Transaction`, `Wallet: View Live Balances`, `Wallet Card: + Collect`, `Wallet Card: Handover`, `Wallet Card: Expense`, `View Tab: Machine Warranty & Validator`, `Register Machine Warranty`, `Warranty: Verify Serial Validator`, `Edit`, `Manage All`), and the **COMPANIES** permission group (`0 / 11 active`: `View`, `+ Quick Add`, `+ Add New (Create)`, `Action: Edit`, `Delete (Bulk)`, `Export`, `Import (Sample + Import)`, `Bulk Actions`, `Grade Edit`, `Potential Edit`, `Manage All`) are displayed cleanly, verify the **TECHNICIAN** Master and **SHIPMENT PLANNING** groups are absent, verify `Admin` (`super_admin`), `User` (`user`), and `Technician` (`technician`) carry the `SYSTEM` badge (protected from rename/deletion), and verify total assigned permissions denominator reflects `398` (or `403` with retained legacy permissions).
 - [ ] Verify **3-Module RBAC Separation**: Grant `technicaltask.view` only to a test user -> verify ONLY `Technical Tasks` appears in the `TASK` sidebar section (not `Payments` or `Technician Ops & Wallet`), and navigating directly to `/payments` or `/technician-operations` redirects to `/403`. Grant `payment.view` only -> verify ONLY `Payments` appears in `TASK`. Grant `technician_operations.view` only -> verify ONLY `Technician Ops & Wallet` appears in `TASK`.
+- [ ] Verify **Department Instant Auto-Save (No `Save Department` / `Cancel` Buttons on Existing Departments):** Open an existing department on `/rbac` -> verify `Save Department` and `Cancel` buttons are absent (`Create Department` appears only for `+ ADD NEW`); toggle individual permission checkboxes, click `Select Group` / `Deselect Group` or `Select All` / `Deselect All`, and edit `Department Name` / `Description` / `Department Code` -> verify `Saving...` / `Auto-saved` status updates cleanly without clicking any Save button (`POST`/`DELETE /rbac/roles/{id}/permissions`, `PUT /rbac/roles/{id}/permissions/bulk`, debounced `PATCH /rbac/roles/{id}`).
+- [ ] Verify **Zero-Permission DB Isolation & Real-Time `PERMISSIONS_UPDATED` Sync:** Sign in as a test user (`User A`) in tab/window 1 while holding an active session; revoke all `company.*` (and all other) permissions from `User A` in Admin tab 2 -> verify `PERMISSIONS_UPDATED` WebSocket (plus focus/`403`/5s navigation `/auth/profile` refresh) immediately hides unpermitted modules in `User A`'s sidebar and redirects active `/companies` or `/user/addEdit` routes to `/403`, and backend API calls with the previously issued JWT return `403` rather than resurrecting stale JWT claims.
+- [ ] Verify **Left-Sidebar Navigation Alignment & Permission Search (`/rbac` & `/users` Overrides):** Open `/rbac` (Department Permissions & Manager Permission Overrides modal) and `/users` -> `🔑 Permission Overrides` -> verify module cards appear under top-to-bottom left-sidebar section headings (`DASHBOARD` -> `TASK` -> `CONTACT` -> `CRM` -> `INVENTORY` -> `SALE` -> `PURCHASE` -> `REPORTS` -> `HRMS` -> `USER MANAGEMENT` -> `SETTINGS — MASTERS` -> `SETTINGS — SYSTEM`) matching `nav.ts`, verify clean module headings and semantic intra-module sorting, and use the `Search module or permission...` bar beside `Select All` on `/rbac` to filter by section name (`inventory`), module name (`Proforma`), or permission code (`proforma.approve`) and clear via `✕` or `Clear search`.
+- [ ] Verify **Sales Process Granular RBAC (25 Permissions):** In `/rbac` under `SALE` -> `SALES PROCESS & ORDERS`, verify all `25` permissions render cleanly (`View`, `View Pending Stage` through `View Cancelled Stage`, `+ Add New (Create)`, `Export`, `Action: View Details`, `View Action Column (⋮)`, `Action: Download Gatepass / PDF`, `Action: SO Files`, `Action: Duplicate`, `Stage: Sales Confirmed`, `Stage: Admin Approved`, `Stage: Acc. Confirmed`, `Stage: Gatepass / Dispatch / LR`, `Action: Cancel`, `Action: Edit`, `Action: Delete`, `Manage All`). Grant `saleorder.view` only -> verify `+ ADD NEW`, `Export`, `Action (⋮)` column, all 9 individual stage tabs, `Update Status` pencil, clickable `Order No.`, and Gatepass PDF links are hidden. Grant single stage view (`saleorder.pending.view`) -> verify only the `Pending` card/tab and pending orders are accessible (`/sales/orders?status=sales_confirmed` returns `403`). Grant individual action buttons (`saleorder.create`, `saleorder.export`, `saleorder.action.view`, `saleorder.update`, `saleorder.duplicate`, `saleorder.download`, `saleorder.files`, `saleorder.cancel`, `saleorder.delete`) and confirm/approve/accounts/warehouse transitions independently and confirm each appears and functions exclusively when granted (or via `saleorder.manage`).
 
 ---
 
@@ -1601,7 +1610,18 @@ Checklist to execute:
 - **Route:** `/companies`
 - **Add Company Route:** `/companies/add`
 - **Legacy Redirects:** `/user/addEdit`, `/user/addedit`
-- **Required Permission:** `company.view` (Mutations: `company.create`, `company.update`, `company.delete`, `company.import`, `company.export`)
+- **Required Permissions (`z8a9b0c1d2e3` — 11 Granular `company.*` Permissions, Isolated from `supplier.*`):**
+  - `company.view`: View Companies list, filters, contacts & Detail Drawer.
+  - `company.quick_add`: Show `+ QUICK ADD` button & drawer (independent of `company.create`).
+  - `company.create`: Show `+ ADD NEW` button & full Company Add modal (`/companies/add`).
+  - `company.update`: Show `ACTION` column (`Edit Company` icon) & Detail Drawer Edit button (hides `ACTION` column cleanly when omitted; does NOT unlock `Grade Edit` or `Potential Edit`).
+  - `company.grade_edit`: Unlock `GRADE` inline `<select>` (`PATCH /companies/{id}/grade`; read-only text without it).
+  - `company.potential_edit`: Unlock `POTENTIAL` inline `<select>` (`PATCH /companies/{id}/potential`; read-only text without it).
+  - `company.import`: Show `SAMPLE FILE` + `IMPORT` inside `Imp / Exp` menu and authorize `POST /companies/import`.
+  - `company.export`: Show `EXPORT` inside `Imp / Exp` menu and authorize `GET /companies/export` (`Imp / Exp` button renders only when `company.import` OR `company.export` OR `company.manage` is granted).
+  - `company.bulk_action`: Show row selection checkboxes and `Bulk Actions ▾` (`Bulk Activate` / `Bulk Inactive` without requiring `company.update`).
+  - `company.delete`: Enable `Bulk Delete` inside `Bulk Actions` and `DELETE /companies/{id}`.
+  - `company.manage`: Full administrative access across all Companies features.
 - **Purpose:** Comprehensive B2B corporate customer and supplier directory tracking legal identities, commercial credit lines, multi-tier potential ratings, multi-contact directories, and dispatch addresses.
 
 ### Visual Elements & Layout
@@ -1609,9 +1629,10 @@ Checklist to execute:
 2. **Page Title:** `Companies`
 3. **Subtitle:** `Manage corporate business accounts, credit terms, multi-contact directories, and client potential ratings.`
 4. **Action Buttons:**
-   - `+ ADD NEW` (Primary blue button) — Opens company creation drawer or navigates to `/companies/add`.
-   - `Imp / Exp` Dropdown — Amber action dropdown (`ImpExpDropdown`) with professional SVG icon badges for `SAMPLE FILE` (slate document template icon), `IMPORT` (blue upload icon), and `EXPORT` (emerald download icon).
-   - `Bulk Actions` — Bulk status activation, deactivation, and soft-deletion for selected companies.
+   - `+ QUICK ADD` (Secondary button, shown only for `company.quick_add | company.manage`) — Opens Quick Add drawer.
+   - `+ ADD NEW` (Primary blue button, shown only for `company.create | company.manage`) — Opens full company creation drawer or navigates to `/companies/add`.
+   - `Imp / Exp` Dropdown — Amber action dropdown (`ImpExpDropdown`, shown only when `company.import | company.export | company.manage` is granted) with `SAMPLE FILE` + `IMPORT` (`company.import`) and `EXPORT` (`company.export`).
+   - `Bulk Actions` (`company.bulk_action | company.manage` / `company.delete`) — Bulk status activation, deactivation (`company.bulk_action`), and soft-deletion (`company.delete`) for selected companies. Without `company.bulk_action | company.manage`, row selection checkboxes are also hidden.
 5. **Filter Toolbar:**
    - Real-time search bar querying legal name, trade name, GSTIN, PAN, and contact persons.
    - Grade filter dropdown (`All`, `Grade A`, `Grade B`, `Grade C`, `Grade D`).
@@ -1637,7 +1658,14 @@ Checklist to execute:
    - `Activity Timeline Tab`: Chronological audit trail of corporate mutations, status transitions, and RFQ consignments.
 
 ### Test Cases
-- [ ] Verify navigating to `/user/addEdit` or `/user/addedit` seamlessly redirects to `/companies/add`.
+- [ ] Verify navigating to `/user/addEdit` or `/user/addedit` seamlessly redirects to `/companies/add` when permitted (`company.view | company.create | company.update | company.manage`), and redirects to `/403` when the user holds none of those permissions.
+- [ ] Verify **Granular Companies RBAC Isolation (11 `company.*` permissions, isolated from `supplier.*`)**:
+  - User with `company.view` only sees the list without `+ QUICK ADD`, `+ ADD NEW`, `Imp / Exp`, `Bulk Actions`, selection checkboxes, or `ACTION` column; `GRADE` and `POTENTIAL` render as read-only text.
+  - Grant `company.quick_add` -> ONLY `+ QUICK ADD` appears (`+ ADD NEW` stays hidden). Grant `company.create` -> ONLY `+ ADD NEW` appears.
+  - Grant `company.grade_edit` -> ONLY `GRADE` `<select>` unlocks (even without `company.update`). Grant `company.potential_edit` -> ONLY `POTENTIAL` `<select>` unlocks (even without `company.update`).
+  - Grant `company.update` alone -> `ACTION` (`Edit`) appears, while `GRADE` and `POTENTIAL` remain read-only text.
+  - Grant `company.import` -> `Imp / Exp` shows `SAMPLE FILE` + `IMPORT` (no `EXPORT`). Grant `company.export` -> `Imp / Exp` shows `EXPORT` only. Without either `.import`, `.export`, or `.manage`, `Imp / Exp` button is hidden.
+  - Grant `company.bulk_action` -> selection checkboxes and `Bulk Actions` (`Bulk Activate` / `Bulk Inactive`) appear without requiring `company.update` or `company.delete`. Verify `supplier.*` grants no access to Companies.
 - [ ] Verify company list loads with correct pagination, search filters, and grade/potential badges.
 - [ ] Verify changing Grade or Potential directly from the table dropdown updates immediately via PATCH without page reload.
 - [ ] Verify creating a company requires legal name and validates GSTIN/PAN formatting.
@@ -1677,7 +1705,7 @@ Checklist to execute:
 
 - **Route:** `/product-stock/list`
 - **Legacy Redirects:** `/product-stock`, `/product_stock/list`, `/product_stock`
-- **Required Permission:** `product.view`
+- **Required Permission:** `product_stock.view` or `product_stock.manage` (Export button requires `product_stock.export` or `product_stock.manage`)
 - **Purpose:** Centralized 15-column multi-warehouse inventory matrix (`Mumbai`, `Ahmedabad`, `Indore` physical, transit, and ordered pipelines) outer-joined directly from Product Master (`limit: 2500`, `le=5000`) with live breakup drawers and Product Master detail view.
 
 ### Visual Elements & Layout
@@ -1709,6 +1737,7 @@ Checklist to execute:
 - [ ] Verify `Is Negative Stock` (`Yes` / `No` / `Select`) filters products with any negative warehouse or total balance.
 - [ ] Verify clicking `Product Name (As Per Tally)` on `/product-stock/list` opens the `Product Details` `SideDrawer` displaying real Packaging Quantity, Minimum Price, and `L × W × H cm` CBM dimensions.
 - [ ] Verify clicking `ⓘ` opens live `Sale Order Information` or `Consignment Breakup` (with FIFO booked Sale Orders) and `Export` downloads `Product_Stock_List.xlsx`.
+- [ ] Verify RBAC gating on `/product-stock/list`: with `product_stock.view` only, the page is accessible in sidebar and list loads without `product.view`, while the `Export` button is hidden; with `product_stock.export` or `product_stock.manage`, the `Export` button is visible and downloads `Product_Stock_List.xlsx`.
 
 ---
 
@@ -1717,7 +1746,7 @@ Checklist to execute:
 - **Route:** `/stock-adjustment`
 - **Legacy Redirects:** `/adjustment/list`, `/adjustment`
 - **Order PDF Route:** `/adjustment/adjustment-order-pdf/:id`
-- **Required Permission:** `product.view` (Mutations: `product.create`, `product.delete`)
+- **Required Permission:** `stock_adjustment.view` or `stock_adjustment.manage` (`+ Add New` Stock IN/OUT: `stock_adjustment.create`; `Export`: `stock_adjustment.export`; `Delete`: `stock_adjustment.delete`; `Downloads`: `stock_adjustment.download`)
 - **Purpose:** Formal inventory adjustments, reconciliation of count variances, split order consignments, client return processing, and damage write-offs with automatic warehouse inventory synchronization, left-sliding audit drawer, and official A4 Order PDF generation.
 
 ### Visual Elements & Layout
@@ -1809,6 +1838,7 @@ Checklist to execute:
 - [ ] Verify the Remarks box renders underneath the table with full notes text.
 - [ ] Verify clicking the 3-dots `⋮` action menu displays `Download PDF` and `Delete`.
 - [ ] Verify clicking `Download PDF` triggers `generateStockAdjustmentPdf()` and downloads the formatted A4 PDF.
+- [ ] Verify RBAC gating on `/stock-adjustment`: with `stock_adjustment.view` only, the list and details SideDrawer load while `+ Add New`, `Export`, and the `Action` column (`Delete`, `Download`) are hidden; granting `stock_adjustment.create`, `stock_adjustment.export`, `stock_adjustment.delete`, `stock_adjustment.download`, or `stock_adjustment.manage` selectively enables the corresponding controls and backend routes.
 - [ ] Verify visiting `/adjustment/adjustment-order-pdf/:id` renders or downloads the adjustment order document.
 - [ ] Verify clicking `Delete` opens a confirmation modal and soft-deletes the record upon confirmation.
 
@@ -1906,7 +1936,7 @@ Checklist to execute:
      - **`Task Log Summary` Tab:** 3-column table (`Updated By` with display name + italicized `DD-MM-YYYY hh:mm AM/PM` timestamp, `Title`, and `Status` pill badge).
    - **`Add Call Log` Right-Side Slide-Over Drawer:** Header `Add Call Log`, `Task Type` radio buttons (`Telecall` default, `Physical Visit`), `Remarks` textarea, and sticky bottom full-width `Submit` button.
 10. **Technical Tasks Payments Module (`/payments` — `PaymentsPage.tsx`) & Technician Wallet Auto-Sync:**
-    - **Route & RBAC:** `/payments` under `TASK` sidebar (`permission: "payment.view"`); `+ ADD NEW` (`payment.create`), `Record Payment` (`payment.update`), and `DELETE` (`payment.delete`) gated via `useAuth()` (`payment.manage` grants full access; `technicaltask.*` does NOT grant access to `/payments`).
+    - **Route & RBAC:** `/payments` under `TASK` sidebar (`permission: "payment.view"`, route guard `payment.view | payment.manage`); granular `9`-permission matrix (`payment.view` for `All` tab & KPIs, `payment.pending.view` for `Pending` tab, `payment.completed.view` for `Completed` tab, `payment.create` for `+ ADD NEW`, `payment.delete` for `DELETE`, `payment.action.view` for `Action` `⋮` column, `payment.details.view` for `View Details` & `Payment Details` modal, `payment.update` for `Record Payment` in both `⋮` and `Payment Details` modal footer, and `payment.manage` for full control; `technicaltask.*` does NOT grant access to `/payments`).
     - **KPI Summary Cards:** `TOTAL PAYMENT` (slate `#0f172a`), `PAID` (green `#16a34a`), and `DUE` (red `#dc2626`) aggregated across active (non-cancelled) `Chargeable` tasks (`Cancel` / `Cancelled` tasks are strictly excluded).
     - **Stage Tabs (`Discount.docx`):** `All (<all_count>)`, `Pending (<pending_count>)` (default active), and `Completed (<completed_count>)`.
     - **Table & Filters:** Renders `Chargeable` badge, `Paid: ₹...` / `Due: ₹...`, dynamic `"—"` dashes for unassigned `Task Approved By` / `Task Allotted To` / `Machine & Model` (zero hardcoded mock strings), and collapsible filters for `City`, `Task Type` (`Telecall`, `Onsite Visit - Client Location`, `Onsite Visit - Third-Party Location`, `In-House`), `Priority` (`A`, `B`), `Task Allotted To`, and `Task Create Date Range`.
@@ -2487,7 +2517,7 @@ Checklist to execute:
 
 ### Overview & Route Mapping
 - **Primary Routes:** `/proforma-invoice/list`, `/proforma-invoice/addedit`, `/sales/proforma-invoices`.
-- **Primary Permissions:** `sale.pi.view`, `sale.pi.create`, `sale.pi.update`, `sale.pi.delete`, `sale.pi.approve`.
+- **Primary Permissions (15 Granular `proforma.*` Controls — Migration `z9i7a8b9c0d1`):** `proforma.view` (*View* / All card & tab), `proforma.pending.view` (*View Pending Stage*), `proforma.admin_approved.view` (*View Admin Approved Stage*), `proforma.confirmed.view` (*View Confirmed Stage*), `proforma.cancelled.view` (*View Cancelled Stage*), `proforma.create` (*+ Add New (Create)*), `proforma.action.view` (*View Action Column (⋮)*), `proforma.download` (*Action: Download / View PDF* & clickable PI link), `proforma.details.view` (*Action: View Details*), `proforma.update` (*Action: Edit* — `pending` stage, plus `admin_approved` with `proforma.approve`/`proforma.manage`), `proforma.approve` (*Stage: Admin Approved (Approve)*), `proforma.confirm` (*Stage: Confirmed (Confirm & Create SO)*), `proforma.cancel` (*Stage: Cancelled (Cancel)*), `proforma.delete` (*Action: Delete*), `proforma.manage` (*Manage All*).
 - **Purpose:** Commercial sales quotations, formal Proforma Invoices (PI), dual address routing (billing vs. shipping), dynamic inter/intra-state tax resolution, commercial payment & delivery terms, and database workflow approval tracking.
 
 ### Key Visual & Functional Components
@@ -2517,6 +2547,7 @@ Checklist to execute:
 - [ ] Verify selecting line items calculates Taxable Value and applies correct GST rates (CGST+SGST or IGST based on states).
 - [ ] Verify selecting a Bank Account embeds correct account number and IFSC into the preview.
 - [ ] Verify status transition buttons reflect permissions and database workflow rules.
+- [ ] Verify **15-Permission Proforma Granular RBAC Matrix (`z9i7a8b9c0d1`)**: With `proforma.view` only, `+ ADD NEW`, stage tabs/cards (`Pending`, `Admin Approved`, `Confirmed`, `Cancelled`), `ACTION` column (`⋮`), and clickable PI PDF links are hidden; granting a stage view only (e.g. `proforma.confirmed.view`) auto-switches to that tab and returns `403` for other `?status=` queries; `proforma.action.view` reveals `⋮`, and each action (`proforma.download`, `proforma.details.view`, `proforma.update`, `proforma.approve`, `proforma.confirm`, `proforma.cancel`, `proforma.delete`) toggles both UI controls and backend endpoints independently; `proforma.manage` grants full access across all tabs, stage edits, and actions; holding any/all `proforma.*` permissions (including `proforma.approve` / `proforma.manage`) never reveals `Discount Payments` in the sidebar or grants `/discount-payments/list` or `/api/v1/sales/discount-payments` access (`403`).
 - [ ] Verify clicking "Download PDF" streams a valid, professional Proforma Invoice PDF.
 - [ ] Verify soft delete and restore actions function properly through the Recycle Bin.
 
@@ -2776,12 +2807,15 @@ The following modules strictly implement the Filter-Above-KPI structure:
 
 ### 1. Module Overview, Routing & RBAC
 - **Route:** `/payments` (`frontend/src/pages/technicalTasks/PaymentsPage.tsx`, `frontend/src/styles/payments.css`)
-- **Navigation Placement:** Left Sidebar under **`TASK`** (`Payments`, `₹` currency icon, `permission: "technicaltask.view"`).
-- **Granular RBAC Gating (`useAuth()`):**
-  - Sidebar & Route Access: `technicaltask.view` (or `technicaltask.manage`).
-  - Header `+ ADD NEW` Button: `technicaltask.create` (or `technicaltask.manage`).
-  - Row `Record Payment` Action: `technicaltask.update` (or `technicaltask.manage`).
-  - Header `DELETE` Button & Bulk Delete Modal: `technicaltask.delete` (or `technicaltask.manage`).
+- **Navigation Placement:** Left Sidebar under **`TASK`** (`Payments`, `₹` currency icon, `permission: "payment.view"`).
+- **Granular 9-Permission RBAC Gating (`useAuth()` — `w0b1c2d3e4f5`, `z4c5d6e7f8a9`, independent of `technicaltask.*`):**
+  - Sidebar, Route & `All` Tab / KPIs: `payment.view` (or `payment.manage`).
+  - Stage Tabs: `payment.pending.view` (`Pending`) and `payment.completed.view` (`Completed`) — auto-selects first permitted tab when `Pending` is hidden.
+  - Header `+ ADD NEW` Button: `payment.create` (or `payment.manage`).
+  - Header `DELETE` Button & Bulk Delete Modal: `payment.delete` (or `payment.manage`).
+  - `Action` (`⋮`) Column: `payment.action.view` (or `payment.manage`).
+  - `View Details`, Clickable Company Name Link & `Payment Details` Modal: `payment.details.view` (or `payment.manage`).
+  - `Record Payment` Action (in `⋮` and `Payment Details` modal footer): `payment.update` (or `payment.manage`).
 - **Core Functionality:** Dedicated field-service collections ledger tracking all active (non-cancelled) `Chargeable` technical tasks across `All`, `Pending`, and `Completed` payment stages with automatic `Self collect` synchronization into Technician Wallet (`/technician-operations`).
 
 ### 2. High-Impact Financial KPI Summary Cards (Filter-Above-KPI Hierarchy)
@@ -2827,7 +2861,7 @@ Positioned directly underneath the collapsible filter card and powered by `GET /
 - [ ] Verify switching between `All (N)`, `Pending (N)`, and `Completed (N)` tabs filters records accurately (`payment_collected=all|pending|completed`), badges spell `Chargeable` accurately, and unassigned columns render `"—"`.
 - [ ] Verify cancelling a `Chargeable` technical task immediately excludes its charge from `TOTAL PAYMENT`, `DUE`, and all `/payments` stage tabs.
 - [ ] Verify recording a payment with `Payment Mode = Self collect` moves fully paid records to `Completed` and automatically logs a `VERIFIED` `COLLECTION` entry in Technician Wallet (`/technician-operations`).
-- [ ] Verify users with `technicaltask.view` only can view `/payments` KPIs and rows, while `+ ADD NEW`, `Record Payment`, and `DELETE` remain hidden unless `create` / `update` / `delete` (or `manage`) are granted.
+- [ ] Verify users with `payment.view` only see KPIs, the `All` tab, and table rows without `+ ADD NEW`, `DELETE`, `Pending`/`Completed` tabs, `Action` (`⋮`) column, or clickable company-name details link; verify `payment.pending.view` / `payment.completed.view`, `payment.action.view`, `payment.details.view` (`View Details` & `Payment Details` modal), `payment.update` (`Record Payment` in `⋮` and modal footer), `payment.create`, and `payment.delete` each unlock only their respective UI elements and backend endpoints.
 - [ ] Verify clicking `Record Payment` renders the modern `.payment-upload-dropzone` with drag-and-drop support, uploading an image or PDF displays the `.payment-receipt-card` with thumbnail/badge, filename, View, Change, and Remove buttons, and removing resets the upload state cleanly.
 
 ---
@@ -3041,7 +3075,7 @@ Positioned directly underneath the collapsible filter card and powered by `GET /
 
 ### Overview & Route Mapping
 - **Primary Routes:** `/masters/products` (Product Master Catalog), `/masters/products/machine-spares/:machineId`.
-- **Primary Permissions:** `product.view`, `product.create`, `product.update`, `product.delete`.
+- **Primary Permissions:** `product.view`, `product.create`, `product.update`, `product.delete`, `product.export`, `product.import`, `product.bulk_action`, `product.manage`.
 - **Purpose:** High-precision taxonomy representation in the master catalog, direct machine-to-spare navigation, deduplicated drawer specifications, and non-disruptive floating duplicate warnings.
 
 ### Key Visual & Functional Components
@@ -3635,7 +3669,7 @@ Positioned directly underneath the collapsible filter card and powered by `GET /
 3. **Idempotent Synthetic Artifact Purge Migration (`z5c6d7e8f9a0_purge_synthetic_pytest_artifacts.py`):**
    - Surgically removes synthetic pytest users (`rec_mgr_*`, `rec_user_*`, `outsider_rep_*`, `*@inhyma.test`, etc.), their `task_recurring_schedules`, spawned recurring test `tasks`, notifications, and unreferenced synthetic pytest `companies` during `alembic upgrade head`, while leaving real users (`admin`, `usera`, `userd`, etc.) and real operational records untouched.
 4. **Canonical 2-System-Role & 306-Permission Bootstrap (`backend/scripts/seed.py`, `backend/scripts/seed_technical_task_permissions.py`):**
-   - `scripts/seed.py` seeds strictly `super_admin` (`Admin SYSTEM`, `325/325` unique permissions including granular `hrms.*`, `bank.*`, `billingcompany.*`, `technicaltask.*`, `payment.*`, and `technician_operations.*` permissions), `user` (`User SYSTEM`), and `technician` (`Technician SYSTEM`), without creating hardcoded business roles.
+   - `scripts/seed.py` seeds strictly `super_admin` (`Admin SYSTEM`, `349/349` unique permissions including granular `hrms.*`, `bank.*`, `billingcompany.*`, `company.*`, `technicaltask.*`, `payment.*`, and `technician_operations.*` permissions), `user` (`User SYSTEM`), and `technician` (`Technician SYSTEM`), without creating hardcoded business roles.
 5. **HRMS Default Seed Soft-Delete Non-Recreation (`app/hrms/service.py`, `app/hrms/leave_service.py`):**
    - `ensure_seeds()` checks total row existence (including soft-deleted rows) for `HrmsLocation`, `HrmsLeaveType`, `HrmsExpenseCategory`, `HrmsHoliday`, and `HrmsLeavePlan`, ensuring soft-deleted defaults never re-create on subsequent page loads.
 
@@ -3706,19 +3740,25 @@ Positioned directly underneath the collapsible filter card and powered by `GET /
 
 ### Feature Overview & UI Specifications
 1. **Navigation, Enterprise Vector Icons & RBAC Gating (`nav.ts`, `TechnicianOperationsPage.tsx` & `useAuth`):**
-   - Sidebar item `Technician Ops & Wallet` under `TASK` requires `technician_operations.view` (independent of `technicaltask.view` and `payment.view`).
+   - Sidebar item `Technician Ops & Wallet` under `TASK` requires `technician_operations.view` (independent of `technicaltask.view` and `payment.view`), while route `/technician-operations` accepts any `technician_operations.{view,gatepasses.view,wallets.view,warranty.view,manage}` permission and automatically opens the first permitted tab.
    - All KPI ribbon cards (`Active Gatepasses` truck, `Pending Sales Orders` alert-triangle, `Cash in Hand` banknote, `Active Machine Warranties` shield-check), header action buttons, navigation tabs (`Package`, `Wallet`, `ShieldCheck`), table badges, and modals/drawers render crisp `24x24` Lucide-style stroke `<svg aria-hidden="true">` icons (zero cartoon emojis).
-   - Read-only users (`technician_operations.view` without `technician_operations.create` / `.update` / `.manage` permissions) see a `Read-Only Access` lock badge and all mutation buttons (`Issue Outward Gatepass`, `Return`, `Record Wallet Transaction`, `Collect`, `Handover`, `Expense`, `Register Machine Warranty`) are hidden; Sales users with `saleorder.create | saleorder.update` retain access to `Create SO`, `Draft SO`, and `Link SO`.
+   - **Granular 20-Permission Matrix (`z5d6e7f8a9b0`, `z7f8a9b0c1d2`):**
+     - **Tabs:** `technician_operations.gatepasses.view`, `technician_operations.wallets.view`, `technician_operations.warranty.view`.
+     - **Header CTAs:** `technician_operations.gatepass.create` (`+ Issue Outward Gatepass`), `technician_operations.wallet.create` (`Record Wallet Transaction`), `technician_operations.warranty.create` (`Register Machine Warranty`).
+     - **Gatepass Row Actions (per-button; `Actions` column hides automatically if none permitted):** `technician_operations.gatepass.return` (`Return`), `technician_operations.gatepass.draft_so` (`Draft SO`), `technician_operations.gatepass.create_so` (`Create SO`), `technician_operations.gatepass.link_so` (`Link SO`), `technician_operations.gatepass.print` (`Print Gatepass Slip`), `technician_operations.gatepass.details` (`Details`).
+     - **Wallet Live Balances & Card Actions:** `technician_operations.wallet.balances.view` (`Technician Live Wallet Balances (Cash in Hand)` section & `/wallet/summaries` call), `technician_operations.wallet.collect` (`+ Collect`), `technician_operations.wallet.handover` (`Handover`), `technician_operations.wallet.expense` (`Expense`), plus type-scoped `POST /wallet/transactions` backend enforcement.
+     - **Warranty Validator:** `technician_operations.warranty.validate` (`Live Machine Serial Warranty Validator` card & `Verify Serial` lookup).
+   - Read-only users (`technician_operations.view` + tab `.view` without mutation permissions) see a `Read-Only Access` lock badge and all write buttons remain hidden.
 2. **Tab 1 — Spare Parts Gatepass & Returns (`?tab=gatepasses`):**
    - **KPI Ribbon:** `Active Gatepasses` (`#eff6ff` / `#dbeafe`), `Pending Sales Orders` (`#fef3c7` / `#fde68a`), `Cash in Hand (Technicians)` (`#dcfce7` / `#bbf7d0`), `Active Machine Warranties` (`#ede9fe` / `#ddd6fe`).
    - **Filter & Count Bar:** Instant search (`Gatepass / Technician / Customer / Serial`), Status selector (`All Statuses`, `ISSUED`, `PARTIALLY_RETURNED`, `RECONCILED`, `CLOSED`), and accurate pagination counter (`Showing X of Y gatepasses` backed by `meta.pagination.total` & `total_records`).
    - **Table Columns & Row Actions:** `Gatepass #` (with `<Warehouse>` vector badge & `Ret: <RGP-#>`), `Technician` (with phone icon), `Customer & Serial` (with `Machine Model` and `[Warranty FOC]` / `[Chargeable]` pill), `Issue Date`, `Parts Issued`, `Returned / Consumed`, `SO & Reconciliation Status`, and `Actions` (`Return`, `Draft SO`, `Create SO`, `Link SO`, `Print Gatepass Slip` printer icon button, `Details` drawer).
    - **Issue Outward Gatepass Modal (`maxWidth: 900px`):**
-     - Fixed centered dialog scrollbars (`style.css`: single outer `<form>` scroll only when needed) and fixed-layout line-item table (`tableLayout: fixed; whiteSpace: normal`) with vertically stacked Master Catalog selector / Part Name and Part Code / Stock badge so inputs never overlap adjacent columns.
+     - Fixed centered dialog scrollbars (`style.css`: single outer `<form>` scroll only when needed) and fixed-layout line-item table (`tableLayout: fixed; whiteSpace: normal`) with a unified typable `SparePartCombobox` (`Select or type spare part...`) and stacked Part Code / Stock badge so inputs never overlap adjacent columns.
      - `Dispatch Warehouse *` `<select>` populated from active physical warehouses (defaults to primary warehouse).
      - `Link Open Technical Task` `<select>` (optional auto-fill of Technician + Mobile, Customer Company, Machine Model, Serial Number, Purpose, and automatic serial warranty check).
-     - Master-backed `<datalist>` inputs for `Technician Name *`, `Customer Company`, `Machine Model`, and `Machine Serial Number` (+ `Check` warranty button).
-     - `Spare Parts to Issue` repeater: Master Catalog `<select>` grouping `Compatible with <Selected Machine>` (`ProductMachineSpare` + `applicable_machine_ids`) above general spare parts/products, live warehouse availability pill (`Avail: X UOM` with green check / red alert icon when `Qty > Avail`), editable `Part Name *`, `Part Code`, `Qty *`, and `Unit Rate (₹)`. Deducts physical warehouse stock on creation (`409 Conflict` on shortage).
+     - Master-backed portaled `TypableLookupCombobox` controls (both searchable dropdown & free-text entry) for `Technician Name *`, `Customer Company`, `Machine Model`, and `Machine Serial Number` (+ `Check` warranty button), plus Wallet & Warranty lookup fields (zero native `<datalist>` popups).
+     - `Spare Parts to Issue` repeater: Unified typable + searchable `SparePartCombobox` (`Master Catalog / Part Name *`) supporting both dropdown selection (grouping `Compatible with <Selected Machine>` above general spare parts/products with live warehouse availability counts) and direct custom part-name typing, paired with live warehouse availability pill (`Avail: X UOM` with green check / red alert icon when `Qty > Avail`), editable `Part Code`, `Qty *`, and `Unit Rate (₹)`. Deducts physical warehouse stock on creation (`409 Conflict` on shortage).
    - **Record Parts Return Modal (`maxWidth: 880px`):**
      - Reconciles `Returned` vs `Consumed` per line item with `Warranty FOC?` checkbox and `Status` (`Returned Good`, `Returned Defective`, `Consumed Billed`, `Consumed FOC Warranty`).
      - Inline red `role="alert"` banner + disabled submit if `Returned + Consumed > Issued` or negative.
@@ -3740,6 +3780,9 @@ Positioned directly underneath the collapsible filter card and powered by `GET /
 - [ ] **TC-TECHOPS-04 (Sales Order Serial -> Machine Warranty & Technical Task Lookup Sync):** Create a Sales Order for a machine with Serial Number `SN-SYNC-2026`. Verify `SN-SYNC-2026` immediately resolves as `UNDER WARRANTY` in both `/technician-operations?tab=warranty` (`Verify Serial`) and Technical Task `Product by Serial No.` lookup (`/technical-tasks/serial-lookup/SN-SYNC-2026`).
 - [ ] **TC-TECHOPS-05 (`Self collect` Wallet Sync, Cancellation Reversal & Receipt Upload):** Complete a Chargeable Technical Task with `Self collect` (`₹2,500`) -> verify `+ ₹2,500` `Task Sync` appears in Technician Wallet. Cancel or delete that Technical Task -> verify the synced wallet entry is reversed/removed. Record a manual `FIELD_EXPENSE` or `HANDOVER_DEPOSIT` with a receipt image upload -> verify `View Receipt` opens the uploaded file.
 - [ ] **TC-TECHOPS-06 (Printable Gatepass Voucher, Single-Scroll Centered Modals, Vector SVG Icons & Read-Only RBAC):** Verify KPI ribbon cards, primary header CTA, and module tabs render crisp SVG stroke icons with zero OS emojis. Open `Record Technician Wallet Transaction`, `Issue Outward Spare Parts Gatepass`, `Record Parts Return`, `Link Sales Order`, and `Register Machine Warranty Policy` (`variant="center"`) -> verify centered forms do not render stacked per-field vertical scrollbars (`Record Technician Wallet Transaction` fits cleanly without any scrollbar on standard desktop viewports, and tall centered dialogs render at most a single outer `<form>` scrollbar). Click the printer icon (`Print Gatepass Slip`) on any Gatepass row or inside `Details` -> verify formatted Outward/Return Material Reconciliation Voucher opens with Technician, Store Keeper, and Authorized Signatory signature blocks. Sign in with `technician_operations.view`-only user -> verify `Read-Only Access` badge and absence of all write buttons (`403 Forbidden` on direct POST). Also verify a `technicaltask.manage` user without `technician_operations.view` cannot see `Technician Ops & Wallet` in the sidebar and receives `403` on `/api/v1/technician-operations/*`.
+- [ ] **TC-TECHOPS-07 (Granular 20-Permission Matrix & Portaled Typable Comboboxes):**
+  - Verify individual toggles for each Tab (`gatepasses.view`, `wallets.view`, `warranty.view`), CTA (`gatepass.create`, `wallet.create`, `warranty.create`), Gatepass row action (`return`, `draft_so`, `create_so`, `link_so`, `print`, `details`), Wallet (`wallet.balances.view`, `wallet.collect`, `wallet.handover`, `wallet.expense`), and Warranty Validator (`warranty.validate`) control only their corresponding UI element and API endpoint without triggering `403` background calls for hidden tabs/balances, and legacy `technician_operations.create` does not appear in RBAC.
+  - Open **Issue Outward Spare Parts Gatepass** and verify `SparePartCombobox` (`Select or type spare part...`) groups `Compatible with <Machine>` and `Master Spare Parts & Products` with `Avail` counts while allowing direct custom text typing, and verify `TypableLookupCombobox` replaces native browser `<datalist>` popups across all hybrid lookup fields.
 
 ---
 
@@ -3828,4 +3871,27 @@ Cross-module selectors, defaults, and document/table renders across `Inhyma_ERP`
 - [ ] **TC-NOFALLBACK-05 (Stock Transfer Filter Row, Payments Single Footer & Technical Task Header):** On `/stock-transfer`, open the filter panel -> verify `Transfer Date`, `From Warehouse`, and `To Warehouse` sit side-by-side on one horizontal row; on `/payments`, verify only one `"Showing X–Y of Z total"` pagination footer appears; on `/technical-task/list`, verify `Imp / Exp ▾` is absent.
 
 ---
-*End of Master Features & Testing Specification Manual. Maintained for Inhyma Solutions Enterprise ERP. Last updated: November 18, 2026 (Shift Technicians from Masters into Fixed `Technician` `SYSTEM` Department [Migration `z2a3b4c5d6e7`, 325 Unique Permissions, `/rbac/technicians/lookup`]; Granular Technical Tasks Tab/Action/Stage RBAC Permissions [`16` permissions, Migrations `x1c2d3e4f5a6` & `y1d2e3f4a5b6`] + Separated Independent RBAC Permissions for Technical Tasks [`technicaltask.*`], Payments [`payment.*`], and Technician Gatepass & Wallet Management [`technician_operations.*`] [Migration `w0b1c2d3e4f5`]; Section 80: Zero-Hardcoded Cross-Module Master Data, Live Error Integrity, Fallback Purge, Stock Transfer Filter Row, Payments Single Pagination Footer & Technical Tasks Header Cleanup; Unified Shimmer Ghost Loading Rollout via `Skeleton.tsx`; Feed Remediation `FEED-AUD-01..12`, Mounted 1:1 DM Canonical Pair Uniqueness [Migration `v9a0b1c2d3e4`] & HRMS Attendance Regularization Self-Approval Authorization; Cargo Overview Full-Stack Architecture & Migration `z9a0b1c2d3e4`; Compact JWT + WebSocket `400 Bad Request` Handshake Fix; Section 79: Financial Planning Report Full-Stack Live Wiring).*
+
+## 81. INVENTORY: Stock Transfer Granular RBAC Matrix & Viewport-Aware Action Menu Portal
+
+- **Routes:** `/stock-transfer`, `/stock-transfer/list`, `/transfer/list`, `/transfer/addEdit` (and `/transfer/add`, `/stock-transfer/add`), `/transfer/transfer-order-pdf/:id` (and `/stock-transfer/transfer-order-pdf/:id`)
+- **Required Permissions (`module="stock_transfer"`, `page="stock-transfer"` — 14 permissions, Migration `z9d2e3f4a5b6`):**
+  - `stock_transfer.view` (*View* — `All (N)` tab, `Action: 👁️ View`, clicking row/date to open `Stock Transfer Details` SideDrawer)
+  - `stock_transfer.pending.view`, `stock_transfer.confirmed.view`, `stock_transfer.received.view`, `stock_transfer.cancel.view` (*View Pending/Confirmed/Received/Cancel Stage* — visibility of each status tab and `?status=` filter access; auto-selects first permitted tab when `All` is hidden)
+  - `stock_transfer.create` (*+ Add New* — `+ ADD NEW` header button, `/transfer/addEdit` route guard, Quick Add modal, `POST /api/v1/inventory/stock-transfer`, and `_REQUIRE_PRODUCT_STOCK_VIEW` warehouse stock lookup)
+  - `stock_transfer.export` (*Export* — golden-amber `Export` CSV button and `Export Selected` inside `Bulk Actions`)
+  - `stock_transfer.bulk_action` (*Bulk Actions* — table row checkboxes and `Bulk Actions ▾` menu)
+  - `stock_transfer.cancel` (*Action: Cancel* — row `✕ Cancel`, `Bulk Cancel`, and `PATCH .../status` with `"Cancel"`)
+  - `stock_transfer.download` (*Action: Download* — row `📥 Download` and `/transfer/transfer-order-pdf*` route guard)
+  - `stock_transfer.pending`, `stock_transfer.confirmed`, `stock_transfer.received` (*Stage: Pending / Confirmed / Received* — `Move to Pending`, `Confirm`, `Receive in Main WH`, SideDrawer `Receive in Main Warehouse`, `POST .../receive-to-main`, and `PATCH .../status` per target stage)
+  - `stock_transfer.manage` (*Manage All* — grants all Stock Transfer views, header tools, bulk actions, downloads, and stage transitions)
+- **Viewport-Aware Row `⋮` Action Menu Portal (`StockTransferPage.tsx`):**
+  - Popup renders into `document.body` via `createPortal` (`position: fixed`, `zIndex: 9999`), calculating `window.innerHeight - rect.bottom` so rows with vertical space below (`>= 210px`) always open downward cleanly instead of overlapping sticky headers / `Search...`, while rows near the viewport bottom flip upward cleanly without being clipped by `.transfer-table-wrap` (`overflow-y: auto`).
+
+### QA Verification Test Cases
+- [ ] **TC-ST-RBAC-01 (View & Stage Tab Isolation):** Assign only `stock_transfer.pending.view` to a user -> verify `/stock-transfer` opens directly on the active `Pending` tab, hides `All`, `Confirmed`, `Received`, `Cancel` tabs, hides header `+ ADD NEW` / `Export` / `Bulk Actions`, hides checkboxes & `ACTION` column, and returns `403` if querying `?status=Confirmed` directly.
+- [ ] **TC-ST-RBAC-02 (Action Menu & Stage Transitions):** Grant `stock_transfer.view` + `stock_transfer.confirmed` on a `Pending` transfer -> verify `Confirm` appears in `⋮` while `Receive in Main WH`, `Cancel`, and `Download` remain hidden and direct `PATCH .../status` to `Received` / `Cancel` returns `403`. Granting `stock_transfer.received`, `stock_transfer.cancel`, or `stock_transfer.download` selectively reveals those actions and backend routes.
+- [ ] **TC-ST-PORTAL-01 (Action Menu Downward/Upward Positioning):** On `/stock-transfer` with 2 rows, click row 2's `⋮` button -> verify the menu opens downward inside `document.body` without covering the table header or `Search...` bar and without clipping `View`; scroll a multi-row list near the bottom of the viewport and click `⋮` -> verify the menu flips cleanly upward and closes on outside click or scroll.
+
+---
+*End of Master Features & Testing Specification Manual. Maintained for Inhyma Solutions Enterprise ERP. Last updated: November 23, 2026 (Section 81: Stock Transfer 14-Permission Granular RBAC Matrix [Migration `z9d2e3f4a5b6`, `377` Bootstrap / `382` Total DB Permissions] & Viewport-Aware Portaled Action Menu; Stock Adjustment 6-Permission RBAC [Migration `z9c1d2e3f4a5`] & Product Stock 3-Permission RBAC [Migration `z9b0c1d2e3f4`]; RBAC Permission Toggle 500/503 Resilience & Idempotent Retry Handling; Zero-Permission DB User Isolation & Real-Time `PERMISSIONS_UPDATED` Sync [`auth/service.py`, `rbac/routes.py`, `users/routes.py`, `AppShell.tsx`, `HrmsRouteGuard`]; Instant RBAC Auto-Save for Departments & User Overrides [`Rbac.tsx`, `Users.tsx`, `rbacOverrides.ts`]; Granular `11`-Permission Companies RBAC Matrix [Migration `z8a9b0c1d2e3`]; Shipment Planning UI/RBAC Removal [Migration `z6e7f8a9b0c1`]; Legacy `technician_operations.create` Removal [Migration `z7f8a9b0c1d2`]; Granular `20`-Permission Technician Gatepass & Wallet Management RBAC Matrix [Migration `z5d6e7f8a9b0`] & Portaled Typable Comboboxes [`SparePartCombobox`, `TypableLookupCombobox`]; Granular Payments Module Tab/Action/Details/Record RBAC Permissions [`9` permissions, Migration `z4c5d6e7f8a9`]; Shift Technicians from Masters into Fixed `Technician` `SYSTEM` Department [Migration `z2a3b4c5d6e7`, `/rbac/technicians/lookup`]; Granular Technical Tasks Tab/Action/Stage RBAC Permissions [`16` permissions, Migrations `x1c2d3e4f5a6` & `y1d2e3f4a5b6`]; Section 80: Zero-Hardcoded Cross-Module Master Data, Live Error Integrity, Fallback Purge, Stock Transfer Filter Row, Payments Single Pagination Footer & Technical Tasks Header Cleanup).*

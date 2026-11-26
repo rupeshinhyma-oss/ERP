@@ -60,16 +60,16 @@ def test_alembic_single_head_no_duplicate_revisions_and_canonical_chain():
     heads = script.get_heads()
     assert len(heads) == 1, f"Expected single canonical Alembic head, got {heads}"
     canonical_head = heads[0]
-    head_chain = [r.revision for r in script.walk_revisions(base="z3b4c5d6e7f8", head=canonical_head)]
-    assert "z5d6e7f8a9b0" in head_chain, (
-        f"Phase 6 revision z5d6e7f8a9b0 missing from canonical head chain {head_chain}"
+    head_chain = [r.revision for r in script.walk_revisions(base="z9j8a9b0c1d2", head=canonical_head)]
+    assert "z9l0c1d2e3f4" in head_chain, (
+        f"Phase 6 revision z9l0c1d2e3f4 missing from canonical head chain {head_chain}"
     )
 
-    rev_z5 = script.get_revision("z5d6e7f8a9b0")
-    rev_z4 = script.get_revision("z4c5d6e7f8a9")
-    rev_z3 = script.get_revision("z3b4c5d6e7f8")
-    assert rev_z5 is not None and rev_z5.down_revision == "z4c5d6e7f8a9"
-    assert rev_z4 is not None and rev_z4.down_revision == "z3b4c5d6e7f8"
+    rev_z5 = script.get_revision("z9l0c1d2e3f4")
+    rev_z4 = script.get_revision("z9k9b0c1d2e3")
+    rev_z3 = script.get_revision("z9j8a9b0c1d2")
+    assert rev_z5 is not None and rev_z5.down_revision == "z9k9b0c1d2e3"
+    assert rev_z4 is not None and rev_z4.down_revision == "z9j8a9b0c1d2"
     assert rev_z3 is not None
 
     # Verify zero duplicate revision IDs across all version files
@@ -132,7 +132,7 @@ async def test_phase6_migration_roundtrip_and_task_all_view_idempotency_on_isola
             )
             await conn.execute("DELETE FROM permissions WHERE code = 'task.all_view'")
             await conn.execute("DROP INDEX IF EXISTS uq_tasks_recurring_schedule_period")
-            await conn.execute("UPDATE alembic_version SET version_num = 'z3b4c5d6e7f8'")
+            await conn.execute("UPDATE alembic_version SET version_num = 'z9j8a9b0c1d2'")
             legacy_exists_before = await conn.fetchval(
                 "SELECT count(*) FROM permissions WHERE code = 'task.organization_view'"
             )
@@ -146,7 +146,7 @@ async def test_phase6_migration_roundtrip_and_task_all_view_idempotency_on_isola
         assert len(heads) == 1, f"Expected single canonical Alembic head, got {heads}"
         canonical_head = heads[0]
 
-        # Step 1: Upgrade z3b4c5d6e7f8 -> z4c5d6e7f8a9 -> z5d6e7f8a9b0 -> canonical head
+        # Step 1: Upgrade z9j8a9b0c1d2 -> z9k9b0c1d2e3 -> z9l0c1d2e3f4 -> canonical head
         _run_alembic("upgrade", "head")
 
         conn = await asyncpg.connect(tmp_dsn)
@@ -195,11 +195,11 @@ async def test_phase6_migration_roundtrip_and_task_all_view_idempotency_on_isola
         finally:
             await conn.close()
 
-        # Step 2: Downgrade z5d6e7f8a9b0 -> z4c5d6e7f8a9 (removes task.all_view, preserves uniqueness index!)
-        _run_alembic("downgrade", "z4c5d6e7f8a9")
+        # Step 2: Downgrade z9l0c1d2e3f4 -> z9k9b0c1d2e3 (removes task.all_view, preserves uniqueness index!)
+        _run_alembic("downgrade", "z9k9b0c1d2e3")
         conn = await asyncpg.connect(tmp_dsn)
         try:
-            assert (await conn.fetchval("SELECT version_num FROM alembic_version")) == "z4c5d6e7f8a9"
+            assert (await conn.fetchval("SELECT version_num FROM alembic_version")) == "z9k9b0c1d2e3"
             assert (await conn.fetchval("SELECT count(*) FROM permissions WHERE code = 'task.all_view'")) == 0
             assert (
                 await conn.fetchval(
@@ -209,11 +209,11 @@ async def test_phase6_migration_roundtrip_and_task_all_view_idempotency_on_isola
         finally:
             await conn.close()
 
-        # Step 3: Downgrade z4c5d6e7f8a9 -> z3b4c5d6e7f8 (drops index cleanly)
-        _run_alembic("downgrade", "z3b4c5d6e7f8")
+        # Step 3: Downgrade z9k9b0c1d2e3 -> z9j8a9b0c1d2 (drops index cleanly)
+        _run_alembic("downgrade", "z9j8a9b0c1d2")
         conn = await asyncpg.connect(tmp_dsn)
         try:
-            assert (await conn.fetchval("SELECT version_num FROM alembic_version")) == "z3b4c5d6e7f8"
+            assert (await conn.fetchval("SELECT version_num FROM alembic_version")) == "z9j8a9b0c1d2"
             assert (
                 await conn.fetchval(
                     "SELECT count(*) FROM pg_indexes WHERE tablename='tasks' AND indexname='uq_tasks_recurring_schedule_period'"
