@@ -17,7 +17,7 @@ from app.auth.dependencies import get_auth_service, get_current_user
 from app.auth.service import AuthService, CurrentUser
 from app.common import workflow as wf
 from app.common.storage import guess_content_type, save_uploaded_file
-from app.core.exceptions import AppException, BadRequestException, ConflictException, NotFoundException
+from app.core.exceptions import AppException, BadRequestException, ConflictException, ForbiddenException, NotFoundException
 from app.core.responses import build_success_response
 from app.database.session import get_db_session
 from app.masters.import_export import ImportSummary, model_to_dict, parse_rows_from_file
@@ -26,9 +26,13 @@ from app.purchase import costing
 from app.purchase.common import load_parties, party_fields, move_stock, product_defaults, require_physical_warehouse, resolve_supplier
 from app.purchase.models import LocalPurchase, LocalPurchaseItem
 from app.purchase.schemas import LocalPurchaseIn, StatusUpdate, fmt_date, parse_date
+from app.rbac.dependencies import require_any_permission
 
 router = APIRouter(prefix="/purchase/local-orders", tags=["Purchase - Local"])
 GROUP = "purchase.local.status"
+
+_LP_VIEW_PERMS = ("localpurchase.view", "localpurchase.manage")
+_LP_DETAIL_PERMS = ("localpurchase.view", "localpurchase.update", "localpurchase.download", "localpurchase.manage")
 
 
 def _rid(request: Request) -> str:
@@ -154,7 +158,7 @@ async def list_local_purchases(
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=500),
     db: AsyncSession = Depends(get_db_session),
-    _user: CurrentUser = Depends(get_current_user),
+    _user: CurrentUser = Depends(require_any_permission(*_LP_VIEW_PERMS)),
 ) -> dict:
     rules = await wf.load_status_rules(db, GROUP)
     base = select(LocalPurchase).where(LocalPurchase.deleted_at.is_(None))
@@ -264,7 +268,7 @@ async def import_local_purchases(
     request: Request,
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db_session),
-    user: CurrentUser = Depends(get_current_user),
+    user: CurrentUser = Depends(require_any_permission("localpurchase.import", "localpurchase.manage")),
 ) -> dict:
     raw_bytes = await file.read()
     rows = parse_rows_from_file(file.filename or "import.csv", raw_bytes)
@@ -456,7 +460,10 @@ async def import_local_purchases(
 
 @router.get("/{purchase_id}", summary="Get a local purchase")
 async def get_local_purchase(
-    purchase_id: uuid.UUID, request: Request, db: AsyncSession = Depends(get_db_session), _user: CurrentUser = Depends(get_current_user)
+    purchase_id: uuid.UUID,
+    request: Request,
+    db: AsyncSession = Depends(get_db_session),
+    _user: CurrentUser = Depends(require_any_permission(*_LP_DETAIL_PERMS)),
 ) -> dict:
     return build_success_response(data=(await _present(db, [await _get(db, purchase_id)]))[0], request_id=_rid(request))
 
@@ -466,7 +473,7 @@ async def create_local_purchase(
     payload: LocalPurchaseIn,
     request: Request,
     db: AsyncSession = Depends(get_db_session),
-    user: CurrentUser = Depends(get_current_user),
+    user: CurrentUser = Depends(require_any_permission("localpurchase.create", "localpurchase.manage")),
 ) -> dict:
     rules = await wf.load_status_rules(db, GROUP)
     supplier, warehouse, result = await _prepare(db, payload)
@@ -484,11 +491,11 @@ async def update_local_purchase(
     payload: LocalPurchaseIn,
     request: Request,
     db: AsyncSession = Depends(get_db_session),
-    user: CurrentUser = Depends(get_current_user),
+    user: CurrentUser = Depends(require_any_permission("localpurchase.update", "localpurchase.manage")),
 ) -> dict:
     record = await _get(db, purchase_id)
     rules = await wf.load_status_rules(db, GROUP)
-    wf.check_editable(rules, record.status, user)
+    wf.check_editable(rules, record.status, user, admin_permission="localpurchase.manage")
     supplier, warehouse, result = await _prepare(db, payload, exclude_id=record.id)
     _apply(record, payload, supplier, warehouse, result)
     await db.flush()
@@ -502,12 +509,12 @@ async def update_local_status(
     payload: StatusUpdate,
     request: Request,
     db: AsyncSession = Depends(get_db_session),
-    user: CurrentUser = Depends(get_current_user),
+    user: CurrentUser = Depends(require_any_permission("localpurchase.confirm", "localpurchase.manage")),
 ) -> dict:
     record = await _get(db, purchase_id)
     rules = await wf.load_status_rules(db, GROUP)
     target = payload.status.strip().lower()
-    wf.check_transition(rules, record.status, target, user, payload.reason)
+    wf.check_transition(rules, record.status, target, user, payload.reason, admin_permission="localpurchase.manage")
 
     if rules[target].get("stock_in") and not record.stock_applied:
         await move_stock(db, record.warehouse, [(i.product_name, i.quantity) for i in record.items], +1)
@@ -521,11 +528,14 @@ async def update_local_status(
 
 @router.delete("/{purchase_id}", summary="Delete a local purchase (reverses stock if it was confirmed)")
 async def delete_local_purchase(
-    purchase_id: uuid.UUID, request: Request, db: AsyncSession = Depends(get_db_session), user: CurrentUser = Depends(get_current_user)
+    purchase_id: uuid.UUID,
+    request: Request,
+    db: AsyncSession = Depends(get_db_session),
+    user: CurrentUser = Depends(require_any_permission("localpurchase.delete", "localpurchase.manage")),
 ) -> dict:
     record = await _get(db, purchase_id)
     rules = await wf.load_status_rules(db, GROUP)
-    wf.check_deletable(rules, record.status, user)
+    wf.check_deletable(rules, record.status, user, admin_permission="localpurchase.manage")
     if record.stock_applied:
         await move_stock(db, record.warehouse, [(i.product_name, i.quantity) for i in record.items], -1)
         record.stock_applied = False
@@ -540,10 +550,12 @@ async def upload_local_bill(
     request: Request,
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db_session),
-    user: CurrentUser = Depends(get_current_user),
+    user: CurrentUser = Depends(require_any_permission("localpurchase.update", "localpurchase.create", "localpurchase.manage")),
 ) -> dict:
     record = await _get(db, purchase_id)
-    wf.check_editable(await wf.load_status_rules(db, GROUP), record.status, user)
+    rules = await wf.load_status_rules(db, GROUP)
+    if not (record.status == wf.initial_status(rules) and "localpurchase.create" in (user.permissions or ())):
+        wf.check_editable(rules, record.status, user, admin_permission="localpurchase.manage")
     url, _stored = await save_uploaded_file(
         content=await file.read(), original_filename=file.filename or "bill", bucket="purchase-bills",
         local_subfolder="purchases", content_type=file.content_type,
@@ -556,10 +568,13 @@ async def upload_local_bill(
 
 @router.delete("/{purchase_id}/bill", summary="Remove the attached bill")
 async def delete_local_bill(
-    purchase_id: uuid.UUID, request: Request, db: AsyncSession = Depends(get_db_session), user: CurrentUser = Depends(get_current_user)
+    purchase_id: uuid.UUID,
+    request: Request,
+    db: AsyncSession = Depends(get_db_session),
+    user: CurrentUser = Depends(require_any_permission("localpurchase.update", "localpurchase.manage")),
 ) -> dict:
     record = await _get(db, purchase_id)
-    wf.check_editable(await wf.load_status_rules(db, GROUP), record.status, user)
+    wf.check_editable(await wf.load_status_rules(db, GROUP), record.status, user, admin_permission="localpurchase.manage")
     record.bill_file_url = record.bill_file_name = None
     await db.flush()
     await db.refresh(record, attribute_names=["items"])
@@ -582,9 +597,13 @@ async def get_local_bill_file(
     if not raw_token:
         raise HTTPException(status_code=401, detail="Authentication credentials were not provided.")
     try:
-        await auth_service.verify_access_token(raw_token)
+        user = await auth_service.verify_access_token(raw_token)
     except Exception as exc:
         raise HTTPException(status_code=401, detail="Invalid or expired access token.") from exc
+
+    perms = set(user.permissions or ())
+    if not (user.is_admin or "*" in perms or "localpurchase.download" in perms or "localpurchase.manage" in perms):
+        raise ForbiddenException("Viewing or downloading local purchase bill files requires 'localpurchase.download'.")
 
     record = await _get(db, purchase_id)
     if not record.bill_file_url:

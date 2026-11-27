@@ -35,6 +35,7 @@ import { DatePicker } from "@/components/DatePicker";
 import { DateRangePicker } from "@/components/DateRangePicker";
 import { apiGet, apiPatch, errorMessage } from "@/lib/api";
 import { Auth } from "@/lib/auth";
+import { useAuth } from "@/lib/hooks";
 import { useToast } from "@/lib/toast";
 import { getCachedBrandName } from "@/lib/brand";
 
@@ -469,7 +470,10 @@ export const INITIAL_DISCOUNT_ORDERS: DiscountOrderRecord[] = [
   },
 ];
 
-const DiscountPaymentsSkeletonRows: React.FC<{ count?: number }> = ({ count = 8 }) => (
+const DiscountPaymentsSkeletonRows: React.FC<{ count?: number; showActionColumn?: boolean }> = ({
+  count = 8,
+  showActionColumn = true,
+}) => (
   <>
     {Array.from({ length: count }).map((_, index) => (
       <tr key={`disc-skeleton-${index}`} className="table-skeleton-row">
@@ -482,9 +486,11 @@ const DiscountPaymentsSkeletonRows: React.FC<{ count?: number }> = ({ count = 8 
         <td style={{ padding: "12px" }}><div className="skeleton-line" style={{ width: "70%", marginLeft: "auto" }} /></td>
         <td style={{ padding: "12px" }}><div className="skeleton-badge" style={{ width: 75 }} /></td>
         <td style={{ padding: "12px" }}><div className="skeleton-badge" style={{ width: 85 }} /></td>
-        <td style={{ padding: "12px", textAlign: "center" }}>
-          <div className="skeleton-box" style={{ width: 28, height: 28, borderRadius: 6, margin: "0 auto" }} />
-        </td>
+        {showActionColumn && (
+          <td style={{ padding: "12px", textAlign: "center" }}>
+            <div className="skeleton-box" style={{ width: 28, height: 28, borderRadius: 6, margin: "0 auto" }} />
+          </td>
+        )}
       </tr>
     ))}
   </>
@@ -501,11 +507,36 @@ export function DiscountPaymentsPage({
 }: DiscountPaymentsPageProps = {}) {
   const navigate = useNavigate();
   const toast = useToast();
+  const { isSuperAdmin, hasPermission } = useAuth();
+  const canManageAll = isSuperAdmin || hasPermission("discount_payment.manage");
+  const canViewAll = canManageAll || hasPermission("discount_payment.view");
+  const canViewPending = canManageAll || hasPermission("discount_payment.pending.view");
+  const canViewCompleted = canManageAll || hasPermission("discount_payment.completed.view");
+  const canAdjustDiscount = canManageAll || hasPermission("discount_payment.adjust");
+  const canViewListPayments = canManageAll || hasPermission("discount_payment.payments.view");
+  const canViewActionColumn = canAdjustDiscount || canViewListPayments;
+  const canViewOrderInvoice =
+    isSuperAdmin ||
+    hasPermission("saleorder.manage") ||
+    hasPermission("saleorder.download") ||
+    hasPermission("saleorder.details.view");
 
   const isTestMode = import.meta.env.MODE === "test";
   const [orders, setOrders] = useState<DiscountOrderRecord[]>(isTestMode ? INITIAL_DISCOUNT_ORDERS : []);
   const [loading, setLoading] = useState<boolean>(initialLoading !== undefined ? initialLoading : !isTestMode);
-  const [activeTab, setActiveTab] = useState<"all" | "pending" | "completed">("pending");
+  const [activeTab, setActiveTab] = useState<"all" | "pending" | "completed">(() =>
+    canViewPending ? "pending" : canViewCompleted ? "completed" : "all"
+  );
+
+  useEffect(() => {
+    if (activeTab === "all" && !canViewAll) {
+      setActiveTab(canViewPending ? "pending" : canViewCompleted ? "completed" : "all");
+    } else if (activeTab === "pending" && !canViewPending) {
+      setActiveTab(canViewAll ? "all" : canViewCompleted ? "completed" : "all");
+    } else if (activeTab === "completed" && !canViewCompleted) {
+      setActiveTab(canViewPending ? "pending" : canViewAll ? "all" : "all");
+    }
+  }, [activeTab, canViewAll, canViewPending, canViewCompleted]);
   const [search, setSearch] = useState("");
   const [perPage, setPerPage] = useState<number>(50);
   const [currentPage, setCurrentPage] = useState<number>(1);
@@ -649,9 +680,20 @@ export function DiscountPaymentsPage({
     setCurrentPage(1);
   };
 
-  // Filtered orders based on Tab, search, and applied filter criteria
+  // Filtered orders based on Tab, RBAC stage scope, search, and applied filter criteria
+  const visibleStageOrders = useMemo(
+    () =>
+      orders.filter((o) => {
+        if (canViewAll) return true;
+        if (!o.settled && canViewPending) return true;
+        if (o.settled && canViewCompleted) return true;
+        return false;
+      }),
+    [orders, canViewAll, canViewPending, canViewCompleted]
+  );
+
   const filteredOrders = useMemo(() => {
-    return orders.filter((o) => {
+    return visibleStageOrders.filter((o) => {
       // Tab filter
       if (activeTab === "pending" && o.settled) return false;
       if (activeTab === "completed" && !o.settled) return false;
@@ -700,7 +742,7 @@ export function DiscountPaymentsPage({
       return true;
     });
   }, [
-    orders,
+    visibleStageOrders,
     activeTab,
     search,
     appliedWarehouse,
@@ -847,10 +889,10 @@ export function DiscountPaymentsPage({
 
   // Top KPI Metrics (reactively updates when adjustments are submitted)
   const metrics = useMemo(() => {
-    const sumTotal = orders.reduce((sum, o) => sum + (o.total_discount || 0), 0);
-    const sumPaid = orders.reduce((sum, o) => sum + (o.paid_discount || 0), 0);
-    const sumDue = orders.reduce((sum, o) => sum + (o.due_discount || 0), 0);
-    if (isTestMode) {
+    const sumTotal = visibleStageOrders.reduce((sum, o) => sum + (o.total_discount || 0), 0);
+    const sumPaid = visibleStageOrders.reduce((sum, o) => sum + (o.paid_discount || 0), 0);
+    const sumDue = visibleStageOrders.reduce((sum, o) => sum + (o.due_discount || 0), 0);
+    if (isTestMode && canViewAll) {
       const seedTotal = INITIAL_DISCOUNT_ORDERS.reduce((s, o) => s + o.total_discount, 0);
       const seedPaid = INITIAL_DISCOUNT_ORDERS.reduce((s, o) => s + o.paid_discount, 0);
       return {
@@ -864,22 +906,37 @@ export function DiscountPaymentsPage({
       paid: sumPaid,
       due: sumDue,
     };
-  }, [orders, isTestMode]);
+  }, [visibleStageOrders, isTestMode, canViewAll]);
 
   // Counts for tabs
-  const pendingCount = useMemo(() => orders.filter((o) => !o.settled).length, [orders]);
+  const pendingCount = useMemo(
+    () => (canViewPending ? visibleStageOrders.filter((o) => !o.settled).length : 0),
+    [visibleStageOrders, canViewPending]
+  );
   const completedCount = useMemo(() => {
-    const actualSettled = orders.filter((o) => o.settled).length;
-    if (isTestMode) {
+    if (!canViewCompleted) return 0;
+    const actualSettled = visibleStageOrders.filter((o) => o.settled).length;
+    if (isTestMode && canViewAll) {
       const seedSettled = INITIAL_DISCOUNT_ORDERS.filter((o) => o.settled).length;
       return 21 - seedSettled + actualSettled;
     }
     return actualSettled;
-  }, [orders, isTestMode]);
-  const allCount = useMemo(
-    () => (isTestMode ? pendingCount + completedCount : orders.length),
-    [orders.length, pendingCount, completedCount, isTestMode]
-  );
+  }, [visibleStageOrders, isTestMode, canViewAll, canViewCompleted]);
+  const allCount = useMemo(() => {
+    if (!canViewAll) return 0;
+    if (isTestMode && canViewPending && canViewCompleted) {
+      return pendingCount + completedCount;
+    }
+    return visibleStageOrders.length;
+  }, [
+    canViewAll,
+    isTestMode,
+    canViewPending,
+    canViewCompleted,
+    pendingCount,
+    completedCount,
+    visibleStageOrders.length,
+  ]);
 
   const resolveOrderPayments = (order: DiscountOrderRecord): DiscountPaymentEntry[] => {
     if (Array.isArray(order.payments) && order.payments.length > 0) {
@@ -901,7 +958,7 @@ export function DiscountPaymentsPage({
 
   // Handle Record Settlement / Discount Adjustment
   const handleConfirmSettle = async () => {
-    if (!settleOrder || submittingSettle) return;
+    if (!canAdjustDiscount || !settleOrder || submittingSettle) return;
     const cleanDate = settleDate.trim();
     if (!cleanDate) {
       const msg = "Date is required.";
@@ -1339,59 +1396,65 @@ export function DiscountPaymentsPage({
             marginBottom: "16px",
           }}
         >
-          <button
-            type="button"
-            onClick={() => setActiveTab("all")}
-            style={{
-              background: "none",
-              border: "none",
-              borderBottom: activeTab === "all" ? "2px solid #0061f2" : "2px solid transparent",
-              color: activeTab === "all" ? "#0061f2" : "#64748b",
-              fontWeight: activeTab === "all" ? 700 : 500,
-              fontSize: "13px",
-              padding: "8px 16px",
-              cursor: "pointer",
-              transition: "all 0.15s ease",
-            }}
-          >
-            All ({allCount})
-          </button>
+          {canViewAll && (
+            <button
+              type="button"
+              onClick={() => setActiveTab("all")}
+              style={{
+                background: "none",
+                border: "none",
+                borderBottom: activeTab === "all" ? "2px solid #0061f2" : "2px solid transparent",
+                color: activeTab === "all" ? "#0061f2" : "#64748b",
+                fontWeight: activeTab === "all" ? 700 : 500,
+                fontSize: "13px",
+                padding: "8px 16px",
+                cursor: "pointer",
+                transition: "all 0.15s ease",
+              }}
+            >
+              All ({allCount})
+            </button>
+          )}
 
-          <button
-            type="button"
-            onClick={() => setActiveTab("pending")}
-            style={{
-              background: "none",
-              border: "none",
-              borderBottom: activeTab === "pending" ? "2px solid #0061f2" : "2px solid transparent",
-              color: activeTab === "pending" ? "#0061f2" : "#64748b",
-              fontWeight: activeTab === "pending" ? 700 : 500,
-              fontSize: "13px",
-              padding: "8px 16px",
-              cursor: "pointer",
-              transition: "all 0.15s ease",
-            }}
-          >
-            Pending ({pendingCount})
-          </button>
+          {canViewPending && (
+            <button
+              type="button"
+              onClick={() => setActiveTab("pending")}
+              style={{
+                background: "none",
+                border: "none",
+                borderBottom: activeTab === "pending" ? "2px solid #0061f2" : "2px solid transparent",
+                color: activeTab === "pending" ? "#0061f2" : "#64748b",
+                fontWeight: activeTab === "pending" ? 700 : 500,
+                fontSize: "13px",
+                padding: "8px 16px",
+                cursor: "pointer",
+                transition: "all 0.15s ease",
+              }}
+            >
+              Pending ({pendingCount})
+            </button>
+          )}
 
-          <button
-            type="button"
-            onClick={() => setActiveTab("completed")}
-            style={{
-              background: "none",
-              border: "none",
-              borderBottom: activeTab === "completed" ? "2px solid #0061f2" : "2px solid transparent",
-              color: activeTab === "completed" ? "#0061f2" : "#64748b",
-              fontWeight: activeTab === "completed" ? 700 : 500,
-              fontSize: "13px",
-              padding: "8px 16px",
-              cursor: "pointer",
-              transition: "all 0.15s ease",
-            }}
-          >
-            Completed ({completedCount})
-          </button>
+          {canViewCompleted && (
+            <button
+              type="button"
+              onClick={() => setActiveTab("completed")}
+              style={{
+                background: "none",
+                border: "none",
+                borderBottom: activeTab === "completed" ? "2px solid #0061f2" : "2px solid transparent",
+                color: activeTab === "completed" ? "#0061f2" : "#64748b",
+                fontWeight: activeTab === "completed" ? 700 : 500,
+                fontSize: "13px",
+                padding: "8px 16px",
+                cursor: "pointer",
+                transition: "all 0.15s ease",
+              }}
+            >
+              Completed ({completedCount})
+            </button>
+          )}
 
         </div>
 
@@ -1496,17 +1559,22 @@ export function DiscountPaymentsPage({
                 <th style={{ padding: "10px 12px", fontWeight: 700, color: "#475569", width: "9%" }}>
                   Gatepass
                 </th>
-                <th style={{ padding: "10px 12px", fontWeight: 700, color: "#475569", textAlign: "center", width: "4%" }}>
-                  Action
-                </th>
+                {canViewActionColumn && (
+                  <th style={{ padding: "10px 12px", fontWeight: 700, color: "#475569", textAlign: "center", width: "4%" }}>
+                    Action
+                  </th>
+                )}
               </tr>
             </thead>
             <tbody>
               {loading ? (
-                <DiscountPaymentsSkeletonRows count={perPage > 10 ? 8 : perPage} />
+                <DiscountPaymentsSkeletonRows
+                  count={perPage > 10 ? 8 : perPage}
+                  showActionColumn={canViewActionColumn}
+                />
               ) : sortedOrders.length === 0 ? (
                 <tr>
-                  <td colSpan={10} style={{ padding: "32px", textAlign: "center", color: "#64748b" }}>
+                  <td colSpan={canViewActionColumn ? 10 : 9} style={{ padding: "32px", textAlign: "center", color: "#64748b" }}>
                     No discount records found matching current criteria.
                   </td>
                 </tr>
@@ -1522,32 +1590,46 @@ export function DiscountPaymentsPage({
                     >
                       {/* Order No */}
                       <td style={{ padding: "8px 12px", verticalAlign: "top" }}>
-                        <a
-                          href={`/sale-order/invoice/${o.order_id || o.id}`}
-                          data-testid={`order-no-btn-${o.id}`}
-                          target="_blank"
-                          rel="noreferrer"
-                          onClick={(e) => {
-                            e.preventDefault();
-                            window.open(`/sale-order/invoice/${o.order_id || o.id}`, "_blank");
-                          }}
-                          style={{
-                            background: "none",
-                            border: "none",
-                            padding: 0,
-                            color: "#0061f2",
-                            fontWeight: 500,
-                            textDecoration: "none",
-                            cursor: "pointer",
-                            fontSize: "12.5px",
-                            textAlign: "left",
-                            display: "block",
-                          }}
-                          onMouseEnter={(e) => (e.currentTarget.style.textDecoration = "underline")}
-                          onMouseLeave={(e) => (e.currentTarget.style.textDecoration = "none")}
-                        >
-                          {o.order_no}
-                        </a>
+                        {canViewOrderInvoice ? (
+                          <a
+                            href={`/sale-order/invoice/${o.order_id || o.id}`}
+                            data-testid={`order-no-btn-${o.id}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            onClick={(e) => {
+                              e.preventDefault();
+                              window.open(`/sale-order/invoice/${o.order_id || o.id}`, "_blank");
+                            }}
+                            style={{
+                              background: "none",
+                              border: "none",
+                              padding: 0,
+                              color: "#0061f2",
+                              fontWeight: 500,
+                              textDecoration: "none",
+                              cursor: "pointer",
+                              fontSize: "12.5px",
+                              textAlign: "left",
+                              display: "block",
+                            }}
+                            onMouseEnter={(e) => (e.currentTarget.style.textDecoration = "underline")}
+                            onMouseLeave={(e) => (e.currentTarget.style.textDecoration = "none")}
+                          >
+                            {o.order_no}
+                          </a>
+                        ) : (
+                          <span
+                            data-testid={`order-no-text-${o.id}`}
+                            style={{
+                              color: "#1e293b",
+                              fontWeight: 500,
+                              fontSize: "12.5px",
+                              display: "block",
+                            }}
+                          >
+                            {o.order_no}
+                          </span>
+                        )}
                         <div style={{ fontSize: "12px", color: "#0061f2", marginTop: "2px" }}>
                           {o.order_date}
                         </div>
@@ -1765,181 +1847,191 @@ export function DiscountPaymentsPage({
                       </td>
 
                       {/* Action Menu (⋮) */}
-                      <td style={{ padding: "8px 12px", verticalAlign: "top", textAlign: "center" }}>
-                        <div style={{ position: "relative", display: "inline-block", zIndex: openActionId === o.id ? 50 : 1 }}>
-                          <button
-                            type="button"
-                            title="Action"
-                            data-testid={`action-btn-${o.id}`}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              if (openActionId === o.id) {
-                                setOpenActionId(null);
-                                setActionMenuPos(null);
-                              } else {
-                                const rect = e.currentTarget.getBoundingClientRect ? e.currentTarget.getBoundingClientRect() : { top: 0, bottom: 0, left: 0, right: 0 };
-                                const innerH = typeof window !== "undefined" ? window.innerHeight : 800;
-                                const innerW = typeof window !== "undefined" ? window.innerWidth : 1200;
-                                const spaceBelow = innerH - (rect.bottom || 0);
-                                const openUpward = spaceBelow < 260 || (idx > 0 && paginatedOrders.length <= 3) || (paginatedOrders.length >= 4 && idx >= paginatedOrders.length - 2);
-                                setActionMenuPos({
-                                  openUpward,
-                                  top: openUpward ? undefined : (rect.bottom || 0) + 4,
-                                  bottom: openUpward ? Math.max(0, innerH - (rect.top || 0) + 4) : undefined,
-                                  right: Math.max(12, innerW - (rect.right || 0)),
-                                });
-                                setOpenActionId(o.id);
-                              }
-                            }}
-                            style={{
-                              background: openActionId === o.id ? "#ffffff" : "transparent",
-                              border: openActionId === o.id ? "1px solid #334155" : "1px solid transparent",
-                              borderRadius: "4px",
-                              fontSize: "14px",
-                              fontWeight: 700,
-                              color: openActionId === o.id ? "#0f172a" : "#64748b",
-                              cursor: "pointer",
-                              padding: "2px 8px",
-                              height: "26px",
-                              lineHeight: 1,
-                              display: "inline-flex",
-                              alignItems: "center",
-                              justifyContent: "center",
-                              boxShadow: openActionId === o.id ? "0 1px 2px rgba(0,0,0,0.05)" : "none",
-                              transition: "all 0.15s ease",
-                            }}
-                            onMouseEnter={(e) => {
-                              if (openActionId !== o.id) {
-                                e.currentTarget.style.borderColor = "#cbd5e1";
-                                e.currentTarget.style.backgroundColor = "#f8fafc";
-                              }
-                            }}
-                            onMouseLeave={(e) => {
-                              if (openActionId !== o.id) {
-                                e.currentTarget.style.borderColor = "transparent";
-                                e.currentTarget.style.backgroundColor = "transparent";
-                              }
-                            }}
-                          >
-                            ⋮
-                          </button>
-
-                          {openActionId === o.id && actionMenuPos && (
-                            <div
-                              onClick={(e) => e.stopPropagation()}
-                              style={{
-                                position: "fixed",
-                                right: `${actionMenuPos.right}px`,
-                                top: actionMenuPos.openUpward ? "auto" : `${actionMenuPos.top}px`,
-                                bottom: actionMenuPos.openUpward ? `${actionMenuPos.bottom}px` : "auto",
-                                background: "#ffffff",
-                                border: "1px solid #cbd5e1",
-                                borderRadius: "4px",
-                                boxShadow: actionMenuPos.openUpward ? "0 -6px 20px rgba(0,0,0,0.15)" : "0 6px 20px rgba(0,0,0,0.15)",
-                                zIndex: 9999,
-                                minWidth: "155px",
-                                textAlign: "left",
-                                overflow: "hidden",
-                                padding: "4px 0",
-                              }}
-                            >
-                              {!o.settled && o.due_discount > 0 && (
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setSettleOrder(o);
-                                    setSettleAmount("");
-                                    setSettleDate(getTodayDdMmYyyy());
-                                    setSettleRemarks("");
-                                    setSettleError("");
-                                    setOpenActionId(null);
-                                    setActionMenuPos(null);
-                                  }}
-                                  style={{
-                                    width: "100%",
-                                    padding: "8px 14px",
-                                    background: "none",
-                                    border: "none",
-                                    textAlign: "left",
-                                    fontSize: "13px",
-                                    fontWeight: 500,
-                                    cursor: "pointer",
-                                    color: "#334155",
-                                    display: "flex",
-                                    alignItems: "center",
-                                    gap: "10px",
-                                    whiteSpace: "nowrap",
-                                    transition: "background-color 0.15s ease",
-                                  }}
-                                  onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#f1f5f9")}
-                                  onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "transparent")}
-                                >
-                                  <span
-                                    style={{
-                                      fontSize: "14px",
-                                      fontWeight: 700,
-                                      color: "#475569",
-                                      width: "14px",
-                                      textAlign: "center",
-                                      display: "inline-block",
-                                    }}
-                                  >
-                                    $
-                                  </span>
-                                  <span>Adjust Discount</span>
-                                </button>
-                              )}
-
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setListPaymentsOrder(o);
+                      {canViewActionColumn && (
+                        <td style={{ padding: "8px 12px", verticalAlign: "top", textAlign: "center" }}>
+                          <div style={{ position: "relative", display: "inline-block", zIndex: openActionId === o.id ? 50 : 1 }}>
+                            <button
+                              type="button"
+                              title="Action"
+                              data-testid={`action-btn-${o.id}`}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (openActionId === o.id) {
                                   setOpenActionId(null);
                                   setActionMenuPos(null);
-                                }}
+                                } else {
+                                  const rect = e.currentTarget.getBoundingClientRect ? e.currentTarget.getBoundingClientRect() : { top: 0, bottom: 0, left: 0, right: 0 };
+                                  const innerH = typeof window !== "undefined" ? window.innerHeight : 800;
+                                  const innerW = typeof window !== "undefined" ? window.innerWidth : 1200;
+                                  const spaceBelow = innerH - (rect.bottom || 0);
+                                  const openUpward = spaceBelow < 260 || (idx > 0 && paginatedOrders.length <= 3) || (paginatedOrders.length >= 4 && idx >= paginatedOrders.length - 2);
+                                  setActionMenuPos({
+                                    openUpward,
+                                    top: openUpward ? undefined : (rect.bottom || 0) + 4,
+                                    bottom: openUpward ? Math.max(0, innerH - (rect.top || 0) + 4) : undefined,
+                                    right: Math.max(12, innerW - (rect.right || 0)),
+                                  });
+                                  setOpenActionId(o.id);
+                                }
+                              }}
+                              style={{
+                                background: openActionId === o.id ? "#ffffff" : "transparent",
+                                border: openActionId === o.id ? "1px solid #334155" : "1px solid transparent",
+                                borderRadius: "4px",
+                                fontSize: "14px",
+                                fontWeight: 700,
+                                color: openActionId === o.id ? "#0f172a" : "#64748b",
+                                cursor: "pointer",
+                                padding: "2px 8px",
+                                height: "26px",
+                                lineHeight: 1,
+                                display: "inline-flex",
+                                alignItems: "center",
+                                justifyContent: "center",
+                                boxShadow: openActionId === o.id ? "0 1px 2px rgba(0,0,0,0.05)" : "none",
+                                transition: "all 0.15s ease",
+                              }}
+                              onMouseEnter={(e) => {
+                                if (openActionId !== o.id) {
+                                  e.currentTarget.style.borderColor = "#cbd5e1";
+                                  e.currentTarget.style.backgroundColor = "#f8fafc";
+                                }
+                              }}
+                              onMouseLeave={(e) => {
+                                if (openActionId !== o.id) {
+                                  e.currentTarget.style.borderColor = "transparent";
+                                  e.currentTarget.style.backgroundColor = "transparent";
+                                }
+                              }}
+                            >
+                              ⋮
+                            </button>
+
+                            {openActionId === o.id && actionMenuPos && (
+                              <div
+                                onClick={(e) => e.stopPropagation()}
                                 style={{
-                                  width: "100%",
-                                  padding: "8px 14px",
-                                  background: "none",
-                                  border: "none",
+                                  position: "fixed",
+                                  right: `${actionMenuPos.right}px`,
+                                  top: actionMenuPos.openUpward ? "auto" : `${actionMenuPos.top}px`,
+                                  bottom: actionMenuPos.openUpward ? `${actionMenuPos.bottom}px` : "auto",
+                                  background: "#ffffff",
+                                  border: "1px solid #cbd5e1",
+                                  borderRadius: "4px",
+                                  boxShadow: actionMenuPos.openUpward ? "0 -6px 20px rgba(0,0,0,0.15)" : "0 6px 20px rgba(0,0,0,0.15)",
+                                  zIndex: 9999,
+                                  minWidth: "155px",
                                   textAlign: "left",
-                                  fontSize: "13px",
-                                  fontWeight: 500,
-                                  cursor: "pointer",
-                                  color: "#334155",
-                                  display: "flex",
-                                  alignItems: "center",
-                                  gap: "10px",
-                                  whiteSpace: "nowrap",
-                                  transition: "background-color 0.15s ease",
+                                  overflow: "hidden",
+                                  padding: "4px 0",
                                 }}
-                                onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#f1f5f9")}
-                                onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "transparent")}
                               >
-                                <svg
-                                  width="14"
-                                  height="14"
-                                  viewBox="0 0 24 24"
-                                  fill="none"
-                                  stroke="#475569"
-                                  strokeWidth="2"
-                                  strokeLinecap="round"
-                                  strokeLinejoin="round"
-                                  style={{ flexShrink: 0 }}
-                                >
-                                  <line x1="8" y1="6" x2="21" y2="6" />
-                                  <line x1="8" y1="12" x2="21" y2="12" />
-                                  <line x1="8" y1="18" x2="21" y2="18" />
-                                  <line x1="3" y1="6" x2="3.01" y2="6" />
-                                  <line x1="3" y1="12" x2="3.01" y2="12" />
-                                  <line x1="3" y1="18" x2="3.01" y2="18" />
-                                </svg>
-                                <span>List Payments</span>
-                              </button>
-                            </div>
-                          )}
-                        </div>
-                      </td>
+                                {canAdjustDiscount && !o.settled && o.due_discount > 0 && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setSettleOrder(o);
+                                      setSettleAmount("");
+                                      setSettleDate(getTodayDdMmYyyy());
+                                      setSettleRemarks("");
+                                      setSettleError("");
+                                      setOpenActionId(null);
+                                      setActionMenuPos(null);
+                                    }}
+                                    style={{
+                                      width: "100%",
+                                      padding: "8px 14px",
+                                      background: "none",
+                                      border: "none",
+                                      textAlign: "left",
+                                      fontSize: "13px",
+                                      fontWeight: 500,
+                                      cursor: "pointer",
+                                      color: "#334155",
+                                      display: "flex",
+                                      alignItems: "center",
+                                      gap: "10px",
+                                      whiteSpace: "nowrap",
+                                      transition: "background-color 0.15s ease",
+                                    }}
+                                    onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#f1f5f9")}
+                                    onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "transparent")}
+                                  >
+                                    <span
+                                      style={{
+                                        fontSize: "14px",
+                                        fontWeight: 700,
+                                        color: "#475569",
+                                        width: "14px",
+                                        textAlign: "center",
+                                        display: "inline-block",
+                                      }}
+                                    >
+                                      $
+                                    </span>
+                                    <span>Adjust Discount</span>
+                                  </button>
+                                )}
+
+                                {canViewListPayments && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setListPaymentsOrder(o);
+                                      setOpenActionId(null);
+                                      setActionMenuPos(null);
+                                    }}
+                                    style={{
+                                      width: "100%",
+                                      padding: "8px 14px",
+                                      background: "none",
+                                      border: "none",
+                                      textAlign: "left",
+                                      fontSize: "13px",
+                                      fontWeight: 500,
+                                      cursor: "pointer",
+                                      color: "#334155",
+                                      display: "flex",
+                                      alignItems: "center",
+                                      gap: "10px",
+                                      whiteSpace: "nowrap",
+                                      transition: "background-color 0.15s ease",
+                                    }}
+                                    onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#f1f5f9")}
+                                    onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "transparent")}
+                                  >
+                                    <svg
+                                      width="14"
+                                      height="14"
+                                      viewBox="0 0 24 24"
+                                      fill="none"
+                                      stroke="#475569"
+                                      strokeWidth="2"
+                                      strokeLinecap="round"
+                                      strokeLinejoin="round"
+                                      style={{ flexShrink: 0 }}
+                                    >
+                                      <line x1="8" y1="6" x2="21" y2="6" />
+                                      <line x1="8" y1="12" x2="21" y2="12" />
+                                      <line x1="8" y1="18" x2="21" y2="18" />
+                                      <line x1="3" y1="6" x2="3.01" y2="6" />
+                                      <line x1="3" y1="12" x2="3.01" y2="12" />
+                                      <line x1="3" y1="18" x2="3.01" y2="18" />
+                                    </svg>
+                                    <span>List Payments</span>
+                                  </button>
+                                )}
+
+                                {!(canAdjustDiscount && !o.settled && o.due_discount > 0) && !canViewListPayments && (
+                                  <div style={{ padding: "8px 14px", fontSize: "12px", color: "#94a3b8", whiteSpace: "nowrap" }}>
+                                    No actions permitted
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        </td>
+                      )}
                     </tr>
                   );
                 })
@@ -2076,7 +2168,7 @@ export function DiscountPaymentsPage({
         )}
 
         {/* Discount Adjustment Right-Side Drawer matching Screenshot */}
-        {settleOrder && (
+        {canAdjustDiscount && settleOrder && (
           <div
             data-testid="discount-adjustment-drawer"
             style={{
@@ -2408,7 +2500,7 @@ export function DiscountPaymentsPage({
         )}
 
         {/* Discount Adjustment Payment List Modal matching Screenshot */}
-        {listPaymentsOrder && (
+        {canViewListPayments && listPaymentsOrder && (
           <div
             data-testid="list-payments-modal"
             style={{

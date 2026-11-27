@@ -3,7 +3,7 @@
 **Service Base URL:** `http://localhost:8002/api/v1`  
 **Authentication Scheme:** Bearer JWT (HS256) & WebSocket Query Tokens  
 **Standard Response Envelope:** `{ "success": true, "data": ..., "meta": ..., "error": null }`  
-**Last Updated:** November 26, 2026
+**Last Updated:** November 27, 2026
 
 > **Universal Cross-Module Active-Only Extraction & Filtering Convention:**
 > - **Management Lists vs Cross-Module Lookups:** Unfiltered management endpoints (`GET /api/v1/masters/*`, `/companies`, `/suppliers`, `/buyers`, `/users`, `/positions`, and `/hrms/setup/*` with default `active_only=false`) return **both** `Active` and `Inactive` rows so each module's own `Active` / `Inactive` tabs and status toggles remain functional. Conversely, every cross-module picker/lookup endpoint (`/api/v1/masters/*/lookup`, `/api/v1/masters/*/dropdown`, `/companies/lookup`, `/companies/sales-persons`, `/users/all?active_only=true`, `/positions/all?active_only=true`, `/inquiries/consignment-codes`, `/inquiries/companies`, `/hrms/setup/*?active_only=true`, `/products/machine-spares/universal-view`, and `/search`) returns **`Active` records only**.
@@ -138,16 +138,16 @@ Machine-to-machine internal service endpoints invoked by `ERP_Main` over authent
 
 | Method | Endpoint URI | Description | Permission Gate |
 | :--- | :--- | :--- | :--- |
-| `GET` | `/api/v1/purchase/local-orders` | List local purchases with status counts (`all`, `pending`, `confirmed`), search, warehouse, and date filters | Authenticated |
-| `POST` | `/api/v1/purchase/local-orders` | Create local purchase with active Supplier, active physical Warehouse, and active Product lines; server auto-calculates expense loading & landing rates | Authenticated |
-| `POST` | `/api/v1/purchase/local-orders/import` | Bulk import multi-line local purchase invoices from `.csv` / `.xlsx` (`file` + optional `column_map` JSON), validating **active** Supplier/Warehouse/Product masters, calculating Expense Factor & Unit Landing Rate (INR) (VB), skipping duplicate Invoice Nos, and isolating row errors via nested DB savepoints | Authenticated |
-| `GET` | `/api/v1/purchase/local-orders/{id}` | Inspect detailed local purchase record and items | Authenticated |
-| `PUT` | `/api/v1/purchase/local-orders/{id}` | Update pending local purchase lines or invoice expenses | `localpurchase.update` |
-| `PATCH` | `/api/v1/purchase/local-orders/{id}/status` | Transition purchase status (`pending` -> `confirmed`); auto-applies physical stock-in movement | `localpurchase.confirm` |
-| `DELETE`| `/api/v1/purchase/local-orders/{id}` | Soft-delete local purchase order | Administrator |
-| `POST` | `/api/v1/purchase/local-orders/{id}/bill` | Upload scanned invoice bill document | Authenticated |
-| `DELETE`| `/api/v1/purchase/local-orders/{id}/bill` | Delete uploaded invoice bill attachment | Authenticated |
-| `GET` | `/api/v1/purchase/local-orders/{id}/bill-file` | Stream or view attached bill file | Authenticated |
+| `GET` | `/api/v1/purchase/local-orders` | List local purchases with status counts (`all`, `pending`, `confirmed`), search, warehouse, and date filters | `localpurchase.view \| localpurchase.manage` |
+| `POST` | `/api/v1/purchase/local-orders` | Create local purchase with active Supplier, active physical Warehouse, and active Product lines; server auto-calculates expense loading & landing rates | `localpurchase.create \| localpurchase.manage` |
+| `POST` | `/api/v1/purchase/local-orders/import` | Bulk import multi-line local purchase invoices from `.csv` / `.xlsx` (`file` + optional `column_map` JSON), validating **active** Supplier/Warehouse/Product masters, calculating Expense Factor & Unit Landing Rate (INR) (VB), skipping duplicate Invoice Nos, and isolating row errors via nested DB savepoints | `localpurchase.import \| localpurchase.manage` |
+| `GET` | `/api/v1/purchase/local-orders/{id}` | Inspect detailed local purchase record and items | `localpurchase.{view,update,download,manage}` |
+| `PUT` | `/api/v1/purchase/local-orders/{id}` | Update pending local purchase lines or invoice expenses | `localpurchase.update \| localpurchase.manage` |
+| `PATCH` | `/api/v1/purchase/local-orders/{id}/status` | Transition purchase status (`pending` -> `confirmed`); auto-applies physical stock-in movement | `localpurchase.confirm \| localpurchase.manage` |
+| `DELETE`| `/api/v1/purchase/local-orders/{id}` | Soft-delete local purchase order (`pending` stage for `localpurchase.delete`; confirmed orders restricted to `localpurchase.manage` / Admin) | `localpurchase.delete \| localpurchase.manage` |
+| `POST` | `/api/v1/purchase/local-orders/{id}/bill` | Upload scanned invoice bill document | `localpurchase.{update,create,manage}` |
+| `DELETE`| `/api/v1/purchase/local-orders/{id}/bill` | Delete uploaded invoice bill attachment | `localpurchase.update \| localpurchase.manage` |
+| `GET` | `/api/v1/purchase/local-orders/{id}/bill-file` | Stream or view attached bill file | `localpurchase.download \| localpurchase.manage` |
 
 ---
 
@@ -351,9 +351,9 @@ Machine-to-machine internal service endpoints invoked by `ERP_Main` over authent
 | `GET` | `/api/v1/sales/planning-consignments` | Extract consignment columns from Shipment Planning sheets for order pre-allocation | `saleorder.{view,<stage>.view,create,update,duplicate,warehouse,manage}` |
 | `GET` | `/api/v1/sales/planning-consignments/{column_id}/items` | Extract planned products and quantities from consignment column | `saleorder.{view,<stage>.view,create,update,duplicate,warehouse,manage}` |
 | `GET` | `/api/v1/sales/export` | Export Sales Orders dataset to Excel spreadsheet (enforces `?status=` stage view check) | `saleorder.export \| saleorder.manage` |
-| `GET` | `/api/v1/sales/discount-payments` | List under-invoicing cash discount payment ledger entries and multi-installment history (strictly decoupled from `proforma.*`) | `saleorder.{view,create,update,accounts,approve,delete,manage} \| crm.leads.{view,manage} \| report.view` |
-| `POST` | `/api/v1/sales/discount-payments` | Record discount payment installment settlement (with optional receipt & remarks) | `saleorder.{create,update,accounts,approve,manage} \| crm.leads.manage` |
-| `PATCH` | `/api/v1/sales/discount-payments/{payment_id}` | Update existing discount payment installment (amount, mode, date, receipt, remarks) | `saleorder.{create,update,accounts,approve,manage} \| crm.leads.manage` |
+| `GET` | `/api/v1/sales/discount-payments` | List under-invoicing cash discount payment ledger entries and multi-installment history (enforces stage `?status=` permissions; strictly isolated from `saleorder.*`, `proforma.*`, `crm.leads.*`, and `report.view`) | `discount_payment.{view,pending.view,completed.view,manage}` |
+| `POST` | `/api/v1/sales/discount-payments` | Record discount payment installment settlement authorization (strictly gated to Discount Payments write permissions) | `discount_payment.adjust \| discount_payment.manage` |
+| `PATCH` | `/api/v1/sales/discount-payments/{payment_id}` | Update existing discount payment installment (amount, mode, date, receipt, remarks) | `discount_payment.adjust \| discount_payment.manage` |
 | `GET` | `/api/v1/sales/deleted-orders` (`/api/v1/delete_order_report/list`) | List soft-deleted Sales Orders in Deleted Orders report | `report.view \| trash.view \| saleorder.{view,approve,delete,manage}` |
 | `POST` | `/api/v1/sales/deleted-orders/{id}/restore` | Restore soft-deleted Sales Order from Deleted Orders report | `saleorder.{approve,delete,manage}` |
 
@@ -428,7 +428,7 @@ Machine-to-machine internal service endpoints invoked by `ERP_Main` over authent
 > **HRMS Setup Active-Only Extraction, Seed Idempotency & RBAC Bootstrap Notes:**
 > - **Cross-Module `?active_only=true` vs Setup Management (`active_only=false`):** HRMS Setup endpoints (`/api/v1/hrms/setup/{locations,leave-types,expense-categories,holidays,leave-plans}`) return both active and inactive rows by default (`active_only=false`) for `/hrms/setup`, and accept `?active_only=true` when consumed by Leave (`/hrms/leave`), Asset Management (`/hrms/assets`), and Expense Management (`/hrms/expenses`), backed by server-side active-status validation on mutations.
 > - **Soft-Delete Non-Recreation (`ensure_seeds()`):** HRMS setup endpoints inspect total row counts including soft-deleted rows (`deleted_at IS NOT NULL`) so user-deleted defaults never re-create on subsequent calls.
-> - **Canonical RBAC System Roles (`/api/v1/rbac/roles`):** Bootstrap seeding (`scripts/seed.py`) provisions strictly three `is_system=True` roles—`super_admin` (`Admin`, holding all `414/414` unique permissions across `419` bootstrap entries), `user` (`User`), and `technician` (`Technician`, fixed field-service department to which admins assign `User` accounts)—with zero hardcoded business departments. All permission grant/revoke/bulk mutations (`POST`/`DELETE /rbac/roles/{id}/permissions`, `PUT /rbac/roles/{id}/permissions/bulk`, `PUT /rbac/users/{id}/permissions/bulk`, `/rbac/clone`, and `POST`/`DELETE /users/{id}/roles`) commit and publish `PERMISSIONS_UPDATED` over WebSocket (`user:{id}`) so connected clients sync `/auth/profile` immediately, while `AuthService.verify_access_token` prevents zero-permission DB users from inheriting stale JWT claims. On `/rbac` and `/users`, permission matrices group modules to match left-sidebar `nav.ts` sections (`NAV_PERMISSION_SECTIONS`) with real-time search filtering (`filterNavPermissionSections`).
+> - **Canonical RBAC System Roles (`/api/v1/rbac/roles`):** Bootstrap seeding (`scripts/seed.py`) provisions strictly three `is_system=True` roles—`super_admin` (`Admin`, holding all `420/420` unique permissions across `425` bootstrap entries), `user` (`User`), and `technician` (`Technician`, fixed field-service department to which admins assign `User` accounts)—with zero hardcoded business departments. All permission grant/revoke/bulk mutations (`POST`/`DELETE /rbac/roles/{id}/permissions`, `PUT /rbac/roles/{id}/permissions/bulk`, `PUT /rbac/users/{id}/permissions/bulk`, `/rbac/clone`, and `POST`/`DELETE /users/{id}/roles`) commit and publish `PERMISSIONS_UPDATED` over WebSocket (`user:{id}`) so connected clients sync `/auth/profile` immediately, while `AuthService.verify_access_token` prevents zero-permission DB users from inheriting stale JWT claims. On `/rbac` and `/users`, permission matrices group modules to match left-sidebar `nav.ts` sections (`NAV_PERMISSION_SECTIONS`) with real-time search filtering (`filterNavPermissionSections`).
 
 ---
 
@@ -458,10 +458,10 @@ Machine-to-machine internal service endpoints invoked by `ERP_Main` over authent
 | Method | Endpoint URI | Description | Permission Gate |
 | :--- | :--- | :--- | :--- |
 | `GET` | `/api/v1/financial-planning` | Aggregates live entries, dual-currency KPIs (`INR` `₹` default + `USD` `$`), and active `payment_terms_options` across confirmed `ImportPurchase` (`confirmed`, `received`, `closed` -> Supplier + `Total Taxes (INR)` rows), confirmed `LocalPurchase` (`confirmed` -> Supplier row), and `Acc. Confirmed` `SaleOrder` (`acc_confirmed` and downstream active stages -> Customer row), merged with `financial_planning_entries` overlays | `report.view \| purchase.view \| saleorder.view \| saleorder.accounts \| saleorder.approve` |
-| `POST` | `/api/v1/financial-planning/upload` | Multipart upload for invoice, customs/BOE challan, or payment receipt (`financial-planning` bucket / `uploads/private/financial_planning`) | `report.view \| purchase.{view,create,update} \| localpurchase.update \| importpurchase.update \| saleorder.{accounts,update,approve}` |
-| `PATCH` | `/api/v1/financial-planning/entries/{entry_key}/terms` | Upsert `payment_terms`, `due_date`, `remarks`, and optional `payment_attachment_url` on `financial_planning_entries` (`entry_key = {source_module}:{uuid}:{role}`) | `report.view \| purchase.{view,create,update} \| localpurchase.update \| importpurchase.update \| saleorder.{accounts,update,approve}` |
-| `POST` | `/api/v1/financial-planning/entries/{entry_key}/record-payment` | Record partial or full settlement (`amount > 0` and `<= balance_amount`), append immutable entry to `payments_history`, and transition `Pending` -> `Cleared` when balance reaches `0` | `report.view \| purchase.{view,create,update} \| localpurchase.update \| importpurchase.update \| saleorder.{accounts,update,approve}` |
-| `PATCH` | `/api/v1/financial-planning/entries/{entry_key}/attachment` | Attach or replace `invoice` or `payment` document URL on a Financial Planning entry | `report.view \| purchase.{view,create,update} \| localpurchase.update \| importpurchase.update \| saleorder.{accounts,update,approve}` |
+| `POST` | `/api/v1/financial-planning/upload` | Multipart upload for invoice, customs/BOE challan, or payment receipt (`financial-planning` bucket / `uploads/private/financial_planning`) | `report.view \| purchase.{view,create,update} \| localpurchase.{update,manage} \| importpurchase.update \| saleorder.{accounts,update,approve}` |
+| `PATCH` | `/api/v1/financial-planning/entries/{entry_key}/terms` | Upsert `payment_terms`, `due_date`, `remarks`, and optional `payment_attachment_url` on `financial_planning_entries` (`entry_key = {source_module}:{uuid}:{role}`) | `report.view \| purchase.{view,create,update} \| localpurchase.{update,manage} \| importpurchase.update \| saleorder.{accounts,update,approve}` |
+| `POST` | `/api/v1/financial-planning/entries/{entry_key}/record-payment` | Record partial or full settlement (`amount > 0` and `<= balance_amount`), append immutable entry to `payments_history`, and transition `Pending` -> `Cleared` when balance reaches `0` | `report.view \| purchase.{view,create,update} \| localpurchase.{update,manage} \| importpurchase.update \| saleorder.{accounts,update,approve}` |
+| `PATCH` | `/api/v1/financial-planning/entries/{entry_key}/attachment` | Attach or replace `invoice` or `payment` document URL on a Financial Planning entry | `report.view \| purchase.{view,create,update} \| localpurchase.{update,manage} \| importpurchase.update \| saleorder.{accounts,update,approve}` |
 
 ---
 
@@ -483,7 +483,7 @@ Machine-to-machine internal service endpoints invoked by `ERP_Main` over authent
 
 | Method | Endpoint URI | Description | Permission Gate |
 | :--- | :--- | :--- | :--- |
-| `GET` | `/api/v1/rbac/permissions` | List all active (non-deprecated) permission definitions (`planning.*`, `technician_operations.create`, `task.organization_view` excluded) | `roles_permissions.view` |
+| `GET` | `/api/v1/rbac/permissions` | List all active (non-deprecated) permission definitions (`planning.*`, `inquiry.*`, `quotation.*`, `technician_operations.create`, `task.organization_view` excluded) | `roles_permissions.view` |
 | `POST` | `/api/v1/rbac/roles/{role_id}/permissions` | Immediately grant one permission to a department and publish `PERMISSIONS_UPDATED` to assigned users | `roles_permissions.action` |
 | `DELETE` | `/api/v1/rbac/roles/{role_id}/permissions/{permission_id}` | Immediately revoke one permission from a department and publish `PERMISSIONS_UPDATED` to assigned users | `roles_permissions.action` |
 | `PUT` | `/api/v1/rbac/roles/{role_id}/permissions/bulk` | Atomically replace all direct permissions on a department (`Select Group` / `Deselect Group` / `Select All` / `Deselect All`; rejects `super_admin` and deprecated codes) and publish `PERMISSIONS_UPDATED` | `roles_permissions.action` |

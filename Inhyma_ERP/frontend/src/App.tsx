@@ -271,32 +271,32 @@ export function App() {
           <Route path="/sales/gatepass-pdf/:id" element={<HrmsRouteGuard anyPermissions={["saleorder.download", "saleorder.manage"]}><GatePassPdfPage /></HrmsRouteGuard>} />
           <Route path="/sales/gatepass-pdf" element={<HrmsRouteGuard anyPermissions={["saleorder.download", "saleorder.manage"]}><GatePassPdfPage /></HrmsRouteGuard>} />
           <Route path="/sale-order" element={<Navigate to="/sale-order/list" replace />} />
-          <Route path="/discount-payments/list" element={<HrmsRouteGuard anyPermissions={["saleorder.view", "saleorder.create", "saleorder.update", "saleorder.accounts", "saleorder.approve", "saleorder.delete", "crm.leads.view", "crm.leads.manage", "report.view"]}><DiscountPaymentsPage /></HrmsRouteGuard>} />
+          <Route path="/discount-payments/list" element={<HrmsRouteGuard anyPermissions={["discount_payment.view", "discount_payment.pending.view", "discount_payment.completed.view", "discount_payment.manage"]}><DiscountPaymentsPage /></HrmsRouteGuard>} />
           <Route path="/discount-payments" element={<Navigate to="/discount-payments/list" replace />} />
-          <Route path="/sale-discount/list" element={<HrmsRouteGuard anyPermissions={["saleorder.view", "saleorder.create", "saleorder.update", "saleorder.accounts", "saleorder.approve", "saleorder.delete", "crm.leads.view", "crm.leads.manage", "report.view"]}><DiscountPaymentsPage /></HrmsRouteGuard>} />
+          <Route path="/sale-discount/list" element={<HrmsRouteGuard anyPermissions={["discount_payment.view", "discount_payment.pending.view", "discount_payment.completed.view", "discount_payment.manage"]}><DiscountPaymentsPage /></HrmsRouteGuard>} />
           <Route path="/sale-discount" element={<Navigate to="/sale-discount/list" replace />} />
 
           {/* LOCAL PURCHASE routes under /purchase/localpurchase */}
-          <Route path="/purchase/localpurchase" element={<HrmsRouteGuard><LocalPurchasePage /></HrmsRouteGuard>} />
-          <Route path="/purchase/localpurchase/add" element={<HrmsRouteGuard><LocalPurchasePage defaultAdd={true} /></HrmsRouteGuard>} />
-          <Route path="/purchase/localpurchase/addedit" element={<HrmsRouteGuard><LocalPurchasePage defaultAdd={true} /></HrmsRouteGuard>} />
-          <Route path="/purchase/localpurchase/addedit/:id" element={<HrmsRouteGuard><LocalPurchasePage defaultAdd={true} /></HrmsRouteGuard>} />
+          <Route path="/purchase/localpurchase" element={<HrmsRouteGuard anyPermissions={["localpurchase.view", "localpurchase.manage"]}><LocalPurchasePage /></HrmsRouteGuard>} />
+          <Route path="/purchase/localpurchase/add" element={<HrmsRouteGuard anyPermissions={["localpurchase.create", "localpurchase.manage"]}><LocalPurchasePage defaultAdd={true} /></HrmsRouteGuard>} />
+          <Route path="/purchase/localpurchase/addedit" element={<HrmsRouteGuard anyPermissions={["localpurchase.create", "localpurchase.manage"]}><LocalPurchasePage defaultAdd={true} /></HrmsRouteGuard>} />
+          <Route path="/purchase/localpurchase/addedit/:id" element={<HrmsRouteGuard anyPermissions={["localpurchase.update", "localpurchase.manage"]}><LocalPurchasePage defaultAdd={true} /></HrmsRouteGuard>} />
           <Route path="/Purchase/localpurchase" element={<Navigate to="/purchase/localpurchase" replace />} />
           <Route path="/purchase/local-purchase" element={<Navigate to="/purchase/localpurchase" replace />} />
-          <Route path="/purchase/local-purchase/add" element={<HrmsRouteGuard><LocalPurchasePage defaultAdd={true} /></HrmsRouteGuard>} />
-          <Route path="/purchase/local-purchase/addedit" element={<HrmsRouteGuard><LocalPurchasePage defaultAdd={true} /></HrmsRouteGuard>} />
-          <Route path="/purchase/local-purchase/addedit/:id" element={<HrmsRouteGuard><LocalPurchasePage defaultAdd={true} /></HrmsRouteGuard>} />
+          <Route path="/purchase/local-purchase/add" element={<HrmsRouteGuard anyPermissions={["localpurchase.create", "localpurchase.manage"]}><LocalPurchasePage defaultAdd={true} /></HrmsRouteGuard>} />
+          <Route path="/purchase/local-purchase/addedit" element={<HrmsRouteGuard anyPermissions={["localpurchase.create", "localpurchase.manage"]}><LocalPurchasePage defaultAdd={true} /></HrmsRouteGuard>} />
+          <Route path="/purchase/local-purchase/addedit/:id" element={<HrmsRouteGuard anyPermissions={["localpurchase.update", "localpurchase.manage"]}><LocalPurchasePage defaultAdd={true} /></HrmsRouteGuard>} />
           <Route path="/purchase-order/list" element={<Navigate to="/purchase/localpurchase" replace />} />
-          <Route path="/purchase-order/add" element={<HrmsRouteGuard><LocalPurchasePage defaultAdd={true} /></HrmsRouteGuard>} />
-          <Route path="/purchase-order/addedit" element={<HrmsRouteGuard><LocalPurchasePage defaultAdd={true} /></HrmsRouteGuard>} />
-          <Route path="/purchase-order/addedit/:id" element={<HrmsRouteGuard><LocalPurchasePage defaultAdd={true} /></HrmsRouteGuard>} />
-          <Route path="/purchase-order/bill-file/:id" element={<HrmsRouteGuard><LocalPurchasePdfPage /></HrmsRouteGuard>} />
-          <Route path="/purchase-order/bill-file" element={<HrmsRouteGuard><LocalPurchasePdfPage /></HrmsRouteGuard>} />
-          <Route path="/purchase-order/pdf/:id" element={<HrmsRouteGuard><LocalPurchasePdfPage /></HrmsRouteGuard>} />
-          <Route path="/purchase-order/pdf" element={<HrmsRouteGuard><LocalPurchasePdfPage /></HrmsRouteGuard>} />
-          <Route path="/purchase/localpurchase/bill-file/:id" element={<HrmsRouteGuard><LocalPurchasePdfPage /></HrmsRouteGuard>} />
-          <Route path="/purchase/localpurchase/pdf/:id" element={<HrmsRouteGuard><LocalPurchasePdfPage /></HrmsRouteGuard>} />
-          <Route path="/purchase/bill-file/:id" element={<HrmsRouteGuard><LocalPurchasePdfPage /></HrmsRouteGuard>} />
+          <Route path="/purchase-order/add" element={<HrmsRouteGuard anyPermissions={["localpurchase.create", "localpurchase.manage"]}><LocalPurchasePage defaultAdd={true} /></HrmsRouteGuard>} />
+          <Route path="/purchase-order/addedit" element={<HrmsRouteGuard anyPermissions={["localpurchase.create", "localpurchase.manage"]}><LocalPurchasePage defaultAdd={true} /></HrmsRouteGuard>} />
+          <Route path="/purchase-order/addedit/:id" element={<HrmsRouteGuard anyPermissions={["localpurchase.update", "localpurchase.manage"]}><LocalPurchasePage defaultAdd={true} /></HrmsRouteGuard>} />
+          <Route path="/purchase-order/bill-file/:id" element={<HrmsRouteGuard anyPermissions={["localpurchase.download", "localpurchase.manage"]}><LocalPurchasePdfPage /></HrmsRouteGuard>} />
+          <Route path="/purchase-order/bill-file" element={<HrmsRouteGuard anyPermissions={["localpurchase.download", "localpurchase.manage"]}><LocalPurchasePdfPage /></HrmsRouteGuard>} />
+          <Route path="/purchase-order/pdf/:id" element={<HrmsRouteGuard anyPermissions={["localpurchase.download", "localpurchase.manage"]}><LocalPurchasePdfPage /></HrmsRouteGuard>} />
+          <Route path="/purchase-order/pdf" element={<HrmsRouteGuard anyPermissions={["localpurchase.download", "localpurchase.manage"]}><LocalPurchasePdfPage /></HrmsRouteGuard>} />
+          <Route path="/purchase/localpurchase/bill-file/:id" element={<HrmsRouteGuard anyPermissions={["localpurchase.download", "localpurchase.manage"]}><LocalPurchasePdfPage /></HrmsRouteGuard>} />
+          <Route path="/purchase/localpurchase/pdf/:id" element={<HrmsRouteGuard anyPermissions={["localpurchase.download", "localpurchase.manage"]}><LocalPurchasePdfPage /></HrmsRouteGuard>} />
+          <Route path="/purchase/bill-file/:id" element={<HrmsRouteGuard anyPermissions={["localpurchase.download", "localpurchase.manage"]}><LocalPurchasePdfPage /></HrmsRouteGuard>} />
           <Route path="/purchase-order" element={<Navigate to="/purchase/localpurchase" replace />} />
           <Route path="/purchase/local" element={<Navigate to="/purchase/localpurchase" replace />} />
           <Route path="/purchase/local/list" element={<Navigate to="/purchase/localpurchase" replace />} />

@@ -61,8 +61,8 @@ TABLES = [
     ProductSubCategory.__table__, BillingCompany.__table__, City.__table__, State.__table__, SupplierEmail.__table__,
 ]
 
-NORMAL = CurrentUser(id=uuid.uuid4(), username="marketing")
-ACCOUNTS = CurrentUser(id=uuid.uuid4(), username="accounts", permissions={"localpurchase.update", "localpurchase.confirm"})
+NORMAL = CurrentUser(id=uuid.uuid4(), username="marketing", permissions={"localpurchase.view", "localpurchase.create", "localpurchase.import"})
+ACCOUNTS = CurrentUser(id=uuid.uuid4(), username="accounts", permissions={"localpurchase.view", "localpurchase.create", "localpurchase.update", "localpurchase.confirm"})
 ADMIN = CurrentUser(id=uuid.uuid4(), username="boss", is_super_admin=True)
 
 TODAY = date.today()
@@ -84,6 +84,7 @@ async def factory():
     async with engine.begin() as conn:
         await conn.run_sync(lambda c: Base.metadata.create_all(c, tables=TABLES))
         await conn.run_sync(_migrate, "m1a2b3c4d5ea_seed_purchase_rules.py")
+        await conn.run_sync(_migrate, "z9t8d9e0f1a2_add_granular_local_purchase_permissions.py")
     maker = async_sessionmaker(engine, expire_on_commit=False)
     async with maker() as s:
         uom = UnitOfMeasurement(code="NOS", name="Numbers", short_name="Nos")
@@ -656,3 +657,58 @@ async def test_import_expected_arrival_defaults_to_eta_plus_5_days_and_stays_edi
         csv_imp = next(o for o in listed if o["consignment_no"] == "EXP-CSV-ETA-5")
         assert csv_imp["eta_port_date"] == eta_str
         assert csv_imp["expected_arrival_date"] == expected_default_str
+
+
+@pytest.mark.asyncio
+async def test_local_purchase_10_permission_rbac_enforcement(factory):
+    """Every localpurchase.* action requires its exact permission and is isolated from purchase.*."""
+    unpriv = CurrentUser(id=uuid.uuid4(), username="import_only", permissions={"purchase.view", "purchase.create", "purchase.update"})
+    viewer = CurrentUser(id=uuid.uuid4(), username="lp_viewer", permissions={"localpurchase.view"})
+    creator = CurrentUser(id=uuid.uuid4(), username="lp_creator", permissions={"localpurchase.create"})
+    importer = CurrentUser(id=uuid.uuid4(), username="lp_importer", permissions={"localpurchase.import"})
+    deleter = CurrentUser(id=uuid.uuid4(), username="lp_deleter", permissions={"localpurchase.delete"})
+    manager = CurrentUser(id=uuid.uuid4(), username="lp_manager", permissions={"localpurchase.manage"})
+
+    async with _client(factory, unpriv) as u_c, _client(factory, viewer) as v_c, _client(factory, creator) as cr_c, \
+            _client(factory, importer) as im_c, _client(factory, deleter) as del_c, _client(factory, manager) as mgr_c:
+        # 1. Import Purchase permissions alone cannot touch Local Purchase
+        assert (await u_c.get("/purchase/local-orders")).status_code == 403
+        assert (await u_c.post("/purchase/local-orders", json=_local(invoice_no="INV-RBAC-0"))).status_code == 403
+        assert (
+            await u_c.post(
+                "/purchase/local-orders/import",
+                files={"file": ("lp.csv", b"invoice_no\nX\n", "text/csv")},
+            )
+        ).status_code == 403
+
+        # 2. Creator can POST + upload pending bill, but cannot list/import/confirm/delete
+        po = await _new_local(cr_c, invoice_no="INV-RBAC-1")
+        assert (await cr_c.get("/purchase/local-orders")).status_code == 403
+        assert (await cr_c.patch(f"/purchase/local-orders/{po['id']}/status", json={"status": "confirmed"})).status_code == 403
+        assert (await cr_c.delete(f"/purchase/local-orders/{po['id']}")).status_code == 403
+
+        # 3. Viewer can list/get, cannot create/import/update/confirm/delete
+        assert (await v_c.get("/purchase/local-orders")).status_code == 200
+        assert (await v_c.get(f"/purchase/local-orders/{po['id']}")).status_code == 200
+        assert (await v_c.post("/purchase/local-orders", json=_local(invoice_no="INV-RBAC-2"))).status_code == 403
+        assert (await v_c.put(f"/purchase/local-orders/{po['id']}", json=_local(invoice_no="INV-RBAC-1"))).status_code == 403
+        assert (await v_c.patch(f"/purchase/local-orders/{po['id']}/status", json={"status": "confirmed"})).status_code == 403
+        assert (await v_c.delete(f"/purchase/local-orders/{po['id']}")).status_code == 403
+
+        # 4. Importer can CSV import, cannot manual POST
+        csv_text = f"invoice_no,invoice_date,supplier_name,warehouse,product_name,quantity,unit_rate,invoice_value_ex_gst,invoice_value_inc_gst\nINV-RBAC-IMP,{PAST},Local Traders,Mumbai,Band Sealer,2,100,200,236\n"
+        imp_res = await im_c.post(
+            "/purchase/local-orders/import",
+            files={"file": ("lp.csv", csv_text.encode("utf-8"), "text/csv")},
+        )
+        assert imp_res.status_code == 200
+        assert imp_res.json()["data"]["created"] == 1
+        assert (await im_c.post("/purchase/local-orders", json=_local(invoice_no="INV-RBAC-3"))).status_code == 403
+
+        # 5. Deleter can delete pending local purchase
+        assert (await del_c.delete(f"/purchase/local-orders/{po['id']}")).status_code == 200
+
+        # 6. Manager has full end-to-end access (create, edit, confirm, delete another)
+        po2 = await _new_local(mgr_c, invoice_no="INV-RBAC-MGR")
+        assert (await mgr_c.put(f"/purchase/local-orders/{po2['id']}", json=_local(invoice_no="INV-RBAC-MGR", remarks="mgr edit"))).status_code == 200
+        assert (await mgr_c.patch(f"/purchase/local-orders/{po2['id']}/status", json={"status": "confirmed"})).status_code == 200

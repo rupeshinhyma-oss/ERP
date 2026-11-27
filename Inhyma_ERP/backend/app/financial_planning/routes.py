@@ -35,6 +35,7 @@ _WRITE_PERMS = (
     "purchase.create",
     "purchase.update",
     "localpurchase.update",
+    "localpurchase.manage",
     "importpurchase.update",
     "saleorder.accounts",
     "saleorder.update",

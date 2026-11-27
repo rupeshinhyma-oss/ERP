@@ -61,6 +61,17 @@ READ_ONLY_REPORT_USER = CurrentUser(
     username="report_viewer",
     permissions={"report.view"},
 )
+DISCOUNT_VIEWER_USER = CurrentUser(
+    id=uuid.uuid4(),
+    username="discount_viewer",
+    permissions={"discount_payment.view"},
+)
+DISCOUNT_ADJUSTER_USER = CurrentUser(
+    id=uuid.uuid4(),
+    username="discount_adjuster",
+    display_name="Accounts Executive",
+    permissions={"discount_payment.view", "discount_payment.adjust"},
+)
 ACCOUNTS_USER = CurrentUser(
     id=uuid.uuid4(),
     username="accounts_exec",
@@ -209,20 +220,15 @@ async def test_bug001_authenticated_without_permission_rejected_403(sales_sec_en
 @pytest.mark.asyncio
 async def test_bug001_readonly_viewer_can_read_but_cannot_mutate_or_restore(sales_sec_env):
     client: AsyncClient = sales_sec_env["client"]
-    sales_sec_env["set_user"](READ_ONLY_REPORT_USER)
+    sales_sec_env["set_user"](DISCOUNT_VIEWER_USER)
 
-    # Empty DB: zero hardcoded seed records returned
+    # Empty DB: zero hardcoded seed records returned for discount_payment.view
     dp_list = await client.get("/api/v1/sales/discount-payments")
     assert dp_list.status_code == 200
     assert dp_list.json()["data"]["items"] == []
     assert dp_list.json()["meta"]["total"] == 0
 
-    del_list = await client.get("/api/v1/sales/deleted-orders")
-    assert del_list.status_code == 200
-    assert del_list.json()["data"]["items"] == []
-    assert del_list.json()["data"]["total"] == 0
-
-    # Mutations rejected for read-only report viewer
+    # Mutations & deleted orders rejected for discount_payment.view only
     assert (
         await client.post(
             "/api/v1/sales/discount-payments",
@@ -241,6 +247,15 @@ async def test_bug001_readonly_viewer_can_read_but_cannot_mutate_or_restore(sale
             json={"amount": 100.0},
         )
     ).status_code == 403
+    assert (await client.get("/api/v1/sales/deleted-orders")).status_code == 403
+
+    # Report viewer can read deleted orders but not discount payments or restore
+    sales_sec_env["set_user"](READ_ONLY_REPORT_USER)
+    assert (await client.get("/api/v1/sales/discount-payments")).status_code == 403
+    del_list = await client.get("/api/v1/sales/deleted-orders")
+    assert del_list.status_code == 200
+    assert del_list.json()["data"]["items"] == []
+    assert del_list.json()["data"]["total"] == 0
     assert (
         await client.post(f"/api/v1/sales/deleted-orders/{uuid.uuid4()}/restore")
     ).status_code == 403
@@ -251,8 +266,8 @@ async def test_bug001_authorized_discount_payment_and_deleted_order_restore_work
     client: AsyncClient = sales_sec_env["client"]
     maker = sales_sec_env["maker"]
 
-    # 1. Accounts user creates and settles a synthetic discount payment
-    sales_sec_env["set_user"](ACCOUNTS_USER)
+    # 1. Discount adjuster creates and settles a synthetic discount payment
+    sales_sec_env["set_user"](DISCOUNT_ADJUSTER_USER)
     create_res = await client.post(
         "/api/v1/sales/discount-payments",
         json={
@@ -393,3 +408,119 @@ async def test_proforma_permissions_do_not_grant_discount_payments(sales_sec_env
             json={"amount": 100.0},
         )
     ).status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_saleorder_permissions_do_not_grant_discount_payments(sales_sec_env):
+    client: AsyncClient = sales_sec_env["client"]
+    saleorder_only_user = CurrentUser(
+        id=uuid.uuid4(),
+        username="saleorder_manager",
+        display_name="Sales Manager",
+        permissions={
+            "saleorder.view",
+            "saleorder.pending.view",
+            "saleorder.sales_confirmed.view",
+            "saleorder.admin_approved.view",
+            "saleorder.acc_confirmed.view",
+            "saleorder.gatepass_created.view",
+            "saleorder.dispatched.view",
+            "saleorder.gatepass_cancelled.view",
+            "saleorder.lr.view",
+            "saleorder.cancelled.view",
+            "saleorder.create",
+            "saleorder.export",
+            "saleorder.details.view",
+            "saleorder.action.view",
+            "saleorder.update",
+            "saleorder.duplicate",
+            "saleorder.download",
+            "saleorder.files",
+            "saleorder.confirm",
+            "saleorder.approve",
+            "saleorder.accounts",
+            "saleorder.warehouse",
+            "saleorder.cancel",
+            "saleorder.delete",
+            "saleorder.manage",
+        },
+        is_super_admin=False,
+    )
+    sales_sec_env["set_user"](saleorder_only_user)
+
+    assert (await client.get("/api/v1/sales/discount-payments")).status_code == 403
+    assert (
+        await client.post(
+            "/api/v1/sales/discount-payments",
+            json={
+                "order_ref": "SO-SYNTH-8888",
+                "customer_name": "Synthetic QA Corp",
+                "sales_person": "QA",
+                "total_order_amount": 10000.0,
+                "discount_percent": 5.0,
+            },
+        )
+    ).status_code == 403
+    assert (
+        await client.patch(
+            f"/api/v1/sales/discount-payments/{uuid.uuid4()}",
+            json={"amount": 100.0},
+        )
+    ).status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_discount_payment_stage_view_isolation(sales_sec_env):
+    client: AsyncClient = sales_sec_env["client"]
+    sales_sec_env["set_user"](DISCOUNT_ADJUSTER_USER)
+    res_p = await client.post(
+        "/api/v1/sales/discount-payments",
+        json={
+            "order_ref": "SO-DP-STAGE-1",
+            "customer_name": "Pending Discount Corp",
+            "sales_person": "Rep 1",
+            "total_order_amount": 10000.0,
+            "discount_percent": 10.0,
+        },
+    )
+    assert res_p.status_code == 201
+
+    completed_only = CurrentUser(
+        id=uuid.uuid4(),
+        username="dp_completed_only",
+        permissions={"discount_payment.completed.view"},
+    )
+    sales_sec_env["set_user"](completed_only)
+    assert (await client.get("/api/v1/sales/discount-payments?status=pending")).status_code == 403
+    assert (await client.get("/api/v1/sales/discount-payments?status=all")).status_code == 403
+    ok_res = await client.get("/api/v1/sales/discount-payments?status=completed")
+    assert ok_res.status_code == 200
+    assert ok_res.json()["data"]["items"] == []
+
+    # Settle SO-DP-STAGE-1 partially so payments history has 1 installment
+    sales_sec_env["set_user"](DISCOUNT_ADJUSTER_USER)
+    patch_res = await client.patch(
+        f"/api/v1/sales/discount-payments/{res_p.json()['data']['id']}",
+        json={"amount": 400.0, "settle_remarks": "Stage test installment"},
+    )
+    assert patch_res.status_code == 200
+
+    # discount_payment.view alone allows All tab, rejects Pending/Completed stage queries, and hides payments history
+    sales_sec_env["set_user"](DISCOUNT_VIEWER_USER)
+    assert (await client.get("/api/v1/sales/discount-payments?status=pending")).status_code == 403
+    assert (await client.get("/api/v1/sales/discount-payments?status=completed")).status_code == 403
+    all_res = await client.get("/api/v1/sales/discount-payments?status=all")
+    assert all_res.status_code == 200
+    assert len(all_res.json()["data"]["items"]) == 1
+    assert all_res.json()["data"]["items"][0]["payments"] == []
+
+    # Granting discount_payment.payments.view exposes installment history
+    payments_viewer = CurrentUser(
+        id=uuid.uuid4(),
+        username="dp_payments_viewer",
+        permissions={"discount_payment.view", "discount_payment.payments.view"},
+    )
+    sales_sec_env["set_user"](payments_viewer)
+    pv_res = await client.get("/api/v1/sales/discount-payments")
+    assert pv_res.status_code == 200
+    assert len(pv_res.json()["data"]["items"][0]["payments"]) == 1

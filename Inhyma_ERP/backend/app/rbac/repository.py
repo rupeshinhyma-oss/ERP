@@ -31,7 +31,20 @@ from app.rbac.models import (
 # Obsolete permission codes retained non-destructively in existing databases
 # (no destructive deletion/migration), but excluded from permission catalogs,
 # effective-permission resolution, UI override panels, and new grants.
-DEPRECATED_PERMISSION_CODES: frozenset[str] = frozenset({"task.organization_view"})
+DEPRECATED_PERMISSION_CODES: frozenset[str] = frozenset(
+    {
+        "task.organization_view",
+        "discount_payment.action.view",
+        "inquiry.view",
+        "inquiry.create",
+        "inquiry.update",
+        "inquiry.delete",
+        "inquiry.approve",
+        "quotation.create",
+        "quotation.approve",
+        "quotation.delete",
+    }
+)
 
 
 class PermissionRepository(BaseRepository[Permission]):

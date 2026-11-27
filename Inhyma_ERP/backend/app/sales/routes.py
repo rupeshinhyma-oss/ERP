@@ -906,24 +906,14 @@ async def _load_discount_enrichment_maps(
 
 
 _DISCOUNT_PAYMENT_VIEW_PERMS = (
-    "saleorder.view",
-    "saleorder.create",
-    "saleorder.update",
-    "saleorder.accounts",
-    "saleorder.approve",
-    "saleorder.delete",
-    "saleorder.manage",
-    "crm.leads.view",
-    "crm.leads.manage",
-    "report.view",
+    "discount_payment.view",
+    "discount_payment.pending.view",
+    "discount_payment.completed.view",
+    "discount_payment.manage",
 )
 _DISCOUNT_PAYMENT_WRITE_PERMS = (
-    "saleorder.create",
-    "saleorder.update",
-    "saleorder.accounts",
-    "saleorder.approve",
-    "saleorder.manage",
-    "crm.leads.manage",
+    "discount_payment.adjust",
+    "discount_payment.manage",
 )
 _DELETED_ORDERS_VIEW_PERMS = (
     "report.view",
@@ -940,6 +930,16 @@ _DELETED_ORDERS_RESTORE_PERMS = (
 )
 
 
+def _is_discount_payment_privileged(user: CurrentUser) -> bool:
+    perms = set(user.permissions or ())
+    return bool(
+        user.is_super_admin
+        or user.username == "admin"
+        or "*" in perms
+        or "discount_payment.manage" in perms
+    )
+
+
 @router.get("/sales/discount-payments", summary="List discount payments")
 async def list_discount_payments(
     request: Request,
@@ -950,10 +950,31 @@ async def list_discount_payments(
     skip: int = Query(0, ge=0),
     limit: int = Query(500, ge=1, le=2000),
     db: AsyncSession = Depends(get_db_session),
-    _current_user: CurrentUser = Depends(require_any_permission(*_DISCOUNT_PAYMENT_VIEW_PERMS)),
+    current_user: CurrentUser = Depends(require_any_permission(*_DISCOUNT_PAYMENT_VIEW_PERMS)),
 ) -> dict:
     """Return list of discount payment records, auto-synchronized with Sales Orders."""
     req_id = getattr(request.state, "request_id", "-")
+    perms = set(current_user.permissions or ())
+    is_priv = _is_discount_payment_privileged(current_user)
+    can_view_all = is_priv or "discount_payment.view" in perms
+    can_view_pending = is_priv or "discount_payment.pending.view" in perms
+    can_view_completed = is_priv or "discount_payment.completed.view" in perms
+    can_view_payments = is_priv or "discount_payment.payments.view" in perms
+
+    req_status = (status_filter or "").strip().lower()
+    if req_status == "all" and not can_view_all:
+        raise ForbiddenException(
+            "Viewing all discount payments requires the 'discount_payment.view' permission."
+        )
+    if req_status == "pending" and not can_view_pending:
+        raise ForbiddenException(
+            "Viewing pending discount payments requires the 'discount_payment.pending.view' permission."
+        )
+    if req_status == "completed" and not can_view_completed:
+        raise ForbiddenException(
+            "Viewing completed discount payments requires the 'discount_payment.completed.view' permission."
+        )
+
     try:
         # Backfill any discounted SaleOrders not yet present in discount_payments
         try:
@@ -983,8 +1004,21 @@ async def list_discount_payments(
             pass
 
         stmt = select(DiscountPayment).where(DiscountPayment.deleted_at.is_(None))
-        if status_filter and status_filter.lower() != "all":
-            sf = status_filter.strip().lower()
+        if not can_view_all:
+            if can_view_pending and not can_view_completed:
+                stmt = stmt.where(
+                    DiscountPayment.settled.is_(False),
+                    DiscountPayment.due_discount > 0.009,
+                )
+            elif can_view_completed and not can_view_pending:
+                stmt = stmt.where(
+                    or_(
+                        DiscountPayment.settled.is_(True),
+                        DiscountPayment.due_discount <= 0.009,
+                    )
+                )
+        if status_filter and req_status != "all":
+            sf = req_status
             if sf == "pending":
                 stmt = stmt.where(
                     DiscountPayment.settled.is_(False),
@@ -1019,8 +1053,9 @@ async def list_discount_payments(
         stmt = stmt.order_by(DiscountPayment.created_at.desc()).offset(skip).limit(limit)
         results = list((await db.execute(stmt)).scalars().all())
         so_map, comp_map, gp_map = await _load_discount_enrichment_maps(db, results)
-        items = [
-            _serialize_discount_payment(
+        items = []
+        for dp in results:
+            serialized = _serialize_discount_payment(
                 dp,
                 so=so_map.get(dp.order_ref),
                 comp=comp_map.get(
@@ -1032,8 +1067,9 @@ async def list_discount_payments(
                 ),
                 gp=gp_map.get(dp.order_ref),
             )
-            for dp in results
-        ]
+            if not can_view_payments:
+                serialized["payments"] = []
+            items.append(serialized)
         return build_success_response(
             data={"items": items},
             meta={"total": total, "skip": skip, "limit": limit},

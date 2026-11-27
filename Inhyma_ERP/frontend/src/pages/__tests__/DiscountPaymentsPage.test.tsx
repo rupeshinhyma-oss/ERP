@@ -10,6 +10,18 @@ vi.mock("@/components/AppShell", () => ({
   ),
 }));
 
+vi.mock("@/lib/hooks", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/hooks")>();
+  return {
+    ...actual,
+    useAuth: () => ({
+      hasPermission: () => true,
+      isSuperAdmin: true,
+      profile: { id: "admin-1", username: "admin", display_name: "Admin", full_name: "Admin", permissions: ["*"] },
+    }),
+  };
+});
+
 // Mock API
 vi.mock("@/lib/api", () => ({
   apiGet: vi.fn().mockResolvedValue({ data: null }),

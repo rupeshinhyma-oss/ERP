@@ -90,7 +90,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   localStorage.clear();
   auth.isSuperAdmin = false;
-  auth.perms = new Set();
+  auth.perms = new Set(["localpurchase.view", "localpurchase.manage"]);
   server = JSON.parse(JSON.stringify(INITIAL));
   (apiGet as any).mockImplementation(fakeApiGet);
   (apiPost as any).mockImplementation(async (_url: string, body: any) => {
@@ -273,9 +273,12 @@ describe("LocalPurchasePage list (data comes from the API)", () => {
 
 describe("LocalPurchasePage row actions follow the database rules and the user's role", () => {
   it("a normal user gets no Edit / Confirm / Delete on a pending purchase", async () => {
+    auth.perms = new Set(["localpurchase.view"]);
     await renderLoaded();
-    fireEvent.click(screen.getByTestId("btn-action-po-1"));
-    expect(screen.getByTestId("action-menu-po-1")).toBeTruthy();
+    expect(screen.queryByTestId("btn-add-new")).toBeNull();
+    expect(screen.queryByRole("button", { name: /bulk actions/i })).toBeNull();
+    expect(screen.queryByRole("columnheader", { name: "Action" })).toBeNull();
+    expect(screen.queryByTestId("btn-action-po-1")).toBeNull();
     for (const id of ["edit", "confirm", "delete"]) expect(screen.queryByTestId(`action-${id}-po-1`)).toBeNull();
   });
 
@@ -297,7 +300,7 @@ describe("LocalPurchasePage row actions follow the database rules and the user's
   });
 
   it("a confirmed purchase offers Download only; Edit and Delete are removed", async () => {
-    auth.perms = new Set(["localpurchase.update", "localpurchase.confirm"]);
+    auth.perms = new Set(["localpurchase.view", "localpurchase.update", "localpurchase.confirm", "localpurchase.download"]);
     const originalOpen = window.open;
     window.open = vi.fn();
     await renderLoaded();
@@ -322,7 +325,7 @@ describe("LocalPurchasePage row actions follow the database rules and the user's
   });
 
   it("Confirm is saved through the status API and the list is reloaded from the server", async () => {
-    auth.perms = new Set(["localpurchase.confirm"]);
+    auth.perms = new Set(["localpurchase.view", "localpurchase.confirm", "localpurchase.download"]);
     await renderLoaded();
     expect(screen.getByText("Pending")).toBeTruthy();
     fireEvent.click(screen.getByTestId("btn-action-po-1"));

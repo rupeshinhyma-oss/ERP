@@ -304,16 +304,26 @@ function SupplierCombobox({ value, onChange, options, error }: SupplierComboboxP
 }
 
 // Shimmer Skeleton Rows for Local Purchase Table
-export function LocalPurchaseSkeletonRows({ count = 8 }: { count?: number }) {
+export function LocalPurchaseSkeletonRows({
+  count = 8,
+  showCheckbox = true,
+  showActionColumn = true,
+}: {
+  count?: number;
+  showCheckbox?: boolean;
+  showActionColumn?: boolean;
+}) {
   const widths = ["110px", "140px", "90px", "130px", "100px", "120px"];
   return (
     <>
       {Array.from({ length: count }).map((_, idx) => (
         <tr key={`local-purchase-sk-${idx}`} style={{ borderBottom: "1px solid #f1f5f9" }}>
           {/* Checkbox */}
-          <td style={{ textAlign: "center", padding: "10px 14px", width: "40px" }}>
-            <div className="skeleton-line" style={{ width: "16px", height: "16px", borderRadius: "4px", margin: "0 auto" }} />
-          </td>
+          {showCheckbox && (
+            <td style={{ textAlign: "center", padding: "10px 14px", width: "40px" }}>
+              <div className="skeleton-line" style={{ width: "16px", height: "16px", borderRadius: "4px", margin: "0 auto" }} />
+            </td>
+          )}
           {/* Invoice No & Date */}
           <td style={{ padding: "10px 14px" }}>
             <div className="skeleton-line" style={{ width: "95px", height: "14px", borderRadius: "4px", marginBottom: "4px" }} />
@@ -344,9 +354,11 @@ export function LocalPurchaseSkeletonRows({ count = 8 }: { count?: number }) {
             <div className="skeleton-badge" style={{ width: "70px", height: "22px", borderRadius: "12px", margin: "0 auto" }} />
           </td>
           {/* Action */}
-          <td style={{ padding: "10px 14px", textAlign: "center", width: "70px" }}>
-            <div className="skeleton-line" style={{ width: "28px", height: "28px", borderRadius: "4px", margin: "0 auto" }} />
-          </td>
+          {showActionColumn && (
+            <td style={{ padding: "10px 14px", textAlign: "center", width: "70px" }}>
+              <div className="skeleton-line" style={{ width: "28px", height: "28px", borderRadius: "4px", margin: "0 auto" }} />
+            </td>
+          )}
         </tr>
       ))}
     </>
@@ -403,9 +415,19 @@ export function LocalPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean
   const [editingOrderId, setEditingOrderId] = useState<string | null>(null);
 
   const { profile, isSuperAdmin, hasPermission } = useAuth();
+  const canManage = isSuperAdmin || profile?.username === "admin" || hasPermission("localpurchase.manage");
+  const canCreate = canManage || hasPermission("localpurchase.create");
+  const canImport = canManage || hasPermission("localpurchase.import");
+  const canExport = canManage || hasPermission("localpurchase.export");
+  const canBulkAction = canManage || hasPermission("localpurchase.bulk_action");
+  const canDownload = canManage || hasPermission("localpurchase.download");
+  const canUpdatePerm = canManage || hasPermission("localpurchase.update");
+  const canConfirmPerm = canManage || hasPermission("localpurchase.confirm");
+  const canDeletePerm = canManage || hasPermission("localpurchase.delete");
+  const canViewActionColumn = canUpdatePerm || canConfirmPerm || canDeletePerm || canDownload;
   const actor = useMemo(
-    () => ({ isAdmin: isSuperAdmin || profile?.username === "admin", has: hasPermission }),
-    [isSuperAdmin, profile?.username, hasPermission]
+    () => ({ isAdmin: canManage, has: hasPermission }),
+    [canManage, hasPermission]
   );
 
   const [orders, setOrders] = useState<PurchaseOrderRecord[]>([]);
@@ -518,7 +540,7 @@ export function LocalPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean
   };
 
   const handleBulkConfirm = async () => {
-    if (selectedIds.length === 0) return;
+    if (!canBulkAction || !canConfirmPerm || selectedIds.length === 0) return;
     let done = 0;
     let failed = 0;
     for (const o of orders.filter((x) => selectedIds.includes(x.id))) {
@@ -541,7 +563,7 @@ export function LocalPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean
   };
 
   const handleBulkDelete = async () => {
-    if (selectedIds.length === 0) return;
+    if (!canBulkAction || !canDeletePerm || selectedIds.length === 0) return;
     if (!window.confirm(`Are you sure you want to delete ${selectedIds.length} selected orders?`)) return;
     let done = 0;
     let failed = 0;
@@ -822,6 +844,7 @@ export function LocalPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean
   };
 
   const handleExport = () => {
+    if (!canExport) return;
     const csvCell = (val: unknown) => `"${String(val ?? "").replace(/"/g, '""')}"`;
     const headers = [
       "Invoice No",
@@ -966,6 +989,7 @@ export function LocalPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean
   };
 
   const handleOpenBillPdf = (order: PurchaseOrderRecord) => {
+    if (!canDownload) return;
     window.open(`/purchase-order/bill-file/${order.id}`, "_blank");
   };
 
@@ -2051,25 +2075,27 @@ export function LocalPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean
             </button>
 
             {/* ADD NEW Button */}
-            <button
-              type="button"
-              className="btn btn-add-new"
-              data-testid="btn-add-new"
-              onClick={handleOpenCreate}
-              style={{
-                background: "#0061f2",
-                color: "#ffffff",
-                padding: "8px 16px",
-                borderRadius: "6px",
-                fontWeight: 600,
-                fontSize: "13px",
-                border: "none",
-                cursor: "pointer",
-                boxShadow: "0 2px 4px rgba(0,97,242,0.2)",
-              }}
-            >
-              + ADD NEW
-            </button>
+            {canCreate && (
+              <button
+                type="button"
+                className="btn btn-add-new"
+                data-testid="btn-add-new"
+                onClick={handleOpenCreate}
+                style={{
+                  background: "#0061f2",
+                  color: "#ffffff",
+                  padding: "8px 16px",
+                  borderRadius: "6px",
+                  fontWeight: 600,
+                  fontSize: "13px",
+                  border: "none",
+                  cursor: "pointer",
+                  boxShadow: "0 2px 4px rgba(0,97,242,0.2)",
+                }}
+              >
+                + ADD NEW
+              </button>
+            )}
 
             {/* Imp / Exp Dropdown (Sample File, Import, Export) */}
             <ImpExpDropdown
@@ -2082,87 +2108,99 @@ export function LocalPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean
                 void loadOrders();
               }}
               onExportCsv={handleExport}
-              showImport={true}
-              showExport={true}
+              showImport={canImport}
+              showExport={canExport}
             />
 
             {/* Bulk Actions Button */}
-            <div style={{ position: "relative" }}>
-              <button
-                type="button"
-                className="btn btn-bulk-action"
-                disabled={selectedIds.length === 0}
-                onClick={() => setBulkMenuOpen((v) => !v)}
-                style={{
-                  background: selectedIds.length > 0 ? "#198754" : "#94a3b8",
-                  color: "#ffffff",
-                  padding: "8px 16px",
-                  borderRadius: "6px",
-                  fontWeight: 600,
-                  fontSize: "13px",
-                  border: "none",
-                  cursor: selectedIds.length > 0 ? "pointer" : "not-allowed",
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "6px",
-                }}
-              >
-                Bulk Actions {selectedIds.length > 0 ? `(${selectedIds.length})` : ""} ▼
-              </button>
-              {bulkMenuOpen && selectedIds.length > 0 && (
-                <div
+            {canBulkAction && (
+              <div data-bulk-menu-container style={{ position: "relative" }}>
+                <button
+                  type="button"
+                  className="btn btn-bulk-action"
+                  disabled={selectedIds.length === 0}
+                  onClick={() => setBulkMenuOpen((v) => !v)}
                   style={{
-                    position: "absolute",
-                    right: 0,
-                    top: "calc(100% + 4px)",
-                    background: "#ffffff",
-                    border: "1px solid #cbd5e1",
+                    background: selectedIds.length > 0 ? "#198754" : "#94a3b8",
+                    color: "#ffffff",
+                    padding: "8px 16px",
                     borderRadius: "6px",
-                    boxShadow: "0 4px 12px rgba(0,0,0,0.1)",
-                    zIndex: 100,
-                    minWidth: "160px",
-                    padding: "4px 0",
+                    fontWeight: 600,
+                    fontSize: "13px",
+                    border: "none",
+                    cursor: selectedIds.length > 0 ? "pointer" : "not-allowed",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "6px",
                   }}
                 >
-                  <button
-                    type="button"
-                    onClick={handleBulkConfirm}
+                  Bulk Actions {selectedIds.length > 0 ? `(${selectedIds.length})` : ""} ▼
+                </button>
+                {bulkMenuOpen && selectedIds.length > 0 && (
+                  <div
+                    data-testid="bulk-actions-menu"
                     style={{
-                      width: "100%",
-                      textAlign: "left",
-                      padding: "8px 14px",
-                      background: "none",
-                      border: "none",
-                      fontSize: "13px",
-                      color: "#1e293b",
-                      cursor: "pointer",
+                      position: "absolute",
+                      right: 0,
+                      top: "calc(100% + 4px)",
+                      background: "#ffffff",
+                      border: "1px solid #cbd5e1",
+                      borderRadius: "6px",
+                      boxShadow: "0 4px 12px rgba(0,0,0,0.1)",
+                      zIndex: 100,
+                      minWidth: "160px",
+                      padding: "4px 0",
                     }}
-                    onMouseEnter={(e) => (e.currentTarget.style.background = "#f1f5f9")}
-                    onMouseLeave={(e) => (e.currentTarget.style.background = "none")}
                   >
-                    Confirm Selected
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleBulkDelete}
-                    style={{
-                      width: "100%",
-                      textAlign: "left",
-                      padding: "8px 14px",
-                      background: "none",
-                      border: "none",
-                      fontSize: "13px",
-                      color: "#dc2626",
-                      cursor: "pointer",
-                    }}
-                    onMouseEnter={(e) => (e.currentTarget.style.background = "#f1f5f9")}
-                    onMouseLeave={(e) => (e.currentTarget.style.background = "none")}
-                  >
-                    Delete Selected
-                  </button>
-                </div>
-              )}
-            </div>
+                    {canConfirmPerm && (
+                      <button
+                        type="button"
+                        onClick={handleBulkConfirm}
+                        style={{
+                          width: "100%",
+                          textAlign: "left",
+                          padding: "8px 14px",
+                          background: "none",
+                          border: "none",
+                          fontSize: "13px",
+                          color: "#1e293b",
+                          cursor: "pointer",
+                        }}
+                        onMouseEnter={(e) => (e.currentTarget.style.background = "#f1f5f9")}
+                        onMouseLeave={(e) => (e.currentTarget.style.background = "none")}
+                      >
+                        Confirm Selected
+                      </button>
+                    )}
+                    {canDeletePerm && (
+                      <button
+                        type="button"
+                        onClick={handleBulkDelete}
+                        style={{
+                          width: "100%",
+                          textAlign: "left",
+                          padding: "8px 14px",
+                          background: "none",
+                          border: "none",
+                          fontSize: "13px",
+                          color: "#dc2626",
+                          cursor: "pointer",
+                        }}
+                        onMouseEnter={(e) => (e.currentTarget.style.background = "#f1f5f9")}
+                        onMouseLeave={(e) => (e.currentTarget.style.background = "none")}
+                      >
+                        Delete Selected
+                      </button>
+                    )}
+                    {!canConfirmPerm && !canDeletePerm && (
+                      <div style={{ padding: "8px 14px", fontSize: "12px", color: "#94a3b8", whiteSpace: "nowrap" }}>
+                        No bulk actions permitted
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </div>
 
@@ -2409,21 +2447,23 @@ export function LocalPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean
             <table style={{ width: "100%", borderCollapse: "collapse", textAlign: "left" }}>
               <thead>
                 <tr style={{ borderBottom: "1px solid #cbd5e1", background: "#f8fafc" }}>
-                  <th style={{ width: "40px", minWidth: "40px", maxWidth: "45px", textAlign: "center", padding: "10px 14px" }}>
-                    <input
-                      type="checkbox"
-                      aria-label="Select all orders"
-                      checked={paginatedOrders.length > 0 && paginatedOrders.every((o) => selectedIds.includes(o.id))}
-                      onChange={(e) => {
-                        if (e.target.checked) {
-                          setSelectedIds(paginatedOrders.map((o) => o.id));
-                        } else {
-                          setSelectedIds([]);
-                        }
-                      }}
-                      style={{ cursor: "pointer", width: "16px", height: "16px" }}
-                    />
-                  </th>
+                  {canBulkAction && (
+                    <th style={{ width: "40px", minWidth: "40px", maxWidth: "45px", textAlign: "center", padding: "10px 14px" }}>
+                      <input
+                        type="checkbox"
+                        aria-label="Select all orders"
+                        checked={paginatedOrders.length > 0 && paginatedOrders.every((o) => selectedIds.includes(o.id))}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setSelectedIds(paginatedOrders.map((o) => o.id));
+                          } else {
+                            setSelectedIds([]);
+                          }
+                        }}
+                        style={{ cursor: "pointer", width: "16px", height: "16px" }}
+                      />
+                    </th>
+                  )}
                   <th
                     onClick={() => handleSort("invoice_no")}
                     title={
@@ -2541,17 +2581,26 @@ export function LocalPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean
                   >
                     Status {renderSortIndicator("status")}
                   </th>
-                  <th style={{ padding: "10px 14px", fontSize: "12.5px", fontWeight: 700, color: "#475569", textAlign: "center", width: "70px", whiteSpace: "nowrap" }}>
-                    Action
-                  </th>
+                  {canViewActionColumn && (
+                    <th style={{ padding: "10px 14px", fontSize: "12.5px", fontWeight: 700, color: "#475569", textAlign: "center", width: "70px", whiteSpace: "nowrap" }}>
+                      Action
+                    </th>
+                  )}
                 </tr>
               </thead>
               <tbody>
                 {loading ? (
-                  <LocalPurchaseSkeletonRows count={perPage > 10 ? 8 : perPage} />
+                  <LocalPurchaseSkeletonRows
+                    count={perPage > 10 ? 8 : perPage}
+                    showCheckbox={canBulkAction}
+                    showActionColumn={canViewActionColumn}
+                  />
                 ) : paginatedOrders.length === 0 ? (
                   <tr>
-                    <td colSpan={9} style={{ padding: "32px", textAlign: "center", color: "#64748b", fontSize: "14px", background: "#f8fafc" }}>
+                    <td
+                      colSpan={(canBulkAction ? 1 : 0) + 7 + (canViewActionColumn ? 1 : 0)}
+                      style={{ padding: "32px", textAlign: "center", color: "#64748b", fontSize: "14px", background: "#f8fafc" }}
+                    >
                       No Data
                     </td>
                   </tr>
@@ -2575,22 +2624,24 @@ export function LocalPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean
                         }
                       }}
                     >
-                      <td style={{ textAlign: "center", padding: "10px 14px" }}>
-                        <input
-                          type="checkbox"
-                          aria-label={`Select order ${order.invoice_no}`}
-                          checked={selectedIds.includes(order.id)}
-                          onChange={(e) => {
-                            e.stopPropagation();
-                            if (e.target.checked) {
-                              setSelectedIds((prev) => [...prev, order.id]);
-                            } else {
-                              setSelectedIds((prev) => prev.filter((id) => id !== order.id));
-                            }
-                          }}
-                          style={{ cursor: "pointer", width: "16px", height: "16px" }}
-                        />
-                      </td>
+                      {canBulkAction && (
+                        <td style={{ textAlign: "center", padding: "10px 14px" }}>
+                          <input
+                            type="checkbox"
+                            aria-label={`Select order ${order.invoice_no}`}
+                            checked={selectedIds.includes(order.id)}
+                            onChange={(e) => {
+                              e.stopPropagation();
+                              if (e.target.checked) {
+                                setSelectedIds((prev) => [...prev, order.id]);
+                              } else {
+                                setSelectedIds((prev) => prev.filter((id) => id !== order.id));
+                              }
+                            }}
+                            style={{ cursor: "pointer", width: "16px", height: "16px" }}
+                          />
+                        </td>
+                      )}
                       <td style={{ padding: "10px 14px" }}>
                         <button
                           type="button"
@@ -2644,12 +2695,13 @@ export function LocalPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean
                           {order.status}
                         </span>
                       </td>
-                      <td style={{
-                        padding: "10px 14px",
-                        textAlign: "center",
-                        position: "relative",
-                        zIndex: activeMenuId === order.id ? 50 : 1,
-                      }}>
+                      {canViewActionColumn && (
+                        <td style={{
+                          padding: "10px 14px",
+                          textAlign: "center",
+                          position: "relative",
+                          zIndex: activeMenuId === order.id ? 50 : 1,
+                        }}>
                         <button
                           type="button"
                           aria-label="Order actions"
@@ -2759,49 +2811,51 @@ export function LocalPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean
                                   </button>
                                 )}
 
-                                <button
-                                  type="button"
-                                  data-testid={`action-download-${order.id}`}
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setActiveMenuId(null);
-                                    handleOpenBillPdf(order);
-                                  }}
-                                  style={{
-                                    width: "100%",
-                                    padding: "8px 14px",
-                                    background: "none",
-                                    border: "none",
-                                    textAlign: "left",
-                                    fontSize: "12.5px",
-                                    fontWeight: 500,
-                                    color: "#334155",
-                                    cursor: "pointer",
-                                    display: "flex",
-                                    alignItems: "center",
-                                    gap: "8px",
-                                    whiteSpace: "nowrap",
-                                  }}
-                                  onMouseEnter={(e) => (e.currentTarget.style.background = "#f1f5f9")}
-                                  onMouseLeave={(e) => (e.currentTarget.style.background = "none")}
-                                >
-                                  <svg
-                                    width="14"
-                                    height="14"
-                                    viewBox="0 0 24 24"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    strokeWidth="2.2"
-                                    strokeLinecap="round"
-                                    strokeLinejoin="round"
-                                    style={{ color: "#334155" }}
+                                {canDownload && (
+                                  <button
+                                    type="button"
+                                    data-testid={`action-download-${order.id}`}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setActiveMenuId(null);
+                                      handleOpenBillPdf(order);
+                                    }}
+                                    style={{
+                                      width: "100%",
+                                      padding: "8px 14px",
+                                      background: "none",
+                                      border: "none",
+                                      textAlign: "left",
+                                      fontSize: "12.5px",
+                                      fontWeight: 500,
+                                      color: "#334155",
+                                      cursor: "pointer",
+                                      display: "flex",
+                                      alignItems: "center",
+                                      gap: "8px",
+                                      whiteSpace: "nowrap",
+                                    }}
+                                    onMouseEnter={(e) => (e.currentTarget.style.background = "#f1f5f9")}
+                                    onMouseLeave={(e) => (e.currentTarget.style.background = "none")}
                                   >
-                                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                                    <polyline points="7 10 12 15 17 10" />
-                                    <line x1="12" y1="15" x2="12" y2="3" />
-                                  </svg>
-                                  <span>Download Purchase</span>
-                                </button>
+                                    <svg
+                                      width="14"
+                                      height="14"
+                                      viewBox="0 0 24 24"
+                                      fill="none"
+                                      stroke="currentColor"
+                                      strokeWidth="2.2"
+                                      strokeLinecap="round"
+                                      strokeLinejoin="round"
+                                      style={{ color: "#334155" }}
+                                    >
+                                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                                      <polyline points="7 10 12 15 17 10" />
+                                      <line x1="12" y1="15" x2="12" y2="3" />
+                                    </svg>
+                                    <span>Download Purchase</span>
+                                  </button>
+                                )}
                                 {!!nextStatus(order) && (
                                   <button
                                     type="button"
@@ -2886,6 +2940,11 @@ export function LocalPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean
                                     </svg>
                                     <span>Delete</span>
                                   </button>
+                                )}
+                                {!canEditOrder(order) && !canDownload && !nextStatus(order) && !canDeleteOrder(order) && (
+                                  <div style={{ padding: "8px 14px", fontSize: "12px", color: "#94a3b8", whiteSpace: "nowrap" }}>
+                                    No actions permitted
+                                  </div>
                                 )}
                               </>
                             ) : (
@@ -3021,12 +3080,18 @@ export function LocalPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean
                                     <span>Delete</span>
                                   </button>
                                 )}
+                                {!canEditOrder(order) && !nextStatus(order) && !canDeleteOrder(order) && (
+                                  <div style={{ padding: "8px 14px", fontSize: "12px", color: "#94a3b8", whiteSpace: "nowrap" }}>
+                                    No actions permitted
+                                  </div>
+                                )}
                               </>
                             )}
                           </div>
                           );
                         })()}
                       </td>
+                      )}
                     </tr>
                   ))
                 )}
@@ -3262,37 +3327,43 @@ export function LocalPurchasePage({ defaultAdd = false }: { defaultAdd?: boolean
                     <div>
                       <div style={{ fontSize: "11.5px", fontWeight: 700, color: "#334155" }}>Bill File:</div>
                       <div style={{ marginTop: "3px" }}>
-                        <button
-                          type="button"
-                          data-testid="btn-bill-file-pdf"
-                          aria-label="View Bill File PDF"
-                          onClick={() => handleOpenBillPdf(selectedOrder)}
-                          style={{
-                            background: "none",
-                            border: "none",
-                            color: "#16a34a",
-                            cursor: "pointer",
-                            padding: 0,
-                            display: "inline-flex",
-                            alignItems: "center",
-                          }}
-                          title={selectedOrder.bill_file ? `View Bill File: ${selectedOrder.bill_file}` : "View Bill File PDF"}
-                        >
-                          <svg
-                            width="18"
-                            height="18"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="2.4"
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
+                        {canDownload ? (
+                          <button
+                            type="button"
+                            data-testid="btn-bill-file-pdf"
+                            aria-label="View Bill File PDF"
+                            onClick={() => handleOpenBillPdf(selectedOrder)}
+                            style={{
+                              background: "none",
+                              border: "none",
+                              color: "#16a34a",
+                              cursor: "pointer",
+                              padding: 0,
+                              display: "inline-flex",
+                              alignItems: "center",
+                            }}
+                            title={selectedOrder.bill_file ? `View Bill File: ${selectedOrder.bill_file}` : "View Bill File PDF"}
                           >
-                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                            <polyline points="7 10 12 15 17 10" />
-                            <line x1="12" y1="15" x2="12" y2="3" />
-                          </svg>
-                        </button>
+                            <svg
+                              width="18"
+                              height="18"
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2.4"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                            >
+                              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                              <polyline points="7 10 12 15 17 10" />
+                              <line x1="12" y1="15" x2="12" y2="3" />
+                            </svg>
+                          </button>
+                        ) : (
+                          <span style={{ fontSize: "12px", color: "#64748b" }}>
+                            {selectedOrder.bill_file || "—"}
+                          </span>
+                        )}
                       </div>
                     </div>
 

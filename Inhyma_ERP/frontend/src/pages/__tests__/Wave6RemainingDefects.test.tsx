@@ -111,11 +111,14 @@ describe("Wave 6 Remaining Defects (BUG-010, BUG-013, BUG-014, BUG-016, BUG-018)
     }
   });
 
-  it("BUG-014: Discount Payments nav item defines Sales/Accounts/Report anyPermissions metadata", () => {
+  it("BUG-014: Discount Payments nav item defines isolated discount_payment.* anyPermissions (separated from saleorder.* and report.view)", () => {
     const saleSection = NAV_SECTIONS.find((s) => s.label === "SALE");
     const discountNav = saleSection?.items.find((i) => i.key === "discount-payments");
-    expect(discountNav?.anyPermissions).toContain("saleorder.view");
-    expect(discountNav?.anyPermissions).toContain("saleorder.accounts");
-    expect(discountNav?.anyPermissions).toContain("report.view");
+    expect(discountNav?.anyPermissions).toContain("discount_payment.view");
+    expect(discountNav?.anyPermissions).toContain("discount_payment.pending.view");
+    expect(discountNav?.anyPermissions).toContain("discount_payment.completed.view");
+    expect(discountNav?.anyPermissions).toContain("discount_payment.manage");
+    expect(discountNav?.anyPermissions?.some((p) => p.startsWith("saleorder."))).toBe(false);
+    expect(discountNav?.anyPermissions?.some((p) => p === "report.view")).toBe(false);
   });
 });
