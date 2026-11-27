@@ -130,7 +130,7 @@ flowchart TD
 
 ### 2.8 Database-Driven Workflow Rules Engine (`app_workflow_rules`)
 - Universal status transition framework replacing hardcoded status graphs.
-- Enforces role-based permissions (`purchase.local.status`, `purchase.import.status`, `proforma.status`) before permitting entity state mutations.
+- Enforces role-based permissions (`purchase.local.status`, `purchase.import.status`, `proforma.status`) alongside granular module stage gates (`proforma.{approve,confirm,cancel,manage}`, `saleorder.{confirm,approve,accounts,warehouse,cancel,manage}`) before permitting entity state mutations.
 
 ### 2.9 Federated Authentication, Central Verification & Password Synchronization
 - **Central Session Routing & Graceful Login:** Spoke login authenticates locally and simultaneously establishes an ecosystem session with `ERP_Main`. If a user is not authorized for Inhyma, they are redirected automatically to their assigned spoke or to the Central Control Plane. If a recent password change hasn't synced locally, the verified central session completes authentication via SSO handover.
@@ -232,8 +232,8 @@ Inhyma_ERP/
 │   │   ├── hrms/                 # Attendance, Leave, Assets, Expenses, Site Visits, Payroll & RBAC
 │   │   ├── rbac/                 # Departments & Permissions (super_admin + user + technician system roles)
 │   │   └── users/                # Unified employee & user directory + ERP_Main identity sync
-│   ├── alembic/                  # Database migrations (single-head invariant, head z9d2e3f4a5b6)
-│   ├── scripts/                  # Idempotent bootstrap seed.py (377 bootstrap permissions, 3 system roles) & maintenance utilities
+│   ├── alembic/                  # Database migrations (single-head invariant, head z9o3f4a5b6c7)
+│   ├── scripts/                  # Idempotent bootstrap seed.py (414 unique bootstrap permissions / 419 entries, 3 system roles) & maintenance utilities
 │   └── tests/                    # SQLite-isolated backend test suites (conftest.py live-DB guard)
 ├── frontend/
 │   ├── src/
@@ -479,7 +479,7 @@ During Render/Docker container boot, `python server.py` executes a four-phase in
 2. **Schema Upgrade (`alembic upgrade heads`):**
    - Executes `alembic upgrade heads` (plural), upgrading all active branch heads to current state without terminating container execution on branch divergences.
 3. **Idempotent Bootstrap Seeding (`scripts.seed`):**
-   - Provisions strictly the 3 system roles (`super_admin` displayed as `Admin`, `user` displayed as `User`, and `technician` displayed as `Technician`), all `377` bootstrap permissions (granted 100% to `super_admin`), geography, and default super-admin credentials on fresh install only—never seeding hardcoded business departments.
+   - Provisions strictly the 3 system roles (`super_admin` displayed as `Admin`, `user` displayed as `User`, and `technician` displayed as `Technician`), all `414` unique bootstrap permissions (`419` entries in `seed.py`, granted 100% to `super_admin`), geography, and default super-admin credentials on fresh install only—never seeding hardcoded business departments.
 4. **ASGI Process Launch (`uvicorn app.main:app`):**
    - Starts API server with DNS resilience and graceful shutdown signal handlers.
 
@@ -503,7 +503,7 @@ During Render/Docker container boot, `python server.py` executes a four-phase in
    - `get_engine()` in `app/database/engine.py` enforces a second hard runtime guard: whenever `pytest` is loaded in `sys.modules` (and `ALLOW_LIVE_DB_TESTS != "1"`), any `supabase.com` / `supabase.co` URL—even if loaded early from `.env`—is forcibly diverted to `sqlite+aiosqlite:///:memory:`.
 2. **Automatic Colleague Workstation QA Sweeper & Canonical 3-Role Bootstrap (`legacy_qa_guard.py`, `scripts/seed.py`, `z5c6d7e8f9a0`, `z2a3b4c5d6e7`):**
    - `app/core/legacy_qa_guard.py` (`purge_retired_qa_files()`) runs automatically on `pytest` startup and local FastAPI server startup to sweep and delete any lingering untracked/copied copies of all 45 retired synthetic-QA scripts and live-DB test modules on developer/colleague workstations after `git pull`, backed by idempotent DB cleanup migration `z5c6d7e8f9a0_purge_synthetic_pytest_artifacts.py`.
-   - `scripts/seed.py` seeds strictly three `is_system=True` roles (`super_admin` = `Admin`, `user` = `User`, and `technician` = `Technician`) and `377` bootstrap granular permissions (with savepoint-guarded idempotent grants in `rbac/repository.py`, `503` transient DB mapping in `core/exception_handlers.py`, and `{ idempotent: true }` client retries in `Rbac.tsx`); all other organizational departments are created dynamically by administrators (`is_system=False`).
+   - `scripts/seed.py` seeds strictly three `is_system=True` roles (`super_admin` = `Admin`, `user` = `User`, and `technician` = `Technician`) and `414` unique bootstrap granular permissions (`419` entries in `BOOTSTRAP_PERMISSIONS`, with savepoint-guarded idempotent grants in `rbac/repository.py`, `503` transient DB mapping in `core/exception_handlers.py`, and `{ idempotent: true }` client retries in `Rbac.tsx`); all other organizational departments are created dynamically by administrators (`is_system=False`). Across `/rbac` and `/users`, module cards align strictly with left-sidebar navigation sections (`NAV_PERMISSION_SECTIONS`), sort semantically (`sortModulePermissions`), and support live search filtering (`filterNavPermissionSections`).
    - **Zero-Permission DB Isolation & Real-Time `PERMISSIONS_UPDATED` Sync (`auth/service.py`, `rbac/routes.py`, `users/routes.py`, `AppShell.tsx`, `HrmsRouteGuard`):** `verify_access_token()` never resurrects stale JWT `perms` or `"*"` claims for DB users holding `UserRole` or `UserPermission` rows when `live_permissions` is empty; RBAC/role mutations publish `PERMISSIONS_UPDATED` on `user:{id}`, while the frontend auto-saves Departments (`PUT /rbac/roles/{id}/permissions/bulk`) and User Overrides (`PUT /rbac/users/{id}/permissions/bulk`) without manual Save buttons and reacts immediately via WebSocket, HTTP `403`, focus, cross-tab `storage`, and 5s navigation sync.
 3. **HRMS Soft-Delete Non-Recreation (`app/hrms/service.py`, `app/hrms/leave_service.py`):**
    - `ensure_seeds()` checks total row counts (including soft-deleted records) across `HrmsLocation`, `HrmsLeaveType`, `HrmsExpenseCategory`, `HrmsHoliday`, and `HrmsLeavePlan` so user-deleted defaults never re-create on subsequent requests.

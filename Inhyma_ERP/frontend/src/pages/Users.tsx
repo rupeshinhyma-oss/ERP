@@ -2506,7 +2506,7 @@ export function UsersPage() {
                                     </span>
                                   )}
                                 </div>
-                                <div style={{ fontSize: 11, color: "#64748b", fontFamily: "monospace", marginTop: 2 }}>
+                                <div style={{ fontSize: 11, color: "#64748b", fontFamily: "monospace", marginTop: 2, overflowWrap: "anywhere", wordBreak: "break-word", lineHeight: 1.35 }}>
                                   {p.code}
                                 </div>
                               </div>

@@ -1043,7 +1043,7 @@ export function RbacPage() {
 
             <Banner error={error} />
 
-            <div style={{ display: "grid", gridTemplateColumns: "minmax(340px, 380px) 1fr", gap: "20px", alignItems: "start" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "minmax(340px, 380px) minmax(0, 1fr)", gap: "20px", alignItems: "start" }}>
               {/* Left Column: Department Details & Users */}
               <div style={{ display: "flex", flexDirection: "column", gap: "16px", minWidth: 0 }}>
                 <div className="card" style={{ padding: "20px" }}>
@@ -1831,7 +1831,7 @@ export function RbacPage() {
               </div>
 
               {/* Right Column: Permission Matrix / Checkboxes */}
-              <div className="card" style={{ padding: "20px" }}>
+              <div className="card" style={{ padding: "20px", minWidth: 0 }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px", flexWrap: "wrap", gap: "8px" }}>
                   <div>
                     <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
@@ -2005,10 +2005,10 @@ export function RbacPage() {
                                         onChange={() => toggleCode(p.code)}
                                       />
                                       <div style={{ flex: 1, minWidth: 0 }}>
-                                        <div style={{ fontSize: 13, fontWeight: 600, color: "#1e293b" }}>
+                                        <div style={{ fontSize: 13, fontWeight: 600, color: "#1e293b", overflowWrap: "anywhere", wordBreak: "break-word" }}>
                                           {friendlyPermissionLabel(p.code)}
                                         </div>
-                                        <div style={{ fontSize: 11, color: "#64748b", fontFamily: "monospace", marginTop: 2 }}>
+                                        <div style={{ fontSize: 11, color: "#64748b", fontFamily: "monospace", marginTop: 2, overflowWrap: "anywhere", wordBreak: "break-word", lineHeight: 1.35 }}>
                                           {p.code}
                                         </div>
                                       </div>
@@ -2711,7 +2711,7 @@ export function RbacPage() {
                                     </span>
                                   )}
                                 </div>
-                                <div style={{ fontSize: 11, color: "#64748b", fontFamily: "monospace", marginTop: 2 }}>
+                                <div style={{ fontSize: 11, color: "#64748b", fontFamily: "monospace", marginTop: 2, overflowWrap: "anywhere", wordBreak: "break-word", lineHeight: 1.35 }}>
                                   {p.code}
                                 </div>
                               </div>

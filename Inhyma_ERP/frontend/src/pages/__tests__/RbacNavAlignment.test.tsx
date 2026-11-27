@@ -155,6 +155,11 @@ describe("Inhyma RBAC left-sidebar navigation alignment", () => {
     fireEvent.click(screen.getByRole("button", { name: /Clear search/i }));
     expect(screen.getByText("Tasks & Work Management")).toBeTruthy();
 
+    // Verify permission code nodes wrap long identifiers instead of overflowing their card
+    const codeNode = screen.getByText("proforma.view") as HTMLElement;
+    expect(codeNode.style.overflowWrap).toBe("anywhere");
+    expect(codeNode.style.wordBreak).toBe("break-word");
+
     unmount();
 
     render(

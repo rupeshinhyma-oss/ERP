@@ -3,7 +3,7 @@
 **Service Base URL:** `http://localhost:8002/api/v1`  
 **Authentication Scheme:** Bearer JWT (HS256) & WebSocket Query Tokens  
 **Standard Response Envelope:** `{ "success": true, "data": ..., "meta": ..., "error": null }`  
-**Last Updated:** November 23, 2026
+**Last Updated:** November 26, 2026
 
 > **Universal Cross-Module Active-Only Extraction & Filtering Convention:**
 > - **Management Lists vs Cross-Module Lookups:** Unfiltered management endpoints (`GET /api/v1/masters/*`, `/companies`, `/suppliers`, `/buyers`, `/users`, `/positions`, and `/hrms/setup/*` with default `active_only=false`) return **both** `Active` and `Inactive` rows so each module's own `Active` / `Inactive` tabs and status toggles remain functional. Conversely, every cross-module picker/lookup endpoint (`/api/v1/masters/*/lookup`, `/api/v1/masters/*/dropdown`, `/companies/lookup`, `/companies/sales-persons`, `/users/all?active_only=true`, `/positions/all?active_only=true`, `/inquiries/consignment-codes`, `/inquiries/companies`, `/hrms/setup/*?active_only=true`, `/products/machine-spares/universal-view`, and `/search`) returns **`Active` records only**.
@@ -175,16 +175,16 @@ Machine-to-machine internal service endpoints invoked by `ERP_Main` over authent
 
 ---
 
-## 9. Sales — Proforma Invoices (`/sales/proforma-invoices`)
+## 9. Sales — Proforma Invoices (`/proforma-invoice/list`, `/sales/proforma-invoices`)
 
 | Method | Endpoint URI | Description | Permission Gate |
 | :--- | :--- | :--- | :--- |
-| `GET` | `/api/v1/sales/proforma-invoices` | List proforma invoices with status tabs, commercial terms, and search | Authenticated |
-| `POST` | `/api/v1/sales/proforma-invoices` | Create new proforma invoice with line items, tax breakdown, and commercial terms | Authenticated |
-| `GET` | `/api/v1/sales/proforma-invoices/{id}` | Inspect detailed proforma invoice with billing/shipping address and line calculations | Authenticated |
-| `PUT` | `/api/v1/sales/proforma-invoices/{id}` | Update editable proforma invoice record | Authenticated |
-| `PATCH` | `/api/v1/sales/proforma-invoices/{id}/status` | Move proforma invoice through workflow (`pending` -> `admin_approved` -> `confirmed` or `cancelled`) | `proforma.approve` / Admin |
-| `DELETE`| `/api/v1/sales/proforma-invoices/{id}` | Soft-delete proforma invoice record | Administrator |
+| `GET` | `/api/v1/proforma-invoice/list` (`/api/v1/sales/proforma-invoices`) | List proforma invoices with per-stage tab counts, commercial terms, and search (masked/enforced per stage view permission) | `proforma.view \| proforma.{pending,admin_approved,confirmed,cancelled}.view \| proforma.manage` |
+| `POST` | `/api/v1/proforma-invoice` | Create new proforma invoice with line items, tax breakdown, and commercial terms | `proforma.create \| proforma.manage` |
+| `GET` | `/api/v1/proforma-invoice/{id}` | Inspect detailed proforma invoice with billing/shipping address and line calculations | `proforma.{view,<stage>.view,download,details.view,update,manage}` |
+| `PATCH` | `/api/v1/proforma-invoice/{id}` | Update editable proforma invoice record (`pending` stage for editors; `admin_approved` additionally requires `proforma.approve \| proforma.manage`) | `proforma.update \| proforma.manage` |
+| `PATCH` | `/api/v1/proforma-invoice/{id}/status` | Move proforma invoice through workflow (`pending` -> `admin_approved` -> `confirmed` or `cancelled`) | `proforma.{approve,confirm,cancel,manage}` (per target stage) |
+| `DELETE`| `/api/v1/proforma-invoice/{id}` | Soft-delete proforma invoice record (at deletable stages) | `proforma.delete \| proforma.manage` |
 
 ---
 
@@ -329,33 +329,37 @@ Machine-to-machine internal service endpoints invoked by `ERP_Main` over authent
 
 ---
 
-## 18. Sales — Sales Orders & Sales Process Execution (`/sales/orders`, `/sales/gate-pass`, `/sales/discount-payments`)
+## 18. Sales — Sales Orders & Sales Process Execution (`/sales/orders`, `/sales/discount-payments`)
 
 | Method | Endpoint URI | Description | Permission Gate |
 | :--- | :--- | :--- | :--- |
-| `GET` | `/api/v1/sales/orders` | Paginated list of Sales Orders with status tabs, search, warehouse, buyer, and date filters | `saleorder.view` |
-| `POST` | `/api/v1/sales/orders` | Create Sales Order defaulting to `pending` status with line items & commercial terms; supports optional `technician_gatepass_id` (credits gatepass-held physical stock without double-deduction and closes the linked gatepass) and auto-syncs `SaleOrderItem.serial_numbers` into `MachineWarranty` | `saleorder.create` |
-| `GET` | `/api/v1/sales/orders/{id}` | Inspect detailed Sales Order record with line items, tax, and address breakdown | `saleorder.view` |
-| `PATCH`| `/api/v1/sales/orders/{id}` | Update Sales Order details, line items, and commercial fields (syncing updated `serial_numbers` to `MachineWarranty`) | `saleorder.update` |
-| `PATCH`| `/api/v1/sales/orders/{id}/status` | Advance Sales Order stage (`pending` -> `sales_confirmed` -> `admin_approved` -> `acc_confirmed` -> `gatepass_created` -> `dispatched` -> `lr` or `cancelled`, re-holding and unlinking any linked Technician Gatepass on cancellation) with PO & Tally Bill metadata | Authenticated (Workflow RBAC) |
-| `POST` | `/api/v1/sales/upload-po` | Upload client Purchase Order (PO) document (`inhyma-sales-docs` / `/uploads/private/sales_po/`) | Authenticated |
-| `POST` | `/api/v1/sales/upload-tally-bill` | Upload Tally Bill document (`inhyma-sales-docs` / `/uploads/private/sales_tally_bills/`) | Authenticated |
-| `POST` | `/api/v1/sales/upload-eway-bill` | Upload E-Way Bill document when `E-Way Bill = Yes` (`inhyma-sales-docs` / `/uploads/private/sales_eway_bills/`) | Authenticated |
-| `POST` | `/api/v1/sales/upload-lr` | Upload Lorry Receipt (LR) file (`inhyma-sales-docs` / `/uploads/private/sales_lr/`) | Authenticated |
-| `POST` | `/api/v1/sales/upload-dispatch-media` | Upload multiple dispatch photos/videos (`inhyma-sales-docs` / `/uploads/private/sales_dispatch_media/`) | Authenticated |
-| `POST` | `/api/v1/sales/orders/{id}/status-with-po` | Atomic multipart status update with optional PO file upload | Authenticated (Workflow RBAC) |
-| `DELETE`| `/api/v1/sales/orders/{id}` | Soft-delete Sales Order, revert inventory stock deductions, and re-hold/reopen any linked Technician Gatepass (`so_required=True`) | `saleorder.delete` |
-| `POST` | `/api/v1/sales/orders/{id}/restore` | Restore soft-deleted Sales Order (Admin only) | `saleorder.manage` |
-| `GET` | `/api/v1/sales/metrics` | Grouped sales order KPI metrics by status tabs | `saleorder.view` |
-| `GET` | `/api/v1/sales/next-gatepass-no` | Generate next sequential gate pass reference number | `saleorder.view` |
-| `GET` | `/api/v1/sales/planning-consignments` | Extract consignment columns from Shipment Planning sheets for order pre-allocation | `saleorder.view` |
-| `GET` | `/api/v1/sales/planning-consignments/{column_id}/items` | Extract planned products and quantities from consignment column | `saleorder.view` |
-| `GET` | `/api/v1/sales/export` | Export Sales Orders dataset to Excel spreadsheet | `saleorder.view` |
-| `POST` | `/api/v1/sales/gate-pass` | Create dispatch Gate Pass with logistics metadata and transporter carrier | `saleorder.update` |
-| `POST` | `/api/v1/sales/orders/{id}/upload-lr` | Attach transporter LR document and multi-photo delivery proof | `saleorder.update` |
-| `GET` | `/api/v1/sales/discount-payments` | List under-invoicing cash discount payment ledger entries and multi-installment history | `saleorder.view` |
-| `POST` | `/api/v1/sales/discount-payments` | Record discount payment installment settlement (with optional receipt & remarks) | `saleorder.update` |
-| `PATCH` | `/api/v1/sales/discount-payments/{payment_id}` | Update existing discount payment installment (amount, mode, date, receipt, remarks) | `saleorder.update` |
+| `GET` | `/api/v1/sales/orders` | Paginated list of Sales Orders with 9 stage tabs, search, warehouse, buyer, and date filters (enforces per-stage `?status=` query gating and tab masking) | `saleorder.view \| saleorder.{pending,sales_confirmed,admin_approved,acc_confirmed,gatepass_created,dispatched,gatepass_cancelled,lr,cancelled}.view \| saleorder.{approve,accounts,warehouse,manage}` |
+| `POST` | `/api/v1/sales/orders` | Create Sales Order defaulting to `pending` status with line items & commercial terms; supports optional `technician_gatepass_id` (credits gatepass-held physical stock without double-deduction and closes the linked gatepass) and auto-syncs `SaleOrderItem.serial_numbers` into `MachineWarranty` | `saleorder.{create,duplicate,manage} \| technician_operations.{gatepass.create_so,manage}` |
+| `GET` | `/api/v1/sales/orders/{id}` | Inspect detailed Sales Order record with line items, tax, and address breakdown | `saleorder.{view,<stage>.view,details.view,download,update,duplicate,files,approve,accounts,warehouse,manage}` |
+| `PATCH`| `/api/v1/sales/orders/{id}` | Update Sales Order details, line items, and commercial fields (syncing updated `serial_numbers` to `MachineWarranty`); file-only updates accepted under `saleorder.files` | `saleorder.update \| saleorder.files \| saleorder.manage` |
+| `PATCH`| `/api/v1/sales/orders/{id}/status` | Advance Sales Order stage (`pending` -> `sales_confirmed` -> `admin_approved` -> `acc_confirmed` -> `gatepass_created` -> `dispatched` -> `lr` or `cancelled`, re-holding and unlinking any linked Technician Gatepass on cancellation) with PO, Tally Bill, E-Way Bill, Gatepass, and LR metadata | `saleorder.{confirm,approve,accounts,warehouse,cancel,manage}` (per transition) |
+| `POST` | `/api/v1/sales/upload-po` | Upload client Purchase Order (PO) document (`inhyma-sales-docs` / `/uploads/private/sales_po/`) | `saleorder.{files,confirm,accounts,warehouse,update,create,manage}` |
+| `POST` | `/api/v1/sales/upload-tally-bill` | Upload Tally Bill document (`inhyma-sales-docs` / `/uploads/private/sales_tally_bills/`) | `saleorder.{files,confirm,accounts,warehouse,update,create,manage}` |
+| `POST` | `/api/v1/sales/upload-eway-bill` | Upload E-Way Bill document when `E-Way Bill = Yes` (`inhyma-sales-docs` / `/uploads/private/sales_eway_bills/`) | `saleorder.{files,confirm,accounts,warehouse,update,create,manage}` |
+| `POST` | `/api/v1/sales/upload-lr` | Upload Lorry Receipt (LR) file (`inhyma-sales-docs` / `/uploads/private/sales_lr/`) | `saleorder.{files,confirm,accounts,warehouse,update,create,manage}` |
+| `POST` | `/api/v1/sales/upload-dispatch-media` | Upload multiple dispatch photos/videos (`inhyma-sales-docs` / `/uploads/private/sales_dispatch_media/`) | `saleorder.{files,confirm,accounts,warehouse,update,create,manage}` |
+| `POST` | `/api/v1/sales/orders/{id}/status-with-po` | Atomic multipart status update with optional PO file upload | `saleorder.{confirm,approve,accounts,warehouse,cancel,manage}` |
+| `DELETE`| `/api/v1/sales/orders/{id}` | Soft-delete Sales Order, revert inventory stock deductions, and re-hold/reopen any linked Technician Gatepass (`so_required=True`) | `saleorder.delete \| saleorder.manage` |
+| `POST` | `/api/v1/sales/orders/{id}/restore` | Restore soft-deleted Sales Order (Admin / `saleorder.manage` only) | `saleorder.manage` |
+| `GET` | `/api/v1/sales/metrics` | Grouped sales order KPI metrics by status tabs | `_REQUIRE_SALEORDER_LIST` |
+| `GET` | `/api/v1/sales/next-gatepass-no` | Generate next sequential gate pass reference number | `saleorder.{view,<stage>.view,create,update,duplicate,warehouse,manage}` |
+| `GET` | `/api/v1/sales/planning-consignments` | Extract consignment columns from Shipment Planning sheets for order pre-allocation | `saleorder.{view,<stage>.view,create,update,duplicate,warehouse,manage}` |
+| `GET` | `/api/v1/sales/planning-consignments/{column_id}/items` | Extract planned products and quantities from consignment column | `saleorder.{view,<stage>.view,create,update,duplicate,warehouse,manage}` |
+| `GET` | `/api/v1/sales/export` | Export Sales Orders dataset to Excel spreadsheet (enforces `?status=` stage view check) | `saleorder.export \| saleorder.manage` |
+| `GET` | `/api/v1/sales/discount-payments` | List under-invoicing cash discount payment ledger entries and multi-installment history (strictly decoupled from `proforma.*`) | `saleorder.{view,create,update,accounts,approve,delete,manage} \| crm.leads.{view,manage} \| report.view` |
+| `POST` | `/api/v1/sales/discount-payments` | Record discount payment installment settlement (with optional receipt & remarks) | `saleorder.{create,update,accounts,approve,manage} \| crm.leads.manage` |
+| `PATCH` | `/api/v1/sales/discount-payments/{payment_id}` | Update existing discount payment installment (amount, mode, date, receipt, remarks) | `saleorder.{create,update,accounts,approve,manage} \| crm.leads.manage` |
+| `GET` | `/api/v1/sales/deleted-orders` (`/api/v1/delete_order_report/list`) | List soft-deleted Sales Orders in Deleted Orders report | `report.view \| trash.view \| saleorder.{view,approve,delete,manage}` |
+| `POST` | `/api/v1/sales/deleted-orders/{id}/restore` | Restore soft-deleted Sales Order from Deleted Orders report | `saleorder.{approve,delete,manage}` |
+
+> **Granular Masters RBAC (`z9e3f4a5b6c7`–`z9h6a7b8c9d0`):**
+> - `/api/v1/masters/products*` (`products/routes.py`, `price_list/routes.py`, `inventory/routes.py`, `events/routes.py`) enforce 8 `product.*` permissions (`view`, `create`, `update`, `delete`, `export`, `import`, `bulk_action`, `manage`; `/activate` & `/deactivate` accept `product.update | product.bulk_action | product.manage`; `/bulk-delete` requires both `product.delete` and `product.bulk_action` or `product.manage`).
+> - `/api/v1/masters/product-categories*`, `/api/v1/masters/product-sub-categories*`, and `/api/v1/masters/brands*` each enforce 9 granular permissions (`view`, `create`, `update`, `delete`, `export`, `import`, `bulk_action`, `status_edit`, `manage`; `/activate` & `/deactivate` accept `*.update | *.status_edit | *.bulk_action | *.manage`).
 
 > **Sales Process Add/Edit Architecture (`SaleProcessForm.tsx`):**
 > - **100% Parity with Proforma Invoice:** Full alignment with Proforma's Add New form structure, validation rules, drawer slides, and calculation engine.
@@ -424,7 +428,7 @@ Machine-to-machine internal service endpoints invoked by `ERP_Main` over authent
 > **HRMS Setup Active-Only Extraction, Seed Idempotency & RBAC Bootstrap Notes:**
 > - **Cross-Module `?active_only=true` vs Setup Management (`active_only=false`):** HRMS Setup endpoints (`/api/v1/hrms/setup/{locations,leave-types,expense-categories,holidays,leave-plans}`) return both active and inactive rows by default (`active_only=false`) for `/hrms/setup`, and accept `?active_only=true` when consumed by Leave (`/hrms/leave`), Asset Management (`/hrms/assets`), and Expense Management (`/hrms/expenses`), backed by server-side active-status validation on mutations.
 > - **Soft-Delete Non-Recreation (`ensure_seeds()`):** HRMS setup endpoints inspect total row counts including soft-deleted rows (`deleted_at IS NOT NULL`) so user-deleted defaults never re-create on subsequent calls.
-> - **Canonical RBAC System Roles (`/api/v1/rbac/roles`):** Bootstrap seeding (`scripts/seed.py`) provisions strictly three `is_system=True` roles—`super_admin` (`Admin`, holding all `349/349` unique permissions), `user` (`User`), and `technician` (`Technician`, fixed field-service department to which admins assign `User` accounts)—with zero hardcoded business departments. All permission grant/revoke/bulk mutations (`POST`/`DELETE /rbac/roles/{id}/permissions`, `PUT /rbac/roles/{id}/permissions/bulk`, `PUT /rbac/users/{id}/permissions/bulk`, `/rbac/clone`, and `POST`/`DELETE /users/{id}/roles`) commit and publish `PERMISSIONS_UPDATED` over WebSocket (`user:{id}`) so connected clients sync `/auth/profile` immediately, while `AuthService.verify_access_token` prevents zero-permission DB users from inheriting stale JWT claims.
+> - **Canonical RBAC System Roles (`/api/v1/rbac/roles`):** Bootstrap seeding (`scripts/seed.py`) provisions strictly three `is_system=True` roles—`super_admin` (`Admin`, holding all `414/414` unique permissions across `419` bootstrap entries), `user` (`User`), and `technician` (`Technician`, fixed field-service department to which admins assign `User` accounts)—with zero hardcoded business departments. All permission grant/revoke/bulk mutations (`POST`/`DELETE /rbac/roles/{id}/permissions`, `PUT /rbac/roles/{id}/permissions/bulk`, `PUT /rbac/users/{id}/permissions/bulk`, `/rbac/clone`, and `POST`/`DELETE /users/{id}/roles`) commit and publish `PERMISSIONS_UPDATED` over WebSocket (`user:{id}`) so connected clients sync `/auth/profile` immediately, while `AuthService.verify_access_token` prevents zero-permission DB users from inheriting stale JWT claims. On `/rbac` and `/users`, permission matrices group modules to match left-sidebar `nav.ts` sections (`NAV_PERMISSION_SECTIONS`) with real-time search filtering (`filterNavPermissionSections`).
 
 ---
 
@@ -454,10 +458,10 @@ Machine-to-machine internal service endpoints invoked by `ERP_Main` over authent
 | Method | Endpoint URI | Description | Permission Gate |
 | :--- | :--- | :--- | :--- |
 | `GET` | `/api/v1/financial-planning` | Aggregates live entries, dual-currency KPIs (`INR` `₹` default + `USD` `$`), and active `payment_terms_options` across confirmed `ImportPurchase` (`confirmed`, `received`, `closed` -> Supplier + `Total Taxes (INR)` rows), confirmed `LocalPurchase` (`confirmed` -> Supplier row), and `Acc. Confirmed` `SaleOrder` (`acc_confirmed` and downstream active stages -> Customer row), merged with `financial_planning_entries` overlays | `report.view \| purchase.view \| saleorder.view \| saleorder.accounts \| saleorder.approve` |
-| `POST` | `/api/v1/financial-planning/upload` | Multipart upload for invoice, customs/BOE challan, or payment receipt (`financial-planning` bucket / `uploads/private/financial_planning`) | `report.view \| purchase.update \| saleorder.accounts \| saleorder.update` |
-| `PATCH` | `/api/v1/financial-planning/entries/{entry_key}/terms` | Upsert `payment_terms`, `due_date`, `remarks`, and optional `payment_attachment_url` on `financial_planning_entries` (`entry_key = {source_module}:{uuid}:{role}`) | `report.view \| purchase.update \| saleorder.accounts \| saleorder.update` |
-| `POST` | `/api/v1/financial-planning/entries/{entry_key}/record-payment` | Record partial or full settlement (`amount > 0` and `<= balance_amount`), append immutable entry to `payments_history`, and transition `Pending` -> `Cleared` when balance reaches `0` | `report.view \| purchase.update \| saleorder.accounts \| saleorder.update` |
-| `PATCH` | `/api/v1/financial-planning/entries/{entry_key}/attachment` | Attach or replace `invoice` or `payment` document URL on a Financial Planning entry | `report.view \| purchase.update \| saleorder.accounts \| saleorder.update` |
+| `POST` | `/api/v1/financial-planning/upload` | Multipart upload for invoice, customs/BOE challan, or payment receipt (`financial-planning` bucket / `uploads/private/financial_planning`) | `report.view \| purchase.{view,create,update} \| localpurchase.update \| importpurchase.update \| saleorder.{accounts,update,approve}` |
+| `PATCH` | `/api/v1/financial-planning/entries/{entry_key}/terms` | Upsert `payment_terms`, `due_date`, `remarks`, and optional `payment_attachment_url` on `financial_planning_entries` (`entry_key = {source_module}:{uuid}:{role}`) | `report.view \| purchase.{view,create,update} \| localpurchase.update \| importpurchase.update \| saleorder.{accounts,update,approve}` |
+| `POST` | `/api/v1/financial-planning/entries/{entry_key}/record-payment` | Record partial or full settlement (`amount > 0` and `<= balance_amount`), append immutable entry to `payments_history`, and transition `Pending` -> `Cleared` when balance reaches `0` | `report.view \| purchase.{view,create,update} \| localpurchase.update \| importpurchase.update \| saleorder.{accounts,update,approve}` |
+| `PATCH` | `/api/v1/financial-planning/entries/{entry_key}/attachment` | Attach or replace `invoice` or `payment` document URL on a Financial Planning entry | `report.view \| purchase.{view,create,update} \| localpurchase.update \| importpurchase.update \| saleorder.{accounts,update,approve}` |
 
 ---
 
