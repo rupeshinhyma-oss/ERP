@@ -128,15 +128,14 @@ class AuthService:
 
     # --- Effective Permissions helper ---------------------------------------
     async def get_user_effective_permissions(self, user_id: uuid.UUID) -> set[str]:
-        """Fetch user's effective permissions with caching and immediate invalidation support."""
-        cache_key = CacheBackend.build_key("user_perms", str(user_id))
-        cached = await self.cache.get(cache_key)
-        if cached is not None and isinstance(cached, list):
-            return set(cached)
+        """Fetch user's live effective permissions directly from the database.
 
-        perms = await self.role_repository.get_permission_codes_for_user(user_id)
-        await self.cache.set(cache_key, list(perms), ttl_seconds=3600)
-        return perms
+        Per-process in-memory caching is intentionally avoided here because
+        multi-worker deployments (e.g. ``--workers 4`` on Render) do not share
+        in-memory cache state across workers, which would otherwise leave
+        revoked permissions active on other workers until cache TTL expiry.
+        """
+        return await self.role_repository.get_permission_codes_for_user(user_id)
 
     # --- Login --------------------------------------------------------------
     async def login(

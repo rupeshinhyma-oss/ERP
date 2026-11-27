@@ -292,3 +292,7 @@ In `src/lib/nav.ts`, sidebar links declare their required permission. Items for 
 - Both `/rbac` (Department editor) and `/users` (User Permission Overrides modal) render sections and module accordions using `PERMISSION_SECTIONS` in `frontend/src/lib/permissionLabels.ts`, aligned top-to-bottom with `frontend/src/lib/nav.ts` (`Contact` -> `Inventory` -> `Sale` -> `Purchase` -> `Planning` -> `Finance` -> `User Management` -> `Settings — Masters` -> `Settings — System`, plus `Other` fallback for unmapped modules).
 - Inside each module card, `groupPermissionsByModule` applies `sortModulePermissions` (`View` -> stage views -> `Create` -> actions/stages -> `Edit` -> `Delete` -> `Import` -> `Export` -> `Bulk Actions` -> `Manage All`), and section/module search queries match and display all permissions inside matched cards.
 
+### 9.4 Live Multi-Worker Permission Resolution (`auth/service.py` & `Users.tsx`)
+- `AuthService.get_user_effective_permissions()` queries `RoleRepository.get_permission_codes_for_user()` directly from PostgreSQL without per-process `user_perms` in-memory caching, ensuring multi-worker deployments (e.g. `--workers 4` on Render) immediately enforce permission revocations across every worker.
+- Saving overrides for the currently logged-in user in `Users.tsx` immediately refreshes `GET /auth/profile` and updates `Auth.updateProfile(...)`.
+

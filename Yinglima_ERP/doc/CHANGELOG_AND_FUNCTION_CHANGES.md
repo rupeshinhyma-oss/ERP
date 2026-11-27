@@ -3,6 +3,13 @@
 **System:** Yinglima_ERP (China Procurement)  
 **Scope:** Functional updates, schema changes, UI hardening, and bug fixes.
 
+### 39. Live Multi-Worker Permission Enforcement & Immediate Self-Sync (`auth/service.py`, `Users.tsx`)
+- **Removed Per-Worker `user_perms` Cache (`auth/service.py`):** Updated `AuthService.get_user_effective_permissions()` to query `RoleRepository.get_permission_codes_for_user()` directly from PostgreSQL on each request instead of caching `user_perms:<user_id>` in per-process memory for 1 hour. Eliminates stale permission bypasses across `--workers 4` on Render when an admin revokes access.
+- **Immediate Self-Refresh (`Users.tsx`):** When saving permission overrides for the currently logged-in user (`handleSaveUserOverrides`), `Users.tsx` immediately calls `GET /auth/profile` and updates `Auth.updateProfile(...)` without waiting for WebSocket or `Ctrl + R`.
+
+### 38. Cleaner Permission Checkboxes in Permission Matrix (`PermissionMatrixEditor.tsx`)
+- **Removed Action Emojis from Individual Checkboxes:** Removed `friendlyActionIcon` from individual permission checkboxes inside module cards in `PermissionMatrixEditor.tsx` so labels (`View`, `Create`, `Edit`, `Delete`, etc.) are cleaner and faster to scan, while keeping section/module/filter-pill icons intact.
+
 ### 37. Sale Process Consignment Code Searchable Dropdown (`SaleProcessList.tsx`)
 - **Upgraded Filter Field (`SelectField`):** Replaced the plain text `<input>` for **Consignment Code** in `SaleProcessList.tsx` Filter Options with a searchable `<SelectField>` (`All Consignments`) matching the adjacent **Buyer Company** dropdown. Options are populated dynamically from `/sales/planning-consignments` merged with distinct `consignment_code` values from loaded sale orders, sorted naturally.
 

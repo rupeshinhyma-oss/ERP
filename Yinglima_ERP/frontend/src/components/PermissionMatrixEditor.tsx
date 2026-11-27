@@ -6,7 +6,6 @@ import {
   PERMISSION_SECTIONS,
   type PermissionSectionId,
   friendlyPermissionLabel,
-  friendlyActionIcon,
   groupPermissionsByModule,
 } from "@/lib/permissionLabels";
 
@@ -584,7 +583,6 @@ export const PermissionMatrixEditor: React.FC<PermissionMatrixEditorProps> = ({
                             const isExtraGrant = isUserOverridesMode && isChecked && !isRole;
                             const isDirectDeny = isUserOverridesMode && !isChecked && isRole;
                             const isDeptInherited = isUserOverridesMode && isChecked && isRole;
-                            const actionIcon = friendlyActionIcon(p.code);
                             const label = friendlyPermissionLabel(p.code);
 
                             // Background and border colors based on state
@@ -648,7 +646,7 @@ export const PermissionMatrixEditor: React.FC<PermissionMatrixEditorProps> = ({
                                         wordBreak: "break-word",
                                       }}
                                     >
-                                      {actionIcon} {label}
+                                      {label}
                                     </span>
                                     {isExtraGrant && (
                                       <span

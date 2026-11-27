@@ -31,6 +31,7 @@ import type {
   PaginationMeta,
   Position,
   PositionAssignment,
+  Profile,
   ReportingRelationship,
   Role,
   User,
@@ -1027,6 +1028,16 @@ export function UsersPage() {
         }
       }
       await apiPut(`/rbac/users/${overridesUserId}/permissions/bulk`, { overrides });
+      if (overridesUserId === Auth.getProfile()?.id) {
+        try {
+          const profileRes = await apiGet<Profile>("/auth/profile");
+          if (profileRes?.data) {
+            Auth.updateProfile(profileRes.data);
+          }
+        } catch {
+          /* live WS sync or next reload will still refresh */
+        }
+      }
       showToast("Permissions updated for user.", "success");
       setOverridesUserId(null);
     } catch (err) {
