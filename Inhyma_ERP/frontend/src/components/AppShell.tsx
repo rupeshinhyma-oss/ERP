@@ -83,14 +83,37 @@ function formatRelativeTime(dateStr: string): string {
 }
 
 function getNotificationIcon(type: string, module?: string | null): string {
-  if (type === "feed_announcement") return "📢";
-  if (type === "feed_comment" || type === "feed_discussion") return "💬";
-  if (type === "feed_message") return "✉️";
-  if (type === "shipment_requirement_raised") return "📦";
-  if (type === "shipment_status_ordered") return "🔵";
-  if (type === "sale_process_created" || module === "sales") return "💼";
-  if (type === "local_purchase_created" || module === "purchases") return "🛒";
-  if (type === "inquiry_created" || module === "inquiries") return "📩";
+  const t = (type || "").toLowerCase();
+  if (t === "feed_announcement") return "📢";
+  if (t === "feed_comment" || t === "feed_discussion") return "💬";
+  if (t === "feed_message") return "✉️";
+  // HRMS notifications
+  if (t.startsWith("hrms_leave") || t.includes("leave_")) return "🗓️";
+  if (t.startsWith("hrms_regularization") || t.includes("regularization_")) return "⏰";
+  if (t.startsWith("hrms_expense") || t.includes("expense_")) return "💳";
+  if (t.startsWith("hrms_asset") || t.includes("asset_")) return "💻";
+  if (t.startsWith("hrms_site_visit")) return "📍";
+  if (t.startsWith("hrms_payslip") || t.startsWith("hrms_salary")) return "💰";
+  // CRM Lead Management notifications
+  if (t === "crm_lead_won") return "🏆";
+  if (t === "crm_lead_lost") return "📉";
+  if (t.startsWith("crm_follow_up")) return "📞";
+  if (t.startsWith("crm_quotation")) return "📄";
+  if (t.startsWith("crm_lead")) return "🎯";
+  // Enterprise Task notifications
+  if (t === "task_escalated" || t.startsWith("escalation_")) return "🚨";
+  if (t === "task_overdue" || t.startsWith("task_deadline")) return "⏳";
+  if (t === "task_completed" || t === "subtask_completed") return "✅";
+  if (t.startsWith("task_approval")) return "📝";
+  if (t === "task_mention" || t === "comment_added" || t === "subtask_comment_added") return "💬";
+  if (t.startsWith("hold_")) return "⏸️";
+  if (t.startsWith("task_") || t.startsWith("subtask_")) return "📌";
+  // Other ERP modules
+  if (t === "shipment_requirement_raised") return "📦";
+  if (t === "shipment_status_ordered") return "🔵";
+  if (t === "sale_process_created" || module === "sales") return "💼";
+  if (t === "local_purchase_created" || module === "purchases") return "🛒";
+  if (t === "inquiry_created" || module === "inquiries") return "📩";
   return "🔔";
 }
 
@@ -476,27 +499,15 @@ export function NotificationBell() {
           {/* Footer */}
           <div
             style={{
-              padding: "10px 16px",
+              padding: "8px 16px",
               background: "#f8fafc",
               borderTop: "1px solid #e2e8f0",
               textAlign: "center",
+              fontSize: "11.5px",
+              color: "#64748b",
             }}
           >
-            <Link
-              to="/notification-settings"
-              onClick={() => setOpen(false)}
-              style={{
-                fontSize: "12px",
-                color: "#2563eb",
-                fontWeight: 600,
-                textDecoration: "none",
-                display: "inline-flex",
-                alignItems: "center",
-                gap: "4px",
-              }}
-            >
-              ⚙️ Configure Notification Rules & Alerts
-            </Link>
+            Click any notification to open the related record
           </div>
         </div>
       )}

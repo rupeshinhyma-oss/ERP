@@ -479,7 +479,7 @@ export function AttendancePage() {
     return searchParams.get("employee_id") || "";
   });
 
-  // Sync selectedEmployeeId and view mode from URL search parameters on navigation
+  // Sync selectedEmployeeId, view mode, and regularization deep-link from URL search parameters
   useEffect(() => {
     const empParam = searchParams.get("employee_id");
     if (empParam !== null && empParam !== selectedEmployeeId) {
@@ -489,7 +489,11 @@ export function AttendancePage() {
     if (viewParam === "all" || viewParam === "individual") {
       setCalendarViewMode((curr) => (curr !== viewParam ? viewParam : curr));
     }
-  }, [searchParams]);
+    const regIdParam = searchParams.get("regularization_id");
+    if (regIdParam && isPrivileged) {
+      setActiveTab("approval");
+    }
+  }, [searchParams, isPrivileged]);
 
   // Handler to update selected employee both in state and URL search params
   const handleSelectEmployee = useCallback((empId: string) => {

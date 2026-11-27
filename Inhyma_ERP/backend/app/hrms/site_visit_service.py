@@ -34,6 +34,7 @@ from app.hrms.models import (
 from app.hrms.notifications import (
     notify_site_visit_assigned,
     notify_site_visit_cancelled,
+    notify_site_visit_reassigned_away,
 )
 from app.hrms.schemas import (
     RegularizationEvidenceRead,
@@ -645,6 +646,15 @@ class HrmsSiteVisitService:
                 visit_id=visit.id,
                 reassigned=True,
             )
+            if prev_employee_id:
+                await notify_site_visit_reassigned_away(
+                    self.db,
+                    previous_employee_id=prev_employee_id,
+                    customer_name=visit.customer_name or visit.site_address,
+                    visit_date=visit.visit_date.isoformat(),
+                    actor_id=actor_id,
+                    visit_id=visit.id,
+                )
         await self.db.commit()
         return await self.get_site_visit(visit.id, actor_id, is_admin, allowed_employee_ids=allowed_employee_ids)
 

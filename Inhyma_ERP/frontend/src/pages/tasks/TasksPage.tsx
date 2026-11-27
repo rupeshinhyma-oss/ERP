@@ -237,9 +237,7 @@ export const TasksPage: React.FC = () => {
     const drawerTabParam = searchParams.get("drawerTab");
     if (urlTaskId) {
       setSelectedTaskId((prev) => (prev === urlTaskId ? prev : urlTaskId));
-      if (drawerTabParam) {
-        setInitialDrawerTab(drawerTabParam);
-      }
+      setInitialDrawerTab(drawerTabParam || "details");
     }
   }, [searchParams]);
 

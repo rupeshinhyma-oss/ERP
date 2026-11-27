@@ -47,6 +47,7 @@ from app.crm.models import (
     CrmSalespersonConfig,
     CrmSalespersonTerritory,
 )
+from app.crm.notifications import _actor_display_name, notify_crm_lead_assigned
 from app.crm.service import CrmSalespersonDistributionService
 from app.database.base import _utcnow
 from app.masters.states.models import State
@@ -550,6 +551,18 @@ class CrmAssignmentEngineService:
         self.session.add(history)
         await self.session.flush()
 
+        if batch_id is None:
+            await notify_crm_lead_assigned(
+                self.session,
+                lead_id=lead.id,
+                lead_code=lead.lead_code,
+                lead_name=lead.name,
+                assignee_id=winner.user_id,
+                actor_id=actor.id if actor else None,
+                actor_name=_actor_display_name(actor) if actor else "Lead Assignment Engine",
+                reassigned=False,
+            )
+
         if commit:
             await self.session.commit()
             await self.session.refresh(lead)
@@ -761,6 +774,18 @@ class CrmAssignmentEngineService:
         self.session.add(history)
         await self.session.flush()
 
+        if batch_id is None:
+            await notify_crm_lead_assigned(
+                self.session,
+                lead_id=lead.id,
+                lead_code=lead.lead_code,
+                lead_name=lead.name,
+                assignee_id=winner.user_id,
+                actor_id=actor.id if actor else None,
+                actor_name=_actor_display_name(actor) if actor else "Lead Assignment Engine",
+                reassigned=False,
+            )
+
         if commit:
             await self.session.commit()
             await self.session.refresh(lead)
@@ -886,6 +911,18 @@ class CrmAssignmentEngineService:
         )
         self.session.add(history)
         await self.session.flush()
+
+        if batch_id is None:
+            await notify_crm_lead_assigned(
+                self.session,
+                lead_id=lead.id,
+                lead_code=lead.lead_code,
+                lead_name=lead.name,
+                assignee_id=target_salesperson_id,
+                actor_id=actor.id if actor else None,
+                actor_name=_actor_display_name(actor) if actor else "Lead Assignment Engine",
+                reassigned=False,
+            )
 
         if commit:
             await self.session.commit()

@@ -86,6 +86,7 @@ from app.companies.models import Company, CompanyContact
 from app.organizations.models import Organization
 from app.users.models import User
 from app.crm.lead_service import CrmLeadService, _is_system_activity
+from app.crm.notifications import _actor_display_name, notify_crm_quotation_event
 from app.crm.models import (
     CrmActivity,
     CrmLead,
@@ -984,6 +985,17 @@ class CrmQuotationService:
         self.session.add(activity)
 
         lead.updated_at = _utcnow()
+        await notify_crm_quotation_event(
+            self.session,
+            lead_id=lead.id,
+            lead_code=lead.lead_code,
+            lead_name=lead.name,
+            quotation_number=quotation.quotation_number,
+            action="created",
+            assignee_id=lead.assigned_to,
+            actor_id=actor.id,
+            actor_name=actor_name,
+        )
         await self.session.commit()
 
         return await self.get_quotation(quotation.id, actor=actor)
@@ -1265,6 +1277,18 @@ class CrmQuotationService:
         self.session.add(activity)
 
         q.lead.updated_at = _utcnow()
+        await notify_crm_quotation_event(
+            self.session,
+            lead_id=q.lead.id,
+            lead_code=q.lead.lead_code,
+            lead_name=q.lead.name,
+            quotation_number=q.quotation_number,
+            action="status_changed",
+            status_label=new_status,
+            assignee_id=q.lead.assigned_to,
+            actor_id=actor.id,
+            actor_name=_actor_display_name(actor),
+        )
         await self.session.commit()
 
         return await self.get_quotation(q.id, actor=actor)

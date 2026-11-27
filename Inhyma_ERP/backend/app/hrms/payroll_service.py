@@ -42,6 +42,7 @@ from app.hrms.schemas import (
     MonthlyPayrollItemEditRequest,
 )
 from app.hrms.attendance_service import HrmsAttendanceService, IST
+from app.hrms.notifications import notify_payslip_published, notify_salary_updated
 from app.rbac.models import Role, UserRole
 from app.users.models import EmploymentStatus, User, UserStatus
 
@@ -435,6 +436,14 @@ class HrmsPayrollService:
             updated_by=admin_id,
         )
         self.db.add(new_salary)
+        await self.db.flush()
+        await notify_salary_updated(
+            self.db,
+            employee_id=req.employee_id,
+            effective_from=req.effective_from.isoformat(),
+            actor_id=admin_id,
+            salary_id=new_salary.id,
+        )
         await self.db.commit()
         await self.db.refresh(new_salary)
         return new_salary
@@ -1439,6 +1448,15 @@ class HrmsPayrollService:
         # Update all items to APPROVED
         for it in items:
             it.status = "APPROVED"
+
+        await self.db.flush()
+        for it in items:
+            await notify_payslip_published(
+                self.db,
+                employee_id=it.employee_id,
+                payroll_month=payroll_month,
+                actor_id=admin_id,
+            )
 
         await self.db.commit()
         await self.db.refresh(payroll)

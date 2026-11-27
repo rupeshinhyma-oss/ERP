@@ -1,4 +1,5 @@
-import React, { useEffect, useState, useMemo } from "react";
+import React, { useEffect, useState, useMemo, useRef } from "react";
+import { useSearchParams } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
 import { Breadcrumb } from "@/components/Breadcrumb";
 import {
@@ -217,6 +218,8 @@ function LeaveApprovalsSkeletonRows({ rowCount = 5 }: { rowCount?: number }) {
 }
 
 export function LeavePage() {
+  const [searchParams] = useSearchParams();
+  const handledRequestLinkRef = useRef<string | null>(null);
   const [activeTab, setActiveTab] = useState<LeaveTab>("my-leaves");
   const [selectedYear, setSelectedYear] = useState<number>(new Date().getFullYear());
   const toast = useToast();
@@ -552,6 +555,37 @@ export function LeavePage() {
   useEffect(() => {
     fetchLeaveTypes();
   }, []);
+
+  // Deep-link support for /hrms/leave?request_id=<uuid> from notification bell
+  useEffect(() => {
+    const targetReqId = searchParams.get("request_id")?.trim();
+    if (!targetReqId) {
+      handledRequestLinkRef.current = null;
+      return;
+    }
+    if (handledRequestLinkRef.current === targetReqId) {
+      return;
+    }
+    const mine = myRequests.find((r) => r.id === targetReqId);
+    if (mine) {
+      handledRequestLinkRef.current = targetReqId;
+      setActiveTab("my-leaves");
+      setSelectedDetailRequest(mine);
+      setActiveModal("detail");
+      return;
+    }
+    const appr = approvals.find((r) => r.id === targetReqId);
+    if (appr) {
+      handledRequestLinkRef.current = targetReqId;
+      setActiveTab("approvals");
+      setSelectedDetailRequest(appr);
+      setActiveModal("detail");
+      return;
+    }
+    if (canApprove && activeTab !== "approvals") {
+      setActiveTab("approvals");
+    }
+  }, [searchParams, myRequests, approvals, canApprove, activeTab]);
 
   // Load admin/HR org directory lists only for users with leave management rights (W3-10)
   useEffect(() => {

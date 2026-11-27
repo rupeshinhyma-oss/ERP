@@ -54,12 +54,15 @@ class NotificationRepository:
         message: str,
         link: str | None = None,
     ) -> Notification:
+        safe_type = (type or "notification").strip()[:50] or "notification"
+        safe_title = (title or "Notification").strip()[:255] or "Notification"
+        safe_link = link.strip()[:255] if isinstance(link, str) and link.strip() else None
         notif = Notification(
             user_id=user_id,
-            type=type,
-            title=title,
+            type=safe_type,
+            title=safe_title,
             message=message,
-            link=link,
+            link=safe_link,
             is_read=False,
         )
         self.session.add(notif)

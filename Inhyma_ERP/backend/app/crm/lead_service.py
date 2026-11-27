@@ -35,6 +35,13 @@ from app.crm.company_linking import (
     validate_gstin,
 )
 from app.crm.import_service import normalize_phone_number, sanitize_formula_text
+from app.crm.notifications import (
+    _actor_display_name,
+    notify_crm_follow_up_status_changed,
+    notify_crm_lead_assigned,
+    notify_crm_lead_stage_changed,
+    notify_crm_lead_transferred_away,
+)
 from app.crm.models import (
     CrmActivity,
     CrmAssignmentHistory,
@@ -1021,6 +1028,18 @@ class CrmLeadService:
         )
         self.session.add(stage_hist)
 
+        if target_assigned_to:
+            await notify_crm_lead_assigned(
+                self.session,
+                lead_id=new_lead.id,
+                lead_code=new_lead.lead_code,
+                lead_name=new_lead.name,
+                assignee_id=target_assigned_to,
+                actor_id=actor.id,
+                actor_name=_actor_display_name(actor),
+                reassigned=False,
+            )
+
         await self.session.commit()
 
         return await self.get_lead(lead_id=new_lead.id, actor=actor)
@@ -1429,6 +1448,29 @@ class CrmLeadService:
             performed_by=actor.id,
         )
         self.session.add(activity)
+
+        target_owner_label = target_user.display_name or target_user.full_name or target_user.username
+        await notify_crm_lead_assigned(
+            self.session,
+            lead_id=lead.id,
+            lead_code=lead.lead_code,
+            lead_name=lead.name,
+            assignee_id=new_salesperson_id,
+            actor_id=actor.id,
+            actor_name=_actor_display_name(actor),
+            reassigned=True,
+            reason=clean_reason,
+        )
+        if previous_owner_id and previous_owner_id != new_salesperson_id:
+            await notify_crm_lead_transferred_away(
+                self.session,
+                lead_code=lead.lead_code,
+                lead_name=lead.name,
+                previous_owner_id=previous_owner_id,
+                actor_id=actor.id,
+                new_owner_name=target_owner_label,
+                reason=clean_reason,
+            )
 
         await self.session.commit()
 
@@ -1853,6 +1895,19 @@ class CrmLeadService:
 
         await self._recalculate_next_follow_up(lead)
         lead.updated_at = now_dt
+
+        await notify_crm_follow_up_status_changed(
+            self.session,
+            lead_id=lead.id,
+            lead_code=lead.lead_code,
+            lead_name=lead.name,
+            follow_up_id=follow_up.id,
+            follow_up_type=follow_up.follow_up_type,
+            new_status=new_status,
+            assignee_id=follow_up.assigned_to,
+            actor_id=actor.id,
+            actor_name=_actor_display_name(actor),
+        )
 
         await self.session.commit()
         await self.session.refresh(follow_up)
@@ -2305,6 +2360,19 @@ class CrmLeadService:
             created_at=now_dt,
         )
         self.session.add(stage_activity)
+
+        await notify_crm_lead_stage_changed(
+            self.session,
+            lead_id=lead.id,
+            lead_code=lead.lead_code,
+            lead_name=lead.name,
+            assignee_id=lead.assigned_to,
+            from_stage_name=prev_stage_name,
+            to_stage_name=target_stage.name,
+            stage_type=target_stage.stage_type,
+            actor_id=actor.id,
+            actor_name=_actor_display_name(actor),
+        )
 
         lead_id = lead.id
         await self.session.commit()

@@ -511,6 +511,94 @@ describe("NotificationBell & Live Notification Delivery (Phase 5)", () => {
     });
   });
 
+  it("renders module-specific icons for HRMS, CRM Leads, and Enterprise Tasks and has no dead /notification-settings link", async () => {
+    mockApiGet.mockImplementation((url: string) => {
+      if (url.includes("/notifications/unread-count")) {
+        return Promise.resolve({ data: { unread_count: 4 } });
+      }
+      if (url.includes("/notifications?limit=30")) {
+        return Promise.resolve({
+          data: {
+            items: [
+              {
+                id: "notif-hrms-payslip",
+                user_id: "user-uuid-1",
+                type: "hrms_payslip_published",
+                title: "Payslip Available",
+                message: "Your payslip for 2026-11 has been approved.",
+                link: "/hrms/payroll?month=2026-11",
+                is_read: false,
+                created_at: new Date().toISOString(),
+              },
+              {
+                id: "notif-crm-lead",
+                user_id: "user-uuid-1",
+                type: "crm_lead_assigned",
+                title: "New Lead Assigned",
+                message: "Lead LD-001 — Acme has been assigned to you.",
+                link: "/crm/leads?leadId=lead-1",
+                is_read: false,
+                created_at: new Date().toISOString(),
+              },
+              {
+                id: "notif-task-esc",
+                user_id: "user-uuid-1",
+                type: "task_escalated",
+                title: "Task Escalated to You",
+                message: "Task 'Urgent Issue' was escalated to you.",
+                link: "/tasks?id=task-1&drawerTab=escalations",
+                is_read: false,
+                created_at: new Date().toISOString(),
+              },
+              {
+                id: "notif-hrms-leave",
+                user_id: "user-uuid-1",
+                type: "hrms_leave_cancelled",
+                title: "Leave Request Cancelled",
+                message: "Your leave request was cancelled.",
+                link: "/hrms/leave?request_id=req-1",
+                is_read: false,
+                created_at: new Date().toISOString(),
+              },
+            ],
+            unread_count: 4,
+          },
+        });
+      }
+      return Promise.resolve({ data: {} });
+    });
+
+    render(
+      <MemoryRouter>
+        <NotificationBell />
+      </MemoryRouter>
+    );
+
+    const bellBtn = screen.getByTitle("Notifications");
+    fireEvent.click(bellBtn);
+
+    await waitFor(() => {
+      expect(screen.getByText("Payslip Available")).toBeTruthy();
+      expect(screen.getByText("New Lead Assigned")).toBeTruthy();
+      expect(screen.getByText("Task Escalated to You")).toBeTruthy();
+      expect(screen.getByText("Leave Request Cancelled")).toBeTruthy();
+      expect(screen.getByText("💰")).toBeTruthy();
+      expect(screen.getByText("🎯")).toBeTruthy();
+      expect(screen.getByText("🚨")).toBeTruthy();
+      expect(screen.getByText("🗓️")).toBeTruthy();
+    });
+
+    // Dead /notification-settings route link must not be rendered
+    expect(screen.queryByText(/Configure Notification Rules/i)).toBeNull();
+
+    // Clicking CRM lead notification marks read and navigates to deep link
+    fireEvent.click(screen.getByText("New Lead Assigned"));
+    await waitFor(() => {
+      expect(mockApiPost).toHaveBeenCalledWith("/notifications/notif-crm-lead/read", {});
+      expect(mockNavigate).toHaveBeenCalledWith("/crm/leads?leadId=lead-1");
+    });
+  });
+
   it("cleans up listeners and resets notifications when user logs out", () => {
     const { rerender } = render(
       <MemoryRouter>

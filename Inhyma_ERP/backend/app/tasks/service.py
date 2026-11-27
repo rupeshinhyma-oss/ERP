@@ -1155,7 +1155,7 @@ class TaskService:
         return refreshed
 
     async def check_expired_holds(self) -> int:
-        """Find tasks currently ON_HOLD where hold_until <= today, and send notifications."""
+        """Find tasks currently ON_HOLD where hold_until <= today, and send deduplicated notifications."""
         today = date.today()
         stmt = (
             select(Task)
@@ -1174,15 +1174,20 @@ class TaskService:
             recipients = {a.user_id for a in task.assignees}
             if task.created_by:
                 recipients.add(task.created_by)
+            link_url = f"/tasks?id={task.id}"
             for uid in recipients:
-                await self.notification_service.notify_user(
-                    user_id=uid,
-                    type="hold_ended",
-                    title="Task Hold Period Ended",
-                    message=f"Task hold period has ended for '{task.title}'.",
-                    link=f"/tasks?id={task.id}",
+                already_sent = await self.notification_service.has_recent_notification(
+                    uid, "hold_ended", link_url, within_hours=20
                 )
-                notified_count += 1
+                if not already_sent:
+                    await self.notification_service.notify_user(
+                        user_id=uid,
+                        type="hold_ended",
+                        title="Task Hold Period Ended",
+                        message=f"Task hold period has ended for '{task.title}'.",
+                        link=link_url,
+                    )
+                    notified_count += 1
             await self._broadcast_task_event("TASK_HOLD_EXPIRED", task)
         return len(tasks)
 
@@ -1441,8 +1446,9 @@ class TaskService:
         await self.repository.session.commit()
         await self.repository.session.refresh(comment, ["user", "attachments", "reactions"])
 
-        # Process mentions
-        await self._process_mentions(message, task.id, comment.id, current_user, task.title)
+        # Process mentions (collect mentioned IDs to avoid double-notifying them with comment_added)
+        mentions = await self._process_mentions(message, task.id, comment.id, current_user, task.title)
+        mentioned_user_ids = {m.mentioned_user_id for m in mentions}
 
         # Audit
         await self.audit_service.record(
@@ -1456,11 +1462,12 @@ class TaskService:
             description=f"Commented on task '{task.title}'",
         )
 
-        # Notify creator and assignees
+        # Notify creator and assignees (excluding author and already-mentioned users)
         recipients = {a.user_id for a in task.assignees}
         if task.created_by:
             recipients.add(task.created_by)
         recipients.discard(current_user.id)
+        recipients -= mentioned_user_ids
 
         has_audio = bool(audio_url)
         has_att = bool(attachments)
@@ -1730,7 +1737,8 @@ class TaskService:
         else:
             await self.repository.session.refresh(sc)
 
-        await self._process_mentions(message, task.id, None, current_user, f"Subtask '{subtask.title}' on {task.title}")
+        mentions = await self._process_mentions(message, task.id, None, current_user, f"Subtask '{subtask.title}' on {task.title}")
+        mentioned_user_ids = {m.mentioned_user_id for m in mentions}
 
         recipients = {a.user_id for a in subtask.assignees}
         if subtask.assignee_id:
@@ -1738,6 +1746,7 @@ class TaskService:
         if task.created_by:
             recipients.add(task.created_by)
         recipients.discard(current_user.id)
+        recipients -= mentioned_user_ids
 
         for uid in recipients:
             await self.notification_service.notify_user(
@@ -1832,12 +1841,14 @@ class TaskService:
         else:
             await self.repository.session.refresh(ec)
 
-        await self._process_mentions(message, task.id, None, current_user, f"Escalation on {task.title}")
+        mentions = await self._process_mentions(message, task.id, None, current_user, f"Escalation on {task.title}")
+        mentioned_user_ids = {m.mentioned_user_id for m in mentions}
 
-        recipients = {esc.from_user, esc.to_user}
+        recipients = {u for u in (esc.from_user, esc.to_user) if u is not None}
         if task.created_by:
             recipients.add(task.created_by)
         recipients.discard(current_user.id)
+        recipients -= mentioned_user_ids
 
         for uid in recipients:
             await self.notification_service.notify_user(
@@ -1845,7 +1856,7 @@ class TaskService:
                 type="escalation_comment_added",
                 title="Escalation Thread Update",
                 message=f"{getattr(current_user, 'display_name', None) or getattr(current_user, 'full_name', None) or current_user.username} replied on escalation ({task.title}): {message[:80]}",
-                link=f"/tasks?id={task.id}",
+                link=f"/tasks?id={task.id}&drawerTab=escalations",
             )
 
         await self._broadcast_task_event(
@@ -1939,14 +1950,15 @@ class TaskService:
             description=f"Escalated task '{task.title}' ({escalation_type})",
         )
 
-        # Notify to_user
-        await self.notification_service.notify_user(
-            user_id=to_user,
-            type="task_escalated",
-            title="Task Escalated to You",
-            message=f"Task '{task.title}' was escalated to you by {getattr(current_user, 'display_name', None) or getattr(current_user, 'full_name', None) or current_user.username}: {reason}",
-            link=f"/tasks?id={task.id}&drawerTab=escalations",
-        )
+        # Notify to_user (exclude self-notification)
+        if to_user != current_user.id:
+            await self.notification_service.notify_user(
+                user_id=to_user,
+                type="task_escalated",
+                title="Task Escalated to You",
+                message=f"Task '{task.title}' was escalated to you by {getattr(current_user, 'display_name', None) or getattr(current_user, 'full_name', None) or current_user.username}: {reason}",
+                link=f"/tasks?id={task.id}&drawerTab=escalations",
+            )
 
         await self._broadcast_task_event(
             "TASK_ESCALATED",
@@ -2046,6 +2058,10 @@ class TaskService:
         if sub_uids:
             await self._validate_eligible_active_users(sub_uids, field_label="subtask assignee")
 
+        old_sub_assignees = {a.user_id for a in (getattr(subtask, "assignees", []) or []) if getattr(a, "user_id", None)}
+        if subtask.assignee_id:
+            old_sub_assignees.add(subtask.assignee_id)
+
         was_completed = subtask.completed or subtask.status == "DONE"
         updated = await self.repository.update_subtask(
             subtask,
@@ -2061,6 +2077,22 @@ class TaskService:
             order_index=order_index,
         )
         await self.repository.session.commit()
+
+        # Notify newly assigned subtask assignees (excluding actor)
+        if assignee_id is not None or assignee_ids is not None:
+            new_sub_assignees = set(assignee_ids or [])
+            if assignee_id:
+                new_sub_assignees.add(assignee_id)
+            newly_added_sub = new_sub_assignees - old_sub_assignees
+            for uid in newly_added_sub:
+                if uid != current_user.id:
+                    await self.notification_service.notify_user(
+                        user_id=uid,
+                        type="subtask_assigned",
+                        title="Subtask Assigned",
+                        message=f"You have been assigned to subtask '{updated.title}' on task: {task.title}",
+                        link=f"/tasks?id={task.id}",
+                    )
 
         # Check if subtask transitioned to completed
         is_now_completed = updated.completed or updated.status == "DONE"
@@ -2715,6 +2747,27 @@ class TaskService:
             description=f"Duplicated task from '{orig.title}'",
         )
 
+        # Notify copied assignees and watchers (excluding actor)
+        for a in refreshed.assignees:
+            if a.user_id == current_user.id:
+                continue
+            if a.assignment_role == "WATCHER":
+                await self.notification_service.notify_user(
+                    user_id=a.user_id,
+                    type="task_watcher",
+                    title="Task Watcher Added",
+                    message=f"You have been added as a watcher to task: {refreshed.title}",
+                    link=f"/tasks?id={refreshed.id}",
+                )
+            else:
+                await self.notification_service.notify_user(
+                    user_id=a.user_id,
+                    type="task_assigned",
+                    title="Task Assigned",
+                    message=f"You have been assigned to task: {refreshed.title}",
+                    link=f"/tasks?id={refreshed.id}",
+                )
+
         await self._broadcast_task_event("TASK_CREATED", refreshed, actor_id=current_user.id)
         return refreshed
 
@@ -2797,6 +2850,61 @@ class TaskService:
             new_values={"action": payload.action, "count": success_count},
             description=f"Bulk {payload.action} on {success_count} tasks",
         )
+
+        # Dispatch concise notifications for bulk ASSIGN / ADD_WATCHER / STATUS->DONE
+        processed_ids = [tid for tid in authorized_task_ids if tid not in more_failed]
+        if processed_ids and payload.action in ("ASSIGN", "ADD_WATCHER") and payload.value is not None:
+            raw_uids = payload.value if isinstance(payload.value, list) else [payload.value]
+            actor_label = (
+                getattr(current_user, "display_name", None)
+                or getattr(current_user, "full_name", None)
+                or current_user.username
+            )
+            notif_type = "task_watcher" if payload.action == "ADD_WATCHER" else "task_assigned"
+            title_str = "Task Watcher Added" if payload.action == "ADD_WATCHER" else "Task Assigned"
+            link_str = f"/tasks?id={processed_ids[0]}" if len(processed_ids) == 1 else "/tasks"
+            for raw_uid in raw_uids:
+                try:
+                    target_uid = uuid.UUID(str(raw_uid))
+                except (TypeError, ValueError):
+                    continue
+                if target_uid == current_user.id:
+                    continue
+                count_n = len(processed_ids)
+                msg_str = (
+                    f"{actor_label} added you as a watcher to {count_n} task(s)."
+                    if payload.action == "ADD_WATCHER"
+                    else f"{actor_label} assigned {count_n} task(s) to you."
+                )
+                await self.notification_service.notify_user(
+                    user_id=target_uid,
+                    type=notif_type,
+                    title=title_str,
+                    message=msg_str,
+                    link=link_str,
+                )
+        elif processed_ids and payload.action == "STATUS" and str(payload.value) == "DONE":
+            actor_label = (
+                getattr(current_user, "display_name", None)
+                or getattr(current_user, "full_name", None)
+                or current_user.username
+            )
+            for tid in processed_ids:
+                t_obj = await self.repository.get_task_by_id(tid)
+                if not t_obj:
+                    continue
+                recipients = {a.user_id for a in getattr(t_obj, "assignees", [])}
+                if t_obj.created_by:
+                    recipients.add(t_obj.created_by)
+                recipients.discard(current_user.id)
+                for uid in recipients:
+                    await self.notification_service.notify_user(
+                        user_id=uid,
+                        type="task_completed",
+                        title="Task Completed",
+                        message=f"Task '{t_obj.title}' has been marked as Completed by {actor_label}",
+                        link=f"/tasks?id={t_obj.id}",
+                    )
 
         event = Event(
             event_type="TASK_BULK_UPDATED",
@@ -3700,6 +3808,8 @@ class TaskService:
                     message=f"Recurring task '{task.title}' for period {period_key} was generated.",
                     link=f"/tasks?id={task.id}",
                 )
+                if auto_commit and isinstance(self.repository.session, AsyncSession):
+                    await self.repository.session.commit()
 
             await self._broadcast_task_event("TASK_CREATED", task, actor_id=sch.created_by)
             generated_tasks.append(task)
@@ -3783,10 +3893,12 @@ class TaskService:
                         await self.notification_service.notify_user(
                             user_id=sch.assignee_id,
                             type="task_deadline_warning",
-                            title=f"Reminder: {task.title}",
+                            title=f"Reminder: {task.title}"[:255],
                             message=f"Recurring task '{task.title}' ({task.recurrence_period}) is due on {task.due_date}.",
                             link=f"/tasks?id={task.id}",
                         )
+                        if auto_commit and isinstance(self.repository.session, AsyncSession):
+                            await self.repository.session.commit()
                         reminders_sent += 1
 
             # 2. Escalation Check
@@ -3852,8 +3964,10 @@ class TaskService:
                             type="task_escalated",
                             title="Recurring Task Escalated",
                             message=f"Recurring task '{task.title}' for {task.recurrence_period} was escalated to you.",
-                            link=f"/tasks?id={task.id}",
+                            link=f"/tasks?id={task.id}&drawerTab=escalations",
                         )
+                        if auto_commit and isinstance(self.repository.session, AsyncSession):
+                            await self.repository.session.commit()
                         escalations_triggered += 1
 
         return {

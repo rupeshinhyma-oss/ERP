@@ -35,6 +35,7 @@ from app.auth.service import CurrentUser
 from app.core.exceptions import BadRequestException, ForbiddenException, NotFoundException
 from app.core.logging import get_logger
 from app.crm.assignment_service import CrmAssignmentEngineService
+from app.crm.notifications import _actor_display_name, notify_crm_batch_leads_assigned
 from app.crm.company_linking import (
     AmbiguousCompanyMatchException,
     batch_resolve_companies,
@@ -1193,6 +1194,7 @@ class CrmImportService:
         row_errors: list[dict[str, Any]] = []
         final_row_results: list[CrmImportRowPreview] = []
         batch_companies: dict[str, tuple[uuid.UUID | None, str | None, bool]] = {}
+        assigned_leads_by_user: dict[uuid.UUID, list[tuple[uuid.UUID, str | None, str]]] = {}
 
         seen_in_transaction: set[str] = set()
 
@@ -1493,6 +1495,10 @@ class CrmImportService:
 
                 # Keep in local dict in case subsequent rows match
                 existing_crm_leads[norm_phone] = new_lead
+                if new_lead.assigned_to is not None:
+                    assigned_leads_by_user.setdefault(new_lead.assigned_to, []).append(
+                        (new_lead.id, new_lead.lead_code, new_lead.name)
+                    )
 
                 resolved_company_action = (
                     ("NEW" if created_new_comp else "EXISTING")
@@ -1549,6 +1555,20 @@ class CrmImportService:
             batch.sanitized_error_summary = json.dumps(row_errors[:100])  # limit summary size
         else:
             batch.sanitized_error_summary = None
+
+        # Dispatch concise per-salesperson assignment notifications inside SAVEPOINTs before commit
+        if assigned_leads_by_user:
+            actor_label = _actor_display_name(actor)
+            for assignee_uid, assigned_lead_tuples in assigned_leads_by_user.items():
+                await notify_crm_batch_leads_assigned(
+                    self.session,
+                    assignee_id=assignee_uid,
+                    leads=assigned_lead_tuples,
+                    batch_name=batch.batch_name,
+                    batch_id=batch.id,
+                    actor_id=actor.id,
+                    actor_name=actor_label,
+                )
 
         try:
             await self.session.commit()

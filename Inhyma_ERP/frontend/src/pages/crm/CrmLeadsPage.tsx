@@ -2050,21 +2050,32 @@ export function CrmLeadsPage() {
     }
   };
 
-  // Deep-linking: Support /crm/leads?leadId=<uuid> and /crm/leads?id=<uuid>
+  // Deep-linking: Support /crm/leads?leadId=<uuid>, ?lead_id=<uuid>, ?id=<uuid>, and optional ?drawerTab=...
   useEffect(() => {
     const searchParams = new URLSearchParams(location.search);
-    const targetLeadId = (searchParams.get("leadId") || searchParams.get("id"))?.trim();
+    const targetLeadId = (
+      searchParams.get("leadId") ||
+      searchParams.get("lead_id") ||
+      searchParams.get("id")
+    )?.trim();
+    const rawDrawerTab = searchParams.get("drawerTab")?.trim().toLowerCase();
+    const validDrawerTabs = new Set(["overview", "activities", "followups", "quotations", "history"]);
+    const targetDrawerTab =
+      rawDrawerTab && validDrawerTabs.has(rawDrawerTab)
+        ? (rawDrawerTab as "overview" | "activities" | "followups" | "quotations" | "history")
+        : null;
 
     if (!targetLeadId) {
       processedDeepLinkIdRef.current = null;
       return;
     }
 
-    if (processedDeepLinkIdRef.current === targetLeadId) {
+    const deepLinkKey = `${targetLeadId}:${targetDrawerTab || ""}`;
+    if (processedDeepLinkIdRef.current === deepLinkKey) {
       return;
     }
 
-    processedDeepLinkIdRef.current = targetLeadId;
+    processedDeepLinkIdRef.current = deepLinkKey;
 
     // Check if the lead is already present in loaded leads or kanbanLeads
     const existingLead =
@@ -2073,6 +2084,9 @@ export function CrmLeadsPage() {
 
     if (existingLead) {
       handleOpenLeadDrawer(existingLead);
+      if (targetDrawerTab) {
+        setDrawerTab(targetDrawerTab);
+      }
       return;
     }
 
@@ -2083,6 +2097,9 @@ export function CrmLeadsPage() {
         const data = res?.data || res;
         if (data && data.id) {
           handleOpenLeadDrawer(data);
+          if (targetDrawerTab) {
+            setDrawerTab(targetDrawerTab);
+          }
         } else {
           showToast("Lead not found or you do not have permission to view it.", "error");
         }

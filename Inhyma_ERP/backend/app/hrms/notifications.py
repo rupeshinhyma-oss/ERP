@@ -250,6 +250,48 @@ async def notify_leave_decision(
     )
 
 
+async def notify_leave_cancelled(
+    db: AsyncSession,
+    *,
+    employee_id: uuid.UUID,
+    from_date: str,
+    to_date: str,
+    number_of_days: float,
+    actor_id: Optional[uuid.UUID] = None,
+    request_id: Optional[uuid.UUID] = None,
+    was_approved: bool = False,
+) -> None:
+    """Notify employee (when Admin cancels their leave) or approvers (when employee cancels own leave)."""
+    emp = await db.get(User, employee_id)
+    emp_name = _emp_display_name(emp)
+    num_disp = int(number_of_days) if float(number_of_days).is_integer() else number_of_days
+    link = f"/hrms/leave?request_id={request_id}" if request_id else "/hrms/leave"
+
+    if actor_id and actor_id != employee_id:
+        balance_note = " Your leave balance has been restored." if was_approved else ""
+        await send_isolated_hrms_notification(
+            db,
+            recipient_id=employee_id,
+            type="hrms_leave_cancelled",
+            title="Leave Request Cancelled",
+            message=f"Your leave request for {num_disp} day(s) from {from_date} to {to_date} was cancelled.{balance_note}",
+            link=link,
+        )
+    else:
+        approvers = await resolve_hrms_approvers(db, employee_id, module_name="leave")
+        for approver_id in approvers:
+            if actor_id and approver_id == actor_id:
+                continue
+            await send_isolated_hrms_notification(
+                db,
+                recipient_id=approver_id,
+                type="hrms_leave_cancelled",
+                title="Leave Request Cancelled",
+                message=f"{emp_name} cancelled their leave request ({num_disp} day(s), {from_date} to {to_date}).",
+                link=link,
+            )
+
+
 async def notify_regularization_requested(
     db: AsyncSession,
     *,
@@ -535,5 +577,74 @@ async def notify_site_visit_cancelled(
         type="hrms_site_visit_cancelled",
         title="Site Visit Cancelled",
         message=f"Your scheduled site visit to {customer_name} on {visit_date} has been cancelled.",
+        link=link,
+    )
+
+
+async def notify_site_visit_reassigned_away(
+    db: AsyncSession,
+    *,
+    previous_employee_id: uuid.UUID,
+    customer_name: str,
+    visit_date: str,
+    actor_id: Optional[uuid.UUID] = None,
+    visit_id: Optional[uuid.UUID] = None,
+) -> None:
+    """Notify the previously assigned employee when their scheduled site visit is reassigned away."""
+    if actor_id and previous_employee_id == actor_id:
+        return
+
+    link = f"/hrms/site-visit?visit_id={visit_id}" if visit_id else "/hrms/site-visit"
+    await send_isolated_hrms_notification(
+        db,
+        recipient_id=previous_employee_id,
+        type="hrms_site_visit_reassigned_away",
+        title="Site Visit Reassigned",
+        message=f"Your scheduled site visit to {customer_name} on {visit_date} has been reassigned to another team member.",
+        link=link,
+    )
+
+
+async def notify_payslip_published(
+    db: AsyncSession,
+    *,
+    employee_id: uuid.UUID,
+    payroll_month: str,
+    actor_id: Optional[uuid.UUID] = None,
+) -> None:
+    """Notify an employee when their monthly payroll is approved and their payslip is available."""
+    if actor_id and employee_id == actor_id:
+        return
+
+    link = f"/hrms/payroll?month={payroll_month}"
+    await send_isolated_hrms_notification(
+        db,
+        recipient_id=employee_id,
+        type="hrms_payslip_published",
+        title="Payslip Available",
+        message=f"Your payslip for {payroll_month} has been approved and is now available to view.",
+        link=link,
+    )
+
+
+async def notify_salary_updated(
+    db: AsyncSession,
+    *,
+    employee_id: uuid.UUID,
+    effective_from: str,
+    actor_id: Optional[uuid.UUID] = None,
+    salary_id: Optional[uuid.UUID] = None,
+) -> None:
+    """Notify an employee when HR/Admin assigns or revises their salary structure."""
+    if actor_id and employee_id == actor_id:
+        return
+
+    link = f"/hrms/payroll?salary_id={salary_id}" if salary_id else "/hrms/payroll"
+    await send_isolated_hrms_notification(
+        db,
+        recipient_id=employee_id,
+        type="hrms_salary_updated",
+        title="Salary Structure Updated",
+        message=f"Your salary structure has been updated effective {effective_from}.",
         link=link,
     )

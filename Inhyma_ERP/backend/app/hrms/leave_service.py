@@ -67,7 +67,11 @@ from app.hrms.schemas import (
     LeaveTypeRead,
     LeaveTypeUpdate,
 )
-from app.hrms.notifications import notify_leave_decision, notify_leave_requested
+from app.hrms.notifications import (
+    notify_leave_cancelled,
+    notify_leave_decision,
+    notify_leave_requested,
+)
 from app.rbac.models import Permission, Role, RoleAssignmentStatus, RolePermission, UserPermission, UserRole
 from app.users.models import User
 
@@ -2360,7 +2364,8 @@ class HrmsLeaveService:
             raise HTTPException(status_code=400, detail="Cannot cancel an approved leave request.")
 
         # If previously approved, restore consumed balance
-        if req.approval_status == "APPROVED":
+        was_approved = req.approval_status == "APPROVED"
+        if was_approved:
             raw_bal = await self.db.scalar(
                 select(HrmsEmployeeLeaveBalance).where(
                     HrmsEmployeeLeaveBalance.employee_id == req.employee_id,
@@ -2391,6 +2396,17 @@ class HrmsLeaveService:
         req.status = "CANCELLED"
         req.approval_status = "CANCELLED"
         req.updated_by = user_id
+        await self.db.flush()
+        await notify_leave_cancelled(
+            self.db,
+            employee_id=req.employee_id,
+            from_date=req.from_date.isoformat(),
+            to_date=req.to_date.isoformat(),
+            number_of_days=req.number_of_days,
+            actor_id=user_id,
+            request_id=req.id,
+            was_approved=was_approved,
+        )
         await self.db.commit()
         await self.db.refresh(req)
         return await self._to_leave_request_read(req)

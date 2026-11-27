@@ -99,6 +99,8 @@ class RecurringTaskWorker:
         generated_count = 0
         reminders_sent = 0
         escalations_triggered = 0
+        deadline_notifications = 0
+        expired_holds_checked = 0
 
         async with sessionmaker() as session:
             is_pg = False
@@ -144,6 +146,12 @@ class RecurringTaskWorker:
                         )
                         reminders_sent = check_stats.get("reminders_sent", 0)
                         escalations_triggered = check_stats.get("escalations_triggered", 0)
+
+                        # 3. Check standard task & escalation deadlines (also covers synced CRM follow-up tasks)
+                        deadline_notifications = await service.check_task_deadlines(user_id=None)
+
+                        # 4. Check expired holds with 20h deduplication
+                        expired_holds_checked = await service.check_expired_holds()
                     except Exception as e:
                         logger.error("Failed executing recurring task cycle: %s", str(e), exc_info=True)
                         raise
@@ -164,6 +172,10 @@ class RecurringTaskWorker:
                     )
                     reminders_sent = check_stats.get("reminders_sent", 0)
                     escalations_triggered = check_stats.get("escalations_triggered", 0)
+
+                    deadline_notifications = await service.check_task_deadlines(user_id=None)
+                    expired_holds_checked = await service.check_expired_holds()
+                    await session.commit()
                 except Exception as e:
                     logger.error("Failed executing recurring task cycle: %s", str(e), exc_info=True)
                     raise
@@ -175,12 +187,16 @@ class RecurringTaskWorker:
             "generated_count": generated_count,
             "reminders_sent": reminders_sent,
             "escalations_triggered": escalations_triggered,
+            "deadline_notifications": deadline_notifications,
+            "expired_holds_checked": expired_holds_checked,
         }
         logger.info(
-            "Recurring task worker pass completed: %d generated, %d reminders, %d escalations.",
+            "Recurring task worker pass completed: %d generated, %d reminders, %d escalations, %d deadline alerts, %d expired holds.",
             generated_count,
             reminders_sent,
             escalations_triggered,
+            deadline_notifications,
+            expired_holds_checked,
         )
         return self.last_stats
 

@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
 import { Breadcrumb } from "@/components/Breadcrumb";
 import { IconCreditCard, IconFileText, IconCoins, IconReceipt } from "@/components/icons";
@@ -107,6 +108,8 @@ function ExpensesTableSkeletonRows({ viewMode = "my", rowCount = 5 }: { viewMode
 export function ExpensesPage() {
   const toast = useToast();
   const { profile, isSuperAdmin, hasPermission } = useAuth();
+  const [searchParams] = useSearchParams();
+  const handledExpenseLinkRef = useRef<string | null>(null);
 
   // RBAC: Check approval and admin permissions
   const canApprove = useMemo(() => {
@@ -226,6 +229,36 @@ export function ExpensesPage() {
       setViewMode("my");
     }
   }, [canApprove, viewMode]);
+
+  // Deep-link support for /hrms/expenses?expense_id=<uuid> from notification bell
+  useEffect(() => {
+    const targetExpenseId = searchParams.get("expense_id")?.trim();
+    if (!targetExpenseId) {
+      handledExpenseLinkRef.current = null;
+      return;
+    }
+    if (handledExpenseLinkRef.current === targetExpenseId) {
+      return;
+    }
+    handledExpenseLinkRef.current = targetExpenseId;
+
+    let cancelled = false;
+    apiGet<ExpenseItem>(`/hrms/expenses/${targetExpenseId}`)
+      .then((res) => {
+        if (cancelled || !res?.data) return;
+        const exp = res.data;
+        if (canApprove && profile?.id && exp.employee_id !== profile.id) {
+          setViewMode("approvals");
+        }
+        setDetailExpense(exp);
+      })
+      .catch(() => {
+        /* fallback gracefully to current list */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [searchParams, canApprove, profile?.id]);
 
   // ---------------------------------------------------------------------------
   // Modal Handlers & Form Reset

@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
 import { Breadcrumb } from "@/components/Breadcrumb";
 import {
@@ -362,6 +363,8 @@ export function PayrollPage() {
     );
   }, [isPayrollDenied, isTrueAdmin, canConfigureSalary, canApprovePayroll, isHrRole, explicitPerms]);
 
+  const [searchParams] = useSearchParams();
+
   // PRIMARY WORKFLOW TABS: Strictly 3 tabs for Admin
   const [activeTab, setActiveTab] = useState<"setup" | "salary" | "monthly">(
     canConfigureSalary ? "setup" : "monthly"
@@ -655,11 +658,24 @@ export function PayrollPage() {
   // TAB 3: Monthly Payroll State (Attendance-driven, Editable, Approval & Reopen)
   // ---------------------------------------------------------------------------
   const [selectedMonth, setSelectedMonth] = useState<string>(() => {
+    const monthParam = searchParams.get("month")?.trim();
+    if (monthParam && /^\d{4}-\d{2}$/.test(monthParam)) {
+      return monthParam;
+    }
     const d = new Date();
     const y = d.getFullYear();
     const m = String(d.getMonth() + 1).padStart(2, "0");
     return `${y}-${m}`;
   });
+
+  // Sync deep-link ?month=YYYY-MM from payslip notifications
+  useEffect(() => {
+    const monthParam = searchParams.get("month")?.trim();
+    if (monthParam && /^\d{4}-\d{2}$/.test(monthParam)) {
+      setSelectedMonth(monthParam);
+      setActiveTab("monthly");
+    }
+  }, [searchParams]);
 
   const [monthlyPayroll, setMonthlyPayroll] = useState<MonthlyPayrollRecord | null>(null);
   const [loadingPayroll, setLoadingPayroll] = useState(false);
