@@ -252,7 +252,7 @@ describe("EscalateTaskModal Hook-Order & Escalation Workflow Regression (NEW-BUG
         isOpen={true}
         onClose={vi.fn()}
         onTaskUpdated={vi.fn()}
-        onOpenEscalate={vi.fn()}
+        onEscalateRequest={vi.fn()}
       />
     );
 

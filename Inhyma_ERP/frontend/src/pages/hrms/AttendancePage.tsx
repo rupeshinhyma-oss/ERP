@@ -228,7 +228,7 @@ interface RegularizationItem {
   punch_in_time?: string | null;
   punch_out_time?: string | null;
   total_hours?: string | null;
-  status: "PENDING" | "APPROVED" | "REJECTED";
+  status: "PENDING" | "APPROVED" | "REJECTED" | "CANCELLED";
   regularization_status?: string | null;
   regularization_reason?: string | null;
   submitted_at: string;
@@ -723,7 +723,7 @@ export function AttendancePage() {
   }, [selectedYear, selectedMonth, calendarDays, weeklyOffDays, now]);
 
   // GPS & Location Simulator State
-  const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
+  const [coords, setCoords] = useState<{ lat: number; lng: number; accuracy?: number } | null>(null);
   const [gpsStatus, setGpsStatus] = useState<"searching" | "connected" | "denied" | "simulated">("searching");
   const [_simulatorMode, setSimulatorMode] = useState<"real" | "inside" | "edge" | "outside">("real");
 
@@ -981,7 +981,7 @@ export function AttendancePage() {
             accuracy: pos.coords.accuracy,
             timestamp: new Date(pos.timestamp || Date.now()),
           };
-          setCoords({ lat: fresh.lat, lng: fresh.lng });
+          setCoords({ lat: fresh.lat, lng: fresh.lng, accuracy: fresh.accuracy });
           setGpsAccuracy(fresh.accuracy);
           setGpsTimestamp(fresh.timestamp);
           setGpsStatus("connected");
@@ -1028,17 +1028,17 @@ export function AttendancePage() {
     setGpsStatus("simulated");
 
     if (mode === "inside") {
-      setCoords({ lat: office.latitude, lng: office.longitude });
+      setCoords({ lat: office.latitude, lng: office.longitude, accuracy: 5.0 });
       setGpsAccuracy(5.0);
       setGpsTimestamp(new Date());
       setAlert({ type: "success", message: "Simulator set: Inside radius (0–10m from office)." });
     } else if (mode === "edge") {
-      setCoords({ lat: office.latitude + 0.0012, lng: office.longitude });
+      setCoords({ lat: office.latitude + 0.0012, lng: office.longitude, accuracy: 15.0 });
       setGpsAccuracy(15.0);
       setGpsTimestamp(new Date());
       setAlert({ type: "warning", message: "Simulator set: Edge of radius (~135m from office)." });
     } else if (mode === "outside") {
-      setCoords({ lat: office.latitude + 0.0045, lng: office.longitude });
+      setCoords({ lat: office.latitude + 0.0045, lng: office.longitude, accuracy: 35.0 });
       setGpsAccuracy(35.0);
       setGpsTimestamp(new Date());
       setAlert({ type: "error", message: "Simulator set: Outside radius (~500m from office)." });
