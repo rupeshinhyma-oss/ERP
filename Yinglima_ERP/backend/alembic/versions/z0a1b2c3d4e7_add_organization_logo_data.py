@@ -1,7 +1,7 @@
 """add organization logo_data column
 
 Revision ID: z0a1b2c3d4e7
-Revises: z0a1b2c3d4e6
+Revises: g9b0c1d2e3f4
 Create Date: 2026-11-27 16:45:00.000000
 
 Adds Organization.logo_data (Text, nullable=True) for database-backed
@@ -12,7 +12,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision = "z0a1b2c3d4e7"
-down_revision = "z0a1b2c3d4e6"
+down_revision = "g9b0c1d2e3f4"
 branch_labels = None
 depends_on = None
 

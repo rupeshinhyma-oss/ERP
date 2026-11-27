@@ -3,6 +3,9 @@
 **System:** Yinglima_ERP (China Procurement)  
 **Scope:** Functional updates, schema changes, UI hardening, and bug fixes.
 
+### 41. Retired Orphaned `reporting.*` Permissions (`scripts/seed.py`)
+- **Removed `reporting.view` & `reporting.manage`:** Added `reporting.view` and `reporting.manage` to `seed_with_session`'s retired permissions cleanup in `backend/scripts/seed.py` (and purged them from the database) so the unused `REPORTING` module no longer appears under `OTHER MODULES` in RBAC / User Permission Overrides.
+
 ### 40. Company Logo DB Storage, Blank-State Fallback Removal & Safe Replacement (`z0a1b2c3d4e7`, `organizations/*`, `common/storage.py`, `main.py`, `brand.ts`, `Organization.tsx`, `AppShell.tsx`, `Login.tsx`, `NetworkStatusNotifier.tsx`, `index.html`, `test_organization_logo.py`, `OrganizationLogo.test.tsx`)
 - **Database-Backed Logo Storage & Endpoints (`models.py`, `schemas.py`, `service.py`, `routes.py`, `main.py`, `z0a1b2c3d4e7_add_organization_logo_data.py`):** Added `Organization.logo_data` (`Text`), widened `logo_url` to `Text`, mounted `/uploads/branding`, updated `OrganizationService.update()` & `PATCH /organizations` (`exclude_unset=True`), and added `GET /api/v1/organizations/logo`, `POST /api/v1/organizations/logo`, and `DELETE /api/v1/organizations/logo` with automatic `delete_stored_file()` cleanup of replaced/removed branding files.
 - **Removed Hardcoded `/logo.png` & `/favicon.svg` Fallbacks (`brand.ts`, `AppShell.tsx`, `Login.tsx`, `Organization.tsx`, `NetworkStatusNotifier.tsx`, `index.html`):** Deleted static `public/logo.png` and `public/favicon.svg` assets. Clicking **Remove Logo** clears DB columns and client storage caches, rendering clean white blank space in ERP Settings, sidebar header, login header, and browser tab favicon (`BLANK_FAVICON_URL`) with cross-tab `storage` sync.

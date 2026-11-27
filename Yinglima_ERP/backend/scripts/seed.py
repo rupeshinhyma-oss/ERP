@@ -396,6 +396,8 @@ async def seed_with_session(session) -> None:
     for retired_code in (
         "planning.row.manage",
         "productgallery.view",
+        "reporting.view",
+        "reporting.manage",
         "stock_movement.view",
         "stock_movement.create",
         "stock_movement.cancel",

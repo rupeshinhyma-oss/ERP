@@ -770,15 +770,6 @@ function Sidebar({
           gap: "6px",
         }}
       >
-        {!collapsed && (
-          <Link
-            to="/dashboard"
-            className="sidebar-brand-logo"
-            style={{ display: "inline-flex", alignItems: "center", textDecoration: "none", cursor: "pointer" }}
-          >
-            <img src="/logo.png" alt="IHM Logo" style={{ height: "38px", width: "auto", objectFit: "contain" }} />
-          </Link>
-        )}
         {!collapsed &&
           (resolvedBrandLogo ? (
             <Link
