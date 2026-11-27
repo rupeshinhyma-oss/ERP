@@ -1060,8 +1060,9 @@ Manage complete vendor team directory:
 - **Actions:** `Edit Organization`, `Save Changes`, `Cancel`.
 - **Real-Time Dynamic Sidebar Branding:**
   - Automatically pushes uploaded company logo and brand name across the entire application shell via `resolveBrandInfo()` and `subscribeBrandLogo()`.
-  - AppShell sidebar header immediately extracts the organization logo (`resolveImageUrl(brandLogo)`) with fallback to `/logo.png`.
-  - Multiple browser tabs receive real-time updates via local event subscription without requiring page refresh.
+  - AppShell sidebar header immediately extracts the organization logo (`resolveImageUrl(brandLogo)`) when present, and renders a clean white blank space (no hardcoded `/logo.png`) when no logo is configured or after `Remove Logo` is clicked.
+  - Clicking `Change PNG Logo` preserves the existing logo until a new upload succeeds cleanly; uploading a new logo replaces the old one everywhere and removes the previous file.
+  - Multiple browser tabs receive real-time updates via local listeners and cross-tab `storage` events without requiring page refresh.
 
 
 ### 21.2. Organization List (`/masters/company-list`)
@@ -3050,25 +3051,24 @@ Positioned directly underneath the collapsible filter card and powered by `GET /
 ## 61. DYNAMIC BRAND LOGO: Real-Time Sidebar Branding from ERP Organization Settings
 
 ### Overview & Route Mapping
-- **Primary Routes:** `/organization` (ERP Settings), Global AppShell Sidebar (`AppShell.tsx`).
+- **Primary Routes:** `/organization` (ERP Settings), Global AppShell Sidebar (`AppShell.tsx`), Login (`Login.tsx`).
 - **Primary Permissions:** `organization.manage`, Public Authenticated.
-- **Purpose:** Seamless corporate white-labeling and visual personalization. Eliminates hardcoded placeholder branding (`/logo.png`) by dynamically resolving the active organization's uploaded company logo in the sidebar header with real-time multi-tab propagation.
+- **Purpose:** Seamless corporate white-labeling and visual personalization. Removes hardcoded placeholder branding (`/logo.png`, `/favicon.svg`) by dynamically resolving the active organization's uploaded company logo in the sidebar header, login header, ERP Settings preview, and browser favicon—rendering clean blank white space when removed or absent.
 
 ### Key Visual & Functional Components
-1. **Dynamic Brand Logo Resolution (`brand.ts` & `AppShell.tsx`):**
-   - On application mount, `AppShell` queries `resolveBrandInfo()` to fetch the active organization profile.
-   - Extracts `logo_data` (Base64 data URI) or `logo_url` (Supabase storage URL).
-   - Sidebar header renders `<img src={resolveImageUrl(brandLogo) || "/logo.png"} alt="IHM Logo" ... />`.
-   - Built-in `onError` event handler: if an image URL fails to load or network error occurs, it gracefully falls back to `/logo.png` with zero visual breakage.
-2. **Real-Time Cross-Tab Subscription (`subscribeBrandLogo`):**
-   - Whenever an administrator uploads and saves a new company logo in **ERP Settings &rarr; Organization**, `setBrandLogo()` emits a localized window event (`ihm_brand_logo_changed`).
-   - The AppShell sidebar listens to this event via `subscribeBrandLogo(setBrandLogo)`, immediately updating the logo in the sidebar header across all active browser windows and tabs without requiring an application reload.
+1. **Dynamic Brand Logo Resolution (`brand.ts`, `AppShell.tsx`, `Login.tsx`, `Organization.tsx`):**
+   - On application mount, `AppShell` and `Login` query `resolveBrandInfo()` / `/organizations/public` and always sync DB state (including clearing stale cached logos when DB `logo_url`/`logo_data` is `null`).
+   - Extracts `logo_data` (Base64 data URI) or `logo_url` (DB-backed endpoint / cloud storage URL).
+   - When no logo is set (or an image fails to load), the sidebar header, login header, ERP Settings preview container, and browser tab favicon (`BLANK_FAVICON_URL`) render blank white without falling back to any hardcoded logo file.
+2. **Safe Replacement & Cross-Tab Synchronization (`subscribeBrandLogo`, `DELETE /organizations/logo`):**
+   - Clicking **Change PNG Logo** opens the file picker while keeping the existing logo intact until a valid new upload completes successfully (`POST /api/v1/organizations/logo`), which then deletes the previous stored file and updates all active UI surfaces immediately.
+   - Clicking **Remove Logo** clears `logo_url` and `logo_data` in PostgreSQL, deletes any stored branding file, clears client caches, and updates all active browser tabs immediately via `subscribeBrandLogo` and `storage` events.
 
 ### QA Verification Test Cases
-- [ ] Verify that opening any ERP page renders the active organization's custom company logo in the sidebar header.
-- [ ] Verify that navigating to `/organization`, uploading a new company logo, and clicking `Save Changes` immediately updates the sidebar header logo in real-time.
-- [ ] Verify that if an invalid or unreachable image URL is returned, the sidebar logo falls back gracefully to `/logo.png`.
-- [ ] Verify that opening a second browser tab and changing the logo in the first tab updates the second tab's sidebar header immediately.
+- [ ] Verify that opening any ERP page with a configured logo renders the active organization's custom company logo in the sidebar header, login header, and browser tab favicon.
+- [ ] Verify that clicking **Remove Logo** clears the logo everywhere (ERP Settings preview, sidebar header, login header, and tab favicon become blank white with no hardcoded `IHM` `/logo.png` fallback, even after page reload).
+- [ ] Verify that clicking **Change PNG Logo** and cancelling the picker or encountering an upload error preserves the existing logo intact.
+- [ ] Verify that uploading a new PNG logo immediately replaces the old logo across ERP Settings, sidebar, login page, favicon, and other open browser tabs.
 
 ---
 

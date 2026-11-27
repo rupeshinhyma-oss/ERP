@@ -7,18 +7,31 @@
  * open tab's next navigation.
  */
 
-import { apiGet } from "./api";
+import { API_ORIGIN, apiGet } from "./api";
 import { DEFAULT_BRAND_NAME } from "./nav";
 import type { Organization } from "@/types";
 
 const CACHE_KEY = "erp_org_company_name";
+const LOGO_CACHE_KEY = "erp_org_company_logo";
+const ORG_PROFILE_CACHE_KEY = "erp_org_full_profile";
+export const BLANK_FAVICON_URL = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'/%3E";
 
 type Listener = (name: string) => void;
 const listeners = new Set<Listener>();
 
+type LogoListener = (logo: string | null) => void;
+const logoListeners = new Set<LogoListener>();
+
+let memoryLogo: string | null | undefined = undefined;
+
 export function subscribeBrandName(listener: Listener): () => void {
   listeners.add(listener);
   return () => listeners.delete(listener);
+}
+
+export function subscribeBrandLogo(listener: LogoListener): () => void {
+  logoListeners.add(listener);
+  return () => logoListeners.delete(listener);
 }
 
 export function getCachedBrandName(): string {
@@ -48,6 +61,246 @@ export function invalidateBrandNameCache(): void {
   inFlightBrandPromise = null;
 }
 
+export function resolveImageUrl(url: string | null | undefined): string {
+  if (!url) return "";
+  let clean = url.trim();
+  if ((clean.startsWith('"') && clean.endsWith('"')) || (clean.startsWith("'") && clean.endsWith("'"))) {
+    clean = clean.slice(1, -1).trim();
+  }
+  if (!clean) return "";
+  if (clean.startsWith("data:")) {
+    return clean;
+  }
+  if (clean.toLowerCase().startsWith("/static/uploads/")) {
+    clean = "/static/uploads/" + clean.slice("/static/uploads/".length);
+  } else if (clean.toLowerCase().startsWith("/uploads/")) {
+    clean = "/uploads/" + clean.slice("/uploads/".length);
+  }
+  if (clean.startsWith("http://") || clean.startsWith("https://")) {
+    return encodeURI(clean);
+  }
+  const fullUrl = `${API_ORIGIN}${clean.startsWith("/") ? "" : "/"}${clean}`;
+  return encodeURI(fullUrl);
+}
+
+export function getCachedBrandLogo(): string | null {
+  if (memoryLogo !== undefined) {
+    return memoryLogo;
+  }
+  const stored =
+    sessionStorage.getItem(LOGO_CACHE_KEY) ||
+    localStorage.getItem(LOGO_CACHE_KEY) ||
+    localStorage.getItem("erp_brand_logo");
+  return (stored && stored.trim()) || null;
+}
+
+export function applyBrandFavicon(logoUrl: string | null, isGrayscale = false): void {
+  if (typeof document === "undefined") return;
+
+  const rawSrc = logoUrl && logoUrl.trim() ? resolveImageUrl(logoUrl) : "";
+
+  const updateFaviconTag = (href: string) => {
+    try {
+      const existingIcons = document.querySelectorAll("link[rel*='icon']");
+      const newLink = document.createElement("link");
+      newLink.id = "dynamic-favicon";
+      newLink.rel = "icon";
+      newLink.type = href.startsWith("data:image/svg") ? "image/svg+xml" : "image/png";
+      newLink.href = href;
+
+      if (existingIcons.length > 0) {
+        existingIcons.forEach((el) => el.parentNode?.removeChild(el));
+      }
+      document.head.appendChild(newLink);
+    } catch {
+      const fav = document.getElementById("dynamic-favicon") as HTMLLinkElement | null;
+      if (fav) {
+        fav.type = href.startsWith("data:image/svg") ? "image/svg+xml" : "image/png";
+        fav.href = href;
+      }
+    }
+  };
+
+  if (!rawSrc) {
+    updateFaviconTag(BLANK_FAVICON_URL);
+    return;
+  }
+
+  updateFaviconTag(rawSrc);
+
+  if (typeof window !== "undefined" && typeof Image !== "undefined") {
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.onload = () => {
+      try {
+        const canvas = document.createElement("canvas");
+        const size = 64;
+        canvas.width = size;
+        canvas.height = size;
+        const ctx = canvas.getContext("2d");
+        if (ctx) {
+          ctx.clearRect(0, 0, size, size);
+          if (isGrayscale) {
+            ctx.filter = "grayscale(100%) opacity(75%)";
+          }
+          const w = img.naturalWidth || img.width;
+          const h = img.naturalHeight || img.height;
+          if (w && h) {
+            const ratio = Math.min(size / w, size / h);
+            const drawW = w * ratio;
+            const drawH = h * ratio;
+            const x = (size - drawW) / 2;
+            const y = (size - drawH) / 2;
+            ctx.drawImage(img, x, y, drawW, drawH);
+            const dataUrl = canvas.toDataURL("image/png");
+            updateFaviconTag(dataUrl);
+          }
+        }
+      } catch {
+        // Fallback to rawSrc already applied
+      }
+    };
+    img.onerror = () => {
+      updateFaviconTag(BLANK_FAVICON_URL);
+    };
+    img.src = rawSrc;
+  }
+}
+
+export function setBrandLogo(logo: string | null, fallbackCacheUrl?: string | null): void {
+  const cleanLogo = (logo || "").trim() || null;
+  memoryLogo = cleanLogo;
+  if (cleanLogo) {
+    try {
+      sessionStorage.setItem(LOGO_CACHE_KEY, cleanLogo);
+      localStorage.setItem(LOGO_CACHE_KEY, cleanLogo);
+      localStorage.setItem("erp_brand_logo", cleanLogo);
+    } catch {
+      const compact = (fallbackCacheUrl || "").trim() || null;
+      if (compact && compact !== cleanLogo) {
+        try {
+          sessionStorage.setItem(LOGO_CACHE_KEY, compact);
+          localStorage.setItem(LOGO_CACHE_KEY, compact);
+          localStorage.setItem("erp_brand_logo", compact);
+        } catch {
+          sessionStorage.removeItem(LOGO_CACHE_KEY);
+          localStorage.removeItem(LOGO_CACHE_KEY);
+          localStorage.removeItem("erp_brand_logo");
+        }
+      } else {
+        sessionStorage.removeItem(LOGO_CACHE_KEY);
+        localStorage.removeItem(LOGO_CACHE_KEY);
+        localStorage.removeItem("erp_brand_logo");
+      }
+    }
+  } else {
+    sessionStorage.removeItem(LOGO_CACHE_KEY);
+    localStorage.removeItem(LOGO_CACHE_KEY);
+    localStorage.removeItem("erp_brand_logo");
+  }
+  applyBrandFavicon(cleanLogo);
+  logoListeners.forEach((listener) => listener(cleanLogo));
+}
+
+export function invalidateBrandLogoCache(): void {
+  memoryLogo = null;
+  sessionStorage.removeItem(LOGO_CACHE_KEY);
+  localStorage.removeItem(LOGO_CACHE_KEY);
+  localStorage.removeItem("erp_brand_logo");
+  applyBrandFavicon(null);
+  logoListeners.forEach((listener) => listener(null));
+}
+
+if (typeof window !== "undefined") {
+  applyBrandFavicon(getCachedBrandLogo());
+  window.addEventListener("storage", (event) => {
+    if (event.key === LOGO_CACHE_KEY || event.key === "erp_brand_logo") {
+      const nextLogo = (event.newValue && event.newValue.trim()) || null;
+      memoryLogo = nextLogo;
+      applyBrandFavicon(nextLogo);
+      logoListeners.forEach((listener) => listener(nextLogo));
+    } else if (event.key === CACHE_KEY || event.key === "erp_brand_name") {
+      const nextName = (event.newValue && event.newValue.trim()) || DEFAULT_BRAND_NAME;
+      listeners.forEach((listener) => listener(nextName));
+    }
+  });
+}
+
+export function getCachedOrganizationProfile(): Organization | null {
+  try {
+    const raw = sessionStorage.getItem(ORG_PROFILE_CACHE_KEY) || localStorage.getItem(ORG_PROFILE_CACHE_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+export function setCachedOrganizationProfile(profile: Organization | null): void {
+  try {
+    if (profile) {
+      const s = JSON.stringify(profile);
+      sessionStorage.setItem(ORG_PROFILE_CACHE_KEY, s);
+      localStorage.setItem(ORG_PROFILE_CACHE_KEY, s);
+    } else {
+      sessionStorage.removeItem(ORG_PROFILE_CACHE_KEY);
+      localStorage.removeItem(ORG_PROFILE_CACHE_KEY);
+    }
+  } catch {
+    // Ignore storage quota limits
+  }
+}
+
+function extractOrganizationLogo(org: Pick<Organization, "logo_url" | "logo_data">): string | null {
+  if (org.logo_data && org.logo_data.startsWith("data:")) {
+    return org.logo_data;
+  }
+  return org.logo_url || org.logo_data || null;
+}
+
+export async function fetchOrganizationProfile(): Promise<Organization | null> {
+  try {
+    const { data } = await apiGet<Organization>("/organizations");
+    if (data) {
+      setCachedOrganizationProfile(data);
+      if (data.company_name) setBrandName(data.company_name);
+      setBrandLogo(extractOrganizationLogo(data), data.logo_url || null);
+      return data;
+    }
+  } catch {
+    try {
+      const { data } = await apiGet<Organization>("/organizations/public");
+      if (data) {
+        setCachedOrganizationProfile(data);
+        if (data.company_name) setBrandName(data.company_name);
+        setBrandLogo(extractOrganizationLogo(data), data.logo_url || null);
+        return data;
+      }
+    } catch {
+      // Non-blocking fallback to cached profile
+    }
+  }
+  return getCachedOrganizationProfile();
+}
+
+export async function resolveBrandInfo(): Promise<{ name: string; logoUrl: string | null }> {
+  try {
+    const profile = await fetchOrganizationProfile();
+    if (profile) {
+      return {
+        name: profile.company_name?.trim() || getCachedBrandName(),
+        logoUrl: extractOrganizationLogo(profile),
+      };
+    }
+  } catch {
+    // Non-blocking fallback to cached
+  }
+
+  return {
+    name: getCachedBrandName(),
+    logoUrl: getCachedBrandLogo(),
+  };
+}
+
 export async function resolveBrandName(force = false): Promise<string> {
   const cached = getCachedBrandName();
   if (!force && cached && cached !== DEFAULT_BRAND_NAME && Date.now() - lastBrandResolvedTime < 120000) {
@@ -60,10 +313,11 @@ export async function resolveBrandName(force = false): Promise<string> {
 
   inFlightBrandPromise = (async () => {
     try {
-      const { data } = await apiGet<{ company_name?: string }>("/organizations/public");
+      const { data } = await apiGet<Organization>("/organizations/public");
       if (data?.company_name) {
         const name = data.company_name.trim();
         setBrandName(name);
+        setBrandLogo(extractOrganizationLogo(data), data.logo_url || null);
         lastBrandResolvedTime = Date.now();
         return name;
       }
@@ -73,6 +327,7 @@ export async function resolveBrandName(force = false): Promise<string> {
         if (data?.company_name) {
           const name = data.company_name.trim();
           setBrandName(name);
+          setBrandLogo(extractOrganizationLogo(data), data.logo_url || null);
           lastBrandResolvedTime = Date.now();
           return name;
         }

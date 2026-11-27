@@ -78,6 +78,7 @@ export function LoginPage() {
     }
   });
   const [brandLogo, setBrandLogoState] = useState<string | null>(() => getCachedBrandLogo());
+  const [logoLoadError, setLogoLoadError] = useState(false);
   const [forgotOpen, setForgotOpen] = useState(false);
   const [forgotIdentifier, setForgotIdentifier] = useState("");
   const [forgotSubmitting, setForgotSubmitting] = useState(false);
@@ -85,6 +86,10 @@ export function LoginPage() {
   const [forgotError, setForgotError] = useState<unknown>(null);
   const identifierRef = useRef<HTMLInputElement>(null);
   const noticeProtectedUntilRef = useRef<number>(0);
+
+  useEffect(() => {
+    setLogoLoadError(false);
+  }, [brandLogo]);
 
   useEffect(() => {
     return subscribeBrandLogo(setBrandLogoState);
@@ -109,11 +114,9 @@ export function LoginPage() {
           }
           document.title = `Sign In - ${data.company_name}`;
         }
-        const logo = data.logo_url || data.logo_data || null;
-        if (logo) {
-          setBrandLogo(logo);
-          setBrandLogoState(logo);
-        }
+        const logo = (data.logo_data && data.logo_data.startsWith("data:") ? data.logo_data : data.logo_url) || data.logo_data || null;
+        setBrandLogo(logo, data.logo_url || null);
+        setBrandLogoState(logo);
       } catch {
         /* fallback to default */
       }
@@ -333,20 +336,20 @@ export function LoginPage() {
   return (
     <div style={{ minHeight: "100vh", width: "100%", background: "#f8fafc", display: "flex", flexDirection: "column" }}>
       {/* Top Header Logo */}
-      <header style={{ padding: "10px 32px", background: "#ffffff", borderBottom: "1px solid #e2e8f0", display: "flex", alignItems: "center" }}>
-        <Link to="/dashboard" style={{ display: "inline-flex", alignItems: "center", textDecoration: "none", cursor: "pointer" }}>
-          <img
-            src={resolveImageUrl(brandLogo) || "/logo.png"}
-            alt={`${brand || "ERP"} Logo`}
-            crossOrigin="anonymous"
-            onError={(e) => {
-              if (e.currentTarget.src !== window.location.origin + "/logo.png") {
-                e.currentTarget.src = "/logo.png";
-              }
-            }}
-            style={{ height: "40px", width: "auto", maxWidth: "200px", objectFit: "contain" }}
-          />
-        </Link>
+      <header style={{ padding: "10px 32px", background: "#ffffff", borderBottom: "1px solid #e2e8f0", display: "flex", alignItems: "center", minHeight: "60px", boxSizing: "border-box" }}>
+        {brandLogo && !logoLoadError && resolveImageUrl(brandLogo) ? (
+          <Link to="/dashboard" style={{ display: "inline-flex", alignItems: "center", textDecoration: "none", cursor: "pointer" }}>
+            <img
+              src={resolveImageUrl(brandLogo)}
+              alt={`${brand || "ERP"} Logo`}
+              crossOrigin="anonymous"
+              onError={() => setLogoLoadError(true)}
+              style={{ height: "40px", width: "auto", maxWidth: "200px", objectFit: "contain" }}
+            />
+          </Link>
+        ) : (
+          <div style={{ height: "40px" }} aria-hidden="true" />
+        )}
       </header>
 
       {/* Main Login Content */}

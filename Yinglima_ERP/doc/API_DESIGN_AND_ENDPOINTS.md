@@ -76,8 +76,10 @@ Machine-to-machine internal service endpoints invoked by `ERP_Main` over authent
 | `POST` | `/api/v1/auth/change-password` | Update current user's password and asynchronously push to ERP_Main | Authenticated |
 | `POST` | `/api/v1/users/{id}/reset-password` | Administrative password reset and automatic fanout push to ERP_Main | `user.manage` |
 | `PATCH` | `/api/v1/users/{id}` | Update user attributes; email is locked to central control plane | `user.update` |
-| `GET` | `/api/v1/organizations/public` | Unauthenticated public branding endpoint returning company name, legal name, and logo | Public |
-| `GET` | `/api/v1/organizations/logo` | Stream high-resolution database-persisted logo image with version hashing (`?v={sha1}`) | Public |
+| `GET` | `/api/v1/organizations/public` | Unauthenticated public branding endpoint returning company name, legal name, and versioned logo URL (`null` when removed) | Public |
+| `GET` | `/api/v1/organizations/logo` | Stream high-resolution database-persisted logo image with version hashing (`?v={sha1}`, returns `404` when absent) | Public |
+| `POST` | `/api/v1/organizations/logo` | Upload or replace company logo in DB (`logo_data`) and storage (`logo_url`), deleting any previous branding file | `organization.manage` |
+| `DELETE` | `/api/v1/organizations/logo` | Remove company logo (clears `logo_url` and `logo_data` in DB and deletes any stored branding file) | `organization.manage` |
 | `GET` | `/api/v1/health/federation` | Run live diagnostics & latency ping against ERP_Main central registry | Super Admin / Authenticated |
 
 ---
@@ -116,11 +118,9 @@ Machine-to-machine internal service endpoints invoked by `ERP_Main` over authent
   }
   ```
 
-### 8.2. Versioned Organization Logo (`GET /api/v1/organizations/logo?v={sha1}`)
-- Streams high-resolution organization logo binary data directly from PostgreSQL (`organizations.logo_data`).
-- HTTP Response Headers:
-  - `Content-Type: image/png` (or image/jpeg)
-  - `Cache-Control: public, max-age=86400, immutable`
-  - `ETag: "{sha1}"`
+### 8.2. Organization Logo Lifecycle (`/api/v1/organizations/logo`)
+- `GET /api/v1/organizations/logo`: Streams high-resolution organization logo binary data directly from PostgreSQL (`organizations.logo_data`) with `Cache-Control: public, max-age=86400` and `Vary: Origin`, or returns `404` when no logo is configured.
+- `POST /api/v1/organizations/logo` (`organization.manage`): Uploads PNG/JPEG/WEBP/GIF/SVG image data into `organizations.logo_data` + storage `logo_url` and deletes any previous branding file.
+- `DELETE /api/v1/organizations/logo` (`organization.manage`): Clears `logo_url` and `logo_data` in PostgreSQL and deletes any stored branding file so UI surfaces/favicons revert to blank white.
 - Guaranteed immediate cache invalidation via unique `?v={sha1}` query parameters upon organization settings updates.
 

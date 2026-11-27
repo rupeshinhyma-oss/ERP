@@ -512,8 +512,8 @@ The RBAC engine secures every endpoint via `require_permission(code)` dependenci
     - **Universal Coverage:** Both `SupplierService` and `BuyerService` enforce `get_any_by_company_name()` to ensure duplicate and trash detection triggers reliably regardless of phone number variations.
 
 ### 8.13. Organization & System Profile
-- **Endpoints:** `GET /organizations/profile`, `PATCH /organizations/profile`.
-- **Features:** Enterprise legal identity, tax/VAT/TIN registration, official address, and base operational currency.
+- **Endpoints:** `GET /organizations`, `POST /organizations`, `PATCH /organizations`, `GET /organizations/public`, `GET /organizations/logo`, `POST /organizations/logo`, `DELETE /organizations/logo`.
+- **Features:** Enterprise legal identity, tax/VAT/TIN registration, official address, base operational currency, and DB-backed company logo management (`logo_data` / `logo_url`) with blank-white fallback (`BLANK_FAVICON_URL`, no hardcoded `/logo.png`).
 
 ### 8.14. Organization Structure, Positions & Reporting Hierarchy
 - **Files:** `backend/app/org_structure/`.
@@ -882,7 +882,8 @@ A dedicated set of 8 pre-built, styled Excel workbooks (`.xlsx`) is maintained i
 | **Trash** | `DELETE`| `/api/v1/trash/{entity}/{id}/purge` | Permanently purge record | `trash.purge` (Super Admin) |
 | **Cache** | `GET` | `/api/v1/cache/stats` | Inspect cache metrics & hit rate | `settings.manage` |
 | **Cache** | `DELETE`| `/api/v1/cache/flush` | Flush entire cache | `settings.manage` |
-| **Organizations** | `GET/PATCH` | `/api/v1/organizations/profile` | Manage enterprise company profile & logo | `organization.view/manage` |
+| **Organizations** | `GET/POST/PATCH` | `/api/v1/organizations` | Manage enterprise company profile | `organization.manage` / Authenticated |
+| **Organizations** | `GET/POST/DELETE` | `/api/v1/organizations/logo` | Stream (`GET`), upload/replace (`POST`), or remove (`DELETE`) company logo in DB & storage | Public (`GET`) / `organization.manage` (`POST`/`DELETE`) |
 | **Events** | `WS` | `/api/v1/events/ws` | Real-time WebSocket connection bus | Authenticated |
 
 ---
@@ -1103,7 +1104,11 @@ Production database seeds (`backend/scripts/seed.py`) run during automated conta
   - If a user exists in the spoke ERP but has `is_active=False` or `deleted_at IS NOT NULL`, `POST /api/v1/auth/sso-handover` rejects handover with `401 Unauthorized` ("Account is inactive or disabled on this ERP instance").
   - If a user does not exist locally and `SSO_HANDOVER_AUTO_PROVISION=false`, access is cleanly rejected with `403 Forbidden`.
 
-### 16.5. Database-Backed Organization Branding & Storage Quota Protection
+### 16.5. Database-Backed Organization Branding, Upload Lifecycle & Blank-State Protection (Updated Nov 27, 2026)
+- Added `organizations.logo_data` (`z0a1b2c3d4e7_add_organization_logo_data.py`), `GET /api/v1/organizations/logo`, `POST /api/v1/organizations/logo`, and `DELETE /api/v1/organizations/logo` with automatic cleanup of replaced/removed branding files.
+- Removed hardcoded `/logo.png` and `/favicon.svg` fallbacks so clicking **Remove Logo** renders clean blank white space and `BLANK_FAVICON_URL`, while **Change PNG Logo** preserves the previous logo until a new upload succeeds cleanly.
+
+#### Original Legacy Branding Notes
 Enterprise logos and branding assets are stored directly in PostgreSQL with public streaming:
 - **Endpoint `GET /api/v1/organizations/logo?v={sha1}`:**
   - Streams high-resolution PNG/JPEG binary data with long-term `Cache-Control: public, max-age=86400, immutable`.
@@ -1128,5 +1133,5 @@ To guarantee that local development (`localhost` / LAN) and cloud deployments (`
 - **Strict Origin Parity (`sanitizeEnvMatchedUrl`):** `routeForCentralSession()`, `enforceCentralLanding()`, `erpUrlFor()`, `controlPlaneUrl()`, and `planSwitch()` reject cross-environment (`localhost` <-> `*.onrender.com`) URLs while automatically adapting `localhost` hostnames to the active LAN IP when accessed over Wi-Fi/LAN.
 
 ---
-*Maintained and verified for Inhyma Solutions Enterprise ERP (Yinglima Node). Last updated: October 29, 2026 (Environment-Isolated Cross-ERP URL Resolution & Zero-Hardcoded-Port Architecture, Sale Process Inwarded Local Purchase Costing, Multi-Field Digit-Normalized Search, Federation Resilience, Winsock DNS Platform Gating, Inbound Email DB Deduplication, Seed First-Install Protection, SSO Deactivated Account Guards, Database-Backed Branding, Universal Filter Standardization).*
+*Maintained and verified for Inhyma Solutions Enterprise ERP (Yinglima Node). Last updated: November 27, 2026 (Company Logo DB Storage [`z0a1b2c3d4e7`], `/organizations/logo` Endpoints, Blank-State White UI & Safe Replacement; Live Multi-Worker Permission Enforcement; Environment-Isolated Cross-ERP URL Resolution & Zero-Hardcoded-Port Architecture, Sale Process Inwarded Local Purchase Costing, Multi-Field Digit-Normalized Search, Federation Resilience, Winsock DNS Platform Gating, Inbound Email DB Deduplication, Seed First-Install Protection, SSO Deactivated Account Guards, Database-Backed Branding, Universal Filter Standardization).*
 

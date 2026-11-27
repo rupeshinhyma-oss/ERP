@@ -47,7 +47,7 @@ describe("Wave 6 Remaining Defects (BUG-010, BUG-013, BUG-014, BUG-016, BUG-018)
       </MemoryRouter>
     );
 
-    const logoImg = screen.getByAltText(/Logo/i) as HTMLImageElement;
+    const logoImg = (await screen.findByAltText(/Logo/i)) as HTMLImageElement;
     expect(logoImg.getAttribute("crossorigin")).toBe("anonymous");
 
     fireEvent.change(screen.getByLabelText(/Username, Email or Mobile Number/i), {

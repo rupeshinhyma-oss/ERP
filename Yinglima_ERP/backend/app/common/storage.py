@@ -17,6 +17,7 @@ import re
 import uuid
 from pathlib import Path
 from typing import Tuple
+from urllib.parse import unquote, urlparse
 
 import httpx
 
@@ -367,3 +368,66 @@ async def save_uploaded_file(
         raise
 
     return f"{url_prefix}/{unique_filename}", unique_filename
+
+
+async def delete_from_supabase(bucket: str, filename: str) -> bool:
+    """Delete a file object from Supabase Storage."""
+    auth_key = settings.supabase_auth_key
+    if not auth_key:
+        return False
+
+    clean_filename = sanitize_filename(filename)
+    delete_url = f"{settings.supabase_base_url}/storage/v1/object/{bucket}/{clean_filename}"
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            for base_headers in _get_auth_header_variants(auth_key):
+                if not base_headers:
+                    continue
+                resp = await client.delete(delete_url, headers=base_headers)
+                if resp.status_code in (200, 204, 404):
+                    return True
+    except Exception as exc:
+        logger.warning("Supabase Storage delete failed for %s/%s: %s", bucket, clean_filename, exc)
+    return False
+
+
+async def delete_stored_file(
+    file_url: str,
+    allowed_buckets: set[str] | None = None,
+    allowed_local_subfolders: set[str] | None = None,
+) -> bool:
+    """Safely delete a stored file from local disk or Supabase Storage."""
+    if not file_url or not isinstance(file_url, str):
+        return True
+
+    effective_buckets = allowed_buckets or PUBLIC_BUCKETS
+    effective_subfolders = allowed_local_subfolders or {"products", "suppliers", "branding", "quotations", "purchase-bills"}
+    clean_path = unquote(urlparse(file_url).path)
+
+    if clean_path.startswith("/uploads/") or clean_path.startswith("uploads/"):
+        rel_str = clean_path.lstrip("/")
+        if rel_str.startswith("uploads/"):
+            rel_str = rel_str[len("uploads/"):]
+        parts = rel_str.split("/")
+        if not parts or parts[0] not in effective_subfolders or ".." in rel_str:
+            return False
+        base_dir = Path("uploads").resolve()
+        target = (base_dir / rel_str).resolve()
+        if not str(target).startswith(str(base_dir)):
+            return False
+        if target.is_file():
+            target.unlink(missing_ok=True)
+        return True
+
+    if "/storage/v1/object/" in clean_path:
+        marker = clean_path.split("/storage/v1/object/", 1)[1]
+        for prefix in ("public/", "authenticated/", "sign/"):
+            if marker.startswith(prefix):
+                marker = marker[len(prefix):]
+                break
+        if "/" in marker:
+            bucket, filename = marker.split("/", 1)
+            if bucket in effective_buckets:
+                return await delete_from_supabase(bucket, filename)
+
+    return True

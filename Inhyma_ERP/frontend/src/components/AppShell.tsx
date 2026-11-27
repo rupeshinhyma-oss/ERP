@@ -737,6 +737,13 @@ function Sidebar({
 }) {
   const { isSuperAdmin, hasPermission } = useAuth();
   const navRef = useRef<HTMLElement>(null);
+  const [logoLoadError, setLogoLoadError] = useState(false);
+
+  useEffect(() => {
+    setLogoLoadError(false);
+  }, [brandLogo]);
+
+  const resolvedBrandLogo = brandLogo && !logoLoadError ? resolveImageUrl(brandLogo) : "";
 
   const visibleSections = useMemo(
     () =>
@@ -861,21 +868,20 @@ function Sidebar({
           gap: "6px",
         }}
       >
-        {!collapsed && (
-          <Link to="/dashboard" style={{ display: "inline-flex", alignItems: "center", textDecoration: "none", cursor: "pointer", maxHeight: "44px" }}>
-            <img
-              src={resolveImageUrl(brandLogo) || "/logo.png"}
-              alt={`${brandName || "ERP"} Logo`}
-              crossOrigin="anonymous"
-              onError={(e) => {
-                if (e.currentTarget.src !== window.location.origin + "/logo.png") {
-                  e.currentTarget.src = "/logo.png";
-                }
-              }}
-              style={{ maxHeight: "38px", maxWidth: "160px", width: "auto", objectFit: "contain" }}
-            />
-          </Link>
-        )}
+        {!collapsed &&
+          (resolvedBrandLogo ? (
+            <Link to="/dashboard" style={{ display: "inline-flex", alignItems: "center", textDecoration: "none", cursor: "pointer", maxHeight: "44px" }}>
+              <img
+                src={resolvedBrandLogo}
+                alt={`${brandName || "ERP"} Logo`}
+                crossOrigin="anonymous"
+                onError={() => setLogoLoadError(true)}
+                style={{ maxHeight: "38px", maxWidth: "160px", width: "auto", objectFit: "contain" }}
+              />
+            </Link>
+          ) : (
+            <div aria-hidden="true" />
+          ))}
         <button
           type="button"
           style={{

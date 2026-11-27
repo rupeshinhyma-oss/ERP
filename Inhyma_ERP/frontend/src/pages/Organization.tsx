@@ -16,7 +16,7 @@ import { Breadcrumb } from "@/components/Breadcrumb";
 import { Banner, Can } from "@/components/ui";
 import { SelectField, TextAreaField, TextField } from "@/components/fields";
 import { apiDelete, apiGet, apiPatch, apiPost, apiPostMultipart, ApiError, errorMessage } from "@/lib/api";
-import { invalidateBrandNameCache, resolveImageUrl, setBrandLogo, setBrandName } from "@/lib/brand";
+import { invalidateBrandNameCache, resolveImageUrl, setBrandLogo, setBrandName, setCachedOrganizationProfile } from "@/lib/brand";
 import { useToast } from "@/lib/toast";
 import type { Organization, OrganizationFieldId } from "@/types";
 
@@ -105,9 +105,28 @@ export function OrganizationPage() {
   const [logoUploading, setLogoUploading] = useState(false);
   const [pendingLogoFile, setPendingLogoFile] = useState<File | null>(null);
   const [pendingLogoPreview, setPendingLogoPreview] = useState<string | null>(null);
+  const [previewError, setPreviewError] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const viewFileInputRef = useRef<HTMLInputElement>(null);
+
+  const clearPendingLogo = () => {
+    setPendingLogoFile(null);
+    setPendingLogoPreview((prev) => {
+      if (prev && prev.startsWith("blob:")) {
+        try {
+          URL.revokeObjectURL(prev);
+        } catch {
+          /* ignore */
+        }
+      }
+      return null;
+    });
+  };
+
+  useEffect(() => {
+    setPreviewError(false);
+  }, [org?.logo_data, org?.logo_url, pendingLogoPreview]);
 
   const setField = (id: OrganizationFieldId, value: string) =>
     setForm((prev) => ({ ...prev, [id]: value }));
@@ -129,9 +148,9 @@ export function OrganizationPage() {
         setForm(fillForm(data));
         setMode("update");
         setEditing(false);
-        if (data.logo_data || data.logo_url) {
-          setBrandLogo(data.logo_data || data.logo_url || null);
-        }
+        setCachedOrganizationProfile(data);
+        const serverLogo = (data.logo_data && data.logo_data.startsWith("data:") ? data.logo_data : data.logo_url) || data.logo_data || null;
+        setBrandLogo(serverLogo, data.logo_url || null);
       } catch (err) {
         if (cancelled) return;
         if (err instanceof ApiError && err.status === 404) {
@@ -174,17 +193,31 @@ export function OrganizationPage() {
   const handleFileChosen = (file: File, autoUpload = false) => {
     const valError = validateLogoFile(file);
     if (valError) {
-      setError(new Error(valError));
+      const err = new Error(valError);
+      setError(err);
+      showToast(valError, "error");
       return;
     }
     setError(null);
-    setPendingLogoFile(file);
-    const objectUrl = URL.createObjectURL(file);
-    setPendingLogoPreview(objectUrl);
 
     if (autoUpload) {
+      // Keep the existing logo intact until the new upload completes cleanly.
       uploadLogoDirectly(file);
+      return;
     }
+
+    setPendingLogoFile(file);
+    const objectUrl = URL.createObjectURL(file);
+    setPendingLogoPreview((prev) => {
+      if (prev && prev.startsWith("blob:")) {
+        try {
+          URL.revokeObjectURL(prev);
+        } catch {
+          /* ignore */
+        }
+      }
+      return objectUrl;
+    });
   };
 
   const uploadLogoDirectly = async (file: File) => {
@@ -199,17 +232,18 @@ export function OrganizationPage() {
         formData
       );
       if (res?.data) {
-        const updatedOrg = res.data.organization || {
+        const updatedOrg = (res.data.organization || {
           ...(org || form),
           logo_url: res.data.logo_url,
           logo_data: res.data.logo_data,
-        };
-        setOrg(updatedOrg as Organization);
-        setForm(fillForm(updatedOrg as Organization));
-        setBrandLogo(res.data.logo_data || res.data.logo_url || null);
-        setPendingLogoFile(null);
-        setPendingLogoPreview(null);
-        showToast("Company logo successfully uploaded and saved in database storage.", "success");
+        }) as Organization;
+        setOrg(updatedOrg);
+        setForm(fillForm(updatedOrg));
+        setCachedOrganizationProfile(updatedOrg);
+        const newLogo = (res.data.logo_data && res.data.logo_data.startsWith("data:") ? res.data.logo_data : res.data.logo_url) || res.data.logo_data || null;
+        setBrandLogo(newLogo, res.data.logo_url || null);
+        clearPendingLogo();
+        showToast("Company logo updated successfully.", "success");
       }
     } catch (err) {
       setError(err);
@@ -220,7 +254,7 @@ export function OrganizationPage() {
   };
 
   const handleDeleteLogo = async () => {
-    if (!window.confirm("Are you sure you want to remove the custom company logo? The ERP will revert to the default logo.")) {
+    if (!window.confirm("Are you sure you want to remove the company logo?")) {
       return;
     }
     setLogoUploading(true);
@@ -228,17 +262,17 @@ export function OrganizationPage() {
     setSuccess(null);
     try {
       const res = await apiDelete<{ logo_url: null; logo_data: null; organization: Organization }>("/organizations/logo");
-      const updatedOrg = res?.data?.organization || {
+      const updatedOrg = (res?.data?.organization || {
         ...(org || form),
         logo_url: null,
         logo_data: null,
-      };
-      setOrg(updatedOrg as Organization);
-      setForm(fillForm(updatedOrg as Organization));
+      }) as Organization;
+      setOrg(updatedOrg);
+      setForm(fillForm(updatedOrg));
+      setCachedOrganizationProfile(updatedOrg);
       setBrandLogo(null);
-      setPendingLogoFile(null);
-      setPendingLogoPreview(null);
-      showToast("Custom logo removed successfully. Default ERP logo restored.", "success");
+      clearPendingLogo();
+      showToast("Company logo removed.", "success");
     } catch (err) {
       setError(err);
       showToast(errorMessage(err), "error");
@@ -263,40 +297,34 @@ export function OrganizationPage() {
         ({ data } = await apiPatch<Organization>("/organizations", payload));
       }
 
-      // If user selected a logo in the file picker, upload it now
+      // If user selected a logo in the edit form file picker, upload it now
       if (pendingLogoFile) {
-        try {
-          const formData = new FormData();
-          formData.append("file", pendingLogoFile);
-          const uploadRes = await apiPostMultipart<{ logo_url: string; logo_data?: string; organization: Organization }>(
-            "/organizations/logo",
-            formData
-          );
-          if (uploadRes?.data) {
-            data = {
-              ...data,
-              logo_url: uploadRes.data.logo_url,
-              logo_data: uploadRes.data.logo_data,
-            };
-            setBrandLogo(uploadRes.data.logo_data || uploadRes.data.logo_url || null);
-          }
-          setPendingLogoFile(null);
-          setPendingLogoPreview(null);
-        } catch (uploadErr) {
-          console.warn("Logo upload warning:", uploadErr);
+        const formData = new FormData();
+        formData.append("file", pendingLogoFile);
+        const uploadRes = await apiPostMultipart<{ logo_url: string; logo_data?: string; organization: Organization }>(
+          "/organizations/logo",
+          formData
+        );
+        if (uploadRes?.data) {
+          data = {
+            ...data,
+            logo_url: uploadRes.data.logo_url,
+            logo_data: uploadRes.data.logo_data,
+          };
         }
+        clearPendingLogo();
       }
 
       setOrg(data);
       setForm(fillForm(data));
+      setCachedOrganizationProfile(data);
 
       invalidateBrandNameCache();
       if (data?.company_name) {
         setBrandName(data.company_name);
       }
-      if (data?.logo_data || data?.logo_url) {
-        setBrandLogo(data.logo_data || data.logo_url || null);
-      }
+      const savedLogo = (data?.logo_data && data.logo_data.startsWith("data:") ? data.logo_data : data?.logo_url) || data?.logo_data || null;
+      setBrandLogo(savedLogo, data?.logo_url || null);
       showToast("Settings and branding saved successfully.", "success");
       setEditing(false);
     } catch (err) {
@@ -310,7 +338,9 @@ export function OrganizationPage() {
   const statusLabel =
     org?.status === "ACTIVE" ? "Active" : org?.status === "INACTIVE" ? "Inactive" : "—";
 
-  const activeLogoSrc = org?.logo_url || org?.logo_data ? resolveImageUrl(org.logo_data || org.logo_url) : null;
+  const activeLogoSrc = org?.logo_data || org?.logo_url ? resolveImageUrl(org.logo_data || org.logo_url) : null;
+  const hasStoredLogo = Boolean(activeLogoSrc);
+  const editPreviewSrc = pendingLogoPreview || (hasStoredLogo ? activeLogoSrc : null);
 
   return (
     <AppShell activeKey="organization">
@@ -386,7 +416,10 @@ export function OrganizationPage() {
                   height: "90px",
                   borderRadius: "10px",
                   border: "1.5px solid #cbd5e1",
-                  background: "repeating-conic-gradient(#f8fafc 0% 25%, #ffffff 0% 50%) 50% / 16px 16px",
+                  background:
+                    activeLogoSrc && !previewError
+                      ? "repeating-conic-gradient(#f8fafc 0% 25%, #ffffff 0% 50%) 50% / 16px 16px"
+                      : "#ffffff",
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
@@ -395,20 +428,19 @@ export function OrganizationPage() {
                   flexShrink: 0,
                 }}
               >
-                <img
-                  src={activeLogoSrc || "/logo.png"}
-                  alt="Company Logo"
-                  onError={(e) => {
-                    if (e.currentTarget.src !== window.location.origin + "/logo.png") {
-                      e.currentTarget.src = "/logo.png";
-                    }
-                  }}
-                  style={{
-                    maxHeight: "70px",
-                    maxWidth: "180px",
-                    objectFit: "contain",
-                  }}
-                />
+                {activeLogoSrc && !previewError ? (
+                  <img
+                    src={activeLogoSrc}
+                    alt="Company Logo"
+                    crossOrigin="anonymous"
+                    onError={() => setPreviewError(true)}
+                    style={{
+                      maxHeight: "70px",
+                      maxWidth: "180px",
+                      objectFit: "contain",
+                    }}
+                  />
+                ) : null}
               </div>
 
               {/* Logo Info & Actions */}
@@ -555,7 +587,10 @@ export function OrganizationPage() {
                       height: "85px",
                       borderRadius: "10px",
                       border: "1.5px solid #cbd5e1",
-                      background: "repeating-conic-gradient(#f1f5f9 0% 25%, #ffffff 0% 50%) 50% / 14px 14px",
+                      background:
+                        editPreviewSrc && !previewError
+                          ? "repeating-conic-gradient(#f1f5f9 0% 25%, #ffffff 0% 50%) 50% / 14px 14px"
+                          : "#ffffff",
                       display: "flex",
                       alignItems: "center",
                       justifyContent: "center",
@@ -564,23 +599,19 @@ export function OrganizationPage() {
                       flexShrink: 0,
                     }}
                   >
-                    <img
-                      src={
-                        pendingLogoPreview ||
-                        (org?.logo_url || org?.logo_data ? resolveImageUrl(org.logo_data || org.logo_url) : "/logo.png")
-                      }
-                      alt="Logo Preview"
-                      onError={(e) => {
-                        if (e.currentTarget.src !== window.location.origin + "/logo.png") {
-                          e.currentTarget.src = "/logo.png";
-                        }
-                      }}
-                      style={{
-                        maxHeight: "68px",
-                        maxWidth: "160px",
-                        objectFit: "contain",
-                      }}
-                    />
+                    {editPreviewSrc && !previewError ? (
+                      <img
+                        src={editPreviewSrc}
+                        alt="Logo Preview"
+                        crossOrigin="anonymous"
+                        onError={() => setPreviewError(true)}
+                        style={{
+                          maxHeight: "68px",
+                          maxWidth: "160px",
+                          objectFit: "contain",
+                        }}
+                      />
+                    ) : null}
                   </div>
 
                   {/* Dropzone text & buttons */}
@@ -622,8 +653,7 @@ export function OrganizationPage() {
                             className="btn"
                             onClick={(e) => {
                               e.stopPropagation();
-                              setPendingLogoFile(null);
-                              setPendingLogoPreview(null);
+                              clearPendingLogo();
                             }}
                             style={{ fontSize: "13px", padding: "6px 14px" }}
                           >
@@ -661,8 +691,7 @@ export function OrganizationPage() {
                   onClick={() => {
                     setError(null);
                     setSuccess(null);
-                    setPendingLogoFile(null);
-                    setPendingLogoPreview(null);
+                    clearPendingLogo();
                     if (org) setForm(fillForm(org));
                     setEditing(false);
                   }}
