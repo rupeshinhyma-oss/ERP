@@ -541,11 +541,26 @@ async def test_phase2_and_7_complete_rbac_and_comment_moderation(pg_feed_env):
         ("POST", f"/api/v1/feed/conversations/{dummy_id}/read", {}),
     ]
 
-    # 1. Unauthenticated -> 401 on all 23; No Feed Perms -> 403 on all 23; SuperAdmin w/ deny:feed.view -> 403 on all 23!
+    # 1. Unauthenticated -> 401 on all 23; SuperAdmin w/ deny:feed.view -> 403 on all 23!
+    #    Standard user with no explicit feed role grants (`h_none`) gets universal feed.view & feed.interact,
+    #    while remaining blocked (403) on feed.create / feed.manage endpoints.
+    create_or_manage_only = {
+        ("POST", "/api/v1/feed/posts"),
+        ("PATCH", f"/api/v1/feed/posts/{dummy_id}"),
+        ("DELETE", f"/api/v1/feed/posts/{dummy_id}"),
+        ("GET", "/api/v1/feed/recipients/eligible"),
+        ("GET", "/api/v1/feed/departments/eligible"),
+        ("POST", "/api/v1/feed/conversations"),
+    }
     for method, url, body in all_23:
         assert (await client.request(method, url, json=body)).status_code == 401
-        assert (await client.request(method, url, json=body, headers=h_none)).status_code == 403
         assert (await client.request(method, url, json=body, headers=h_sa_deny_view)).status_code == 403
+        if (method, url) in create_or_manage_only:
+            assert (await client.request(method, url, json=body, headers=h_none)).status_code == 403
+
+    assert (await client.get("/api/v1/feed/posts", headers=h_none)).status_code == 200
+    assert (await client.get("/api/v1/feed/conversations", headers=h_none)).status_code == 200
+    assert (await client.get("/api/v1/feed/conversations/unread-count", headers=h_none)).status_code == 200
 
     # 2. Author creates public post & comment
     r_pub = await client.post(
@@ -565,7 +580,8 @@ async def test_phase2_and_7_complete_rbac_and_comment_moderation(pg_feed_env):
     assert r_cmt.status_code == 201
     cmt_id = r_cmt.json()["data"]["id"]
 
-    # 3. `feed.view` ONLY: can read posts/comments/mark-read, CANNOT create posts/comments/reactions or enumerate directory!
+    # 3. Standard user (`h_view` / `h_none`): can read, react, comment, and mark-read,
+    #    CANNOT create posts or enumerate directory!
     assert (await client.get("/api/v1/feed/posts", headers=h_view)).status_code == 200
     assert (await client.get(f"/api/v1/feed/posts/{pub_id}", headers=h_view)).status_code == 200
     assert (await client.get(f"/api/v1/feed/posts/{pub_id}/comments", headers=h_view)).status_code == 200
@@ -576,15 +592,21 @@ async def test_phase2_and_7_complete_rbac_and_comment_moderation(pg_feed_env):
         await client.post("/api/v1/feed/posts", json={"content": "nope", "audience_type": "ALL"}, headers=h_view)
     ).status_code == 403
     assert (
-        await client.post(f"/api/v1/feed/posts/{pub_id}/comments", json={"content": "nope"}, headers=h_view)
-    ).status_code == 403
-    assert (
         await client.post(
             f"/api/v1/feed/posts/{pub_id}/reactions", json={"reaction_type": "LIKE"}, headers=h_view
         )
-    ).status_code == 403
+    ).status_code == 200
+    r_view_cmt = await client.post(
+        f"/api/v1/feed/posts/{pub_id}/comments", json={"content": "Universal employee reply"}, headers=h_view
+    )
+    assert r_view_cmt.status_code == 201
+    assert (
+        await client.delete(
+            f"/api/v1/feed/posts/{pub_id}/comments/{r_view_cmt.json()['data']['id']}", headers=h_view
+        )
+    ).status_code == 200
 
-    # 4. `feed.create` ONLY: can create post & lookup audience, CANNOT list feed or moderate others
+    # 4. `feed.create` ONLY: can create post, lookup audience, and list feed (universal feed.view), CANNOT moderate others
     r_c_only = await client.post(
         "/api/v1/feed/posts",
         json={"title": f"CreateOnly {tag}", "content": "Body", "audience_type": "ALL"},
@@ -593,7 +615,7 @@ async def test_phase2_and_7_complete_rbac_and_comment_moderation(pg_feed_env):
     assert r_c_only.status_code == 201
     pg_feed_env["created_post_ids"].append(uuid.UUID(r_c_only.json()["data"]["id"]))
     assert (await client.get("/api/v1/feed/recipients/eligible", headers=h_create)).status_code == 200
-    assert (await client.get("/api/v1/feed/posts", headers=h_create)).status_code == 403
+    assert (await client.get("/api/v1/feed/posts", headers=h_create)).status_code == 200
     assert (await client.delete(f"/api/v1/feed/posts/{pub_id}", headers=h_create)).status_code == 403
 
     # 5. Super Admin with explicit `deny:feed.create` & `deny:feed.manage`: can view (`feed.view`), CANNOT create or moderate!

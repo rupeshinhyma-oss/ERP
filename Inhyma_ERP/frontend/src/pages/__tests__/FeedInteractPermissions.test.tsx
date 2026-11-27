@@ -3,6 +3,7 @@ import { render, screen, fireEvent, waitFor, cleanup } from "@testing-library/re
 import { MemoryRouter } from "react-router-dom";
 import { FeedPage } from "../feed/FeedPage";
 import { feedApi } from "@/lib/feedApi";
+import { Auth } from "@/lib/auth";
 
 vi.mock("@/components/AppShell", () => ({
   AppShell: ({ children }: { children: React.ReactNode }) => (
@@ -377,5 +378,58 @@ describe("Company Feed — feed.interact vs feed.create Frontend RBAC (KNOWN-01)
 
     expect(screen.getByTestId("feed-forbidden-state")).toBeDefined();
     expect(feedApi.listPosts).not.toHaveBeenCalled();
+  });
+});
+
+describe("Auth.hasPermission universal Feed availability for all Inhyma users", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("grants feed.view and feed.interact to any authenticated user (including custom department & HR roles without explicit feed grants) while keeping feed.create/feed.manage gated", () => {
+    vi.spyOn(Auth, "getProfile").mockReturnValue({
+      id: "dept-user-1",
+      username: "usera",
+      roles: ["Test"],
+      permissions: [],
+    } as any);
+
+    expect(Auth.hasPermission("feed.view")).toBe(true);
+    expect(Auth.hasPermission("feed.interact")).toBe(true);
+    expect(Auth.hasPermission("feed.create")).toBe(false);
+    expect(Auth.hasPermission("feed.manage")).toBe(false);
+
+    vi.spyOn(Auth, "getProfile").mockReturnValue({
+      id: "hr-user-1",
+      username: "hr1",
+      roles: ["HR"],
+      permissions: ["hrms.attendance"],
+    } as any);
+
+    expect(Auth.hasPermission("feed.view")).toBe(true);
+    expect(Auth.hasPermission("feed.interact")).toBe(true);
+    expect(Auth.hasPermission("feed.create")).toBe(false);
+  });
+
+  it("still honors explicit deny:feed.view and deny:feed.interact overrides", () => {
+    vi.spyOn(Auth, "getProfile").mockReturnValue({
+      id: "denied-view-1",
+      username: "blocked",
+      roles: ["Test"],
+      permissions: ["deny:feed.view"],
+    } as any);
+
+    expect(Auth.hasPermission("feed.view")).toBe(false);
+    expect(Auth.hasPermission("feed.interact")).toBe(false);
+
+    vi.spyOn(Auth, "getProfile").mockReturnValue({
+      id: "denied-interact-1",
+      username: "readonly",
+      roles: ["Test"],
+      permissions: ["deny:feed.interact"],
+    } as any);
+
+    expect(Auth.hasPermission("feed.view")).toBe(true);
+    expect(Auth.hasPermission("feed.interact")).toBe(false);
   });
 });

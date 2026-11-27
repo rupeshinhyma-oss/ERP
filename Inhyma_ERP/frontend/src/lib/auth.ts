@@ -201,6 +201,12 @@ export const Auth = {
     }
 
     if (this.isSuperAdmin()) return true;
+
+    // Universal Feed access for all authenticated Inhyma users (unless explicitly denied above)
+    if (code === "feed.view" || code === "feed.interact") {
+      return true;
+    }
+
     if (!Array.isArray(profile.permissions)) return false;
     const perms = profile.permissions;
 

@@ -4,12 +4,12 @@ Feed Module RBAC & Permission Helpers.
 Enforces the Feed permission contract using the existing ERP RBAC tables
 (``Permission``, ``RolePermission``, ``UserPermission``) and ``CurrentUser``:
 - ``feed.view``     : View Feed page, posts, comments, readership (own), and DMs.
-                      (``feed.manage`` satisfies ``feed.view`` unless ``deny:feed.view`` is set,
-                      matching ``frontend/src/lib/auth.ts``.)
+                      Available by default to every active authenticated Inhyma user
+                      unless ``deny:feed.view`` is explicitly set.
 - ``feed.interact`` : React to and comment on authorized visible posts, edit/delete own
                       comments, and reply/edit/delete own messages within authorized 1:1 DM
-                      conversations. (``feed.create`` satisfies ``feed.interact`` unless
-                      ``deny:feed.interact`` is set.)
+                      conversations. Available by default to every active authenticated
+                      Inhyma user unless ``deny:feed.interact`` or ``deny:feed.view`` is set.
 - ``feed.create``   : Create/edit own announcements, query eligible audience recipients/
                       departments, and initiate new 1:1 DM conversations.
 - ``feed.manage``   : Moderate (delete) other users' visible published posts and comments.
@@ -81,7 +81,10 @@ def evaluate_feed_permission(
     """
     Evaluate whether ``required_code`` is granted under strict deny precedence.
     - Explicit ``deny:feed.view`` blocks all Feed module access.
-    - Explicit ``deny:<required_code>`` always overrides grants/wildcards.
+    - Explicit ``deny:<required_code>`` always overrides grants/wildcards/defaults.
+    - ``feed.view`` and ``feed.interact`` are available by default to every active
+      authenticated Inhyma user (regardless of department role) unless explicitly denied.
+    - ``feed.create`` and ``feed.manage`` require explicit permission grants or ``*``.
     - Role labels (e.g. "Admin" in role name) never substitute for permission grants.
     """
     if "feed.view" in explicit_denies:
@@ -89,18 +92,11 @@ def evaluate_feed_permission(
     if required_code in explicit_denies:
         return False
 
-    if required_code in raw_perms or "*" in raw_perms:
+    if required_code in ("feed.view", "feed.interact"):
         return True
 
-    if required_code == "feed.view":
-        if "feed.manage" not in explicit_denies and (
-            "feed.manage" in raw_perms or "feed.read" in raw_perms
-        ):
-            return True
-
-    if required_code == "feed.interact":
-        if "feed.create" not in explicit_denies and "feed.create" in raw_perms:
-            return True
+    if required_code in raw_perms or "*" in raw_perms:
+        return True
 
     return False
 

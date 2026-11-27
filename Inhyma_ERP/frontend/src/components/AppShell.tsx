@@ -83,6 +83,9 @@ function formatRelativeTime(dateStr: string): string {
 }
 
 function getNotificationIcon(type: string, module?: string | null): string {
+  if (type === "feed_announcement") return "📢";
+  if (type === "feed_comment" || type === "feed_discussion") return "💬";
+  if (type === "feed_message") return "✉️";
   if (type === "shipment_requirement_raised") return "📦";
   if (type === "shipment_status_ordered") return "🔵";
   if (type === "sale_process_created" || module === "sales") return "💼";
@@ -120,10 +123,11 @@ export function NotificationBell() {
   }, []);
 
   useEffect(() => {
+    if (!userId) return;
     void pollUnreadCount();
     const interval = setInterval(pollUnreadCount, 30000);
     return () => clearInterval(interval);
-  }, [pollUnreadCount]);
+  }, [pollUnreadCount, userId]);
 
   // Load full notification list when opened
   const loadNotifications = useCallback(async () => {

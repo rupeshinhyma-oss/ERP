@@ -497,23 +497,87 @@ async def test_feed_interact_multi_role_matrix_employee_manager_hr_admin_unautho
         )
     ).status_code == 403
 
-    # --- D. UNAUTHORIZED, STRICTLY READ-ONLY, AND EXPLICIT DENY PRECEDENCE ---
-    # Strictly read-only (`feed.view` ONLY) -> can read 200, blocked 403 on react/comment/DM reply
-    assert (await client.get(f"/api/v1/feed/posts/{all_post_id}", headers=h_readonly)).status_code == 200
-    assert (
-        await client.post(
-            f"/api/v1/feed/posts/{all_post_id}/reactions",
-            json={"reaction_type": "LIKE"},
-            headers=h_readonly,
-        )
-    ).status_code == 403
-    assert (
-        await client.post(
+    # --- D. UNIVERSAL FEED ACCESS, ANNOUNCEMENT NOTIFICATIONS, AND EXPLICIT DENY PRECEDENCE ---
+    # Any active user without explicit feed.* role grants (`h_none` / `h_readonly`) CAN read, react,
+    # and comment on visible ALL announcements, while staying blocked on feed.create and untargeted dept posts.
+    for hdr in (h_none, h_readonly):
+        assert (await client.get(f"/api/v1/feed/posts/{all_post_id}", headers=hdr)).status_code == 200
+        assert (
+            await client.post(
+                f"/api/v1/feed/posts/{all_post_id}/reactions",
+                json={"reaction_type": "LIKE"},
+                headers=hdr,
+            )
+        ).status_code == 200
+        r_uni_cmt = await client.post(
             f"/api/v1/feed/posts/{all_post_id}/comments",
-            json={"content": "Readonly blocked"},
-            headers=h_readonly,
+            json={"content": "Universal feed user comment"},
+            headers=hdr,
         )
-    ).status_code == 403
+        assert r_uni_cmt.status_code == 201
+        assert (
+            await client.delete(
+                f"/api/v1/feed/posts/{all_post_id}/comments/{r_uni_cmt.json()['data']['id']}",
+                headers=hdr,
+            )
+        ).status_code == 200
+        # Still blocked from creating broadcasts or reading untargeted department post
+        assert (
+            await client.post(
+                "/api/v1/feed/posts",
+                json={"title": "Blocked", "content": "No feed.create", "audience_type": "ALL"},
+                headers=hdr,
+            )
+        ).status_code == 403
+        assert (await client.get(f"/api/v1/feed/posts/{sales_post_id}", headers=hdr)).status_code == 403
+
+    # Verify BOTH company-wide (`ALL`) and department-level (`SELECTED`) announcements appear in notifications
+    # even for users in custom departments who have ZERO explicit `feed.*` role permissions!
+    u_sales_plain, h_sales_plain = await pg_feed_interact_env["make_user"](
+        "salesplain", roles=[dept_sales]
+    )
+    r_all2 = await client.post(
+        "/api/v1/feed/posts",
+        json={"title": f"All Hands {tag}", "content": "Company-wide notice for all users", "audience_type": "ALL"},
+        headers=h_admin,
+    )
+    assert r_all2.status_code == 201
+    all2_id = r_all2.json()["data"]["id"]
+    pg_feed_interact_env["created_post_ids"].append(uuid.UUID(all2_id))
+
+    r_dept2 = await client.post(
+        "/api/v1/feed/posts",
+        json={
+            "title": f"Sales Target {tag}",
+            "content": "Sales department update",
+            "audience_type": "SELECTED",
+            "department_ids": [str(dept_sales.id)],
+        },
+        headers=h_admin,
+    )
+    assert r_dept2.status_code == 201
+    dept2_id = r_dept2.json()["data"]["id"]
+    pg_feed_interact_env["created_post_ids"].append(uuid.UUID(dept2_id))
+
+    # Sales plain user (no explicit feed.* grants) gets BOTH company-wide AND Sales department notifications
+    sales_notifs = (await client.get("/api/v1/notifications?limit=50", headers=h_sales_plain)).json()["data"]["items"]
+    sales_links = {n["link"]: n for n in sales_notifs if n["type"] == "feed_announcement"}
+    assert f"/feed?post_id={all2_id}" in sales_links
+    assert sales_links[f"/feed?post_id={all2_id}"]["title"] == f"Announcement: All Hands {tag}"
+    assert f"/feed?post_id={dept2_id}" in sales_links
+    assert sales_links[f"/feed?post_id={dept2_id}"]["title"].startswith("Department Announcement (")
+    assert f"Sales Target {tag}" in sales_links[f"/feed?post_id={dept2_id}"]["title"]
+
+    # Ops plain user (`h_none`, no explicit feed.* grants) gets company-wide notification, NOT Sales-only dept notification
+    ops_notifs = (await client.get("/api/v1/notifications?limit=50", headers=h_none)).json()["data"]["items"]
+    ops_links = {n["link"] for n in ops_notifs if n["type"] == "feed_announcement"}
+    assert f"/feed?post_id={all2_id}" in ops_links
+    assert f"/feed?post_id={dept2_id}" not in ops_links
+
+    # Explicit `deny:feed.view` user receives NO announcement notifications
+    deny_notifs = (await client.get("/api/v1/notifications?limit=50", headers=h_deny_view)).json()["data"]["items"]
+    deny_links = {n["link"] for n in deny_notifs if n["type"] == "feed_announcement"}
+    assert f"/feed?post_id={all2_id}" not in deny_links
 
     # Explicit `deny:feed.interact` blocks reactions & comments EVEN with `feed.create` or `super_admin`!
     for label, hdr in [("create+deny_interact", h_deny_interact), ("superadmin+deny_interact", h_admin_deny_interact)]:
@@ -533,25 +597,24 @@ async def test_feed_interact_multi_role_matrix_employee_manager_hr_admin_unautho
             )
         ).status_code == 403, f"{label} should be blocked from commenting"
 
-    # Unauthenticated -> 401; No perms -> 403; `deny:feed.view` (even with `feed.interact`) -> 403
+    # Unauthenticated -> 401; Explicit `deny:feed.view` (even with `feed.interact`) -> 403
     assert (
         await client.post(
             f"/api/v1/feed/posts/{all_post_id}/reactions", json={"reaction_type": "LIKE"}
         )
     ).status_code == 401
-    for hdr in (h_none, h_deny_view):
-        assert (await client.get(f"/api/v1/feed/posts/{all_post_id}", headers=hdr)).status_code == 403
-        assert (
-            await client.post(
-                f"/api/v1/feed/posts/{all_post_id}/reactions",
-                json={"reaction_type": "LIKE"},
-                headers=hdr,
-            )
-        ).status_code == 403
-        assert (
-            await client.post(
-                f"/api/v1/feed/posts/{all_post_id}/comments",
-                json={"content": "No access"},
-                headers=hdr,
-            )
-        ).status_code == 403
+    assert (await client.get(f"/api/v1/feed/posts/{all_post_id}", headers=h_deny_view)).status_code == 403
+    assert (
+        await client.post(
+            f"/api/v1/feed/posts/{all_post_id}/reactions",
+            json={"reaction_type": "LIKE"},
+            headers=h_deny_view,
+        )
+    ).status_code == 403
+    assert (
+        await client.post(
+            f"/api/v1/feed/posts/{all_post_id}/comments",
+            json={"content": "No access"},
+            headers=h_deny_view,
+        )
+    ).status_code == 403

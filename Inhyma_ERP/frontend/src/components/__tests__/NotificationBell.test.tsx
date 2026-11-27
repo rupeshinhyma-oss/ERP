@@ -451,6 +451,66 @@ describe("NotificationBell & Live Notification Delivery (Phase 5)", () => {
     });
   });
 
+  it("renders company-wide and department-level Feed announcement notifications with announcement icon and navigates to post", async () => {
+    mockApiGet.mockImplementation((url: string) => {
+      if (url.includes("/notifications/unread-count")) {
+        return Promise.resolve({ data: { unread_count: 2 } });
+      }
+      if (url.includes("/notifications?limit=30")) {
+        return Promise.resolve({
+          data: {
+            items: [
+              {
+                id: "notif-feed-all",
+                user_id: "user-uuid-1",
+                type: "feed_announcement",
+                title: "Announcement: Q4 Townhall",
+                message: "All employees please join at 4 PM.",
+                link: "/feed?post_id=post-all-1",
+                is_read: false,
+                created_at: new Date().toISOString(),
+              },
+              {
+                id: "notif-feed-dept",
+                user_id: "user-uuid-1",
+                type: "feed_announcement",
+                title: "Department Announcement (Sales): Monthly Targets",
+                message: "Updated territory quotas posted.",
+                link: "/feed?post_id=post-dept-1",
+                is_read: false,
+                created_at: new Date().toISOString(),
+              },
+            ],
+            unread_count: 2,
+          },
+        });
+      }
+      return Promise.resolve({ data: {} });
+    });
+
+    render(
+      <MemoryRouter>
+        <NotificationBell />
+      </MemoryRouter>
+    );
+
+    const bellBtn = screen.getByTitle("Notifications");
+    fireEvent.click(bellBtn);
+
+    await waitFor(() => {
+      expect(screen.getByText("Announcement: Q4 Townhall")).toBeTruthy();
+      expect(screen.getByText("Department Announcement (Sales): Monthly Targets")).toBeTruthy();
+      expect(screen.getAllByText("📢")).toHaveLength(2);
+    });
+
+    fireEvent.click(screen.getByText("Department Announcement (Sales): Monthly Targets"));
+
+    await waitFor(() => {
+      expect(mockApiPost).toHaveBeenCalledWith("/notifications/notif-feed-dept/read", {});
+      expect(mockNavigate).toHaveBeenCalledWith("/feed?post_id=post-dept-1");
+    });
+  });
+
   it("cleans up listeners and resets notifications when user logs out", () => {
     const { rerender } = render(
       <MemoryRouter>

@@ -170,9 +170,9 @@ class FeedService:
 
     async def _filter_users_with_feed_view(self, candidate_ids: set[uuid.UUID]) -> set[uuid.UUID]:
         """
-        Batch-filter ``candidate_ids`` in SQL to active login users who hold ``feed.view``
-        (via role grant, direct grant, ``feed.manage``, or ``super_admin``) and do NOT
-        have an explicit ``UserPermission(is_granted=False)`` on ``feed.view``.
+        Batch-filter ``candidate_ids`` in SQL to active login users who have Feed access.
+        Feed is available by default to every active, non-deleted ERP user with login access
+        unless they have an explicit ``UserPermission(is_granted=False)`` on ``feed.view``.
         """
         if not candidate_ids or not self._is_real_db_session():
             return set()
@@ -196,45 +196,7 @@ class FeedService:
             )
         )
         denied_ids = set((await self.session.execute(deny_stmt)).scalars().all())
-        remaining_ids = eligible_ids - denied_ids
-        if not remaining_ids:
-            return set()
-
-        active_role_clauses = self._active_user_role_clauses()
-
-        # 1. Granted via RolePermission (feed.view or feed.manage) or super_admin/admin system role
-        role_grant_stmt = (
-            select(UserRole.user_id)
-            .join(Role, (Role.id == UserRole.role_id) & (Role.deleted_at.is_(None)))
-            .outerjoin(RolePermission, RolePermission.role_id == Role.id)
-            .outerjoin(Permission, Permission.id == RolePermission.permission_id)
-            .where(
-                UserRole.user_id.in_(remaining_ids),
-                *active_role_clauses,
-                or_(
-                    Role.name.in_(["super_admin", "admin"]),
-                    Permission.code.in_(["feed.view", "feed.manage", "feed.read"]),
-                ),
-            )
-            .distinct()
-        )
-        granted_ids = set((await self.session.execute(role_grant_stmt)).scalars().all())
-
-        # 2. Granted via direct UserPermission(is_granted=True)
-        still_unchecked = remaining_ids - granted_ids
-        if still_unchecked:
-            direct_grant_stmt = (
-                select(UserPermission.user_id)
-                .join(Permission, Permission.id == UserPermission.permission_id)
-                .where(
-                    UserPermission.user_id.in_(still_unchecked),
-                    UserPermission.is_granted.is_(True),
-                    Permission.code.in_(["feed.view", "feed.manage", "feed.read"]),
-                )
-            )
-            granted_ids.update((await self.session.execute(direct_grant_stmt)).scalars().all())
-
-        return granted_ids
+        return eligible_ids - denied_ids
 
     # ==========================================================================
     # Audience Visibility & Dynamic Department Resolution
@@ -706,7 +668,31 @@ class FeedService:
             if not target_user_ids:
                 return
             post_link = f"/feed?post_id={post.id}"
-            title = f"Announcement: {post.title}" if post.title else "New Company Announcement"
+            if post.audience_type == FeedAudienceType.SELECTED.value:
+                dept_stmt = (
+                    select(Role.name)
+                    .join(FeedPostDepartment, FeedPostDepartment.department_id == Role.id)
+                    .where(
+                        FeedPostDepartment.post_id == post.id,
+                        Role.deleted_at.is_(None),
+                    )
+                    .order_by(Role.name)
+                )
+                dept_names = list((await self.session.execute(dept_stmt)).scalars().all())
+                if dept_names:
+                    dept_label = ", ".join(dept_names[:3])
+                    if len(dept_names) > 3:
+                        dept_label = f"{dept_label} +{len(dept_names) - 3}"
+                    raw_title = (
+                        f"Department Announcement ({dept_label}): {post.title}"
+                        if post.title
+                        else f"Department Announcement ({dept_label})"
+                    )
+                else:
+                    raw_title = f"Announcement: {post.title}" if post.title else "New Announcement"
+            else:
+                raw_title = f"Announcement: {post.title}" if post.title else "New Company Announcement"
+            title = raw_title[:255]
             snippet = post.content[:120] + ("..." if len(post.content) > 120 else "")
             await self._batch_create_notifications(
                 user_ids=list(target_user_ids),
@@ -1117,7 +1103,9 @@ class FeedService:
 
         await self.session.commit()
 
-        if prev_status == FeedPostStatus.DRAFT.value and post.status == FeedPostStatus.PUBLISHED.value:
+        if post.status == FeedPostStatus.PUBLISHED.value and (
+            prev_status == FeedPostStatus.DRAFT.value or audience_modified
+        ):
             await self._notify_post_publication(post)
 
         return await self._load_post_read_internal(actor, post.id)

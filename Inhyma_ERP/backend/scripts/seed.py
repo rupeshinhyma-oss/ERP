@@ -692,17 +692,18 @@ async def seed() -> None:
                         session.add(RolePermission(role_id=user_role.id, permission_id=permission.id))
                 await session.flush()
             else:
-                # Idempotent top-up: if the default `user` role grants `feed.view`,
-                # ensure `feed.interact` is also granted so employees can react, comment,
+                # Idempotent top-up: ensure the default `user` role always carries
+                # `feed.view` and `feed.interact` so employees can view, react, comment,
                 # and reply in their own 1:1 DMs without granting `feed.create`.
                 existing_user_codes = {link.permission.code for link in user_role.permission_links}
-                if "feed.view" in existing_user_codes and "feed.interact" not in existing_user_codes:
-                    interact_perm = perms_by_code.get("feed.interact") or await permission_repo.get_by_code(
-                        "feed.interact"
-                    )
-                    if interact_perm:
-                        await role_repo.add_permission(user_role, interact_perm)
-                        logger.info("Granted feed.interact to default user role.")
+                for default_feed_code in ("feed.view", "feed.interact"):
+                    if default_feed_code not in existing_user_codes:
+                        feed_perm = perms_by_code.get(default_feed_code) or await permission_repo.get_by_code(
+                            default_feed_code
+                        )
+                        if feed_perm:
+                            await role_repo.add_permission(user_role, feed_perm)
+                            logger.info("Granted %s to default user role.", default_feed_code)
 
             technician_role = await role_repo.get_by_name(TECHNICIAN_ROLE_NAME, include_deleted=True)
             if technician_role is None:
