@@ -3,7 +3,7 @@
 **System:** Yinglima_ERP  
 **Module:** ERP Settings, Audit Logs & Trash Recovery (`/organization`, `/audit`, `/trash`)  
 **Status:** Active / Production Ready  
-**Last Updated:** 2026-11-17  
+**Last Updated:** 2026-11-27  
 
 ---
 
@@ -19,14 +19,15 @@ This module handles governance, data protection, and traceability:
 ## 2. Key Architecture & File Map
 
 ### Frontend:
-* **Settings:** `Organization.tsx` (Route: `/organization`)
+* **Settings & Branding:** `Organization.tsx` (`/organization`), `src/lib/brand.ts` (`BLANK_FAVICON_URL`, `subscribeBrandLogo`, cross-tab `storage` sync), `AppShell.tsx`, `Login.tsx`, `NetworkStatusNotifier.tsx`, `index.html`, `src/pages/__tests__/OrganizationLogo.test.tsx`
 * **Audit Log Viewer:** `Audit.tsx` (Route: `/audit`)
 * **Trash Management:** `Trash.tsx` (Route: `/trash`)
 
 ### Backend:
+* **Organizations & Branding Service/Routes:** `app/organizations/{models,schemas,repository,service,routes}.py`, `alembic/versions/z0a1b2c3d4e7_add_organization_logo_data.py` (`organizations.logo_data`), `app/common/storage.py` (`delete_stored_file`), `app/main.py` (`/uploads/branding`), `tests/test_organization_logo.py`
 * **Audit Service & Routes:** `app/audit/service.py`, `app/audit/routes.py`
 * **Trash Service & Routes:** `app/trash/service.py`, `app/trash/routes.py`
-* **Models:** `app/audit/models.py` (`audit_logs`), Base Model `SoftDeleteMixin` (`deleted_at`, `deleted_by`)
+* **Models:** `app/organizations/models.py` (`organizations`), `app/audit/models.py` (`audit_logs`), Base Model `SoftDeleteMixin` (`deleted_at`, `deleted_by`)
 
 ---
 
@@ -60,6 +61,9 @@ This module handles governance, data protection, and traceability:
   - Viewing audit logs requires `audit.view`.
   - Viewing trash requires `trash.view`.
   - Restoring / purging items requires `trash.action`.
+- [ ] **Company Logo Upload, Safe Replacement & Blank-State Removal (`/organization`):**
+  - Clicking **Remove Logo** clears `logo_url`/`logo_data` via `DELETE /api/v1/organizations/logo` and leaves ERP Settings preview, top-left sidebar header, login header, and browser tab favicon blank/white with zero `/logo.png` fallback.
+  - Clicking **Change PNG Logo** and cancelling or failing upload preserves the existing logo intact; once upload succeeds (`POST /api/v1/organizations/logo`), the previous logo file is deleted and all UI surfaces/favicons update immediately across open tabs.
 
 ---
 
