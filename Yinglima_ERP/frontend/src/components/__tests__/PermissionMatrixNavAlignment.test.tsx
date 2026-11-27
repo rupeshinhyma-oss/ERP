@@ -5,18 +5,18 @@ import { PERMISSION_SECTIONS, groupPermissionsByModule } from "@/lib/permissionL
 import type { Permission } from "@/types";
 
 const SAMPLE_PERMS: Permission[] = [
-  { id: "1", code: "trash.view", module: "trash", page: "trash", action: "view", scope: "ALL", description: "" },
-  { id: "2", code: "warehouse.view", module: "warehouse", page: "masters-warehouses", action: "view", scope: "ALL", description: "" },
-  { id: "3", code: "city.view", module: "city", page: "masters-cities", action: "view", scope: "ALL", description: "" },
-  { id: "4", code: "user.view", module: "user", page: "users", action: "view", scope: "ALL", description: "" },
-  { id: "5", code: "finance_report.view", module: "finance_report", page: "finance-report", action: "view", scope: "ALL", description: "" },
-  { id: "6", code: "planning.view", module: "planning", page: "planning", action: "view", scope: "ALL", description: "" },
-  { id: "7", code: "local_purchase.view", module: "local_purchase", page: "local-purchases", action: "view", scope: "ALL", description: "" },
-  { id: "8", code: "sale_process.manage", module: "sale_process", page: "sale-process", action: "manage", scope: "ALL", description: "" },
-  { id: "9", code: "sale_process.view", module: "sale_process", page: "sale-process", action: "view", scope: "ALL", description: "" },
-  { id: "10", code: "sale_process.create", module: "sale_process", page: "sale-process", action: "create", scope: "ALL", description: "" },
-  { id: "11", code: "product.view", module: "product", page: "masters-products", action: "view", scope: "ALL", description: "" },
-  { id: "12", code: "supplier.view", module: "supplier", page: "suppliers", action: "view", scope: "ALL", description: "" },
+  { id: "1", code: "trash.view", module: "trash", description: "" },
+  { id: "2", code: "warehouse.view", module: "warehouse", description: "" },
+  { id: "3", code: "city.view", module: "city", description: "" },
+  { id: "4", code: "user.view", module: "user", description: "" },
+  { id: "5", code: "finance_report.view", module: "finance_report", description: "" },
+  { id: "6", code: "planning.view", module: "planning", description: "" },
+  { id: "7", code: "local_purchase.view", module: "local_purchase", description: "" },
+  { id: "8", code: "sale_process.manage", module: "sale_process", description: "" },
+  { id: "9", code: "sale_process.view", module: "sale_process", description: "" },
+  { id: "10", code: "sale_process.create", module: "sale_process", description: "" },
+  { id: "11", code: "product.view", module: "product", description: "" },
+  { id: "12", code: "supplier.view", module: "supplier", description: "" },
 ];
 
 describe("Yinglima PermissionMatrixEditor left-sidebar navigation alignment", () => {

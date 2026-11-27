@@ -17,7 +17,7 @@ import { apiDelete, apiGet, apiPatch, downloadExport, errorMessage } from "@/lib
 import { useLookup } from "@/lib/lookups";
 import { useToast } from "@/lib/toast";
 import { useConfirm } from "@/lib/confirm";
-import type { SaleOrder, SaleSummaryMetrics } from "@/types/saleProcess";
+import type { PlanningConsignmentColumn, SaleOrder, SaleSummaryMetrics } from "@/types/saleProcess";
 import {
   getSaleOrdersListCache,
   setSaleOrdersListCache,
@@ -148,6 +148,39 @@ export function SaleProcessListPage() {
     "/buyers",
     500
   );
+  const [planningConsignments, setPlanningConsignments] = useState<PlanningConsignmentColumn[]>([]);
+
+  useEffect(() => {
+    let active = true;
+    apiGet<PlanningConsignmentColumn[]>("/sales/planning-consignments")
+      .then((res) => {
+        if (active && Array.isArray(res.data)) {
+          setPlanningConsignments(res.data);
+        }
+      })
+      .catch(() => {
+        // Fallback quietly; order consignment codes still populate options
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const consignmentOptions = useMemo(() => {
+    const codes = new Set<string>();
+    for (const col of planningConsignments) {
+      const code = (col.code || col.column_name || "").trim();
+      if (code) codes.add(code);
+    }
+    for (const o of orders) {
+      const code = (o.consignment_code || "").trim();
+      if (code) codes.add(code);
+    }
+    if (selectedConsignment.trim()) {
+      codes.add(selectedConsignment.trim());
+    }
+    return Array.from(codes).sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }));
+  }, [planningConsignments, orders, selectedConsignment]);
 
   // Fetch KPI Metrics
   const fetchMetrics = useCallback(async () => {
@@ -702,24 +735,29 @@ export function SaleProcessListPage() {
                 <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px" }}>
                   Consignment Code
                 </label>
-                <input
-                  type="text"
+                <SelectField
                   value={selectedConsignment}
-                  onChange={(e) => {
-                    setSelectedConsignment(e.target.value);
+                  onChange={(val) => {
+                    setSelectedConsignment(val);
                     setPage(1);
                   }}
-                  placeholder="e.g. MUMINHYMA 1"
-                  style={{
-                    width: "100%",
+                  triggerStyle={{
                     height: "38px",
                     padding: "7px 10px",
                     borderRadius: "6px",
                     border: "1px solid #cbd5e1",
                     fontSize: "13px",
+                    background: "#ffffff",
                     boxSizing: "border-box",
                   }}
-                />
+                >
+                  <option value="">All Consignments</option>
+                  {consignmentOptions.map((code) => (
+                    <option key={code} value={code}>
+                      {code}
+                    </option>
+                  ))}
+                </SelectField>
               </div>
 
               {/* Currency */}

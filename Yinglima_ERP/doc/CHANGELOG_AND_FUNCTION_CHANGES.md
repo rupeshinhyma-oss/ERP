@@ -3,6 +3,9 @@
 **System:** Yinglima_ERP (China Procurement)  
 **Scope:** Functional updates, schema changes, UI hardening, and bug fixes.
 
+### 37. Sale Process Consignment Code Searchable Dropdown (`SaleProcessList.tsx`)
+- **Upgraded Filter Field (`SelectField`):** Replaced the plain text `<input>` for **Consignment Code** in `SaleProcessList.tsx` Filter Options with a searchable `<SelectField>` (`All Consignments`) matching the adjacent **Buyer Company** dropdown. Options are populated dynamically from `/sales/planning-consignments` merged with distinct `consignment_code` values from loaded sale orders, sorted naturally.
+
 ### 36. Sticky Department Action Bar & Permission Toolbar in RBAC (`Rbac.tsx`, `PermissionMatrixEditor.tsx`)
 - **Sticky Department Header (`Rbac.tsx`):** Pinned the Department edit header (`← Back to Departments`, `Department: ...`, `Cancel`, `Save Department`) at `top: 64px` (right below the ERP topbar) so `Save Department` stays accessible while scrolling through permissions.
 - **Sticky Permission Matrix Toolbar (`PermissionMatrixEditor.tsx`):** Added `stickyHeaderTop` prop (set to `124px` in `Rbac.tsx`) to keep the module category filter pills, search input, and `Grant All` / `Deny All` / `Expand All` / `Collapse All` buttons pinned while scrolling.

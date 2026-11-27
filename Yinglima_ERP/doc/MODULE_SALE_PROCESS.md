@@ -3,7 +3,7 @@
 **System:** Yinglima_ERP  
 **Module:** Sales Process Orders, 16-Column CI Costing Engine & Exports (`/sale/process`)  
 **Status:** Active / Production Ready  
-**Last Updated:** 2026-10-21  
+**Last Updated:** 2026-11-26  
 
 ---
 
@@ -16,7 +16,7 @@ The **Sale Process** module is the central international trade and billing engin
 ## 2. Key Architecture & File Map
 
 ### Frontend:
-* **Orders List:** `SaleProcessOrders.tsx` (Route: `/sale/process`)
+* **Orders List:** `SaleProcessList.tsx` (Route: `/sale/process`) — includes KPI cards, status tabs, and **Filter Options** (`Buyer Company` and `Consignment Code` searchable `<SelectField>` dropdowns populated from `/sales/planning-consignments` + order consignments, `Currency`, and `Date From` / `Date To`).
 * **New / Edit Order Form:** `SaleProcessForm.tsx` (Route: `/sale/process/new`, `/sale/process/:id/edit`)
 * **Commercial Invoice (CI) 16-Column Table:** `CommercialInvoiceTable.tsx`
 * **Export Actions:** `ExcelExportButton.tsx` (Direct Excel `.xlsx` generator)
