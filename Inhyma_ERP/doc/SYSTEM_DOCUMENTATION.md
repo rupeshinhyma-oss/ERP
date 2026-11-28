@@ -170,20 +170,20 @@ Inhyma_ERP/
 │   │   ├── cache/              # Redis / in-memory cache manager, cleanup worker
 │   │   ├── common/             # BaseRepository, BaseService, Pagination, Storage, Importer, Email
 │   │   ├── core/                # Config, Responses, Exceptions, Exception Handlers, Logging
-│   │   ├── crm/                # CRM pipelines, Kanban leads, round-robin distribution, quotations
+│   │   ├── crm/                # CRM pipelines, Kanban leads, round-robin distribution, quotations & CRM notifications
 │   │   ├── database/           # Async Engine (PostgreSQL + StaticPool SQLite test isolation), Session DI, Mixins
 │   │   ├── employees/          # Employee (workforce/person) records, optional User Account link
 │   │   ├── cargo_overview/     # Cargo Overview (22-slot Gallery, 12-item Checklist, Finance & Product Summary, pluggable CargoDataExtractor)
 │   │   ├── events/             # WebSocket connection manager and broadcast bus
 │   │   ├── feed/               # Internal broadcast announcements & 1-to-1 employee messaging
 │   │   ├── financial_planning/ # Live 3-module Financial Planning Report & settlement overlays
-│   │   ├── hrms/               # Attendance, Leave, Assets, Expenses, Site Visits, Payroll & RBAC
+│   │   ├── hrms/               # Attendance, Leave, Assets, Expenses, Site Visits, Payroll, notifications & RBAC
 │   │   ├── integration/        # Cross-ERP entity sync engine & ImportPurchase sync adapter (Yinglima -> Inhyma)
 │   │   ├── inventory/          # 9-warehouse Product Stock matrix, Re-Order engine, 5-source Stock Transactions ledger, Adjustments & Transfers
 │   │   ├── inquiries/          # RFQ lifecycle, AI Quote Extractor, IMAP email poller
 │   │   ├── masters/           # Brands, Categories, Subcategories, Geography, Currencies
 │   │   ├── middleware/        # Correlation ID, Logging, Security, Rate Limiter
-│   │   ├── organizations/     # Enterprise profile settings
+│   │   ├── organizations/     # Enterprise profile settings & DB-backed company logo endpoints (/logo GET/POST/DELETE)
 │   │   ├── org_structure/     # Departments, Positions, Leadership, Reporting Structure (IAM upgrade)
 │   │   ├── planning/          # Legacy SQLAlchemy models only (UI & /api/v1/planning router & planning.* RBAC removed — z6e7f8a9b0c1)
 │   │   ├── products/          # Product catalog, dynamic specs, machine-spares & Yinglima sync_adapter
@@ -530,8 +530,8 @@ A user may be assigned any number of Roles simultaneously (`POST /users/{id}/rol
 - **Features:** Centralized Recycle Bin displaying soft-deleted records across all tables. One-click recovery restores records with full relational integrity. Permanent purge is restricted to Super Administrators.
 
 ### 8.13. Organization & System Profile
-- **Endpoints:** `GET /organizations/profile`, `PATCH /organizations/profile`.
-- **Features:** Enterprise legal identity, tax/VAT/TIN registration, official address, and base operational currency.
+- **Endpoints:** `GET /organizations`, `POST /organizations`, `PATCH /organizations`, `GET /organizations/public`, `GET /organizations/logo`, `POST /organizations/logo`, `DELETE /organizations/logo`.
+- **Features:** Enterprise legal identity, tax/VAT/TIN registration, official address, base operational currency, and DB-backed company logo management (`logo_data` / `logo_url`) with blank-white fallback (`BLANK_FAVICON_URL`, no hardcoded `/logo.png`).
 
 ### 8.14. Organization Structure, Positions & Reporting Hierarchy
 - **Files:** `backend/app/org_structure/`.
@@ -1364,6 +1364,15 @@ A user may be assigned any number of Roles simultaneously (`POST /users/{id}/rol
     - **List View:** Streamlined `.page-header` with `#556987` funnel toggle (`.btn-filter-toggle`) and golden-amber `Export` (`.btn-imp-exp` exporting UTF-8 BOM `.csv` of active filtered rows); collapsible filter panel above the table card (`Ordered Date Range`, `ETD Origin Date Range`, `ETA Port Date Range` via `DateRangePicker`, `Warehouse`, `Finance Status`, `Forwarder Name`, `Clearing Agent` + `Reset` `.btn-filter-reset` and `Search` `.btn-filter-search`); Warehouse tabs (`All` + dynamic active warehouses), Finance Stage pills (`All`, `Pending`, `Cleared`), `items/page` (`25`/`50`/`100`), search, 15-column consignment table with inline `Cargo Remark`, clickable `Gallery Docs` / `Cargo Checklist` badges, and `document.body` portal 3-dot Action menu (`Open Cargo Overview`, `Consignment Gallery` modal, `Shipment Checklist Details` modal).
     - **Detail View (`Overview — <key>`):** Metadata strip (with inline date/forwarder/agent editing), **Section 1: Finance Planning** (`INR` `₹` & `USD` `$`, colored party role badges), **Section 2: Consignment Gallery** (4-column grid of 22 upload/download/delete slots), **Section 3: Cargo Status — Shipment Checklist Details** (3-column grid of 12 optimistic Yes/No cards + `Cargo Remark`), and **Section 4: Product Summary** (`Sr No.`, `Product Name`, `Supplier / Document`, `Quantity` + UOM, `Batch No.`).
 
+### 8.31. Platform Notifications: HRMS, CRM Leads, Enterprise Tasks & Deep-Link Alerts
+- **Backend Notification Engines & Safety Guards:**
+  - `NotificationRepository.create()` (`app/notifications/repository.py`) defensively truncates `type[:50]`, `title[:255]`, and `link[:255]`.
+  - **HRMS (`app/hrms/notifications.py`, `leave_service.py`, `site_visit_service.py`, `payroll_service.py`):** SAVEPOINT-isolated, deduplicated alerts covering leave cancellations, site visit reassignments away from prior assignee, salary revisions, and monthly payslip releases.
+  - **CRM Leads (`app/crm/notifications.py`, `lead_service.py`, `assignment_service.py`, `import_service.py`, `quotation_service.py`):** SAVEPOINT-isolated alerts covering manual/round-robin/CSV-import assignments (concise batch summaries), pipeline Won/Lost manager alerts, follow-up completions/cancellations, and sales quotation creation/status updates.
+  - **Enterprise Tasks Worker (`app/tasks/service.py`, `app/tasks/recurring_worker.py`):** Hourly `RecurringTaskWorker._run_once()` invokes `check_task_deadlines(user_id=None)` and `check_expired_holds()` (20h deduplication), prevents duplicate `@mention` + comment alerts, excludes self-escalations, and routes escalation alerts to `&drawerTab=escalations`.
+- **Frontend Notification Bell & Deep-Links (`AppShell.tsx`, `LeavePage.tsx`, `AttendancePage.tsx`, `ExpensesPage.tsx`, `PayrollPage.tsx`, `CrmLeadsPage.tsx`, `TasksPage.tsx`):**
+  - Displays distinct module/event icons inside `NotificationBell`, removes the dead `/notification-settings` link, and routes clicks cleanly into target records (`?request_id=`, `?regularization_id=`, `?expense_id=`, `?month=`, `?lead_id=&drawerTab=`, `&drawerTab=escalations`).
+
 ---
 
 ## 9. Real-Time WebSocket & Event Synchronization
@@ -1556,7 +1565,8 @@ A user may be assigned any number of Roles simultaneously (`POST /users/{id}/rol
 | **Trash** | `DELETE`| `/api/v1/trash/{entity}/{id}/purge` | Permanently purge record | `trash.purge` (Super Admin) |
 | **Cache** | `GET` | `/api/v1/cache/stats` | Inspect cache metrics & hit rate | `settings.manage` |
 | **Cache** | `DELETE`| `/api/v1/cache/flush` | Flush entire cache | `settings.manage` |
-| **Organizations** | `GET/PATCH` | `/api/v1/organizations/profile` | Manage enterprise company profile & logo | `organization.view/manage` |
+| **Organizations** | `GET/POST/PATCH` | `/api/v1/organizations` | Manage enterprise company profile | `organization.manage` / Authenticated |
+| **Organizations** | `GET/POST/DELETE` | `/api/v1/organizations/logo` | Stream (`GET`), upload/replace (`POST`), or remove (`DELETE`) company logo in DB & storage | Public (`GET`) / `organization.manage` (`POST`/`DELETE`) |
 | **Events** | `WS` | `/api/v1/events/ws` | Real-time WebSocket connection bus | Authenticated |
 | **Tasks** | `GET` | `/api/v1/tasks` | List scoped tasks with view_mode (`my`/`department`/`organization`/`kanban`/`calendar`), optional `department_id`, and status (`ON_HOLD`), priority, date filters | `task.view` |
 | **Tasks** | `POST` | `/api/v1/tasks` | Create task with default status TODO, multiple assignees, watchers, start/due dates, subtasks & optional initial escalation | `task.view` / `task.create` |
@@ -2080,9 +2090,10 @@ Enterprise logos and branding assets are stored directly in PostgreSQL with publ
 - **Endpoint `GET /api/v1/organizations/logo?v={sha1}`:**
   - Streams high-resolution PNG/JPEG binary data with long-term `Cache-Control: public, max-age=86400, immutable`.
   - The query parameter `v` contains a SHA-1 hash of the image content, forcing immediate browser cache refresh upon logo replacement.
-- **Client Storage Quota Protections (`try/catch` in `brand.ts` and `Organization.tsx`):**
-  - Storing massive Base64 strings in browser `localStorage` causes `QuotaExceededError` crashes on mobile or restricted webview browsers.
-  - All brand caching operations are wrapped in graceful quota guards that safely degrade to in-memory state or remote streaming without throwing unhandled exceptions.
+- **Client Storage Quota Protections & Blank-State Branding (`brand.ts`, `Organization.tsx`, `AppShell.tsx`, `Login.tsx`):**
+  - Massive Base64 `logo_data` strings fall back gracefully to in-memory state + compact streaming URLs if `localStorage`/`sessionStorage` throws `QuotaExceededError`.
+  - **No Hardcoded Logo Fallback:** Removed static `/logo.png` and `/favicon.svg` fallback assets; when `logo_url`/`logo_data` is `null` or `Remove Logo` is clicked (deleting the stored file via `delete_stored_file` and clearing both DB columns + client storage caches), the ERP Settings preview, sidebar header, login header, and browser tab favicon (`BLANK_FAVICON_URL`) render blank white cleanly and sync across tabs via `storage` listeners.
+  - **`Change PNG Logo` Replacement Guarantee:** Clicking `Change PNG Logo` preserves the existing logo everywhere until the new upload succeeds cleanly (`POST /api/v1/organizations/logo`), at which point the old branding file is deleted and all UI surfaces/favicons swap to the newly uploaded logo.
 
 ### 16.7. Environment-Isolated Cross-ERP URL Resolution & Zero-Hardcoded-Port Architecture
 To guarantee that local development (`localhost` / LAN) and cloud deployments (`Render.com`) can safely operate even when sharing a common central PostgreSQL database without cross-redirecting users between environments:
@@ -2172,5 +2183,5 @@ To guarantee single-source-of-truth integrity across PostgreSQL and FastAPI Mast
   - Removed the redundant manual `"Showing X – Y of Z total"` footer above `<Pagination />` in `PaymentsPage.tsx`, leaving `<Pagination />` as the single footer summary & pager, and removed the standalone `Imp / Exp ▾` header button from `TechnicalTasksPage.tsx`.
 
 ---
-*Maintained and verified for Inhyma Solutions Enterprise ERP. Last updated: November 27, 2026 (Local Purchase 10-Permission Granular RBAC Matrix [Migration `z9t8d9e0f1a2`, `420` Unique Permissions / `425` Bootstrap Entries]; Discount Payments 6-Permission Isolated RBAC Matrix [Migrations `z9q5a6b7c8d9`, `z9s7c8d9e0f1`] replacing Unused Inquiries & Quotations RBAC [Migration `z9r6b7c8d9e0`] & Sales Process Separation; Sales Process & Orders 25-Permission Granular RBAC [Migration `z9j8a9b0c1d2`]; Left-Sidebar Navigation RBAC Alignment, Monospace Wrap & Inline Search [`permissionLabels.ts`, `Rbac.tsx`, `Users.tsx`, `pages.css`]; Proforma Invoices 15-Permission RBAC & Discount Payments Isolation [Migration `z9i7a8b9c0d1`]; Granular Brands / Sub-Categories / Categories 9-Permission RBAC [Migrations `z9h6a7b8c9d0`, `z9g5a6b7c8d9`, `z9f4a5b6c7d8`]; Product Master 8-Permission RBAC [Migration `z9e3f4a5b6c7`]; Stock Transfer 14-Permission RBAC & Portaled Action Menu [Migration `z9d2e3f4a5b6`]; Stock Adjustment 6-Permission RBAC [Migration `z9c1d2e3f4a5`]; Product Stock 3-Permission RBAC [Migration `z9b0c1d2e3f4`]; RBAC & DB Resilience; Zero-Permission DB Isolation & Real-Time `PERMISSIONS_UPDATED` Sync; Instant RBAC Auto-Save for Departments & User Overrides; Granular Companies 11-Permission RBAC Matrix [Migration `z8a9b0c1d2e3`]; Shipment Planning RBAC & Dead UI Removal [`z6e7f8a9b0c1`]; Legacy `technician_operations.create` Removal [`z7f8a9b0c1d2`]; Granular Technician Gatepass & Wallet Management RBAC Matrix [Migration `z5d6e7f8a9b0`]; Granular Payments Module RBAC Matrix [Migration `z4c5d6e7f8a9`]; Fixed `Technician` `SYSTEM` Department [Migration `z2a3b4c5d6e7`, `/rbac/technicians/lookup`]; Granular Technical Tasks 16-Permission RBAC; Zero-Hardcoded Cross-Module Master Data & Fallback Purge Architecture, Cargo Overview & Financial Planning Report).*
+*Maintained and verified for Inhyma Solutions Enterprise ERP. Last updated: November 27, 2026 (Company Logo Blank-State, Hardcoded `/logo.png` Removal & Safe `Change PNG Logo` Lifecycle [`166cc8f`, `organizations/routes.py`, `brand.ts`, `Organization.tsx`, `AppShell.tsx`, `Login.tsx`, `index.html`]; HRMS, CRM Leads & Enterprise Task Notification Audit, Hourly Deadline Worker & Deep-Links [`f0a767b`]; Universal Feed Access & Announcement Notifications [`2781b41`]; Frontend `tsc -b` Fixes on `AttendancePage.tsx` & `EscalateTaskModal.test.tsx` [`347552e`]; Local Purchase 10-Permission Granular RBAC Matrix [Migration `z9t8d9e0f1a2`, `420` Unique Permissions / `425` Bootstrap Entries]; Discount Payments 6-Permission Isolated RBAC Matrix [Migrations `z9q5a6b7c8d9`, `z9s7c8d9e0f1`] replacing Unused Inquiries & Quotations RBAC [Migration `z9r6b7c8d9e0`] & Sales Process Separation; Sales Process & Orders 25-Permission Granular RBAC [Migration `z9j8a9b0c1d2`]; Left-Sidebar Navigation RBAC Alignment, Monospace Wrap & Inline Search [`permissionLabels.ts`, `Rbac.tsx`, `Users.tsx`, `pages.css`]; Proforma Invoices 15-Permission RBAC & Discount Payments Isolation [Migration `z9i7a8b9c0d1`]; Granular Brands / Sub-Categories / Categories 9-Permission RBAC [Migrations `z9h6a7b8c9d0`, `z9g5a6b7c8d9`, `z9f4a5b6c7d8`]; Product Master 8-Permission RBAC [Migration `z9e3f4a5b6c7`]; Stock Transfer 14-Permission RBAC & Portaled Action Menu [Migration `z9d2e3f4a5b6`]; Stock Adjustment 6-Permission RBAC [Migration `z9c1d2e3f4a5`]; Product Stock 3-Permission RBAC [Migration `z9b0c1d2e3f4`]; RBAC & DB Resilience; Zero-Permission DB Isolation & Real-Time `PERMISSIONS_UPDATED` Sync; Instant RBAC Auto-Save for Departments & User Overrides; Granular Companies 11-Permission RBAC Matrix [Migration `z8a9b0c1d2e3`]; Shipment Planning RBAC & Dead UI Removal [`z6e7f8a9b0c1`]; Legacy `technician_operations.create` Removal [`z7f8a9b0c1d2`]; Granular Technician Gatepass & Wallet Management RBAC Matrix [Migration `z5d6e7f8a9b0`]; Granular Payments Module RBAC Matrix [Migration `z4c5d6e7f8a9`]; Fixed `Technician` `SYSTEM` Department [Migration `z2a3b4c5d6e7`, `/rbac/technicians/lookup`]; Granular Technical Tasks 16-Permission RBAC; Zero-Hardcoded Cross-Module Master Data & Fallback Purge Architecture, Cargo Overview & Financial Planning Report).*
 

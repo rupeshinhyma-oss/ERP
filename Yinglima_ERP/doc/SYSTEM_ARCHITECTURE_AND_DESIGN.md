@@ -239,13 +239,15 @@ Automated container deployment platforms (Render, Docker, Kubernetes) execute bu
 
 ---
 
-## 10. Database-Backed Organization Branding & Storage Quota Protection
+## 10. Database-Backed Organization Branding, Blank-State Protection & Quota Safety
 
-1. **Database Persistence & Public Binary Streaming:**
-   - Organization logo image binary is persisted directly in PostgreSQL (`organizations.logo_data`).
-   - Served via `GET /api/v1/organizations/logo?v={sha1}` with `Cache-Control: public, max-age=86400, immutable`.
-   - Content hash `?v={sha1}` forces instant cache invalidation upon logo replacement.
-2. **Client Quota Protection:**
-   - `try/catch` wrappers around `localStorage.setItem` in `brand.ts` and `Organization.tsx` eliminate browser `QuotaExceededError` crashes on mobile devices when storing high-resolution image strings.
+1. **Database Persistence, Public Streaming & Old File Cleanup:**
+   - Organization logo image data is persisted directly in PostgreSQL (`organizations.logo_data` added via Alembic migration `z0a1b2c3d4e7_add_organization_logo_data.py` + `organizations.logo_url`).
+   - Managed via `GET /api/v1/organizations/logo` (serves binary with `Cache-Control: public, max-age=86400`), `POST /api/v1/organizations/logo` (replaces DB logo and deletes the old branding file via `delete_stored_file`), and `DELETE /api/v1/organizations/logo` (clears both DB columns and deletes the stored file).
+2. **Blank-State Protection & Safe Replacement (`brand.ts`, `Organization.tsx`, `AppShell.tsx`, `Login.tsx`, `NetworkStatusNotifier.tsx`, `index.html`):**
+   - Removed static `/logo.png` and `/favicon.svg` fallbacks. Clicking **Remove Logo** renders blank white space in ERP Settings, sidebar header, login header, and browser tab favicon (`BLANK_FAVICON_URL`), synced across tabs via `storage` events.
+   - Clicking **Change PNG Logo** preserves the existing logo until the new upload succeeds cleanly.
+3. **Client Quota Protection:**
+   - `try/catch` wrappers around `localStorage`/`sessionStorage` in `brand.ts` gracefully fall back to in-memory state and compact streaming URLs without throwing `QuotaExceededError`.
 
 

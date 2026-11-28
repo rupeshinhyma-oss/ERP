@@ -2,7 +2,7 @@
  * NetworkStatusNotifier -- Universal offline/online listener.
  *
  * 1. Dynamically toggles the browser tab favicon:
- *    - Online: shows the full-color company logo (/logo.png).
+ *    - Online: shows the configured company logo (or a blank favicon when none is set).
  *    - Offline: converts the company logo to a grayscale version.
  *
  * 2. Displays a floating popup at the bottom-right of the screen when offline:

@@ -255,6 +255,8 @@ export interface Organization {
   country?: string | null;
   postal_code?: string | null;
   business_hours?: string | null;
+  logo_url?: string | null;
+  logo_data?: string | null;
 }
 
 /** The 16 editable organization fields, in form order. */

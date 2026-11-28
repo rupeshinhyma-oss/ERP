@@ -1,7 +1,7 @@
 """Reconcile schema drift on fresh PG18 DBs (products, hsn_codes, supplier_product_links)
 
 Revision ID: h0c1d2e3f4a5
-Revises: g9b0c1d2e3f4
+Revises: z0a1b2c3d4e7
 Create Date: 2026-11-28 11:50:00.000000
 
 Idempotently reconciles ORM-mapped columns missing on fresh Alembic upgrades:
@@ -23,7 +23,7 @@ from alembic import op
 from sqlalchemy.dialects import postgresql
 
 revision: str = "h0c1d2e3f4a5"
-down_revision: Union[str, None] = "g9b0c1d2e3f4"
+down_revision: Union[str, None] = "z0a1b2c3d4e7"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

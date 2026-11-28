@@ -3644,7 +3644,10 @@ Manage complete vendor team directory:
 
   - Registered Head Office Address, City, State, Country, Postal Code.
 
-- **Actions:** `Edit Organization`, `Save Changes`, `Cancel`. Automatically updates brand name across sidebar.
+- **Actions:** `Edit`, `Save`, `Cancel`, plus **Company Logo** management (`Upload PNG Logo` / `Change PNG Logo`, `Remove Logo`, and drag-and-drop `Browse PNG / Image` in edit mode).
+  - **Blank-State & Replacement Behavior:**
+    - When **Remove Logo** is clicked (or no logo exists), `DELETE /api/v1/organizations/logo` clears `logo_url`/`logo_data` in PostgreSQL and deletes any stored file; ERP Settings preview, sidebar header, login header, and browser tab favicon (`BLANK_FAVICON_URL`) immediately become white/blank (zero `/logo.png` fallback) and sync across tabs.
+    - Clicking **Change PNG Logo** preserves the existing logo everywhere if cancelled or if upload fails, replacing it once the new upload completes cleanly.
 
 
 

@@ -27,7 +27,14 @@ import {
   PAGE_TITLES,
   DEFAULT_BRAND_NAME,
 } from "@/lib/nav";
-import { getCachedBrandName, resolveBrandName, subscribeBrandName } from "@/lib/brand";
+import {
+  getCachedBrandLogo,
+  getCachedBrandName,
+  resolveBrandInfo,
+  resolveImageUrl,
+  subscribeBrandLogo,
+  subscribeBrandName,
+} from "@/lib/brand";
 import { ICONS, IconBell, IconChevronDown, IconChevronRight } from "./icons";
 import { EcosystemSwitcher } from "./EcosystemSwitcher";
 import { processIncomingSsoHandover, routeForCentralSession } from "@/lib/ssoBridge";
@@ -621,16 +628,26 @@ function ForcePasswordChangeModal({ onDone }: { onDone: () => void }) {
 function Sidebar({
   activeKey,
   brandName: _brandName,
+  brandName,
+  brandLogo,
   collapsed,
   onToggleSidebar,
 }: {
   activeKey: string;
   brandName: string;
+  brandLogo?: string | null;
   collapsed: boolean;
   onToggleSidebar: () => void;
 }) {
   const { isSuperAdmin, hasPermission } = useAuth();
   const navRef = useRef<HTMLElement>(null);
+  const [logoLoadError, setLogoLoadError] = useState(false);
+
+  useEffect(() => {
+    setLogoLoadError(false);
+  }, [brandLogo]);
+
+  const resolvedBrandLogo = brandLogo && !logoLoadError ? resolveImageUrl(brandLogo) : "";
 
   const visibleSections = useMemo(
     () =>
@@ -753,15 +770,24 @@ function Sidebar({
           gap: "6px",
         }}
       >
-        {!collapsed && (
-          <Link
-            to="/dashboard"
-            className="sidebar-brand-logo"
-            style={{ display: "inline-flex", alignItems: "center", textDecoration: "none", cursor: "pointer" }}
-          >
-            <img src="/logo.png" alt="IHM Logo" style={{ height: "38px", width: "auto", objectFit: "contain" }} />
-          </Link>
-        )}
+        {!collapsed &&
+          (resolvedBrandLogo ? (
+            <Link
+              to="/dashboard"
+              className="sidebar-brand-logo"
+              style={{ display: "inline-flex", alignItems: "center", textDecoration: "none", cursor: "pointer", maxHeight: "44px" }}
+            >
+              <img
+                src={resolvedBrandLogo}
+                alt={`${brandName || "ERP"} Logo`}
+                crossOrigin="anonymous"
+                onError={() => setLogoLoadError(true)}
+                style={{ maxHeight: "38px", maxWidth: "160px", width: "auto", objectFit: "contain" }}
+              />
+            </Link>
+          ) : (
+            <div aria-hidden="true" />
+          ))}
         <button
           type="button"
           className="sidebar-toggle-btn"
@@ -1231,6 +1257,7 @@ export function AppShell({ activeKey, children, pageClassName }: AppShellProps) 
   const location = useLocation();
   const navigate = useNavigate();
   const [brandName, setBrandName] = useState(() => getCachedBrandName());
+  const [brandLogo, setBrandLogoState] = useState<string | null>(() => getCachedBrandLogo());
   const [passwordModalDismissed, setPasswordModalDismissed] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(
     () => localStorage.getItem("erp_sidebar_collapsed") === "true"
@@ -1313,12 +1340,16 @@ export function AppShell({ activeKey, children, pageClassName }: AppShellProps) 
   }, [loggedIn]);
 
   useEffect(() => subscribeBrandName(setBrandName), []);
+  useEffect(() => subscribeBrandLogo(setBrandLogoState), []);
 
   useEffect(() => {
     let cancelled = false;
     if (!loggedIn) return;
-    resolveBrandName().then((name) => {
-      if (!cancelled) setBrandName(name);
+    resolveBrandInfo().then((info) => {
+      if (!cancelled) {
+        setBrandName(info.name);
+        setBrandLogoState(info.logoUrl);
+      }
     });
     return () => {
       cancelled = true;
@@ -1461,7 +1492,7 @@ export function AppShell({ activeKey, children, pageClassName }: AppShellProps) 
         isNarrowViewport && mobileMenuOpen ? "mobile-sidebar-open" : ""
       } ${pageClassName || ""}`.trim()}
     >
-      <Sidebar activeKey={activeKey} brandName={brandName} collapsed={effectiveCollapsed} onToggleSidebar={toggleSidebar} />
+      <Sidebar activeKey={activeKey} brandName={brandName} brandLogo={brandLogo} collapsed={effectiveCollapsed} onToggleSidebar={toggleSidebar} />
       <div className="main-column">
         <Topbar />
         {children}

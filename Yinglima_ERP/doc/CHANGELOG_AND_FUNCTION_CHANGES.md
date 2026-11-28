@@ -3,7 +3,7 @@
 **System:** Yinglima_ERP (China Procurement)  
 **Scope:** Functional updates, schema changes, UI hardening, and bug fixes.
 
-### 40. Master Production Readiness Remediation — Security, Finance, Migrations, Reliability & Polish (2026-11-28)
+### 42. Master Production Readiness Remediation — Security, Finance, Migrations, Reliability & Polish (2026-11-28)
 - **P0 Security (`BUG-001`, `BUG-002`, `BUG-004`, `BUG-005`, `BUG-006`):**
   - Restored Argon2id password hashing (`auth/security.py`, `auth/service.py`) with race-safe conditional rehashing of legacy plaintext passwords on successful login.
   - Scrubbed hardcoded SMTP/Gmail App Password defaults from `core/config.py`, `.env.defaults`, `email_inbound_worker.py`, and redacted SMTP errors in `common/email.py`.
@@ -13,12 +13,20 @@
 - **P1 Reliability, Migrations & Operations (`BUG-008`, `BUG-011`, `BUG-012`, `BUG-013`, `BUG-014`, `BUG-015`, `BUG-018`):**
   - Fixed `durable_events/routes.py` `db=db` keyword calls and mapped integration ingestion validation/conflict errors cleanly in `integration/routes.py`.
   - Bounded JWT expiry (`ACCESS_TOKEN_EXPIRE_MINUTES=30`, max `120`; `REFRESH_TOKEN_EXPIRE_DAYS=30`, max `90`) and tightened `validate_production_secrets()` boot checks in `core/config.py`.
-  - Repaired fresh-DB Alembic migration idempotency (`9c0d1e2f3a4b`, `b3c4d5e6f7a8`, `c4d5e6f7a8b9`) and added forward reconciliation migration `h0c1d2e3f4a5` (`products.supplier_id` + `supplier_product_links.updated_at`).
+  - Repaired fresh-DB Alembic migration idempotency (`9c0d1e2f3a4b`, `b3c4d5e6f7a8`, `c4d5e6f7a8b9`) and added forward reconciliation migration `h0c1d2e3f4a5` (`products.supplier_id` + `supplier_product_links.updated_at`, revising `z0a1b2c3d4e7`).
   - Eliminated WebSocket DB session leaks via `verify_websocket_token()` in `auth/dependencies.py`, `events/routes.py`, and `planning/routes.py`, and bounded DB pooling to `10+10`.
   - Removed misleading `"Storage Suspended (402)"` labels from `ProductGallery.tsx`.
 - **P2/P3 Performance, UI & RBAC Polish (`BUG-019`, `BUG-024`, `BUG-025`, `BUG-026`, `BUG-027`, `BUG-029`):**
   - Eliminated direct-login `401 POST /global/ecosystem-session/establish` console spam in `ecosystemSession.ts` & `EcosystemSwitcher.tsx`.
   - Replaced duplicate sidebar navigation icons (`IconBarChart`, `IconClipboardList`, `IconReceipt`, `IconTag` in `icons.tsx` / `nav.ts`), added pre-mount `<RouteGuard>` in `App.tsx`, locked `GET /masters/currencies/rates` with `Depends(get_current_user)`, replaced `COUNT(*) OVER ()` in `audit/repository.py` with separated page + narrow `COUNT(id)`, hardened/cached `/health/federation`, and resolved test-suite isolation & PG18 lock deadlocks.
+
+### 41. Retired Orphaned `reporting.*` Permissions (`scripts/seed.py`)
+- **Removed `reporting.view` & `reporting.manage`:** Added `reporting.view` and `reporting.manage` to `seed_with_session`'s retired permissions cleanup in `backend/scripts/seed.py` (and purged them from the database) so the unused `REPORTING` module no longer appears under `OTHER MODULES` in RBAC / User Permission Overrides.
+
+### 40. Company Logo DB Storage, Blank-State Fallback Removal & Safe Replacement (`z0a1b2c3d4e7`, `organizations/*`, `common/storage.py`, `main.py`, `brand.ts`, `Organization.tsx`, `AppShell.tsx`, `Login.tsx`, `NetworkStatusNotifier.tsx`, `index.html`, `test_organization_logo.py`, `OrganizationLogo.test.tsx`)
+- **Database-Backed Logo Storage & Endpoints (`models.py`, `schemas.py`, `service.py`, `routes.py`, `main.py`, `z0a1b2c3d4e7_add_organization_logo_data.py`):** Added `Organization.logo_data` (`Text`), widened `logo_url` to `Text`, mounted `/uploads/branding`, updated `OrganizationService.update()` & `PATCH /organizations` (`exclude_unset=True`), and added `GET /api/v1/organizations/logo`, `POST /api/v1/organizations/logo`, and `DELETE /api/v1/organizations/logo` with automatic `delete_stored_file()` cleanup of replaced/removed branding files.
+- **Removed Hardcoded `/logo.png` & `/favicon.svg` Fallbacks (`brand.ts`, `AppShell.tsx`, `Login.tsx`, `Organization.tsx`, `NetworkStatusNotifier.tsx`, `index.html`):** Deleted static `public/logo.png` and `public/favicon.svg` assets. Clicking **Remove Logo** clears DB columns and client storage caches, rendering clean white blank space in ERP Settings, sidebar header, login header, and browser tab favicon (`BLANK_FAVICON_URL`) with cross-tab `storage` sync.
+- **Safe `Change PNG Logo` Replacement (`Organization.tsx`):** Preserves the existing logo everywhere if file selection is cancelled or upload fails, replacing the old logo cleanly once the new upload completes.
 
 ### 39. Live Multi-Worker Permission Enforcement & Immediate Self-Sync (`auth/service.py`, `Users.tsx`)
 - **Removed Per-Worker `user_perms` Cache (`auth/service.py`):** Updated `AuthService.get_user_effective_permissions()` to query `RoleRepository.get_permission_codes_for_user()` directly from PostgreSQL on each request instead of caching `user_perms:<user_id>` in per-process memory for 1 hour. Eliminates stale permission bypasses across `--workers 4` on Render when an admin revokes access.

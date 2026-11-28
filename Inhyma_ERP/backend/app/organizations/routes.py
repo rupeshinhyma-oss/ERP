@@ -13,7 +13,7 @@ from app.audit.dependencies import get_audit_service
 from app.audit.service import AuditService
 from app.auth.dependencies import get_current_user
 from app.auth.service import CurrentUser
-from app.common.storage import guess_content_type, save_uploaded_file
+from app.common.storage import delete_stored_file, guess_content_type, save_uploaded_file
 from app.core.config import settings
 from app.core.exceptions import BadRequestException
 from app.core.responses import build_success_response
@@ -213,6 +213,9 @@ async def upload_organization_logo(
     b64_content = base64.b64encode(content).decode("ascii")
     data_uri = f"data:{mime};base64,{b64_content}"
 
+    existing_org = await organization_service.get_or_raise()
+    old_logo_url = existing_org.logo_url
+
     public_url, _ = await save_uploaded_file(
         content=content,
         original_filename=filename,
@@ -222,6 +225,15 @@ async def upload_organization_logo(
     )
 
     organization = await organization_service.update(logo_url=public_url, logo_data=data_uri)
+    if old_logo_url and old_logo_url != public_url and not old_logo_url.startswith("/api/v1/organizations/logo"):
+        try:
+            await delete_stored_file(
+                old_logo_url,
+                allowed_buckets={"public-assets"},
+                allowed_local_subfolders={"branding"},
+            )
+        except Exception:
+            pass
     org_data = OrganizationRead.model_validate(organization).model_dump(mode="json")
 
     await _record_org_action(
@@ -253,7 +265,19 @@ async def delete_organization_logo(
     audit_service: AuditService = Depends(get_audit_service),
 ) -> dict:
     """Remove company / ERP logo. Restricted to Super Administrators."""
+    existing_org = await organization_service.get_or_raise()
+    old_logo_url = existing_org.logo_url
+
     organization = await organization_service.update(logo_url=None, logo_data=None)
+    if old_logo_url and not old_logo_url.startswith("/api/v1/organizations/logo"):
+        try:
+            await delete_stored_file(
+                old_logo_url,
+                allowed_buckets={"public-assets"},
+                allowed_local_subfolders={"branding"},
+            )
+        except Exception:
+            pass
     org_data = OrganizationRead.model_validate(organization).model_dump(mode="json")
 
     await _record_org_action(

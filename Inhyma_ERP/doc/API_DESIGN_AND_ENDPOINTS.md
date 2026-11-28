@@ -214,8 +214,10 @@ Machine-to-machine internal service endpoints invoked by `ERP_Main` over authent
 | `POST` | `/api/v1/users/{id}/reset-password` | Administrative password reset and automatic fanout push to ERP_Main | `user.manage` |
 | `PATCH` | `/api/v1/users/{id}` | Update user profile & HR attributes (`display_name` primary, internal `username` preserved when omitted, email locked to central control plane) with best-effort `display_name` push to `ERP_Main` (`POST /internal/users/profile`) | `user.update` / Self |
 | `POST` | `/api/v1/internal/users/{id}/deprovision` | Invalidate spoke sessions and soft-delete user upon ERP_Main deprovisioning | Internal Service Key |
-| `GET` | `/api/v1/organizations/public` | Unauthenticated public branding endpoint returning company name, legal name, and DB-backed versioned logo URL | Public |
-| `GET` | `/api/v1/organizations/logo` | Stream company logo binary directly from database (`logo_data`) with `?v={sha1}` version hash for immutable client caching | Public |
+| `GET` | `/api/v1/organizations/public` | Unauthenticated public branding endpoint returning company name, legal name, and DB-backed versioned logo URL (`null` when removed) | Public |
+| `GET` | `/api/v1/organizations/logo` | Stream company logo binary directly from database (`logo_data`) with `?v={sha1}` version hash for immutable client caching (`404` when absent) | Public |
+| `POST` | `/api/v1/organizations/logo` | Upload or replace company logo (`logo_data` in PostgreSQL + branding storage cleanup of previous file) | `organization.manage` |
+| `DELETE` | `/api/v1/organizations/logo` | Remove company logo (clears `logo_url` & `logo_data` in DB and deletes stored branding file) | `organization.manage` |
 | `GET` | `/api/v1/health/federation` | Cross-ERP sign-in and control plane diagnostics: live ERP_Main probes, latencies, base URLs tried, and validation problems (safe, no secrets) | Public |
 
 ## Session-scoped tokens and per-session revocation

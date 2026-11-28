@@ -90,6 +90,8 @@
 78. [TASK: Technician Ops & Wallet — Spare Parts Gatepass Stock Conservation, Sales Process Bridge, Wallet Voucher Ledger & Machine Warranty Registry](#78-task-technician-ops--wallet--spare-parts-gatepass-stock-conservation-sales-process-bridge-wallet-voucher-ledger--machine-warranty-registry)
 79. [REPORTS: Financial Planning Report & Cargo Overview Modules](#79-reports-financial-planning-report--cargo-overview-modules)
 80. [PLATFORM GOVERNANCE: Zero-Hardcoded Cross-Module Master Data, Live Error Integrity & Fallback Purge](#80-platform-governance-zero-hardcoded-cross-module-master-data-live-error-integrity--fallback-purge)
+81. [INVENTORY: Stock Transfer Granular RBAC Matrix & Viewport-Aware Action Menu Portal](#81-inventory-stock-transfer-granular-rbac-matrix--viewport-aware-action-menu-portal)
+82. [NOTIFICATIONS & DEEP-LINKS: HRMS, CRM Leads, Enterprise Tasks & Feed Notification Bell](#82-notifications--deep-links-hrms-crm-leads-enterprise-tasks--feed-notification-bell)
 
 ---
 
@@ -126,7 +128,7 @@
 | **CRM** | Leads & Pipelines | `/crm/leads` | `crm-leads` | `users` | `crm.view` |
 | **CRM** | Sales Quotations | `/crm/quotations` | `crm-quotations` | `fileText` | `crm.quotation.view` |
 | **COMMUNICATION** | Feed & Announcements | `/feed` | `feed` | `messageSquare` | Authenticated |
-| **PURCHASE** | Local Purchase | `/purchase/localpurchase` | `local-purchases` | `shoppingBag` | `purchase.view` |
+| **PURCHASE** | Local Purchase | `/purchase/localpurchase` | `local-purchases` | `shoppingBag` | `localpurchase.view` \| `localpurchase.manage` (strictly separated from `purchase.view`, Migration `z9t8d9e0f1a2`) |
 | **PURCHASE** | Import Purchase | `/purchase/importpurchase` | `import-purchases` | `ship` | `purchase.view` |
 | **PURCHASE** | Suppliers | `/purchase/suppliers` (`/suppliers` redirect) | `purchase-suppliers` | `factory` | `supplier.view` |
 | **REPORTS** | Re-Order | `/reports/re-order` (`/product-reorder/list`) | `reports-reorder` | `refreshCw` | `product.view` |
@@ -1060,8 +1062,9 @@ Manage complete vendor team directory:
 - **Actions:** `Edit Organization`, `Save Changes`, `Cancel`.
 - **Real-Time Dynamic Sidebar Branding:**
   - Automatically pushes uploaded company logo and brand name across the entire application shell via `resolveBrandInfo()` and `subscribeBrandLogo()`.
-  - AppShell sidebar header immediately extracts the organization logo (`resolveImageUrl(brandLogo)`) with fallback to `/logo.png`.
-  - Multiple browser tabs receive real-time updates via local event subscription without requiring page refresh.
+  - AppShell sidebar header immediately extracts the organization logo (`resolveImageUrl(brandLogo)`) when present, and renders a clean white blank space (no hardcoded `/logo.png`) when no logo is configured or after `Remove Logo` is clicked.
+  - Clicking `Change PNG Logo` preserves the existing logo until a new upload succeeds cleanly; uploading a new logo replaces the old one everywhere and removes the previous file.
+  - Multiple browser tabs receive real-time updates via local listeners and cross-tab `storage` events without requiring page refresh.
 
 
 ### 21.2. Organization List (`/masters/company-list`)
@@ -3050,25 +3053,24 @@ Positioned directly underneath the collapsible filter card and powered by `GET /
 ## 61. DYNAMIC BRAND LOGO: Real-Time Sidebar Branding from ERP Organization Settings
 
 ### Overview & Route Mapping
-- **Primary Routes:** `/organization` (ERP Settings), Global AppShell Sidebar (`AppShell.tsx`).
+- **Primary Routes:** `/organization` (ERP Settings), Global AppShell Sidebar (`AppShell.tsx`), Login (`Login.tsx`).
 - **Primary Permissions:** `organization.manage`, Public Authenticated.
-- **Purpose:** Seamless corporate white-labeling and visual personalization. Eliminates hardcoded placeholder branding (`/logo.png`) by dynamically resolving the active organization's uploaded company logo in the sidebar header with real-time multi-tab propagation.
+- **Purpose:** Seamless corporate white-labeling and visual personalization. Removes hardcoded placeholder branding (`/logo.png`, `/favicon.svg`) by dynamically resolving the active organization's uploaded company logo in the sidebar header, login header, ERP Settings preview, and browser favicon—rendering clean blank white space when removed or absent.
 
 ### Key Visual & Functional Components
-1. **Dynamic Brand Logo Resolution (`brand.ts` & `AppShell.tsx`):**
-   - On application mount, `AppShell` queries `resolveBrandInfo()` to fetch the active organization profile.
-   - Extracts `logo_data` (Base64 data URI) or `logo_url` (Supabase storage URL).
-   - Sidebar header renders `<img src={resolveImageUrl(brandLogo) || "/logo.png"} alt="IHM Logo" ... />`.
-   - Built-in `onError` event handler: if an image URL fails to load or network error occurs, it gracefully falls back to `/logo.png` with zero visual breakage.
-2. **Real-Time Cross-Tab Subscription (`subscribeBrandLogo`):**
-   - Whenever an administrator uploads and saves a new company logo in **ERP Settings &rarr; Organization**, `setBrandLogo()` emits a localized window event (`ihm_brand_logo_changed`).
-   - The AppShell sidebar listens to this event via `subscribeBrandLogo(setBrandLogo)`, immediately updating the logo in the sidebar header across all active browser windows and tabs without requiring an application reload.
+1. **Dynamic Brand Logo Resolution (`brand.ts`, `AppShell.tsx`, `Login.tsx`, `Organization.tsx`):**
+   - On application mount, `AppShell` and `Login` query `resolveBrandInfo()` / `/organizations/public` and always sync DB state (including clearing stale cached logos when DB `logo_url`/`logo_data` is `null`).
+   - Extracts `logo_data` (Base64 data URI) or `logo_url` (DB-backed endpoint / cloud storage URL).
+   - When no logo is set (or an image fails to load), the sidebar header, login header, ERP Settings preview container, and browser tab favicon (`BLANK_FAVICON_URL`) render blank white without falling back to any hardcoded logo file.
+2. **Safe Replacement & Cross-Tab Synchronization (`subscribeBrandLogo`, `DELETE /organizations/logo`):**
+   - Clicking **Change PNG Logo** opens the file picker while keeping the existing logo intact until a valid new upload completes successfully (`POST /api/v1/organizations/logo`), which then deletes the previous stored file and updates all active UI surfaces immediately.
+   - Clicking **Remove Logo** clears `logo_url` and `logo_data` in PostgreSQL, deletes any stored branding file, clears client caches, and updates all active browser tabs immediately via `subscribeBrandLogo` and `storage` events.
 
 ### QA Verification Test Cases
-- [ ] Verify that opening any ERP page renders the active organization's custom company logo in the sidebar header.
-- [ ] Verify that navigating to `/organization`, uploading a new company logo, and clicking `Save Changes` immediately updates the sidebar header logo in real-time.
-- [ ] Verify that if an invalid or unreachable image URL is returned, the sidebar logo falls back gracefully to `/logo.png`.
-- [ ] Verify that opening a second browser tab and changing the logo in the first tab updates the second tab's sidebar header immediately.
+- [ ] Verify that opening any ERP page with a configured logo renders the active organization's custom company logo in the sidebar header, login header, and browser tab favicon.
+- [ ] Verify that clicking **Remove Logo** clears the logo everywhere (ERP Settings preview, sidebar header, login header, and tab favicon become blank white with no hardcoded `IHM` `/logo.png` fallback, even after page reload).
+- [ ] Verify that clicking **Change PNG Logo** and cancelling the picker or encountering an upload error preserves the existing logo intact.
+- [ ] Verify that uploading a new PNG logo immediately replaces the old logo across ERP Settings, sidebar, login page, favicon, and other open browser tabs.
 
 ---
 
@@ -3895,6 +3897,23 @@ Cross-module selectors, defaults, and document/table renders across `Inhyma_ERP`
 - [ ] **TC-ST-RBAC-01 (View & Stage Tab Isolation):** Assign only `stock_transfer.pending.view` to a user -> verify `/stock-transfer` opens directly on the active `Pending` tab, hides `All`, `Confirmed`, `Received`, `Cancel` tabs, hides header `+ ADD NEW` / `Export` / `Bulk Actions`, hides checkboxes & `ACTION` column, and returns `403` if querying `?status=Confirmed` directly.
 - [ ] **TC-ST-RBAC-02 (Action Menu & Stage Transitions):** Grant `stock_transfer.view` + `stock_transfer.confirmed` on a `Pending` transfer -> verify `Confirm` appears in `⋮` while `Receive in Main WH`, `Cancel`, and `Download` remain hidden and direct `PATCH .../status` to `Received` / `Cancel` returns `403`. Granting `stock_transfer.received`, `stock_transfer.cancel`, or `stock_transfer.download` selectively reveals those actions and backend routes.
 - [ ] **TC-ST-PORTAL-01 (Action Menu Downward/Upward Positioning):** On `/stock-transfer` with 2 rows, click row 2's `⋮` button -> verify the menu opens downward inside `document.body` without covering the table header or `Search...` bar and without clipping `View`; scroll a multi-row list near the bottom of the viewport and click `⋮` -> verify the menu flips cleanly upward and closes on outside click or scroll.
+
+---
+
+## 82. NOTIFICATIONS & DEEP-LINKS: HRMS, CRM Leads, Enterprise Tasks & Feed Notification Bell
+
+- **Files:** `AppShell.tsx` (`NotificationBell`), `app/notifications/repository.py`, `app/hrms/notifications.py`, `app/crm/notifications.py`, `app/tasks/{service,recurring_worker}.py`, `app/feed/service.py`, `LeavePage.tsx`, `AttendancePage.tsx`, `ExpensesPage.tsx`, `PayrollPage.tsx`, `CrmLeadsPage.tsx`, `TasksPage.tsx`.
+- **Notification Bell UI & Icon Mapping (`AppShell.tsx`):**
+  - Renders module-specific icons (`📢`, `💬`, `✉️` for Feed; `🗓️`, `⏰`, `💳`, `💻`, `📍`, `💰` for HRMS; `🎯`, `🏆`, `📉`, `📞`, `📄` for CRM Leads; `📌`, `✅`, `🚨`, `⏳`, `📝`, `⏸️` for Enterprise Tasks).
+  - Removed the broken `/notification-settings` link in the bell footer (`Click any notification to open the related record`), polls only when `userId` is present, and truncates `type[:50]`, `title[:255]`, `link[:255]` defensively in `NotificationRepository.create()`.
+- **Deep-Link Navigation & Background Deadline Worker:**
+  - **HRMS:** `/hrms/leave?request_id=`, `/hrms/attendance?regularization_id=`, `/hrms/expenses?expense_id=`, `/hrms/payroll?month=` (plus notifications for leave cancellation, site visit reassignment away, salary revision, and payslip release).
+  - **CRM:** `/crm/leads?lead_id=...&drawerTab=...` (plus round-robin/CSV distribution batch summaries, pipeline Won/Lost manager alerts, quotation updates).
+  - **Enterprise Tasks:** Hourly `RecurringTaskWorker._run_once()` triggers `TaskService.check_task_deadlines(user_id=None)` and `TaskService.check_expired_holds()` (20h deduplication); escalation comment alerts deep-link with `&drawerTab=escalations`, and `TasksPage.tsx` resets `initialDrawerTab` to `"details"` when switching to non-escalation links.
+
+### QA Verification Test Cases
+- [ ] **TC-NOTIF-01 (Notification Bell Icons, Deep-Links & Footer):** Trigger HRMS, CRM, Task, and Feed notifications -> verify distinct module icons appear inside `NotificationBell`, zero `/notification-settings` link renders in the footer, and clicking any notification opens the corresponding record/drawer tab cleanly.
+- [ ] **TC-NOTIF-02 (Escalation vs Standard Task Tab Reset):** Open an escalated task link (`&drawerTab=escalations`) in `TasksPage.tsx`, then navigate to a standard task link -> verify the drawer resets cleanly to the `"details"` tab.
 
 ---
 *End of Master Features & Testing Specification Manual. Maintained for Inhyma Solutions Enterprise ERP. Last updated: November 27, 2026 (Local Purchase 10-Permission Granular RBAC Matrix [Migration `z9t8d9e0f1a2`, `420` Unique Bootstrap Permissions / `425` Entries]; Discount Payments 6-Permission Isolated RBAC Matrix [Migrations `z9q5a6b7c8d9`, `z9s7c8d9e0f1`] replacing Unused Inquiries & Quotations RBAC [Migration `z9r6b7c8d9e0`] & Sales Process Separation; Sales Process & Orders 25-Permission Granular RBAC Matrix [Migration `z9j8a9b0c1d2`]; Left-Sidebar Navigation Section RBAC Alignment, Monospace Wrap & Live Search Bar [`NAV_PERMISSION_SECTIONS`, `filterNavPermissionSections`, `Rbac.tsx`, `Users.tsx`, `pages.css`]; Proforma Invoices 15-Permission Granular RBAC & Discount Payments Isolation [Migration `z9i7a8b9c0d1`]; Brands / Sub-Categories / Categories 9-Permission Granular RBAC [Migrations `z9h6a7b8c9d0`, `z9g5a6b7c8d9`, `z9f4a5b6c7d8`]; Product Master 8-Permission Granular RBAC [Migration `z9e3f4a5b6c7`]; Section 81: Stock Transfer 14-Permission Granular RBAC Matrix [Migration `z9d2e3f4a5b6`] & Viewport-Aware Portaled Action Menu; Stock Adjustment 6-Permission RBAC [Migration `z9c1d2e3f4a5`] & Product Stock 3-Permission RBAC [Migration `z9b0c1d2e3f4`]; RBAC Permission Toggle 500/503 Resilience & Idempotent Retry Handling; Zero-Permission DB User Isolation & Real-Time `PERMISSIONS_UPDATED` Sync; Instant RBAC Auto-Save for Departments & User Overrides; Granular `11`-Permission Companies RBAC Matrix [Migration `z8a9b0c1d2e3`]; Shipment Planning UI/RBAC Removal [Migration `z6e7f8a9b0c1`]; Legacy `technician_operations.create` Removal [Migration `z7f8a9b0c1d2`]; Granular `20`-Permission Technician Gatepass & Wallet Management RBAC Matrix [Migration `z5d6e7f8a9b0`] & Portaled Typable Comboboxes; Granular Payments Module Tab/Action/Details/Record RBAC Permissions [`9` permissions, Migration `z4c5d6e7f8a9`]; Shift Technicians from Masters into Fixed `Technician` `SYSTEM` Department [Migration `z2a3b4c5d6e7`, `/rbac/technicians/lookup`]; Granular Technical Tasks Tab/Action/Stage RBAC Permissions [`16` permissions, Migrations `x1c2d3e4f5a6` & `y1d2e3f4a5b6`]; Section 80: Zero-Hardcoded Cross-Module Master Data, Live Error Integrity, Fallback Purge, Stock Transfer Filter Row, Payments Single Pagination Footer & Technical Tasks Header Cleanup).*

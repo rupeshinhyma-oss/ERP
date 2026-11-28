@@ -91,6 +91,16 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     # Eagerly initialize the engine to fail fast on misconfiguration.
     engine = get_engine()
+    if engine.dialect.name != "sqlite":
+        try:
+            from sqlalchemy import text
+
+            async with engine.begin() as _schema_conn:
+                await _schema_conn.execute(
+                    text("ALTER TABLE organizations ADD COLUMN IF NOT EXISTS logo_data TEXT;")
+                )
+        except Exception:
+            logger.warning("Startup logo_data column check skipped or deferred.", exc_info=True)
 
     # Reliability fallback: guarantee the bootstrap admin account exists
     # every time this backend starts, with zero manual steps. Previously
@@ -295,9 +305,11 @@ def create_application() -> FastAPI:
             raise HTTPException(status_code=404, detail="Private file not found.")
         return FileResponse(target)
 
-    # Public static uploads for product images and supplier media
+    # Public static uploads for product images, supplier media, and branding logos
+    (uploads_dir / "branding").mkdir(exist_ok=True)
     app.mount("/uploads/products", StaticFiles(directory=uploads_dir / "products"), name="uploads_products")
     app.mount("/uploads/suppliers", StaticFiles(directory=uploads_dir / "suppliers"), name="uploads_suppliers")
+    app.mount("/uploads/branding", StaticFiles(directory=uploads_dir / "branding"), name="uploads_branding")
     app.mount("/static/uploads", StaticFiles(directory=uploads_dir / "products"), name="static_uploads")
 
     # ---------------------------------------------------------------

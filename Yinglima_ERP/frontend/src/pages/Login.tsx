@@ -8,7 +8,7 @@ import { Link, Navigate, useNavigate } from "react-router-dom";
 import { apiGet, apiPost } from "@/lib/api";
 import { Auth } from "@/lib/auth";
 import { controlPlaneUrl, createSsoHandoverUrlFromSession, processIncomingSsoHandover, routeForCentralSession } from "@/lib/ssoBridge";
-import { setBrandName } from "@/lib/brand";
+import { getCachedBrandLogo, resolveImageUrl, setBrandLogo, setBrandName, subscribeBrandLogo } from "@/lib/brand";
 import { ErrorBanner } from "@/components/ui";
 import type { Profile, TokenPair } from "@/types";
 
@@ -18,6 +18,7 @@ interface PublicOrgInfo {
   company_name: string;
   legal_name?: string | null;
   logo_url?: string | null;
+  logo_data?: string | null;
 }
 
 function EyeIcon({ visible }: { visible: boolean }) {
@@ -75,7 +76,17 @@ export function LoginPage() {
       return false;
     }
   });
+  const [brandLogo, setBrandLogoState] = useState<string | null>(() => getCachedBrandLogo());
+  const [logoLoadError, setLogoLoadError] = useState(false);
   const identifierRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    setLogoLoadError(false);
+  }, [brandLogo]);
+
+  useEffect(() => {
+    return subscribeBrandLogo(setBrandLogoState);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -85,15 +96,20 @@ export function LoginPage() {
     (async () => {
       try {
         const { data } = await apiGet<PublicOrgInfo>("/organizations/public");
-        if (cancelled || !data?.company_name) return;
-        setBrand(data.company_name);
-        setBrandName(data.company_name);
-        try {
-          localStorage.setItem(BRAND_CACHE_KEY, data.company_name);
-        } catch {
-          /* ignore */
+        if (cancelled || !data) return;
+        if (data.company_name) {
+          setBrand(data.company_name);
+          setBrandName(data.company_name);
+          try {
+            localStorage.setItem(BRAND_CACHE_KEY, data.company_name);
+          } catch {
+            /* ignore */
+          }
+          document.title = `Sign In — ${data.company_name}`;
         }
-        document.title = `Sign In — ${data.company_name}`;
+        const logo = (data.logo_data && data.logo_data.startsWith("data:") ? data.logo_data : data.logo_url) || data.logo_data || null;
+        setBrandLogo(logo, data.logo_url || null);
+        setBrandLogoState(logo);
       } catch {
         /* fallback to default */
       }
@@ -253,10 +269,20 @@ export function LoginPage() {
   return (
     <div style={{ minHeight: "100vh", width: "100%", background: "#f8fafc", display: "flex", flexDirection: "column" }}>
       {/* Top Header Logo */}
-      <header style={{ padding: "10px 32px", background: "#ffffff", borderBottom: "1px solid #e2e8f0", display: "flex", alignItems: "center" }}>
-        <Link to="/dashboard" style={{ display: "inline-flex", alignItems: "center", textDecoration: "none", cursor: "pointer" }}>
-          <img src="/logo.png" alt="IHM Logo" style={{ height: "40px", width: "auto", objectFit: "contain" }} />
-        </Link>
+      <header style={{ padding: "10px 32px", background: "#ffffff", borderBottom: "1px solid #e2e8f0", display: "flex", alignItems: "center", minHeight: "60px", boxSizing: "border-box" }}>
+        {brandLogo && !logoLoadError && resolveImageUrl(brandLogo) ? (
+          <Link to="/dashboard" style={{ display: "inline-flex", alignItems: "center", textDecoration: "none", cursor: "pointer" }}>
+            <img
+              src={resolveImageUrl(brandLogo)}
+              alt={`${brand || "ERP"} Logo`}
+              crossOrigin="anonymous"
+              onError={() => setLogoLoadError(true)}
+              style={{ height: "40px", width: "auto", maxWidth: "200px", objectFit: "contain" }}
+            />
+          </Link>
+        ) : (
+          <div style={{ height: "40px" }} aria-hidden="true" />
+        )}
       </header>
 
       {/* Main Login Content */}

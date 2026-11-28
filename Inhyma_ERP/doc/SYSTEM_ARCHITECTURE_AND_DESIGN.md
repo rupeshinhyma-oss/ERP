@@ -261,13 +261,13 @@ To achieve complete decoupling between infrastructure routing and organizational
    - The backend instance identifier `ERP_INSTANCE_ID = "erp-01"` is defined in [`backend/app/core/config.py`](file:///c:/Users/Inhyma%20Solutions/OneDrive/Desktop/ERP/Inhyma_ERP/backend/app/core/config.py).
    - Used for inter-ERP service-to-service authentication, health reporting, and identity sync across the ecosystem.
 
-2. **Public Branding Contract (`GET /organizations/public`):**
-   - Unauthenticated endpoint serving `{ company_name, legal_name, logo_url, erp_id }`.
-   - Allows client applications, login pages, and browser tab titles to resolve branding dynamically before authentication.
+2. **Public Branding Contract (`GET /organizations/public` & `/organizations/logo`):**
+   - Unauthenticated endpoint serving `{ company_name, legal_name, logo_url, logo_data, erp_id }` (`logo_url` and `logo_data` are `null` when no logo is configured or after **Remove Logo**).
+   - `GET /organizations/logo` streams DB-backed logo bytes (or returns `404` when absent); `POST /organizations/logo` and `DELETE /organizations/logo` (`organization.manage`) replace/clear `logo_data`/`logo_url` and clean up old branding files via `delete_stored_file`.
 
-3. **Dynamic Single Source of Truth (`ERP Settings -> Company Name`):**
-   - The human-facing brand name is never hardcoded in source files.
-   - All frontend components, document templates, and PDF renderers query `getCachedBrandName()`, which stays synchronized with the active record in the `organizations` database table.
+3. **Dynamic Single Source of Truth (`ERP Settings -> Company Name & Logo`):**
+   - The human-facing brand name and logo are never hardcoded in static public assets (`/logo.png`, `/favicon.svg` removed).
+   - Frontend components synchronize via `getCachedBrandName()`, `getCachedBrandLogo()`, `subscribeBrandLogo()`, and cross-tab `storage` events; when removed or unset, ERP Settings, sidebar header, login header, and browser tab favicon (`BLANK_FAVICON_URL`) render blank white cleanly, and **Change PNG Logo** preserves the prior logo until upload succeeds.
 
 ---
 

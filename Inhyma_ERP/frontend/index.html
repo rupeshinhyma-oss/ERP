@@ -4,7 +4,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <link id="dynamic-favicon" rel="icon" type="image/png" href="/logo.png" />
+  <link id="dynamic-favicon" rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'/%3E" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link
@@ -28,10 +28,14 @@
         document.title = page + " - " + company;
 
         var storedLogo = localStorage.getItem("erp_org_company_logo") || sessionStorage.getItem("erp_org_company_logo") || localStorage.getItem("erp_brand_logo");
-        if (storedLogo && storedLogo.trim()) {
-          var fav = document.getElementById("dynamic-favicon");
-          if (fav) {
+        var fav = document.getElementById("dynamic-favicon");
+        if (fav) {
+          if (storedLogo && storedLogo.trim()) {
+            fav.type = storedLogo.trim().indexOf("data:image/svg") === 0 ? "image/svg+xml" : "image/png";
             fav.href = storedLogo.trim();
+          } else {
+            fav.type = "image/svg+xml";
+            fav.href = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'/%3E";
           }
         }
       } catch (e) {}

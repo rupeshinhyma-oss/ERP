@@ -15,7 +15,8 @@ class OrganizationCreate(BaseModel):
 
     company_name: str = Field(..., min_length=1, max_length=200)
     legal_name: str | None = Field(default=None, max_length=200)
-    logo_url: str | None = Field(default=None, max_length=500)
+    logo_url: str | None = Field(default=None)
+    logo_data: str | None = Field(default=None)
     gst_number: str | None = Field(default=None, max_length=50)
     pan_number: str | None = Field(default=None, max_length=50)
     email: EmailStr | None = None
@@ -37,7 +38,8 @@ class OrganizationUpdate(BaseModel):
 
     company_name: str | None = Field(default=None, min_length=1, max_length=200)
     legal_name: str | None = Field(default=None, max_length=200)
-    logo_url: str | None = Field(default=None, max_length=500)
+    logo_url: str | None = Field(default=None)
+    logo_data: str | None = Field(default=None)
     gst_number: str | None = Field(default=None, max_length=50)
     pan_number: str | None = Field(default=None, max_length=50)
     email: EmailStr | None = None
@@ -61,21 +63,22 @@ class OrganizationRead(BaseModel):
 
     id: uuid.UUID
     company_name: str
-    legal_name: str | None
-    logo_url: str | None
-    gst_number: str | None
-    pan_number: str | None
-    email: str | None
-    phone: str | None
-    website: str | None
-    address: str | None
-    city: str | None
-    state: str | None
-    country: str | None
-    postal_code: str | None
-    timezone: str
-    currency: str
-    business_hours: str | None
-    status: OrganizationStatus
+    legal_name: str | None = None
+    logo_url: str | None = None
+    logo_data: str | None = None
+    gst_number: str | None = None
+    pan_number: str | None = None
+    email: str | None = None
+    phone: str | None = None
+    website: str | None = None
+    address: str | None = None
+    city: str | None = None
+    state: str | None = None
+    country: str | None = None
+    postal_code: str | None = None
+    timezone: str = "UTC"
+    currency: str = "USD"
+    business_hours: str | None = None
+    status: OrganizationStatus = OrganizationStatus.ACTIVE
     created_at: datetime
     updated_at: datetime
