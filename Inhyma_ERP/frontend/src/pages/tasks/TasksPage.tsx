@@ -1,9 +1,10 @@
 import React, { useEffect, useState, useCallback } from "react";
 import { useSearchParams } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
-import { Banner } from "@/components/ui";
+import { Banner, ConfirmModal } from "@/components/ui";
 import { Pagination } from "@/components/Pagination";
 import { useAuth } from "@/lib/hooks";
+import { useToast } from "@/lib/toast";
 import { liveClient } from "@/lib/live/liveClient";
 import { tasksApi, type TaskDepartment } from "@/lib/tasksApi";
 import { BulkActionBar } from "@/components/BulkActionBar";
@@ -134,6 +135,16 @@ const KANBAN_COLUMNS: { key: TaskStatus; label: string; color: string; bg: strin
 export const TasksPage: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const { hasPermission, isSuperAdmin, profile } = useAuth();
+  const toast = useToast();
+  const [confirmDialog, setConfirmDialog] = useState<{
+    title: string;
+    message: string;
+    confirmLabel?: string;
+    danger?: boolean;
+    onConfirm: () => Promise<void> | void;
+  } | null>(null);
+  const [saveFilterModalOpen, setSaveFilterModalOpen] = useState(false);
+  const [saveFilterName, setSaveFilterName] = useState("My Custom Filter");
 
   // Authoritative role-based task visibility flags
   // Admin (`isSuperAdmin`), Admin-approved read-only viewers (`task.all_view`),
@@ -551,7 +562,7 @@ export const TasksPage: React.FC = () => {
       await tasksApi.assignTask(taskId, [profile.id]);
       fetchTasks();
     } catch (err: any) {
-      alert(err?.response?.data?.detail || "Failed to assign task");
+      toast(err?.response?.data?.detail || "Failed to assign task", "error");
     }
   };
 
@@ -564,7 +575,7 @@ export const TasksPage: React.FC = () => {
       await tasksApi.updateTask(taskId, { status: "DONE" });
       void fetchTasks(true);
     } catch (err: any) {
-      alert(err?.response?.data?.detail || "Failed to complete task");
+      toast(err?.response?.data?.detail || "Failed to complete task", "error");
       void fetchTasks(true);
     }
   };
@@ -575,7 +586,7 @@ export const TasksPage: React.FC = () => {
       await tasksApi.duplicateTask(taskId);
       fetchTasks();
     } catch (err: any) {
-      alert(err?.response?.data?.detail || "Failed to duplicate task");
+      toast(err?.response?.data?.detail || "Failed to duplicate task", "error");
     }
   };
 
@@ -585,16 +596,22 @@ export const TasksPage: React.FC = () => {
       setSelectedTaskIds([]);
       fetchTasks();
     } catch (err: any) {
-      alert(err?.response?.data?.detail || "Failed to execute bulk action");
+      toast(err?.response?.data?.detail || "Failed to execute bulk action", "error");
     }
   };
 
-  const handleSaveFilter = async () => {
-    const name = window.prompt("Enter a name for this saved filter:", "My Custom Filter");
-    if (!name || !name.trim()) return;
+  const handleSaveFilter = () => {
+    setSaveFilterName("My Custom Filter");
+    setSaveFilterModalOpen(true);
+  };
+
+  const handleConfirmSaveFilter = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const name = saveFilterName.trim();
+    if (!name) return;
     try {
       const created = await tasksApi.createSavedFilter({
-        name: name.trim(),
+        name,
         filter_json: {
           searchQuery,
           statusFilter,
@@ -605,8 +622,10 @@ export const TasksPage: React.FC = () => {
         },
       });
       setSavedFilters((prev) => [...prev, created]);
+      setSaveFilterModalOpen(false);
+      toast(`Saved filter "${name}" created.`, "success");
     } catch (err: any) {
-      alert(err?.response?.data?.detail || "Failed to save filter");
+      toast(err?.response?.data?.detail || "Failed to save filter", "error");
     }
   };
 
@@ -621,16 +640,24 @@ export const TasksPage: React.FC = () => {
     setAssigneeFilter(json.assigneeFilter || "");
   };
 
-  const handleDeleteSavedFilter = async (e: React.MouseEvent, id: string) => {
+  const handleDeleteSavedFilter = (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
-    if (!confirm("Delete this saved filter?")) return;
-    try {
-      await tasksApi.deleteSavedFilter(id);
-      setSavedFilters((prev) => prev.filter((f) => f.id !== id));
-      if (selectedSavedFilterId === id) setSelectedSavedFilterId(null);
-    } catch (err: any) {
-      alert(err?.response?.data?.detail || "Failed to delete filter");
-    }
+    setConfirmDialog({
+      title: "Delete Saved Filter",
+      message: "Delete this saved filter?",
+      confirmLabel: "Delete",
+      danger: true,
+      onConfirm: async () => {
+        try {
+          await tasksApi.deleteSavedFilter(id);
+          setSavedFilters((prev) => prev.filter((f) => f.id !== id));
+          if (selectedSavedFilterId === id) setSelectedSavedFilterId(null);
+          toast("Saved filter deleted.", "success");
+        } catch (err: any) {
+          toast(err?.response?.data?.detail || "Failed to delete filter", "error");
+        }
+      },
+    });
   };
 
   const handleToggleSelectTask = (taskId: string) => {
@@ -677,15 +704,23 @@ export const TasksPage: React.FC = () => {
     };
   }, [profile?.id]);
 
-  const handleDeleteTask = async (e: React.MouseEvent, t: TaskSummary) => {
+  const handleDeleteTask = (e: React.MouseEvent, t: TaskSummary) => {
     e.stopPropagation();
-    if (!confirm(`Are you sure you want to delete task "${t.title}"?`)) return;
-    try {
-      await tasksApi.deleteTask(t.id);
-      fetchTasks();
-    } catch (err: any) {
-      alert(err?.response?.data?.detail || "Failed to delete task");
-    }
+    setConfirmDialog({
+      title: "Delete Task",
+      message: `Are you sure you want to delete task "${t.title}"?`,
+      confirmLabel: "Delete",
+      danger: true,
+      onConfirm: async () => {
+        try {
+          await tasksApi.deleteTask(t.id);
+          fetchTasks();
+          toast(`Task "${t.title}" deleted.`, "success");
+        } catch (err: any) {
+          toast(err?.response?.data?.detail || "Failed to delete task", "error");
+        }
+      },
+    });
   };
 
   const handleOpenEscalate = (e: React.MouseEvent, t: TaskSummary) => {
@@ -697,7 +732,7 @@ export const TasksPage: React.FC = () => {
 
   const handleQuickStatusChange = async (taskId: string, newStatus: TaskStatus) => {
     if (newStatus === "PENDING_APPROVAL") {
-      alert("To submit a task for approval, open the task details and use 'Submit for Approval' with a designated approver.");
+      toast("To submit a task for approval, open the task details and use 'Submit for Approval' with a designated approver.", "info");
       setSelectedTaskId(taskId);
       return;
     }
@@ -710,7 +745,7 @@ export const TasksPage: React.FC = () => {
       void fetchTasks(true);
     } catch (err: any) {
       setTasks(previousTasks);
-      alert(err?.message || err?.response?.data?.detail || "Failed to update status");
+      toast(err?.message || err?.response?.data?.detail || "Failed to update status", "error");
     }
   };
 
@@ -2762,6 +2797,73 @@ export const TasksPage: React.FC = () => {
             onClearSelection={() => setSelectedTaskIds([])}
             onExecuteBulkAction={handleExecuteBulkAction}
           />
+        )}
+
+        <ConfirmModal
+          open={Boolean(confirmDialog)}
+          title={confirmDialog?.title}
+          message={confirmDialog?.message ?? ""}
+          confirmLabel={confirmDialog?.confirmLabel}
+          danger={confirmDialog?.danger}
+          onCancel={() => setConfirmDialog(null)}
+          onConfirm={() => {
+            const action = confirmDialog?.onConfirm;
+            setConfirmDialog(null);
+            if (action) void action();
+          }}
+        />
+
+        {saveFilterModalOpen && (
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="Save Custom Filter"
+            style={{
+              position: "fixed",
+              inset: 0,
+              zIndex: 99999,
+              background: "rgba(15, 23, 42, 0.55)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              padding: "16px",
+            }}
+            onClick={() => setSaveFilterModalOpen(false)}
+          >
+            <form
+              onSubmit={handleConfirmSaveFilter}
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                background: "#fff",
+                borderRadius: "10px",
+                padding: "20px",
+                width: "100%",
+                maxWidth: "400px",
+                boxShadow: "0 20px 40px rgba(0,0,0,0.2)",
+              }}
+            >
+              <h3 style={{ margin: "0 0 10px", fontSize: "16px", fontWeight: 700 }}>Save Filter</h3>
+              <label style={{ display: "block", fontSize: "13px", marginBottom: "6px", color: "#475569" }}>
+                Enter a name for this saved filter
+              </label>
+              <input
+                type="text"
+                className="form-control"
+                value={saveFilterName}
+                onChange={(e) => setSaveFilterName(e.target.value)}
+                autoFocus
+                style={{ width: "100%", marginBottom: "16px" }}
+              />
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px" }}>
+                <button type="button" className="btn btn-secondary" onClick={() => setSaveFilterModalOpen(false)}>
+                  Cancel
+                </button>
+                <button type="submit" className="btn btn-primary" disabled={!saveFilterName.trim()}>
+                  Save Filter
+                </button>
+              </div>
+            </form>
+          </div>
         )}
       </main>
     </AppShell>

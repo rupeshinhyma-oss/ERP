@@ -14,7 +14,7 @@
  * /dashboard. It is now imported and routed below.
  */
 
-import { useEffect, useRef } from "react";
+import { Suspense, lazy, useEffect, useRef } from "react";
 import { Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { setUnauthorizedHandler } from "@/lib/api";
 import { LEGACY_REDIRECTS } from "@/lib/nav";
@@ -24,10 +24,9 @@ import { useAuth } from "@/lib/hooks";
 import { LoginPage } from "@/pages/Login";
 import { AuthCallbackPage } from "@/pages/AuthCallback";
 import { DashboardPage } from "@/pages/Dashboard";
-import { FeedPage } from "@/pages/FeedPage";
 import { ForbiddenPage } from "@/pages/Forbidden";
 
-function HrmsRouteGuard({
+export function HrmsRouteGuard({
   permission,
   anyPermissions,
   children,
@@ -48,96 +47,100 @@ function HrmsRouteGuard({
   }
   return <>{children}</>;
 }
-import { OrganizationPage } from "@/pages/Organization";
-import { AuditPage } from "@/pages/Audit";
-import { UsersPage } from "@/pages/Users";
-import { ProfilePage } from "@/pages/Profile";
-import { RbacPage } from "@/pages/Rbac";
-import { PositionsPage } from "@/pages/org/Positions";
-import { CompaniesPage } from "@/pages/Companies";
-import { LeadsPage } from "@/pages/LeadsPage";
-import FollowUpsPage from "@/pages/FollowUpsPage";
-import { SuppliersPage } from "@/pages/Suppliers";
-import { ProformaInvoicesPage } from "@/pages/ProformaInvoicesPage";
-import { ProformaInvoicePdfPage } from "@/pages/ProformaInvoicePdfPage";
-import { SalesOrderPdfPage } from "@/pages/SalesOrderPdfPage";
-import { GatePassPdfPage } from "@/pages/GatePassPdfPage";
-import { SaleProcessListPage } from "@/pages/sales/SaleProcessList";
-import { SaleProcessFormPage } from "@/pages/sales/SaleProcessForm";
-import { DiscountPaymentsPage } from "@/pages/sales/DiscountPaymentsPage";
-import { LocalPurchasePage } from "@/pages/purchase/LocalPurchasePage";
-import { LocalPurchasePdfPage } from "@/pages/LocalPurchasePdfPage";
-import { ImportPurchasePage } from "@/pages/purchase/ImportPurchasePage";
-import { ImportPurchasePdfPage } from "@/pages/ImportPurchasePdfPage";
-import { TasksPage } from "@/pages/tasks/TasksPage";
-import { TechnicalTasksPage } from "@/pages/technicalTasks/TechnicalTasksPage";
-import { TechnicalTaskDetailPage } from "@/pages/technicalTasks/TechnicalTaskDetailPage";
-import { PaymentsPage } from "@/pages/PaymentsPage";
-import { GeneralReportsPage } from "@/pages/GeneralReportsPage";
-import { FinancialPlanningReportPage } from "@/pages/FinancialPlanningReportPage";
-import { CargoOverviewPage } from "@/pages/CargoOverviewPage";
-import { TechnicalTaskTypesPage } from "@/pages/masters/TechnicalTaskTypes";
-import { TechnicianOperationsPage } from "@/pages/TechnicianOperationsPage";
-import { AttendancePage } from "@/pages/hrms/AttendancePage";
-import { LeavePage } from "@/pages/hrms/LeavePage";
-import { ExpensesPage } from "@/pages/hrms/ExpensesPage";
-import { SiteVisitPage } from "@/pages/hrms/SiteVisitPage";
-import { PayrollPage } from "@/pages/hrms/PayrollPage";
-import { SetupPage } from "@/pages/hrms/SetupPage";
-import { AssetPage } from "@/pages/hrms/AssetPage";
-import { PipelineSetupPage } from "@/pages/crm/PipelineSetupPage";
-import { SalespersonDistributionPage } from "@/pages/crm/SalespersonDistributionPage";
-import { CrmLeadsPage } from "@/pages/crm/CrmLeadsPage";
 
-import { CountriesPage } from "@/pages/masters/Countries";
-import { StatesPage } from "@/pages/masters/States";
-import { DistrictsPage } from "@/pages/masters/Districts";
-import { CitiesPage } from "@/pages/masters/Cities";
-import { CompanyListPage } from "@/pages/masters/CompanyList";
-import { CurrenciesPage } from "@/pages/masters/Currencies";
-import { UomPage } from "@/pages/masters/Uom";
-import { BrandsPage } from "@/pages/masters/Brands";
-import { SupplierTypesPage } from "@/pages/masters/SupplierTypes";
-import { BuyerTypesPage } from "@/pages/masters/BuyerTypes";
-import { CategoriesPage } from "@/pages/masters/Categories";
-import { SubCategoriesPage } from "@/pages/masters/SubCategories";
-import { ProductsPage } from "@/pages/masters/Products";
-import { PriceListPage } from "@/pages/PriceListPage";
-import { TaxesPage } from "@/pages/masters/Taxes";
-import { AdditionalChargesPage } from "@/pages/masters/AdditionalCharges";
-import { SocialMediaPage } from "@/pages/masters/SocialMedia";
-import { AgentTypesPage } from "@/pages/masters/AgentTypes";
-import { CompanyCategoriesPage } from "@/pages/masters/CompanyCategories";
-import { CompanySectorsPage } from "@/pages/masters/CompanySectors";
-import { WarehousesPage } from "@/pages/masters/Warehouses";
-import { BillingCompaniesPage } from "@/pages/masters/BillingCompanies";
-import { BanksPage } from "@/pages/masters/Banks";
-import { TransportPage } from "@/pages/masters/Transport";
-import { PaymentTermsPage } from "@/pages/masters/PaymentTerms";
-import { LeadSourcesPage } from "@/pages/masters/LeadSources";
-import { AdjustmentPurposesPage } from "@/pages/masters/AdjustmentPurposes";
-import { CallTypesPage } from "@/pages/masters/CallTypes";
+// Route-level code splitting (BUG-021): keep Login/Dashboard/Callback/403 in entry chunk,
+// lazy-load large feature routes (CRM, Companies, Sales, Purchase, HRMS, Reports, Masters).
+const FeedPage = lazy(() => import("@/pages/FeedPage").then((m) => ({ default: m.FeedPage })));
+const OrganizationPage = lazy(() => import("@/pages/Organization").then((m) => ({ default: m.OrganizationPage })));
+const AuditPage = lazy(() => import("@/pages/Audit").then((m) => ({ default: m.AuditPage })));
+const UsersPage = lazy(() => import("@/pages/Users").then((m) => ({ default: m.UsersPage })));
+const ProfilePage = lazy(() => import("@/pages/Profile").then((m) => ({ default: m.ProfilePage })));
+const RbacPage = lazy(() => import("@/pages/Rbac").then((m) => ({ default: m.RbacPage })));
+const PositionsPage = lazy(() => import("@/pages/org/Positions").then((m) => ({ default: m.PositionsPage })));
+const CompaniesPage = lazy(() => import("@/pages/Companies").then((m) => ({ default: m.CompaniesPage })));
+const LeadsPage = lazy(() => import("@/pages/LeadsPage").then((m) => ({ default: m.LeadsPage })));
+const FollowUpsPage = lazy(() => import("@/pages/FollowUpsPage"));
+const SuppliersPage = lazy(() => import("@/pages/Suppliers").then((m) => ({ default: m.SuppliersPage })));
+const ProformaInvoicesPage = lazy(() => import("@/pages/ProformaInvoicesPage").then((m) => ({ default: m.ProformaInvoicesPage })));
+const ProformaInvoicePdfPage = lazy(() => import("@/pages/ProformaInvoicePdfPage").then((m) => ({ default: m.ProformaInvoicePdfPage })));
+const SalesOrderPdfPage = lazy(() => import("@/pages/SalesOrderPdfPage").then((m) => ({ default: m.SalesOrderPdfPage })));
+const GatePassPdfPage = lazy(() => import("@/pages/GatePassPdfPage").then((m) => ({ default: m.GatePassPdfPage })));
+const SaleProcessListPage = lazy(() => import("@/pages/sales/SaleProcessList").then((m) => ({ default: m.SaleProcessListPage })));
+const SaleProcessFormPage = lazy(() => import("@/pages/sales/SaleProcessForm").then((m) => ({ default: m.SaleProcessFormPage })));
+const DiscountPaymentsPage = lazy(() => import("@/pages/sales/DiscountPaymentsPage").then((m) => ({ default: m.DiscountPaymentsPage })));
+const LocalPurchasePage = lazy(() => import("@/pages/purchase/LocalPurchasePage").then((m) => ({ default: m.LocalPurchasePage })));
+const LocalPurchasePdfPage = lazy(() => import("@/pages/LocalPurchasePdfPage").then((m) => ({ default: m.LocalPurchasePdfPage })));
+const ImportPurchasePage = lazy(() => import("@/pages/purchase/ImportPurchasePage").then((m) => ({ default: m.ImportPurchasePage })));
+const ImportPurchasePdfPage = lazy(() => import("@/pages/ImportPurchasePdfPage").then((m) => ({ default: m.ImportPurchasePdfPage })));
+const TasksPage = lazy(() => import("@/pages/tasks/TasksPage").then((m) => ({ default: m.TasksPage })));
+const TechnicalTasksPage = lazy(() => import("@/pages/technicalTasks/TechnicalTasksPage").then((m) => ({ default: m.TechnicalTasksPage })));
+const TechnicalTaskDetailPage = lazy(() => import("@/pages/technicalTasks/TechnicalTaskDetailPage").then((m) => ({ default: m.TechnicalTaskDetailPage })));
+const PaymentsPage = lazy(() => import("@/pages/PaymentsPage").then((m) => ({ default: m.PaymentsPage })));
+const GeneralReportsPage = lazy(() => import("@/pages/GeneralReportsPage").then((m) => ({ default: m.GeneralReportsPage })));
+const FinancialPlanningReportPage = lazy(() => import("@/pages/FinancialPlanningReportPage").then((m) => ({ default: m.FinancialPlanningReportPage })));
+const CargoOverviewPage = lazy(() => import("@/pages/CargoOverviewPage").then((m) => ({ default: m.CargoOverviewPage })));
+const TechnicalTaskTypesPage = lazy(() => import("@/pages/masters/TechnicalTaskTypes").then((m) => ({ default: m.TechnicalTaskTypesPage })));
+const TechnicianOperationsPage = lazy(() => import("@/pages/TechnicianOperationsPage").then((m) => ({ default: m.TechnicianOperationsPage })));
+const AttendancePage = lazy(() => import("@/pages/hrms/AttendancePage").then((m) => ({ default: m.AttendancePage })));
+const LeavePage = lazy(() => import("@/pages/hrms/LeavePage").then((m) => ({ default: m.LeavePage })));
+const ExpensesPage = lazy(() => import("@/pages/hrms/ExpensesPage").then((m) => ({ default: m.ExpensesPage })));
+const SiteVisitPage = lazy(() => import("@/pages/hrms/SiteVisitPage").then((m) => ({ default: m.SiteVisitPage })));
+const PayrollPage = lazy(() => import("@/pages/hrms/PayrollPage").then((m) => ({ default: m.PayrollPage })));
+const SetupPage = lazy(() => import("@/pages/hrms/SetupPage").then((m) => ({ default: m.SetupPage })));
+const AssetPage = lazy(() => import("@/pages/hrms/AssetPage").then((m) => ({ default: m.AssetPage })));
+const PipelineSetupPage = lazy(() => import("@/pages/crm/PipelineSetupPage").then((m) => ({ default: m.PipelineSetupPage })));
+const SalespersonDistributionPage = lazy(() => import("@/pages/crm/SalespersonDistributionPage").then((m) => ({ default: m.SalespersonDistributionPage })));
+const CrmLeadsPage = lazy(() => import("@/pages/crm/CrmLeadsPage").then((m) => ({ default: m.CrmLeadsPage })));
+
+const CountriesPage = lazy(() => import("@/pages/masters/Countries").then((m) => ({ default: m.CountriesPage })));
+const StatesPage = lazy(() => import("@/pages/masters/States").then((m) => ({ default: m.StatesPage })));
+const DistrictsPage = lazy(() => import("@/pages/masters/Districts").then((m) => ({ default: m.DistrictsPage })));
+const CitiesPage = lazy(() => import("@/pages/masters/Cities").then((m) => ({ default: m.CitiesPage })));
+const CompanyListPage = lazy(() => import("@/pages/masters/CompanyList").then((m) => ({ default: m.CompanyListPage })));
+const CurrenciesPage = lazy(() => import("@/pages/masters/Currencies").then((m) => ({ default: m.CurrenciesPage })));
+const UomPage = lazy(() => import("@/pages/masters/Uom").then((m) => ({ default: m.UomPage })));
+const BrandsPage = lazy(() => import("@/pages/masters/Brands").then((m) => ({ default: m.BrandsPage })));
+const SupplierTypesPage = lazy(() => import("@/pages/masters/SupplierTypes").then((m) => ({ default: m.SupplierTypesPage })));
+const BuyerTypesPage = lazy(() => import("@/pages/masters/BuyerTypes").then((m) => ({ default: m.BuyerTypesPage })));
+const CategoriesPage = lazy(() => import("@/pages/masters/Categories").then((m) => ({ default: m.CategoriesPage })));
+const SubCategoriesPage = lazy(() => import("@/pages/masters/SubCategories").then((m) => ({ default: m.SubCategoriesPage })));
+const ProductsPage = lazy(() => import("@/pages/masters/Products").then((m) => ({ default: m.ProductsPage })));
+const PriceListPage = lazy(() => import("@/pages/PriceListPage").then((m) => ({ default: m.PriceListPage })));
+const TaxesPage = lazy(() => import("@/pages/masters/Taxes").then((m) => ({ default: m.TaxesPage })));
+const AdditionalChargesPage = lazy(() => import("@/pages/masters/AdditionalCharges").then((m) => ({ default: m.AdditionalChargesPage })));
+const SocialMediaPage = lazy(() => import("@/pages/masters/SocialMedia").then((m) => ({ default: m.SocialMediaPage })));
+const AgentTypesPage = lazy(() => import("@/pages/masters/AgentTypes").then((m) => ({ default: m.AgentTypesPage })));
+const CompanyCategoriesPage = lazy(() => import("@/pages/masters/CompanyCategories").then((m) => ({ default: m.CompanyCategoriesPage })));
+const CompanySectorsPage = lazy(() => import("@/pages/masters/CompanySectors").then((m) => ({ default: m.CompanySectorsPage })));
+const WarehousesPage = lazy(() => import("@/pages/masters/Warehouses").then((m) => ({ default: m.WarehousesPage })));
+const BillingCompaniesPage = lazy(() => import("@/pages/masters/BillingCompanies").then((m) => ({ default: m.BillingCompaniesPage })));
+const BanksPage = lazy(() => import("@/pages/masters/Banks").then((m) => ({ default: m.BanksPage })));
+const TransportPage = lazy(() => import("@/pages/masters/Transport").then((m) => ({ default: m.TransportPage })));
+const PaymentTermsPage = lazy(() => import("@/pages/masters/PaymentTerms").then((m) => ({ default: m.PaymentTermsPage })));
+const LeadSourcesPage = lazy(() => import("@/pages/masters/LeadSources").then((m) => ({ default: m.LeadSourcesPage })));
+const AdjustmentPurposesPage = lazy(() => import("@/pages/masters/AdjustmentPurposes").then((m) => ({ default: m.AdjustmentPurposesPage })));
+const CallTypesPage = lazy(() => import("@/pages/masters/CallTypes").then((m) => ({ default: m.CallTypesPage })));
 import { NetworkStatusNotifier } from "@/components/NetworkStatusNotifier";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { LiveConnectionLifecycle } from "@/lib/live/liveConnectionLifecycle";
-import { ProductGalleryPage } from "@/pages/ProductGallery";
-import { TrashPage } from "@/pages/Trash";
-import PublicSupplierQuotePage from "@/pages/PublicSupplierQuotePage";
+const ProductGalleryPage = lazy(() => import("@/pages/ProductGallery").then((m) => ({ default: m.ProductGalleryPage })));
+const TrashPage = lazy(() => import("@/pages/Trash").then((m) => ({ default: m.TrashPage })));
+const PublicSupplierQuotePage = lazy(() => import("@/pages/PublicSupplierQuotePage"));
 import { initGlobalPasteSanitizer } from "@/lib/pasteSanitizer";
 import { initGlobalAutocompleteBlocker } from "@/lib/autocompleteBlocker";
 import { processIncomingSsoHandover } from "@/lib/ssoBridge";
-import { ProductStockPage } from "@/pages/ProductStockPage";
-import { StockTransactionDetailPage } from "@/pages/StockTransactionDetailPage";
-import { ProductReorderPage } from "@/pages/ProductReorderPage";
-import { DeletedOrdersPage } from "@/pages/DeletedOrdersPage";
-import { StockAdjustmentPage } from "@/pages/StockAdjustmentPage";
-import { AdjustmentOrderPdfPage } from "@/pages/AdjustmentOrderPdfPage";
-import { AddAdjustmentOrderPage } from "@/pages/AddAdjustmentOrderPage";
-import { StockTransferPage } from "@/pages/StockTransferPage";
-import { TransferOrderPdfPage } from "@/pages/TransferOrderPdfPage";
-import { AddTransferOrderPage } from "@/pages/AddTransferOrderPage";
-import { AgentsPage } from "@/pages/AgentsPage";
-import { IndustrialZonesPage } from "@/pages/IndustrialZonesPage";
+const ProductStockPage = lazy(() => import("@/pages/ProductStockPage").then((m) => ({ default: m.ProductStockPage })));
+const StockTransactionDetailPage = lazy(() => import("@/pages/StockTransactionDetailPage").then((m) => ({ default: m.StockTransactionDetailPage })));
+const ProductReorderPage = lazy(() => import("@/pages/ProductReorderPage").then((m) => ({ default: m.ProductReorderPage })));
+const DeletedOrdersPage = lazy(() => import("@/pages/DeletedOrdersPage").then((m) => ({ default: m.DeletedOrdersPage })));
+const StockAdjustmentPage = lazy(() => import("@/pages/StockAdjustmentPage").then((m) => ({ default: m.StockAdjustmentPage })));
+const AdjustmentOrderPdfPage = lazy(() => import("@/pages/AdjustmentOrderPdfPage").then((m) => ({ default: m.AdjustmentOrderPdfPage })));
+const AddAdjustmentOrderPage = lazy(() => import("@/pages/AddAdjustmentOrderPage").then((m) => ({ default: m.AddAdjustmentOrderPage })));
+const StockTransferPage = lazy(() => import("@/pages/StockTransferPage").then((m) => ({ default: m.StockTransferPage })));
+const TransferOrderPdfPage = lazy(() => import("@/pages/TransferOrderPdfPage").then((m) => ({ default: m.TransferOrderPdfPage })));
+const AddTransferOrderPage = lazy(() => import("@/pages/AddTransferOrderPage").then((m) => ({ default: m.AddTransferOrderPage })));
+const AgentsPage = lazy(() => import("@/pages/AgentsPage").then((m) => ({ default: m.AgentsPage })));
+const IndustrialZonesPage = lazy(() => import("@/pages/IndustrialZonesPage").then((m) => ({ default: m.IndustrialZonesPage })));
 
 export function App() {
   const navigate = useNavigate();
@@ -190,6 +193,13 @@ export function App() {
         page's crashed state.
       */}
       <ErrorBoundary key={location.pathname} title="This page ran into a problem.">
+        <Suspense
+          fallback={
+            <div style={{ padding: "40px 24px", textAlign: "center", color: "#64748b", fontSize: "13px" }}>
+              Loading…
+            </div>
+          }
+        >
         <Routes>
           <Route path="/login" element={<LoginPage />} />
           <Route path="/auth/callback" element={<AuthCallbackPage />} />
@@ -198,17 +208,17 @@ export function App() {
           <Route path="/dashboard" element={<DashboardPage />} />
           <Route path="/feed" element={<HrmsRouteGuard><FeedPage /></HrmsRouteGuard>} />
           <Route path="/403" element={<ForbiddenPage />} />
-          <Route path="/organization" element={<HrmsRouteGuard><OrganizationPage /></HrmsRouteGuard>} />
-          <Route path="/erp-settings" element={<HrmsRouteGuard><OrganizationPage /></HrmsRouteGuard>} />
-          <Route path="/audit" element={<HrmsRouteGuard><AuditPage /></HrmsRouteGuard>} />
-          <Route path="/trash" element={<HrmsRouteGuard><TrashPage /></HrmsRouteGuard>} />
+          <Route path="/organization" element={<HrmsRouteGuard permission="organization.manage"><OrganizationPage /></HrmsRouteGuard>} />
+          <Route path="/erp-settings" element={<HrmsRouteGuard permission="organization.manage"><OrganizationPage /></HrmsRouteGuard>} />
+          <Route path="/audit" element={<HrmsRouteGuard permission="audit.view"><AuditPage /></HrmsRouteGuard>} />
+          <Route path="/trash" element={<HrmsRouteGuard permission="trash.view"><TrashPage /></HrmsRouteGuard>} />
           <Route path="/profile" element={<HrmsRouteGuard><ProfilePage /></HrmsRouteGuard>} />
-          <Route path="/users" element={<HrmsRouteGuard><UsersPage /></HrmsRouteGuard>} />
-          <Route path="/rbac" element={<HrmsRouteGuard><RbacPage /></HrmsRouteGuard>} />
+          <Route path="/users" element={<HrmsRouteGuard permission="user.view"><UsersPage /></HrmsRouteGuard>} />
+          <Route path="/rbac" element={<HrmsRouteGuard anyPermissions={["roles_permissions.view", "role.view", "role.manage"]}><RbacPage /></HrmsRouteGuard>} />
           <Route path="/effective-permissions" element={<Navigate to="/rbac" replace />} />
           {/* Employee was merged into User -- /employees is now an alias for the same page. */}
-          <Route path="/employees" element={<HrmsRouteGuard><UsersPage /></HrmsRouteGuard>} />
-          <Route path="/positions" element={<HrmsRouteGuard><PositionsPage /></HrmsRouteGuard>} />
+          <Route path="/employees" element={<HrmsRouteGuard permission="user.view"><UsersPage /></HrmsRouteGuard>} />
+          <Route path="/positions" element={<HrmsRouteGuard permission="position.view"><PositionsPage /></HrmsRouteGuard>} />
           <Route path="/companies" element={<HrmsRouteGuard anyPermissions={["company.view", "company.manage"]}><CompaniesPage /></HrmsRouteGuard>} />
           <Route path="/companies/add" element={<HrmsRouteGuard anyPermissions={["company.view", "company.create", "company.manage"]}><CompaniesPage defaultAdd={true} /></HrmsRouteGuard>} />
           <Route path="/companies/addedit" element={<HrmsRouteGuard anyPermissions={["company.view", "company.create", "company.update", "company.manage"]}><CompaniesPage defaultAdd={true} /></HrmsRouteGuard>} />
@@ -539,6 +549,7 @@ export function App() {
 
           <Route path="*" element={<Navigate to="/dashboard" replace />} />
         </Routes>
+        </Suspense>
       </ErrorBoundary>
     </>
   );

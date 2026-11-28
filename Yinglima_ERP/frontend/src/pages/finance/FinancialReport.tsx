@@ -58,12 +58,42 @@ const BL_STATUS_OPTIONS = [
   "Surrendered",
 ];
 
+function normalizeCurrencyCode(code?: string | null, fallback = "USD"): string {
+  const c = (code || "").trim().toUpperCase();
+  if (!c) return fallback;
+  if (c === "CNY" || c === "RMB" || c === "¥" || c === "CN¥") return "RMB";
+  if (c === "USD" || c === "US$" || c === "$") return "USD";
+  return c;
+}
+
+function currencySymbol(code?: string | null, fallback = "¥"): string {
+  const c = normalizeCurrencyCode(code, "");
+  if (c === "RMB") return "¥";
+  if (c === "USD") return "$";
+  if (c === "EUR") return "€";
+  if (c === "INR") return "₹";
+  return c || fallback;
+}
+
 function fmtMoney(val: number | null | undefined, symbol = "¥"): string {
-  const num = Number(val ?? 0);
+  if (val === null || val === undefined || Number.isNaN(Number(val))) {
+    return "—";
+  }
+  const num = Number(val);
   return `${symbol} ${num.toLocaleString("en-US", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   })}`;
+}
+
+function fmtMixedBreakdown(
+  breakdown: Record<string, { total_amount: number; paid_amount: number; balance_amount: number }> | undefined,
+  field: "total_amount" | "paid_amount" | "balance_amount"
+): string {
+  if (!breakdown) return "Mixed";
+  const entries = Object.entries(breakdown);
+  if (entries.length === 0) return "—";
+  return entries.map(([curr, b]) => fmtMoney(b[field], currencySymbol(curr))).join(" + ");
 }
 
 function fmtDate(d?: string | null): string {
@@ -78,7 +108,8 @@ function fmtDate(d?: string | null): string {
 let cachedFinanceReport: FinanceReportResponse | null = null;
 
 function recomputeFinanceReportKpis(rep: FinanceReportResponse): FinanceReportResponse {
-  const rate = rep.usd_to_rmb_rate > 0 ? rep.usd_to_rmb_rate : 7.2;
+  const rawRate = rep.usd_to_rmb_rate;
+  const rate = rawRate && Number.isFinite(rawRate) && rawRate > 0 ? rawRate : null;
   const lps = rep.local_purchases || [];
   const sos = rep.sale_orders || [];
 
@@ -86,9 +117,132 @@ function recomputeFinanceReportKpis(rep: FinanceReportResponse): FinanceReportRe
   const lpPaid = Number(lps.reduce((s, r) => s + (r.paid_amount || 0), 0).toFixed(2));
   const lpBal = Number(lps.reduce((s, r) => s + (r.balance_amount || 0), 0).toFixed(2));
 
-  const soTotal = Number(sos.reduce((s, r) => s + (r.total_amount || 0), 0).toFixed(2));
-  const soPaid = Number(sos.reduce((s, r) => s + (r.paid_amount || 0), 0).toFixed(2));
-  const soBal = Number(sos.reduce((s, r) => s + (r.balance_amount || 0), 0).toFixed(2));
+  // BUG-006: Respect each SaleOrder's actual currency; never label RMB as USD or multiply RMB by usd_to_rmb.
+  const breakdown: Record<string, { records: number; total_amount: number; paid_amount: number; balance_amount: number }> = {};
+  for (const r of sos) {
+    const curr = normalizeCurrencyCode(r.currency, "USD");
+    const b = (breakdown[curr] ||= { records: 0, total_amount: 0, paid_amount: 0, balance_amount: 0 });
+    b.records += 1;
+    b.total_amount = Number((b.total_amount + (r.total_amount || 0)).toFixed(2));
+    b.paid_amount = Number((b.paid_amount + (r.paid_amount || 0)).toFixed(2));
+    b.balance_amount = Number((b.balance_amount + (r.balance_amount || 0)).toFixed(2));
+  }
+  const soCurrencies = Object.keys(breakdown);
+  let soKpi: FinanceReportResponse["sale_order_kpi"];
+
+  if (sos.length === 0) {
+    soKpi = {
+      ...rep.sale_order_kpi,
+      total_records: 0,
+      pending_records: 0,
+      cleared_records: 0,
+      currency: "USD",
+      total_amount: 0,
+      paid_amount: 0,
+      balance_amount: 0,
+      secondary_currency: "RMB",
+      total_amount_secondary: rate ? 0 : null,
+      paid_amount_secondary: rate ? 0 : null,
+      balance_amount_secondary: rate ? 0 : null,
+      is_mixed_currency: false,
+      conversion_unavailable: !rate,
+      currency_breakdown: {},
+    };
+  } else if (soCurrencies.length === 1) {
+    const nativeCurr = soCurrencies[0];
+    const b = breakdown[nativeCurr];
+    let secCurr: string | null = nativeCurr === "RMB" ? "USD" : nativeCurr === "USD" ? "RMB" : null;
+    let secTotal = 0;
+    let secPaid = 0;
+    let secBal = 0;
+    let canConvert = secCurr !== null;
+    if (canConvert) {
+      for (const r of sos) {
+        const effRate = r.usd_exchange_rate && r.usd_exchange_rate > 0 ? r.usd_exchange_rate : rate;
+        if (!effRate) {
+          canConvert = false;
+          break;
+        }
+        if (nativeCurr === "RMB") {
+          secTotal += (r.total_amount || 0) / effRate;
+          secPaid += (r.paid_amount || 0) / effRate;
+          secBal += (r.balance_amount || 0) / effRate;
+        } else {
+          secTotal += (r.total_amount || 0) * effRate;
+          secPaid += (r.paid_amount || 0) * effRate;
+          secBal += (r.balance_amount || 0) * effRate;
+        }
+      }
+    }
+    soKpi = {
+      ...rep.sale_order_kpi,
+      total_records: sos.length,
+      pending_records: sos.filter((r) => r.stage === "pending").length,
+      cleared_records: sos.filter((r) => r.stage === "cleared").length,
+      currency: nativeCurr,
+      total_amount: b.total_amount,
+      paid_amount: b.paid_amount,
+      balance_amount: b.balance_amount,
+      secondary_currency: secCurr,
+      total_amount_secondary: canConvert ? Number(secTotal.toFixed(2)) : null,
+      paid_amount_secondary: canConvert ? Number(secPaid.toFixed(2)) : null,
+      balance_amount_secondary: canConvert ? Number(secBal.toFixed(2)) : null,
+      is_mixed_currency: false,
+      conversion_unavailable: !canConvert,
+      currency_breakdown: breakdown,
+    };
+  } else {
+    const onlyUsdRmb = soCurrencies.every((c) => c === "USD" || c === "RMB");
+    let canConvert = onlyUsdRmb;
+    let usdTotal = 0;
+    let usdPaid = 0;
+    let usdBal = 0;
+    let rmbTotal = 0;
+    let rmbPaid = 0;
+    let rmbBal = 0;
+    if (canConvert) {
+      for (const r of sos) {
+        const curr = normalizeCurrencyCode(r.currency, "USD");
+        const effRate = r.usd_exchange_rate && r.usd_exchange_rate > 0 ? r.usd_exchange_rate : rate;
+        if (!effRate) {
+          canConvert = false;
+          break;
+        }
+        if (curr === "USD") {
+          usdTotal += r.total_amount || 0;
+          usdPaid += r.paid_amount || 0;
+          usdBal += r.balance_amount || 0;
+          rmbTotal += (r.total_amount || 0) * effRate;
+          rmbPaid += (r.paid_amount || 0) * effRate;
+          rmbBal += (r.balance_amount || 0) * effRate;
+        } else {
+          rmbTotal += r.total_amount || 0;
+          rmbPaid += r.paid_amount || 0;
+          rmbBal += r.balance_amount || 0;
+          usdTotal += (r.total_amount || 0) / effRate;
+          usdPaid += (r.paid_amount || 0) / effRate;
+          usdBal += (r.balance_amount || 0) / effRate;
+        }
+      }
+    }
+    soKpi = {
+      ...rep.sale_order_kpi,
+      total_records: sos.length,
+      pending_records: sos.filter((r) => r.stage === "pending").length,
+      cleared_records: sos.filter((r) => r.stage === "cleared").length,
+      currency: canConvert ? "USD" : "MIXED",
+      total_amount: canConvert ? Number(usdTotal.toFixed(2)) : null,
+      paid_amount: canConvert ? Number(usdPaid.toFixed(2)) : null,
+      balance_amount: canConvert ? Number(usdBal.toFixed(2)) : null,
+      secondary_currency: canConvert ? "RMB" : null,
+      total_amount_secondary: canConvert ? Number(rmbTotal.toFixed(2)) : null,
+      paid_amount_secondary: canConvert ? Number(rmbPaid.toFixed(2)) : null,
+      balance_amount_secondary: canConvert ? Number(rmbBal.toFixed(2)) : null,
+      is_mixed_currency: true,
+      conversion_unavailable: !canConvert,
+      currency_breakdown: breakdown,
+    };
+  }
 
   const agTotal = Number(sos.reduce((s, r) => s + (r.agent_inv_amount || 0), 0).toFixed(2));
   const agPaid = Number(
@@ -109,22 +263,12 @@ function recomputeFinanceReportKpis(rep: FinanceReportResponse): FinanceReportRe
       total_amount: lpTotal,
       paid_amount: lpPaid,
       balance_amount: lpBal,
-      total_amount_secondary: Number((lpTotal / rate).toFixed(2)),
-      paid_amount_secondary: Number((lpPaid / rate).toFixed(2)),
-      balance_amount_secondary: Number((lpBal / rate).toFixed(2)),
+      total_amount_secondary: rate ? Number((lpTotal / rate).toFixed(2)) : null,
+      paid_amount_secondary: rate ? Number((lpPaid / rate).toFixed(2)) : null,
+      balance_amount_secondary: rate ? Number((lpBal / rate).toFixed(2)) : null,
+      conversion_unavailable: !rate,
     },
-    sale_order_kpi: {
-      ...rep.sale_order_kpi,
-      total_records: sos.length,
-      pending_records: sos.filter((r) => r.stage === "pending").length,
-      cleared_records: sos.filter((r) => r.stage === "cleared").length,
-      total_amount: soTotal,
-      paid_amount: soPaid,
-      balance_amount: soBal,
-      total_amount_secondary: Number((soTotal * rate).toFixed(2)),
-      paid_amount_secondary: Number((soPaid * rate).toFixed(2)),
-      balance_amount_secondary: Number((soBal * rate).toFixed(2)),
-    },
+    sale_order_kpi: soKpi,
     agent_freight_kpi: {
       ...rep.agent_freight_kpi,
       total_records: sos.filter((r) => (r.agent_inv_amount || 0) > 0 || r.agent_name).length,
@@ -137,9 +281,10 @@ function recomputeFinanceReportKpis(rep: FinanceReportResponse): FinanceReportRe
       total_amount: agTotal,
       paid_amount: agPaid,
       balance_amount: agBal,
-      total_amount_secondary: Number((agTotal / rate).toFixed(2)),
-      paid_amount_secondary: Number((agPaid / rate).toFixed(2)),
-      balance_amount_secondary: Number((agBal / rate).toFixed(2)),
+      total_amount_secondary: rate ? Number((agTotal / rate).toFixed(2)) : null,
+      paid_amount_secondary: rate ? Number((agPaid / rate).toFixed(2)) : null,
+      balance_amount_secondary: rate ? Number((agBal / rate).toFixed(2)) : null,
+      conversion_unavailable: !rate,
     },
   };
   cachedFinanceReport = updated;
@@ -589,7 +734,7 @@ export function FinancialReportPage() {
     setPaymentModalTarget(null);
     setReport((prev) => {
       if (!prev) return prev;
-      const rate = prev.usd_to_rmb_rate > 0 ? prev.usd_to_rmb_rate : 7.2;
+      const rate = prev.usd_to_rmb_rate && prev.usd_to_rmb_rate > 0 ? prev.usd_to_rmb_rate : null;
       const updateRow = <T extends LocalPurchaseFinanceRow | SaleOrderFinanceRow>(r: T): T => {
         if (r.source_id !== target.source_id) return r;
         const newPayments = [tempPayment, ...(r.payments || [])];
@@ -610,7 +755,7 @@ export function FinancialReportPage() {
           due_date: payNextDueDate || r.due_date,
           payment_terms: payTermsInput.trim() || r.payment_terms,
         };
-        if (r.source_type === "local_purchase") {
+        if (r.source_type === "local_purchase" && rate) {
           updatedRow.paid_amount_usd = Number((newPaid / rate).toFixed(2));
           updatedRow.balance_amount_usd = Number((newBal / rate).toFixed(2));
         }
@@ -699,7 +844,7 @@ export function FinancialReportPage() {
     });
     setReport((prev) => {
       if (!prev) return prev;
-      const rate = prev.usd_to_rmb_rate > 0 ? prev.usd_to_rmb_rate : 7.2;
+      const rate = prev.usd_to_rmb_rate && prev.usd_to_rmb_rate > 0 ? prev.usd_to_rmb_rate : null;
       const updateRow = <T extends LocalPurchaseFinanceRow | SaleOrderFinanceRow>(r: T): T => {
         if (r.source_id !== payment.source_id) return r;
         const newPayments = (r.payments || []).filter((p) => p.id !== payment.id);
@@ -717,7 +862,7 @@ export function FinancialReportPage() {
           payments_count: newPayments.length,
           payments: newPayments,
         };
-        if (r.source_type === "local_purchase") {
+        if (r.source_type === "local_purchase" && rate) {
           updatedRow.paid_amount_usd = Number((newPaid / rate).toFixed(2));
           updatedRow.balance_amount_usd = Number((newBal / rate).toFixed(2));
         }
@@ -1225,13 +1370,18 @@ export function FinancialReportPage() {
               SALES PROCESS — ALL
             </div>
             <div style={{ fontSize: 17, fontWeight: 700, color: "#0f172a", marginTop: 4 }}>
-              {fmtMoney(soKpi?.total_amount, "$")}{" "}
+              {soKpi?.currency === "MIXED" || soKpi?.total_amount == null
+                ? fmtMixedBreakdown(soKpi?.currency_breakdown, "total_amount")
+                : fmtMoney(soKpi.total_amount, currencySymbol(soKpi.currency, "$"))}{" "}
               <span style={{ fontSize: 13, fontWeight: 600, color: "#475569" }}>
                 ({soKpi?.total_records ?? 0})
               </span>
             </div>
             <div style={{ fontSize: 11, color: "#64748b", marginTop: 2 }}>
-              Eqv: {fmtMoney(soKpi?.total_amount_secondary, "¥")}
+              Eqv:{" "}
+              {soKpi?.conversion_unavailable || soKpi?.total_amount_secondary == null
+                ? "Rate unavailable"
+                : fmtMoney(soKpi.total_amount_secondary, currencySymbol(soKpi.secondary_currency, "¥"))}
             </div>
           </div>
 
@@ -1257,10 +1407,15 @@ export function FinancialReportPage() {
               SALES PROCESS — RECEIVED
             </div>
             <div style={{ fontSize: 17, fontWeight: 700, color: "#16a34a", marginTop: 4 }}>
-              {fmtMoney(soKpi?.paid_amount, "$")}
+              {soKpi?.currency === "MIXED" || soKpi?.paid_amount == null
+                ? fmtMixedBreakdown(soKpi?.currency_breakdown, "paid_amount")
+                : fmtMoney(soKpi.paid_amount, currencySymbol(soKpi.currency, "$"))}
             </div>
             <div style={{ fontSize: 11, color: "#64748b", marginTop: 2 }}>
-              Cleared: {soKpi?.cleared_records ?? 0} | Eqv: {fmtMoney(soKpi?.paid_amount_secondary, "¥")}
+              Cleared: {soKpi?.cleared_records ?? 0} | Eqv:{" "}
+              {soKpi?.conversion_unavailable || soKpi?.paid_amount_secondary == null
+                ? "Rate unavailable"
+                : fmtMoney(soKpi.paid_amount_secondary, currencySymbol(soKpi.secondary_currency, "¥"))}
             </div>
           </div>
 
@@ -1286,10 +1441,15 @@ export function FinancialReportPage() {
               SALES PROCESS — BALANCE
             </div>
             <div style={{ fontSize: 17, fontWeight: 700, color: "#dc2626", marginTop: 4 }}>
-              {fmtMoney(soKpi?.balance_amount, "$")}
+              {soKpi?.currency === "MIXED" || soKpi?.balance_amount == null
+                ? fmtMixedBreakdown(soKpi?.currency_breakdown, "balance_amount")
+                : fmtMoney(soKpi.balance_amount, currencySymbol(soKpi.currency, "$"))}
             </div>
             <div style={{ fontSize: 11, color: "#64748b", marginTop: 2 }}>
-              Pending: {soKpi?.pending_records ?? 0} | Eqv: {fmtMoney(soKpi?.balance_amount_secondary, "¥")}
+              Pending: {soKpi?.pending_records ?? 0} | Eqv:{" "}
+              {soKpi?.conversion_unavailable || soKpi?.balance_amount_secondary == null
+                ? "Rate unavailable"
+                : fmtMoney(soKpi.balance_amount_secondary, currencySymbol(soKpi.secondary_currency, "¥"))}
             </div>
           </div>
         </div>
@@ -2033,7 +2193,7 @@ export function FinancialReportPage() {
 
                           {/* Total Amount */}
                           <td style={{ ...tdStyle, textAlign: "right", fontWeight: 700, color: "#0f172a" }}>
-                            <div>{fmtMoney(row.total_amount, "$")}</div>
+                            <div>{fmtMoney(row.total_amount, currencySymbol(row.currency, "$"))}</div>
                             {row.ocean_freight_usd > 0 && (
                               <div style={{ fontSize: 11, fontWeight: 500, color: "#64748b" }}>
                                 Freight: {fmtMoney(row.ocean_freight_usd, "$")}
@@ -2044,7 +2204,7 @@ export function FinancialReportPage() {
                           {/* Received Payment */}
                           <td style={{ ...tdStyle, textAlign: "right" }}>
                             <div style={{ fontWeight: 700, color: "#16a34a" }}>
-                              {fmtMoney(row.paid_amount, "$")}
+                              {fmtMoney(row.paid_amount, currencySymbol(row.currency, "$"))}
                             </div>
                             {row.payments_count > 0 && (
                               <button
@@ -2073,7 +2233,7 @@ export function FinancialReportPage() {
                                 color: row.balance_amount > 0 ? "#dc2626" : "#16a34a",
                               }}
                             >
-                              {fmtMoney(row.balance_amount, "$")}
+                              {fmtMoney(row.balance_amount, currencySymbol(row.currency, "$"))}
                             </div>
                           </td>
 
@@ -2328,7 +2488,10 @@ export function FinancialReportPage() {
                   <div style={{ fontSize: 15, fontWeight: 700, color: "#0f172a", marginTop: 2 }}>
                     {fmtMoney(
                       paymentModalTarget.total_amount,
-                      paymentModalTarget.source_type === "local_purchase" ? "¥" : "$"
+                      currencySymbol(
+                        paymentModalTarget.currency,
+                        paymentModalTarget.source_type === "local_purchase" ? "¥" : "$"
+                      )
                     )}
                   </div>
                 </div>
@@ -2337,7 +2500,10 @@ export function FinancialReportPage() {
                   <div style={{ fontSize: 15, fontWeight: 700, color: "#16a34a", marginTop: 2 }}>
                     {fmtMoney(
                       paymentModalTarget.paid_amount,
-                      paymentModalTarget.source_type === "local_purchase" ? "¥" : "$"
+                      currencySymbol(
+                        paymentModalTarget.currency,
+                        paymentModalTarget.source_type === "local_purchase" ? "¥" : "$"
+                      )
                     )}
                   </div>
                 </div>
@@ -2346,7 +2512,10 @@ export function FinancialReportPage() {
                   <div style={{ fontSize: 15, fontWeight: 700, color: "#dc2626", marginTop: 2 }}>
                     {fmtMoney(
                       paymentModalTarget.balance_amount,
-                      paymentModalTarget.source_type === "local_purchase" ? "¥" : "$"
+                      currencySymbol(
+                        paymentModalTarget.currency,
+                        paymentModalTarget.source_type === "local_purchase" ? "¥" : "$"
+                      )
                     )}
                   </div>
                 </div>
@@ -2543,21 +2712,30 @@ export function FinancialReportPage() {
                   <strong>
                     {fmtMoney(
                       historyModalTarget.total_amount,
-                      historyModalTarget.source_type === "local_purchase" ? "¥" : "$"
+                      currencySymbol(
+                        historyModalTarget.currency,
+                        historyModalTarget.source_type === "local_purchase" ? "¥" : "$"
+                      )
                     )}
                   </strong>{" "}
                   | Paid:{" "}
                   <strong style={{ color: "#16a34a" }}>
                     {fmtMoney(
                       historyModalTarget.paid_amount,
-                      historyModalTarget.source_type === "local_purchase" ? "¥" : "$"
+                      currencySymbol(
+                        historyModalTarget.currency,
+                        historyModalTarget.source_type === "local_purchase" ? "¥" : "$"
+                      )
                     )}
                   </strong>{" "}
                   | Balance:{" "}
                   <strong style={{ color: "#dc2626" }}>
                     {fmtMoney(
                       historyModalTarget.balance_amount,
-                      historyModalTarget.source_type === "local_purchase" ? "¥" : "$"
+                      currencySymbol(
+                        historyModalTarget.currency,
+                        historyModalTarget.source_type === "local_purchase" ? "¥" : "$"
+                      )
                     )}
                   </strong>
                 </div>

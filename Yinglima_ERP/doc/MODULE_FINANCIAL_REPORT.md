@@ -99,3 +99,11 @@ The **Financial Report & Payment Planner** module (`/finance/report`) provides a
   - `consignment_overview.cargo_status.view`: View Section 3 (`Cargo Status — Shipment Checklist Details` + `Cargo Checklist` badge).
   - `consignment_overview.cargo_status.edit`: Toggle `Yes`/`No` checklist items and edit `ETD Origin`, `ETA Port`, `Forwarder`, and `Cargo Remark`.
   - `consignment_overview.product_summary.view`: View Section 4 (`Product Summary` table).
+
+
+## Master Production Readiness Remediation (2026-11-28)
+- **Native-Currency Accuracy (`BUG-006`, `finance/service.py`, `FinancialReport.tsx`):**
+  - Eliminated the unexplained hardcoded `6.66` USD/RMB multiplier and fixed currency mislabeling so every sales order retains its real native currency (`RMB`/`CNY`, `USD`, etc.) using `Decimal` arithmetic (`ROUND_HALF_UP`).
+  - Currency conversion only applies when an explicit, validated positive exchange rate is available in the active rate direction; otherwise the report preserves native currency with an explicit `"Rate unavailable"` indicator and never sums un-normalized mixed currencies.
+- **Pre-Mount Route Protection (`BUG-027`, `frontend/src/App.tsx`):**
+  - Wrapped `/finance/report`, `/finance/consignment-overview`, and `/finance/vat-return` in `<RouteGuard>` so unauthorized users render `<ForbiddenPage>` immediately without firing background `403` API bursts.

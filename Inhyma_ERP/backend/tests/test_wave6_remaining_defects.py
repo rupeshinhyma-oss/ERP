@@ -50,10 +50,12 @@ async def test_organizations_public_route_is_not_duplicated_in_api_router() -> N
     import app.api.v1.router as router_mod
 
     assert not hasattr(router_mod, "get_public_org_info")
-    direct_api_router_dups = [
+    # api_router includes organizations_router once, so /organizations/public must appear exactly once
+    api_router_matches = [
         r for r in api_router.routes if getattr(r, "path", None) == "/organizations/public"
     ]
-    assert len(direct_api_router_dups) == 0
+    assert len(api_router_matches) == 1
+    assert api_router_matches[0].endpoint.__name__ == "get_public_organization_branding"
 
     org_router_matches = [
         r for r in org_router.routes if getattr(r, "path", None) == "/organizations/public"

@@ -28,7 +28,7 @@ from datetime import datetime
 logger = logging.getLogger("inquiry_routes")
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Response, UploadFile, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -1452,12 +1452,158 @@ async def create_bulk_rfqs(
     )
 
 
+from typing import Literal
+
+
 class InboundMessageWebhookPayload(BaseModel):
-    channel: str = Field(default="email", description="email, whatsapp, wechat, zapier")
-    sender: str = Field(..., description="Sender email or phone number e.g. +86138..., supplier@gmail.com")
-    text: str = Field(..., description="Message text or chat transcript")
-    item_id: str | None = None
-    rfq_token: str | None = None
+    channel: Literal["email", "whatsapp", "wechat", "zapier"] = Field(
+        default="email",
+        description="Allowed inbound channel: email, whatsapp, wechat, zapier",
+    )
+    sender: str = Field(..., min_length=3, max_length=255, description="Sender email or phone number")
+    text: str = Field(..., min_length=1, max_length=20000, description="Message text or chat transcript")
+    item_id: str | None = Field(default=None, max_length=64)
+    rfq_token: str | None = Field(default=None, max_length=2048)
+
+    @field_validator("sender", "text")
+    @classmethod
+    def _reject_blank_fields(cls, value: str) -> str:
+        cleaned = (value or "").strip()
+        if not cleaned:
+            raise ValueError("Field must not be blank.")
+        return cleaned
+
+    @field_validator("item_id")
+    @classmethod
+    def _validate_item_id(cls, value: str | None) -> str | None:
+        if value is None or value == "":
+            return None
+        try:
+            uuid.UUID(value)
+        except (ValueError, TypeError) as exc:
+            raise ValueError("item_id must be a valid UUID.") from exc
+        return value
+
+
+_WEBHOOK_REPLAY_CACHE: dict[str, float] = {}
+_WEBHOOK_REPLAY_CACHE_MAX = 5000
+
+
+def _prune_webhook_replay_cache(now_ts: float, max_skew: int) -> None:
+    cutoff = now_ts - max_skew
+    expired = [k for k, ts in _WEBHOOK_REPLAY_CACHE.items() if ts < cutoff]
+    for k in expired:
+        _WEBHOOK_REPLAY_CACHE.pop(k, None)
+    if len(_WEBHOOK_REPLAY_CACHE) > _WEBHOOK_REPLAY_CACHE_MAX:
+        overflow = len(_WEBHOOK_REPLAY_CACHE) - _WEBHOOK_REPLAY_CACHE_MAX
+        for k, _ in sorted(_WEBHOOK_REPLAY_CACHE.items(), key=lambda kv: kv[1])[:overflow]:
+            _WEBHOOK_REPLAY_CACHE.pop(k, None)
+
+
+async def _verify_inbound_webhook_signature(request: Request) -> None:
+    """
+    BUG-004: Verify HMAC-SHA256 sender authenticity, timestamp tolerance, and replay protection
+    on POST /inquiries/inbound-webhook. Never logs secrets or raw signature digests.
+    """
+    import hashlib
+    import hmac
+    import time
+
+    secret = (settings.INBOUND_WEBHOOK_SECRET or "").strip()
+    require_sig = bool(settings.INBOUND_WEBHOOK_REQUIRE_SIGNATURE or secret)
+
+    if not secret:
+        if require_sig:
+            logger.warning(
+                "Rejected inbound webhook: signature enforcement active but INBOUND_WEBHOOK_SECRET is not configured.",
+                extra={"request_id": getattr(request.state, "request_id", "-")},
+            )
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Inbound webhook authentication is required.",
+            )
+        return
+
+    sig_header = (
+        request.headers.get("X-Webhook-Signature")
+        or request.headers.get("X-Hub-Signature-256")
+        or ""
+    ).strip()
+    if not sig_header:
+        logger.warning(
+            "Rejected inbound webhook: missing signature header.",
+            extra={"request_id": getattr(request.state, "request_id", "-")},
+        )
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing webhook signature.",
+        )
+
+    provided_hex = sig_header[7:].strip() if sig_header.lower().startswith("sha256=") else sig_header
+    if not provided_hex:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid webhook signature format.",
+        )
+
+    raw_body = await request.body()
+    ts_header = (request.headers.get("X-Webhook-Timestamp") or "").strip()
+    max_skew = max(30, int(getattr(settings, "INBOUND_WEBHOOK_MAX_SKEW_SECONDS", 300)))
+    now_ts = time.time()
+
+    if not ts_header:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing webhook timestamp header.",
+        )
+    try:
+        ts_val = float(ts_header)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid webhook timestamp.",
+        ) from exc
+    if abs(now_ts - ts_val) > max_skew:
+        logger.warning(
+            "Rejected inbound webhook: timestamp outside allowed skew window.",
+            extra={"request_id": getattr(request.state, "request_id", "-")},
+        )
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Webhook timestamp expired or outside replay window.",
+        )
+
+    secret_bytes = secret.encode("utf-8")
+    signed_bytes = ts_header.encode("utf-8") + b"." + raw_body
+    expected_hex = hmac.new(secret_bytes, signed_bytes, hashlib.sha256).hexdigest()
+
+    if not hmac.compare_digest(expected_hex.lower(), provided_hex.lower()):
+        logger.warning(
+            "Rejected inbound webhook: HMAC signature verification failed.",
+            extra={"request_id": getattr(request.state, "request_id", "-")},
+        )
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid webhook signature.",
+        )
+
+    delivery_nonce = (request.headers.get("X-Webhook-Id") or request.headers.get("X-Webhook-Nonce") or "").strip()
+    replay_key = (
+        f"id:{delivery_nonce}"
+        if delivery_nonce
+        else "body:" + hashlib.sha256(signed_bytes).hexdigest()
+    )
+    _prune_webhook_replay_cache(now_ts, max_skew)
+    if replay_key in _WEBHOOK_REPLAY_CACHE:
+        logger.warning(
+            "Rejected replayed inbound webhook delivery.",
+            extra={"request_id": getattr(request.state, "request_id", "-")},
+        )
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Duplicate or replayed webhook delivery rejected.",
+        )
+    _WEBHOOK_REPLAY_CACHE[replay_key] = now_ts
 
 
 @router.post("/inbound-webhook", summary="Inbound webhook for WhatsApp, WeChat, and Email quotation auto-ingestion")
@@ -1467,10 +1613,14 @@ async def inbound_quotation_webhook(
     session: AsyncSession = Depends(get_db_session),
     event_dispatcher: EventDispatcher = Depends(get_event_dispatcher),
 ) -> dict:
-    """Accept incoming messages from WhatsApp/WeChat/Email webhooks, extract quote with AI, and auto-insert into ERP."""
+    """Accept verified inbound messages from WhatsApp/WeChat/Email webhooks, extract quote with AI, and auto-insert into ERP."""
+    from app.common.rate_limit import enforce_rate_limit, webhook_limiter
     from app.inquiries.models import InquiryItem, Quotation, QuotationStatus, RFQ
     from app.inquiries.public_quotes import decode_rfq_token
     from app.suppliers.models import Supplier, SupplierContact, SupplierEmail
+
+    enforce_rate_limit(webhook_limiter, request)
+    await _verify_inbound_webhook_signature(request)
 
     # Match supplier
     supplier: Supplier | None = None
@@ -1489,7 +1639,8 @@ async def inbound_quotation_webhook(
         if s_contact:
             supplier = await session.get(Supplier, s_contact.supplier_id)
 
-    # Match inquiry item
+    # BUG-004: Match inquiry item strictly via explicit item_id, verified rfq_token, or active supplier RFQ.
+    # Never blindly attach unmatched payloads to the most recent InquiryItem.
     matched_item_id = None
     if payload.item_id:
         try:
@@ -1510,12 +1661,6 @@ async def inbound_quotation_webhook(
             if r.supplier_ids and str(supplier.id) in r.supplier_ids:
                 matched_item_id = r.inquiry_item_id
                 break
-
-    if not matched_item_id:
-        recent_res = await session.execute(select(InquiryItem).order_by(InquiryItem.created_at.desc()).limit(1))
-        latest_item = recent_res.scalar_one_or_none()
-        if latest_item:
-            matched_item_id = latest_item.id
 
     if not matched_item_id:
         return build_success_response(

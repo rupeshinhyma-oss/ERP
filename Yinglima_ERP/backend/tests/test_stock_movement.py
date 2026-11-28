@@ -22,12 +22,37 @@ async def test_stock_movement_inward_outward_and_extract_flow():
     async with sm() as session:
         service = StockMovementService(session)
 
-        # 1. Fetch test supplier and buyer or create mock references
-        supp = (await session.execute(select(Supplier))).scalars().first()
-        assert supp is not None
+        # 1. Fetch test supplier and buyer or seed synthetic isolated references
+        from app.masters.countries.models import Country
+        cntry = (await session.execute(select(Country).limit(1))).scalars().first()
+        if cntry is None:
+            cntry = Country(name=f"India-{uuid.uuid4().hex[:4]}", code=f"I{uuid.uuid4().hex[:3].upper()}")
+            session.add(cntry)
+            await session.flush()
 
-        buyer = (await session.execute(select(Buyer))).scalars().first()
-        assert buyer is not None
+        supp = (await session.execute(select(Supplier).limit(1))).scalars().first()
+        if supp is None:
+            from app.masters.states.models import State
+            from app.masters.cities.models import City
+            st = (await session.execute(select(State).where(State.country_id == cntry.id).limit(1))).scalars().first()
+            if st is None:
+                st = State(name=f"Zhejiang-{uuid.uuid4().hex[:4]}", code=f"Z{uuid.uuid4().hex[:3].upper()}", country_id=cntry.id)
+                session.add(st)
+                await session.flush()
+            cty = (await session.execute(select(City).where(City.state_id == st.id).limit(1))).scalars().first()
+            if cty is None:
+                cty = City(name=f"Wenzhou-{uuid.uuid4().hex[:4]}", state_id=st.id, country_id=cntry.id)
+                session.add(cty)
+                await session.flush()
+            supp = Supplier(company_name=f"Synthetic Stock Supplier {uuid.uuid4().hex[:4]}", country_id=cntry.id, state_id=st.id, city_id=cty.id)
+            session.add(supp)
+            await session.flush()
+
+        buyer = (await session.execute(select(Buyer).limit(1))).scalars().first()
+        if buyer is None:
+            buyer = Buyer(company_name=f"Synthetic Stock Buyer {uuid.uuid4().hex[:4]}", country_id=cntry.id)
+            session.add(buyer)
+            await session.flush()
 
         test_sku = f"TEST-SKU-{uuid.uuid4().hex[:6]}"
         inward_mov = None
@@ -146,11 +171,15 @@ async def test_stock_movement_inward_outward_and_extract_flow():
             assert lp_extract.items[0].quantity == 20.0
 
             # 7. Test: 1-Click Extract from Sale Order
-            comp = (await session.execute(select(MasterCompany))).scalars().first()
+            comp = (await session.execute(select(MasterCompany).limit(1))).scalars().first()
+            if comp is None:
+                comp = MasterCompany(name=f"Yinglima Stock Co {uuid.uuid4().hex[:4]}", code=f"YS{uuid.uuid4().hex[:4].upper()}")
+                session.add(comp)
+                await session.flush()
             so = SaleOrder(
                 order_no=f"TEST-SO-{uuid.uuid4().hex[:6]}",
-                organization_id=comp.id if comp else None,
-                organization_name=comp.name if comp else "Yinglima",
+                organization_id=comp.id,
+                organization_name=comp.name,
                 buyer_id=buyer.id,
                 buyer_name=buyer.company_name,
                 order_date=date.today(),
@@ -205,11 +234,36 @@ async def test_stock_movement_strict_block_outward_insufficient_stock():
     async with sm() as session:
         service = StockMovementService(session)
 
-        supp = (await session.execute(select(Supplier))).scalars().first()
-        assert supp is not None
+        from app.masters.countries.models import Country
+        cntry = (await session.execute(select(Country).limit(1))).scalars().first()
+        if cntry is None:
+            cntry = Country(name=f"India-{uuid.uuid4().hex[:4]}", code=f"I{uuid.uuid4().hex[:3].upper()}")
+            session.add(cntry)
+            await session.flush()
 
-        buyer = (await session.execute(select(Buyer))).scalars().first()
-        assert buyer is not None
+        supp = (await session.execute(select(Supplier).limit(1))).scalars().first()
+        if supp is None:
+            from app.masters.states.models import State
+            from app.masters.cities.models import City
+            st = (await session.execute(select(State).where(State.country_id == cntry.id).limit(1))).scalars().first()
+            if st is None:
+                st = State(name=f"Zhejiang-{uuid.uuid4().hex[:4]}", code=f"Z{uuid.uuid4().hex[:3].upper()}", country_id=cntry.id)
+                session.add(st)
+                await session.flush()
+            cty = (await session.execute(select(City).where(City.state_id == st.id).limit(1))).scalars().first()
+            if cty is None:
+                cty = City(name=f"Wenzhou-{uuid.uuid4().hex[:4]}", state_id=st.id, country_id=cntry.id)
+                session.add(cty)
+                await session.flush()
+            supp = Supplier(company_name=f"Synthetic Block Supplier {uuid.uuid4().hex[:4]}", country_id=cntry.id, state_id=st.id, city_id=cty.id)
+            session.add(supp)
+            await session.flush()
+
+        buyer = (await session.execute(select(Buyer).limit(1))).scalars().first()
+        if buyer is None:
+            buyer = Buyer(company_name=f"Synthetic Block Buyer {uuid.uuid4().hex[:4]}", country_id=cntry.id)
+            session.add(buyer)
+            await session.flush()
 
 
         test_sku = f"BLOCK-TEST-{uuid.uuid4().hex[:6]}"
@@ -263,8 +317,8 @@ async def test_stock_movement_strict_block_outward_insufficient_stock():
             with pytest.raises(BadRequestException) as exc_info:
                 await service.create_movement(outward_payload_excess)
 
-            assert "Insufficient Stock" in str(exc_info.value)
-            assert "Available stock in warehouse is 5 units" in str(exc_info.value)
+            assert "insufficient stock" in str(exc_info.value).lower()
+            assert "Available: 5" in str(exc_info.value) and "Requested: 10" in str(exc_info.value)
             assert "blocked to prevent negative inventory" in str(exc_info.value)
 
             # 3. Test delete_movement on inward: if not dispatched, it can be deleted

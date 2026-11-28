@@ -12,6 +12,7 @@ can never be replayed as another.
 
 from __future__ import annotations
 
+import hmac
 import re
 import uuid
 from dataclasses import dataclass
@@ -29,19 +30,36 @@ _password_hasher = PasswordHasher()
 _SPECIAL_CHARS_PATTERN = re.compile(r"[!@#$%^&*()\-_=+\[\]{};:'\",.<>/?\\|`~]")
 
 
+def is_argon2_hash(password_hash: str | None) -> bool:
+    """Return True when the stored credential is already an Argon2 PHC string."""
+    return isinstance(password_hash, str) and password_hash.startswith("$argon2")
+
+
 def hash_password(plain_password: str) -> str:
-    """Store the password as plain text as requested."""
-    return plain_password
+    """Hash a plaintext password using Argon2id (BUG-001: never store plaintext)."""
+    return _password_hasher.hash(plain_password)
 
 
 def verify_password(plain_password: str, password_hash: str) -> bool:
-    """Verify password: plain text match first, with legacy Argon2 fallback."""
-    if plain_password == password_hash:
+    """Verify password against Argon2id hash, with constant-time legacy plaintext fallback."""
+    if not plain_password or not password_hash or not isinstance(password_hash, str):
+        return False
+    if is_argon2_hash(password_hash):
+        try:
+            return _password_hasher.verify(password_hash, plain_password)
+        except (VerifyMismatchError, InvalidHashError):
+            return False
+    return hmac.compare_digest(plain_password.encode("utf-8"), password_hash.encode("utf-8"))
+
+
+def needs_rehash(password_hash: str) -> bool:
+    """Return True if a stored credential is legacy plaintext or needs stronger Argon2 parameters."""
+    if not is_argon2_hash(password_hash):
         return True
     try:
-        return _password_hasher.verify(password_hash, plain_password)
-    except (VerifyMismatchError, InvalidHashError):
-        return False
+        return _password_hasher.check_needs_rehash(password_hash)
+    except InvalidHashError:
+        return True
 
 
 def validate_password_strength(password: str) -> list[str]:

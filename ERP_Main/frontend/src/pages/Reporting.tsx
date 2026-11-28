@@ -95,7 +95,7 @@ export function Reporting() {
         {
           report_key: "global_supplier_summary",
           name: "Global Supplier Summary",
-          description: "Cross-ERP supplier catalog (awaiting supplier integration event support in Phase 6/7).",
+          description: "Cross-ERP supplier catalog (planned — supplier projection event stream not yet enabled).",
           entity_type: "supplier",
           supported_formats: ["csv", "xlsx"],
           supported_filters: ["query", "status", "erp_ids"],
@@ -105,7 +105,7 @@ export function Reporting() {
         {
           report_key: "global_quotation_summary",
           name: "Global Quotations & Pricing",
-          description: "Cross-ERP quotation summary (awaiting quotation event stream integration).",
+          description: "Cross-ERP quotation summary (planned — quotation projection event stream not yet enabled).",
           entity_type: "quotation",
           supported_formats: ["csv", "xlsx"],
           supported_filters: ["date_range", "erp_ids"],
@@ -449,7 +449,7 @@ export function Reporting() {
                         </div>
                       ) : (
                         <div style={{ fontSize: "12px", color: "var(--color-muted)", fontStyle: "italic" }}>
-                          Not yet available: Event stream not implemented in current backend.
+                          Planned capability — projection event stream is not yet enabled.
                         </div>
                       )}
                     </div>

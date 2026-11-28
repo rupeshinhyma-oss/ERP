@@ -507,3 +507,112 @@ export function ModalAlert({
     </div>
   );
 }
+
+/* ------------------------------------------------------------------ */
+/* Custom ERP Confirm Dialog (BUG-029: replaces native window.confirm)*/
+/* ------------------------------------------------------------------ */
+
+export function ConfirmModal({
+  open,
+  title = "Confirm Action",
+  message,
+  confirmLabel = "Confirm",
+  cancelLabel = "Cancel",
+  danger = false,
+  onConfirm,
+  onCancel,
+}: {
+  open: boolean;
+  title?: string;
+  message: string;
+  confirmLabel?: string;
+  cancelLabel?: string;
+  danger?: boolean;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  useEffect(() => {
+    if (!open || typeof document === "undefined") return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, [open]);
+  if (!open) return null;
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label={title}
+      data-testid="erp-confirm-modal"
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 99999,
+        background: "rgba(15, 23, 42, 0.6)",
+        backdropFilter: "blur(3px)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: "20px",
+      }}
+      onClick={onCancel}
+    >
+      <div
+        style={{
+          background: "#ffffff",
+          borderRadius: "12px",
+          width: "100%",
+          maxWidth: "420px",
+          padding: "24px",
+          boxShadow: "0 20px 40px -12px rgba(0, 0, 0, 0.28)",
+          border: "1px solid #e2e8f0",
+        }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h3 style={{ fontSize: "16px", fontWeight: 700, color: "#0f172a", margin: "0 0 10px 0" }}>
+          {title}
+        </h3>
+        <p style={{ fontSize: "13.5px", color: "#334155", lineHeight: 1.55, margin: "0 0 20px 0", whiteSpace: "pre-wrap" }}>
+          {message}
+        </p>
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px" }}>
+          <button
+            type="button"
+            onClick={onCancel}
+            style={{
+              padding: "8px 16px",
+              background: "#f1f5f9",
+              color: "#334155",
+              fontWeight: 600,
+              fontSize: "13px",
+              borderRadius: "6px",
+              border: "1px solid #cbd5e1",
+              cursor: "pointer",
+            }}
+          >
+            {cancelLabel}
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            style={{
+              padding: "8px 16px",
+              background: danger ? "#dc2626" : "#0061f2",
+              color: "#ffffff",
+              fontWeight: 600,
+              fontSize: "13px",
+              borderRadius: "6px",
+              border: "none",
+              cursor: "pointer",
+            }}
+          >
+            {confirmLabel}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}

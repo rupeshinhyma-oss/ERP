@@ -238,9 +238,16 @@ class TestPhase9FederationReliabilityAndCredentials:
         assert headers["X-Request-ID"] == "corr-test-12345"
         assert headers["Idempotency-Key"] == "idemp-key-67890"
 
-    async def test_dependency_health_check_safe_response(self, client):
-        """GET /api/v1/health/dependencies returns safe status without exposing secrets."""
-        resp = await client.get("/api/v1/health/dependencies")
+    async def test_dependency_health_check_safe_response(self, client, admin_client):
+        """GET /api/v1/health/dependencies returns minimal status anonymously and safe diagnostics to admins (BUG-028)."""
+        anon_resp = await client.get("/api/v1/health/dependencies")
+        assert anon_resp.status_code == 200
+        anon_data = anon_resp.json()["data"]
+        assert anon_data["service"] == "erp_main"
+        assert anon_data["status"] in ("healthy", "degraded")
+        assert "federation_credentials" not in anon_data
+
+        resp = await admin_client.get("/api/v1/health/dependencies")
         assert resp.status_code == 200
         data = resp.json()["data"]
         assert data["service"] == "erp_main"

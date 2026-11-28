@@ -30,12 +30,12 @@ async def test_quotation_documents_allows_product_view():
 
 @pytest.mark.asyncio
 async def test_quotation_documents_allows_productgallery_view():
-    """Users with productgallery.view should be authorized to fetch quotation documents for gallery."""
+    """Users with productgallery.quotations.view should be authorized to fetch quotation documents for gallery."""
     app = create_application()
     user = CurrentUser(
         id=uuid.uuid4(),
         username="gallery_viewer",
-        permissions={"productgallery.view"},
+        permissions={"productgallery.quotations.view"},
     )
     app.dependency_overrides[get_current_user] = lambda: user
 

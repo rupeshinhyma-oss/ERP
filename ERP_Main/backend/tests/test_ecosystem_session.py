@@ -13,13 +13,14 @@ import pytest
 
 
 @pytest.mark.asyncio
-async def test_establish_ecosystem_session_for_super_admin(client):
-    """Super admin establishes an ecosystem session and receives shared session_id."""
+async def test_establish_ecosystem_session_for_super_admin(super_admin_client, client):
+    """Seeded Super Admin establishes an ecosystem session, validates it, and revokes it (authorized)."""
+    me = (await super_admin_client.get("/api/v1/global/auth/me")).json()["data"]
     resp = await client.post(
         "/api/v1/global/ecosystem-session/establish",
         json={
-            "email": "admin@example.com",
-            "password": "ChangeMe!12345",
+            "email": me["email"],
+            "password": "Test-Password-123!",
             "source_erp": "inhyma",
         },
     )
@@ -27,12 +28,13 @@ async def test_establish_ecosystem_session_for_super_admin(client):
     data = resp.json()["data"]
     assert data["active"] is True
     assert "session_id" in data
+    assert "exchange_code" in data
     assert data["role"] in ("super_admin", "admin")
     assert "*" in data["allowed_erps"]
 
     session_id = data["session_id"]
 
-    # Verify session lookup
+    # Verify session lookup (authorized via signed HttpOnly cookie set on establish)
     get_resp = await client.get(f"/api/v1/global/ecosystem-session/{session_id}")
     assert get_resp.status_code == 200
     get_data = get_resp.json()["data"]
@@ -44,8 +46,8 @@ async def test_establish_ecosystem_session_for_super_admin(client):
     assert revoke_resp.status_code == 200
     assert revoke_resp.json()["data"]["status"] == "revoked"
 
-    # Verify session is now inactive
-    check_resp = await client.get(f"/api/v1/global/ecosystem-session/{session_id}")
+    # Verify session is now inactive (checked by authenticated admin)
+    check_resp = await super_admin_client.get(f"/api/v1/global/ecosystem-session/{session_id}")
     assert check_resp.status_code == 200
     assert check_resp.json()["data"]["active"] is False
     assert check_resp.json()["data"]["revoked"] is True

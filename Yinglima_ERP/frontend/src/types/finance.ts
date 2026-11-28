@@ -46,7 +46,7 @@ export interface LocalPurchaseFinanceRow {
   paid_amount: number;
   balance_amount: number;
   total_bank_charges: number;
-  usd_exchange_rate: number;
+  usd_exchange_rate: number | null;
   total_amount_usd: number;
   paid_amount_usd: number;
   balance_amount_usd: number;
@@ -91,7 +91,7 @@ export interface SaleOrderFinanceRow {
   paid_amount: number;
   balance_amount: number;
   total_bank_charges: number;
-  usd_exchange_rate: number;
+  usd_exchange_rate: number | null;
 
   stage: "pending" | "cleared";
   payment_terms?: string | null;
@@ -114,22 +114,32 @@ export interface SaleOrderFinanceRow {
   payments: FinancePaymentItem[];
 }
 
+export interface CurrencyTotals {
+  records: number;
+  total_amount: number;
+  paid_amount: number;
+  balance_amount: number;
+}
+
 export interface SectionKpiSummary {
   total_records: number;
   pending_records: number;
   cleared_records: number;
   currency: string;
-  total_amount: number;
-  paid_amount: number;
-  balance_amount: number;
-  secondary_currency: string;
-  total_amount_secondary: number;
-  paid_amount_secondary: number;
-  balance_amount_secondary: number;
+  total_amount: number | null;
+  paid_amount: number | null;
+  balance_amount: number | null;
+  secondary_currency: string | null;
+  total_amount_secondary: number | null;
+  paid_amount_secondary: number | null;
+  balance_amount_secondary: number | null;
+  is_mixed_currency?: boolean;
+  conversion_unavailable?: boolean;
+  currency_breakdown?: Record<string, CurrencyTotals>;
 }
 
 export interface FinanceReportResponse {
-  usd_to_rmb_rate: number;
+  usd_to_rmb_rate: number | null;
   local_purchase_kpi: SectionKpiSummary;
   sale_order_kpi: SectionKpiSummary;
   agent_freight_kpi: SectionKpiSummary;

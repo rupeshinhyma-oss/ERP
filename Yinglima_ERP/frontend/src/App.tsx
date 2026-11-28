@@ -14,9 +14,11 @@
  * /dashboard. It is now imported and routed below.
  */
 
-import { Suspense, lazy, useEffect, useRef } from "react";
+import { Suspense, lazy, useEffect, useRef, type ReactNode } from "react";
 import { Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { setUnauthorizedHandler } from "@/lib/api";
+import { Auth } from "@/lib/auth";
+import { useAuth } from "@/lib/hooks";
 import { LEGACY_REDIRECTS } from "@/lib/nav";
 
 // Critical-path pages stay in the entry bundle.
@@ -24,6 +26,32 @@ import { LoginPage } from "@/pages/Login";
 import { DashboardPage } from "@/pages/Dashboard";
 import { AuthCallbackPage } from "@/pages/AuthCallback";
 import { ForbiddenPage } from "@/pages/Forbidden";
+
+/**
+ * Route-level RBAC guard (BUG-027): prevents restricted page components from
+ * mounting and firing 403 API bursts before AppShell can redirect to /403.
+ */
+export function RouteGuard({
+  permission,
+  anyPermissions,
+  children,
+}: {
+  permission?: string;
+  anyPermissions?: string[];
+  children: ReactNode;
+}) {
+  const { hasPermission } = useAuth();
+  if (!Auth.isLoggedIn()) {
+    return <Navigate to="/login" replace />;
+  }
+  if (permission && !hasPermission(permission)) {
+    return <ForbiddenPage />;
+  }
+  if (anyPermissions && anyPermissions.length > 0 && !anyPermissions.some((p) => hasPermission(p))) {
+    return <ForbiddenPage />;
+  }
+  return <>{children}</>;
+}
 
 // Every other page is code-split, then prefetched when the browser is idle
 // (see prefetchAllPages below) so route switches still feel instant.
@@ -196,17 +224,17 @@ export function App() {
             <Route path="/" element={<Navigate to="/dashboard" replace />} />
             <Route path="/dashboard" element={<DashboardPage />} />
             <Route path="/403" element={<ForbiddenPage />} />
-            <Route path="/organization" element={<OrganizationPage />} />
-            <Route path="/notification-settings" element={<NotificationSettingsPage />} />
-            <Route path="/audit" element={<AuditPage />} />
-            <Route path="/trash" element={<TrashPage />} />
-            <Route path="/profile" element={<ProfilePage />} />
-            <Route path="/users" element={<UsersPage />} />
-            <Route path="/rbac" element={<RbacPage />} />
-            <Route path="/effective-permissions" element={<EffectivePermissionsPage />} />
+            <Route path="/organization" element={<RouteGuard permission="organization.manage"><OrganizationPage /></RouteGuard>} />
+            <Route path="/notification-settings" element={<RouteGuard permission="notification_settings.view"><NotificationSettingsPage /></RouteGuard>} />
+            <Route path="/audit" element={<RouteGuard permission="audit.view"><AuditPage /></RouteGuard>} />
+            <Route path="/trash" element={<RouteGuard permission="trash.view"><TrashPage /></RouteGuard>} />
+            <Route path="/profile" element={<RouteGuard><ProfilePage /></RouteGuard>} />
+            <Route path="/users" element={<RouteGuard permission="user.view"><UsersPage /></RouteGuard>} />
+            <Route path="/rbac" element={<RouteGuard permission="roles_permissions.view"><RbacPage /></RouteGuard>} />
+            <Route path="/effective-permissions" element={<RouteGuard permission="roles_permissions.view"><EffectivePermissionsPage /></RouteGuard>} />
             {/* Employee was merged into User -- /employees is now an alias for the same page. */}
-            <Route path="/employees" element={<UsersPage />} />
-            <Route path="/positions" element={<PositionsPage />} />
+            <Route path="/employees" element={<RouteGuard permission="user.view"><UsersPage /></RouteGuard>} />
+            <Route path="/positions" element={<RouteGuard permission="position.view"><PositionsPage /></RouteGuard>} />
             <Route path="/suppliers" element={<SuppliersPage />} />
             <Route path="/buyers" element={<BuyersPage />} />
             <Route path="/inquiries" element={<InquiriesPage />} />
@@ -233,9 +261,9 @@ export function App() {
             <Route path="/sales" element={<Navigate to="/sale/process" replace />} />
 
             {/* Finance */}
-            <Route path="/finance/report" element={<FinancialReportPage />} />
-            <Route path="/finance/consignment-overview" element={<ConsignmentOverviewPage />} />
-            <Route path="/finance/vat-return" element={<VatReturnPage />} />
+            <Route path="/finance/report" element={<RouteGuard permission="finance_report.view"><FinancialReportPage /></RouteGuard>} />
+            <Route path="/finance/consignment-overview" element={<RouteGuard permission="consignment_overview.view"><ConsignmentOverviewPage /></RouteGuard>} />
+            <Route path="/finance/vat-return" element={<RouteGuard permission="vat_return.view"><VatReturnPage /></RouteGuard>} />
             <Route path="/vat-return" element={<Navigate to="/finance/vat-return" replace />} />
             <Route path="/consignment-overview" element={<Navigate to="/finance/consignment-overview" replace />} />
             <Route path="/finance" element={<Navigate to="/finance/report" replace />} />

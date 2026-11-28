@@ -11,7 +11,7 @@ import { processIncomingSsoHandover, resolveSingleErpDirectUrl } from "@/lib/sso
 import { getEcosystemCookie } from "@/lib/ecosystemSession";
 import { ErrorBanner } from "@/components/ui";
 
-const BRAND_NAME = "INHYMA SOLUTIONS LLP";
+const BRAND_NAME = "ERP Dashboard — Global Control Panel";
 
 function EyeIcon({ visible }: { visible: boolean }) {
   return visible ? (

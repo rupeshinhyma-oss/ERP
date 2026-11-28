@@ -24,7 +24,7 @@ from __future__ import annotations
 from enum import Enum
 from functools import lru_cache
 
-from pydantic import Field, PostgresDsn
+from pydantic import Field, PostgresDsn, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -124,8 +124,8 @@ class Settings(BaseSettings):
     # connections -- keep this in mind alongside PostgreSQL's own
     # `max_connections` (and put PgBouncer in front in production so the
     # database itself isn't holding hundreds of idle connections).
-    DATABASE_POOL_SIZE: int = 50
-    DATABASE_MAX_OVERFLOW: int = 50
+    DATABASE_POOL_SIZE: int = 10
+    DATABASE_MAX_OVERFLOW: int = 10
     DATABASE_POOL_TIMEOUT_SECONDS: int = 30
     DATABASE_POOL_RECYCLE_SECONDS: int = 1800
     DATABASE_ECHO: bool = False
@@ -204,8 +204,23 @@ class Settings(BaseSettings):
         "previously-encrypted member password unrecoverable.",
     )
     JWT_ISSUER: str = "erp-backend"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 5256000
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     REFRESH_TOKEN_EXPIRE_DAYS: int = 30
+
+    @field_validator("ACCESS_TOKEN_EXPIRE_MINUTES", mode="after")
+    @classmethod
+    def _cap_access_token_ttl(cls, v: int) -> int:
+        # BUG-012: Never mint multi-year access tokens even if legacy .env had 5256000.
+        if v <= 0 or v > 120:
+            return 30
+        return v
+
+    @field_validator("REFRESH_TOKEN_EXPIRE_DAYS", mode="after")
+    @classmethod
+    def _cap_refresh_token_ttl(cls, v: int) -> int:
+        if v <= 0 or v > 90:
+            return 30
+        return v
 
     # -------------------------------------------------------------------
     # Password policy
@@ -247,13 +262,13 @@ class Settings(BaseSettings):
     DEFAULT_SORT_ORDER: str = "asc"
 
     # -------------------------------------------------------------------
-    # SMTP / Automated Email Dispatch
+    # SMTP / Automated Email Dispatch (BUG-002: env-only, never hardcode)
     # -------------------------------------------------------------------
     SMTP_HOST: str = "smtp.gmail.com"
     SMTP_PORT: int = 587
-    SMTP_USER: str = "om1inhyma@gmail.com"
-    SMTP_PASSWORD: str = "wmwdaqjhmqutizvr"
-    SMTP_FROM_EMAIL: str = "om1inhyma@gmail.com"
+    SMTP_USER: str = ""
+    SMTP_PASSWORD: str = ""
+    SMTP_FROM_EMAIL: str = ""
     SMTP_FROM_NAME: str = "Yinglima Procurement Team"
     SMTP_USE_TLS: bool = True
 
@@ -371,6 +386,31 @@ class Settings(BaseSettings):
                 creds.append(p_clean)
         return creds
 
+    def get_outbound_service_credential(self) -> str:
+        """Resolve the active non-placeholder service credential matching peer/ERP_Main auth priority."""
+        if self.ERP_MAIN_SERVICE_CREDENTIAL and "CHANGE-ME" not in self.ERP_MAIN_SERVICE_CREDENTIAL:
+            return self.ERP_MAIN_SERVICE_CREDENTIAL
+        if self.FEDERATION_SERVICE_CREDENTIAL and "CHANGE-ME" not in self.FEDERATION_SERVICE_CREDENTIAL:
+            return self.FEDERATION_SERVICE_CREDENTIAL
+        expected = self.get_expected_erp_main_credentials()
+        if expected:
+            return expected[0]
+        return self.FEDERATION_SERVICE_CREDENTIAL
+
+    # Inbound Quotation Webhook Security (BUG-004)
+    INBOUND_WEBHOOK_SECRET: str = Field(
+        default="",
+        description="Environment-configured HMAC-SHA256 secret for POST /api/v1/inquiries/inbound-webhook.",
+    )
+    INBOUND_WEBHOOK_REQUIRE_SIGNATURE: bool = Field(
+        default=True,
+        description="Enforce HMAC-SHA256 signature and timestamp replay protection on inbound quotation webhooks.",
+    )
+    INBOUND_WEBHOOK_MAX_SKEW_SECONDS: int = Field(
+        default=300,
+        description="Maximum allowed timestamp age/skew in seconds for inbound webhook replay protection.",
+    )
+
     ERP_MAIN_URL: str = Field(
         default="",
         description="Optional single public URL of ERP_Main (e.g. https://erp-main-backend.onrender.com). When set it "
@@ -475,7 +515,7 @@ class Settings(BaseSettings):
 
     def validate_production_secrets(self) -> None:
         """
-        Refuse to boot in production with the placeholder JWT secret.
+        Refuse to boot in production with placeholder secrets, wildcard CORS, or SQLite.
 
         Called explicitly from the application lifespan (not from
         ``__init__``) so that unit tests / local tooling importing
@@ -491,6 +531,22 @@ class Settings(BaseSettings):
                 "MEMBER_PASSWORD_ENCRYPTION_KEY is still set to its placeholder value in a "
                 "production environment. Set a strong, random MEMBER_PASSWORD_ENCRYPTION_KEY "
                 "via the environment."
+            )
+        if self.is_production and self.JWT_SECRET_KEY == self.MEMBER_PASSWORD_ENCRYPTION_KEY:
+            raise RuntimeError(
+                "MEMBER_PASSWORD_ENCRYPTION_KEY must not equal JWT_SECRET_KEY in production."
+            )
+        if self.is_production and ("*" in self.cors_allowed_origins_list or not self.CORS_ALLOWED_ORIGINS.strip()):
+            raise RuntimeError(
+                "CORS_ALLOWED_ORIGINS cannot be wildcard '*' or empty in production when credentials are enabled."
+            )
+        if self.is_production and "sqlite" in str(self.DATABASE_URL).lower():
+            raise RuntimeError(
+                "DATABASE_URL cannot use SQLite in a production environment. Configure PostgreSQL."
+            )
+        if self.is_production and self.BOOTSTRAP_ADMIN_PASSWORD.strip() in ("", "ChangeMe!12345"):
+            raise RuntimeError(
+                "BOOTSTRAP_ADMIN_PASSWORD cannot remain empty or the default 'ChangeMe!12345' in production."
             )
         if self.is_production and not self.get_expected_erp_main_credentials():
             raise RuntimeError(

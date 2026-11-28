@@ -82,6 +82,32 @@ class AuditRepository(BaseRepository[AuditLog]):
             stmt = stmt.where(User.email.ilike(f"%{actor_email}%"))
         return stmt
 
+    async def paginated_list(self, query: "Any") -> tuple[list[AuditLog], int]:
+        """
+        Optimized audit pagination (BUG-026): avoids ``COUNT(*) OVER ()`` window
+        materialization of wide JSON ``old_values``/``new_values`` columns across
+        the entire ``audit_logs`` table. Runs an index-friendly page fetch plus a
+        narrow ``COUNT(audit_logs.id)`` query instead.
+        """
+        from sqlalchemy import func
+
+        base_stmt = self._base_select()
+        base_stmt = self._apply_search(base_stmt, query.search.normalized)
+        base_stmt = self._apply_dynamic_filters(base_stmt, query.filters)
+
+        count_stmt = select(func.count(AuditLog.id))
+        if base_stmt.whereclause is not None:
+            count_stmt = count_stmt.where(base_stmt.whereclause)
+        total = int((await self.session.execute(count_stmt)).scalar_one())
+        if total == 0:
+            return [], 0
+
+        list_stmt = self._apply_sort(base_stmt, query.sort)
+        list_stmt = list_stmt.offset(query.page.offset).limit(query.page.limit)
+        result = await self.session.execute(list_stmt)
+        items = list(result.scalars().all())
+        return items, total
+
     async def paginated_list_with_actor_filters(
         self,
         query: "Any",

@@ -1,6 +1,6 @@
 """Automated Inbound Email Quotation Ingestion Worker.
 
-Continuously listens to incoming supplier reply emails via IMAP (om1inhyma@gmail.com),
+Continuously listens to incoming supplier reply emails via IMAP (configured via SMTP_USER/SMTP_PASSWORD env vars),
 extracts quotation details and PDF attachments using Gemini/OpenAI, automatically creates
 Quotation records in the ERP database, and broadcasts real-time WebSocket events to update
 the ERP screen with zero manual clicks.

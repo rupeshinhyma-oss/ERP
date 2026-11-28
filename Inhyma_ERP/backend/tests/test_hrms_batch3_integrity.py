@@ -1228,14 +1228,14 @@ async def test_phase5_g4a_payroll_get_monthly_blocks_unprivileged_auto_calculate
     mock_service = AsyncMock()
     mock_service.get_monthly_payroll.return_value = None
 
-    with pytest.raises(HTTPException) as exc_404:
-        await get_monthly_payroll(
-            payroll_month="2026-11",
-            auto_calculate=False,
-            ctx=approver_only_ctx,
-            service=mock_service,
-        )
-    assert exc_404.value.status_code == 404
+    res_empty = await get_monthly_payroll(
+        payroll_month="2026-11",
+        auto_calculate=False,
+        ctx=approver_only_ctx,
+        service=mock_service,
+    )
+    assert res_empty["success"] is True
+    assert res_empty["data"] is None
     mock_service.calculate_monthly_payroll.assert_not_called()
 
     with pytest.raises(HTTPException) as exc_403:

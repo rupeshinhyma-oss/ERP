@@ -83,3 +83,14 @@ $$\text{Effective Permissions} = \left( \bigcup_{r \in \text{ActiveRoles}} \text
 4. **Dynamic Central Control Plane Linkage:**
    - Central user management navigation (`centralUsersUrl`) derives its host strictly from the active ERP registry via `getEcosystemErps()`, eliminating hardcoded local development hostnames or ports.
 
+
+
+## Master Production Readiness Remediation (2026-11-28)
+- **Argon2id Password Hashing Restoration (`BUG-001`, `auth/security.py`, `auth/service.py`):**
+  - Restored Argon2id password hashing (`hash_password()` never returns plaintext) and secure `verify_password()` supporting Argon2id hashes and controlled transition of legacy plaintext records.
+  - Successful legacy logins conditionally rehash the password to Argon2id via a race-safe conditional DB update; invalid passwords never trigger rehashing and raw password values are never logged or returned.
+- **Bounded JWT Lifetimes (`BUG-012`, `core/config.py`, `.env.defaults`):**
+  - Replaced the 10-year (`5256000` min) JWT expiry default with bounded defaults (`ACCESS_TOKEN_EXPIRE_MINUTES=30`, clamped to `1..120`; `REFRESH_TOKEN_EXPIRE_DAYS=30`, clamped to `1..90`).
+- **Central Session & Route-Guard Hardening (`BUG-019`, `BUG-027`, `ecosystemSession.ts`, `EcosystemSwitcher.tsx`, `App.tsx`):**
+  - Direct-login local sessions (`ylm-sess-*` / `ihm-sess-*` or without password/central session ID) skip `POST /global/ecosystem-session/establish` completely, eliminating dual `401` console bursts, while concurrent central calls are deduplicated.
+  - Added `<RouteGuard>` in `App.tsx` for `/users`, `/rbac`, `/effective-permissions`, `/positions`, `/audit`, `/trash`, `/organization`, and finance routes so unauthorized navigation stops before child API requests fire.

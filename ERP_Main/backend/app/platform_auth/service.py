@@ -18,13 +18,15 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
+from sqlalchemy import update
+
 from app.core.exceptions import ConflictException, ForbiddenException, UnauthorizedException
 from app.global_audit.models import AuditActorType, AuditEventType
 from app.global_audit.service import GlobalAuditService
 from app.platform_auth.models import PlatformAdmin, PlatformAdminRole
 from app.platform_auth.repository import PlatformAdminRepository
 from app.platform_auth.schemas import PlatformAdminCreate
-from app.platform_auth.security import create_platform_access_token, hash_password, verify_password
+from app.platform_auth.security import create_platform_access_token, hash_password, needs_rehash, verify_password
 
 
 class PlatformAuthService:
@@ -95,6 +97,17 @@ class PlatformAuthService:
             # never actually reaching the audit log before this fix.
             await self.repository.db.commit()
             raise UnauthorizedException("Invalid email or password.")
+        # BUG-001: Safe conditional Argon2id upgrade on successful legacy login.
+        stored_hash = admin.password_hash
+        if stored_hash and needs_rehash(stored_hash):
+            upgraded_hash = hash_password(password)
+            rehash_result = await self.repository.db.execute(
+                update(PlatformAdmin)
+                .where(PlatformAdmin.id == admin.id, PlatformAdmin.password_hash == stored_hash)
+                .values(password_hash=upgraded_hash)
+            )
+            if (rehash_result.rowcount or 0) > 0:
+                admin.password_hash = upgraded_hash
         return admin
 
     async def create_admin(self, payload: PlatformAdminCreate, *, created_by: PlatformAdmin) -> PlatformAdmin:

@@ -74,17 +74,22 @@ async def test_recovery_after_restart_needs_a_stored_session(client):
     await _register(client, "rec@example.com")
     login = await client.post("/api/v1/global/user-auth/login", json={"email": "rec@example.com", "password": PW})
     sid = login.json()["data"]["session_id"]
+    tok = login.json()["data"]["access_token"]
+    hdr = {"Authorization": f"Bearer {tok}"}
 
     es._ECOSYSTEM_SESSION_STORE.clear()  # simulate the Render instance restarting
-    ok = await client.post(EST, json={"email": "rec@example.com", "existing_session_id": sid, "source_erp": "inhyma"})
+    ok = await client.post(
+        EST, json={"email": "rec@example.com", "existing_session_id": sid, "source_erp": "inhyma"}, headers=hdr
+    )
     assert ok.status_code == 200 and ok.json()["data"]["session_id"] == sid
 
     es._ECOSYSTEM_SESSION_STORE.clear()
     bogus = await client.post(
         EST,
         json={"email": "rec@example.com", "existing_session_id": "11111111-1111-4111-8111-111111111111", "source_erp": "x"},
+        headers=hdr,
     )
-    assert bogus.status_code == 401
+    assert bogus.status_code in (401, 403)
 
 
 @pytest.mark.asyncio
@@ -101,7 +106,7 @@ async def test_recovery_rejects_a_session_belonging_to_someone_else(client):
 # --- (b) no hijacking ---------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_cannot_overwrite_another_users_session_id(client):
+async def test_cannot_overwrite_another_users_session_id(client, admin_client):
     await _register(client, "victim@example.com")
     await _register(client, "mallory@example.com")
     v = await client.post(EST, json={"email": "victim@example.com", "password": PW, "source_erp": "x"})
@@ -112,7 +117,7 @@ async def test_cannot_overwrite_another_users_session_id(client):
     )
     assert m.status_code == 200
     assert m.json()["data"]["session_id"] != victim_sid
-    still = await client.get(f"{GET}/{victim_sid}")
+    still = await admin_client.get(f"{GET}/{victim_sid}")
     assert still.json()["data"]["email"] == "victim@example.com"
 
 

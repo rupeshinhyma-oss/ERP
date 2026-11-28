@@ -25,7 +25,25 @@ async def test_get_product_costing_info_from_local_purchase():
 
         sup = (await session.execute(select(Supplier))).scalars().first()
         if not sup:
-            sup = Supplier(company_name="Dinghe Machinery Co.", organization_id=comp.id)
+            from app.masters.countries.models import Country
+            from app.masters.states.models import State
+            from app.masters.cities.models import City
+            cntry = (await session.execute(select(Country).limit(1))).scalars().first()
+            if not cntry:
+                cntry = Country(name=f"China-{uuid.uuid4().hex[:4]}", code=f"C{uuid.uuid4().hex[:3].upper()}")
+                session.add(cntry)
+                await session.flush()
+            st = (await session.execute(select(State).where(State.country_id == cntry.id).limit(1))).scalars().first()
+            if not st:
+                st = State(name=f"Zhejiang-{uuid.uuid4().hex[:4]}", code=f"Z{uuid.uuid4().hex[:3].upper()}", country_id=cntry.id)
+                session.add(st)
+                await session.flush()
+            cty = (await session.execute(select(City).where(City.state_id == st.id).limit(1))).scalars().first()
+            if not cty:
+                cty = City(name=f"Wenzhou-{uuid.uuid4().hex[:4]}", state_id=st.id, country_id=cntry.id)
+                session.add(cty)
+                await session.flush()
+            sup = Supplier(company_name="Dinghe Machinery Co.", country_id=cntry.id, state_id=st.id, city_id=cty.id)
             session.add(sup)
             await session.flush()
 
@@ -46,7 +64,7 @@ async def test_get_product_costing_info_from_local_purchase():
         from app.masters.product_categories.models import ProductCategory
         cat = (await session.execute(select(ProductCategory))).scalars().first()
         if not cat:
-            cat = ProductCategory(category_name="Packaging", category_code=f"CAT-{uuid.uuid4().hex[:4]}")
+            cat = ProductCategory(name="Packaging", code=f"CAT-{uuid.uuid4().hex[:4]}")
             session.add(cat)
             await session.flush()
 
@@ -160,12 +178,11 @@ async def test_get_product_costing_info_from_supplier_quote_fallback():
                 await session.flush()
             cty = (await session.execute(select(City))).scalars().first()
             if not cty:
-                cty = City(name="Wenzhou", state_id=st.id)
+                cty = City(name="Wenzhou", state_id=st.id, country_id=cntry.id)
                 session.add(cty)
                 await session.flush()
             sup = Supplier(
                 company_name=f"Quote Supplier {uuid.uuid4().hex[:4]}",
-                organization_id=comp.id,
                 country_id=cntry.id,
                 state_id=st.id,
                 city_id=cty.id,
@@ -175,7 +192,7 @@ async def test_get_product_costing_info_from_supplier_quote_fallback():
 
         cat = (await session.execute(select(ProductCategory))).scalars().first()
         if not cat:
-            cat = ProductCategory(category_name="Packaging", category_code=f"CAT-{uuid.uuid4().hex[:4]}")
+            cat = ProductCategory(name="Packaging", code=f"CAT-{uuid.uuid4().hex[:4]}")
             session.add(cat)
             await session.flush()
 

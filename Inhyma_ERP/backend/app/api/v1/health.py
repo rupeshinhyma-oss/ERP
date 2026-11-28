@@ -91,25 +91,27 @@ async def _is_authorized_diagnostics_caller(request: Request, db: AsyncSession |
             return True
 
     if db is not None:
-        try:
-            from app.auth.dependencies import build_auth_service
+        from app.auth.dependencies import get_auth_service
+        from app.cache.dependency import get_cache
+        from app.core.exceptions import UnauthorizedException
 
-            auth_svc = build_auth_service(db)
+        auth_svc = get_auth_service(db=db, cache=get_cache())
+        try:
             user = await auth_svc.verify_access_token(token)
-            if user.is_super_admin or "organization.manage" in user.permissions or "audit.view" in user.permissions:
-                return True
-        except Exception:
+        except UnauthorizedException:
             return False
+        if user.is_super_admin or "organization.manage" in user.permissions or "audit.view" in user.permissions:
+            return True
     else:
-        try:
-            from app.auth.security import TokenType, decode_token
+        from app.auth.security import InvalidTokenError, TokenType, decode_token
 
+        try:
             claims = decode_token(token, expected_type=TokenType.ACCESS)
-            perms = set(claims.get("perms") or [])
-            if "*" in perms or "organization.manage" in perms or "audit.view" in perms:
-                return True
-        except Exception:
+        except InvalidTokenError:
             return False
+        perms = set(claims.get("perms") or [])
+        if "*" in perms or "organization.manage" in perms or "audit.view" in perms:
+            return True
 
     return False
 
@@ -175,6 +177,7 @@ async def federation_health(
     Reports SSO readiness minimally to public callers and full live probe diagnostics to authorized operators.
     Never returns credentials.
     """
+    import asyncio
     import time as _time
 
     import httpx
@@ -192,15 +195,17 @@ async def federation_health(
             request_id=getattr(request.state, "request_id", "-"),
         )
 
-    probes = []
-    for base in erp_main_api_base_urls():
+    async def _probe_one(base: str) -> dict:
         started = _time.monotonic()
         try:
-            async with _client_for_erp_main(httpx.Timeout(8.0)) as http_client:
+            async with _client_for_erp_main(httpx.Timeout(2.0, connect=1.5)) as http_client:
                 r = await http_client.get(f"{base}/health/live")
-            probes.append({"url": base, "reachable": True, "status": r.status_code, "ms": round((_time.monotonic() - started) * 1000)})
+            return {"url": base, "reachable": True, "status": r.status_code, "ms": round((_time.monotonic() - started) * 1000)}
         except Exception as exc:  # diagnostics only
-            probes.append({"url": base, "reachable": False, "error": f"{type(exc).__name__}: {str(exc)[:160]}"})
+            return {"url": base, "reachable": False, "error": f"{type(exc).__name__}: {str(exc)[:160]}"}
+
+    urls = erp_main_api_base_urls()
+    probes = list(await asyncio.gather(*(_probe_one(u) for u in urls))) if urls else []
     data = {
         "environment": str(getattr(settings.ENVIRONMENT, "value", settings.ENVIRONMENT)),
         "erp_key": settings.ERP_KEY,

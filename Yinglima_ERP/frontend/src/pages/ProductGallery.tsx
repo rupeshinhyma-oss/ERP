@@ -1019,7 +1019,7 @@ export function ProductGalleryPage() {
                             <div style={{ fontSize: "28px", marginBottom: "2px" }}>⚠️</div>
                             <div style={{ fontSize: "11.5px", fontWeight: 700 }}>Image Unavailable</div>
                             <div style={{ fontSize: "10px", color: "#9f1239", opacity: 0.85, marginTop: "2px" }}>
-                              Storage Suspended (402)
+                              File not found or unreachable
                             </div>
                             {canDeleteProductMedia && (
                               <button
@@ -1251,7 +1251,7 @@ export function ProductGalleryPage() {
                             <div style={{ fontSize: "28px", marginBottom: "2px" }}>⚠️</div>
                             <div style={{ fontSize: "11.5px", fontWeight: 700 }}>Photo Unavailable</div>
                             <div style={{ fontSize: "10px", color: "#9f1239", opacity: 0.85, marginTop: "2px" }}>
-                              Storage Suspended (402)
+                              File not found or unreachable
                             </div>
                             {canDeleteSupplierMedia && (
                               <button
@@ -1653,7 +1653,7 @@ export function ProductGalleryPage() {
                         <div style={{ fontSize: "36px" }}>⚠️</div>
                         <div style={{ fontSize: "14px", fontWeight: 700, color: "#9f1239" }}>Image Unavailable</div>
                         <div style={{ fontSize: "12px", color: "#be123c", textAlign: "center", maxWidth: "340px" }}>
-                          Storage provider returned <strong>HTTP 402: Payment Required</strong>. The image file cannot be accessed.
+                          This image could not be loaded (missing file, broken link, or storage unavailable).
                         </div>
                         {canDeleteProductMedia && (
                           <button
@@ -2012,7 +2012,7 @@ export function ProductGalleryPage() {
                         <div style={{ fontSize: "36px" }}>⚠️</div>
                         <div style={{ fontSize: "14px", fontWeight: 700, color: "#9f1239" }}>Visit Photo Unavailable</div>
                         <div style={{ fontSize: "12px", color: "#be123c", textAlign: "center", maxWidth: "340px" }}>
-                          Storage provider returned <strong>HTTP 402: Payment Required</strong>.
+                          This visit photo could not be loaded (missing file, broken link, or storage unavailable).
                         </div>
                         {canDeleteSupplierMedia && (
                           <button

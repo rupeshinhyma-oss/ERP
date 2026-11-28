@@ -80,6 +80,17 @@ def upgrade() -> None:
     op.execute("CREATE INDEX IF NOT EXISTS ix_stock_movement_items_movement_id ON stock_movement_items(movement_id)")
     op.execute("CREATE INDEX IF NOT EXISTS ix_stock_movement_items_product_id ON stock_movement_items(product_id)")
 
+    # 3. Link local_purchases and sales_orders back to stock_movements (idempotent for both fresh and upgraded DBs)
+    op.execute("ALTER TABLE local_purchases ADD COLUMN IF NOT EXISTS stock_movement_id UUID REFERENCES stock_movements(id) ON DELETE SET NULL")
+    op.execute("ALTER TABLE local_purchases ADD COLUMN IF NOT EXISTS stock_movement_number VARCHAR(100)")
+    op.execute("CREATE INDEX IF NOT EXISTS ix_local_purchases_stock_movement_id ON local_purchases(stock_movement_id)")
+    op.execute("CREATE INDEX IF NOT EXISTS ix_local_purchases_stock_movement_number ON local_purchases(stock_movement_number)")
+
+    op.execute("ALTER TABLE sales_orders ADD COLUMN IF NOT EXISTS stock_movement_id UUID REFERENCES stock_movements(id) ON DELETE SET NULL")
+    op.execute("ALTER TABLE sales_orders ADD COLUMN IF NOT EXISTS stock_movement_number VARCHAR(100)")
+    op.execute("CREATE INDEX IF NOT EXISTS ix_sales_orders_stock_movement_id ON sales_orders(stock_movement_id)")
+    op.execute("CREATE INDEX IF NOT EXISTS ix_sales_orders_stock_movement_number ON sales_orders(stock_movement_number)")
+
 
 def downgrade() -> None:
     op.execute("DROP TABLE IF EXISTS stock_movement_items")

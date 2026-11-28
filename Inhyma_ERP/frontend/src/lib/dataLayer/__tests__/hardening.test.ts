@@ -255,7 +255,7 @@ describe("Phase 8C-A: Realtime liveClient Integration (Steps 13, 14)", () => {
 
     const afterEviction = await getBuyerWithCache("b_realtime_test");
     expect(afterEviction.fromCache).toBe(false);
-    expect(vi.mocked(apiGet)).toHaveBeenCalledWith("/buyers/b_realtime_test");
+    expect(vi.mocked(apiGet)).toHaveBeenCalledWith("/companies/b_realtime_test");
   });
 });
 

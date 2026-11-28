@@ -27,14 +27,33 @@ async def test_local_purchase_inward_lifecycle():
         service = LocalPurchaseService(db_session)
 
         # 1. Ensure test supplier exists
+        from app.masters.countries.models import Country
         stmt = select(Supplier).limit(1)
         res = await db_session.execute(stmt)
         supplier = res.scalars().first()
         if not supplier:
+            from app.masters.states.models import State
+            from app.masters.cities.models import City
+            cntry = (await db_session.execute(select(Country).limit(1))).scalars().first()
+            if not cntry:
+                cntry = Country(name=f"China-{uuid.uuid4().hex[:4]}", code=f"C{uuid.uuid4().hex[:3].upper()}")
+                db_session.add(cntry)
+                await db_session.flush()
+            st = (await db_session.execute(select(State).where(State.country_id == cntry.id).limit(1))).scalars().first()
+            if not st:
+                st = State(name=f"Zhejiang-{uuid.uuid4().hex[:4]}", code=f"Z{uuid.uuid4().hex[:3].upper()}", country_id=cntry.id)
+                db_session.add(st)
+                await db_session.flush()
+            cty = (await db_session.execute(select(City).where(City.state_id == st.id).limit(1))).scalars().first()
+            if not cty:
+                cty = City(name=f"Wenzhou-{uuid.uuid4().hex[:4]}", state_id=st.id, country_id=cntry.id)
+                db_session.add(cty)
+                await db_session.flush()
             supplier = Supplier(
                 company_name=f"Inward Test Supplier {uuid.uuid4().hex[:4]}",
-                supplier_code=f"SUP-INW-{uuid.uuid4().hex[:4]}",
-                country="China",
+                country_id=cntry.id,
+                state_id=st.id,
+                city_id=cty.id,
             )
             db_session.add(supplier)
             await db_session.flush()

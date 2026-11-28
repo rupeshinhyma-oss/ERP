@@ -203,6 +203,7 @@ export function createSsoHandoverUrl(targetBaseUrl: string, targetPath?: string)
 /** The parts of a central (ERP_Main) session that routing needs. */
 export interface CentralSessionLike {
   session_id?: string;
+  exchange_code?: string;
   email?: string;
   display_name?: string;
   role?: string;
@@ -233,7 +234,7 @@ export function erpUrlFor(key: string, s?: CentralSessionLike | null): string {
 export function createSsoHandoverUrlFromSession(targetBaseUrl: string, s: CentralSessionLike): string {
   const safeBaseUrl = sanitizeEnvMatchedUrl(targetBaseUrl);
   if (!safeBaseUrl || !s.session_id) return "#";
-  const payload = {
+  const payload: Record<string, unknown> = {
     role: s.role || "global_user",
     user: s.display_name || s.email || "",
     email: s.email || "",
@@ -242,6 +243,9 @@ export function createSsoHandoverUrlFromSession(targetBaseUrl: string, s: Centra
     ts: Date.now(),
     sig: SSO_SIGNATURE,
   };
+  if (s.exchange_code) {
+    payload.exchange_code = s.exchange_code;
+  }
   const url = new URL(safeBaseUrl, window.location.origin);
   url.searchParams.set("sso_handover", btoa(JSON.stringify(payload)));
   return url.toString();

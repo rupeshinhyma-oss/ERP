@@ -19,6 +19,7 @@ export interface EcosystemSessionData {
   expires_at?: string;
   revoked_at?: string | null;
   active?: boolean;
+  exchange_code?: string;
 }
 
 const COOKIE_NAME = "ihm_ecosystem_session";
@@ -105,6 +106,10 @@ function setCookieEverywhere(name: string, value: string, maxAgeSeconds: number)
 export function getRawEcosystemCookie(): EcosystemSessionData | null {
   if (typeof document === "undefined") return null;
   try {
+    const stored = typeof localStorage !== "undefined" ? localStorage.getItem(LOCAL_STORAGE_KEY) : null;
+    if (stored) {
+      return JSON.parse(stored);
+    }
     const match = document.cookie
       .split("; ")
       .find((row) => row.startsWith(`${COOKIE_NAME}=`));
@@ -113,10 +118,6 @@ export function getRawEcosystemCookie(): EcosystemSessionData | null {
       if (val) {
         return JSON.parse(decodeURIComponent(val));
       }
-    }
-    const stored = localStorage.getItem(LOCAL_STORAGE_KEY);
-    if (stored) {
-      return JSON.parse(stored);
     }
   } catch {
     /* ignore parsing errors */
@@ -212,9 +213,13 @@ export function setEcosystemCookie(session: EcosystemSessionData): void {
     // Completely clear any prior explicit logout flag across all domain permutations
     clearCookieEverywhere(LOGOUT_COOKIE_NAME);
 
-    const serialized = encodeURIComponent(JSON.stringify(session));
+    // BUG-003: Never expose raw session_id or exchange_code in browser-readable document.cookie.
+    // Server binds the real session via HttpOnly cookie; document.cookie carries non-sensitive UI metadata only.
+    const { session_id: _omitSid, exchange_code: _omitCode, ...publicCookieMeta } = session;
+    const serialized = encodeURIComponent(JSON.stringify(publicCookieMeta));
     setCookieEverywhere(COOKIE_NAME, serialized, 604800);
-    localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(session));
+    const { exchange_code: _omitStoredCode, ...storedSession } = session;
+    localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(storedSession));
   } catch (err) {
     console.warn("Could not write ecosystem session cookie:", err);
   }
@@ -287,6 +292,21 @@ export function broadcastEcosystemEvent(event: { type: "LOGIN" | "LOGOUT"; sessi
 /* Central API Interaction                                            */
 /* ------------------------------------------------------------------ */
 
+function _centralAuthHeaders(): Record<string, string> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  try {
+    if (typeof localStorage !== "undefined") {
+      const tok = localStorage.getItem("erp_main_access_token") || localStorage.getItem("access_token");
+      if (tok) {
+        headers.Authorization = `Bearer ${tok}`;
+      }
+    }
+  } catch {
+    /* ignore storage errors */
+  }
+  return headers;
+}
+
 /**
  * Centrally registers or syncs an ecosystem session with ERP_Main.
  */
@@ -301,7 +321,8 @@ export async function establishCentralEcosystemSession(params: {
   try {
     const res = await fetch(`${apiUrl}/establish`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: _centralAuthHeaders(),
+      credentials: "include",
       body: JSON.stringify(params),
     });
 
@@ -337,7 +358,8 @@ export async function verifyCentralEcosystemSession(sessionId: string): Promise<
   try {
     const res = await fetch(`${apiUrl}/${sessionId}`, {
       method: "GET",
-      headers: { "Content-Type": "application/json" },
+      headers: _centralAuthHeaders(),
+      credentials: "include",
       signal: controller?.signal,
     });
 
@@ -378,6 +400,7 @@ export async function globalEcosystemLogout(sessionId?: string): Promise<void> {
       ? localStorage.getItem("erp_session_id") || localStorage.getItem("erp_main_session_id") || undefined
       : undefined);
 
+  const authHeaders = _centralAuthHeaders();
   clearEcosystemCookie(idToRevoke);
 
   // Notify all open tabs across same-host origins immediately (0ms perceived latency)
@@ -388,7 +411,8 @@ export async function globalEcosystemLogout(sessionId?: string): Promise<void> {
     try {
       await fetch(`${apiUrl}/${idToRevoke}/revoke`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: authHeaders,
+        credentials: "include",
         keepalive: true,
       });
     } catch {

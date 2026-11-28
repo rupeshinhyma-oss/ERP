@@ -45,8 +45,8 @@ export async function getBuyerWithCache(
   }
 
   try {
-    // Fetch from server: apiGet returns ApiResult<BuyerEntity> where payload is in .data
-    const response = await apiGet<BuyerEntity>(`/buyers/${buyerId}`);
+    // Fetch from server: apiGet returns ApiResult<BuyerEntity> where payload is in .data (BUG-017: /companies contract)
+    const response = await apiGet<BuyerEntity>(`/companies/${buyerId}`);
     const serverBuyer = response.data;
 
     // Write to IndexedDB
@@ -98,7 +98,7 @@ export async function createBuyerOfflineCapable(
     entityId: temporaryId,
     operationType: "CREATE",
     method: "POST",
-    path: "/buyers",
+    path: "/companies",
     payload,
   });
 
@@ -142,7 +142,7 @@ export async function updateBuyerOfflineCapable(
     entityId: buyerId,
     operationType: "UPDATE",
     method: "PATCH",
-    path: `/buyers/${buyerId}`,
+    path: `/companies/${buyerId}`,
     payload: changes,
   });
 

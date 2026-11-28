@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
 import { Breadcrumb } from "@/components/Breadcrumb";
+import { ConfirmModal } from "@/components/ui";
 import { IconCreditCard, IconFileText, IconCoins, IconReceipt } from "@/components/icons";
 import { API_BASE, apiDelete, apiGet, apiPost, apiPostMultipart, apiPut, errorMessage } from "@/lib/api";
 import { Auth } from "@/lib/auth";
@@ -153,6 +154,13 @@ export function ExpensesPage() {
   // Expense List State
   const [expenses, setExpenses] = useState<ExpenseItem[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [confirmDialog, setConfirmDialog] = useState<{
+    title: string;
+    message: string;
+    confirmLabel?: string;
+    danger?: boolean;
+    onConfirm: () => Promise<void> | void;
+  } | null>(null);
   const [apiError, setApiError] = useState<string | null>(null);
 
   // Filter Bar State
@@ -430,59 +438,78 @@ export function ExpensesPage() {
   // Submit Draft from Table
   // ---------------------------------------------------------------------------
 
-  const handleSubmitDraft = async (exp: ExpenseItem) => {
-    if (!window.confirm(`Submit claim ${exp.expense_code} for approval?`)) return;
-    setIsLoading(true);
-    try {
-      await apiPost(`/hrms/expenses/${exp.id}/submit`);
-      toast(`Claim ${exp.expense_code} submitted for approval.`, "success");
-      await loadData();
-    } catch (err: unknown) {
-      toast(errorMessage(err) || "Failed to submit expense.", "error");
-    } finally {
-      setIsLoading(false);
-    }
+  const handleSubmitDraft = (exp: ExpenseItem) => {
+    setConfirmDialog({
+      title: "Submit Expense Claim",
+      message: `Submit claim ${exp.expense_code} for approval?`,
+      confirmLabel: "Submit",
+      onConfirm: async () => {
+        setIsLoading(true);
+        try {
+          await apiPost(`/hrms/expenses/${exp.id}/submit`);
+          toast(`Claim ${exp.expense_code} submitted for approval.`, "success");
+          await loadData();
+        } catch (err: unknown) {
+          toast(errorMessage(err) || "Failed to submit expense.", "error");
+        } finally {
+          setIsLoading(false);
+        }
+      },
+    });
   };
 
   // ---------------------------------------------------------------------------
   // Delete Draft
   // ---------------------------------------------------------------------------
 
-  const handleDeleteDraft = async (exp: ExpenseItem) => {
-    if (!window.confirm(`Are you sure you want to delete draft claim ${exp.expense_code}?`)) return;
-    setIsLoading(true);
-    try {
-      await apiDelete(`/hrms/expenses/${exp.id}`);
-      toast(`Draft claim ${exp.expense_code} deleted successfully.`, "success");
-      await loadData();
-    } catch (err: unknown) {
-      toast(errorMessage(err) || "Failed to delete expense draft.", "error");
-    } finally {
-      setIsLoading(false);
-    }
+  const handleDeleteDraft = (exp: ExpenseItem) => {
+    setConfirmDialog({
+      title: "Delete Draft Claim",
+      message: `Are you sure you want to delete draft claim ${exp.expense_code}?`,
+      confirmLabel: "Delete",
+      danger: true,
+      onConfirm: async () => {
+        setIsLoading(true);
+        try {
+          await apiDelete(`/hrms/expenses/${exp.id}`);
+          toast(`Draft claim ${exp.expense_code} deleted successfully.`, "success");
+          await loadData();
+        } catch (err: unknown) {
+          toast(errorMessage(err) || "Failed to delete expense draft.", "error");
+        } finally {
+          setIsLoading(false);
+        }
+      },
+    });
   };
 
   // ---------------------------------------------------------------------------
   // Approve Expense
   // ---------------------------------------------------------------------------
 
-  const handleApproveExpense = async (exp: ExpenseItem) => {
+  const handleApproveExpense = (exp: ExpenseItem) => {
     if (exp.employee_id === profile?.id) {
       toast("Self-approval is not permitted.", "error");
       return;
     }
-    if (!window.confirm(`Approve claim ${exp.expense_code} for ₹${exp.amount.toFixed(2)}?`)) return;
-    setIsLoading(true);
-    try {
-      await apiPost(`/hrms/expenses/${exp.id}/approve`);
-      toast(`Claim ${exp.expense_code} approved successfully.`, "success");
-      if (detailExpense?.id === exp.id) setDetailExpense(null);
-      await loadData();
-    } catch (err: unknown) {
-      toast(errorMessage(err) || "Failed to approve expense claim.", "error");
-    } finally {
-      setIsLoading(false);
-    }
+    setConfirmDialog({
+      title: "Approve Expense Claim",
+      message: `Approve claim ${exp.expense_code} for ₹${exp.amount.toFixed(2)}?`,
+      confirmLabel: "Approve",
+      onConfirm: async () => {
+        setIsLoading(true);
+        try {
+          await apiPost(`/hrms/expenses/${exp.id}/approve`);
+          toast(`Claim ${exp.expense_code} approved successfully.`, "success");
+          if (detailExpense?.id === exp.id) setDetailExpense(null);
+          await loadData();
+        } catch (err: unknown) {
+          toast(errorMessage(err) || "Failed to approve expense claim.", "error");
+        } finally {
+          setIsLoading(false);
+        }
+      },
+    });
   };
 
   // ---------------------------------------------------------------------------
@@ -1738,6 +1765,20 @@ export function ExpensesPage() {
             </div>
           </div>
         )}
+
+        <ConfirmModal
+          open={Boolean(confirmDialog)}
+          title={confirmDialog?.title}
+          message={confirmDialog?.message ?? ""}
+          confirmLabel={confirmDialog?.confirmLabel}
+          danger={confirmDialog?.danger}
+          onCancel={() => setConfirmDialog(null)}
+          onConfirm={() => {
+            const action = confirmDialog?.onConfirm;
+            setConfirmDialog(null);
+            if (action) void action();
+          }}
+        />
       </main>
     </AppShell>
   );

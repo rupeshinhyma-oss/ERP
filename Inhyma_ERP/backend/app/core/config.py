@@ -216,8 +216,23 @@ class Settings(BaseSettings):
         "previously-encrypted member password unrecoverable.",
     )
     JWT_ISSUER: str = "erp-backend"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 5256000
-    REFRESH_TOKEN_EXPIRE_DAYS: int = 3650
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
+    REFRESH_TOKEN_EXPIRE_DAYS: int = 30
+
+    @field_validator("ACCESS_TOKEN_EXPIRE_MINUTES", mode="after")
+    @classmethod
+    def _cap_access_token_ttl(cls, v: int) -> int:
+        # BUG-012: Never mint multi-year access tokens even if legacy .env had 5256000.
+        if v <= 0 or v > 120:
+            return 30
+        return v
+
+    @field_validator("REFRESH_TOKEN_EXPIRE_DAYS", mode="after")
+    @classmethod
+    def _cap_refresh_token_ttl(cls, v: int) -> int:
+        if v <= 0 or v > 90:
+            return 30
+        return v
 
     # -------------------------------------------------------------------
     # Password policy
@@ -259,14 +274,14 @@ class Settings(BaseSettings):
     DEFAULT_SORT_ORDER: str = "asc"
 
     # -------------------------------------------------------------------
-    # SMTP / Automated Email Dispatch
+    # SMTP / Automated Email Dispatch (BUG-002: env-only, never hardcode)
     # -------------------------------------------------------------------
     SMTP_HOST: str = "smtp.gmail.com"
     SMTP_PORT: int = 587
-    SMTP_USER: str = "om1inhyma@gmail.com"
-    SMTP_PASSWORD: str = "wmwdaqjhmqutizvr"
-    SMTP_FROM_EMAIL: str = "om1inhyma@gmail.com"
-    SMTP_FROM_NAME: str = "Yinglima Procurement Team"
+    SMTP_USER: str = ""
+    SMTP_PASSWORD: str = ""
+    SMTP_FROM_EMAIL: str = ""
+    SMTP_FROM_NAME: str = "Inhyma Procurement Team"
     SMTP_USE_TLS: bool = True
 
     # -------------------------------------------------------------------

@@ -79,6 +79,7 @@ async def open_session_for_erp(
     await db.commit()
 
     session_id = str(row.id)
+    principal_id = str(admin.id) if (admin is not None and admin.is_active) else str(user.id)
     data = {
         "active": True,
         "session_id": session_id,
@@ -90,10 +91,48 @@ async def open_session_for_erp(
         "created_at": datetime.now(timezone.utc).isoformat(),
         "expires_at": row.expires_at.isoformat(),
         "revoked_at": None,
+        "exchange_code": es.issue_exchange_code(
+            session_id=session_id,
+            email=email,
+            user_id=principal_id,
+            user_type=user_type,
+        ),
     }
     es._prune_store(datetime.now(timezone.utc))
-    es._ECOSYSTEM_SESSION_STORE[session_id] = {**data, "_checked_at": time.monotonic()}
+    es._ECOSYSTEM_SESSION_STORE[session_id] = {
+        **{k: v for k, v in data.items() if k != "exchange_code"},
+        "_checked_at": time.monotonic(),
+        "_principal_id": principal_id,
+    }
     return build_success_response(data, request_id=getattr(request.state, "request_id", ""))
+
+
+@router.post("/{session_id}/exchange-code", summary="An ERP requests a short-lived single-use exchange code for a live session")
+async def issue_exchange_code_for_erp(
+    session_id: str,
+    request: Request,
+    authorization: str | None = Header(default=None),
+    x_erp_key: str | None = Header(default=None, alias="X-ERP-Key"),
+    db: AsyncSession = Depends(get_db_session),
+) -> dict:
+    """Server-to-server issuance of a single-use exchange code when a verified ERP user switches to ERP_Main."""
+    _verify_erp_caller(authorization, x_erp_key)
+    live = await es._resolve_live_session(db, session_id, datetime.now(timezone.utc))
+    if live is None:
+        raise NotFoundException("Active central session not found.")
+    email = (live.get("email") or "").strip().lower()
+    user_type = str(live.get("user_type") or "global_user")
+    principal_id = str(live.get("_principal_id") or email)
+    code = es.issue_exchange_code(
+        session_id=session_id,
+        email=email,
+        user_id=principal_id,
+        user_type=user_type,
+    )
+    return build_success_response(
+        {"exchange_code": code, "session_id": session_id},
+        request_id=getattr(request.state, "request_id", ""),
+    )
 
 
 @router.post("/{session_id}/signout", summary="A person signed out at an ERP: end that session everywhere")

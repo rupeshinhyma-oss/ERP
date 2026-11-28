@@ -562,7 +562,7 @@ class ProductService:
         stmt = (
             select(ProductDimensionRow, Product)
             .join(Product, ProductDimensionRow.product_id == Product.id)
-            .where(Product.is_deleted.is_(False), Product.status == RecordStatus.ACTIVE)
+            .where(Product.deleted_at.is_(None), Product.status == RecordStatus.ACTIVE)
             .order_by(Product.product_name_tally, ProductDimensionRow.sort_order)
         )
         if search and search.strip():

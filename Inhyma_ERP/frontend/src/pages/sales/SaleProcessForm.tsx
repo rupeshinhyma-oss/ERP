@@ -162,6 +162,8 @@ export function parseDateAny(dateStr?: string | null): Date | null {
 export function SaleProcessFormPage() {
   const navigate = useNavigate();
   const toastHook = useToast();
+  const toastRef = useRef(toastHook);
+  toastRef.current = toastHook;
   const { id } = useParams<{ id: string }>();
   const [searchParams] = useSearchParams();
   const duplicateId = searchParams.get("duplicate_id");
@@ -539,7 +541,7 @@ export function SaleProcessFormPage() {
         }
       } catch (err: any) {
         if (mounted) {
-          toastHook(apiErrorText(err) || "Failed to load Technician Gatepass draft items", "error");
+          toastRef.current(apiErrorText(err) || "Failed to load Technician Gatepass draft items", "error");
         }
       }
     }
@@ -548,7 +550,7 @@ export function SaleProcessFormPage() {
     return () => {
       mounted = false;
     };
-  }, [isEdit, targetLoadId, gatepassId, toastHook]);
+  }, [isEdit, targetLoadId, gatepassId]);
 
   // Load existing order if in Edit or Duplicate mode
   useEffect(() => {

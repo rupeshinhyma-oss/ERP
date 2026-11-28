@@ -2,6 +2,7 @@ import React, { useEffect, useState, useMemo, useRef } from "react";
 import { useSearchParams } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
 import { Breadcrumb } from "@/components/Breadcrumb";
+import { ConfirmModal } from "@/components/ui";
 import {
   IconCalendar,
   IconCheckSquare,
@@ -252,6 +253,13 @@ export function LeavePage() {
 
   // Request Details Modal
   const [selectedDetailRequest, setSelectedDetailRequest] = useState<LeaveRequest | null>(null);
+  const [confirmDialog, setConfirmDialog] = useState<{
+    title: string;
+    message: string;
+    confirmLabel?: string;
+    danger?: boolean;
+    onConfirm: () => Promise<void> | void;
+  } | null>(null);
 
   // Attachment Upload State
   const [uploadingAttachment, setUploadingAttachment] = useState<boolean>(false);
@@ -784,19 +792,26 @@ export function LeavePage() {
     }
   };
 
-  const handleCancelRequest = async (reqId: string) => {
-    if (!window.confirm("Are you sure you want to cancel this leave application?")) return;
-    try {
-      setLoading(true);
-      await apiPatch<LeaveRequest>(`/hrms/leave/requests/${reqId}/cancel`, {});
-      setSuccessMsg("Leave request cancelled successfully.");
-      fetchMyRequests();
-      fetchMyBalances();
-    } catch (err: any) {
-      setErrorMsg(err.message || "Failed to cancel request.");
-    } finally {
-      setLoading(false);
-    }
+  const handleCancelRequest = (reqId: string) => {
+    setConfirmDialog({
+      title: "Cancel Leave Application",
+      message: "Are you sure you want to cancel this leave application?",
+      confirmLabel: "Cancel Request",
+      danger: true,
+      onConfirm: async () => {
+        try {
+          setLoading(true);
+          await apiPatch<LeaveRequest>(`/hrms/leave/requests/${reqId}/cancel`, {});
+          setSuccessMsg("Leave request cancelled successfully.");
+          fetchMyRequests();
+          fetchMyBalances();
+        } catch (err: any) {
+          setErrorMsg(err.message || "Failed to cancel request.");
+        } finally {
+          setLoading(false);
+        }
+      },
+    });
   };
 
   const handleOpenAdjustment = (row: MatrixRow) => {
@@ -989,18 +1004,25 @@ export function LeavePage() {
     }
   };
 
-  const handleDeleteType = async (lt: LeaveType) => {
-    if (!window.confirm(`Are you sure you want to delete leave type "${lt.name}"?`)) return;
-    try {
-      setLoading(true);
-      await apiDelete(`/hrms/leave/types/${lt.id}`);
-      setSuccessMsg(`Leave Type "${lt.name}" deleted successfully.`);
-      fetchLeaveTypes();
-    } catch (err: any) {
-      setErrorMsg(err.message || "Failed to delete leave type.");
-    } finally {
-      setLoading(false);
-    }
+  const handleDeleteType = (lt: LeaveType) => {
+    setConfirmDialog({
+      title: "Delete Leave Type",
+      message: `Are you sure you want to delete leave type "${lt.name}"?`,
+      confirmLabel: "Delete",
+      danger: true,
+      onConfirm: async () => {
+        try {
+          setLoading(true);
+          await apiDelete(`/hrms/leave/types/${lt.id}`);
+          setSuccessMsg(`Leave Type "${lt.name}" deleted successfully.`);
+          fetchLeaveTypes();
+        } catch (err: any) {
+          setErrorMsg(err.message || "Failed to delete leave type.");
+        } finally {
+          setLoading(false);
+        }
+      },
+    });
   };
 
   const handleSaveType = async (e: React.FormEvent) => {
@@ -3464,6 +3486,20 @@ export function LeavePage() {
             </div>
           </div>
         )}
+
+        <ConfirmModal
+          open={Boolean(confirmDialog)}
+          title={confirmDialog?.title}
+          message={confirmDialog?.message ?? ""}
+          confirmLabel={confirmDialog?.confirmLabel}
+          danger={confirmDialog?.danger}
+          onCancel={() => setConfirmDialog(null)}
+          onConfirm={() => {
+            const action = confirmDialog?.onConfirm;
+            setConfirmDialog(null);
+            if (action) void action();
+          }}
+        />
       </main>
     </AppShell>
   );

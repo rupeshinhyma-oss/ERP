@@ -22,6 +22,7 @@ export interface SsoHandoverPayload {
   user: string;
   email: string;
   session_id?: string;
+  exchange_code?: string;
   allowed_erps?: string[];
   ts: number;
   sig: string;
@@ -367,6 +368,7 @@ async function runIncomingSsoHandover(): Promise<HandoverResult> {
   const token = urlParams.get("sso_handover");
   let hasValidToken = false;
   let targetSessionId: string | undefined;
+  let targetExchangeCode: string | undefined;
   let targetRole: "super_admin" | "admin" | "global_user" = "super_admin";
   let targetEmail = "admin@example.com";
   let allowedErps = ["*"];
@@ -383,6 +385,7 @@ async function runIncomingSsoHandover(): Promise<HandoverResult> {
           sessionStorage.removeItem("ihm_explicit_logout");
         }
         if (payload.session_id) targetSessionId = payload.session_id;
+        if (payload.exchange_code) targetExchangeCode = payload.exchange_code;
         if (payload.role) targetRole = payload.role;
         if (payload.email) targetEmail = payload.email;
         if (payload.allowed_erps) allowedErps = payload.allowed_erps;
@@ -449,11 +452,14 @@ async function runIncomingSsoHandover(): Promise<HandoverResult> {
     return "not-logged-in";
   }
   try {
-    const exchange = () =>
-      apiPost<ExchangeResult>("/global/ecosystem-session/exchange", {
-        session_id: targetSessionId as string,
-        email: targetEmail,
-      });
+    const exchangePayload: Record<string, string> = {
+      session_id: targetSessionId as string,
+      email: targetEmail,
+    };
+    if (targetExchangeCode) {
+      exchangePayload.exchange_code = targetExchangeCode;
+    }
+    const exchange = () => apiPost<ExchangeResult>("/global/ecosystem-session/exchange", exchangePayload);
     let res: Awaited<ReturnType<typeof exchange>> | undefined;
     const retryDelaysMs = [700, 2500, 6000];
     for (let attempt = 0; ; attempt++) {

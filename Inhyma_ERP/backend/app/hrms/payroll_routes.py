@@ -393,9 +393,9 @@ async def get_monthly_payroll(
         payroll = await service.get_monthly_payroll(month)
 
     if not payroll:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"No payroll calculated yet for {month}. Click Calculate Payroll to process.",
+        return build_success_response(
+            data=None,
+            message=f"No payroll calculated yet for {month}. Click Calculate Payroll to process.",
         )
 
     return build_success_response(

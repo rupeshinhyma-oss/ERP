@@ -50,9 +50,10 @@ vi.mock("@/lib/api", async (importOriginal) => {
   };
 });
 
-// Mock toast
+// Mock toast (stable reference across re-renders)
+const mockToast = vi.fn();
 vi.mock("@/lib/toast", () => ({
-  useToast: () => vi.fn(),
+  useToast: () => mockToast,
 }));
 
 describe("SaleProcessFormPage (/sale-order/addedit & /sales/process/add)", () => {
@@ -287,7 +288,7 @@ describe("SaleProcessFormPage (/sale-order/addedit & /sales/process/add)", () =>
     );
 
     await waitFor(() => {
-      expect(screen.getByText(/GP-TECH-2026-0001/)).toBeTruthy();
+      expect(screen.getByText(/#GP-TECH-2026-0001/)).toBeTruthy();
       expect((screen.getByRole("textbox", { name: "Warehouse" }) as HTMLInputElement).value).toBe("Main Warehouse");
       expect(screen.getByDisplayValue("Heating Element 500W")).toBeTruthy();
     });

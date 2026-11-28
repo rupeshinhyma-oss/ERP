@@ -3,6 +3,23 @@
 **System:** Yinglima_ERP (China Procurement)  
 **Scope:** Functional updates, schema changes, UI hardening, and bug fixes.
 
+### 40. Master Production Readiness Remediation — Security, Finance, Migrations, Reliability & Polish (2026-11-28)
+- **P0 Security (`BUG-001`, `BUG-002`, `BUG-004`, `BUG-005`, `BUG-006`):**
+  - Restored Argon2id password hashing (`auth/security.py`, `auth/service.py`) with race-safe conditional rehashing of legacy plaintext passwords on successful login.
+  - Scrubbed hardcoded SMTP/Gmail App Password defaults from `core/config.py`, `.env.defaults`, `email_inbound_worker.py`, and redacted SMTP errors in `common/email.py`.
+  - Secured `POST /api/v1/inquiries/inbound-webhook` with HMAC-SHA256 (`hmac.compare_digest`), timestamp tolerance, replay rejection (`409`), rate limiting (`429`), strict Pydantic validation, and removed blind attachment to the latest `InquiryItem`.
+  - Hardened `tests/conftest.py` and `database/engine.py` to block hosted/Supabase DB connections during pytest (`NullPool` on local test PostgreSQL, disposable temp file on SQLite).
+  - Fixed `finance/service.py` & `FinancialReport.tsx` to preserve native order currencies using `Decimal` (`ROUND_HALF_UP`), eliminating the hardcoded `6.66` multiplier and mislabeled RMB-as-USD totals.
+- **P1 Reliability, Migrations & Operations (`BUG-008`, `BUG-011`, `BUG-012`, `BUG-013`, `BUG-014`, `BUG-015`, `BUG-018`):**
+  - Fixed `durable_events/routes.py` `db=db` keyword calls and mapped integration ingestion validation/conflict errors cleanly in `integration/routes.py`.
+  - Bounded JWT expiry (`ACCESS_TOKEN_EXPIRE_MINUTES=30`, max `120`; `REFRESH_TOKEN_EXPIRE_DAYS=30`, max `90`) and tightened `validate_production_secrets()` boot checks in `core/config.py`.
+  - Repaired fresh-DB Alembic migration idempotency (`9c0d1e2f3a4b`, `b3c4d5e6f7a8`, `c4d5e6f7a8b9`) and added forward reconciliation migration `h0c1d2e3f4a5` (`products.supplier_id` + `supplier_product_links.updated_at`).
+  - Eliminated WebSocket DB session leaks via `verify_websocket_token()` in `auth/dependencies.py`, `events/routes.py`, and `planning/routes.py`, and bounded DB pooling to `10+10`.
+  - Removed misleading `"Storage Suspended (402)"` labels from `ProductGallery.tsx`.
+- **P2/P3 Performance, UI & RBAC Polish (`BUG-019`, `BUG-024`, `BUG-025`, `BUG-026`, `BUG-027`, `BUG-029`):**
+  - Eliminated direct-login `401 POST /global/ecosystem-session/establish` console spam in `ecosystemSession.ts` & `EcosystemSwitcher.tsx`.
+  - Replaced duplicate sidebar navigation icons (`IconBarChart`, `IconClipboardList`, `IconReceipt`, `IconTag` in `icons.tsx` / `nav.ts`), added pre-mount `<RouteGuard>` in `App.tsx`, locked `GET /masters/currencies/rates` with `Depends(get_current_user)`, replaced `COUNT(*) OVER ()` in `audit/repository.py` with separated page + narrow `COUNT(id)`, hardened/cached `/health/federation`, and resolved test-suite isolation & PG18 lock deadlocks.
+
 ### 39. Live Multi-Worker Permission Enforcement & Immediate Self-Sync (`auth/service.py`, `Users.tsx`)
 - **Removed Per-Worker `user_perms` Cache (`auth/service.py`):** Updated `AuthService.get_user_effective_permissions()` to query `RoleRepository.get_permission_codes_for_user()` directly from PostgreSQL on each request instead of caching `user_perms:<user_id>` in per-process memory for 1 hour. Eliminates stale permission bypasses across `--workers 4` on Render when an admin revokes access.
 - **Immediate Self-Refresh (`Users.tsx`):** When saving permission overrides for the currently logged-in user (`handleSaveUserOverrides`), `Users.tsx` immediately calls `GET /auth/profile` and updates `Auth.updateProfile(...)` without waiting for WebSocket or `Ctrl + R`.

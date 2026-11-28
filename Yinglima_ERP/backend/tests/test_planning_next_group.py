@@ -179,7 +179,7 @@ async def test_create_next_mum_group_on_empty_sheet_creates_lookups_and_first_gr
         "APPROVAL DATE",
         "Mum 1",
         "Mum1 Remarks",
-        "Supplier Name",
+        "Brand of Supplier",
         "City",
         "PKG QTY",
         "UNIT WEIGHT/PKG (KG)",

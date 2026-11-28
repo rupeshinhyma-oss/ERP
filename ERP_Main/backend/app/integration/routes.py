@@ -21,9 +21,11 @@ import json
 import uuid
 
 from fastapi import APIRouter, Depends, Request, status
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import ForbiddenException, NotFoundException
 from app.core.responses import build_success_response
+from app.database.session import get_db_session
 from app.erp_registry.repository import ErpInstanceRepository
 from app.integration.dependencies import get_integration_service
 from app.integration.schemas import (
@@ -318,6 +320,7 @@ async def get_mesh_status(
     request: Request,
     principal: AuthorizedPrincipal = Depends(require_platform_permission(_MANAGE)),
     service: IntegrationService = Depends(get_integration_service),
+    db: AsyncSession = Depends(get_db_session),
 ) -> dict:
     """
     Control-plane operational view (Phase 8F Section 24).
@@ -328,16 +331,16 @@ async def get_mesh_status(
 
     from app.erp_registry.models import ErpInstance
 
-    instances_res = await service.session.execute(select(ErpInstance))
+    instances_res = await db.execute(select(ErpInstance))
     instances = instances_res.scalars().all()
 
     dead_letters = await service.list_dead_letters(limit=100)
-    subs = await service.list_subscriptions(limit=100)
+    subs = await service.list_subscriptions()
 
     mesh_nodes = [
         {
             "erp_id": str(inst.id),
-            "erp_key": inst.erp_key,
+            "erp_key": inst.key,
             "name": inst.name,
             "status": inst.status.value if hasattr(inst.status, "value") else str(inst.status),
             "base_url": inst.base_url,

@@ -101,3 +101,12 @@ All Master pages featuring top toolbar filters (Provinces, Sub-Categories, Citie
 4. **Instant Reactive Filtering (No Search Button):** The obsolete orange "Search" button has been completely eliminated. Selecting an option instantly applies the filter via `extraFilters` reactive query parameters.
 5. **Aligned Layout & Uniform 38px Heights:** Uniform 38px component height across all dropdown triggers and inputs ensures a clean, straight, and uncluttered layout with zero visual skewing.
 6. **Quick Clear Trigger (✕):** When an active selection is made, a subtle hover circular clear icon allows 1-click reset to "All".
+
+
+## 7. Master Production Readiness Remediation (2026-11-28)
+- **Authenticated Currency Rates Endpoint (`BUG-029`, `masters/currencies/routes.py`):**
+  - Added `Depends(get_current_user)` to `GET /api/v1/masters/currencies/rates` so unauthenticated callers are rejected while authenticated pages (`ProductPrices.tsx`) continue functioning normally.
+- **Product Gallery Accurate Fallback Messaging (`BUG-018`, `frontend/src/pages/ProductGallery.tsx`):**
+  - Removed misleading `"Storage Suspended (402)"` copy and replaced broken-image states with neutral unavailable-media placeholders.
+- **Schema Reconciliation Migration (`BUG-013`, `alembic/versions/h0c1d2e3f4a5_reconcile_product_supplier_and_spl_updated_at.py`):**
+  - Added idempotent forward migration revising `g9b0c1d2e3f4` to ensure `products.supplier_id` (UUID FK -> `suppliers.id`, indexed) and `supplier_product_links.updated_at` (`TIMESTAMPTZ NOT NULL DEFAULT now()`) exist consistently on both fresh and upgraded PostgreSQL databases.

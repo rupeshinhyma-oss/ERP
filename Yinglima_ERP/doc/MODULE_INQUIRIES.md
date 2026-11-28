@@ -133,3 +133,11 @@ To prevent shipping delays, customs rejections, or port demurrage when exporting
 
 
 
+
+
+## Master Production Readiness Remediation (2026-11-28)
+- **Signed Inbound Webhook Hardening (`BUG-004`, `inquiries/routes.py`):**
+  - Hardened `POST /api/v1/inquiries/inbound-webhook` with mandatory HMAC-SHA256 verification (`X-Webhook-Signature` / `X-Signature-256` with `hmac.compare_digest`), timestamp tolerance (`X-Webhook-Timestamp`), replay protection (`409 Conflict` via nonce/signature cache), per-client rate limiting (`429 Too Many Requests`), and strict Pydantic payload validation (`422`).
+  - Removed unsafe fallback logic that blindly attached arbitrary inbound payloads to the latest `InquiryItem` or created unverified quotations.
+- **SMTP Secret Scrubbing (`BUG-002`, `core/config.py`, `common/email.py`, `email_inbound_worker.py`):**
+  - Removed all hardcoded Gmail App Password / SMTP credential defaults from source and `.env.defaults`; SMTP credentials load strictly from environment variables, fail safely when unconfigured, and redact credentials from error logs.

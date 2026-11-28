@@ -52,7 +52,7 @@ export const NAV_SECTIONS: NavSection[] = [
     label: "INVENTORY",
     items: [
       { key: "masters-products", label: "Product Master", path: "/masters/products", icon: "box", permission: "product.view" },
-      { key: "product-prices", label: "Product Prices", path: "/inventory/product-prices", icon: "coins", permission: "product_price.view" },
+      { key: "product-prices", label: "Product Prices", path: "/inventory/product-prices", icon: "tag", permission: "product_price.view" },
       {
         key: "product-gallery",
         label: "Product Gallery",
@@ -91,9 +91,9 @@ export const NAV_SECTIONS: NavSection[] = [
   {
     label: "FINANCE",
     items: [
-      { key: "finance-report", label: "Financial Report", path: "/finance/report", icon: "coins", permission: "finance_report.view" },
-      { key: "consignment-overview", label: "Consignment Overview", path: "/finance/consignment-overview", icon: "fileText", permission: "consignment_overview.view" },
-      { key: "vat-return", label: "VAT Return", path: "/finance/vat-return", icon: "coins", permission: "vat_return.view" },
+      { key: "finance-report", label: "Financial Report", path: "/finance/report", icon: "barChart", permission: "finance_report.view" },
+      { key: "consignment-overview", label: "Consignment Overview", path: "/finance/consignment-overview", icon: "clipboardList", permission: "consignment_overview.view" },
+      { key: "vat-return", label: "VAT Return", path: "/finance/vat-return", icon: "receipt", permission: "vat_return.view" },
     ],
   },
   {

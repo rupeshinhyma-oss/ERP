@@ -49,6 +49,16 @@ async def test_is_inhyma_organization_detection(db_session):
 
 
 async def test_sync_product_to_inhyma_outbox_and_delivery(db_session):
+    from app.masters.company_list.models import MasterCompany
+
+    inhyma_comp = (
+        await db_session.execute(select(MasterCompany).where(MasterCompany.id == INHYMA_KNOWN_UUID))
+    ).scalar_one_or_none()
+    if not inhyma_comp:
+        inhyma_comp = MasterCompany(id=INHYMA_KNOWN_UUID, name="Inhyma Solutions", code="INHYMA")
+        db_session.add(inhyma_comp)
+        await db_session.flush()
+
     cat = (await db_session.execute(select(ProductCategory).limit(1))).scalar_one_or_none()
     uom = (await db_session.execute(select(UnitOfMeasurement).limit(1))).scalar_one_or_none()
     if not cat:

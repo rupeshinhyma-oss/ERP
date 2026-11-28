@@ -1,8 +1,10 @@
 import { useState, useEffect, useMemo } from "react";
 import { AppShell } from "@/components/AppShell";
 import { SideDrawer, DetailFieldGrid } from "@/components/SideDrawer";
+import { ConfirmModal } from "@/components/ui";
 import { apiGet, apiPatch, API_ORIGIN } from "@/lib/api";
 import { usePendingGuard, useAuth } from "@/lib/hooks";
+import { useToast } from "@/lib/toast";
 import { useLookup } from "@/lib/lookups";
 import type {
   Product,
@@ -353,6 +355,14 @@ type GalleryTab = "all" | "products" | "suppliers" | "quotations";
 
 export function ProductGalleryPage() {
   const { hasPermission } = useAuth();
+  const toast = useToast();
+  const [confirmDialog, setConfirmDialog] = useState<{
+    title: string;
+    message: string;
+    confirmLabel?: string;
+    danger?: boolean;
+    onConfirm: () => Promise<void> | void;
+  } | null>(null);
   const canDeleteProductMedia = hasPermission("product.manage") || hasPermission("product.update");
   const canDeleteSupplierMedia = hasPermission("supplier.update");
 
@@ -372,6 +382,11 @@ export function ProductGalleryPage() {
   const [selectedQuotation, setSelectedQuotation] = useState<QuotationDocument | null>(null);
   const [selectedImageIndex, setSelectedImageIndex] = useState(0);
   const [selectedMediaIndices, setSelectedMediaIndices] = useState<number[]>([]);
+  const [brokenMediaMap, setBrokenMediaMap] = useState<Record<string, boolean>>({});
+  const markMediaBroken = (url?: string | null) => {
+    if (!url) return;
+    setBrokenMediaMap((prev) => (prev[url] ? prev : { ...prev, [url]: true }));
+  };
   // Phase 7: keyed by "productId:photoIndex" so deleting one photo never
   // disables the delete control for another photo/product.
   const { isPending: isPhotoDeletePending, guard: guardPhotoDelete } = usePendingGuard<string>();
@@ -769,10 +784,20 @@ export function ProductGalleryPage() {
                             playsInline
                             style={{ width: "100%", height: "100%", objectFit: "cover" }}
                           />
+                        ) : brokenMediaMap[img] ? (
+                          <div
+                            data-testid="gallery-broken-image-fallback"
+                            style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100%", width: "100%", padding: "36px 12px 12px", textAlign: "center", color: "#64748b", background: "#f8fafc" }}
+                          >
+                            <div style={{ fontSize: "20px", marginBottom: "4px", opacity: 0.7 }}>🖼️</div>
+                            <div style={{ fontSize: "12px", fontWeight: 600, color: "#475569" }}>Image unavailable</div>
+                            <div style={{ fontSize: "10px", color: "#94a3b8", marginTop: "2px" }}>File not found or unreachable</div>
+                          </div>
                         ) : (
                           <img
                             src={resolveImageUrl(img)}
                             alt={prod.product_name_tally || prod.product_name || "Product Photo"}
+                            onError={() => markMediaBroken(img)}
                             style={{ width: "100%", height: "100%", objectFit: "cover" }}
                           />
                         )
@@ -958,10 +983,20 @@ export function ProductGalleryPage() {
                             playsInline
                             style={{ width: "100%", height: "100%", objectFit: "cover" }}
                           />
+                        ) : brokenMediaMap[firstImg] ? (
+                          <div
+                            data-testid="gallery-broken-image-fallback"
+                            style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100%", width: "100%", padding: "36px 12px 12px", textAlign: "center", color: "#0369a1", background: "#f0f9ff" }}
+                          >
+                            <div style={{ fontSize: "20px", marginBottom: "4px", opacity: 0.7 }}>🖼️</div>
+                            <div style={{ fontSize: "12px", fontWeight: 600, color: "#0369a1" }}>Image unavailable</div>
+                            <div style={{ fontSize: "10px", color: "#64748b", marginTop: "2px" }}>File not found or unreachable</div>
+                          </div>
                         ) : (
                           <img
                             src={resolveImageUrl(firstImg)}
                             alt={supp.company_name}
+                            onError={() => markMediaBroken(firstImg)}
                             style={{ width: "100%", height: "100%", objectFit: "cover" }}
                           />
                         )
@@ -1246,34 +1281,41 @@ export function ProductGalleryPage() {
             ? p.images
             : (p.image_url ? [p.image_url] : []);
 
-          const handleDeletePhoto = async (indicesToDelete: number[]) => {
+          const handleDeletePhoto = (indicesToDelete: number[]) => {
             if (!p || !indicesToDelete.length) return;
             const count = indicesToDelete.length;
             const confirmMsg = count === 1
               ? "Are you sure you want to delete this media from the product?"
               : `Are you sure you want to delete ${count} selected media files from the product?`;
-            if (!window.confirm(confirmMsg)) return;
+            setConfirmDialog({
+              title: "Delete Product Media",
+              message: confirmMsg,
+              confirmLabel: "Delete",
+              danger: true,
+              onConfirm: async () => {
+                const deleteKey = count === 1 ? `${p.id}:${indicesToDelete[0]}` : `${p.id}:bulk-delete`;
+                await guardPhotoDelete(deleteKey, async () => {
+                  const updatedImages = detailImgList.filter((_, idx) => !indicesToDelete.includes(idx));
+                  const updatedPayload = {
+                    images: updatedImages,
+                    image_url: updatedImages[0] || null,
+                  };
 
-            const deleteKey = count === 1 ? `${p.id}:${indicesToDelete[0]}` : `${p.id}:bulk-delete`;
-            await guardPhotoDelete(deleteKey, async () => {
-              const updatedImages = detailImgList.filter((_, idx) => !indicesToDelete.includes(idx));
-              const updatedPayload = {
-                images: updatedImages,
-                image_url: updatedImages[0] || null,
-              };
-
-              try {
-                await apiPatch<Product>(`/masters/products/${p.id}`, updatedPayload);
-                setProducts((prev) =>
-                  prev.map((prod) => (prod.id === p.id ? { ...prod, ...updatedPayload } : prod))
-                );
-                setSelectedProduct((prev) => (prev ? { ...prev, ...updatedPayload } : null));
-                setSelectedImageIndex(0);
-                setSelectedMediaIndices([]);
-              } catch (err) {
-                console.error("Failed to delete media:", err);
-                alert("Failed to delete media. Please try again.");
-              }
+                  try {
+                    await apiPatch<Product>(`/masters/products/${p.id}`, updatedPayload);
+                    setProducts((prev) =>
+                      prev.map((prod) => (prod.id === p.id ? { ...prod, ...updatedPayload } : prod))
+                    );
+                    setSelectedProduct((prev) => (prev ? { ...prev, ...updatedPayload } : null));
+                    setSelectedImageIndex(0);
+                    setSelectedMediaIndices([]);
+                    toast("Product media deleted.", "success");
+                  } catch (err) {
+                    console.error("Failed to delete media:", err);
+                    toast("Failed to delete media. Please try again.", "error");
+                  }
+                });
+              },
             });
           };
 
@@ -1323,10 +1365,20 @@ export function ProductGalleryPage() {
                           boxShadow: "0 4px 6px -1px rgba(0,0,0,0.1)",
                         }}
                       />
+                    ) : activeMedia && brokenMediaMap[activeMedia] ? (
+                      <div
+                        data-testid="gallery-broken-image-fallback"
+                        style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "32px 16px", background: "#ffffff", borderRadius: "8px", border: "1px dashed #cbd5e1", color: "#475569" }}
+                      >
+                        <div style={{ fontSize: "24px", marginBottom: "6px" }}>🖼️</div>
+                        <div style={{ fontSize: "13px", fontWeight: 600 }}>Image unavailable</div>
+                        <div style={{ fontSize: "11px", color: "#94a3b8", marginTop: "4px" }}>This image could not be loaded (missing file or unreachable storage).</div>
+                      </div>
                     ) : (
                       <img
                         src={resolveImageUrl(activeMedia)}
                         alt="Product Primary Photo"
+                        onError={() => markMediaBroken(activeMedia)}
                         style={{
                           maxHeight: "260px",
                           maxWidth: "100%",
@@ -1528,11 +1580,35 @@ export function ProductGalleryPage() {
                                 >
                                   🎬
                                 </div>
+                              ) : brokenMediaMap[imgUri] ? (
+                                <div
+                                  onClick={() => setSelectedImageIndex(idx)}
+                                  title="Image unavailable"
+                                  style={{
+                                    width: "56px",
+                                    height: "56px",
+                                    borderRadius: "6px",
+                                    background: "#f1f5f9",
+                                    color: "#64748b",
+                                    display: "flex",
+                                    alignItems: "center",
+                                    justifyContent: "center",
+                                    fontSize: "16px",
+                                    cursor: "pointer",
+                                    border: idx === selectedImageIndex ? "2.5px solid #2563eb" : "1px solid #cbd5e0",
+                                    boxShadow: idx === selectedImageIndex ? "0 0 0 2px rgba(37,99,235,0.2)" : "0 1px 3px rgba(0,0,0,0.1)",
+                                    transform: idx === selectedImageIndex ? "scale(1.06)" : "scale(1)",
+                                    transition: "all 0.15s ease",
+                                  }}
+                                >
+                                  🖼️
+                                </div>
                               ) : (
                                 <img
                                   src={resolveImageUrl(imgUri)}
                                   alt={`Thumbnail ${idx + 1}`}
                                   onClick={() => setSelectedImageIndex(idx)}
+                                  onError={() => markMediaBroken(imgUri)}
                                   style={{
                                     width: "56px",
                                     height: "56px",
@@ -1589,38 +1665,45 @@ export function ProductGalleryPage() {
           const activeSuppMedia = suppMedia[selectedImageIndex] || suppMedia[0];
           const activeSuppIsVideo = isVideoUrl(activeSuppMedia);
 
-          const handleDeleteSupplierPhotos = async (indicesToDelete: number[]) => {
+          const handleDeleteSupplierPhotos = (indicesToDelete: number[]) => {
             if (!supp || !indicesToDelete.length) return;
             const count = indicesToDelete.length;
             const confirmMsg = count === 1
               ? "Are you sure you want to delete this visit photo from the supplier?"
               : `Are you sure you want to delete ${count} selected visit media files from the supplier?`;
-            if (!window.confirm(confirmMsg)) return;
+            setConfirmDialog({
+              title: "Delete Supplier Visit Photo",
+              message: confirmMsg,
+              confirmLabel: "Delete",
+              danger: true,
+              onConfirm: async () => {
+                const deleteKey = count === 1 ? `supp:${supp.id}:${indicesToDelete[0]}` : `supp:${supp.id}:bulk-delete`;
+                await guardPhotoDelete(deleteKey, async () => {
+                  const updatedRaw = suppMedia.filter((_, idx) => !indicesToDelete.includes(idx));
+                  try {
+                    const updatedPayload = {
+                      visit_media: updatedRaw.length ? updatedRaw : null,
+                    };
+                    await apiPatch<Supplier>(`/suppliers/${supp.id}`, updatedPayload);
 
-            const deleteKey = count === 1 ? `supp:${supp.id}:${indicesToDelete[0]}` : `supp:${supp.id}:bulk-delete`;
-            await guardPhotoDelete(deleteKey, async () => {
-              const updatedRaw = suppMedia.filter((_, idx) => !indicesToDelete.includes(idx));
-              try {
-                const updatedPayload = {
-                  visit_media: updatedRaw.length ? updatedRaw : null,
-                };
-                await apiPatch<Supplier>(`/suppliers/${supp.id}`, updatedPayload);
+                    const newSuppObj: Supplier = {
+                      ...supp,
+                      visit_media: updatedRaw.length ? updatedRaw : undefined,
+                    };
 
-                const newSuppObj: Supplier = {
-                  ...supp,
-                  visit_media: updatedRaw.length ? updatedRaw : undefined,
-                };
-
-                setSuppliers((prev) =>
-                  prev.map((s) => (s.id === supp.id ? newSuppObj : s))
-                );
-                setSelectedSupplier(newSuppObj);
-                setSelectedImageIndex(0);
-                setSelectedMediaIndices([]);
-              } catch (err) {
-                console.error("Failed to delete supplier visit photo:", err);
-                alert("Failed to delete visit photo. Please try again.");
-              }
+                    setSuppliers((prev) =>
+                      prev.map((s) => (s.id === supp.id ? newSuppObj : s))
+                    );
+                    setSelectedSupplier(newSuppObj);
+                    setSelectedImageIndex(0);
+                    setSelectedMediaIndices([]);
+                    toast("Supplier visit photo deleted.", "success");
+                  } catch (err) {
+                    console.error("Failed to delete supplier visit photo:", err);
+                    toast("Failed to delete visit photo. Please try again.", "error");
+                  }
+                });
+              },
             });
           };
 
@@ -1641,10 +1724,20 @@ export function ProductGalleryPage() {
                           boxShadow: "0 4px 6px -1px rgba(0,0,0,0.1)",
                         }}
                       />
+                    ) : activeSuppMedia && brokenMediaMap[activeSuppMedia] ? (
+                      <div
+                        data-testid="gallery-broken-image-fallback"
+                        style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "32px 16px", background: "#ffffff", borderRadius: "8px", border: "1px dashed #7dd3fc", color: "#0369a1" }}
+                      >
+                        <div style={{ fontSize: "24px", marginBottom: "6px" }}>🖼️</div>
+                        <div style={{ fontSize: "13px", fontWeight: 600 }}>Image unavailable</div>
+                        <div style={{ fontSize: "11px", color: "#64748b", marginTop: "4px" }}>This image could not be loaded (missing file or unreachable storage).</div>
+                      </div>
                     ) : (
                       <img
                         src={resolveImageUrl(activeSuppMedia)}
                         alt="Supplier Visit Photo"
+                        onError={() => markMediaBroken(activeSuppMedia)}
                         style={{
                           maxHeight: "260px",
                           maxWidth: "100%",
@@ -1846,11 +1939,35 @@ export function ProductGalleryPage() {
                                 >
                                   🎬
                                 </div>
+                              ) : brokenMediaMap[imgUri] ? (
+                                <div
+                                  onClick={() => setSelectedImageIndex(idx)}
+                                  title="Image unavailable"
+                                  style={{
+                                    width: "56px",
+                                    height: "56px",
+                                    borderRadius: "6px",
+                                    background: "#e0f2fe",
+                                    color: "#0369a1",
+                                    display: "flex",
+                                    alignItems: "center",
+                                    justifyContent: "center",
+                                    fontSize: "16px",
+                                    cursor: "pointer",
+                                    border: idx === selectedImageIndex ? "2.5px solid #0284c7" : "1px solid #bae6fd",
+                                    boxShadow: idx === selectedImageIndex ? "0 0 0 2px rgba(2,132,199,0.2)" : "0 1px 3px rgba(0,0,0,0.1)",
+                                    transform: idx === selectedImageIndex ? "scale(1.06)" : "scale(1)",
+                                    transition: "all 0.15s ease",
+                                  }}
+                                >
+                                  🖼️
+                                </div>
                               ) : (
                                 <img
                                   src={resolveImageUrl(imgUri)}
                                   alt={`Thumbnail ${idx + 1}`}
                                   onClick={() => setSelectedImageIndex(idx)}
+                                  onError={() => markMediaBroken(imgUri)}
                                   style={{
                                     width: "56px",
                                     height: "56px",
@@ -2001,6 +2118,20 @@ export function ProductGalleryPage() {
           </>
         )}
       </SideDrawer>
+
+      <ConfirmModal
+        open={Boolean(confirmDialog)}
+        title={confirmDialog?.title}
+        message={confirmDialog?.message ?? ""}
+        confirmLabel={confirmDialog?.confirmLabel}
+        danger={confirmDialog?.danger}
+        onCancel={() => setConfirmDialog(null)}
+        onConfirm={() => {
+          const action = confirmDialog?.onConfirm;
+          setConfirmDialog(null);
+          if (action) void action();
+        }}
+      />
     </AppShell>
   );
 }

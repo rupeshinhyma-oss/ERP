@@ -206,7 +206,8 @@ describe("Companies Cascading Address Selection (State -> District -> City)", ()
       expect(names).not.toContain("Surat City");
     });
 
-    // The list request filters on the district id
+    // Click Search to apply the staged district filter and verify the list request filters on district_id
+    fireEvent.click(screen.getByRole("button", { name: /^Search$/i }));
     await waitFor(() => {
       const urls = (getSpy as any).mock.calls.map((c: any[]) => String(c[0]));
       expect(urls.some((u: string) => u.startsWith("/companies") && u.includes("district_id=dist-ahmedabad-1"))).toBe(true);

@@ -29,10 +29,10 @@ def _q2_opt(val: Decimal | float | int | str | None) -> Decimal | None:
         return None
     return Decimal(str(val)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
-from sqlalchemy import delete, desc, func, or_, select, text
+from sqlalchemy import case, delete, desc, func, or_, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import joinedload, selectinload
 
 from app.core.exceptions import BadRequestException, ConflictException, NotFoundException
 from app.hrms.notifications import notify_asset_assigned, notify_asset_returned
@@ -315,6 +315,7 @@ class HrmsAssetService:
         dept_map: dict[uuid.UUID, str | None] | None = None,
         branch_map: dict[uuid.UUID, str | None] | None = None,
         relations_preloaded: bool = False,
+        maint_count_override: int | None = None,
     ) -> AssetRead:
         """Transform an ORM HrmsAsset into the AssetRead schema with enriched relations."""
         assigned_name = None
@@ -417,7 +418,9 @@ class HrmsAssetService:
                 )
 
         maint_count = 0
-        if relations_preloaded or (hasattr(asset, "maintenance_records") and asset.maintenance_records):
+        if maint_count_override is not None:
+            maint_count = maint_count_override
+        elif relations_preloaded or (hasattr(asset, "maintenance_records") and asset.maintenance_records):
             maint_count = len(asset.maintenance_records or [])
         else:
             m_cnt_stmt = select(func.count(HrmsAssetMaintenance.id)).where(HrmsAssetMaintenance.asset_id == asset.id)
@@ -479,21 +482,19 @@ class HrmsAssetService:
         page_size: Optional[int] = None,
     ) -> list[AssetRead]:
         """Query and return active company assets matching search and filter parameters."""
+        # BUG-026: Use joinedload for single-row relations and omit unused full history/maintenance
+        # subtrees on list endpoints (reduces 14+ sequential SQL round-trips to <= 4 queries).
         query = (
             select(HrmsAsset)
             .where(HrmsAsset.deleted_at.is_(None))
             .options(
-                selectinload(HrmsAsset.assigned_to),
-                selectinload(HrmsAsset.location),
-                selectinload(HrmsAsset.creator),
-                selectinload(HrmsAsset.updater),
-                selectinload(HrmsAsset.history).selectinload(HrmsAssetHistory.performer),
-                selectinload(HrmsAsset.history).selectinload(HrmsAssetHistory.user),
-                selectinload(HrmsAsset.assignments).selectinload(HrmsAssetAssignment.employee),
-                selectinload(HrmsAsset.assignments).selectinload(HrmsAssetAssignment.assigner),
-                selectinload(HrmsAsset.assignments).selectinload(HrmsAssetAssignment.returner),
-                selectinload(HrmsAsset.maintenance_records).selectinload(HrmsAssetMaintenance.creator),
-                selectinload(HrmsAsset.maintenance_records).selectinload(HrmsAssetMaintenance.updater),
+                joinedload(HrmsAsset.assigned_to),
+                joinedload(HrmsAsset.location),
+                joinedload(HrmsAsset.creator),
+                joinedload(HrmsAsset.updater),
+                selectinload(HrmsAsset.assignments).joinedload(HrmsAssetAssignment.employee),
+                selectinload(HrmsAsset.assignments).joinedload(HrmsAssetAssignment.assigner),
+                selectinload(HrmsAsset.assignments).joinedload(HrmsAssetAssignment.returner),
             )
             .order_by(HrmsAsset.asset_code.asc())
         )
@@ -568,9 +569,20 @@ class HrmsAssetService:
             query = query.offset((page - 1) * page_size).limit(page_size)
 
         res = await self.db.execute(query)
-        assets = list(res.scalars().all())
+        assets = list(res.unique().scalars().all())
         if not assets:
             return []
+
+        # Batch maintenance counts in one grouped query instead of loading all maintenance rows + users
+        asset_ids = [a.id for a in assets]
+        maint_rows = (
+            await self.db.execute(
+                select(HrmsAssetMaintenance.asset_id, func.count(HrmsAssetMaintenance.id))
+                .where(HrmsAssetMaintenance.asset_id.in_(asset_ids))
+                .group_by(HrmsAssetMaintenance.asset_id)
+            )
+        ).all()
+        maint_count_map: dict[uuid.UUID, int] = {aid: int(cnt) for aid, cnt in maint_rows}
 
         # Batch-resolve departments and branches once across all assigned employees (eliminates N+1)
         emp_ids: set[uuid.UUID] = set()
@@ -584,48 +596,56 @@ class HrmsAssetService:
         dept_map, branch_map = await self._batch_resolve_employee_depts_and_branches(emp_ids)
         return [
             await self._to_asset_read(
-                a, dept_map=dept_map, branch_map=branch_map, relations_preloaded=True
+                a,
+                include_history=False,
+                dept_map=dept_map,
+                branch_map=branch_map,
+                relations_preloaded=True,
+                maint_count_override=maint_count_map.get(a.id, 0),
             )
             for a in assets
         ]
 
     async def get_summary(self) -> AssetSummaryRead:
-        """Compute aggregate counts directly from PostgreSQL database."""
-        base_filter = HrmsAsset.deleted_at.is_(None)
+        """Compute all aggregate asset counts in a single database query (BUG-026)."""
+        upper_status = func.upper(HrmsAsset.status)
+        summary_stmt = select(
+            func.count(HrmsAsset.id).label("total"),
+            func.coalesce(func.sum(case((upper_status == "AVAILABLE", 1), else_=0)), 0).label("avail"),
+            func.coalesce(
+                func.sum(
+                    case(
+                        (
+                            or_(
+                                upper_status.in_(["ASSIGNED", "IN_USE"]),
+                                HrmsAsset.assigned_to_user_id.isnot(None),
+                            ),
+                            1,
+                        ),
+                        else_=0,
+                    )
+                ),
+                0,
+            ).label("assigned"),
+            func.coalesce(
+                func.sum(case((upper_status.in_(["MAINTENANCE", "UNDER_MAINTENANCE"]), 1), else_=0)),
+                0,
+            ).label("maint"),
+            func.coalesce(func.sum(case((upper_status == "DAMAGED", 1), else_=0)), 0).label("damaged"),
+            func.coalesce(func.sum(case((upper_status == "LOST", 1), else_=0)), 0).label("lost"),
+            func.coalesce(func.sum(case((upper_status == "RETIRED", 1), else_=0)), 0).label("retired"),
+        ).where(HrmsAsset.deleted_at.is_(None))
 
-        total_stmt = select(func.count(HrmsAsset.id)).where(base_filter)
-        avail_stmt = select(func.count(HrmsAsset.id)).where(base_filter, func.upper(HrmsAsset.status) == "AVAILABLE")
-        assigned_stmt = select(func.count(HrmsAsset.id)).where(
-            base_filter,
-            or_(
-                func.upper(HrmsAsset.status).in_(["ASSIGNED", "IN_USE"]),
-                HrmsAsset.assigned_to_user_id.isnot(None),
-            ),
-        )
-        maint_stmt = select(func.count(HrmsAsset.id)).where(
-            base_filter,
-            func.upper(HrmsAsset.status).in_(["MAINTENANCE", "UNDER_MAINTENANCE"]),
-        )
-        damaged_stmt = select(func.count(HrmsAsset.id)).where(base_filter, func.upper(HrmsAsset.status) == "DAMAGED")
-        lost_stmt = select(func.count(HrmsAsset.id)).where(base_filter, func.upper(HrmsAsset.status) == "LOST")
-        retired_stmt = select(func.count(HrmsAsset.id)).where(base_filter, func.upper(HrmsAsset.status) == "RETIRED")
-
-        total = (await self.db.execute(total_stmt)).scalar() or 0
-        avail = (await self.db.execute(avail_stmt)).scalar() or 0
-        assigned = (await self.db.execute(assigned_stmt)).scalar() or 0
-        maint = (await self.db.execute(maint_stmt)).scalar() or 0
-        damaged = (await self.db.execute(damaged_stmt)).scalar() or 0
-        lost = (await self.db.execute(lost_stmt)).scalar() or 0
-        retired = (await self.db.execute(retired_stmt)).scalar() or 0
+        row = (await self.db.execute(summary_stmt)).one()
 
         return AssetSummaryRead(
-            total_assets=total,
-            available=avail,
-            assigned=assigned,
-            in_maintenance=maint,
-            damaged=damaged,
-            lost=lost,
-            retired=retired,
+            total_assets=int(row.total or 0),
+            available=int(row.avail or 0),
+            assigned=int(row.assigned or 0),
+            in_maintenance=int(row.maint or 0),
+            damaged=int(row.damaged or 0),
+            lost=int(row.lost or 0),
+            retired=int(row.retired or 0),
         )
 
     # -----------------------------------------------------------------------

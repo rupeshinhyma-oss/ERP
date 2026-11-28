@@ -103,23 +103,42 @@ async def test_supplier_service_import_dual_contacts():
     async with sessionmaker() as session:
         service = get_supplier_service(db=session, cache_manager=get_cache_manager())
 
-        # Check existing country/state/city for valid test row
-        countries = await service.country_repository.list_all()
-        if not countries:
-            pytest.skip("No countries found in test database")
-
-        country = countries[0]
-        states = await service.state_repository.list_all()
-        state = next((s for s in states if s.country_id == country.id), None)
-        if not state:
-            pytest.skip("No state found for country")
-
-        cities = await service.city_repository.list_all()
-        city = next((c for c in cities if c.state_id == state.id), None)
-        if not city:
-            pytest.skip("No city found for state")
-
+        # Ensure a valid country/state/city hierarchy exists in the isolated test DB
+        from app.masters.countries.models import Country
+        from app.masters.states.models import State
+        from app.masters.cities.models import City
         import uuid
+
+        countries = await service.country_repository.list_all()
+        states = await service.state_repository.list_all()
+        cities = await service.city_repository.list_all()
+
+        country = next(
+            (
+                c
+                for c in countries
+                if any(
+                    s.country_id == c.id and any(ct.state_id == s.id for ct in cities)
+                    for s in states
+                )
+            ),
+            None,
+        )
+        if country is not None:
+            state = next(s for s in states if s.country_id == country.id and any(ct.state_id == s.id for ct in cities))
+            city = next(ct for ct in cities if ct.state_id == state.id)
+        else:
+            suffix = uuid.uuid4().hex[:4].upper()
+            country = Country(name=f"ImportChina-{suffix}", code=f"I{suffix[:3]}")
+            session.add(country)
+            await session.flush()
+            state = State(name=f"ImportZhejiang-{suffix}", code=f"Z{suffix[:3]}", country_id=country.id)
+            session.add(state)
+            await session.flush()
+            city = City(name=f"ImportWenzhou-{suffix}", state_id=state.id, country_id=country.id)
+            session.add(city)
+            await session.commit()
+
         test_company = f"Test Dual Contact Machinery {uuid.uuid4().hex[:8]}"
 
         csv_content = f"""Company Name,Country,State / Province,City,Contact Person,Designation,Calling Number,WhatsApp Number,Contact Person 2,Designation 2,Calling Number 2,WhatsApp Number 2
@@ -127,7 +146,7 @@ async def test_supplier_service_import_dual_contacts():
 """
         # 1. First import (Insert)
         summary = await service.import_file("test.csv", csv_content.encode("utf-8"), update_existing=False)
-        assert summary.created == 1
+        assert summary.created == 1, f"Import failed: {summary.errors}"
         assert summary.failed == 0
 
         # Verify supplier and contacts

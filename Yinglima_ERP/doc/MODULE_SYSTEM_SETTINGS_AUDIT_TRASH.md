@@ -95,3 +95,17 @@ This module handles governance, data protection, and traceability:
 - Navigating to `/trash` or returning via back button renders the data table and category counter badges at **0ms** immediately without skeleton reset.
 - Background revalidation refreshes live state silently.
 
+
+
+## 7. Master Production Readiness Remediation (2026-11-28)
+- **Audit Log Pagination Optimization (`BUG-026`, `audit/repository.py`):**
+  - Overrode `AuditRepository.paginated_list()` to execute an indexed page query plus a separate narrow `SELECT COUNT(audit_logs.id)` query instead of materializing wide JSON `TEXT` columns inside `COUNT(*) OVER ()`.
+- **Federation Health Latency & Least-Privilege Exposure (`BUG-026`, `api/v1/health.py`):**
+  - `GET /api/v1/health/federation` now returns an immediate minimal payload anonymously (0 outbound peer HTTP probes) and runs parallel `asyncio.gather` peer checks with a 2.0s timeout and 15s TTL cache only for authenticated operators/spoke services.
+- **WebSocket Pool & Connection Safety (`BUG-014`, `auth/dependencies.py`, `events/routes.py`, `planning/routes.py`, `database/engine.py`):**
+  - Replaced `Depends(get_db_session)` on long-lived WebSocket endpoints with short-lived `verify_websocket_token()` sessions released immediately after auth handshake; bounded production pool to `pool_size=10, max_overflow=10` and enabled `NullPool` under pytest.
+- **Production Boot Guards & Test DB Isolation (`BUG-005`, `BUG-015`, `core/config.py`, `tests/conftest.py`):**
+  - Enforced startup validation rejecting default/weak JWT secrets, insecure dev flags, and wildcard CORS in production (`ENVIRONMENT=production`).
+  - Hardened `tests/conftest.py` to refuse hosted/Supabase/production DB URLs during pytest and default to an isolated disposable SQLite file cleaned up on session exit.
+- **Durable Events, Integration Error Mapping & Fresh-DB Migrations (`BUG-008`, `BUG-011`, `BUG-013`, `BUG-024`, `BUG-025`):**
+  - Fixed `durable_events/routes.py` keyword argument calls (`db=db`), mapped domain/validation errors cleanly in `integration/routes.py` (`400`/`409`/`200 NOOP` instead of `500`), made fresh-DB Alembic migrations idempotent through single head `h0c1d2e3f4a5` (reconciling `products.supplier_id` and `supplier_product_links.updated_at`), and assigned distinct sidebar navigation icons (`IconBarChart`, `IconClipboardList`, `IconReceipt`, `IconTag`) in `nav.ts`.

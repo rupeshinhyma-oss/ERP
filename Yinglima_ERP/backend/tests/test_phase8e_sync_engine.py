@@ -68,6 +68,12 @@ async def seeded_country(db_session):
     try:
         yield country
     finally:
+        # Release any uncommitted row/table locks held by db_session BEFORE opening
+        # cleanup_session, otherwise PostgreSQL self-deadlocks on DELETE.
+        try:
+            await db_session.rollback()
+        except Exception:
+            pass
         try:
             session_factory = get_sessionmaker()
             async with session_factory() as cleanup_session:

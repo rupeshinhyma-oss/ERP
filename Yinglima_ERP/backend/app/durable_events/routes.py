@@ -54,7 +54,7 @@ async def list_dead_letters(
     """List dead-lettered deliveries not yet successfully replayed (Section 20)."""
     dead_letters = await DeadLetterEventRepository(db).list_unreplayed(limit=limit)
     return build_success_response(
-        [_dead_letter_to_dict(dl) for dl in dead_letters], request_id=request.state.request_id
+        data=[_dead_letter_to_dict(dl) for dl in dead_letters], request_id=request.state.request_id
     )
 
 
@@ -80,7 +80,7 @@ async def list_deliveries_for_event(
         }
         for d in deliveries
     ]
-    return build_success_response(data, request_id=request.state.request_id)
+    return build_success_response(data=data, request_id=request.state.request_id)
 
 
 @router.post("/dead-letters/{dead_letter_id}/replay", summary="Replay a dead-lettered event delivery")
@@ -95,7 +95,7 @@ async def replay_dead_letter(
     delivery = await service.replay_dead_letter(dead_letter_id, replayed_by=str(current_user.id))
     await db.commit()
     return build_success_response(
-        {"delivery_id": str(delivery.id), "status": delivery.status.value},
+        data={"delivery_id": str(delivery.id), "status": delivery.status.value},
         request_id=request.state.request_id,
         message="Dead letter replay scheduled.",
     )

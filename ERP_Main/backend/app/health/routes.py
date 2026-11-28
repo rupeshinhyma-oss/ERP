@@ -21,8 +21,22 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/health", tags=["Health"])
 
 
-@router.api_route("", methods=["GET", "HEAD"], summary="Liveness check (legacy)")
-@router.api_route("/live", methods=["GET", "HEAD"], summary="Liveness probe")
+@router.get("", summary="Liveness check (legacy)", operation_id="health_liveness_legacy")
+async def liveness_legacy(request: Request) -> dict:
+    """Legacy root liveness endpoint."""
+    request_id = getattr(request.state, "request_id", "")
+    return build_success_response({"status": "ok", "service": "erp_main"}, request_id=request_id)
+
+
+@router.head("", include_in_schema=False)
+@router.head("/live", include_in_schema=False)
+async def liveness_head(request: Request) -> dict:
+    """HEAD liveness probe (excluded from OpenAPI to prevent duplicate operation IDs)."""
+    request_id = getattr(request.state, "request_id", "")
+    return build_success_response({"status": "ok", "service": "erp_main"}, request_id=request_id)
+
+
+@router.get("/live", summary="Liveness probe", operation_id="health_liveness")
 async def liveness(request: Request) -> dict:
     """
     Report whether the application process itself is alive.
@@ -32,7 +46,7 @@ async def liveness(request: Request) -> dict:
     return build_success_response({"status": "ok", "service": "erp_main"}, request_id=request_id)
 
 
-@router.api_route("/ready", methods=["GET", "HEAD"], summary="Readiness probe")
+@router.get("/ready", summary="Readiness probe", operation_id="health_readiness")
 async def readiness(
     request: Request,
     session: AsyncSession = Depends(get_db_session),
@@ -60,14 +74,61 @@ async def readiness(
         )
 
 
-@router.get("/dependencies", summary="Federation & Subsystem Dependency Health")
+@router.head("/ready", include_in_schema=False)
+async def readiness_head(
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+) -> dict:
+    """HEAD readiness probe."""
+    return await readiness(request=request, session=session)
+
+
+def _is_authorized_platform_diagnostics_caller(request: Request) -> bool:
+    """Return True if caller presents a valid platform admin/global JWT or spoke service credential."""
+    import hmac
+    from app.core.config import settings
+    from app.global_auth.security import decode_global_access_token
+    from app.platform_auth.security import decode_platform_access_token
+
+    auth_header = (request.headers.get("authorization") or "").strip()
+    token = auth_header[7:].strip() if auth_header.lower().startswith("bearer ") else ""
+    if not token:
+        return False
+
+    for erp_key in ("yinglima", "inhyma"):
+        cred = settings.get_service_credential_for_erp(erp_key)
+        if cred and hmac.compare_digest(token, cred):
+            return True
+
+    try:
+        claims = decode_platform_access_token(token)
+        if claims and claims.get("sub"):
+            return True
+    except Exception:
+        pass
+
+    try:
+        claims = decode_global_access_token(token)
+        if claims and claims.get("sub"):
+            return True
+    except Exception:
+        pass
+    return False
+
+
+@router.get(
+    "/dependencies",
+    summary="Federation & Subsystem Dependency Health",
+    operation_id="health_dependencies",
+)
 async def dependency_health(
     request: Request,
     session: AsyncSession = Depends(get_db_session),
 ) -> dict:
     """
-    Report safe diagnostic status for federation credentials, DB, and background workers.
-    Does NOT expose secrets, credentials, or private tokens.
+    Report minimal safe status publicly and detailed subsystem diagnostics only
+    to authenticated platform admins / authorized spoke services (BUG-028).
+    Never exposes secrets, credentials, or private tokens.
     """
     from app.core.config import settings
 
@@ -78,6 +139,15 @@ async def dependency_health(
         db_healthy = True
     except Exception as exc:
         logger.warning("Database connectivity check failed during dependency health check: %s", exc)
+
+    if not _is_authorized_platform_diagnostics_caller(request):
+        return build_success_response(
+            {
+                "status": "healthy" if db_healthy else "degraded",
+                "service": "erp_main",
+            },
+            request_id=request_id,
+        )
 
     yinglima_cred_configured = bool(settings.get_service_credential_for_erp("yinglima"))
     inhyma_cred_configured = bool(settings.get_service_credential_for_erp("inhyma"))

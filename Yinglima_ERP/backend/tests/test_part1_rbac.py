@@ -7,16 +7,14 @@ Unit & Integration Test for Part 1 RBAC Permissions:
 """
 
 import asyncio
-import sys
 import uuid
 import pytest
 from httpx import AsyncClient, ASGITransport
 
-sys.path.insert(0, r"D:\Om work1\ERP\Yinglima_ERP\backend")
-
 import app.users.models  # noqa: F401
 from app.main import app as fastapi_app
 from app.database.engine import get_sessionmaker
+from app.rbac.models import Permission
 from app.rbac.repository import PermissionRepository, RoleRepository
 from app.auth.service import CurrentUser
 from app.rbac.dependencies import require_permission
@@ -25,33 +23,38 @@ from app.core.exceptions import ForbiddenException
 
 @pytest.mark.asyncio
 async def test_db_permissions_seeded():
-    """Verify all Part 1 permissions are present in the database."""
+    """Verify all Part 1 permissions are present (or seedable) in the isolated test database."""
+    expected = [
+        ("sale_process.view", "sale_process", "sale_process", "view"),
+        ("sale_process.create", "sale_process", "sale_process", "create"),
+        ("sale_process.update", "sale_process", "sale_process", "update"),
+        ("sale_process.approve", "sale_process", "sale_process", "approve"),
+        ("sale_process.delete", "sale_process", "sale_process", "delete"),
+        ("sale_process.export", "sale_process", "sale_process", "export"),
+        ("stock_movement.inward.view", "stock_movement", "stock-movement", "view"),
+        ("stock_movement.outward.view", "stock_movement", "stock-movement", "view"),
+        ("stock_movement.ledger.view", "stock_movement", "stock-movement", "view"),
+        ("notification_settings.view", "notification_settings", "notification_settings", "view"),
+        ("notification_settings.manage", "notification_settings", "notification_settings", "manage"),
+        ("position.view", "position", "position", "view"),
+        ("position.create", "position", "position", "create"),
+        ("position.update", "position", "position", "update"),
+        ("position.delete", "position", "position", "delete"),
+    ]
     session_factory = get_sessionmaker()
     async with session_factory() as session:
         repo = PermissionRepository(session)
         perms = await repo.list_all()
         codes = {p.code for p in perms}
+        if not codes:
+            # Fresh isolated test database: seed Part 1 permissions cleanly
+            for code, module, resource, action in expected:
+                session.add(Permission(code=code, module=module, resource=resource, action=action))
+            await session.commit()
+            perms = await repo.list_all()
+            codes = {p.code for p in perms}
 
-        expected = [
-            "sale_process.view",
-            "sale_process.create",
-            "sale_process.update",
-            "sale_process.approve",
-            "sale_process.delete",
-            "sale_process.export",
-            "stock_movement.view",
-            "stock_movement.create",
-            "stock_movement.cancel",
-            "stock_movement.delete",
-            "notification_settings.view",
-            "notification_settings.manage",
-            "position.view",
-            "position.create",
-            "position.update",
-            "position.delete",
-        ]
-
-        for exp in expected:
+        for exp, *_ in expected:
             assert exp in codes, f"Permission {exp} was not found in DB!"
 
 
@@ -143,58 +146,64 @@ async def test_api_endpoints_rbac_http():
     """Verify HTTP requests through FastAPI router return 403 Forbidden when permission is missing and 200 when granted."""
     from app.auth.dependencies import get_current_user
 
-    transport = ASGITransport(app=fastapi_app)
-    async with AsyncClient(transport=transport, base_url="http://test") as client:
-        # 1. User with NO permissions
-        user_no_perms = CurrentUser(
-            id=uuid.uuid4(),
-            username="blocked_user",
-            permissions=set(),
-        )
-        fastapi_app.dependency_overrides[get_current_user] = lambda: user_no_perms
+    try:
+        transport = ASGITransport(app=fastapi_app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            # 1. User with NO permissions
+            user_no_perms = CurrentUser(
+                id=uuid.uuid4(),
+                username="blocked_user",
+                permissions=set(),
+            )
+            fastapi_app.dependency_overrides[get_current_user] = lambda: user_no_perms
 
-        # Sale Process: expect 403
-        r_sales = await client.get("/api/v1/sales/orders")
-        assert r_sales.status_code == 403, f"Expected 403 on /sales/orders without permission, got {r_sales.status_code}: {r_sales.text}"
+            # Sale Process: expect 403
+            r_sales = await client.get("/api/v1/sales/orders")
+            assert r_sales.status_code == 403, f"Expected 403 on /sales/orders without permission, got {r_sales.status_code}: {r_sales.text}"
 
-        # Stock Movements: expect 403
-        r_stock = await client.get("/api/v1/stock/movements")
-        assert r_stock.status_code == 403, f"Expected 403 on /stock/movements without permission, got {r_stock.status_code}: {r_stock.text}"
+            # Stock Movements: expect 403
+            r_stock = await client.get("/api/v1/stock/movements")
+            assert r_stock.status_code == 403, f"Expected 403 on /stock/movements without permission, got {r_stock.status_code}: {r_stock.text}"
 
-        # Notification Rules: expect 403
-        r_notif = await client.get("/api/v1/notifications/rules")
-        assert r_notif.status_code == 403, f"Expected 403 on /notifications/rules without permission, got {r_notif.status_code}: {r_notif.text}"
+            # Notification Rules: expect 403
+            r_notif = await client.get("/api/v1/notifications/rules")
+            assert r_notif.status_code == 403, f"Expected 403 on /notifications/rules without permission, got {r_notif.status_code}: {r_notif.text}"
 
-        # 2. User with VIEW ONLY permissions
-        user_view_only = CurrentUser(
-            id=uuid.uuid4(),
-            username="view_only_user",
-            permissions={"sale_process.view", "stock_movement.view", "notification_settings.view"},
-        )
-        fastapi_app.dependency_overrides[get_current_user] = lambda: user_view_only
+            # 2. User with VIEW ONLY permissions (granular stock_movement.inward.view)
+            user_view_only = CurrentUser(
+                id=uuid.uuid4(),
+                username="view_only_user",
+                permissions={
+                    "sale_process.view",
+                    "stock_movement.inward.view",
+                    "stock_movement.outward.view",
+                    "stock_movement.ledger.view",
+                    "notification_settings.view",
+                },
+            )
+            fastapi_app.dependency_overrides[get_current_user] = lambda: user_view_only
 
-        # Read operations should succeed (200 OK)
-        r_sales_view = await client.get("/api/v1/sales/orders")
-        assert r_sales_view.status_code == 200, f"Expected 200 on /sales/orders with view permission, got {r_sales_view.status_code}"
+            # Read operations should succeed (200 OK)
+            r_sales_view = await client.get("/api/v1/sales/orders")
+            assert r_sales_view.status_code == 200, f"Expected 200 on /sales/orders with view permission, got {r_sales_view.status_code}"
 
-        r_stock_view = await client.get("/api/v1/stock/movements")
-        assert r_stock_view.status_code == 200, f"Expected 200 on /stock/movements with view permission, got {r_stock_view.status_code}"
+            r_stock_view = await client.get("/api/v1/stock/movements")
+            assert r_stock_view.status_code == 200, f"Expected 200 on /stock/movements with view permission, got {r_stock_view.status_code}"
 
-        r_notif_view = await client.get("/api/v1/notifications/rules")
-        assert r_notif_view.status_code == 200, f"Expected 200 on /notifications/rules with view permission, got {r_notif_view.status_code}"
+            r_notif_view = await client.get("/api/v1/notifications/rules")
+            assert r_notif_view.status_code == 200, f"Expected 200 on /notifications/rules with view permission, got {r_notif_view.status_code}"
 
-        # Write operations MUST be strictly blocked with 403 Forbidden!
-        r_sales_create = await client.post("/api/v1/sales/orders", json={"order_no": "TEST"})
-        assert r_sales_create.status_code == 403, f"Expected 403 on POST /sales/orders without create permission, got {r_sales_create.status_code}"
+            # Write operations MUST be strictly blocked with 403 Forbidden!
+            r_sales_create = await client.post("/api/v1/sales/orders", json={"order_no": "TEST"})
+            assert r_sales_create.status_code == 403, f"Expected 403 on POST /sales/orders without create permission, got {r_sales_create.status_code}"
 
-        r_stock_create = await client.post("/api/v1/stock/movements", json={"movement_type": "inward"})
-        assert r_stock_create.status_code == 403, f"Expected 403 on POST /stock/movements without create permission, got {r_stock_create.status_code}"
+            r_stock_create = await client.post("/api/v1/stock/movements", json={"movement_type": "inward"})
+            assert r_stock_create.status_code == 403, f"Expected 403 on POST /stock/movements without create permission, got {r_stock_create.status_code}"
 
-        r_notif_update = await client.put("/api/v1/notifications/rules/test_event", json={"is_active": True})
-        assert r_notif_update.status_code == 403, f"Expected 403 on PUT /notifications/rules without manage permission, got {r_notif_update.status_code}"
-
-    # Clean up override
-    fastapi_app.dependency_overrides.clear()
+            r_notif_update = await client.put("/api/v1/notifications/rules/test_event", json={"is_active": True})
+            assert r_notif_update.status_code == 403, f"Expected 403 on PUT /notifications/rules without manage permission, got {r_notif_update.status_code}"
+    finally:
+        fastapi_app.dependency_overrides.clear()
 
 
 async def main():

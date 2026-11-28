@@ -86,26 +86,15 @@ async def sheet_live_updates(
     websocket: WebSocket,
     sheet_id: uuid.UUID,
     token: str = Query(..., description="Access token (same one used for Authorization: Bearer)."),
-    auth_service: AuthService = Depends(get_auth_service),
 ) -> None:
     """
     Push every change made to this sheet to every other open tab, live.
-
-    Browsers can't set an ``Authorization`` header on a WebSocket
-    handshake, so the same access token normally sent as a Bearer header
-    is instead passed as ``?token=...`` here -- verified through the
-    exact same :meth:`AuthService.verify_access_token` path as every REST
-    request, so an expired/blacklisted/revoked token is rejected exactly
-    the same way.
-
-    Once connected, this socket only *receives* events (cell edits,
-    column/row changes, ...); the client keeps making its normal REST
-    calls to actually perform edits. See ``app.planning.ws_manager`` for
-    what triggers a broadcast and ``app.planning.service`` for the call
-    sites.
+    BUG-014 hardened: verifies token via short-lived DB session and releases it before entering receive loop.
     """
+    from app.auth.dependencies import verify_websocket_token
+
     try:
-        current_user = await auth_service.verify_access_token(token)
+        current_user = await verify_websocket_token(websocket, token)
     except UnauthorizedException:
         await websocket.close(code=4401, reason="Invalid or expired token.")
         return

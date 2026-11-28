@@ -43,10 +43,10 @@ from __future__ import annotations
 import asyncio
 import json
 
-from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 
-from app.auth.dependencies import get_auth_service
-from app.auth.service import AuthService, CurrentUser
+from app.auth.dependencies import verify_websocket_token
+from app.auth.service import CurrentUser
 from app.core.exceptions import UnauthorizedException
 from app.core.logging import get_logger
 from app.events.channels import is_any_user_channel, is_user_channel, permission_required_for_channel
@@ -93,23 +93,14 @@ def _authorize_channel(channel: str, current_user: CurrentUser) -> str | None:
 async def live_events(
     websocket: WebSocket,
     token: str | None = Query(default=None, description="Access token (or sent via initial auth frame)."),
-    auth_service: AuthService = Depends(get_auth_service),
 ) -> None:
     """
-    General-purpose live-event WebSocket. See the module docstring above
-    for the full wire protocol.
-
-    Authentication mirrors ``app.planning.routes.sheet_live_updates``
-    exactly (verify the same access token through
-    ``AuthService.verify_access_token``, close with code 4401 if invalid)
-    -- Phase 1 brief section 6: "The WebSocket must use the ERP's existing
-    authentication mechanism... do not create a second unrelated
-    authentication system."
+    General-purpose live-event WebSocket (BUG-014 hardened: short-lived DB session closed immediately after auth).
     """
     already_accepted = False
     if token:
         try:
-            current_user = await auth_service.verify_access_token(token)
+            current_user = await verify_websocket_token(websocket, token)
         except UnauthorizedException:
             await websocket.accept()
             await websocket.close(code=4401, reason="Invalid or expired token.")
@@ -124,7 +115,7 @@ async def live_events(
             parsed = json.loads(raw_auth)
             if not isinstance(parsed, dict) or parsed.get("action") != "auth" or not isinstance(parsed.get("token"), str):
                 raise UnauthorizedException("Missing auth token.")
-            current_user = await auth_service.verify_access_token(parsed["token"])
+            current_user = await verify_websocket_token(websocket, parsed["token"])
         except Exception:
             try:
                 await websocket.close(code=4401, reason="Invalid or expired token.")

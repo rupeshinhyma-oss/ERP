@@ -416,10 +416,15 @@ describe("HRMS Expense Management — Phase 2 Functional Tests", () => {
       expect(screen.getByText("Approval Requests")).toBeDefined();
     });
 
-    // Find Approve button on pending claim EXP-0002
+    // Find Approve button on pending claim EXP-0002 -> opens ConfirmModal (BUG-029)
     const approveButtons = screen.getAllByRole("button", { name: /^Approve$/i });
     expect(approveButtons.length).toBeGreaterThan(0);
     fireEvent.click(approveButtons[0]);
+
+    const confirmModal = await screen.findByTestId("erp-confirm-modal");
+    expect(confirmModal).toBeTruthy();
+    const modalApproveBtns = screen.getAllByRole("button", { name: /^Approve$/i });
+    fireEvent.click(modalApproveBtns[modalApproveBtns.length - 1]);
 
     await waitFor(() => {
       expect(apiModule.apiPost).toHaveBeenCalledWith(

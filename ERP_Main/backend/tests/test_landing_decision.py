@@ -212,5 +212,5 @@ async def test_production_environment_uses_render_env_urls_and_rejects_localhost
 
     # If INHYMA_FRONTEND_URL is unset in production and DB holds localhost, localhost must be rejected.
     monkeypatch.setattr(settings, "INHYMA_FRONTEND_URL", "")
-    seen = (await client.get(f"/api/v1/global/ecosystem-session/{s['session_id']}")).json()["data"]
+    seen = (await admin_client.get(f"/api/v1/global/ecosystem-session/{s['session_id']}")).json()["data"]
     assert seen["landing"]["target"]["url"] is None

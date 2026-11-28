@@ -20,12 +20,25 @@ async def test_sale_planning_sheet_hierarchy_and_consignments():
     async with sm() as session:
         service = SaleService(session)
 
-        # 1. Fetch or create company and user for test
-        comp = (await session.execute(select(MasterCompany))).scalars().first()
-        assert comp is not None
+        # 1. Fetch or create company and user for isolated test DB
+        comp = (await session.execute(select(MasterCompany).limit(1))).scalars().first()
+        if comp is None:
+            comp = MasterCompany(name=f"Yinglima Sheet Co {uuid.uuid4().hex[:4]}", code=f"YS{uuid.uuid4().hex[:4].upper()}")
+            session.add(comp)
+            await session.flush()
 
-        user = (await session.execute(select(User))).scalars().first()
-        assert user is not None
+        user = (await session.execute(select(User).limit(1))).scalars().first()
+        if user is None:
+            from app.auth.security import hash_password
+            user = User(
+                username=f"sheet_test_user_{uuid.uuid4().hex[:6]}",
+                email=f"sheet_test_{uuid.uuid4().hex[:6]}@test.local",
+                password_hash=hash_password("TestPass!12345"),
+                first_name="Sheet",
+                last_name="Tester",
+            )
+            session.add(user)
+            await session.flush()
         user_id = user.id
 
         # 2. Create test sheet A (e.g. Inhyma Mumbai) and sheet B (e.g. Inhyma Ahmedabad)

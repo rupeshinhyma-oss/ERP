@@ -179,9 +179,14 @@ async def verify_ecosystem_session(
             attempts += 1
             url = f"{base}/global/ecosystem-session/{sid_q}"
             per_try = httpx.Timeout(connect=min(8.0, remaining), read=min(15.0, remaining), write=5.0, pool=5.0)
+            req_headers: dict[str, str] = {}
+            out_cred = settings.get_outbound_service_credential()
+            if out_cred and "CHANGE-ME" not in out_cred:
+                req_headers["Authorization"] = f"Bearer {out_cred}"
+                req_headers["X-ERP-Key"] = settings.ERP_KEY
             try:
                 async with _client_for_erp_main(per_try) as http_client:
-                    response = await http_client.get(url)
+                    response = await http_client.get(url, headers=req_headers)
             except httpx.HTTPError as exc:
                 retryable_seen = True
                 last_error = f"{base}: {type(exc).__name__}: {exc}"[:300]

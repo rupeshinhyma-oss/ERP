@@ -17,6 +17,7 @@ export interface EcosystemSessionData {
   expires_at?: string;
   revoked_at?: string | null;
   active?: boolean;
+  exchange_code?: string;
 }
 
 const COOKIE_NAME = "ihm_ecosystem_session";
@@ -103,6 +104,10 @@ function setCookieEverywhere(name: string, value: string, maxAgeSeconds: number)
 export function getRawEcosystemCookie(): EcosystemSessionData | null {
   if (typeof document === "undefined") return null;
   try {
+    const stored = typeof localStorage !== "undefined" ? localStorage.getItem(LOCAL_STORAGE_KEY) : null;
+    if (stored) {
+      return JSON.parse(stored);
+    }
     const match = document.cookie
       .split("; ")
       .find((row) => row.startsWith(`${COOKIE_NAME}=`));
@@ -111,10 +116,6 @@ export function getRawEcosystemCookie(): EcosystemSessionData | null {
       if (val) {
         return JSON.parse(decodeURIComponent(val));
       }
-    }
-    const stored = localStorage.getItem(LOCAL_STORAGE_KEY);
-    if (stored) {
-      return JSON.parse(stored);
     }
   } catch {
     /* ignore parsing errors */
@@ -206,9 +207,12 @@ export function setEcosystemCookie(session: EcosystemSessionData): void {
     // Completely clear any prior explicit logout flag across all domain permutations
     clearCookieEverywhere(LOGOUT_COOKIE_NAME);
 
-    const serialized = encodeURIComponent(JSON.stringify(session));
+    // BUG-003: Never expose raw session_id or exchange_code in browser-readable document.cookie.
+    const { session_id: _omitSid, exchange_code: _omitCode, ...publicCookieMeta } = session;
+    const serialized = encodeURIComponent(JSON.stringify(publicCookieMeta));
     setCookieEverywhere(COOKIE_NAME, serialized, 604800);
-    localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(session));
+    const { exchange_code: _omitStoredCode, ...storedSession } = session;
+    localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(storedSession));
   } catch (err) {
     console.warn("Could not write ecosystem session cookie:", err);
   }
@@ -284,6 +288,8 @@ export function broadcastEcosystemEvent(event: { type: "LOGIN" | "LOGOUT"; sessi
 /**
  * Centrally registers or syncs an ecosystem session with ERP_Main.
  */
+const inflightEstablish = new Map<string, Promise<EcosystemSessionData | null>>();
+
 export async function establishCentralEcosystemSession(params: {
   email?: string;
   password?: string;
@@ -292,26 +298,48 @@ export async function establishCentralEcosystemSession(params: {
 }): Promise<EcosystemSessionData | null> {
   const apiUrl = getCentralAuthApi();
   if (!apiUrl) return null;
-  try {
-    const res = await fetch(`${apiUrl}/establish`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(params),
-    });
-
-    if (!res.ok) return null;
-    const body = await res.json();
-    const session: EcosystemSessionData = body.data || body;
-
-    if (session?.session_id) {
-      setEcosystemCookie(session);
-      broadcastEcosystemEvent({ type: "LOGIN", session });
-      return session;
-    }
-  } catch (err) {
-    console.warn("Could not establish central ecosystem session:", err);
+  // BUG-019: Never fire a doomed 401 POST /establish for direct-login sessions
+  // that have neither a central existing_session_id nor a password.
+  const hasCentralSid = Boolean(
+    params.existing_session_id &&
+      !params.existing_session_id.startsWith("ihm-sess-") &&
+      !params.existing_session_id.startsWith("ylm-sess-"),
+  );
+  if (!hasCentralSid && !params.password) {
+    return null;
   }
-  return null;
+  const dedupeKey = hasCentralSid ? `sid:${params.existing_session_id}` : "";
+  if (dedupeKey && inflightEstablish.has(dedupeKey)) {
+    return inflightEstablish.get(dedupeKey)!;
+  }
+  const run = (async () => {
+    try {
+      const res = await fetch(`${apiUrl}/establish`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify(params),
+      });
+
+      if (!res.ok) return null;
+      const body = await res.json();
+      const session: EcosystemSessionData = body.data || body;
+
+      if (session?.session_id) {
+        setEcosystemCookie(session);
+        broadcastEcosystemEvent({ type: "LOGIN", session });
+        return session;
+      }
+    } catch (err) {
+      console.warn("Could not establish central ecosystem session:", err);
+    }
+    return null;
+  })();
+  if (dedupeKey) {
+    inflightEstablish.set(dedupeKey, run);
+    run.finally(() => inflightEstablish.delete(dedupeKey));
+  }
+  return run;
 }
 
 /**
@@ -332,6 +360,7 @@ export async function verifyCentralEcosystemSession(sessionId: string): Promise<
     const res = await fetch(`${apiUrl}/${sessionId}`, {
       method: "GET",
       headers: { "Content-Type": "application/json" },
+      credentials: "include",
       signal: controller?.signal,
     });
 
@@ -383,6 +412,7 @@ export async function globalEcosystemLogout(sessionId?: string): Promise<void> {
       await fetch(`${apiUrl}/${idToRevoke}/revoke`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        credentials: "include",
         keepalive: true,
       });
     } catch {

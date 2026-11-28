@@ -93,7 +93,7 @@ class LocalPurchaseFinanceRow(BaseModel):
     paid_amount: float = 0.0
     balance_amount: float = 0.0
     total_bank_charges: float = 0.0
-    usd_exchange_rate: float = 7.20
+    usd_exchange_rate: float | None = None
     total_amount_usd: float = 0.0
     paid_amount_usd: float = 0.0
     balance_amount_usd: float = 0.0
@@ -141,7 +141,7 @@ class SaleOrderFinanceRow(BaseModel):
     paid_amount: float = 0.0
     balance_amount: float = 0.0
     total_bank_charges: float = 0.0
-    usd_exchange_rate: float = 7.20
+    usd_exchange_rate: float | None = None
 
     # Stage & Customer Schedule Metadata
     stage: Literal["pending", "cleared"] = "pending"
@@ -166,22 +166,32 @@ class SaleOrderFinanceRow(BaseModel):
     payments: list[FinancePaymentResponse] = Field(default_factory=list)
 
 
+class CurrencyTotals(BaseModel):
+    records: int = 0
+    total_amount: float = 0.0
+    paid_amount: float = 0.0
+    balance_amount: float = 0.0
+
+
 class SectionKpiSummary(BaseModel):
     total_records: int = 0
     pending_records: int = 0
     cleared_records: int = 0
     currency: str = "RMB"
-    total_amount: float = 0.0
-    paid_amount: float = 0.0
-    balance_amount: float = 0.0
-    secondary_currency: str = "USD"
-    total_amount_secondary: float = 0.0
-    paid_amount_secondary: float = 0.0
-    balance_amount_secondary: float = 0.0
+    total_amount: float | None = 0.0
+    paid_amount: float | None = 0.0
+    balance_amount: float | None = 0.0
+    secondary_currency: str | None = "USD"
+    total_amount_secondary: float | None = 0.0
+    paid_amount_secondary: float | None = 0.0
+    balance_amount_secondary: float | None = 0.0
+    is_mixed_currency: bool = False
+    conversion_unavailable: bool = False
+    currency_breakdown: dict[str, CurrencyTotals] = Field(default_factory=dict)
 
 
 class FinanceReportResponse(BaseModel):
-    usd_to_rmb_rate: float = 7.20
+    usd_to_rmb_rate: float | None = None
     local_purchase_kpi: SectionKpiSummary
     sale_order_kpi: SectionKpiSummary
     agent_freight_kpi: SectionKpiSummary

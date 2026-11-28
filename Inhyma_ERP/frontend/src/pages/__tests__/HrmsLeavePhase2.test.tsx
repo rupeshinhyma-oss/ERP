@@ -288,7 +288,7 @@ describe("HRMS Leave Management — Phase 2: Employee Leave Request & My Leaves"
   });
 
   it("allows cancelling a PENDING request", async () => {
-    window.confirm = vi.fn(() => true);
+    const confirmSpy = vi.spyOn(window, "confirm");
 
     render(
       <MemoryRouter>
@@ -300,8 +300,13 @@ describe("HRMS Leave Management — Phase 2: Employee Leave Request & My Leaves"
     const cancelBtn = screen.getByRole("button", { name: "Cancel" });
     fireEvent.click(cancelBtn);
 
+    const modal = await screen.findByTestId("erp-confirm-modal");
+    expect(modal).toBeTruthy();
+    expect(confirmSpy).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel Request" }));
+
     await waitFor(() => {
-      expect(window.confirm).toHaveBeenCalled();
+      expect(screen.getByText("CANCELLED")).toBeTruthy();
     });
   });
 

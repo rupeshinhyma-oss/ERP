@@ -85,11 +85,30 @@ async def register_erp(
     )
 
 
+from app.health.routes import _is_authorized_platform_diagnostics_caller
+
+
+def _serialize_erp_instance_for_request(request: Request, erp_instance) -> dict:
+    """
+    Serialize ERP registry records with least-privilege metadata exposure (BUG-028).
+
+    Unauthenticated directory lookups retain public launcher fields (id, key, name,
+    display_name, status, modules, timestamps) while omitting internal deployment
+    details (base_url, environment, version, last_seen_at, description). Authenticated
+    platform admins, global users, and spoke services receive the full record.
+    """
+    data = ErpInstanceRead.model_validate(erp_instance).model_dump(mode="json")
+    if not _is_authorized_platform_diagnostics_caller(request):
+        for internal_field in ("base_url", "environment", "version", "last_seen_at", "description"):
+            data[internal_field] = None
+    return data
+
+
 @router.get("", summary="List all registered ERP instances")
 async def list_erps(request: Request, service: ErpRegistryService = Depends(get_erp_registry_service)) -> dict:
-    """List every ERP instance in the registry. Read-only; no authentication required (see module docstring)."""
+    """List registered ERP instances (minimal public directory anonymously; full metadata authenticated)."""
     erp_instances = await service.list_all()
-    data = [ErpInstanceRead.model_validate(e).model_dump(mode="json") for e in erp_instances]
+    data = [_serialize_erp_instance_for_request(request, e) for e in erp_instances]
     return build_success_response(data, request_id=_request_id(request))
 
 
@@ -97,10 +116,10 @@ async def list_erps(request: Request, service: ErpRegistryService = Depends(get_
 async def get_erp_by_key(
     request: Request, key: str, service: ErpRegistryService = Depends(get_erp_registry_service)
 ) -> dict:
-    """Fetch a single ERP instance by its machine-readable key (e.g. 'yinglima'). Read-only."""
+    """Fetch a single ERP instance by its machine-readable key (e.g. 'yinglima')."""
     erp_instance = await service.get_by_key(key)
     return build_success_response(
-        ErpInstanceRead.model_validate(erp_instance).model_dump(mode="json"), request_id=_request_id(request)
+        _serialize_erp_instance_for_request(request, erp_instance), request_id=_request_id(request)
     )
 
 
@@ -108,10 +127,10 @@ async def get_erp_by_key(
 async def get_erp(
     request: Request, erp_id: uuid.UUID, service: ErpRegistryService = Depends(get_erp_registry_service)
 ) -> dict:
-    """Fetch a single ERP instance by its internal UUID. Read-only."""
+    """Fetch a single ERP instance by its internal UUID."""
     erp_instance = await service.get(erp_id)
     return build_success_response(
-        ErpInstanceRead.model_validate(erp_instance).model_dump(mode="json"), request_id=_request_id(request)
+        _serialize_erp_instance_for_request(request, erp_instance), request_id=_request_id(request)
     )
 
 

@@ -223,7 +223,15 @@ class Settings(BaseSettings):
     )
     PLATFORM_JWT_ALGORITHM: str = "HS256"
     PLATFORM_JWT_ISSUER: str = "erp-main-control-plane"
-    PLATFORM_ACCESS_TOKEN_EXPIRE_MINUTES: int = 5256000
+    PLATFORM_ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
+
+    @field_validator("PLATFORM_ACCESS_TOKEN_EXPIRE_MINUTES", mode="after")
+    @classmethod
+    def _cap_platform_access_token_ttl(cls, v: int) -> int:
+        # BUG-003 / BUG-012: Never mint multi-year access tokens even if a legacy .env had 5256000.
+        if v <= 0 or v > 120:
+            return 30
+        return v
 
     # -------------------------------------------------------------------
     # Platform Bootstrap Admin Credentials
@@ -240,6 +248,14 @@ class Settings(BaseSettings):
         default="Super Admin",
         description="Bootstrap platform admin display name.",
     )
+    # BUG-016: Unseeded fallback admin auth is OFF by default and strictly forbidden in production.
+    ALLOW_UNSEEDED_DEV_ADMIN_FALLBACK: bool = Field(
+        default=False,
+        description="Development-only opt-in allowing bootstrap admin login on an unseeded DB. Always rejected in production.",
+    )
+    # BUG-003: Short-lived single-use signed code for POST /global/ecosystem-session/exchange.
+    ECOSYSTEM_EXCHANGE_CODE_EXPIRE_SECONDS: int = 60
+    ECOSYSTEM_SESSION_COOKIE_NAME: str = "ihm_eco_sid"
 
     # -------------------------------------------------------------------
     # ERP Service Identity / Credentials (Phase 3)
@@ -278,8 +294,16 @@ class Settings(BaseSettings):
     )
     GLOBAL_AUTH_JWT_ALGORITHM: str = "HS256"
     GLOBAL_AUTH_JWT_ISSUER: str = "erp-main-global-auth"
-    GLOBAL_ACCESS_TOKEN_EXPIRE_MINUTES: int = 5256000
-    GLOBAL_SESSION_MAX_LIFETIME_HOURS: int = 87600
+    GLOBAL_ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
+    GLOBAL_SESSION_MAX_LIFETIME_HOURS: int = 168
+
+    @field_validator("GLOBAL_ACCESS_TOKEN_EXPIRE_MINUTES", mode="after")
+    @classmethod
+    def _cap_global_access_token_ttl(cls, v: int) -> int:
+        # BUG-003 / BUG-012: Keep access tokens short-lived separate from session lifetime.
+        if v <= 0 or v > 120:
+            return 30
+        return v
 
     # Password policy (Phase 4 Step 10) -- identical shape to Yinglima's
     # own `PASSWORD_*`/`MAX_FAILED_LOGIN_ATTEMPTS`/`ACCOUNT_LOCK_MINUTES`
@@ -479,6 +503,14 @@ class Settings(BaseSettings):
             raise RuntimeError(
                 "CORS_ALLOWED_ORIGINS must not be '*' in a production environment when "
                 "CORS_ALLOW_CREDENTIALS is enabled."
+            )
+        if self.is_production and self.ALLOW_UNSEEDED_DEV_ADMIN_FALLBACK:
+            raise RuntimeError(
+                "ALLOW_UNSEEDED_DEV_ADMIN_FALLBACK cannot be enabled in a production environment."
+            )
+        if self.is_production and self.BOOTSTRAP_ADMIN_PASSWORD.strip() in ("", "ChangeMe!12345"):
+            raise RuntimeError(
+                "BOOTSTRAP_ADMIN_PASSWORD cannot remain empty or the default 'ChangeMe!12345' in production."
             )
         if self.is_production and "sqlite" in self.DATABASE_URL.lower():
             raise RuntimeError(

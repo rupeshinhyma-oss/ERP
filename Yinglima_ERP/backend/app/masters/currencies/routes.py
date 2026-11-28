@@ -175,8 +175,11 @@ async def import_currencys(
 
 
 @router.get("/rates", summary="Get active currency exchange rates")
-async def get_currency_rates_endpoint(request: Request) -> dict:
-    """Fetch all active currency conversion rates against USD."""
+async def get_currency_rates_endpoint(
+    request: Request,
+    _current_user: CurrentUser = Depends(get_current_user),
+) -> dict:
+    """Fetch all active currency conversion rates against USD (authenticated)."""
     from app.common.currency import get_active_rates
     rates = await get_active_rates()
     return build_success_response(data={"base": "USD", "rates": rates}, request_id=request.state.request_id)

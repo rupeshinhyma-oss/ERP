@@ -165,11 +165,11 @@ class ProductRepository(BaseRepository[Product]):
             )
             spare_condition = or_(
                 Product.category_id.in_(spare_cat_subq),
-                Product.sub_category_id.in_(spare_subcat_subq),
-                Product.product_name.ilike("%spare%"),
-                Product.product_name.ilike("%spae%"),
-                Product.product_name_tally.ilike("%spare%"),
-                Product.product_name_invoice.ilike("%spare%"),
+                and_(Product.sub_category_id.is_not(None), Product.sub_category_id.in_(spare_subcat_subq)),
+                func.coalesce(Product.product_name, "").ilike("%spare%"),
+                func.coalesce(Product.product_name, "").ilike("%spae%"),
+                func.coalesce(Product.product_name_tally, "").ilike("%spare%"),
+                func.coalesce(Product.product_name_invoice, "").ilike("%spare%"),
             )
             if is_spare_bool:
                 stmt = stmt.where(spare_condition)

@@ -21,9 +21,12 @@ Security notes
 
 from __future__ import annotations
 
+import hashlib
 import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
+
+from sqlalchemy import update
 
 from app.core.config import settings
 from app.core.exceptions import ConflictException, ForbiddenException, NotFoundException, UnauthorizedException
@@ -36,6 +39,7 @@ from app.global_auth.schemas import GlobalLoginRequest, GlobalRegisterRequest
 from app.global_auth.security import (
     create_global_access_token,
     hash_password,
+    needs_rehash,
     validate_password_strength,
     verify_password,
 )
@@ -171,9 +175,25 @@ class GlobalAuthService:
             raise UnauthorizedException("Invalid email or password.")
 
         # Successful login: clear lockout state and the rate-limit bucket.
+        stored_hash = credential.password_hash
         credential.failed_login_count = 0
         credential.locked_until = None
         await self.credential_repository.create(credential)  # flush + refresh
+
+        # BUG-001: Safe conditional Argon2id upgrade on successful legacy login.
+        if stored_hash and needs_rehash(stored_hash):
+            upgraded_hash = hash_password(payload.password)
+            rehash_result = await self.credential_repository.db.execute(
+                update(GlobalUserCredential)
+                .where(
+                    GlobalUserCredential.id == credential.id,
+                    GlobalUserCredential.password_hash == stored_hash,
+                )
+                .values(password_hash=upgraded_hash)
+            )
+            if (rehash_result.rowcount or 0) > 0:
+                credential.password_hash = upgraded_hash
+
         _login_limiter.reset(rate_key)
 
         now = datetime.now(timezone.utc)
@@ -188,13 +208,15 @@ class GlobalAuthService:
 
         issued = create_global_access_token(global_user_id=user.id, session_id=created_session.id)
 
+        session_ref = hashlib.sha256(f"audit-session:{created_session.id}".encode("utf-8")).hexdigest()[:16]
         await self.audit.record(
             event_type=AuditEventType.GLOBAL_LOGIN_SUCCESS,
             actor_type=AuditActorType.SYSTEM,
             actor_id=user.id,
             actor_label=user.primary_email,
             target_type="global_session",
-            target_id=created_session.id,
+            target_id=None,
+            details={"session_ref": session_ref},
         )
         return user, issued.token, issued.expires_at, created_session.id
 

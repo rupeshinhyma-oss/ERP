@@ -14,8 +14,14 @@ Features:
 
 from __future__ import annotations
 
+import base64
 from datetime import datetime, timedelta, timezone
+import hashlib
+import hmac
+import json
 import logging
+import secrets
+import threading
 import time
 import uuid
 from typing import Any, Dict, List, Optional
@@ -35,17 +41,39 @@ from app.global_audit.repository import GlobalAuditRepository
 from app.global_audit.service import GlobalAuditService
 from app.global_auth.landing import attach_landing
 from app.global_auth.models import GlobalSession, GlobalUserCredential
-from app.global_auth.security import create_global_access_token, hash_password, verify_password
+from app.global_auth.security import (
+    InvalidGlobalTokenError,
+    create_global_access_token,
+    decode_global_access_token,
+    hash_password,
+    needs_rehash,
+    verify_password,
+)
 from app.global_auth.session_ops import ensure_admin_mirror_user, parse_session_id
 from app.global_users.models import GlobalUser, GlobalUserStatus
 from app.platform_auth.models import PlatformAdmin, PlatformAdminRole
-from app.platform_auth.security import create_platform_access_token, verify_password as verify_platform_password
+from app.platform_auth.security import (
+    InvalidPlatformTokenError,
+    create_platform_access_token,
+    decode_platform_access_token,
+    hash_password as hash_platform_password,
+    needs_rehash as needs_platform_rehash,
+    verify_password as verify_platform_password,
+)
 
 router = APIRouter(prefix="/global/ecosystem-session", tags=["Ecosystem Unified Session"])
 logger = logging.getLogger(__name__)
 
 # In-memory synchronized session cache for fast sub-millisecond lookups across all origins
 _ECOSYSTEM_SESSION_STORE: Dict[str, Dict[str, Any]] = {}
+
+# BUG-003: Single-use signed exchange authorization code registry: jti -> (expires_at_epoch, consumed)
+_EXCHANGE_ISS = "erp-main-ecosystem-session"
+_EXCHANGE_AUD = "erp-main-session-exchange"
+_SESSION_COOKIE_AUD = "erp-main-session-cookie"
+_EXCHANGE_LOCK = threading.Lock()
+_EXCHANGE_CODE_REGISTRY: Dict[str, tuple[float, bool]] = {}
+_MAX_EXCHANGE_CODES = 20000
 
 
 class EstablishSessionRequest(BaseModel):
@@ -75,10 +103,321 @@ def _request_id(request: Request) -> str:
     return getattr(request.state, "request_id", str(uuid.uuid4()))
 
 
-# Identifiers the unseeded-database fallback recognises for the built-in admin.
+# Identifiers the explicit dev-only unseeded-database fallback may recognise.
+# BUG-016: Hardcoded fallback password removed; never active in production.
 _DEFAULT_ADMIN_IDS = ("admin", "admin@example.com")
-_DEFAULT_ADMIN_PASSWORD = "ChangeMe!12345"
 _CONTROL_PLANE_KEY = "control-plane"
+
+
+def _allow_unseeded_dev_fallback() -> bool:
+    """Dev-only opt-in fallback; strictly impossible in production."""
+    if settings.is_production:
+        return False
+    if not bool(getattr(settings, "ALLOW_UNSEEDED_DEV_ADMIN_FALLBACK", False)):
+        return False
+    configured = (getattr(settings, "BOOTSTRAP_ADMIN_PASSWORD", "") or "").strip()
+    return bool(configured)
+
+
+def _session_fingerprint(session_id: str) -> str:
+    """Non-reversible short digest for audit logs & diagnostics (never log raw session IDs)."""
+    return hashlib.sha256(f"eco-session-audit:{session_id}".encode("utf-8")).hexdigest()[:16]
+
+
+def _signing_key(purpose: str) -> bytes:
+    """Derive a domain-separated HMAC signing key for exchange codes / HttpOnly session cookies."""
+    material = f"{purpose}:{settings.GLOBAL_AUTH_JWT_SECRET_KEY}:{settings.PLATFORM_JWT_SECRET_KEY}".encode("utf-8")
+    return hashlib.sha256(material).digest()
+
+
+def _b64url_encode(raw: bytes) -> str:
+    return base64.urlsafe_b64encode(raw).rstrip(b"=").decode("ascii")
+
+
+def _b64url_decode(val: str) -> bytes:
+    pad = "=" * (-len(val) % 4)
+    return base64.urlsafe_b64decode((val + pad).encode("ascii"))
+
+
+def _sign_compact_payload(payload: dict[str, Any], *, purpose: str) -> str:
+    body = _b64url_encode(json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8"))
+    sig = hmac.new(_signing_key(purpose), body.encode("ascii"), hashlib.sha256).hexdigest()
+    return f"{body}.{sig}"
+
+
+def _verify_compact_payload(token: str, *, purpose: str, expected_aud: str) -> Optional[dict[str, Any]]:
+    if not token or "." not in token:
+        return None
+    parts = token.split(".", 1)
+    if len(parts) != 2 or not parts[0] or not parts[1]:
+        return None
+    body_b64, sig_hex = parts
+    expected_sig = hmac.new(_signing_key(purpose), body_b64.encode("ascii"), hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(expected_sig.lower(), sig_hex.lower()):
+        return None
+    try:
+        data = json.loads(_b64url_decode(body_b64).decode("utf-8"))
+    except Exception:
+        return None
+    if not isinstance(data, dict):
+        return None
+    if data.get("iss") != _EXCHANGE_ISS or data.get("aud") != expected_aud:
+        return None
+    exp = data.get("exp")
+    if not isinstance(exp, (int, float)) or time.time() >= float(exp):
+        return None
+    return data
+
+
+def _prune_exchange_codes(now_ts: float) -> None:
+    expired = [j for j, (exp_ts, _) in _EXCHANGE_CODE_REGISTRY.items() if exp_ts <= now_ts]
+    for j in expired:
+        _EXCHANGE_CODE_REGISTRY.pop(j, None)
+    overflow = len(_EXCHANGE_CODE_REGISTRY) - _MAX_EXCHANGE_CODES
+    if overflow > 0:
+        oldest = sorted(_EXCHANGE_CODE_REGISTRY.items(), key=lambda kv: kv[1][0])[:overflow]
+        for j, _ in oldest:
+            _EXCHANGE_CODE_REGISTRY.pop(j, None)
+
+
+def issue_exchange_code(
+    *,
+    session_id: str,
+    email: str,
+    user_id: str,
+    user_type: str,
+    ttl_seconds: Optional[int] = None,
+) -> str:
+    """Mint a signed, short-lived, single-use exchange authorization code bound to user + session."""
+    ttl = int(ttl_seconds if ttl_seconds is not None else getattr(settings, "ECOSYSTEM_EXCHANGE_CODE_EXPIRE_SECONDS", 60))
+    ttl = max(5, min(ttl, 300))
+    now_ts = time.time()
+    exp_ts = now_ts + ttl
+    jti = secrets.token_urlsafe(24)
+    payload = {
+        "iss": _EXCHANGE_ISS,
+        "aud": _EXCHANGE_AUD,
+        "jti": jti,
+        "sid": str(session_id),
+        "sub": str(user_id),
+        "email": (email or "").strip().lower(),
+        "utype": user_type,
+        "iat": int(now_ts),
+        "exp": exp_ts,
+    }
+    with _EXCHANGE_LOCK:
+        _prune_exchange_codes(now_ts)
+        _EXCHANGE_CODE_REGISTRY[jti] = (exp_ts, False)
+    return _sign_compact_payload(payload, purpose="exchange-code")
+
+
+def consume_exchange_code(
+    code: Optional[str],
+    *,
+    expected_session_id: str,
+    expected_email: str,
+) -> dict[str, Any]:
+    """
+    Verify signature, expiry, iss, aud, session+email binding, and atomically mark single-use code consumed.
+    Raises 401 on any failure (missing, invalid signature, expired, replay, mismatched binding).
+    """
+    if not code or not isinstance(code, str):
+        raise _unauthorized("A signed single-use exchange_code is required.")
+    claims = _verify_compact_payload(code.strip(), purpose="exchange-code", expected_aud=_EXCHANGE_AUD)
+    if claims is None:
+        raise _unauthorized("Invalid or expired exchange authorization code.")
+    jti = str(claims.get("jti") or "")
+    claim_sid = str(claims.get("sid") or "")
+    claim_email = str(claims.get("email") or "").strip().lower()
+    if not jti or claim_sid != str(expected_session_id) or claim_email != (expected_email or "").strip().lower():
+        raise _unauthorized("Exchange authorization code does not match the requested session or user.")
+
+    now_ts = time.time()
+    with _EXCHANGE_LOCK:
+        _prune_exchange_codes(now_ts)
+        entry = _EXCHANGE_CODE_REGISTRY.get(jti)
+        if entry is None:
+            raise _unauthorized("Exchange authorization code is unknown or expired.")
+        exp_ts, consumed = entry
+        if consumed or now_ts >= exp_ts:
+            raise _unauthorized("Exchange authorization code has already been used or expired.")
+        # Atomic one-time consumption before any token is minted.
+        _EXCHANGE_CODE_REGISTRY[jti] = (exp_ts, True)
+    return claims
+
+
+def _issue_session_cookie_value(session_id: str, email: str, expires_at: datetime) -> str:
+    payload = {
+        "iss": _EXCHANGE_ISS,
+        "aud": _SESSION_COOKIE_AUD,
+        "sid": str(session_id),
+        "email": (email or "").strip().lower(),
+        "exp": _utc(expires_at).timestamp(),
+    }
+    return _sign_compact_payload(payload, purpose="session-cookie")
+
+
+def _set_httponly_session_cookie(response: Response, session_id: str, email: str, expires_at: datetime) -> None:
+    cookie_name = getattr(settings, "ECOSYSTEM_SESSION_COOKIE_NAME", "ihm_eco_sid")
+    max_age = max(60, int((_utc(expires_at) - datetime.now(timezone.utc)).total_seconds()))
+    val = _issue_session_cookie_value(session_id, email, expires_at)
+    response.set_cookie(
+        key=cookie_name,
+        value=val,
+        max_age=max_age,
+        httponly=True,
+        secure=settings.is_production,
+        samesite="lax",
+        path="/",
+    )
+
+
+def _clear_httponly_session_cookie(response: Response) -> None:
+    cookie_name = getattr(settings, "ECOSYSTEM_SESSION_COOKIE_NAME", "ihm_eco_sid")
+    response.delete_cookie(key=cookie_name, path="/", httponly=True, secure=settings.is_production, samesite="lax")
+
+
+def _verify_cookie_for_session(request: Request, session_id: str) -> Optional[dict[str, Any]]:
+    cookie_name = getattr(settings, "ECOSYSTEM_SESSION_COOKIE_NAME", "ihm_eco_sid")
+    raw = request.cookies.get(cookie_name)
+    if not raw:
+        return None
+    claims = _verify_compact_payload(raw, purpose="session-cookie", expected_aud=_SESSION_COOKIE_AUD)
+    if claims is None:
+        return None
+    return claims
+
+
+async def _authorize_session_access(
+    request: Request,
+    db: AsyncSession,
+    session_id: str,
+    *,
+    allow_revoked_own_session: bool = False,
+) -> dict[str, Any]:
+    """
+    BUG-003: Authenticate and authorize callers of GET /{session_id}, POST /{session_id}/revoke,
+    and POST /exchange-code.
+
+    Permitted callers:
+      1. Authenticated spoke ERP service credential (Authorization: Bearer <cred> + X-ERP-Key)
+      2. Authenticated PlatformAdmin JWT (SUPER_ADMIN / PLATFORM_ADMIN for any session; others only own session)
+      3. Authenticated GlobalUser JWT (only own session / own email)
+      4. Valid signed HttpOnly session cookie bound strictly to `session_id`
+    """
+    auth_header = (request.headers.get("authorization") or "").strip()
+    x_erp_key = (request.headers.get("x-erp-key") or "").strip()
+
+    # 1. Server-to-server spoke ERP service credential
+    if x_erp_key:
+        from app.global_users.password_sync import _verify_erp_caller
+
+        try:
+            erp_key = _verify_erp_caller(auth_header, x_erp_key)
+            return {"kind": "service", "erp_key": erp_key, "is_admin": True}
+        except Exception as exc:
+            raise _unauthorized("Invalid service credential.") from exc
+
+    owner_email = await _session_owner_email(db, session_id)
+
+    # 2. Bearer JWT (PlatformAdmin OR GlobalUser)
+    if auth_header.lower().startswith("bearer "):
+        raw_token = auth_header[7:].strip()
+        if not raw_token:
+            raise _unauthorized("Missing bearer token.")
+
+        # 2a. Try PlatformAdmin JWT
+        try:
+            p_claims = decode_platform_access_token(raw_token)
+        except InvalidPlatformTokenError:
+            p_claims = None
+
+        if p_claims is not None:
+            try:
+                admin_id = uuid.UUID(str(p_claims.get("sub")))
+            except (ValueError, TypeError):
+                raise _unauthorized("Invalid administrator token.")
+            admin = await db.scalar(select(PlatformAdmin).where(PlatformAdmin.id == admin_id))
+            if admin is None or not admin.is_active:
+                raise _unauthorized("Administrator account is inactive.")
+            token_sid = str(p_claims.get("sid") or "")
+            is_same_sid = bool(token_sid and token_sid == session_id)
+            if not allow_revoked_own_session or not is_same_sid:
+                if token_sid:
+                    from app.global_auth.session_ops import session_is_live
+
+                    if not await session_is_live(db, token_sid):
+                        raise _unauthorized("Session has expired or been revoked.")
+                if admin.tokens_revoked_before is not None:
+                    iat = p_claims.get("iat")
+                    if iat is not None and float(iat) <= _utc(admin.tokens_revoked_before).timestamp():
+                        raise _unauthorized("Token has been revoked.")
+
+            is_privileged_admin = admin.role in (PlatformAdminRole.SUPER_ADMIN, PlatformAdminRole.PLATFORM_ADMIN)
+            admin_email = (admin.email or "").strip().lower()
+            if is_privileged_admin or is_same_sid or (owner_email is not None and owner_email == admin_email):
+                return {
+                    "kind": "platform_admin",
+                    "email": admin_email,
+                    "user_id": str(admin.id),
+                    "is_admin": is_privileged_admin,
+                }
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Not authorized to access or revoke another user's session.",
+            )
+
+        # 2b. Try GlobalUser JWT
+        try:
+            g_claims = decode_global_access_token(raw_token)
+        except InvalidGlobalTokenError:
+            raise _unauthorized("Invalid or expired authentication token.")
+
+        try:
+            user_id = uuid.UUID(str(g_claims.get("sub")))
+            token_sid_uuid = uuid.UUID(str(g_claims.get("jti") or g_claims.get("sid")))
+        except (ValueError, TypeError):
+            raise _unauthorized("Invalid user token.")
+
+        user = await db.scalar(select(GlobalUser).where(GlobalUser.id == user_id))
+        if user is None or user.status != GlobalUserStatus.ACTIVE:
+            raise _unauthorized("User account is inactive.")
+
+        token_sid_str = str(token_sid_uuid)
+        is_same_sid = token_sid_str == session_id
+        if not allow_revoked_own_session or not is_same_sid:
+            sess_row = await db.scalar(select(GlobalSession).where(GlobalSession.id == token_sid_uuid))
+            if sess_row is None or sess_row.revoked_at is not None or _utc(sess_row.expires_at) <= datetime.now(timezone.utc):
+                raise _unauthorized("Session has expired or been revoked.")
+
+        user_email = (user.primary_email or "").strip().lower()
+        if is_same_sid or (owner_email is not None and owner_email == user_email):
+            return {
+                "kind": "global_user",
+                "email": user_email,
+                "user_id": str(user.id),
+                "is_admin": False,
+            }
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to access or revoke another user's session.",
+        )
+
+    # 3. Signed HttpOnly session cookie strictly bound to THIS session_id
+    cookie_claims = _verify_cookie_for_session(request, session_id)
+    if cookie_claims is not None:
+        if str(cookie_claims.get("sid") or "") == session_id:
+            return {
+                "kind": "session_cookie",
+                "email": str(cookie_claims.get("email") or ""),
+                "is_admin": False,
+            }
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Session cookie does not authorize access to another session.",
+        )
+
+    raise _unauthorized("Authentication is required to access or modify ecosystem sessions.")
 
 
 def _utc(dt: datetime) -> datetime:
@@ -154,8 +493,8 @@ async def _revalidate_cached(db: AsyncSession, sess: Dict[str, Any], now: dateti
                 except ValueError:
                     pass
             return {**sess, "display_name": admin_row.display_name or sess.get("display_name") or "Super Admin"}
-        # No PlatformAdmin row: only sessions minted by the unseeded-DB fallback may exist.
-        return sess if email in _DEFAULT_ADMIN_IDS else None
+        # No PlatformAdmin row: only sessions minted by the explicit dev-only fallback may exist.
+        return sess if (_allow_unseeded_dev_fallback() and email in _DEFAULT_ADMIN_IDS) else None
 
     user = await db.scalar(select(GlobalUser).where(func.lower(GlobalUser.primary_email) == email))
     if user is None or user.status != GlobalUserStatus.ACTIVE:
@@ -341,8 +680,11 @@ async def establish_ecosystem_session(
             search_keys.add(prefix)
     search_keys = {k for k in search_keys if k}
 
-    # --- A. Refresh / recovery: prove identity with a live session, not a password.
+    # --- A. Refresh / recovery: prove identity with a live session AND caller authorization, not a bare session_id.
     if not password:
+        if not payload.existing_session_id:
+            raise _unauthorized()
+        await _authorize_session_access(request, db, payload.existing_session_id)
         live = await _resolve_live_session(db, payload.existing_session_id, now)
         if live is None:
             raise _unauthorized()
@@ -350,7 +692,16 @@ async def establish_ecosystem_session(
         live_name = (live.get("display_name") or "").strip().lower()
         if email_clean and live_email != email_clean and live_name not in search_keys:
             raise _unauthorized()
-        return build_success_response(await attach_landing(db, _public(live)), request_id=_request_id(request))
+        public_live = _public(live)
+        live_exp = _utc(datetime.fromisoformat(public_live["expires_at"])) if public_live.get("expires_at") else expires_at
+        _set_httponly_session_cookie(response, public_live["session_id"], live_email, live_exp)
+        public_live["exchange_code"] = issue_exchange_code(
+            session_id=public_live["session_id"],
+            email=live_email,
+            user_id=str(live.get("_principal_id") or live_email),
+            user_type=str(public_live.get("user_type") or "global_user"),
+        )
+        return build_success_response(await attach_landing(db, public_live), request_id=_request_id(request))
 
     # --- B. Password login.
     is_super_admin = False
@@ -359,6 +710,7 @@ async def establish_ecosystem_session(
     role = "global_user"
     allowed_erps: List[str] = []
     global_user_id: Optional[uuid.UUID] = None  # row used to persist the session
+    principal_id: str = ""
 
     admin_conditions = [func.lower(PlatformAdmin.email) == email_clean]
     for key in search_keys:
@@ -367,12 +719,25 @@ async def establish_ecosystem_session(
     admin = await db.scalar(select(PlatformAdmin).where(or_(*admin_conditions)))
 
     if admin is not None and admin.is_active and verify_platform_password(password, admin.password_hash):
+        # BUG-001: Conditional Argon2id rehash on successful legacy PlatformAdmin login
+        old_admin_hash = admin.password_hash
+        if old_admin_hash and needs_platform_rehash(old_admin_hash):
+            upgraded = hash_platform_password(password)
+            res = await db.execute(
+                update(PlatformAdmin)
+                .where(PlatformAdmin.id == admin.id, PlatformAdmin.password_hash == old_admin_hash)
+                .values(password_hash=upgraded)
+            )
+            if (res.rowcount or 0) > 0:
+                admin.password_hash = upgraded
+
         is_super_admin = True
         user_type = "platform_admin"
         role = "super_admin" if admin.role == PlatformAdminRole.SUPER_ADMIN else "admin"
         display_name = admin.display_name or "Super Admin"
         allowed_erps = ["*"]
         email_clean = (admin.email or "").strip().lower()
+        principal_id = str(admin.id)
         # Persist via the mirrored Global User (if any) so the session survives a restart.
         mirror = await db.scalar(select(GlobalUser).where(func.lower(GlobalUser.primary_email) == email_clean))
         if mirror is not None and mirror.status == GlobalUserStatus.ACTIVE:
@@ -405,22 +770,49 @@ async def establish_ecosystem_session(
             if not stored_pwd or not verify_password(password, stored_pwd):
                 raise _unauthorized("Invalid email or password.")
             if not cred:
+                # BUG-001: Always persist an Argon2id hash, never plaintext
                 db.add(
-                    GlobalUserCredential(global_user_id=user.id, password_hash=stored_pwd, must_change_password=False)
+                    GlobalUserCredential(
+                        global_user_id=user.id,
+                        password_hash=hash_password(password),
+                        must_change_password=False,
+                    )
                 )
                 await db.flush()
+            elif needs_rehash(cred.password_hash):
+                old_cred_hash = cred.password_hash
+                upgraded = hash_password(password)
+                res = await db.execute(
+                    update(GlobalUserCredential)
+                    .where(
+                        GlobalUserCredential.id == cred.id,
+                        GlobalUserCredential.password_hash == old_cred_hash,
+                    )
+                    .values(password_hash=upgraded)
+                )
+                if (res.rowcount or 0) > 0:
+                    cred.password_hash = upgraded
+
             global_user_id = user.id
+            principal_id = str(user.id)
             display_name = user.display_name or user.primary_email
             meta_role = (user.metadata_json or {}).get("role")
             role = meta_role.lower() if meta_role else "global_user"
             allowed_erps = await _active_erp_keys(db, user.id) + [_CONTROL_PLANE_KEY]
-        elif admin is None and email_clean in _DEFAULT_ADMIN_IDS and password == _DEFAULT_ADMIN_PASSWORD:
-            # Unseeded database only: no PlatformAdmin row exists yet, so accept the documented default.
+        elif (
+            admin is None
+            and _allow_unseeded_dev_fallback()
+            and email_clean in _DEFAULT_ADMIN_IDS
+            and (await db.scalar(select(func.count(PlatformAdmin.id)))) == 0
+            and hmac.compare_digest(password, settings.BOOTSTRAP_ADMIN_PASSWORD)
+        ):
+            # Explicit development-only opt-in on an unseeded DB (never available in production).
             is_super_admin = True
             user_type = "platform_admin"
             role = "super_admin"
             display_name = "Super Admin"
             allowed_erps = ["*"]
+            principal_id = "dev-bootstrap-admin"
         else:
             raise _unauthorized()
 
@@ -461,7 +853,20 @@ async def establish_ecosystem_session(
         "revoked_at": None,
     }
     _prune_store(now)
-    _ECOSYSTEM_SESSION_STORE[session_id] = {**session_data, "_checked_at": time.monotonic()}
+    _ECOSYSTEM_SESSION_STORE[session_id] = {
+        **session_data,
+        "_checked_at": time.monotonic(),
+        "_principal_id": principal_id or session_data["email"],
+    }
+
+    # BUG-003: Bind browser session via signed HttpOnly cookie & issue single-use exchange code.
+    _set_httponly_session_cookie(response, session_id, session_data["email"], expires_at)
+    exchange_code = issue_exchange_code(
+        session_id=session_id,
+        email=session_data["email"],
+        user_id=principal_id or session_data["email"],
+        user_type=user_type,
+    )
 
     try:
         audit = GlobalAuditService(repository=GlobalAuditRepository(db))
@@ -470,13 +875,57 @@ async def establish_ecosystem_session(
             actor_type=AuditActorType.HUMAN_ADMIN if is_super_admin else AuditActorType.SYSTEM,
             actor_label=session_data["email"],
             target_type="ecosystem_session",
-            target_id=uuid.UUID(session_id),
-            details={"source_erp": payload.source_erp, "role": role},
+            target_id=None,  # BUG-003: never store raw session_id in audit target_id
+            details={
+                "source_erp": payload.source_erp,
+                "role": role,
+                "session_ref": _session_fingerprint(session_id),
+            },
         )
     except Exception:
         pass
 
-    return build_success_response(await attach_landing(db, session_data), request_id=_request_id(request))
+    response_payload = await attach_landing(db, {**session_data, "exchange_code": exchange_code})
+    return build_success_response(response_payload, request_id=_request_id(request))
+
+
+class IssueExchangeCodeRequest(BaseModel):
+    session_id: str = Field(..., description="Active ecosystem session ID owned by the authenticated caller.")
+
+
+@router.post("/exchange-code", summary="Mint a short-lived single-use signed exchange code for an authenticated session")
+async def create_ecosystem_exchange_code(
+    payload: IssueExchangeCodeRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db_session),
+) -> dict:
+    """
+    Issue a signed, short-lived, single-use exchange authorization code for SSO handover into ERP_Main.
+    Requires authenticated ownership (Bearer JWT, signed HttpOnly session cookie, or spoke service credential).
+    """
+    await _authorize_session_access(request, db, payload.session_id)
+    now = datetime.now(timezone.utc)
+    live = await _resolve_live_session(db, payload.session_id, now)
+    if live is None:
+        raise _unauthorized("Session is no longer active.")
+    email = (live.get("email") or "").strip().lower()
+    user_type = str(live.get("user_type") or "global_user")
+    principal_id = str(live.get("_principal_id") or email)
+    code = issue_exchange_code(
+        session_id=payload.session_id,
+        email=email,
+        user_id=principal_id,
+        user_type=user_type,
+    )
+    ttl = int(getattr(settings, "ECOSYSTEM_EXCHANGE_CODE_EXPIRE_SECONDS", 60))
+    return build_success_response(
+        {
+            "exchange_code": code,
+            "session_id": payload.session_id,
+            "expires_in_seconds": ttl,
+        },
+        request_id=_request_id(request),
+    )
 
 
 @router.get("/{session_id}", summary="Validate ecosystem session status")
@@ -488,10 +937,10 @@ async def get_ecosystem_session(
     """
     Report whether an ecosystem session is currently valid.
 
-    Every call is checked against CURRENT database state (user status, ERP
-    memberships, expiry, revocation); the in-memory store is only a cache.
-    A session whose user was suspended/disabled/removed is reported inactive.
+    BUG-003: Authenticated and authorized — requires a valid Bearer JWT belonging to the session owner
+    or an administrator, a signed HttpOnly session cookie bound to `session_id`, or a spoke ERP service credential.
     """
+    await _authorize_session_access(request, db, session_id, allow_revoked_own_session=True)
     now = datetime.now(timezone.utc)
     rid = _request_id(request)
 
@@ -531,28 +980,41 @@ async def get_ecosystem_session(
 class ExchangeSessionRequest(BaseModel):
     session_id: str = Field(..., description="Central ecosystem session id carried by an SSO handover.")
     email: str = Field(..., description="Email the handover claims to be for; must match the session owner.")
+    exchange_code: Optional[str] = Field(
+        default=None,
+        description="Signed, short-lived, single-use exchange authorization code bound to user + session (required).",
+    )
 
 
-@router.post("/exchange", summary="Sign the right person in to ERP_Main from a verified central session")
+@router.post("/exchange", summary="Sign the right person in to ERP_Main using a signed single-use exchange code")
 async def exchange_ecosystem_session(
     payload: ExchangeSessionRequest,
     request: Request,
+    response: Response,
     db: AsyncSession = Depends(get_db_session),
 ) -> dict:
     """
-    Turn a live central ecosystem session into an ERP_Main access token FOR THAT SAME PERSON.
-
-    Used when someone arrives at the dashboard from another ERP (SSO handover) and has no ERP_Main login
-    yet.  The session id is the proof (it is only known to the person ERP_Main issued it to); the
-    session is re-validated against current user status and memberships; the token issued is for the
-    session's own user -- a platform admin gets an admin token, a normal global user gets a
-    global-user token with exactly their own role -- never anyone else's.
+    BUG-003 Hardened Exchange:
+    Never mints a JWT from `(session_id, email)` alone. Requires a valid, unexpired, single-use,
+    HMAC-signed `exchange_code` cryptographically bound to `(session_id, email, user_type, iss, aud)`
+    and atomically consumed on first use so replays are rejected.
     """
     now = datetime.now(timezone.utc)
     email = (payload.email or "").strip().lower()
+
+    # 1. Verify and atomically consume the signed single-use exchange authorization code FIRST.
+    claims = consume_exchange_code(
+        payload.exchange_code,
+        expected_session_id=payload.session_id,
+        expected_email=email,
+    )
+
+    # 2. Re-validate live session against CURRENT database state.
     live = await _resolve_live_session(db, payload.session_id, now)
     if live is None or (live.get("email") or "").strip().lower() != email:
         raise _unauthorized("Your central session is no longer active. Please sign in again.")
+    if claims.get("utype") and live.get("user_type") and claims.get("utype") != live.get("user_type"):
+        raise _unauthorized("Exchange code principal type mismatch.")
 
     if live.get("user_type") == "platform_admin":
         admin = await _active_platform_admin(db, email)
@@ -605,6 +1067,14 @@ async def exchange_ecosystem_session(
             raise _unauthorized()
         issued = create_global_access_token(global_user_id=user.id, session_id=row.id)
         principal = "global_user"
+
+    # Bind the HttpOnly session cookie on ERP_Main after verified exchange
+    live_exp = (
+        _utc(datetime.fromisoformat(live["expires_at"]))
+        if live.get("expires_at")
+        else now + timedelta(hours=settings.GLOBAL_SESSION_MAX_LIFETIME_HOURS)
+    )
+    _set_httponly_session_cookie(response, payload.session_id, email, live_exp)
 
     data = {
         "principal_type": principal,
@@ -715,7 +1185,11 @@ async def fanout_session_revoke(db: AsyncSession, user_email: Optional[str], ses
                 pass
         return acknowledged
     except Exception as exc:
-        logging.getLogger(__name__).warning("Could not fan out revoke of session %s: %s", session_id, exc)
+        logging.getLogger(__name__).warning(
+            "Could not fan out revoke of session ref=%s: %s",
+            _session_fingerprint(session_id),
+            exc,
+        )
         return 0
 
 
@@ -755,7 +1229,9 @@ async def sign_out_session(db: AsyncSession, session_id: str, *, now: Optional[d
                 summary["revoked"] = True
         except Exception:
             await db.rollback()
-            logging.getLogger(__name__).exception("Could not revoke central session %s", sid)
+            logging.getLogger(__name__).exception(
+                "Could not revoke central session ref=%s", _session_fingerprint(sid)
+            )
         summary["erps_notified"] = await fanout_session_revoke(db, owner, sid)
     return summary
 
@@ -801,11 +1277,14 @@ async def sign_out_everywhere(db: AsyncSession, user_email: str, *, now: Optiona
 async def revoke_ecosystem_session(
     session_id: str,
     request: Request,
+    response: Response,
     db: AsyncSession = Depends(get_db_session),
 ) -> dict:
     """
     Centrally revoke an ecosystem session. Logs the user out of all connected ERPs immediately.
+    BUG-003: Requires authenticated owner, administrator, signed HttpOnly session cookie, or spoke service credential.
     """
+    caller = await _authorize_session_access(request, db, session_id)
     now = datetime.now(timezone.utc)
     user_email = await _session_owner_email(db, session_id)
 
@@ -828,16 +1307,25 @@ async def revoke_ecosystem_session(
     # 3. Sign out THIS session everywhere it was used (not the person's other logins)
     await sign_out_session(db, session_id, now=now)
 
-    # 4. Audit revocation
+    # Clear HttpOnly session cookie if this caller revoked their own cookie-bound session
+    cookie_claims = _verify_cookie_for_session(request, session_id)
+    if cookie_claims and str(cookie_claims.get("sid") or "") == session_id:
+        _clear_httponly_session_cookie(response)
+
+    # 4. Audit revocation without exposing raw session_id
     try:
         audit = GlobalAuditService(repository=GlobalAuditRepository(db))
         await audit.record(
             event_type=AuditEventType.GLOBAL_LOGOUT,
-            actor_type=AuditActorType.SYSTEM,
-            actor_label=user_email or session_id,
+            actor_type=AuditActorType.HUMAN_ADMIN if caller.get("is_admin") else AuditActorType.SYSTEM,
+            actor_label=user_email or caller.get("email") or caller.get("erp_key") or "authenticated_caller",
             target_type="ecosystem_session",
-            target_id=uuid.UUID(session_id) if len(session_id) == 36 else None,
-            details={"revoked_globally": True, "email": user_email},
+            target_id=None,  # BUG-003: never store raw session_id in audit target_id
+            details={
+                "revoked_globally": True,
+                "email": user_email,
+                "session_ref": _session_fingerprint(session_id),
+            },
         )
     except Exception:
         pass

@@ -13,6 +13,8 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 
+from sqlalchemy import update
+
 from app.auth.models import Session
 from app.auth.repository import PasswordHistoryRepository, SessionRepository, TokenBlacklistRepository
 from app.auth.security import (
@@ -22,6 +24,7 @@ from app.auth.security import (
     create_refresh_token,
     decode_token,
     hash_password,
+    needs_rehash,
     validate_password_strength,
     verify_password,
 )
@@ -212,12 +215,27 @@ class AuthService:
                 raise UnauthorizedException("Access denied by central identity policy.")
 
         # Success: reset failed-attempt counter and record login.
+        stored_hash = user.password_hash
         user.failed_login_count = 0
         user.locked_until = None
         if user.status == UserStatus.LOCKED:
             user.status = UserStatus.PASSWORD_CHANGE_REQUIRED if user.must_change_password else UserStatus.ACTIVE
         user.last_login_at = datetime.now(timezone.utc)
         await self.user_repository.update(user)
+
+        # BUG-001: Safe conditional Argon2id upgrade on successful legacy login.
+        # Matching WHERE password_hash = old_hash guarantees we never overwrite a
+        # concurrent password change made in another transaction.
+        if stored_hash and needs_rehash(stored_hash):
+            upgraded_hash = hash_password(password)
+            rehash_result = await self.user_repository.session.execute(
+                update(User)
+                .where(User.id == user.id, User.password_hash == stored_hash)
+                .values(password_hash=upgraded_hash)
+            )
+            if (rehash_result.rowcount or 0) > 0:
+                user.password_hash = upgraded_hash
+
         # Clear any prior force-logout timestamp upon successful login
         await self.cache.delete(CacheBackend.build_key("auth_force_logout", str(user.id)))
 

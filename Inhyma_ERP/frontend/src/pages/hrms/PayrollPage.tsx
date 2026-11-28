@@ -692,8 +692,8 @@ export function PayrollPage() {
     if (!month || !/^\d{4}-\d{2}$/.test(month)) return;
     try {
       setLoadingPayroll(true);
-      const res = await apiGet<MonthlyPayrollRecord>(`/hrms/payroll/monthly/${month}`);
-      setMonthlyPayroll(res.data);
+      const res = await apiGet<MonthlyPayrollRecord | null>(`/hrms/payroll/monthly/${month}`);
+      setMonthlyPayroll(res.data ?? null);
     } catch {
       setMonthlyPayroll(null);
     } finally {

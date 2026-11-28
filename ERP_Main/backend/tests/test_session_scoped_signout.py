@@ -86,16 +86,16 @@ async def test_two_logins_of_one_user_are_independent_logging_out_of_one_keeps_t
 async def test_central_revoke_by_session_id_ends_only_that_session(admin_client, client):
     await _user(admin_client, "rv@example.com")
     a = await _ulogin(client, "rv@example.com"); b = await _ulogin(client, "rv@example.com")
-    assert (await client.post(f"/api/v1/global/ecosystem-session/{a['session_id']}/revoke")).status_code == 200
+    assert (await client.post(f"/api/v1/global/ecosystem-session/{a['session_id']}/revoke", headers=_h(a["access_token"]))).status_code == 200
     assert not await _user_alive(client, a["access_token"]) and await _user_alive(client, b["access_token"])
-    assert (await client.get(f"/api/v1/global/ecosystem-session/{b['session_id']}")).json()["data"]["active"] is True
+    assert (await client.get(f"/api/v1/global/ecosystem-session/{b['session_id']}", headers=_h(b["access_token"]))).json()["data"]["active"] is True
 
 
 @pytest.mark.asyncio
 async def test_a_user_with_no_ticked_erps_triggers_no_erp_calls(admin_client, client):
     await _erp(admin_client, "yinglima"); await _user(admin_client, "none@example.com")
     a = await _ulogin(client, "none@example.com")
-    await client.post(f"/api/v1/global/ecosystem-session/{a['session_id']}/revoke")
+    await client.post(f"/api/v1/global/ecosystem-session/{a['session_id']}/revoke", headers=_h(a["access_token"]))
     assert _Spy.revoked == []
 
 
@@ -103,9 +103,9 @@ async def test_a_user_with_no_ticked_erps_triggers_no_erp_calls(admin_client, cl
 async def test_signing_out_twice_or_an_unknown_session_is_harmless(admin_client, client):
     await _user(admin_client, "twice@example.com"); a = await _ulogin(client, "twice@example.com")
     for _ in range(2):
-        assert (await client.post(f"/api/v1/global/ecosystem-session/{a['session_id']}/revoke")).status_code == 200
-    assert (await client.post(f"/api/v1/global/ecosystem-session/{uuid.uuid4()}/revoke")).status_code == 200
-    assert (await client.post("/api/v1/global/ecosystem-session/ihm-sess-123/revoke")).status_code == 200
+        assert (await admin_client.post(f"/api/v1/global/ecosystem-session/{a['session_id']}/revoke")).status_code == 200
+    assert (await admin_client.post(f"/api/v1/global/ecosystem-session/{uuid.uuid4()}/revoke")).status_code == 200
+    assert (await admin_client.post("/api/v1/global/ecosystem-session/ihm-sess-123/revoke")).status_code == 200
 
 
 # ----------------------------------------------------------------------------- admins
@@ -211,7 +211,7 @@ async def test_an_erp_can_open_a_central_session_for_a_person_it_authenticated(a
     ok = await client.post("/api/v1/internal/sessions/open", json={"email": "granted@example.com"}, headers=AUTHN)
     assert ok.status_code == 200
     d = ok.json()["data"]; assert d["active"] and "yinglima" in d["allowed_erps"]
-    assert (await client.get(f"/api/v1/global/ecosystem-session/{d['session_id']}")).json()["data"]["active"] is True
+    assert (await client.get(f"/api/v1/global/ecosystem-session/{d['session_id']}", headers=AUTHN)).json()["data"]["active"] is True
     second = await client.post("/api/v1/internal/sessions/open", json={"email": "granted@example.com"}, headers=AUTHN)
     assert second.json()["data"]["session_id"] != d["session_id"], "every login gets its own session id"
     refused = await client.post("/api/v1/internal/sessions/open", json={"email": "notgranted@example.com"}, headers=AUTHN)
@@ -226,8 +226,8 @@ async def test_an_erp_reports_a_signout_for_exactly_one_session(admin_client, cl
     s2 = (await client.post("/api/v1/internal/sessions/open", json={"email": "s2s@example.com"}, headers=AUTHN)).json()["data"]["session_id"]
     assert (await client.post(f"/api/v1/internal/sessions/{s1}/signout")).status_code == 401
     assert (await client.post(f"/api/v1/internal/sessions/{s1}/signout", headers=AUTHN)).status_code == 200
-    assert (await client.get(f"/api/v1/global/ecosystem-session/{s1}")).json()["data"]["active"] is False
-    assert (await client.get(f"/api/v1/global/ecosystem-session/{s2}")).json()["data"]["active"] is True
+    assert (await client.get(f"/api/v1/global/ecosystem-session/{s1}", headers=AUTHN)).json()["data"]["active"] is False
+    assert (await client.get(f"/api/v1/global/ecosystem-session/{s2}", headers=AUTHN)).json()["data"]["active"] is True
     assert {s for _, s in _Spy.revoked} == {s1}
 
 
@@ -235,14 +235,16 @@ async def test_an_erp_reports_a_signout_for_exactly_one_session(admin_client, cl
 @pytest.mark.asyncio
 async def test_the_dashboard_token_minted_when_arriving_from_an_erp_is_bound_to_that_session(super_admin_client, client):
     email = await _admin_email(super_admin_client)
-    sid = (await client.post("/api/v1/global/ecosystem-session/establish", json={"email": email, "password": ADMIN_PW, "source_erp": "inhyma"})).json()["data"]["session_id"]
+    est_data = (await client.post("/api/v1/global/ecosystem-session/establish", json={"email": email, "password": ADMIN_PW, "source_erp": "inhyma"})).json()["data"]
+    sid = est_data["session_id"]
+    code = est_data["exchange_code"]
     other = await _alogin(client, email, ADMIN_PW)                       # the same admin's OTHER login
-    ex = await client.post("/api/v1/global/ecosystem-session/exchange", json={"session_id": sid, "email": email})
+    ex = await client.post("/api/v1/global/ecosystem-session/exchange", json={"session_id": sid, "email": email, "exchange_code": code})
     assert ex.status_code == 200 and ex.json()["data"]["principal_type"] == "platform_admin"
     tok = ex.json()["data"]["access_token"]
     assert decode_platform_access_token(tok)["sid"] == sid
     assert await _admin_alive(client, tok)
-    await client.post(f"/api/v1/global/ecosystem-session/{sid}/revoke")
+    await client.post(f"/api/v1/global/ecosystem-session/{sid}/revoke", headers=_h(tok))
     assert not await _admin_alive(client, tok), "signing out of that session ends the dashboard token it minted"
     assert await _admin_alive(client, other["access_token"]), "the same admin's other login is untouched"
-    assert (await client.post("/api/v1/global/ecosystem-session/exchange", json={"session_id": sid, "email": email})).status_code == 401
+    assert (await client.post("/api/v1/global/ecosystem-session/exchange", json={"session_id": sid, "email": email, "exchange_code": code})).status_code == 401

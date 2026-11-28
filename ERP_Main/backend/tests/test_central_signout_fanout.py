@@ -53,7 +53,7 @@ async def test_signing_out_centrally_notifies_every_erp_with_an_active_membershi
     assert r.status_code == 200
     notified = sorted(k for k, _, _ in _SpyAdapter.calls)
     assert notified == ["inhyma", "yinglima"], f"expected both ERPs notified, got {notified}"  # not 'other': no membership
-    after = (await client.get(f"/api/v1/global/ecosystem-session/{sid}")).json()["data"]
+    after = (await admin_client.get(f"/api/v1/global/ecosystem-session/{sid}")).json()["data"]
     assert after.get("active") is False
 
 

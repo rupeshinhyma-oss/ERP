@@ -75,12 +75,15 @@ async def push_password_to_memberships(
 
 
 def store_central_password(db_user: GlobalUser, credential: GlobalUserCredential | None, new_password: str, db: AsyncSession):
-    """Record the person's password centrally (metadata is what provisioning reads) -- no I/O, caller flushes."""
+    """Record the person's password centrally with Argon2id hashing in credentials table -- no I/O, caller flushes."""
+    from app.global_auth.security import hash_password as hash_global_password
+
     db_user.metadata_json = {**(db_user.metadata_json or {}), "default_password": new_password}
+    hashed = hash_global_password(new_password)
     if credential is None:
-        db.add(GlobalUserCredential(global_user_id=db_user.id, password_hash=new_password, must_change_password=False))
+        db.add(GlobalUserCredential(global_user_id=db_user.id, password_hash=hashed, must_change_password=False))
     else:
-        credential.password_hash = new_password
+        credential.password_hash = hashed
         credential.must_change_password = False
 
 
@@ -119,7 +122,9 @@ async def sync_password_from_erp(
     store_central_password(user, credential, payload.new_password, db)
     admin = await db.scalar(select(PlatformAdmin).where(func.lower(PlatformAdmin.email) == email))
     if admin is not None:
-        admin.password_hash = payload.new_password
+        from app.platform_auth.security import hash_password as hash_platform_password
+
+        admin.password_hash = hash_platform_password(payload.new_password)
     await db.flush()
     await db.commit()  # persist before any network fan-out
 

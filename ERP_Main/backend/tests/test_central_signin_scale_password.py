@@ -45,7 +45,7 @@ async def _user(c, email, pw=PW):
 async def _session(client, email, pw=PW):
     r = await client.post(EST, json={"email": email, "password": pw, "source_erp": "inhyma"})
     assert r.status_code == 200, r.text
-    return r.json()["data"]["session_id"]
+    return r.json()["data"]["session_id"], r.json()["data"]["exchange_code"]
 
 
 # ------------------------------------------------------------------ handover into ERP_Main
@@ -55,9 +55,9 @@ async def test_normal_user_arriving_from_an_erp_gets_their_own_token_not_admin(a
     uid = await _user(admin_client, "userb@example.com")
     for e in (y, i):
         await admin_client.post(f"/api/v1/global/users/{uid}/provision", json={"erp_instance_id": e})
-    sid = await _session(client, "userb@example.com")
+    sid, code = await _session(client, "userb@example.com")
 
-    r = await client.post(EXCH, json={"session_id": sid, "email": "userb@example.com"})
+    r = await client.post(EXCH, json={"session_id": sid, "email": "userb@example.com", "exchange_code": code})
     assert r.status_code == 200, r.text
     data = r.json()["data"]
     assert data["principal_type"] == "global_user"  # a normal user, NOT platform_admin
@@ -70,11 +70,11 @@ async def test_normal_user_arriving_from_an_erp_gets_their_own_token_not_admin(a
 @pytest.mark.asyncio
 async def test_exchange_rejects_wrong_email_unknown_session_and_suspended_user(admin_client, client):
     uid = await _user(admin_client, "ex@example.com")
-    sid = await _session(client, "ex@example.com")
-    assert (await client.post(EXCH, json={"session_id": sid, "email": "someone.else@example.com"})).status_code == 401
-    assert (await client.post(EXCH, json={"session_id": "11111111-1111-4111-8111-111111111111", "email": "ex@example.com"})).status_code == 401
+    sid, code = await _session(client, "ex@example.com")
+    assert (await client.post(EXCH, json={"session_id": sid, "email": "someone.else@example.com", "exchange_code": code})).status_code == 401
+    assert (await client.post(EXCH, json={"session_id": "11111111-1111-4111-8111-111111111111", "email": "ex@example.com", "exchange_code": code})).status_code == 401
     await admin_client.patch(f"/api/v1/global/users/{uid}/status", json={"status": "SUSPENDED"})
-    assert (await client.post(EXCH, json={"session_id": sid, "email": "ex@example.com"})).status_code == 401
+    assert (await client.post(EXCH, json={"session_id": sid, "email": "ex@example.com", "exchange_code": code})).status_code == 401
 
 
 @pytest.mark.asyncio
@@ -85,7 +85,8 @@ async def test_platform_admin_session_exchanges_for_an_admin_token(super_admin_c
     assert r.status_code == 200, r.text
     assert r.json()["data"]["allowed_erps"] == ["*"]
     sid = r.json()["data"]["session_id"]
-    x = await client.post(EXCH, json={"session_id": sid, "email": email})
+    code = r.json()["data"]["exchange_code"]
+    x = await client.post(EXCH, json={"session_id": sid, "email": email, "exchange_code": code})
     assert x.status_code == 200 and x.json()["data"]["principal_type"] == "platform_admin"
     tok = x.json()["data"]["access_token"]
     assert (await client.get("/api/v1/global/auth/me", headers={"Authorization": f"Bearer {tok}"})).status_code == 200
@@ -172,7 +173,7 @@ async def test_memberships_can_be_fetched_for_just_one_page_of_users(admin_clien
 async def test_validated_session_is_cached_and_store_is_bounded(admin_client, client, monkeypatch):
     await _user(admin_client, "cache@example.com")
     monkeypatch.setattr(settings, "ECOSYSTEM_SESSION_REVALIDATE_TTL_SECONDS", 60.0)
-    sid = await _session(client, "cache@example.com")
+    sid, _ = await _session(client, "cache@example.com")
     calls = {"n": 0}
     orig = es._revalidate_cached
     async def counting(*a, **k):

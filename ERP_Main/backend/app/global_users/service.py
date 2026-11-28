@@ -84,9 +84,11 @@ class GlobalUserService:
         pwd = (payload.metadata or {}).get("default_password") or (payload.metadata or {}).get("password")
         if pwd:
             from app.global_auth.models import GlobalUserCredential
+            from app.global_auth.security import hash_password as hash_global_password
+
             cred = GlobalUserCredential(
                 global_user_id=created.id,
-                password_hash=pwd,
+                password_hash=hash_global_password(pwd),
                 must_change_password=False,
             )
             self.repository.db.add(cred)
@@ -161,20 +163,24 @@ class GlobalUserService:
         pwd = meta.get("default_password") or meta.get("password")
         if pwd:
             from app.global_auth.models import GlobalUserCredential
+            from app.global_auth.security import hash_password as hash_global_password
+            from app.platform_auth.security import hash_password as hash_platform_password
+
             cred_stmt = select(GlobalUserCredential).where(GlobalUserCredential.global_user_id == user.id)
             cred = await self.repository.db.scalar(cred_stmt)
+            hashed_global = hash_global_password(pwd)
             if cred:
-                cred.password_hash = pwd
+                cred.password_hash = hashed_global
             else:
                 cred = GlobalUserCredential(
                     global_user_id=user.id,
-                    password_hash=pwd,
+                    password_hash=hashed_global,
                     must_change_password=False,
                 )
                 self.repository.db.add(cred)
 
             if admin:
-                admin.password_hash = pwd
+                admin.password_hash = hash_platform_password(pwd)
             await self.repository.db.flush()
 
         password_changed = bool(pwd and pwd != old_password)

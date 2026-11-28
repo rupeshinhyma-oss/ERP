@@ -114,7 +114,7 @@ describe("Inhyma Buyer Pilot Integration", () => {
 
     expect(buyer.company_name).toBe("Updated Offline Name");
     expect(operation.operationType).toBe("UPDATE");
-    expect(operation.path).toBe("/buyers/buyer_123");
+    expect(operation.path).toBe("/companies/buyer_123");
 
     const syncable = await getSyncableOperations();
     expect(syncable).toHaveLength(1);
@@ -151,7 +151,7 @@ describe("Inhyma Buyer Pilot Integration", () => {
     // Verify API call was dispatched with Idempotency-Key
     expect(mockApiCall).toHaveBeenCalledTimes(1);
     expect(mockApiCall).toHaveBeenCalledWith(
-      "/buyers",
+      "/companies",
       expect.objectContaining({
         method: "POST",
         headers: expect.objectContaining({

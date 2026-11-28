@@ -19,6 +19,31 @@ from app.core.logging import get_logger
 logger = get_logger(__name__)
 
 
+_PLACEHOLDER_MARKERS = ("your-smtp-", "change-me", "placeholder")
+
+
+def _is_smtp_configured() -> bool:
+    """Return True only when real, non-placeholder SMTP credentials are configured via env."""
+    user = (settings.SMTP_USER or "").strip()
+    pwd = (settings.SMTP_PASSWORD or "").strip()
+    sender = (settings.SMTP_FROM_EMAIL or "").strip()
+    if not user or not pwd or not sender:
+        return False
+    low_combined = f"{user.lower()} {pwd.lower()} {sender.lower()}"
+    if any(marker in low_combined for marker in _PLACEHOLDER_MARKERS):
+        return False
+    return True
+
+
+def _redact_smtp_error(exc: Exception) -> str:
+    """Sanitize SMTP exception text so credentials are never written to logs."""
+    msg = f"{type(exc).__name__}: {exc}"
+    secret = (settings.SMTP_PASSWORD or "").strip()
+    if secret:
+        msg = msg.replace(secret, "[REDACTED]")
+    return msg
+
+
 def _send_smtp_sync(
     to_emails: list[str],
     subject: str,
@@ -26,8 +51,11 @@ def _send_smtp_sync(
     text_content: str | None = None,
 ) -> bool:
     """Synchronous SMTP worker intended to run in a thread executor."""
-    if not settings.SMTP_USER or not settings.SMTP_PASSWORD:
-        logger.warning("SMTP credentials not configured. Skipping email dispatch.")
+    if not _is_smtp_configured():
+        logger.warning(
+            "SMTP credentials not configured or placeholder in %s environment. Skipping email dispatch safely.",
+            getattr(settings.ENVIRONMENT, "value", str(settings.ENVIRONMENT)),
+        )
         return False
 
     valid_recipients = [e.strip() for e in to_emails if e and "@" in e]
@@ -57,9 +85,9 @@ def _send_smtp_sync(
         )
         return True
     except Exception as exc:
-        logger.exception(
+        logger.error(
             "Failed to send email via SMTP: %s",
-            exc,
+            _redact_smtp_error(exc),
             extra={"subject": subject, "recipients": valid_recipients},
         )
         return False

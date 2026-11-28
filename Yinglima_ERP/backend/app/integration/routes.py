@@ -347,10 +347,37 @@ async def ingest_direct_event(
     Ingest a cross-ERP integration event delivered directly from a peer ERP.
     Processes atomically through GenericSyncEngine.
     """
-    from app.integration.sync_engine import GenericSyncEngine
+    from app.integration.sync_engine import (
+        AdapterNotFoundError,
+        GenericSyncEngine,
+        PolicyDirectionViolationError,
+        SyncConflictError,
+        UnsupportedContractVersionError,
+    )
 
     engine = GenericSyncEngine()
-    result = await engine.process_event(db, envelope)
+    try:
+        result = await engine.process_event(db, envelope)
+    except (ValueError, UnsupportedContractVersionError) as exc:
+        await db.rollback()
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except SyncConflictError as exc:
+        await db.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except (AdapterNotFoundError, PolicyDirectionViolationError) as exc:
+        await db.rollback()
+        return build_success_response(
+            data={
+                "status": "REJECTED",
+                "event_id": str(envelope.get("event_id", "")),
+                "local_entity_id": None,
+                "source_version": int(envelope.get("event_version", 1) or 1),
+                "local_version": 0,
+                "action": "NOOP",
+                "details": str(exc),
+            },
+            request_id=getattr(request.state, "request_id", "-"),
+        )
     await db.commit()
     return build_success_response(data=result.to_dict(), request_id=getattr(request.state, "request_id", "-"))
 

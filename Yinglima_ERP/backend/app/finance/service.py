@@ -10,7 +10,8 @@ import re
 import time
 import uuid
 from datetime import date, datetime, timezone
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+import math
 from typing import Any
 
 from openpyxl import Workbook
@@ -39,6 +40,7 @@ from app.finance.schemas import (
     ConsignmentOverviewListResponse,
     ConsignmentOverviewRow,
     ConsignmentProductLine,
+    CurrencyTotals,
     FinanceMetaUpdate,
     FinancePaymentCreate,
     FinancePaymentResponse,
@@ -71,8 +73,247 @@ logger = get_logger(__name__)
 EXCLUDED_STATUSES = ("pending", "draft", "cancelled", "canceled")
 _TABLES_VERIFIED = True
 _CONSIGNMENT_TABLE_VERIFIED = False
-_CACHED_USD_TO_RMB: float = 7.20
+_CACHED_USD_TO_RMB: float | None = None
 _CACHED_RATE_TS: float = 0.0
+_QUANT_2DP = Decimal("0.01")
+
+
+def normalize_currency_code(code: str | None, default: str = "USD") -> str:
+    """Normalize currency labels (CNY/RMB -> RMB, USD -> USD)."""
+    cleaned = (code or "").strip().upper()
+    if not cleaned:
+        return default
+    if cleaned in ("CNY", "RMB", "¥", "CN¥"):
+        return "RMB"
+    if cleaned in ("USD", "US$", "$"):
+        return "USD"
+    return cleaned
+
+
+def validate_exchange_rate(raw_rate: Any) -> Decimal | None:
+    """
+    Validate a USD->RMB exchange rate (`1 USD = rate RMB`).
+    Returns a strictly positive finite Decimal or None when unavailable/invalid.
+    """
+    if raw_rate is None or isinstance(raw_rate, bool):
+        return None
+    try:
+        dec = Decimal(str(raw_rate))
+    except (InvalidOperation, ValueError, TypeError):
+        return None
+    if not dec.is_finite() or dec <= Decimal("0"):
+        return None
+    return dec
+
+
+def _to_decimal(val: Any) -> Decimal:
+    if val is None or isinstance(val, bool):
+        return Decimal("0.00")
+    try:
+        dec = Decimal(str(val))
+        return dec if dec.is_finite() else Decimal("0.00")
+    except (InvalidOperation, ValueError, TypeError):
+        return Decimal("0.00")
+
+
+def _q2(val: Decimal) -> float:
+    return float(val.quantize(_QUANT_2DP, rounding=ROUND_HALF_UP))
+
+
+def compute_sale_order_kpi(
+    so_rows: list[SaleOrderFinanceRow],
+    report_usd_to_rmb: float | None,
+) -> SectionKpiSummary:
+    """
+    BUG-006: Currency-safe KPI aggregation for Sales Process rows.
+
+    Rules:
+    - Never relabel RMB orders as USD or multiply RMB amounts by usd_to_rmb.
+    - Single currency (all RMB or all USD): preserve native currency for primary totals;
+      compute secondary equivalent using valid explicit rate and correct direction
+      (RMB -> USD divides by rate; USD -> RMB multiplies by rate), or mark conversion_unavailable=True.
+    - Mixed currencies: never sum raw amounts across currencies. Convert to USD/RMB only when
+      valid explicit rates exist for every row; otherwise report currency='MIXED' with
+      conversion_unavailable=True and exact native currency_breakdown.
+    """
+    report_rate = validate_exchange_rate(report_usd_to_rmb)
+    total_records = len(so_rows)
+    pending_records = sum(1 for r in so_rows if r.stage == "pending")
+    cleared_records = sum(1 for r in so_rows if r.stage == "cleared")
+
+    if total_records == 0:
+        return SectionKpiSummary(
+            total_records=0,
+            pending_records=0,
+            cleared_records=0,
+            currency="USD",
+            total_amount=0.0,
+            paid_amount=0.0,
+            balance_amount=0.0,
+            secondary_currency="RMB",
+            total_amount_secondary=0.0 if report_rate is not None else None,
+            paid_amount_secondary=0.0 if report_rate is not None else None,
+            balance_amount_secondary=0.0 if report_rate is not None else None,
+            is_mixed_currency=False,
+            conversion_unavailable=report_rate is None,
+            currency_breakdown={},
+        )
+
+    # Exact native-currency breakdown
+    by_curr: dict[str, dict[str, Any]] = {}
+    for row in so_rows:
+        curr = normalize_currency_code(row.currency, default="USD")
+        bucket = by_curr.setdefault(
+            curr,
+            {"records": 0, "total": Decimal("0"), "paid": Decimal("0"), "balance": Decimal("0")},
+        )
+        bucket["records"] += 1
+        bucket["total"] += _to_decimal(row.total_amount)
+        bucket["paid"] += _to_decimal(row.paid_amount)
+        bucket["balance"] += _to_decimal(row.balance_amount)
+
+    breakdown = {
+        curr: CurrencyTotals(
+            records=b["records"],
+            total_amount=_q2(b["total"]),
+            paid_amount=_q2(b["paid"]),
+            balance_amount=_q2(b["balance"]),
+        )
+        for curr, b in sorted(by_curr.items())
+    }
+
+    currencies = set(by_curr.keys())
+
+    # Single native currency: always preserve native amounts verbatim
+    if len(currencies) == 1:
+        native_curr = next(iter(currencies))
+        native_b = by_curr[native_curr]
+        prim_total = _q2(native_b["total"])
+        prim_paid = _q2(native_b["paid"])
+        prim_bal = _q2(native_b["balance"])
+
+        if native_curr in ("RMB", "USD"):
+            sec_curr = "USD" if native_curr == "RMB" else "RMB"
+            sec_total_dec = Decimal("0")
+            sec_paid_dec = Decimal("0")
+            sec_bal_dec = Decimal("0")
+            can_convert = True
+            for row in so_rows:
+                eff_rate = validate_exchange_rate(row.usd_exchange_rate) or report_rate
+                if eff_rate is None:
+                    can_convert = False
+                    break
+                if native_curr == "RMB":
+                    sec_total_dec += _to_decimal(row.total_amount) / eff_rate
+                    sec_paid_dec += _to_decimal(row.paid_amount) / eff_rate
+                    sec_bal_dec += _to_decimal(row.balance_amount) / eff_rate
+                else:
+                    sec_total_dec += _to_decimal(row.total_amount) * eff_rate
+                    sec_paid_dec += _to_decimal(row.paid_amount) * eff_rate
+                    sec_bal_dec += _to_decimal(row.balance_amount) * eff_rate
+
+            return SectionKpiSummary(
+                total_records=total_records,
+                pending_records=pending_records,
+                cleared_records=cleared_records,
+                currency=native_curr,
+                total_amount=prim_total,
+                paid_amount=prim_paid,
+                balance_amount=prim_bal,
+                secondary_currency=sec_curr,
+                total_amount_secondary=_q2(sec_total_dec) if can_convert else None,
+                paid_amount_secondary=_q2(sec_paid_dec) if can_convert else None,
+                balance_amount_secondary=_q2(sec_bal_dec) if can_convert else None,
+                is_mixed_currency=False,
+                conversion_unavailable=not can_convert,
+                currency_breakdown=breakdown,
+            )
+
+        # Non-USD/RMB single native currency: keep native, mark secondary unavailable
+        return SectionKpiSummary(
+            total_records=total_records,
+            pending_records=pending_records,
+            cleared_records=cleared_records,
+            currency=native_curr,
+            total_amount=prim_total,
+            paid_amount=prim_paid,
+            balance_amount=prim_bal,
+            secondary_currency=None,
+            total_amount_secondary=None,
+            paid_amount_secondary=None,
+            balance_amount_secondary=None,
+            is_mixed_currency=False,
+            conversion_unavailable=True,
+            currency_breakdown=breakdown,
+        )
+
+    # Mixed currencies: NEVER sum raw mixed amounts without explicit valid conversion
+    if currencies <= {"USD", "RMB"}:
+        usd_total_dec = Decimal("0")
+        usd_paid_dec = Decimal("0")
+        usd_bal_dec = Decimal("0")
+        rmb_total_dec = Decimal("0")
+        rmb_paid_dec = Decimal("0")
+        rmb_bal_dec = Decimal("0")
+        can_convert = True
+        for row in so_rows:
+            curr = normalize_currency_code(row.currency, default="USD")
+            eff_rate = validate_exchange_rate(row.usd_exchange_rate) or report_rate
+            if eff_rate is None:
+                can_convert = False
+                break
+            t_dec = _to_decimal(row.total_amount)
+            p_dec = _to_decimal(row.paid_amount)
+            b_dec = _to_decimal(row.balance_amount)
+            if curr == "USD":
+                usd_total_dec += t_dec
+                usd_paid_dec += p_dec
+                usd_bal_dec += b_dec
+                rmb_total_dec += t_dec * eff_rate
+                rmb_paid_dec += p_dec * eff_rate
+                rmb_bal_dec += b_dec * eff_rate
+            else:
+                rmb_total_dec += t_dec
+                rmb_paid_dec += p_dec
+                rmb_bal_dec += b_dec
+                usd_total_dec += t_dec / eff_rate
+                usd_paid_dec += p_dec / eff_rate
+                usd_bal_dec += b_dec / eff_rate
+
+        if can_convert:
+            return SectionKpiSummary(
+                total_records=total_records,
+                pending_records=pending_records,
+                cleared_records=cleared_records,
+                currency="USD",
+                total_amount=_q2(usd_total_dec),
+                paid_amount=_q2(usd_paid_dec),
+                balance_amount=_q2(usd_bal_dec),
+                secondary_currency="RMB",
+                total_amount_secondary=_q2(rmb_total_dec),
+                paid_amount_secondary=_q2(rmb_paid_dec),
+                balance_amount_secondary=_q2(rmb_bal_dec),
+                is_mixed_currency=True,
+                conversion_unavailable=False,
+                currency_breakdown=breakdown,
+            )
+
+    return SectionKpiSummary(
+        total_records=total_records,
+        pending_records=pending_records,
+        cleared_records=cleared_records,
+        currency="MIXED",
+        total_amount=None,
+        paid_amount=None,
+        balance_amount=None,
+        secondary_currency=None,
+        total_amount_secondary=None,
+        paid_amount_secondary=None,
+        balance_amount_secondary=None,
+        is_mixed_currency=True,
+        conversion_unavailable=True,
+        currency_breakdown=breakdown,
+    )
 
 CONSIGNMENT_DOC_SLOTS: list[tuple[str, str]] = [
     ("proforma_invoice", "Proforma Invoice (PI)"),
@@ -185,15 +426,18 @@ class FinanceService:
             await self.session.rollback()
             logger.warning("finance._ensure_tables warning: %s", exc)
 
-    async def _get_usd_to_rmb_rate(self) -> float:
+    async def _get_usd_to_rmb_rate(self) -> float | None:
         global _CACHED_USD_TO_RMB, _CACHED_RATE_TS
         now = time.monotonic()
         if _CACHED_RATE_TS > 0 and (now - _CACHED_RATE_TS) < 60.0:
             return _CACHED_USD_TO_RMB
         try:
             rates = await get_active_rates()
-            rate = float(rates.get("RMB") or rates.get("CNY") or 7.20)
-            _CACHED_USD_TO_RMB = rate if rate > 0 else 7.20
+            raw_rate = rates.get("RMB") if isinstance(rates, dict) else None
+            if raw_rate is None and isinstance(rates, dict):
+                raw_rate = rates.get("CNY")
+            valid_dec = validate_exchange_rate(raw_rate)
+            _CACHED_USD_TO_RMB = float(valid_dec) if valid_dec is not None else None
             _CACHED_RATE_TS = now
             return _CACHED_USD_TO_RMB
         except Exception:
@@ -330,9 +574,9 @@ class FinanceService:
                 balance_amount=balance_amt,
                 total_bank_charges=bank_chg,
                 usd_exchange_rate=usd_to_rmb,
-                total_amount_usd=round(total_amt / usd_to_rmb, 2) if usd_to_rmb > 0 else 0.0,
-                paid_amount_usd=round(paid_amt / usd_to_rmb, 2) if usd_to_rmb > 0 else 0.0,
-                balance_amount_usd=round(balance_amt / usd_to_rmb, 2) if usd_to_rmb > 0 else 0.0,
+                total_amount_usd=round(total_amt / usd_to_rmb, 2) if (usd_to_rmb and usd_to_rmb > 0) else 0.0,
+                paid_amount_usd=round(paid_amt / usd_to_rmb, 2) if (usd_to_rmb and usd_to_rmb > 0) else 0.0,
+                balance_amount_usd=round(balance_amt / usd_to_rmb, 2) if (usd_to_rmb and usd_to_rmb > 0) else 0.0,
                 stage=row_stage,
                 payment_terms=meta.payment_terms if meta else None,
                 expected_dispatch_date=meta.expected_dispatch_date if meta else None,
@@ -400,9 +644,8 @@ class FinanceService:
             if agent_inv <= 0 and (agent_local > 0 or agent_freight > 0):
                 agent_inv = round(agent_local + agent_freight, 2)
 
-            so_rate = _to_float(so.usd_exchange_rate, default=usd_to_rmb)
-            if so_rate <= 0:
-                so_rate = usd_to_rmb
+            valid_so_rate = validate_exchange_rate(so.usd_exchange_rate)
+            so_rate = float(valid_so_rate) if valid_so_rate is not None else usd_to_rmb
 
             row = SaleOrderFinanceRow(
                 source_id=so.id,
@@ -415,7 +658,7 @@ class FinanceService:
                 buyer_branch_name=so.buyer_branch_name,
                 organization_name=so.organization_name,
                 source_status=so.status or "confirmed",
-                currency=so.currency or "USD",
+                currency=normalize_currency_code(so.currency, default="USD"),
                 items_summary=items_summary,
                 items_list=items_list,
                 items_count=len(active_items),
@@ -465,50 +708,44 @@ class FinanceService:
                 so_all_rows.append(row)
 
         # Compute KPI summaries across filtered rows (before stage filter so Pending/Cleared counts are always shown)
-        lp_total_rmb = round(sum(r.total_amount for r in lp_all_rows), 2)
-        lp_paid_rmb = round(sum(r.paid_amount for r in lp_all_rows), 2)
-        lp_bal_rmb = round(sum(r.balance_amount for r in lp_all_rows), 2)
+        rate_dec = validate_exchange_rate(usd_to_rmb)
+        lp_total_dec = sum((_to_decimal(r.total_amount) for r in lp_all_rows), Decimal("0"))
+        lp_paid_dec = sum((_to_decimal(r.paid_amount) for r in lp_all_rows), Decimal("0"))
+        lp_bal_dec = sum((_to_decimal(r.balance_amount) for r in lp_all_rows), Decimal("0"))
         lp_kpi = SectionKpiSummary(
             total_records=len(lp_all_rows),
             pending_records=sum(1 for r in lp_all_rows if r.stage == "pending"),
             cleared_records=sum(1 for r in lp_all_rows if r.stage == "cleared"),
             currency="RMB",
-            total_amount=lp_total_rmb,
-            paid_amount=lp_paid_rmb,
-            balance_amount=lp_bal_rmb,
+            total_amount=_q2(lp_total_dec),
+            paid_amount=_q2(lp_paid_dec),
+            balance_amount=_q2(lp_bal_dec),
             secondary_currency="USD",
-            total_amount_secondary=round(lp_total_rmb / usd_to_rmb, 2) if usd_to_rmb > 0 else 0.0,
-            paid_amount_secondary=round(lp_paid_rmb / usd_to_rmb, 2) if usd_to_rmb > 0 else 0.0,
-            balance_amount_secondary=round(lp_bal_rmb / usd_to_rmb, 2) if usd_to_rmb > 0 else 0.0,
+            total_amount_secondary=_q2(lp_total_dec / rate_dec) if rate_dec is not None else None,
+            paid_amount_secondary=_q2(lp_paid_dec / rate_dec) if rate_dec is not None else None,
+            balance_amount_secondary=_q2(lp_bal_dec / rate_dec) if rate_dec is not None else None,
+            conversion_unavailable=rate_dec is None,
+            currency_breakdown={
+                "RMB": CurrencyTotals(
+                    records=len(lp_all_rows),
+                    total_amount=_q2(lp_total_dec),
+                    paid_amount=_q2(lp_paid_dec),
+                    balance_amount=_q2(lp_bal_dec),
+                )
+            }
+            if lp_all_rows
+            else {},
         )
 
-        so_total_usd = round(sum(r.total_amount for r in so_all_rows), 2)
-        so_paid_usd = round(sum(r.paid_amount for r in so_all_rows), 2)
-        so_bal_usd = round(sum(r.balance_amount for r in so_all_rows), 2)
-        so_kpi = SectionKpiSummary(
-            total_records=len(so_all_rows),
-            pending_records=sum(1 for r in so_all_rows if r.stage == "pending"),
-            cleared_records=sum(1 for r in so_all_rows if r.stage == "cleared"),
-            currency="USD",
-            total_amount=so_total_usd,
-            paid_amount=so_paid_usd,
-            balance_amount=so_bal_usd,
-            secondary_currency="RMB",
-            total_amount_secondary=round(so_total_usd * usd_to_rmb, 2),
-            paid_amount_secondary=round(so_paid_usd * usd_to_rmb, 2),
-            balance_amount_secondary=round(so_bal_usd * usd_to_rmb, 2),
-        )
+        # BUG-006: Respect each SaleOrder's actual currency; never label RMB as USD or multiply RMB by usd_to_rmb.
+        so_kpi = compute_sale_order_kpi(so_all_rows, usd_to_rmb)
 
-        agent_total_rmb = round(sum(r.agent_inv_amount for r in so_all_rows), 2)
-        agent_paid_rmb = round(
-            sum(
-                r.agent_inv_amount
-                for r in so_all_rows
-                if (r.bill_status or "").strip().lower() == "paid"
-            ),
-            2,
+        agent_total_dec = sum((_to_decimal(r.agent_inv_amount) for r in so_all_rows), Decimal("0"))
+        agent_paid_dec = sum(
+            (_to_decimal(r.agent_inv_amount) for r in so_all_rows if (r.bill_status or "").strip().lower() == "paid"),
+            Decimal("0"),
         )
-        agent_bal_rmb = max(0.0, round(agent_total_rmb - agent_paid_rmb, 2))
+        agent_bal_dec = max(Decimal("0"), agent_total_dec - agent_paid_dec)
         agent_kpi = SectionKpiSummary(
             total_records=sum(1 for r in so_all_rows if r.agent_inv_amount > 0 or r.agent_name),
             pending_records=sum(
@@ -522,13 +759,14 @@ class FinanceService:
                 if r.agent_inv_amount > 0 and (r.bill_status or "").strip().lower() == "paid"
             ),
             currency="RMB",
-            total_amount=agent_total_rmb,
-            paid_amount=agent_paid_rmb,
-            balance_amount=agent_bal_rmb,
+            total_amount=_q2(agent_total_dec),
+            paid_amount=_q2(agent_paid_dec),
+            balance_amount=_q2(agent_bal_dec),
             secondary_currency="USD",
-            total_amount_secondary=round(agent_total_rmb / usd_to_rmb, 2) if usd_to_rmb > 0 else 0.0,
-            paid_amount_secondary=round(agent_paid_rmb / usd_to_rmb, 2) if usd_to_rmb > 0 else 0.0,
-            balance_amount_secondary=round(agent_bal_rmb / usd_to_rmb, 2) if usd_to_rmb > 0 else 0.0,
+            total_amount_secondary=_q2(agent_total_dec / rate_dec) if rate_dec is not None else None,
+            paid_amount_secondary=_q2(agent_paid_dec / rate_dec) if rate_dec is not None else None,
+            balance_amount_secondary=_q2(agent_bal_dec / rate_dec) if rate_dec is not None else None,
+            conversion_unavailable=rate_dec is None,
         )
 
         # Apply stage filter if requested
@@ -949,9 +1187,10 @@ class FinanceService:
             "ETA Destination Port",
             "TT Received Date",
             "Payment Terms",
-            "Total Amount (USD $)",
-            "Received Payment (USD $)",
-            "Pending Balance (USD $)",
+            "Currency",
+            "Total Amount",
+            "Received Payment",
+            "Pending Balance",
             "Estimated Due Date",
             "Stage",
             "BL Details",
@@ -980,6 +1219,7 @@ class FinanceService:
                 r.eta_port_date.isoformat() if r.eta_port_date else "",
                 r.tt_received_date.isoformat() if r.tt_received_date else "",
                 r.payment_terms or "",
+                r.currency,
                 r.total_amount,
                 r.paid_amount,
                 r.balance_amount,
@@ -996,9 +1236,10 @@ class FinanceService:
                 r.remarks or "",
             ])
             row_idx = ws_so.max_row
-            ws_so.cell(row=row_idx, column=10).font = green_font
-            ws_so.cell(row=row_idx, column=11).font = red_font if r.balance_amount > 0 else green_font
+            ws_so.cell(row=row_idx, column=11).font = green_font
+            ws_so.cell(row=row_idx, column=12).font = red_font if r.balance_amount > 0 else green_font
 
+        so_export_kpi = compute_sale_order_kpi(report.sale_orders, report.usd_to_rmb_rate)
         ws_so.append([
             "TOTAL",
             "",
@@ -1008,9 +1249,10 @@ class FinanceService:
             "",
             "",
             "",
-            round(sum(x.total_amount for x in report.sale_orders), 2),
-            round(sum(x.paid_amount for x in report.sale_orders), 2),
-            round(sum(x.balance_amount for x in report.sale_orders), 2),
+            so_export_kpi.currency,
+            so_export_kpi.total_amount if so_export_kpi.total_amount is not None else "N/A (Mixed)",
+            so_export_kpi.paid_amount if so_export_kpi.paid_amount is not None else "N/A (Mixed)",
+            so_export_kpi.balance_amount if so_export_kpi.balance_amount is not None else "N/A (Mixed)",
             "",
             "",
             "",

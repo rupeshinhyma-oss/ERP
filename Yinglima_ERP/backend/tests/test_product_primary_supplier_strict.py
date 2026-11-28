@@ -29,16 +29,56 @@ async def test_product_primary_supplier_strict_resolution_and_no_fallback():
     """
     sm = get_sessionmaker()
     async with sm() as session:
-        # Fetch up to 2 existing active suppliers
-        suppliers = (await session.execute(select(Supplier).limit(2))).scalars().all()
-        assert len(suppliers) >= 2, "Test requires at least 2 suppliers in database"
+        # Fetch or seed 2 active suppliers, category, and UOM so test works on fresh isolated DBs
+        from app.masters.countries.models import Country
+        from app.masters.states.models import State
+        from app.masters.cities.models import City
+        seeded_ids = {"suppliers": [], "categories": [], "uoms": [], "countries": []}
+        cntry = (await session.execute(select(Country).limit(1))).scalars().first()
+        if cntry is None:
+            cntry = Country(name=f"China-{uuid.uuid4().hex[:4]}", code=f"C{uuid.uuid4().hex[:3].upper()}")
+            session.add(cntry)
+            await session.flush()
+            seeded_ids["countries"].append(cntry.id)
+        st = (await session.execute(select(State).where(State.country_id == cntry.id).limit(1))).scalars().first()
+        if st is None:
+            st = State(name=f"Zhejiang-{uuid.uuid4().hex[:4]}", code=f"Z{uuid.uuid4().hex[:3].upper()}", country_id=cntry.id)
+            session.add(st)
+            await session.flush()
+        cty = (await session.execute(select(City).where(City.state_id == st.id).limit(1))).scalars().first()
+        if cty is None:
+            cty = City(name=f"Wenzhou-{uuid.uuid4().hex[:4]}", state_id=st.id, country_id=cntry.id)
+            session.add(cty)
+            await session.flush()
+
+        suppliers = list((await session.execute(select(Supplier).limit(2))).scalars().all())
+        while len(suppliers) < 2:
+            s_obj = Supplier(
+                company_name=f"Primary Strict Supplier {len(suppliers) + 1} {uuid.uuid4().hex[:4]}",
+                country_id=cntry.id,
+                state_id=st.id,
+                city_id=cty.id,
+            )
+            session.add(s_obj)
+            await session.flush()
+            suppliers.append(s_obj)
+            seeded_ids["suppliers"].append(s_obj.id)
         test_supplier = suppliers[0]
         test_other_supplier = suppliers[1]
 
-        category = (await session.execute(select(ProductCategory))).scalars().first()
-        assert category is not None, "Test requires at least 1 product category"
+        category = (await session.execute(select(ProductCategory).limit(1))).scalars().first()
+        if category is None:
+            category = ProductCategory(name=f"Packaging-{uuid.uuid4().hex[:4]}", code=f"CAT-{uuid.uuid4().hex[:4]}")
+            session.add(category)
+            await session.flush()
+            seeded_ids["categories"].append(category.id)
 
-        uom = (await session.execute(select(UnitOfMeasurement))).scalars().first()
+        uom = (await session.execute(select(UnitOfMeasurement).limit(1))).scalars().first()
+        if uom is None:
+            uom = UnitOfMeasurement(name=f"Pieces-{uuid.uuid4().hex[:4]}", code=f"P{uuid.uuid4().hex[:4].upper()}")
+            session.add(uom)
+            await session.flush()
+            seeded_ids["uoms"].append(uom.id)
 
         # Product 1: Has explicit primary supplier in Product Master
         prod_with_primary = Product(

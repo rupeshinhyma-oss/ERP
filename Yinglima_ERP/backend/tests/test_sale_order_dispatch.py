@@ -42,11 +42,18 @@ async def test_sale_order_outward_dispatch_lifecycle():
             session.add(company)
             await session.flush()
 
-        # 2. Ensure buyer exists
+        # 2. Ensure country, buyer, and supplier exist
+        from app.masters.countries.models import Country
+        cntry = (await session.execute(select(Country).limit(1))).scalars().first()
+        if not cntry:
+            cntry = Country(name=f"India-{uuid.uuid4().hex[:4]}", code=f"I{uuid.uuid4().hex[:3].upper()}")
+            session.add(cntry)
+            await session.flush()
+
         q_b = await session.execute(select(Buyer).limit(1))
         buyer = q_b.scalars().first()
         if not buyer:
-            buyer = Buyer(company_name=f"Test Buyer {uuid.uuid4().hex[:4]}", country="India")
+            buyer = Buyer(company_name=f"Test Buyer {uuid.uuid4().hex[:4]}", country_id=cntry.id)
             session.add(buyer)
             await session.flush()
 
@@ -54,7 +61,19 @@ async def test_sale_order_outward_dispatch_lifecycle():
         q_s = await session.execute(select(Supplier).limit(1))
         supplier = q_s.scalars().first()
         if not supplier:
-            supplier = Supplier(company_name=f"Test Factory {uuid.uuid4().hex[:4]}", country="China")
+            from app.masters.states.models import State
+            from app.masters.cities.models import City
+            st = (await session.execute(select(State).where(State.country_id == cntry.id).limit(1))).scalars().first()
+            if not st:
+                st = State(name=f"Zhejiang-{uuid.uuid4().hex[:4]}", code=f"Z{uuid.uuid4().hex[:3].upper()}", country_id=cntry.id)
+                session.add(st)
+                await session.flush()
+            cty = (await session.execute(select(City).where(City.state_id == st.id).limit(1))).scalars().first()
+            if not cty:
+                cty = City(name=f"Wenzhou-{uuid.uuid4().hex[:4]}", state_id=st.id, country_id=cntry.id)
+                session.add(cty)
+                await session.flush()
+            supplier = Supplier(company_name=f"Test Factory {uuid.uuid4().hex[:4]}", country_id=cntry.id, state_id=st.id, city_id=cty.id)
             session.add(supplier)
             await session.flush()
 

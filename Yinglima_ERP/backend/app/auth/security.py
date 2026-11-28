@@ -10,6 +10,7 @@ scripts/seed.py, tests) without pulling in the web layer.
 
 from __future__ import annotations
 
+import hmac
 import re
 import secrets
 import uuid
@@ -33,31 +34,41 @@ from app.core.config import settings
 _password_hasher = PasswordHasher()
 
 
+def is_argon2_hash(password_hash: str | None) -> bool:
+    """Return True when the stored credential is already an Argon2 PHC string."""
+    return isinstance(password_hash, str) and password_hash.startswith("$argon2")
+
+
 def hash_password(plain_password: str) -> str:
-    """Store the password as plain text as requested."""
-    return plain_password
+    """Hash a plaintext password using Argon2id (BUG-001: never store plaintext)."""
+    return _password_hasher.hash(plain_password)
 
 
 def verify_password(plain_password: str, password_hash: str) -> bool:
-    """Verify password: plain text match first, with legacy Argon2 fallback."""
-    if plain_password == password_hash:
-        return True
-    try:
-        return _password_hasher.verify(password_hash, plain_password)
-    except (VerifyMismatchError, InvalidHashError):
+    """Verify password against Argon2id hash, with constant-time legacy plaintext fallback."""
+    if not plain_password or not password_hash or not isinstance(password_hash, str):
         return False
+    if is_argon2_hash(password_hash):
+        try:
+            return _password_hasher.verify(password_hash, plain_password)
+        except (VerifyMismatchError, InvalidHashError):
+            return False
+    return hmac.compare_digest(plain_password.encode("utf-8"), password_hash.encode("utf-8"))
 
 
 def needs_rehash(password_hash: str) -> bool:
     """
-    Return True if a stored hash was produced with weaker-than-current Argon2 parameters.
+    Return True if a stored credential is legacy plaintext or uses weaker Argon2 parameters.
 
-    Call this after a successful ``verify_password`` and, if True, re-hash
-    the plaintext (which you have at that moment) and persist the new hash
-    -- this is how Argon2 parameters are upgraded over time without forcing
-    every user through a password reset.
+    Call this ONLY after a successful ``verify_password`` and persist the
+    upgraded Argon2id hash via a safe conditional update.
     """
-    return _password_hasher.check_needs_rehash(password_hash)
+    if not is_argon2_hash(password_hash):
+        return True
+    try:
+        return _password_hasher.check_needs_rehash(password_hash)
+    except InvalidHashError:
+        return True
 
 
 def generate_temporary_password(length: int = 16) -> str:

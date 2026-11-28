@@ -27,7 +27,7 @@ from app.durable_events.repository import (
 )
 from app.durable_events.service import DurableEventService
 
-pytestmark = pytest.mark.asyncio
+pytestmark = [pytest.mark.asyncio, pytest.mark.postgres]
 
 
 @pytest_asyncio.fixture

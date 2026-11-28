@@ -44,6 +44,8 @@ TEST_DB_URL = os.environ.get(
     "postgresql+asyncpg://postgres:root@127.0.0.1:5432/inhyma_test_db",
 )
 
+pytestmark = [pytest.mark.asyncio(loop_scope="module"), pytest.mark.postgres]
+
 
 def _auth_headers(user: User, session_id: str) -> dict[str, str]:
     tok = create_access_token(user.id, session_id=session_id)

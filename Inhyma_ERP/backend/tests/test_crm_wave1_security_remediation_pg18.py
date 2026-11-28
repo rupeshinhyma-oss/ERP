@@ -32,7 +32,8 @@ TEST_DB_URL = os.environ.get(
     "TEST_DATABASE_URL",
     "postgresql+asyncpg://postgres:root@127.0.0.1:5432/inhyma_test_db",
 )
-os.environ["DATABASE_URL"] = TEST_DB_URL
+
+pytestmark = [pytest.mark.asyncio, pytest.mark.postgres]
 
 from app.audit.models import AuditLog
 from app.auth.models import Session as AuthSession

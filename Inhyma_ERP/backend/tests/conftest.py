@@ -50,13 +50,18 @@ if os.environ.get("ALLOW_LIVE_DB_TESTS") != "1" and (
     object.__setattr__(settings, "DATABASE_URL", "sqlite+aiosqlite:///:memory:")
 
 
-@pytest_asyncio.fixture(autouse=True)
-async def isolate_sqlite_test_engine() -> AsyncGenerator[None, None]:
-    """Dispose any lazily created SQLite test engine between tests."""
+@pytest.fixture(autouse=True)
+def isolate_sqlite_test_engine():
+    """Dispose any lazily created SQLite test engine between tests without conflicting with module-scoped event loops."""
     is_sqlite = str(settings.DATABASE_URL).lower().startswith("sqlite")
     yield
     if is_sqlite and engine_module._engine is not None:
-        await engine_module.dispose_engine()
+        try:
+            engine_module._engine.sync_engine.dispose()
+        except Exception:
+            pass
+        engine_module._engine = None
+        engine_module._sessionmaker = None
 
 
 @pytest_asyncio.fixture
@@ -73,6 +78,17 @@ async def client() -> AsyncGenerator[AsyncClient, None]:
 def anyio_backend() -> str:
     """Restrict async tests to the asyncio backend only."""
     return "asyncio"
+
+
+def pytest_runtest_setup(item: pytest.Item) -> None:
+    """Skip @pytest.mark.postgres tests when running under SQLite without an explicit local PG test DB."""
+    if "postgres" in item.keywords:
+        db_url = str(settings.DATABASE_URL).lower()
+        pg_override = os.environ.get("TEST_DATABASE_URL", "").strip().lower()
+        if db_url.startswith("sqlite") and not pg_override.startswith("postgresql"):
+            pytest.skip(
+                "PostgreSQL-only test skipped on SQLite (run with isolated local PostgreSQL DATABASE_URL / TEST_DATABASE_URL)."
+            )
 
 
 @pytest.fixture(autouse=True)

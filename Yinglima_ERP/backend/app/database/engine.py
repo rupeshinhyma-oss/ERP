@@ -13,8 +13,11 @@ Alembic, testing, and for keeping import order irrelevant).
 
 from __future__ import annotations
 
+import os
+import sys
+
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
-from sqlalchemy.pool import AsyncAdaptedQueuePool
+from sqlalchemy.pool import AsyncAdaptedQueuePool, NullPool, StaticPool
 
 from app.core.config import settings
 from app.core.logging import get_logger
@@ -23,6 +26,15 @@ logger = get_logger(__name__)
 
 _engine: AsyncEngine | None = None
 _sessionmaker: async_sessionmaker[AsyncSession] | None = None
+
+
+def _is_supabase_url(url: str) -> bool:
+    lower = url.lower()
+    return "supabase.com" in lower or "supabase.co" in lower
+
+
+def _is_pytest_runtime() -> bool:
+    return "pytest" in sys.modules or bool(os.environ.get("PYTEST_CURRENT_TEST"))
 
 
 def _statement_cache_must_be_disabled() -> bool:
@@ -52,6 +64,22 @@ def get_engine() -> AsyncEngine:
     """
     global _engine
     if _engine is None:
+        db_url = str(settings.DATABASE_URL)
+        # Hard safety guard (BUG-005): never allow pytest runs to connect to a
+        # live Supabase database unless ALLOW_LIVE_DB_TESTS=1 is explicitly set.
+        if _is_pytest_runtime() and os.environ.get("ALLOW_LIVE_DB_TESTS") != "1" and _is_supabase_url(db_url):
+            db_url = "sqlite+aiosqlite:///:memory:"
+        if db_url.lower().startswith("sqlite"):
+            _engine = create_async_engine(
+                db_url,
+                echo=settings.DATABASE_ECHO,
+                poolclass=StaticPool,
+                connect_args={"check_same_thread": False},
+                future=True,
+            )
+            logger.info("SQLite test database engine created.")
+            return _engine
+
         connect_args = {}
         if _statement_cache_must_be_disabled():
             # Required when connecting through a transaction-mode PgBouncer
@@ -64,8 +92,21 @@ def get_engine() -> AsyncEngine:
             connect_args["statement_cache_size"] = 0
             connect_args["prepared_statement_name_func"] = lambda: ""
 
+        if _is_pytest_runtime():
+            # Under pytest each async test can run on a fresh event loop; NullPool
+            # prevents cross-loop asyncpg connection reuse and TooManyConnectionsError.
+            _engine = create_async_engine(
+                db_url,
+                echo=settings.DATABASE_ECHO,
+                poolclass=NullPool,
+                future=True,
+                connect_args=connect_args,
+            )
+            logger.info("Test database engine created with NullPool.")
+            return _engine
+
         _engine = create_async_engine(
-            str(settings.DATABASE_URL),
+            db_url,
             echo=settings.DATABASE_ECHO,
             poolclass=AsyncAdaptedQueuePool,
             pool_size=settings.DATABASE_POOL_SIZE,

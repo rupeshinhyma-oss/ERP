@@ -35,17 +35,19 @@ export function EcosystemSwitcher({ currentKey = "inhyma", organizationName }: E
     setCookie(getEcosystemCookie());
   }, [open]);
 
-  // Proactively fetch or refresh ecosystem session from central control plane
+  // Proactively refresh ecosystem session ONLY when an actual central SSO session exists
+  // (BUG-019: direct-login local sessions `ihm-sess-*` have no central session and must not trigger 401s).
   useEffect(() => {
     const profile = Auth.getProfile();
     const sessionId = Auth.getSessionId() || getEcosystemCookie()?.session_id;
     const email = profile?.email || getEcosystemCookie()?.email;
+    const hasCentralSession = Boolean(sessionId && !sessionId.startsWith("ihm-sess-"));
 
-    if (email) {
+    if (email && hasCentralSession && sessionId) {
       establishCentralEcosystemSession({
         email,
         source_erp: currentKey,
-        existing_session_id: sessionId && !sessionId.startsWith("ihm-sess-") ? sessionId : undefined,
+        existing_session_id: sessionId,
       }).then((freshSession) => {
         if (freshSession) {
           setCookie(freshSession);

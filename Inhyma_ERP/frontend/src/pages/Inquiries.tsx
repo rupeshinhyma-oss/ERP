@@ -163,7 +163,7 @@ export function InquiriesPage() {
 
   const resolveBuyerName = useCallback(async (buyerId: string) => {
     try {
-      const { data } = await apiGet<Buyer>(`/buyers/${buyerId}`);
+      const { data } = await apiGet<Buyer>(`/companies/${buyerId}`);
       setBuyerNames((prev) => ({ ...prev, [buyerId]: data.company_name || (data as any).name || buyerId }));
     } catch {
       setBuyerNames((prev) => ({ ...prev, [buyerId]: "Unknown Company" }));
@@ -183,7 +183,7 @@ export function InquiriesPage() {
           apiGet<ConsignmentCode[]>("/inquiries/consignment-codes"),
           apiGet<any>("/masters/products?page_size=1000"),
           apiGet<any>("/masters/uom?page_size=1000"),
-          apiGet<any>("/buyers?limit=1000").catch(() => ({ data: [] })),
+          apiGet<any>("/companies?page_size=1000").catch(() => ({ data: [] })),
         ]);
         const cMap: Record<string, string> = {};
         codeRes.data.forEach((c) => { cMap[c.id] = c.code; });
@@ -6283,7 +6283,7 @@ function QuickInquiryDrawer({
     (async () => {
       try {
         const [compRes, uomRes] = await Promise.all([
-          apiGet<any>("/buyers?limit=1000&status=active"),
+          apiGet<any>("/companies?page_size=1000&status=active"),
           apiGet<any[]>("/masters/uom?status=active"),
         ]);
         const buyersList = Array.isArray(compRes.data) ? compRes.data : compRes.data?.data || [];
@@ -6385,7 +6385,7 @@ function QuickInquiryDrawer({
     }
     (async () => {
       try {
-        const { data } = await apiGet<any>(`/buyers/${selectedBuyerId}`);
+        const { data } = await apiGet<any>(`/companies/${selectedBuyerId}`);
         if (data) {
           const formatted = {
             ...data,
@@ -6532,13 +6532,13 @@ function QuickInquiryDrawer({
 
   const buyerFetcher: FetchOptions = useCallback(
     async (term, signal) => {
-      const { data } = await apiGet<any>("/buyers" + toQueryString({ search: term, limit: 20, status: "active" }), { signal });
+      const { data } = await apiGet<any>("/companies" + toQueryString({ search: term, page_size: 20, status: "active" }), { signal });
       const list = Array.isArray(data) ? data : (data?.data || []);
       return list
         .filter((b: any) => b?.is_active !== false)
         .map((b: any) => ({
         value: b.id,
-        label: b.company_name || b.name || "Unnamed Buyer",
+        label: b.company_name || b.name || "Unnamed Company",
       }));
     },
     []
@@ -6546,7 +6546,7 @@ function QuickInquiryDrawer({
 
   const buyerLabel = useCallback(async (id: string) => {
     try {
-      const { data } = await apiGet<any>(`/buyers/${id}`);
+      const { data } = await apiGet<any>(`/companies/${id}`);
       return data.company_name || data.name || id;
     } catch {
       return id;

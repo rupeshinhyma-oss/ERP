@@ -522,6 +522,43 @@ export function IconStockMovement(props: IconProps) {
   );
 }
 
+/** Financial Report (Bar Chart / Analytics) */
+export function IconBarChart(props: IconProps) {
+  return (
+    <NavSvg {...props}>
+      <line x1="18" y1="20" x2="18" y2="10" />
+      <line x1="12" y1="20" x2="12" y2="4" />
+      <line x1="6" y1="20" x2="6" y2="14" />
+      <line x1="3" y1="20" x2="21" y2="20" />
+    </NavSvg>
+  );
+}
+
+/** Consignment Overview (Clipboard Summary List) */
+export function IconClipboardList(props: IconProps) {
+  return (
+    <NavSvg {...props}>
+      <rect x="8" y="2" width="8" height="4" rx="1" ry="1" />
+      <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
+      <path d="M12 11h4" />
+      <path d="M12 16h4" />
+      <path d="M8 11h.01" />
+      <path d="M8 16h.01" />
+    </NavSvg>
+  );
+}
+
+/** VAT Return (Tax Receipt / Refund Slip) */
+export function IconReceipt(props: IconProps) {
+  return (
+    <NavSvg {...props}>
+      <path d="M4 2v20l2-1 2 1 2-1 2 1 2-1 2 1 2-1 2 1V2l-2 1-2-1-2 1-2-1-2 1-2-1-2 1Z" />
+      <path d="M16 8h-6a2 2 0 1 0 0 4h4a2 2 0 1 1 0 4H8" />
+      <path d="M12 17.5v-11" />
+    </NavSvg>
+  );
+}
+
 /** Icon lookup by the string keys the nav config uses. */
 export const ICONS = {
   dashboard: IconDashboard,
@@ -546,6 +583,9 @@ export const ICONS = {
   map: IconMap,
   pin: IconPin,
   coins: IconCoins,
+  barChart: IconBarChart,
+  clipboardList: IconClipboardList,
+  receipt: IconReceipt,
   ruler: IconRuler,
   settings: IconSettings,
   building: IconBuilding,

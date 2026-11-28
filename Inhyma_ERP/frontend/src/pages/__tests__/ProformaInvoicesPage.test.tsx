@@ -435,12 +435,16 @@ describe("Add Proforma Invoice Form (/proforma-invoice/add & /proforma-invoice/a
     const dropdown = screen.getByTestId("datepicker-dropdown");
     expect(dropdown).toBeTruthy();
 
-    // Select date 27 (future day compliant with minDate="today")
-    const day27Btn = within(dropdown).getAllByRole("button", { name: "27" }).find((b) => !b.hasAttribute("disabled"))!;
-    fireEvent.click(day27Btn);
+    // Select a non-disabled valid day (compliant with minDate="today" regardless of day of month)
+    const enabledDayBtn = within(dropdown)
+      .getAllByRole("button")
+      .find((b) => /^\d{1,2}$/.test((b.textContent || "").trim()) && !b.hasAttribute("disabled"))!;
+    expect(enabledDayBtn).toBeTruthy();
+    const chosenDay = (enabledDayBtn.textContent || "").trim().padStart(2, "0");
+    fireEvent.click(enabledDayBtn);
 
     // Expect input value updated
-    expect((expDateInput as HTMLInputElement).value).toMatch(/^27-\d{2}-\d{4}$/);
+    expect((expDateInput as HTMLInputElement).value).toMatch(new RegExp(`^${chosenDay}-\\d{2}-\\d{4}$`));
     expect(screen.queryByTestId("datepicker-dropdown")).toBeNull();
   });
 
