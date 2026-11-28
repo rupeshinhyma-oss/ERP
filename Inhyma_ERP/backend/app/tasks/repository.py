@@ -24,6 +24,7 @@ from app.tasks.models import (
     SprintStatus,
     Task,
     TaskAssignee,
+    TaskAssignmentHistory,
     TaskAttachment,
     TaskComment,
     TaskCommentAttachment,
@@ -415,6 +416,31 @@ class TaskRepository(BaseRepository[Task]):
             Task.id.in_(select(TaskAssignee.task_id).where(TaskAssignee.user_id == current_user_id)),
         )
 
+        prev_assigned_condition = and_(
+            Task.id.in_(
+                select(TaskAssignmentHistory.task_id).where(
+                    TaskAssignmentHistory.task_id.is_not(None),
+                    TaskAssignmentHistory.user_id == current_user_id,
+                    TaskAssignmentHistory.assignment_role != "WATCHER",
+                    TaskAssignmentHistory.unassigned_at.is_not(None),
+                )
+            ),
+            ~Task.id.in_(
+                select(TaskAssignee.task_id).where(
+                    TaskAssignee.user_id == current_user_id,
+                    TaskAssignee.assignment_role != "WATCHER",
+                )
+            ),
+        )
+
+        any_reassigned_condition = Task.id.in_(
+            select(TaskAssignmentHistory.task_id).where(
+                TaskAssignmentHistory.task_id.is_not(None),
+                TaskAssignmentHistory.assignment_role != "WATCHER",
+                TaskAssignmentHistory.unassigned_at.is_not(None),
+            )
+        )
+
         target_depts: list[uuid.UUID] = []
         if department_id:
             target_depts.append(department_id)
@@ -425,6 +451,10 @@ class TaskRepository(BaseRepository[Task]):
             # 1. Admin & Admin-approved users: all tasks across all departments
             if normalized_view == "my":
                 base_query = base_query.where(own_task_condition)
+            elif normalized_view == "my_history":
+                base_query = base_query.where(prev_assigned_condition)
+            elif normalized_view == "history":
+                base_query = base_query.where(any_reassigned_condition)
             if target_depts:
                 base_query = base_query.where(get_dept_task_condition(target_depts))
         elif is_dept_manager:
@@ -439,6 +469,16 @@ class TaskRepository(BaseRepository[Task]):
                 base_query = base_query.where(own_task_condition)
                 if target_depts:
                     base_query = base_query.where(get_dept_task_condition(target_depts))
+            elif normalized_view == "my_history":
+                base_query = base_query.where(prev_assigned_condition)
+                if target_depts:
+                    base_query = base_query.where(get_dept_task_condition(target_depts))
+            elif normalized_view == "history":
+                dept_hist = and_(
+                    get_dept_task_condition(target_depts if target_depts else list(dept_scope_ids)),
+                    any_reassigned_condition,
+                )
+                base_query = base_query.where(or_(prev_assigned_condition, dept_hist))
             elif target_depts:
                 base_query = base_query.where(get_dept_task_condition(target_depts))
             elif normalized_view == "department":
@@ -452,12 +492,15 @@ class TaskRepository(BaseRepository[Task]):
                     )
                 )
         else:
-            # 3. Employee: strictly own tasks only; department/organization views & filters denied
+            # 3. Employee: strictly own active tasks (or own historical previous assignments in history view)
             if normalized_view in ("department", "organization"):
                 raise ForbiddenException("You do not have permission to view department or organization tasks.")
             if target_depts:
                 raise ForbiddenException("You do not have permission to filter tasks by department.")
-            base_query = base_query.where(own_task_condition)
+            if normalized_view in ("history", "my_history"):
+                base_query = base_query.where(prev_assigned_condition)
+            else:
+                base_query = base_query.where(own_task_condition)
 
         # --- Additional Filters ---
         if status is not None:
@@ -486,9 +529,21 @@ class TaskRepository(BaseRepository[Task]):
             base_query = base_query.where(Task.approval_status == approval_status)
 
         if assignee_id is not None:
-            base_query = base_query.where(
-                Task.id.in_(select(TaskAssignee.task_id).where(TaskAssignee.user_id == assignee_id))
-            )
+            if normalized_view in ("history", "my_history"):
+                base_query = base_query.where(
+                    Task.id.in_(
+                        select(TaskAssignmentHistory.task_id).where(
+                            TaskAssignmentHistory.task_id.is_not(None),
+                            TaskAssignmentHistory.user_id == assignee_id,
+                            TaskAssignmentHistory.assignment_role != "WATCHER",
+                            TaskAssignmentHistory.unassigned_at.is_not(None),
+                        )
+                    )
+                )
+            else:
+                base_query = base_query.where(
+                    Task.id.in_(select(TaskAssignee.task_id).where(TaskAssignee.user_id == assignee_id))
+                )
 
         if due_date_from is not None:
             base_query = base_query.where(Task.due_date >= due_date_from)
@@ -511,7 +566,11 @@ class TaskRepository(BaseRepository[Task]):
         # Order & Paginate
         stmt = (
             base_query.options(
-                selectinload(Task.assignees),
+                selectinload(Task.assignees).selectinload(TaskAssignee.user),
+                selectinload(Task.assignment_history).selectinload(TaskAssignmentHistory.user),
+                selectinload(Task.assignment_history).selectinload(TaskAssignmentHistory.assigned_by_user),
+                selectinload(Task.assignment_history).selectinload(TaskAssignmentHistory.unassigned_by_user),
+                selectinload(Task.assignment_history).selectinload(TaskAssignmentHistory.reassigned_to_user),
                 selectinload(Task.subtasks),
                 selectinload(Task.child_tasks),
                 selectinload(Task.parent_task),
@@ -573,6 +632,10 @@ class TaskRepository(BaseRepository[Task]):
                 selectinload(Task.sprint),
                 selectinload(Task.approver),
                 selectinload(Task.assignees).selectinload(TaskAssignee.user),
+                selectinload(Task.assignment_history).selectinload(TaskAssignmentHistory.user),
+                selectinload(Task.assignment_history).selectinload(TaskAssignmentHistory.assigned_by_user),
+                selectinload(Task.assignment_history).selectinload(TaskAssignmentHistory.unassigned_by_user),
+                selectinload(Task.assignment_history).selectinload(TaskAssignmentHistory.reassigned_to_user),
                 selectinload(Task.subtasks).selectinload(TaskSubtask.assignee),
                 selectinload(Task.subtasks).selectinload(TaskSubtask.assignees).selectinload(TaskSubtaskAssignee.user),
                 selectinload(Task.comments).selectinload(TaskComment.user),
@@ -634,8 +697,17 @@ class TaskRepository(BaseRepository[Task]):
         user_ids: list[uuid.UUID],
         *,
         role: str = "ASSIGNEE",
+        actor_id: uuid.UUID | None = None,
+        source: str = "TASK_ASSIGN",
     ) -> list[TaskAssignee]:
-        """Replace assignees for a given role (or general assignees)."""
+        """
+        Replace assignees for a given role while preserving immutable assignment history.
+
+        - For non-WATCHER roles, removed assignees have their active history row closed
+          (or backfilled-and-closed for legacy rows) instead of losing historical visibility,
+          and newly added assignees receive a new open ``TaskAssignmentHistory`` record.
+        - For ``WATCHER``, existing non-WATCHER assignee rows are NEVER downgraded or overwritten.
+        """
         deduped_user_ids = list(dict.fromkeys(user_ids))
         stmt = select(TaskAssignee).where(
             TaskAssignee.task_id == task.id,
@@ -644,10 +716,50 @@ class TaskRepository(BaseRepository[Task]):
         res = await self.session.execute(stmt)
         existing_with_role = list(res.scalars().all())
         current_map = {a.user_id: a for a in existing_with_role}
+        now_dt = datetime.now(timezone.utc)
+
+        is_assignment_role = role != "WATCHER"
+        newly_added_uids = [uid for uid in deduped_user_ids if uid not in current_map]
+        primary_replacement_uid = newly_added_uids[0] if newly_added_uids else (deduped_user_ids[0] if deduped_user_ids else None)
 
         deleted_any = False
         for uid, a in list(current_map.items()):
             if uid not in deduped_user_ids:
+                if is_assignment_role:
+                    open_hist_stmt = (
+                        select(TaskAssignmentHistory)
+                        .where(
+                            TaskAssignmentHistory.task_id == task.id,
+                            TaskAssignmentHistory.user_id == uid,
+                            TaskAssignmentHistory.unassigned_at.is_(None),
+                        )
+                        .order_by(TaskAssignmentHistory.assigned_at.desc())
+                    )
+                    open_hist_rows = list((await self.session.execute(open_hist_stmt)).scalars().all())
+                    if open_hist_rows:
+                        for hr in open_hist_rows:
+                            hr.unassigned_at = now_dt
+                            hr.unassigned_by = actor_id
+                            if primary_replacement_uid and primary_replacement_uid != uid:
+                                hr.reassigned_to_user_id = primary_replacement_uid
+                    else:
+                        # Backfill pre-existing / legacy assignment row before closing
+                        self.session.add(
+                            TaskAssignmentHistory(
+                                task_id=task.id,
+                                recurring_schedule_id=getattr(task, "recurring_schedule_id", None),
+                                user_id=uid,
+                                assignment_role=a.assignment_role or role,
+                                assigned_by=getattr(task, "created_by", None),
+                                assigned_at=getattr(a, "created_at", None) or getattr(task, "created_at", None) or now_dt,
+                                unassigned_at=now_dt,
+                                unassigned_by=actor_id,
+                                reassigned_to_user_id=(
+                                    primary_replacement_uid if primary_replacement_uid and primary_replacement_uid != uid else None
+                                ),
+                                source=source,
+                            )
+                        )
                 await self.session.delete(a)
                 deleted_any = True
         if deleted_any:
@@ -666,6 +778,11 @@ class TaskRepository(BaseRepository[Task]):
                 other_res = await self.session.execute(other_stmt)
                 existing_any = other_res.scalar_one_or_none()
                 if existing_any:
+                    if not is_assignment_role and existing_any.assignment_role != "WATCHER":
+                        # Never downgrade an active assignee to WATCHER
+                        raise ForbiddenException(
+                            "Cannot change an active assignee into a watcher. Use authorized assignment controls."
+                        )
                     existing_any.assignment_role = role
                     new_assignees.append(existing_any)
                 else:
@@ -673,8 +790,144 @@ class TaskRepository(BaseRepository[Task]):
                     self.session.add(new_a)
                     new_assignees.append(new_a)
 
+                if is_assignment_role:
+                    self.session.add(
+                        TaskAssignmentHistory(
+                            task_id=task.id,
+                            recurring_schedule_id=getattr(task, "recurring_schedule_id", None),
+                            user_id=uid,
+                            assignment_role=role,
+                            assigned_by=actor_id or getattr(task, "created_by", None),
+                            assigned_at=now_dt,
+                            unassigned_at=None,
+                            source=source,
+                        )
+                    )
+
         await self.session.flush()
         return new_assignees
+
+    async def has_previous_assignment(self, task_id: uuid.UUID, user_id: uuid.UUID) -> bool:
+        """Return True if ``user_id`` was previously assigned (non-watcher) to ``task_id``."""
+        stmt = (
+            select(TaskAssignmentHistory.id)
+            .where(
+                TaskAssignmentHistory.task_id == task_id,
+                TaskAssignmentHistory.user_id == user_id,
+                TaskAssignmentHistory.assignment_role != "WATCHER",
+                TaskAssignmentHistory.unassigned_at.is_not(None),
+            )
+            .limit(1)
+        )
+        res = await self.session.execute(stmt)
+        return res.scalar_one_or_none() is not None
+
+    async def get_user_previous_assignment_map(
+        self, user_id: uuid.UUID, task_ids: list[uuid.UUID]
+    ) -> dict[uuid.UUID, TaskAssignmentHistory]:
+        """Batch-fetch the latest closed non-watcher assignment history row per task for ``user_id``."""
+        if not task_ids:
+            return {}
+        stmt = (
+            select(TaskAssignmentHistory)
+            .where(
+                TaskAssignmentHistory.task_id.in_(task_ids),
+                TaskAssignmentHistory.user_id == user_id,
+                TaskAssignmentHistory.assignment_role != "WATCHER",
+                TaskAssignmentHistory.unassigned_at.is_not(None),
+            )
+            .options(
+                selectinload(TaskAssignmentHistory.unassigned_by_user),
+                selectinload(TaskAssignmentHistory.reassigned_to_user),
+            )
+            .order_by(TaskAssignmentHistory.unassigned_at.desc())
+        )
+        res = await self.session.execute(stmt)
+        latest: dict[uuid.UUID, TaskAssignmentHistory] = {}
+        for row in res.scalars().all():
+            if row.task_id and row.task_id not in latest:
+                latest[row.task_id] = row
+        return latest
+
+    async def record_recurring_schedule_assignment_change(
+        self,
+        *,
+        schedule: TaskRecurringSchedule,
+        old_assignee_id: uuid.UUID | None,
+        new_assignee_id: uuid.UUID | None,
+        actor_id: uuid.UUID | None,
+        source: str = "RECURRING_SCHEDULE",
+    ) -> None:
+        """Record recurring-schedule default assignee creation or change in immutable history."""
+        now_dt = datetime.now(timezone.utc)
+        if old_assignee_id is not None and old_assignee_id != new_assignee_id:
+            open_stmt = (
+                select(TaskAssignmentHistory)
+                .where(
+                    TaskAssignmentHistory.task_id.is_(None),
+                    TaskAssignmentHistory.recurring_schedule_id == schedule.id,
+                    TaskAssignmentHistory.user_id == old_assignee_id,
+                    TaskAssignmentHistory.unassigned_at.is_(None),
+                )
+                .order_by(TaskAssignmentHistory.assigned_at.desc())
+            )
+            open_rows = list((await self.session.execute(open_stmt)).scalars().all())
+            if open_rows:
+                for row in open_rows:
+                    row.unassigned_at = now_dt
+                    row.unassigned_by = actor_id
+                    row.reassigned_to_user_id = new_assignee_id
+            else:
+                self.session.add(
+                    TaskAssignmentHistory(
+                        task_id=None,
+                        recurring_schedule_id=schedule.id,
+                        user_id=old_assignee_id,
+                        assignment_role="ASSIGNEE",
+                        assigned_by=schedule.created_by,
+                        assigned_at=schedule.created_at or now_dt,
+                        unassigned_at=now_dt,
+                        unassigned_by=actor_id,
+                        reassigned_to_user_id=new_assignee_id,
+                        source=source,
+                    )
+                )
+
+        if new_assignee_id is not None and new_assignee_id != old_assignee_id:
+            self.session.add(
+                TaskAssignmentHistory(
+                    task_id=None,
+                    recurring_schedule_id=schedule.id,
+                    user_id=new_assignee_id,
+                    assignment_role="ASSIGNEE",
+                    assigned_by=actor_id or schedule.created_by,
+                    assigned_at=now_dt,
+                    unassigned_at=None,
+                    source=source,
+                )
+            )
+        await self.session.flush()
+
+    async def list_recurring_schedule_assignment_history(
+        self, schedule_id: uuid.UUID
+    ) -> list[TaskAssignmentHistory]:
+        """List chronological assignment history for a recurring schedule definition."""
+        stmt = (
+            select(TaskAssignmentHistory)
+            .where(
+                TaskAssignmentHistory.task_id.is_(None),
+                TaskAssignmentHistory.recurring_schedule_id == schedule_id,
+            )
+            .options(
+                selectinload(TaskAssignmentHistory.user),
+                selectinload(TaskAssignmentHistory.assigned_by_user),
+                selectinload(TaskAssignmentHistory.unassigned_by_user),
+                selectinload(TaskAssignmentHistory.reassigned_to_user),
+            )
+            .order_by(TaskAssignmentHistory.assigned_at.asc())
+        )
+        res = await self.session.execute(stmt)
+        return list(res.scalars().all())
 
     async def add_comment(
         self,
@@ -1588,7 +1841,7 @@ class TaskRepository(BaseRepository[Task]):
                 elif action == "ASSIGN":
                     raw_uids = value if isinstance(value, list) else [value]
                     uids = [uuid.UUID(str(u)) for u in raw_uids]
-                    await self.set_assignees(task, uids, role="ASSIGNEE")
+                    await self.set_assignees(task, uids, role="ASSIGNEE", actor_id=actor_id, source="BULK_ASSIGN")
                 elif action == "ADD_WATCHER":
                     raw_uids = value if isinstance(value, list) else [value]
                     uids = [uuid.UUID(str(u)) for u in raw_uids]
@@ -1899,7 +2152,12 @@ class TaskRepository(BaseRepository[Task]):
                 selectinload(TaskRecurringSchedule.assignee),
                 selectinload(TaskRecurringSchedule.manager),
                 selectinload(TaskRecurringSchedule.creator),
+                selectinload(TaskRecurringSchedule.assignment_history).selectinload(TaskAssignmentHistory.user),
+                selectinload(TaskRecurringSchedule.assignment_history).selectinload(TaskAssignmentHistory.assigned_by_user),
+                selectinload(TaskRecurringSchedule.assignment_history).selectinload(TaskAssignmentHistory.unassigned_by_user),
+                selectinload(TaskRecurringSchedule.assignment_history).selectinload(TaskAssignmentHistory.reassigned_to_user),
             )
+            .execution_options(populate_existing=True)
         )
         res = await self.session.execute(stmt)
         return res.scalar_one_or_none()
@@ -1921,6 +2179,10 @@ class TaskRepository(BaseRepository[Task]):
                 selectinload(TaskRecurringSchedule.assignee),
                 selectinload(TaskRecurringSchedule.manager),
                 selectinload(TaskRecurringSchedule.creator),
+                selectinload(TaskRecurringSchedule.assignment_history).selectinload(TaskAssignmentHistory.user),
+                selectinload(TaskRecurringSchedule.assignment_history).selectinload(TaskAssignmentHistory.assigned_by_user),
+                selectinload(TaskRecurringSchedule.assignment_history).selectinload(TaskAssignmentHistory.unassigned_by_user),
+                selectinload(TaskRecurringSchedule.assignment_history).selectinload(TaskAssignmentHistory.reassigned_to_user),
             )
             .order_by(TaskRecurringSchedule.created_at.desc())
         )
@@ -2007,6 +2269,10 @@ class TaskRepository(BaseRepository[Task]):
             .options(
                 selectinload(Task.recurring_schedule),
                 selectinload(Task.assignees).selectinload(TaskAssignee.user),
+                selectinload(Task.assignment_history).selectinload(TaskAssignmentHistory.user),
+                selectinload(Task.assignment_history).selectinload(TaskAssignmentHistory.assigned_by_user),
+                selectinload(Task.assignment_history).selectinload(TaskAssignmentHistory.unassigned_by_user),
+                selectinload(Task.assignment_history).selectinload(TaskAssignmentHistory.reassigned_to_user),
                 selectinload(Task.approver),
                 selectinload(Task.creator),
                 selectinload(Task.escalations),
@@ -2014,37 +2280,84 @@ class TaskRepository(BaseRepository[Task]):
             .order_by(Task.due_date.desc(), Task.created_at.desc())
             .limit(limit)
         )
+        if schedule_id:
+            stmt = stmt.where(Task.recurring_schedule_id == schedule_id)
+
         if scoped_department_user_ids is not None:
             allowed_uids = set(scoped_department_user_ids)
             if scoped_user_id is not None:
                 allowed_uids.add(scoped_user_id)
             if not allowed_uids:
                 return []
-            stmt = stmt.where(
-                or_(
-                    Task.created_by.in_(allowed_uids),
-                    Task.approver_id.in_(allowed_uids),
-                    Task.id.in_(
-                        select(TaskAssignee.task_id).where(TaskAssignee.user_id.in_(allowed_uids))
-                    ),
-                )
+            active_scope_cond = or_(
+                Task.created_by.in_(allowed_uids),
+                Task.approver_id.in_(allowed_uids),
+                Task.id.in_(
+                    select(TaskAssignee.task_id).where(TaskAssignee.user_id.in_(allowed_uids))
+                ),
             )
+            if history_only:
+                prev_cond = (
+                    and_(
+                        Task.id.in_(
+                            select(TaskAssignmentHistory.task_id).where(
+                                TaskAssignmentHistory.task_id.is_not(None),
+                                TaskAssignmentHistory.user_id == scoped_user_id,
+                                TaskAssignmentHistory.assignment_role != "WATCHER",
+                                TaskAssignmentHistory.unassigned_at.is_not(None),
+                            )
+                        ),
+                        ~Task.id.in_(
+                            select(TaskAssignee.task_id).where(
+                                TaskAssignee.user_id == scoped_user_id,
+                                TaskAssignee.assignment_role != "WATCHER",
+                            )
+                        ),
+                    )
+                    if scoped_user_id is not None
+                    else Task.id.is_(None)
+                )
+                stmt = stmt.where(or_(and_(active_scope_cond, Task.status == TaskStatus.DONE), prev_cond))
+            else:
+                stmt = stmt.where(active_scope_cond, Task.status != TaskStatus.DONE)
         elif scoped_user_id is not None:
-            stmt = stmt.where(
-                or_(
-                    Task.created_by == scoped_user_id,
-                    Task.approver_id == scoped_user_id,
+            active_user_cond = or_(
+                Task.created_by == scoped_user_id,
+                Task.approver_id == scoped_user_id,
+                Task.id.in_(
+                    select(TaskAssignee.task_id).where(TaskAssignee.user_id == scoped_user_id)
+                ),
+            )
+            if history_only:
+                prev_user_cond = and_(
                     Task.id.in_(
-                        select(TaskAssignee.task_id).where(TaskAssignee.user_id == scoped_user_id)
+                        select(TaskAssignmentHistory.task_id).where(
+                            TaskAssignmentHistory.task_id.is_not(None),
+                            TaskAssignmentHistory.user_id == scoped_user_id,
+                            TaskAssignmentHistory.assignment_role != "WATCHER",
+                            TaskAssignmentHistory.unassigned_at.is_not(None),
+                        )
+                    ),
+                    ~Task.id.in_(
+                        select(TaskAssignee.task_id).where(
+                            TaskAssignee.user_id == scoped_user_id,
+                            TaskAssignee.assignment_role != "WATCHER",
+                        )
                     ),
                 )
-            )
-        if schedule_id:
-            stmt = stmt.where(Task.recurring_schedule_id == schedule_id)
-        if history_only:
-            stmt = stmt.where(Task.status == TaskStatus.DONE)
+                stmt = stmt.where(
+                    or_(
+                        and_(active_user_cond, Task.status == TaskStatus.DONE),
+                        prev_user_cond,
+                    )
+                )
+            else:
+                stmt = stmt.where(active_user_cond, Task.status != TaskStatus.DONE)
         else:
-            stmt = stmt.where(Task.status != TaskStatus.DONE)
+            if history_only:
+                stmt = stmt.where(Task.status == TaskStatus.DONE)
+            else:
+                stmt = stmt.where(Task.status != TaskStatus.DONE)
 
         res = await self.session.execute(stmt)
         return list(res.scalars().all())

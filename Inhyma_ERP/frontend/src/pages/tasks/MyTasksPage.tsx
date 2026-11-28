@@ -17,7 +17,7 @@ import {
   IconRefresh,
 } from "@/components/icons";
 
-type TabFilter = "ALL" | TaskStatus | "OVERDUE";
+type TabFilter = "ALL" | TaskStatus | "OVERDUE" | "HISTORY";
 
 const MyTasksSkeletonTable: React.FC<{ count?: number }> = ({ count = 6 }) => (
   <div className="table-responsive">
@@ -76,10 +76,19 @@ export const MyTasksPage: React.FC = () => {
   const fetchTasks = useCallback(async () => {
     try {
       setLoading(true);
-      const res = await tasksApi.getMyTasks({
-        search: searchQuery.trim() || undefined,
-        status: activeTab === "ALL" || activeTab === "OVERDUE" ? undefined : (activeTab as TaskStatus),
-      });
+      const res =
+        activeTab === "HISTORY"
+          ? await tasksApi.getTasks({
+              view: "history",
+              search: searchQuery.trim() || undefined,
+            })
+          : await tasksApi.getMyTasks({
+              search: searchQuery.trim() || undefined,
+              status:
+                activeTab === "ALL" || activeTab === "OVERDUE"
+                  ? undefined
+                  : (activeTab as TaskStatus),
+            });
 
       let items = res.items;
       if (activeTab === "OVERDUE") {
@@ -129,6 +138,7 @@ export const MyTasksPage: React.FC = () => {
 
   const handleQuickToggleDone = async (e: React.MouseEvent, task: TaskSummary) => {
     e.stopPropagation();
+    if (task.is_previously_assigned) return;
     try {
       const newStatus: TaskStatus = task.status === "DONE" ? "TODO" : "DONE";
       await tasksApi.updateTask(task.id, { status: newStatus });
@@ -196,7 +206,7 @@ export const MyTasksPage: React.FC = () => {
       {/* Tabs & Search Controls */}
       <div className="task-page-controls">
         <div className="task-filter-tabs">
-          {(["ALL", "TODO", "IN_PROGRESS", "REVIEW", "DONE", "OVERDUE"] as TabFilter[]).map(
+          {(["ALL", "TODO", "IN_PROGRESS", "REVIEW", "DONE", "OVERDUE", "HISTORY"] as TabFilter[]).map(
             (tab) => (
               <button
                 key={tab}
@@ -204,7 +214,7 @@ export const MyTasksPage: React.FC = () => {
                 className={`task-tab-btn ${activeTab === tab ? "active" : ""}`}
                 onClick={() => setActiveTab(tab)}
               >
-                {tab.replace("_", " ")}
+                {tab === "HISTORY" ? "PREVIOUSLY ASSIGNED" : tab.replace("_", " ")}
               </button>
             )
           )}
@@ -272,6 +282,7 @@ export const MyTasksPage: React.FC = () => {
                           type="checkbox"
                           className="task-checkbox"
                           checked={t.status === "DONE"}
+                          disabled={Boolean(t.is_previously_assigned)}
                           onChange={() => {}}
                         />
                       </td>
@@ -284,6 +295,20 @@ export const MyTasksPage: React.FC = () => {
                           >
                             {t.title}
                           </span>
+                          {t.is_previously_assigned && (
+                            <span
+                              className="task-badge"
+                              style={{
+                                background: "#fef3c7",
+                                color: "#92400e",
+                                border: "1px solid #fcd34d",
+                                fontSize: "11px",
+                                fontWeight: 700,
+                              }}
+                            >
+                              PREVIOUSLY ASSIGNED
+                            </span>
+                          )}
                           {overdue && (
                             <span className="task-badge badge-overdue">OVERDUE</span>
                           )}

@@ -123,10 +123,19 @@ async def upload_file(
     )
 
 
+def _serialize_task(task: object, current_user: CurrentUser) -> dict:
+    serialized = TaskRead.model_validate(
+        task, context={"current_user_id": current_user.id}
+    ).model_dump()
+    if getattr(task, "_sanitize_for_previous_assignee", False):
+        TaskService.sanitize_task_read_dict(serialized)
+    return serialized
+
+
 @router.get("", summary="List tasks with visibility rules and filters")
 async def list_tasks(
     request: Request,
-    view: str = Query("all", description="View mode: all, my, department, kanban, calendar"),
+    view: str = Query("all", description="View mode: all, my, history, department, kanban, calendar"),
     department_id: uuid.UUID | None = Query(None, description="Filter by department ID"),
     status: TaskStatus | None = None,
     priority: TaskPriority | None = None,
@@ -497,6 +506,22 @@ async def get_recurring_schedule(
     return build_success_response(data=schedule.model_dump(), request_id=getattr(request.state, "request_id", "-"))
 
 
+@router.get("/recurring/schedules/{schedule_id}/history", summary="Get assignment history for a recurring schedule")
+async def get_recurring_schedule_history(
+    schedule_id: uuid.UUID,
+    request: Request,
+    current_user: CurrentUser = Depends(
+        require_any_permission("task.view", "task.department_view", "task.all_view", "task.manage")
+    ),
+    service: TaskService = Depends(get_task_service),
+) -> dict:
+    history = await service.get_recurring_schedule_history(schedule_id, current_user=current_user)
+    return build_success_response(
+        data=[h.model_dump() for h in history],
+        request_id=getattr(request.state, "request_id", "-"),
+    )
+
+
 @router.patch("/recurring/schedules/{schedule_id}", summary="Update recurring schedule")
 async def update_recurring_schedule(
     schedule_id: uuid.UUID,
@@ -574,7 +599,7 @@ async def trigger_generate_recurring_tasks(
     service: TaskService = Depends(get_task_service),
 ) -> dict:
     if schedule_id is not None:
-        await service.get_recurring_schedule(schedule_id, current_user=current_user)
+        await service.assert_can_generate_recurring_schedule(schedule_id, current_user=current_user)
     tasks = await service.generate_recurring_tasks(as_of_date=as_of_date, schedule_id=schedule_id)
     return build_success_response(
         data={"generated_count": len(tasks), "task_ids": [str(t.id) for t in tasks]},
@@ -654,10 +679,10 @@ async def get_task_by_id(
     service: TaskService = Depends(get_task_service),
 ) -> dict:
     task = await service.get_task(id, current_user=current_user)
-    serialized = TaskRead.model_validate(
-        task, context={"current_user_id": current_user.id}
-    ).model_dump()
-    return build_success_response(data=serialized, request_id=getattr(request.state, "request_id", "-"))
+    return build_success_response(
+        data=_serialize_task(task, current_user),
+        request_id=getattr(request.state, "request_id", "-"),
+    )
 
 
 @router.patch("/{id}", summary="Update task details")
@@ -669,10 +694,10 @@ async def update_task(
     service: TaskService = Depends(get_task_service),
 ) -> dict:
     task = await service.update_task(id, payload, current_user)
-    serialized = TaskRead.model_validate(
-        task, context={"current_user_id": current_user.id}
-    ).model_dump()
-    return build_success_response(data=serialized, request_id=getattr(request.state, "request_id", "-"))
+    return build_success_response(
+        data=_serialize_task(task, current_user),
+        request_id=getattr(request.state, "request_id", "-"),
+    )
 
 
 @router.delete("/{id}", summary="Soft-delete task")
@@ -699,10 +724,10 @@ async def assign_task(
     task = await service.assign_task(
         id, payload.user_ids, current_user, role=payload.assignment_role.value
     )
-    serialized = TaskRead.model_validate(
-        task, context={"current_user_id": current_user.id}
-    ).model_dump()
-    return build_success_response(data=serialized, request_id=getattr(request.state, "request_id", "-"))
+    return build_success_response(
+        data=_serialize_task(task, current_user),
+        request_id=getattr(request.state, "request_id", "-"),
+    )
 
 
 @router.post("/{id}/comment", summary="Add comment to task")

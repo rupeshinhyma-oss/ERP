@@ -18,6 +18,7 @@ interface BulkActionBarProps {
   availableUsers: AvailableUser[];
   availableLabels: TaskLabel[];
   availableSprints: TaskSprint[];
+  canAssign?: boolean;
 }
 
 export const BulkActionBar: React.FC<BulkActionBarProps> = ({
@@ -29,6 +30,7 @@ export const BulkActionBar: React.FC<BulkActionBarProps> = ({
   availableUsers,
   availableLabels,
   availableSprints,
+  canAssign = true,
 }) => {
   const [loading, setLoading] = useState(false);
   const activeIds = selectedTaskIds || selectedIds || [];
@@ -172,8 +174,8 @@ export const BulkActionBar: React.FC<BulkActionBarProps> = ({
             <option value="APPROVAL">Approval</option>
           </select>
 
-          {/* Assignee Select */}
-          {availableUsers.length > 0 && (
+          {/* Assignee Select (only shown when authorized to change assignees for selected tasks) */}
+          {canAssign && availableUsers.length > 0 && (
             <select
               defaultValue=""
               onChange={handleAssigneeChange}

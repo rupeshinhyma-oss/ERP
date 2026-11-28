@@ -12,11 +12,11 @@ Standalone task management and workforce collaboration:
 from __future__ import annotations
 
 import uuid
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from enum import Enum
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Index, Integer, JSON, String, Text, UniqueConstraint, inspect, text
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Index, Integer, JSON, String, Text, UniqueConstraint, and_, inspect, text
 from sqlalchemy import Enum as SAEnum
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -190,6 +190,14 @@ class Task(Base, UUIDPrimaryKeyMixin, TimestampMixin, VersionMixin, SoftDeleteMi
         cascade="all, delete-orphan",
         lazy="selectin",
     )
+    assignment_history: Mapped[list["TaskAssignmentHistory"]] = relationship(
+        "TaskAssignmentHistory",
+        foreign_keys="TaskAssignmentHistory.task_id",
+        back_populates="task",
+        cascade="all, delete-orphan",
+        order_by="TaskAssignmentHistory.assigned_at",
+        lazy="selectin",
+    )
     subtasks: Mapped[list["TaskSubtask"]] = relationship(
         "TaskSubtask",
         back_populates="task",
@@ -332,6 +340,75 @@ class TaskAssignee(Base, UUIDPrimaryKeyMixin, TimestampMixin):
 
     def __repr__(self) -> str:
         return f"<TaskAssignee task_id={self.task_id} user_id={self.user_id} role={self.assignment_role}>"
+
+
+class TaskAssignmentHistory(Base, UUIDPrimaryKeyMixin):
+    """
+    Immutable assignment history ledger for Enterprise Tasks and Recurring Schedules.
+
+    - Active assignments have ``unassigned_at = None``.
+    - Reassignments / removals close the previous row with ``unassigned_at``, ``unassigned_by``,
+      and optional ``reassigned_to_user_id`` instead of deleting assignment history.
+    - Recurring schedule definition assignment changes set ``task_id = None`` and
+      ``recurring_schedule_id = schedule.id``.
+    """
+
+    __tablename__ = "task_assignment_history"
+    __table_args__ = (
+        Index("ix_task_assignment_history_task_user", "task_id", "user_id", "unassigned_at"),
+        Index("ix_task_assignment_history_user_unassigned", "user_id", "unassigned_at"),
+        Index("ix_task_assignment_history_schedule_assigned", "recurring_schedule_id", "assigned_at"),
+    )
+
+    task_id: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(), ForeignKey("tasks.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    recurring_schedule_id: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(), ForeignKey("task_recurring_schedules.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        GUID(), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    assignment_role: Mapped[str] = mapped_column(String(50), default="ASSIGNEE", nullable=False)
+    assigned_by: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    assigned_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False
+    )
+    unassigned_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
+    unassigned_by: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    reassigned_to_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    source: Mapped[str] = mapped_column(String(40), default="MANUAL", nullable=False)
+
+    task: Mapped["Task | None"] = relationship(
+        "Task", foreign_keys=[task_id], back_populates="assignment_history"
+    )
+    recurring_schedule: Mapped["TaskRecurringSchedule | None"] = relationship(
+        "TaskRecurringSchedule", foreign_keys=[recurring_schedule_id]
+    )
+    user: Mapped["User | None"] = relationship("User", foreign_keys=[user_id], lazy="selectin")
+    assigned_by_user: Mapped["User | None"] = relationship(
+        "User", foreign_keys=[assigned_by], lazy="selectin"
+    )
+    unassigned_by_user: Mapped["User | None"] = relationship(
+        "User", foreign_keys=[unassigned_by], lazy="selectin"
+    )
+    reassigned_to_user: Mapped["User | None"] = relationship(
+        "User", foreign_keys=[reassigned_to_user_id], lazy="selectin"
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"<TaskAssignmentHistory task_id={self.task_id} schedule_id={self.recurring_schedule_id} "
+            f"user_id={self.user_id} unassigned_at={self.unassigned_at}>"
+        )
 
 
 class TaskSubtask(Base, UUIDPrimaryKeyMixin, TimestampMixin):
@@ -907,6 +984,17 @@ class TaskRecurringSchedule(Base, UUIDPrimaryKeyMixin, TimestampMixin, SoftDelet
     manager: Mapped["User | None"] = relationship("User", foreign_keys=[manager_id], lazy="selectin")
     creator: Mapped["User | None"] = relationship("User", foreign_keys=[created_by], lazy="selectin")
     tasks: Mapped[list["Task"]] = relationship("Task", back_populates="recurring_schedule", lazy="selectin")
+    assignment_history: Mapped[list["TaskAssignmentHistory"]] = relationship(
+        "TaskAssignmentHistory",
+        primaryjoin=lambda: and_(
+            TaskRecurringSchedule.id == TaskAssignmentHistory.recurring_schedule_id,
+            TaskAssignmentHistory.task_id.is_(None),
+        ),
+        foreign_keys="TaskAssignmentHistory.recurring_schedule_id",
+        order_by="TaskAssignmentHistory.assigned_at",
+        lazy="selectin",
+        viewonly=True,
+    )
 
     def __repr__(self) -> str:
         return f"<TaskRecurringSchedule id={self.id} title={self.title!r} freq={self.frequency} status={self.status}>"

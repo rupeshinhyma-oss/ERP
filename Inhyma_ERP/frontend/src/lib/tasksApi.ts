@@ -12,6 +12,7 @@ import type {
   MiniSubtaskInput,
   SprintStatus,
   TaskAttachment,
+  TaskAssignmentHistory,
   TaskBulkActionRequest,
   TaskComment,
   TaskDependency,
@@ -43,7 +44,7 @@ import type {
 } from "@/types/tasks";
 
 export interface TaskQueryParams {
-  view?: "all" | "my" | "kanban" | "calendar" | "department";
+  view?: "all" | "my" | "history" | "my_history" | "kanban" | "calendar" | "department";
   status?: TaskStatus;
   priority?: TaskPriority;
   issue_type?: IssueType | string;
@@ -615,6 +616,11 @@ export async function getRecurringSchedule(scheduleId: string): Promise<TaskRecu
   return res.data!;
 }
 
+export async function fetchRecurringScheduleHistory(scheduleId: string): Promise<TaskAssignmentHistory[]> {
+  const res = await apiGet<TaskAssignmentHistory[]>(`/tasks/recurring/schedules/${scheduleId}/history`);
+  return res.data || [];
+}
+
 export async function createRecurringSchedule(
   input: TaskRecurringScheduleCreateInput
 ): Promise<TaskRecurringSchedule> {
@@ -756,6 +762,7 @@ export const tasksApi = {
   fetchCapacityView,
   fetchRecurringSchedules,
   getRecurringSchedule,
+  fetchRecurringScheduleHistory,
   createRecurringSchedule,
   updateRecurringSchedule,
   deleteRecurringSchedule,

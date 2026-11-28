@@ -36,6 +36,7 @@ from app.tasks.models import (
     SprintStatus,
     Task,
     TaskAssignee,
+    TaskAssignmentHistory,
     TaskAttachment,
     TaskComment,
     TaskCommentAttachment,
@@ -71,6 +72,7 @@ from app.tasks.schemas import (
     CapacityDayAllocation,
     CapacityViewResponse,
     TaskAssigneeOptionRead,
+    TaskAssignmentHistoryRead,
     TaskDepartmentRead,
     TaskApprovalActionRequest,
     TaskBulkActionRequest,
@@ -189,17 +191,101 @@ class TaskService:
                 return set(permitted_raw)
         return set()
 
+    @staticmethod
+    def _format_user_label(user: Any) -> str:
+        if user is None:
+            return "User"
+        return (
+            getattr(user, "display_name", None)
+            or getattr(user, "full_name", None)
+            or getattr(user, "username", None)
+            or "User"
+        )
+
+    @staticmethod
+    def _is_active_task_assignee(task: Task, actor_id: uuid.UUID) -> bool:
+        return any(
+            getattr(a, "user_id", None) == actor_id
+            and getattr(a, "assignment_role", "ASSIGNEE") != "WATCHER"
+            for a in (getattr(task, "assignees", []) or [])
+        )
+
+    async def _is_active_dept_manager_for_task(self, task: Task, actor_id: uuid.UUID) -> bool:
+        """Return True if actor holds an active DepartmentLeadershipAssignment for the task's creator or active assignees."""
+        target_user_ids = {task.created_by} if task.created_by else set()
+        for a in getattr(task, "assignees", []) or []:
+            if getattr(a, "user_id", None):
+                target_user_ids.add(a.user_id)
+
+        if not target_user_ids:
+            return False
+
+        dept_subq = select(UserRole.role_id).where(
+            UserRole.user_id.in_(target_user_ids),
+            or_(UserRole.status == RoleAssignmentStatus.ACTIVE, UserRole.status.is_(None)),
+        )
+        mgr_stmt = (
+            select(DepartmentLeadershipAssignment.id)
+            .where(
+                DepartmentLeadershipAssignment.employee_id == actor_id,
+                DepartmentLeadershipAssignment.status == OrgRecordStatus.ACTIVE,
+                DepartmentLeadershipAssignment.department_id.in_(dept_subq),
+            )
+            .limit(1)
+        )
+        res = await self.repository.session.execute(mgr_stmt)
+        return res.scalar_one_or_none() is not None
+
+    async def _can_change_task_assignee(self, task: Task, current_user: Any) -> bool:
+        """
+        Strict assignment-change authorization policy:
+          - Admin (`is_super_admin` / `super_admin` / `*`) or administrative `task.manage`: ALLOWED.
+          - Original task creator (`task.created_by == actor_id`): ALLOWED if actor holds `task.assign`
+            (or `task.create` when called via authorized assignment workflow — note HTTP route also requires `task.assign`/`task.manage`).
+          - Active Department Manager of the task's creator or assignees: ALLOWED if actor holds `task.assign`.
+          - Current assignee (who is NOT creator, NOT Admin/task.manage, NOT active Dept Manager): STRICTLY DENIED.
+          - Previous assignee (who is NOT creator, NOT Admin/task.manage, NOT active Dept Manager): STRICTLY DENIED.
+          - Read-only viewers (`task.all_view`, `task.department_view`): STRICTLY DENIED.
+        """
+        if self._is_task_admin_manager(current_user):
+            return True
+
+        actor_id = getattr(current_user, "id", None)
+        if not actor_id:
+            return False
+
+        user_perms = set(getattr(current_user, "permissions", []) or [])
+        if "task.assign" not in user_perms:
+            return False
+
+        if task.created_by == actor_id:
+            return True
+
+        return await self._is_active_dept_manager_for_task(task, actor_id)
+
+    async def _assert_can_change_task_assignee(self, task: Task, current_user: Any) -> None:
+        if not await self._can_change_task_assignee(task, current_user):
+            raise ForbiddenException(
+                "You do not have permission to change the assignee of this task."
+            )
+
     async def _assert_can_mutate_task(self, task: Task, current_user: Any, action: str = "update") -> None:
         """
         Enforce strict Object-Level Authorization for task mutations.
         Viewing permissions (`task.view`, `task.department_view`, `task.all_view`)
-        NEVER grant mutation access to unrelated tasks.
+        and previous-assignee historical visibility NEVER grant mutation access.
         Allowed actors:
           - Admin (`is_super_admin` / `super_admin` / `*`) or administrative `task.manage`
           - Creator (for update or delete)
-          - Assignees (for update/assign/dependency/subtasks; delete restricted)
-          - Active Department Manager of creator or any assignee
+          - Active non-watcher assignees (for permitted edits/status/subtasks/dependencies;
+            NEVER for delete or changing task assignees!)
+          - Active Department Manager of creator or any active assignee
         """
+        normalized_action = (action or "").strip().lower()
+        if normalized_action in ("assign", "assign users to", "bulk assign", "reassign"):
+            await self._assert_can_change_task_assignee(task, current_user)
+            return
+
         if self._is_task_admin_manager(current_user):
             return
 
@@ -211,34 +297,14 @@ class TaskService:
         if task.created_by == actor_id:
             return
 
-        # Assignees can update, assign, link dependencies, but cannot delete
-        is_assignee = any(getattr(a, "user_id", None) == actor_id for a in getattr(task, "assignees", []))
+        # Active assignees can update status/fields/subtasks/dependencies, but CANNOT delete or reassign
+        is_assignee = self._is_active_task_assignee(task, actor_id)
         if is_assignee and action != "delete":
             return
 
-        # Active Department Manager check: verify current_user actively manages creator's or assignees' department(s)
-        target_user_ids = {task.created_by} if task.created_by else set()
-        for a in getattr(task, "assignees", []):
-            if getattr(a, "user_id", None):
-                target_user_ids.add(a.user_id)
-
-        if target_user_ids:
-            dept_subq = select(UserRole.role_id).where(
-                UserRole.user_id.in_(target_user_ids),
-                or_(UserRole.status == RoleAssignmentStatus.ACTIVE, UserRole.status.is_(None)),
-            )
-            mgr_stmt = (
-                select(DepartmentLeadershipAssignment.id)
-                .where(
-                    DepartmentLeadershipAssignment.employee_id == actor_id,
-                    DepartmentLeadershipAssignment.status == OrgRecordStatus.ACTIVE,
-                    DepartmentLeadershipAssignment.department_id.in_(dept_subq),
-                )
-                .limit(1)
-            )
-            res = await self.repository.session.execute(mgr_stmt)
-            if res.scalar_one_or_none():
-                return
+        # Active Department Manager check
+        if await self._is_active_dept_manager_for_task(task, actor_id):
+            return
 
         raise ForbiddenException(f"You do not have permission to {action} this task.")
 
@@ -408,40 +474,38 @@ class TaskService:
             return (None, None)
         raise ValueError(f"Malformed task department response from repository: expected tuple or None, got {type(dept_info).__name__}")
 
-    async def _assert_can_view_task(self, task: Task, current_user: Any) -> None:
+    async def _has_standard_view_access(self, task: Task, current_user: Any) -> bool:
         """
-        Enforce strict Read Authorization across all Enterprise Tasks endpoints.
-        Allowed viewers:
+        Check standard (non-historical) view authorization for a task:
           - Admin (`is_super_admin` / `super_admin` / `*`), Admin-approved (`task.all_view`),
             or administrative task manager (`task.manage`)
           - Creator or designated Approver of the task
-          - Assignees and Watchers on the task
+          - Active Assignees and Watchers on the task
           - Department Manager (active DepartmentLeadershipAssignment or explicit `task.department_view`)
             for tasks belonging to their own/managed department(s)
-        Plain Employees (only `task.view`) can NEVER view other employees' or department tasks.
         """
         if self._can_view_all_tasks(current_user):
-            return
+            return True
 
         actor_id = getattr(current_user, "id", None)
         if not actor_id:
-            raise ForbiddenException("You do not have permission to view this task.")
+            return False
 
         # Creator or Approver can always view
         if task.created_by == actor_id or getattr(task, "approver_id", None) == actor_id:
-            return
+            return True
 
-        # Assignees & Watchers can view
+        # Active Assignees & Watchers can view
         is_participant = any(getattr(a, "user_id", None) == actor_id for a in (getattr(task, "assignees", []) or [])) or \
                          any(getattr(w, "user_id", None) == actor_id for w in (getattr(task, "watchers", []) or []))
         if is_participant:
-            return
+            return True
 
         # Department-level visibility (Department Managers only — active leadership or `task.department_view`)
         dept_scope_ids = await self._resolve_user_department_scope_ids(current_user)
         task_dept_id, _ = await self._resolve_task_department(task.id)
         if task_dept_id and task_dept_id in dept_scope_ids:
-            return
+            return True
 
         # Check whether any task participant (creator / assignees) belongs to an authorized department
         target_user_ids = {task.created_by} if task.created_by else set()
@@ -465,7 +529,7 @@ class TaskService:
             )
             res = await self.repository.session.execute(mgr_stmt)
             if res.scalar_one_or_none():
-                return
+                return True
 
             if dept_scope_ids:
                 # Also allow if participant is an active member or active leader in actor's scoped department(s)
@@ -480,7 +544,7 @@ class TaskService:
                 )
                 member_res = await self.repository.session.execute(scoped_member_stmt)
                 if member_res.scalar_one_or_none():
-                    return
+                    return True
 
                 scoped_leader_stmt = (
                     select(DepartmentLeadershipAssignment.id)
@@ -493,7 +557,38 @@ class TaskService:
                 )
                 leader_res = await self.repository.session.execute(scoped_leader_stmt)
                 if leader_res.scalar_one_or_none():
-                    return
+                    return True
+
+        return False
+
+    async def _is_previous_assignee_for_task(self, task: Task, actor_id: uuid.UUID) -> bool:
+        """Return True if actor has a closed (reassigned/removed) non-watcher assignment history row on this task."""
+        if isinstance(self.repository.session, AsyncSession) and hasattr(self.repository, "has_previous_assignment"):
+            return await self.repository.has_previous_assignment(task.id, actor_id)
+        from sqlalchemy import inspect as sa_inspect
+        state = sa_inspect(task, raiseerr=False)
+        hist = state.dict.get("assignment_history", []) if state else getattr(task, "assignment_history", []) or []
+        return any(
+            getattr(h, "user_id", None) == actor_id
+            and getattr(h, "assignment_role", "ASSIGNEE") != "WATCHER"
+            and getattr(h, "unassigned_at", None) is not None
+            for h in hist
+        )
+
+    async def _assert_can_view_task(self, task: Task, current_user: Any) -> bool:
+        """
+        Enforce strict Read Authorization across all Enterprise Tasks endpoints.
+        Returns True if the actor's access is strictly read-only previous-assignee historical visibility,
+        or False if they have standard view access.
+        Plain Employees (only `task.view`) can NEVER view other employees' or department tasks
+        unless they are/were explicitly assigned to that task.
+        """
+        if await self._has_standard_view_access(task, current_user):
+            return False
+
+        actor_id = getattr(current_user, "id", None)
+        if actor_id and await self._is_previous_assignee_for_task(task, actor_id):
+            return True
 
         raise ForbiddenException("You do not have permission to view this task.")
 
@@ -575,6 +670,105 @@ class TaskService:
             recurrence_period=getattr(task, "recurrence_period", None),
         )
 
+    @staticmethod
+    def _sanitize_user_mini_dict(u: Any) -> Any:
+        if isinstance(u, dict):
+            u["email"] = None
+            u["username"] = None
+        return u
+
+    @classmethod
+    def sanitize_task_read_dict(cls, data: dict[str, Any]) -> dict[str, Any]:
+        """Strip private email/username snapshots when viewer has previous-assignee-only visibility."""
+        cls._sanitize_user_mini_dict(data.get("creator"))
+        cls._sanitize_user_mini_dict(data.get("approver"))
+        for a in data.get("assignees") or []:
+            if isinstance(a, dict):
+                cls._sanitize_user_mini_dict(a.get("user"))
+        for h in data.get("assignment_history") or []:
+            if isinstance(h, dict):
+                cls._sanitize_user_mini_dict(h.get("user"))
+                cls._sanitize_user_mini_dict(h.get("assigned_by_user"))
+                cls._sanitize_user_mini_dict(h.get("unassigned_by_user"))
+                cls._sanitize_user_mini_dict(h.get("reassigned_to_user"))
+        for st in data.get("subtasks") or []:
+            if isinstance(st, dict):
+                cls._sanitize_user_mini_dict(st.get("assignee"))
+                for sa in st.get("assignees") or []:
+                    if isinstance(sa, dict):
+                        cls._sanitize_user_mini_dict(sa.get("user"))
+        for c in data.get("comments") or []:
+            if isinstance(c, dict):
+                cls._sanitize_user_mini_dict(c.get("user"))
+        for e in data.get("escalations") or []:
+            if isinstance(e, dict):
+                cls._sanitize_user_mini_dict(e.get("from_user_rel"))
+                cls._sanitize_user_mini_dict(e.get("to_user_rel"))
+        return data
+
+    async def _annotate_task_summaries(
+        self,
+        tasks: list[Task],
+        summaries: list[TaskSummaryRead],
+        *,
+        current_user_id: uuid.UUID,
+        user_permissions: set[str],
+        is_super_admin: bool = False,
+    ) -> None:
+        """Batch-populate `can_change_assignee` and previous-assignee metadata without N+1 queries."""
+        if not tasks:
+            return
+        is_admin_mgr = is_task_admin_manager(user_permissions, is_super_admin=is_super_admin)
+        has_all_view = can_view_all_tasks(user_permissions, is_super_admin=is_super_admin)
+        has_assign_perm = is_admin_mgr or ("task.assign" in user_permissions)
+
+        managed_dept_users: set[uuid.UUID] = set()
+        if not is_admin_mgr and has_assign_perm and isinstance(self.repository.session, AsyncSession):
+            managed_depts = await self.repository.get_user_managed_department_ids(current_user_id)
+            if managed_depts:
+                managed_dept_users = await self.repository.get_department_user_ids(set(managed_depts))
+
+        prev_map: dict[uuid.UUID, TaskAssignmentHistory] = {}
+        if isinstance(self.repository.session, AsyncSession) and hasattr(
+            self.repository, "get_user_previous_assignment_map"
+        ):
+            prev_map = await self.repository.get_user_previous_assignment_map(
+                current_user_id, [t.id for t in tasks]
+            )
+
+        for t, s in zip(tasks, summaries):
+            is_active = self._is_active_task_assignee(t, current_user_id)
+            if is_admin_mgr:
+                s.can_change_assignee = True
+            elif has_assign_perm:
+                participant_ids = ({t.created_by} if t.created_by else set()) | {
+                    a.user_id for a in (getattr(t, "assignees", []) or []) if getattr(a, "user_id", None)
+                }
+                s.can_change_assignee = (t.created_by == current_user_id) or bool(
+                    managed_dept_users and (participant_ids & managed_dept_users)
+                )
+            else:
+                s.can_change_assignee = False
+
+            prev_row = prev_map.get(t.id)
+            is_prev = bool(prev_row is not None and not is_active)
+            s.is_previously_assigned = is_prev
+            if is_prev and prev_row is not None:
+                s.reassigned_at = prev_row.unassigned_at
+                s.reassigned_by_name = (
+                    self._format_user_label(prev_row.unassigned_by_user)
+                    if prev_row.unassigned_by_user
+                    else None
+                )
+                if not has_all_view and t.created_by != current_user_id and not s.can_change_assignee:
+                    if s.creator is not None:
+                        s.creator.email = None
+                        s.creator.username = None
+                    for a in s.assignees:
+                        if a.user is not None:
+                            a.user.email = None
+                            a.user.username = None
+
     async def _broadcast_task_event(
         self,
         event_type: str,
@@ -582,6 +776,7 @@ class TaskService:
         *,
         actor_id: uuid.UUID | None = None,
         extra_payload: dict[str, Any] | None = None,
+        extra_user_ids: set[uuid.UUID] | None = None,
     ) -> None:
         """Broadcast live task event to tasks module channel and affected users."""
         payload = {
@@ -610,6 +805,9 @@ class TaskService:
         # Also broadcast directly to creator and assignees
         if task.created_by:
             channels.append(user_channel(task.created_by))
+        if extra_user_ids:
+            for uid in extra_user_ids:
+                channels.append(user_channel(uid))
         from sqlalchemy import inspect as sa_inspect
         try:
             insp = sa_inspect(task)
@@ -680,17 +878,64 @@ class TaskService:
                 s.department_id = d_info[0]
                 s.department_name = d_info[1]
             summaries.append(s)
+        await self._annotate_task_summaries(
+            tasks,
+            summaries,
+            current_user_id=current_user_id,
+            user_permissions=user_permissions,
+            is_super_admin=is_super_admin,
+        )
         return summaries, total
 
     async def get_task(self, task_id: uuid.UUID, current_user: Any | None = None) -> Task:
         task = await self.repository.get_task_by_id(task_id)
         if not task:
             raise NotFoundException(f"Task with ID {task_id} not found.")
+        is_prev_only = False
         if current_user is not None:
-            await self._assert_can_view_task(task, current_user)
+            is_prev_only = await self._assert_can_view_task(task, current_user)
         dept_id, dept_name = await self._resolve_task_department(task.id)
         setattr(task, "department_id", dept_id)
         setattr(task, "department_name", dept_name)
+        if current_user is not None:
+            setattr(task, "can_change_assignee", await self._can_change_task_assignee(task, current_user))
+            actor_id = getattr(current_user, "id", None)
+            prev_row: TaskAssignmentHistory | None = None
+            if actor_id and not self._is_active_task_assignee(task, actor_id):
+                from sqlalchemy import inspect as sa_inspect
+                state = sa_inspect(task, raiseerr=False)
+                loaded_hist = (
+                    state.dict.get("assignment_history")
+                    if state
+                    else getattr(task, "assignment_history", None)
+                )
+                if loaded_hist:
+                    closed_for_actor = [
+                        h for h in loaded_hist
+                        if getattr(h, "user_id", None) == actor_id
+                        and getattr(h, "assignment_role", "ASSIGNEE") != "WATCHER"
+                        and getattr(h, "unassigned_at", None) is not None
+                    ]
+                    if closed_for_actor:
+                        closed_for_actor.sort(key=lambda h: h.unassigned_at, reverse=True)
+                        prev_row = closed_for_actor[0]
+                elif is_prev_only and isinstance(self.repository.session, AsyncSession) and hasattr(
+                    self.repository, "get_user_previous_assignment_map"
+                ):
+                    prev_map = await self.repository.get_user_previous_assignment_map(actor_id, [task.id])
+                    prev_row = prev_map.get(task.id)
+
+            is_prev = bool(prev_row is not None)
+            setattr(task, "is_previously_assigned", is_prev)
+            setattr(task, "reassigned_at", prev_row.unassigned_at if prev_row else None)
+            setattr(
+                task,
+                "reassigned_by_name",
+                self._format_user_label(prev_row.unassigned_by_user)
+                if prev_row and getattr(prev_row, "unassigned_by_user", None)
+                else None,
+            )
+            setattr(task, "_sanitize_for_previous_assignee", is_prev_only)
         return task
 
     async def create_task(
@@ -769,11 +1014,23 @@ class TaskService:
 
         # Add assignees
         if payload.assignee_ids:
-            await self.repository.set_assignees(task, payload.assignee_ids, role="ASSIGNEE")
+            await self.repository.set_assignees(
+                task,
+                payload.assignee_ids,
+                role="ASSIGNEE",
+                actor_id=current_user.id,
+                source="TASK_CREATE",
+            )
 
         # Add watchers
         if payload.watcher_ids:
-            await self.repository.set_assignees(task, payload.watcher_ids, role="WATCHER")
+            await self.repository.set_assignees(
+                task,
+                payload.watcher_ids,
+                role="WATCHER",
+                actor_id=current_user.id,
+                source="TASK_CREATE",
+            )
 
         # Add labels
         if payload.label_ids:
@@ -866,7 +1123,7 @@ class TaskService:
                 )
 
         await self.repository.session.commit()
-        refreshed = await self.get_task(task.id)
+        refreshed = await self.get_task(task.id, current_user=current_user)
 
         # Audit Log
         await self.audit_service.record(
@@ -919,6 +1176,15 @@ class TaskService:
         payload: TaskUpdate,
         current_user: Any,
     ) -> Task:
+        # Block direct PATCH attempts to mutate assignees (bypass protection)
+        forbidden_assignee_fields = {"assignee_id", "assignee_ids", "assignees"} & getattr(
+            payload, "model_fields_set", set()
+        )
+        if forbidden_assignee_fields:
+            raise ForbiddenException(
+                "Task assignees cannot be modified via task update. Use the authorized assignment endpoint."
+            )
+
         if isinstance(self.repository.session, AsyncSession) and hasattr(self.repository, "lock_task_row"):
             await self.repository.lock_task_row(task_id)
 
@@ -1081,7 +1347,7 @@ class TaskService:
 
         task.version = (task.version or 0) + 1
         await self.repository.session.commit()
-        refreshed = await self.get_task(task.id)
+        refreshed = await self.get_task(task.id, current_user=current_user)
 
         new_values = {
             "title": refreshed.title,
@@ -1317,18 +1583,41 @@ class TaskService:
             await self.repository.lock_task_row(task_id)
 
         task = await self.get_task(task_id, current_user=current_user)
-        await self._assert_can_mutate_task(task, current_user, action="assign users to")
-
         deduped_ids = list(dict.fromkeys(user_ids or []))
+
+        if role == "WATCHER":
+            await self._assert_can_mutate_task(task, current_user, action="manage watchers on")
+            active_non_watcher_ids = {
+                a.user_id
+                for a in (getattr(task, "assignees", []) or [])
+                if getattr(a, "assignment_role", "ASSIGNEE") != "WATCHER"
+            }
+            if set(deduped_ids) & active_non_watcher_ids:
+                raise ForbiddenException(
+                    "Cannot downgrade an active task assignee into a watcher. Use authorized assignment controls."
+                )
+        else:
+            await self._assert_can_change_task_assignee(task, current_user)
+
         if deduped_ids:
             await self._validate_eligible_active_users(deduped_ids, field_label=role.lower())
 
-        old_ids = {a.user_id for a in task.assignees if a.assignment_role == role}
-        await self.repository.set_assignees(task, deduped_ids, role=role)
+        old_role_rows = [a for a in (getattr(task, "assignees", []) or []) if a.assignment_role == role]
+        old_ids = {a.user_id for a in old_role_rows}
+        old_names = [self._format_user_label(getattr(a, "user", None)) for a in old_role_rows]
+
+        await self.repository.set_assignees(
+            task,
+            deduped_ids,
+            role=role,
+            actor_id=current_user.id,
+            source="TASK_ASSIGN",
+        )
         await self.repository.session.commit()
-        refreshed = await self.get_task(task.id)
+        refreshed = await self.get_task(task.id, current_user=current_user)
 
         newly_added = set(deduped_ids) - old_ids
+        removed_ids = old_ids - set(deduped_ids)
         for uid in newly_added:
             if uid != current_user.id:
                 notif_type = "task_watcher" if role == "WATCHER" else "task_assigned"
@@ -1346,6 +1635,11 @@ class TaskService:
                     link=f"/tasks?id={refreshed.id}",
                 )
 
+        new_names = [
+            self._format_user_label(getattr(a, "user", None))
+            for a in (getattr(refreshed, "assignees", []) or [])
+            if a.assignment_role == role
+        ]
         await self.audit_service.record(
             action=AuditAction.ROLE_ASSIGNED,
             module="tasks",
@@ -1353,11 +1647,25 @@ class TaskService:
             username_snapshot=getattr(current_user, "display_name", None) or getattr(current_user, "full_name", None) or current_user.username,
             entity_type="Task",
             entity_id=str(refreshed.id),
-            new_values={"role": role, "user_ids": [str(u) for u in user_ids]},
+            old_values={
+                "role": role,
+                "user_ids": [str(u) for u in sorted(old_ids, key=str)],
+                "user_names": old_names,
+            },
+            new_values={
+                "role": role,
+                "user_ids": [str(u) for u in deduped_ids],
+                "user_names": new_names,
+            },
             description=f"Updated {role.lower()}s for task '{refreshed.title}'",
         )
 
-        await self._broadcast_task_event("TASK_ASSIGNED", refreshed, actor_id=current_user.id)
+        await self._broadcast_task_event(
+            "TASK_ASSIGNED",
+            refreshed,
+            actor_id=current_user.id,
+            extra_user_ids=removed_ids if removed_ids else None,
+        )
         return refreshed
 
     async def _process_mentions(
@@ -1900,6 +2208,10 @@ class TaskService:
             await self.repository.lock_task_row(task_id)
 
         task = await self.get_task(task_id, current_user=current_user)
+        if getattr(task, "_sanitize_for_previous_assignee", False) or not await self._has_standard_view_access(
+            task, current_user
+        ):
+            raise ForbiddenException("You do not have permission to escalate this task.")
         await self._validate_eligible_active_users([to_user], field_label="escalation target")
 
         # Idempotency guard: prevent duplicate DB rows when clients retry an identical escalation
@@ -2052,15 +2364,22 @@ class TaskService:
         if not is_sub_assignee:
             await self._assert_can_mutate_task(task, current_user, action="update subtask on")
 
+        old_sub_assignees = {a.user_id for a in (getattr(subtask, "assignees", []) or []) if getattr(a, "user_id", None)}
+        if subtask.assignee_id:
+            old_sub_assignees.add(subtask.assignee_id)
+
+        if assignee_id is not None or assignee_ids is not None:
+            requested_sub_assignees = set(assignee_ids or [])
+            if assignee_id is not None:
+                requested_sub_assignees.add(assignee_id)
+            if requested_sub_assignees != old_sub_assignees:
+                await self._assert_can_change_task_assignee(task, current_user)
+
         sub_uids = list(assignee_ids or [])
         if assignee_id:
             sub_uids.append(assignee_id)
         if sub_uids:
             await self._validate_eligible_active_users(sub_uids, field_label="subtask assignee")
-
-        old_sub_assignees = {a.user_id for a in (getattr(subtask, "assignees", []) or []) if getattr(a, "user_id", None)}
-        if subtask.assignee_id:
-            old_sub_assignees.add(subtask.assignee_id)
 
         was_completed = subtask.completed or subtask.status == "DONE"
         updated = await self.repository.update_subtask(
@@ -2164,19 +2483,106 @@ class TaskService:
             },
         })
 
-        # 2. Assignees
-        for a in task.assignees:
-            role_label = a.assignment_role.capitalize()
-            user_name = a.user.full_name if a.user else "User"
-            timeline.append({
-                "id": f"assignee-{a.id}",
-                "timestamp": a.created_at,
-                "actor_id": None,
-                "actor_name": "Task System",
-                "event_type": "USER_ASSIGNED",
-                "description": f"Added {user_name} as {role_label}",
-                "details": {"role": a.assignment_role, "user_id": str(a.user_id)},
-            })
+        # 2. Assignment History (immutable chronological record including previous assignees)
+        from sqlalchemy import inspect as sa_inspect
+        task_state = sa_inspect(task, raiseerr=False)
+        hist_rows = (
+            task_state.dict.get("assignment_history", [])
+            if task_state
+            else getattr(task, "assignment_history", []) or []
+        )
+        if hist_rows:
+            for h in hist_rows:
+                role_label = (h.assignment_role or "ASSIGNEE").capitalize()
+                user_name = self._format_user_label(getattr(h, "user", None))
+                assigned_by_name = (
+                    self._format_user_label(getattr(h, "assigned_by_user", None))
+                    if getattr(h, "assigned_by_user", None)
+                    else "Task System"
+                )
+                timeline.append({
+                    "id": f"assign-hist-in-{h.id}",
+                    "timestamp": h.assigned_at,
+                    "actor_id": h.assigned_by,
+                    "actor_name": assigned_by_name,
+                    "event_type": "USER_ASSIGNED",
+                    "description": f"Assigned {user_name} as {role_label}",
+                    "details": {
+                        "role": h.assignment_role,
+                        "user_id": str(h.user_id),
+                        "user_name": user_name,
+                        "source": h.source,
+                    },
+                })
+                if h.unassigned_at is not None:
+                    unassigned_by_name = (
+                        self._format_user_label(getattr(h, "unassigned_by_user", None))
+                        if getattr(h, "unassigned_by_user", None)
+                        else "Task System"
+                    )
+                    if h.reassigned_to_user_id:
+                        new_name = (
+                            self._format_user_label(getattr(h, "reassigned_to_user", None))
+                            if getattr(h, "reassigned_to_user", None)
+                            else "another user"
+                        )
+                        timeline.append({
+                            "id": f"assign-hist-out-{h.id}",
+                            "timestamp": h.unassigned_at,
+                            "actor_id": h.unassigned_by,
+                            "actor_name": unassigned_by_name,
+                            "event_type": "USER_REASSIGNED",
+                            "description": f"Reassigned from {user_name} to {new_name}",
+                            "details": {
+                                "role": h.assignment_role,
+                                "previous_user_id": str(h.user_id),
+                                "previous_user_name": user_name,
+                                "new_user_id": str(h.reassigned_to_user_id),
+                                "new_user_name": new_name,
+                                "source": h.source,
+                            },
+                        })
+                    else:
+                        timeline.append({
+                            "id": f"assign-hist-out-{h.id}",
+                            "timestamp": h.unassigned_at,
+                            "actor_id": h.unassigned_by,
+                            "actor_name": unassigned_by_name,
+                            "event_type": "USER_UNASSIGNED",
+                            "description": f"Removed {user_name} from {role_label}",
+                            "details": {
+                                "role": h.assignment_role,
+                                "previous_user_id": str(h.user_id),
+                                "previous_user_name": user_name,
+                                "source": h.source,
+                            },
+                        })
+            # Also include watchers in timeline
+            for a in task.assignees:
+                if a.assignment_role == "WATCHER":
+                    user_name = a.user.full_name if a.user else "User"
+                    timeline.append({
+                        "id": f"assignee-{a.id}",
+                        "timestamp": a.created_at,
+                        "actor_id": None,
+                        "actor_name": "Task System",
+                        "event_type": "USER_ASSIGNED",
+                        "description": f"Added {user_name} as Watcher",
+                        "details": {"role": a.assignment_role, "user_id": str(a.user_id)},
+                    })
+        else:
+            for a in task.assignees:
+                role_label = a.assignment_role.capitalize()
+                user_name = a.user.full_name if a.user else "User"
+                timeline.append({
+                    "id": f"assignee-{a.id}",
+                    "timestamp": a.created_at,
+                    "actor_id": None,
+                    "actor_name": "Task System",
+                    "event_type": "USER_ASSIGNED",
+                    "description": f"Added {user_name} as {role_label}",
+                    "details": {"role": a.assignment_role, "user_id": str(a.user_id)},
+                })
 
         # 3. Subtasks
         for s in task.subtasks:
@@ -2541,7 +2947,7 @@ class TaskService:
         task.approval_notes = payload.notes
         task.version += 1
         await self.repository.session.commit()
-        refreshed = await self.get_task(task.id)
+        refreshed = await self.get_task(task.id, current_user=current_user)
 
         await self.notification_service.notify_user(
             user_id=payload.approver_id,
@@ -2625,7 +3031,7 @@ class TaskService:
             task.approval_notes = payload.notes
         task.version += 1
         await self.repository.session.commit()
-        refreshed = await self.get_task(task.id)
+        refreshed = await self.get_task(task.id, current_user=current_user)
 
         recipients = {a.user_id for a in task.assignees}
         if task.created_by:
@@ -2663,6 +3069,8 @@ class TaskService:
         current_user: Any,
     ) -> Task:
         orig = await self.get_task(task_id, current_user=current_user)
+        if getattr(orig, "_sanitize_for_previous_assignee", False):
+            raise ForbiddenException("You do not have permission to duplicate a previously assigned task.")
         user_perms = set(getattr(current_user, "permissions", []))
         if not (
             getattr(current_user, "is_super_admin", False)
@@ -2695,11 +3103,23 @@ class TaskService:
 
         assignee_uids = [a.user_id for a in orig.assignees if a.assignment_role == "ASSIGNEE"]
         if assignee_uids:
-            await self.repository.set_assignees(new_task, assignee_uids, role="ASSIGNEE")
+            await self.repository.set_assignees(
+                new_task,
+                assignee_uids,
+                role="ASSIGNEE",
+                actor_id=current_user.id,
+                source="TASK_CREATE",
+            )
         if options.include_watchers:
             watcher_uids = [a.user_id for a in orig.assignees if a.assignment_role == "WATCHER"]
             if watcher_uids:
-                await self.repository.set_assignees(new_task, watcher_uids, role="WATCHER")
+                await self.repository.set_assignees(
+                    new_task,
+                    watcher_uids,
+                    role="WATCHER",
+                    actor_id=current_user.id,
+                    source="TASK_CREATE",
+                )
 
         if options.include_subtasks and orig.subtasks:
             for st in orig.subtasks:
@@ -2777,8 +3197,14 @@ class TaskService:
         payload: TaskBulkActionRequest,
         current_user: Any,
     ) -> TaskBulkActionResponse:
+        if payload.action == "ASSIGN":
+            user_perms = set(getattr(current_user, "permissions", []) or [])
+            if not self._is_task_admin_manager(current_user) and "task.assign" not in user_perms:
+                raise ForbiddenException("You do not have permission to change task assignees.")
+
         authorized_task_ids = []
         failed_ids = []
+        forbidden_ids = []
         for tid in payload.task_ids:
             task = await self.repository.get_task_by_id(tid)
             if not task:
@@ -2790,8 +3216,13 @@ class TaskService:
                 authorized_task_ids.append(tid)
             except ForbiddenException:
                 failed_ids.append(tid)
+                forbidden_ids.append(tid)
 
         if not authorized_task_ids:
+            if payload.action == "ASSIGN" and forbidden_ids:
+                raise ForbiddenException(
+                    "You do not have permission to change the assignee of the selected task(s)."
+                )
             return TaskBulkActionResponse(
                 success_count=0,
                 failed_ids=payload.task_ids,
@@ -3242,10 +3673,53 @@ class TaskService:
         }
         return res
 
+    async def _can_manage_recurring_schedule(
+        self,
+        schedule: TaskRecurringSchedule,
+        current_user: Any | None,
+    ) -> bool:
+        if current_user is None:
+            return False
+        try:
+            await self._assert_can_access_recurring_schedule(schedule, current_user, for_mutation=True)
+            return True
+        except ForbiddenException:
+            return False
+
+    async def _to_recurring_schedule_read(
+        self,
+        schedule: TaskRecurringSchedule,
+        current_user: Any | None,
+        *,
+        can_manage_override: bool | None = None,
+    ) -> TaskRecurringScheduleRead:
+        can_manage = (
+            can_manage_override
+            if can_manage_override is not None
+            else await self._can_manage_recurring_schedule(schedule, current_user)
+        )
+        read_obj = TaskRecurringScheduleRead.model_validate(schedule)
+        read_obj.can_manage_schedule = can_manage
+        return read_obj
+
+    async def assert_can_generate_recurring_schedule(
+        self, schedule_id: uuid.UUID, current_user: Any
+    ) -> TaskRecurringSchedule:
+        schedule = await self.repository.get_recurring_schedule(schedule_id)
+        if not schedule:
+            raise NotFoundException(f"Recurring task schedule {schedule_id} not found.")
+        await self._assert_can_access_recurring_schedule(schedule, current_user, for_mutation=True)
+        return schedule
+
     async def create_recurring_schedule(
         self, payload: TaskRecurringScheduleCreate, current_user: Any
     ) -> TaskRecurringScheduleRead:
         """Create a recurring task schedule."""
+        if payload.assignee_id:
+            await self._validate_eligible_active_users([payload.assignee_id], field_label="assignee")
+        if payload.manager_id:
+            await self._validate_eligible_active_users([payload.manager_id], field_label="manager")
+
         freq_str = payload.frequency.value if hasattr(payload.frequency, "value") else str(payload.frequency)
         nxt = calculate_next_occurrence(
             frequency=freq_str,
@@ -3278,6 +3752,18 @@ class TaskService:
             next_run_date=next_due,
         )
         created = await self.repository.create_recurring_schedule(schedule)
+        if created.assignee_id and isinstance(self.repository.session, AsyncSession) and hasattr(
+            self.repository, "record_recurring_schedule_assignment_change"
+        ):
+            await self.repository.record_recurring_schedule_assignment_change(
+                schedule=created,
+                old_assignee_id=None,
+                new_assignee_id=created.assignee_id,
+                actor_id=current_user.id,
+                source="RECURRING_CREATE",
+            )
+            await self.repository.session.commit()
+            created = (await self.repository.get_recurring_schedule(created.id)) or created
         await self.audit_service.record(
             action=AuditAction.CREATE,
             module="tasks",
@@ -3285,10 +3771,15 @@ class TaskService:
             username_snapshot=getattr(current_user, "display_name", None) or getattr(current_user, "full_name", None) or getattr(current_user, "username", "system"),
             entity_type="TaskRecurringSchedule",
             entity_id=str(created.id),
-            new_values={"title": created.title, "frequency": created.frequency, "status": created.status},
+            new_values={
+                "title": created.title,
+                "frequency": created.frequency,
+                "status": created.status,
+                "assignee_id": str(created.assignee_id) if created.assignee_id else None,
+            },
             description=f"Created recurring schedule '{created.title}' ({created.frequency})",
         )
-        return TaskRecurringScheduleRead.model_validate(created)
+        return await self._to_recurring_schedule_read(created, current_user, can_manage_override=True)
 
     async def _assert_can_access_recurring_schedule(
         self,
@@ -3302,10 +3793,13 @@ class TaskService:
         - Admin / Task Manager (`task.manage`): full read & mutation access.
         - Admin-approved read viewer (`task.all_view`): read access across all departments;
           cannot mutate schedules they do not own/manage.
-        - Department Manager: read access to own/managed department schedules; mutation
-          allowed if creator, assigned manager, or active leader of the schedule's department.
-        - Plain Employee: read access ONLY to schedules assigned to / created by / managed by self;
-          mutation allowed only if creator.
+        - Creator (`schedule.created_by == actor_id`): read & mutation access to own schedule.
+        - Department Manager (active DepartmentLeadershipAssignment): read & mutation access
+          for schedules in their managed department(s).
+        - Designated schedule manager (`schedule.manager_id == actor_id` and NOT the assignee):
+          read & mutation access.
+        - Assigned Employee (`schedule.assignee_id == actor_id`, not creator/admin/active manager):
+          READ-ONLY access; STRICTLY DENIED on all mutations (403), including assignee changes.
         """
         if current_user is None:
             return
@@ -3323,7 +3817,7 @@ class TaskService:
             return
         if not for_mutation and (schedule.assignee_id == actor_id or schedule.manager_id == actor_id):
             return
-        if for_mutation and schedule.manager_id == actor_id:
+        if for_mutation and schedule.manager_id == actor_id and schedule.assignee_id != actor_id:
             return
 
         if for_mutation:
@@ -3356,7 +3850,35 @@ class TaskService:
         if not schedule:
             raise NotFoundException(f"Recurring task schedule {schedule_id} not found.")
         await self._assert_can_access_recurring_schedule(schedule, current_user, for_mutation=False)
-        return TaskRecurringScheduleRead.model_validate(schedule)
+        return await self._to_recurring_schedule_read(schedule, current_user)
+
+    async def get_recurring_schedule_history(
+        self,
+        schedule_id: uuid.UUID,
+        current_user: Any,
+    ) -> list[TaskAssignmentHistoryRead]:
+        schedule = await self.repository.get_recurring_schedule(schedule_id)
+        if not schedule:
+            raise NotFoundException(f"Recurring task schedule {schedule_id} not found.")
+        sanitize_emails = False
+        try:
+            await self._assert_can_access_recurring_schedule(schedule, current_user, for_mutation=False)
+        except ForbiddenException:
+            # Allow previous schedule assignee read-only visibility of assignment history
+            actor_id = getattr(current_user, "id", None)
+            rows_all = await self.repository.list_recurring_schedule_assignment_history(schedule_id)
+            if not actor_id or not any(r.user_id == actor_id for r in rows_all):
+                raise
+            sanitize_emails = True
+        rows = await self.repository.list_recurring_schedule_assignment_history(schedule_id)
+        result = [TaskAssignmentHistoryRead.model_validate(r) for r in rows]
+        if sanitize_emails:
+            for item in result:
+                for u_field in (item.user, item.assigned_by_user, item.unassigned_by_user, item.reassigned_to_user):
+                    if u_field is not None:
+                        u_field.email = None
+                        u_field.username = None
+        return result
 
     async def list_recurring_schedules(
         self,
@@ -3390,7 +3912,38 @@ class TaskService:
             scoped_department_user_ids=scoped_dept_users,
             scoped_department_names=scoped_dept_names,
         )
-        return [TaskRecurringScheduleRead.model_validate(s) for s in schedules]
+        # Precompute manager scope once to avoid N+1 checks across schedules
+        is_admin_mgr = self._is_task_admin_manager(current_user) if current_user is not None else False
+        actor_id = getattr(current_user, "id", None) if current_user is not None else None
+        managed_dept_names: set[str] = set()
+        managed_dept_users: set[uuid.UUID] = set()
+        if current_user is not None and not is_admin_mgr and actor_id and isinstance(self.repository.session, AsyncSession):
+            managed_depts = await self.repository.get_user_managed_department_ids(actor_id)
+            if managed_depts:
+                managed_dept_names = await self.repository.get_department_names_by_ids(set(managed_depts))
+                managed_dept_users = await self.repository.get_department_user_ids(set(managed_depts))
+
+        output: list[TaskRecurringScheduleRead] = []
+        for s in schedules:
+            if current_user is None:
+                can_mgr = False
+            elif is_admin_mgr:
+                can_mgr = True
+            elif actor_id and (
+                s.created_by == actor_id
+                or (s.manager_id == actor_id and s.assignee_id != actor_id)
+                or (s.department and s.department.strip().lower() in managed_dept_names)
+                or (s.assignee_id and s.assignee_id in managed_dept_users)
+                or (s.manager_id and s.manager_id in managed_dept_users)
+                or (s.created_by and s.created_by in managed_dept_users)
+            ):
+                can_mgr = True
+            else:
+                can_mgr = False
+            read_obj = TaskRecurringScheduleRead.model_validate(s)
+            read_obj.can_manage_schedule = can_mgr
+            output.append(read_obj)
+        return output
 
     async def update_recurring_schedule(
         self,
@@ -3403,8 +3956,14 @@ class TaskService:
             raise NotFoundException(f"Recurring task schedule {schedule_id} not found.")
         await self._assert_can_access_recurring_schedule(schedule, current_user, for_mutation=True)
 
+        if payload.assignee_id is not None:
+            await self._validate_eligible_active_users([payload.assignee_id], field_label="assignee")
+        if payload.manager_id is not None:
+            await self._validate_eligible_active_users([payload.manager_id], field_label="manager")
+
         old_status = schedule.status
         old_title = schedule.title
+        old_assignee_id = schedule.assignee_id
 
         new_freq = payload.frequency.value if payload.frequency and hasattr(payload.frequency, "value") else (str(payload.frequency) if payload.frequency else schedule.frequency)
         new_config = payload.recurrence_config if payload.recurrence_config is not None else schedule.recurrence_config
@@ -3455,7 +4014,21 @@ class TaskService:
         if payload.effective_end_date is not None:
             schedule.effective_end_date = payload.effective_end_date
 
-        # If explicitly opted to update pending instances:
+        # Record recurring definition assignee change in immutable assignment history.
+        # IMPORTANT: Never rewrite historical/already-generated instances' assignees!
+        if payload.assignee_id is not None and payload.assignee_id != old_assignee_id:
+            if isinstance(self.repository.session, AsyncSession) and hasattr(
+                self.repository, "record_recurring_schedule_assignment_change"
+            ):
+                await self.repository.record_recurring_schedule_assignment_change(
+                    schedule=schedule,
+                    old_assignee_id=old_assignee_id,
+                    new_assignee_id=payload.assignee_id,
+                    actor_id=current_user.id,
+                    source="RECURRING_UPDATE",
+                )
+
+        # If explicitly opted to update pending instances (deliberately preserving each instance's original assignees):
         if payload.update_pending_instances:
             pending_instances = await self.repository.list_recurring_instances(
                 schedule_id=schedule.id, history_only=False
@@ -3466,19 +4039,27 @@ class TaskService:
                 t.approver_id = schedule.manager_id
 
         await self.repository.session.commit()
-        await self.repository.session.refresh(schedule, ["assignee", "manager", "creator"])
+        refreshed = (await self.repository.get_recurring_schedule(schedule.id)) or schedule
         await self.audit_service.record(
             action=AuditAction.UPDATE,
             module="tasks",
             user_id=current_user.id,
             username_snapshot=getattr(current_user, "display_name", None) or getattr(current_user, "full_name", None) or getattr(current_user, "username", "system"),
             entity_type="TaskRecurringSchedule",
-            entity_id=str(schedule.id),
-            old_values={"title": old_title, "status": old_status},
-            new_values={"title": schedule.title, "status": schedule.status},
-            description=f"Updated recurring schedule '{schedule.title}'",
+            entity_id=str(refreshed.id),
+            old_values={
+                "title": old_title,
+                "status": old_status,
+                "assignee_id": str(old_assignee_id) if old_assignee_id else None,
+            },
+            new_values={
+                "title": refreshed.title,
+                "status": refreshed.status,
+                "assignee_id": str(refreshed.assignee_id) if refreshed.assignee_id else None,
+            },
+            description=f"Updated recurring schedule '{refreshed.title}'",
         )
-        return TaskRecurringScheduleRead.model_validate(schedule)
+        return await self._to_recurring_schedule_read(refreshed, current_user, can_manage_override=True)
 
     async def pause_recurring_schedule(
         self, schedule_id: uuid.UUID, current_user: Any
@@ -3490,25 +4071,25 @@ class TaskService:
         if schedule.status == "ARCHIVED":
             raise ValidationException("Cannot pause an archived recurring schedule. Please restore the schedule first.")
         if schedule.status == "PAUSED":
-            return TaskRecurringScheduleRead.model_validate(schedule)
+            return await self._to_recurring_schedule_read(schedule, current_user, can_manage_override=True)
 
         prev_status = schedule.status
         schedule.status = "PAUSED"
         schedule.next_run_date = None
         await self.repository.session.commit()
-        await self.repository.session.refresh(schedule, ["assignee", "manager", "creator"])
+        refreshed = (await self.repository.get_recurring_schedule(schedule.id)) or schedule
         await self.audit_service.record(
             action=AuditAction.UPDATE,
             module="tasks",
             user_id=current_user.id,
             username_snapshot=getattr(current_user, "display_name", None) or getattr(current_user, "full_name", None) or getattr(current_user, "username", "system"),
             entity_type="TaskRecurringSchedule",
-            entity_id=str(schedule.id),
+            entity_id=str(refreshed.id),
             old_values={"status": prev_status},
             new_values={"status": "PAUSED"},
-            description=f"Paused recurring schedule '{schedule.title}'",
+            description=f"Paused recurring schedule '{refreshed.title}'",
         )
-        return TaskRecurringScheduleRead.model_validate(schedule)
+        return await self._to_recurring_schedule_read(refreshed, current_user, can_manage_override=True)
 
     async def resume_recurring_schedule(
         self, schedule_id: uuid.UUID, current_user: Any
@@ -3520,7 +4101,7 @@ class TaskService:
         if schedule.status == "ARCHIVED":
             raise ValidationException("Cannot resume an archived recurring schedule directly. Please unarchive / restore the schedule first.")
         if schedule.status == "ACTIVE":
-            return TaskRecurringScheduleRead.model_validate(schedule)
+            return await self._to_recurring_schedule_read(schedule, current_user, can_manage_override=True)
 
         prev_status = schedule.status
         schedule.status = "ACTIVE"
@@ -3533,19 +4114,19 @@ class TaskService:
         )
         schedule.next_run_date = nxt[0] if nxt else None
         await self.repository.session.commit()
-        await self.repository.session.refresh(schedule, ["assignee", "manager", "creator"])
+        refreshed = (await self.repository.get_recurring_schedule(schedule.id)) or schedule
         await self.audit_service.record(
             action=AuditAction.UPDATE,
             module="tasks",
             user_id=current_user.id,
             username_snapshot=getattr(current_user, "display_name", None) or getattr(current_user, "full_name", None) or getattr(current_user, "username", "system"),
             entity_type="TaskRecurringSchedule",
-            entity_id=str(schedule.id),
+            entity_id=str(refreshed.id),
             old_values={"status": prev_status},
             new_values={"status": "ACTIVE"},
-            description=f"Resumed recurring schedule '{schedule.title}'",
+            description=f"Resumed recurring schedule '{refreshed.title}'",
         )
-        return TaskRecurringScheduleRead.model_validate(schedule)
+        return await self._to_recurring_schedule_read(refreshed, current_user, can_manage_override=True)
 
     async def archive_recurring_schedule(
         self, schedule_id: uuid.UUID, current_user: Any
@@ -3555,7 +4136,7 @@ class TaskService:
             raise NotFoundException(f"Recurring task schedule {schedule_id} not found.")
         await self._assert_can_access_recurring_schedule(schedule, current_user, for_mutation=True)
         if schedule.status == "ARCHIVED":
-            return TaskRecurringScheduleRead.model_validate(schedule)
+            return await self._to_recurring_schedule_read(schedule, current_user, can_manage_override=True)
 
         prev_status = schedule.status
         cfg = dict(schedule.recurrence_config or {})
@@ -3565,19 +4146,19 @@ class TaskService:
         schedule.next_run_date = None
 
         await self.repository.session.commit()
-        await self.repository.session.refresh(schedule, ["assignee", "manager", "creator"])
+        refreshed = (await self.repository.get_recurring_schedule(schedule.id)) or schedule
         await self.audit_service.record(
             action=AuditAction.UPDATE,
             module="tasks",
             user_id=current_user.id,
             username_snapshot=getattr(current_user, "display_name", None) or getattr(current_user, "full_name", None) or getattr(current_user, "username", "system"),
             entity_type="TaskRecurringSchedule",
-            entity_id=str(schedule.id),
+            entity_id=str(refreshed.id),
             old_values={"status": prev_status},
             new_values={"status": "ARCHIVED"},
-            description=f"Archived recurring schedule '{schedule.title}'",
+            description=f"Archived recurring schedule '{refreshed.title}'",
         )
-        return TaskRecurringScheduleRead.model_validate(schedule)
+        return await self._to_recurring_schedule_read(refreshed, current_user, can_manage_override=True)
 
     async def unarchive_recurring_schedule(
         self, schedule_id: uuid.UUID, current_user: Any
@@ -3587,7 +4168,7 @@ class TaskService:
             raise NotFoundException(f"Recurring task schedule {schedule_id} not found.")
         await self._assert_can_access_recurring_schedule(schedule, current_user, for_mutation=True)
         if schedule.status != "ARCHIVED":
-            return TaskRecurringScheduleRead.model_validate(schedule)
+            return await self._to_recurring_schedule_read(schedule, current_user, can_manage_override=True)
 
         if schedule.effective_end_date and schedule.effective_end_date < date.today():
             raise ValidationException(
@@ -3613,19 +4194,19 @@ class TaskService:
             schedule.next_run_date = None
 
         await self.repository.session.commit()
-        await self.repository.session.refresh(schedule, ["assignee", "manager", "creator"])
+        refreshed = (await self.repository.get_recurring_schedule(schedule.id)) or schedule
         await self.audit_service.record(
             action=AuditAction.UPDATE,
             module="tasks",
             user_id=current_user.id,
             username_snapshot=getattr(current_user, "display_name", None) or getattr(current_user, "full_name", None) or getattr(current_user, "username", "system"),
             entity_type="TaskRecurringSchedule",
-            entity_id=str(schedule.id),
+            entity_id=str(refreshed.id),
             old_values={"status": "ARCHIVED"},
-            new_values={"status": schedule.status},
-            description=f"Restored recurring schedule '{schedule.title}' to {schedule.status}",
+            new_values={"status": refreshed.status},
+            description=f"Restored recurring schedule '{refreshed.title}' to {refreshed.status}",
         )
-        return TaskRecurringScheduleRead.model_validate(schedule)
+        return await self._to_recurring_schedule_read(refreshed, current_user, can_manage_override=True)
 
     async def delete_recurring_schedule(
         self, schedule_id: uuid.UUID, current_user: Any
@@ -3748,7 +4329,7 @@ class TaskService:
                     self.repository.session.add(task)
                     await self.repository.session.flush()
 
-                    # Assignees
+                    # Assignees & immutable initial assignment history
                     if sch.assignee_id:
                         assignee_rec = TaskAssignee(
                             task_id=task.id,
@@ -3756,6 +4337,18 @@ class TaskService:
                             assignment_role="ASSIGNEE",
                         )
                         self.repository.session.add(assignee_rec)
+                        self.repository.session.add(
+                            TaskAssignmentHistory(
+                                task_id=task.id,
+                                recurring_schedule_id=sch.id,
+                                user_id=sch.assignee_id,
+                                assignment_role="ASSIGNEE",
+                                assigned_by=sch.created_by,
+                                assigned_at=datetime.now(timezone.utc),
+                                unassigned_at=None,
+                                source="RECURRING_GENERATED",
+                            )
+                        )
 
                     if sch.manager_id and sch.manager_id != sch.assignee_id:
                         manager_rec = TaskAssignee(
@@ -3829,7 +4422,35 @@ class TaskService:
                 sch = await self.repository.get_recurring_schedule(schedule_id)
                 if not sch:
                     raise NotFoundException(f"Recurring task schedule {schedule_id} not found.")
-                await self._assert_can_access_recurring_schedule(sch, current_user, for_mutation=False)
+                try:
+                    await self._assert_can_access_recurring_schedule(sch, current_user, for_mutation=False)
+                except ForbiddenException:
+                    # Allow a previous assignee of this schedule or its instances to read their own instances
+                    has_own_instance = False
+                    if isinstance(self.repository.session, AsyncSession):
+                        own_stmt = (
+                            select(Task.id)
+                            .where(
+                                Task.recurring_schedule_id == schedule_id,
+                                Task.deleted_at.is_(None),
+                                or_(
+                                    Task.id.in_(
+                                        select(TaskAssignee.task_id).where(TaskAssignee.user_id == current_user.id)
+                                    ),
+                                    Task.id.in_(
+                                        select(TaskAssignmentHistory.task_id).where(
+                                            TaskAssignmentHistory.task_id.is_not(None),
+                                            TaskAssignmentHistory.user_id == current_user.id,
+                                            TaskAssignmentHistory.assignment_role != "WATCHER",
+                                        )
+                                    ),
+                                ),
+                            )
+                            .limit(1)
+                        )
+                        has_own_instance = (await self.repository.session.execute(own_stmt)).scalar_one_or_none() is not None
+                    if not has_own_instance:
+                        raise
             dept_scope_ids = await self._resolve_user_department_scope_ids(current_user)
             scoped_user_id = current_user.id
             if dept_scope_ids:
@@ -3842,10 +4463,22 @@ class TaskService:
             scoped_department_user_ids=scoped_dept_users,
         )
         actor_id = getattr(current_user, "id", None) if current_user is not None else None
-        return [
-            TaskSummaryRead.model_validate(t, context={"current_user_id": actor_id})
-            for t in instances
-        ]
+        summaries = [self._to_summary(t, current_user_id=actor_id) for t in instances]
+        if current_user is not None and actor_id is not None:
+            user_perms = set(getattr(current_user, "permissions", []) or [])
+            is_super = bool(
+                getattr(current_user, "is_super_admin", False)
+                or getattr(current_user, "is_superuser", False)
+                or getattr(current_user, "role", "") == "super_admin"
+            )
+            await self._annotate_task_summaries(
+                instances,
+                summaries,
+                current_user_id=actor_id,
+                user_permissions=user_perms,
+                is_super_admin=is_super,
+            )
+        return summaries
 
     async def check_recurring_reminders_and_escalations(
         self,
@@ -3878,20 +4511,29 @@ class TaskService:
             if not sch or sch.status in ("PAUSED", "ARCHIVED"):
                 continue
 
+            # Resolve the instance's actual active assignee first so changing the schedule's default
+            # assignee never misroutes reminders/escalations for historical instances.
+            active_instance_assignees = [
+                a.user_id
+                for a in (getattr(task, "assignees", []) or [])
+                if getattr(a, "assignment_role", "ASSIGNEE") not in ("WATCHER", "REVIEWER")
+            ]
+            target_assignee_id = active_instance_assignees[0] if active_instance_assignees else sch.assignee_id
+
             # 1. Reminder Check
-            if sch.reminder_lead_days is not None and sch.reminder_lead_days >= 0 and sch.assignee_id:
+            if sch.reminder_lead_days is not None and sch.reminder_lead_days >= 0 and target_assignee_id:
                 reminder_trigger_date = task.due_date - timedelta(days=sch.reminder_lead_days)
                 if reminder_trigger_date <= today <= task.due_date:
                     from app.notifications.models import Notification
                     notif_stmt = select(Notification).where(
-                        Notification.user_id == sch.assignee_id,
+                        Notification.user_id == target_assignee_id,
                         Notification.type == "task_deadline_warning",
                         Notification.link == f"/tasks?id={task.id}",
                     )
                     existing_notif = (await self.repository.session.execute(notif_stmt)).scalar_one_or_none()
                     if not existing_notif:
                         await self.notification_service.notify_user(
-                            user_id=sch.assignee_id,
+                            user_id=target_assignee_id,
                             type="task_deadline_warning",
                             title=f"Reminder: {task.title}"[:255],
                             message=f"Recurring task '{task.title}' ({task.recurrence_period}) is due on {task.due_date}.",
@@ -3902,7 +4544,7 @@ class TaskService:
                         reminders_sent += 1
 
             # 2. Escalation Check
-            if sch.manager_id and sch.assignee_id:
+            if sch.manager_id and target_assignee_id:
                 esc_timing = sch.escalation_timing_type or "ON_DUE_DATE"
                 offset = sch.escalation_offset_days or 0
                 if esc_timing == "BEFORE_DUE_DATE":
@@ -3945,7 +4587,7 @@ class TaskService:
                         )
                         esc = TaskEscalation(
                             task_id=task.id,
-                            from_user=sch.assignee_id,
+                            from_user=target_assignee_id,
                             to_user=sch.manager_id,
                             reason=reason,
                             escalation_type="ORGANIZATION_USER",

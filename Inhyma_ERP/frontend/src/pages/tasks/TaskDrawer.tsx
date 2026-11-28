@@ -928,12 +928,11 @@ export const TaskDrawer: React.FC<TaskDrawerProps> = ({
   const assigneesList = task?.assignees.filter((a) => a.assignment_role !== "WATCHER") || [];
   const watchersList = task?.assignees.filter((a) => a.assignment_role === "WATCHER") || [];
 
-  const isCreatorOrAssignee = Boolean(
-    task &&
-      profile?.id &&
-      (task.created_by === profile.id ||
-        assigneesList.some((a) => a.user_id === profile.id))
+  const isCreator = Boolean(task && profile?.id && task.created_by === profile.id);
+  const isActiveAssignee = Boolean(
+    task && profile?.id && assigneesList.some((a) => a.user_id === profile.id)
   );
+  const isCreatorOrAssignee = isCreator || isActiveAssignee;
   const isActiveDeptManagerOfTask = Boolean(
     task &&
       !canManage &&
@@ -945,6 +944,15 @@ export const TaskDrawer: React.FC<TaskDrawerProps> = ({
   const canEditTask = Boolean(
     task && (canManage || isCreatorOrAssignee || isActiveDeptManagerOfTask)
   );
+  // Strict assignee-change authorization: active assignees CANNOT reassign tasks;
+  // only Admin / task.manage, original creator (with task.assign), or active Dept Manager (with task.assign).
+  const canChangeAssignee = Boolean(
+    task &&
+      (typeof task.can_change_assignee === "boolean"
+        ? task.can_change_assignee
+        : canManage || (canAssign && (isCreator || isActiveDeptManagerOfTask)))
+  );
+  const isPreviousAssigneeReadOnly = Boolean(task && task.is_previously_assigned && !canEditTask);
   const canCollaborate = Boolean(
     task &&
       (canEditTask ||
@@ -1244,7 +1252,7 @@ export const TaskDrawer: React.FC<TaskDrawerProps> = ({
           </div>
 
           <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-            {canEscalate && onEscalateRequest && task && (
+            {canEscalate && onEscalateRequest && task && !isPreviousAssigneeReadOnly && (
               <button
                 type="button"
                 className="btn btn-small"
@@ -1324,6 +1332,33 @@ export const TaskDrawer: React.FC<TaskDrawerProps> = ({
             <div style={{ textAlign: "center", padding: "40px", color: "#ef4444" }}>{error || "Task not found."}</div>
           ) : drawerTab === "details" ? (
             <>
+              {/* Previously Assigned Historical Visibility Banner */}
+              {isPreviousAssigneeReadOnly && (
+                <div
+                  data-testid="previously-assigned-banner"
+                  style={{
+                    background: "#fffbeb",
+                    border: "1px solid #fcd34d",
+                    borderRadius: "8px",
+                    padding: "12px 14px",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "4px",
+                  }}
+                >
+                  <div style={{ fontWeight: 700, color: "#92400e", fontSize: "13px" }}>
+                    🕘 Previously Assigned to You (Read-Only History)
+                  </div>
+                  <div style={{ fontSize: "12px", color: "#78350f" }}>
+                    This task is no longer actively assigned to you
+                    {task.reassigned_at
+                      ? ` — reassigned on ${new Date(task.reassigned_at).toLocaleString()}`
+                      : ""}
+                    {task.reassigned_by_name ? ` by ${task.reassigned_by_name}` : ""}. You retain read-only visibility in your task history.
+                  </div>
+                </div>
+              )}
+
               {/* Progress Bar */}
               <div style={{ background: "#f8fafc", padding: "12px 14px", borderRadius: "8px", border: "1px solid #e2e8f0" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px", fontSize: "12.5px" }}>
@@ -1679,9 +1714,10 @@ export const TaskDrawer: React.FC<TaskDrawerProps> = ({
                   <span style={{ fontSize: "12px", fontWeight: 700, color: "#1e293b" }}>
                     👥 ASSIGNEES ({assigneesList.length})
                   </span>
-                  {canAssign && canEditTask && (
+                  {canChangeAssignee && (
                     <button
                       type="button"
+                      data-testid="add-assignee-btn"
                       onClick={() => setShowAddAssignee(!showAddAssignee)}
                       style={{
                         background: showAddAssignee ? "#eff6ff" : "transparent",
@@ -1699,7 +1735,7 @@ export const TaskDrawer: React.FC<TaskDrawerProps> = ({
                   )}
                 </div>
 
-                {showAddAssignee && (
+                {canChangeAssignee && showAddAssignee && (
                   <div style={{ marginBottom: "10px" }}>
                     <SearchableUserSelect
                       users={availableUsers}
@@ -1758,9 +1794,10 @@ export const TaskDrawer: React.FC<TaskDrawerProps> = ({
                           </span>
                           <span>{name}</span>
                           <span style={{ fontSize: "11px", color: "#64748b" }}>({dept})</span>
-                          {canAssign && canEditTask && (
+                          {canChangeAssignee && (
                             <button
                               type="button"
+                              data-testid={`remove-assignee-${a.user_id}`}
                               onClick={() => handleRemoveAssignee(a.user_id)}
                               style={{
                                 border: "none",
@@ -1781,6 +1818,80 @@ export const TaskDrawer: React.FC<TaskDrawerProps> = ({
                     })
                   )}
                 </div>
+
+                {/* Immutable Assignment History */}
+                {task.assignment_history && task.assignment_history.length > 0 && (
+                  <div
+                    data-testid="task-assignment-history"
+                    style={{
+                      marginTop: "10px",
+                      paddingTop: "8px",
+                      borderTop: "1px dashed #e2e8f0",
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: "5px",
+                    }}
+                  >
+                    <span style={{ fontSize: "11px", fontWeight: 700, color: "#64748b", textTransform: "uppercase" }}>
+                      Assignment History ({task.assignment_history.length})
+                    </span>
+                    {task.assignment_history.map((h) => {
+                      const assigneeName =
+                        h.user?.full_name ||
+                        availableUsers.find((u) => u.id === h.user_id)?.full_name ||
+                        "User";
+                      const reassignedToName =
+                        h.reassigned_to_user?.full_name ||
+                        (h.reassigned_to_user_id
+                          ? availableUsers.find((u) => u.id === h.reassigned_to_user_id)?.full_name
+                          : null);
+                      const isCurrent = !h.unassigned_at;
+                      return (
+                        <div
+                          key={h.id}
+                          style={{
+                            fontSize: "11.5px",
+                            color: "#475569",
+                            display: "flex",
+                            justifyContent: "space-between",
+                            alignItems: "center",
+                            flexWrap: "wrap",
+                            gap: "6px",
+                            background: isCurrent ? "#f0fdf4" : "#f8fafc",
+                            border: isCurrent ? "1px solid #bbf7d0" : "1px solid #e2e8f0",
+                            borderRadius: "6px",
+                            padding: "5px 8px",
+                          }}
+                        >
+                          <div>
+                            <strong style={{ color: "#1e293b" }}>{assigneeName}</strong>
+                            <span style={{ color: "#64748b", marginLeft: "6px" }}>
+                              assigned {new Date(h.assigned_at).toLocaleDateString()}
+                            </span>
+                            {h.unassigned_at && (
+                              <span style={{ color: "#92400e", marginLeft: "6px" }}>
+                                • {reassignedToName ? `reassigned to ${reassignedToName}` : "unassigned"} on{" "}
+                                {new Date(h.unassigned_at).toLocaleDateString()}
+                              </span>
+                            )}
+                          </div>
+                          <span
+                            style={{
+                              fontSize: "10px",
+                              fontWeight: 700,
+                              padding: "1px 6px",
+                              borderRadius: "10px",
+                              background: isCurrent ? "#dcfce7" : "#fef3c7",
+                              color: isCurrent ? "#15803d" : "#92400e",
+                            }}
+                          >
+                            {isCurrent ? "CURRENT" : "PREVIOUS"}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
 
               {/* Watchers */}
@@ -2621,7 +2732,15 @@ export const TaskDrawer: React.FC<TaskDrawerProps> = ({
                           width: "10px",
                           height: "10px",
                           borderRadius: "50%",
-                          background: evt.event_type.includes("COMPLETED") ? "#16a34a" : evt.event_type.includes("ESCALATED") ? "#dc2626" : "#3b82f6",
+                          background: evt.event_type.includes("COMPLETED")
+                            ? "#16a34a"
+                            : evt.event_type.includes("ESCALATED")
+                            ? "#dc2626"
+                            : evt.event_type === "USER_REASSIGNED" || evt.event_type === "USER_UNASSIGNED"
+                            ? "#d97706"
+                            : evt.event_type === "USER_ASSIGNED"
+                            ? "#7c3aed"
+                            : "#3b82f6",
                           border: "2px solid #ffffff",
                         }}
                       />

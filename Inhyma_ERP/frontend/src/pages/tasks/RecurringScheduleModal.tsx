@@ -19,6 +19,7 @@ interface RecurringScheduleModalProps {
   onSuccess: () => void;
   scheduleToEdit?: TaskRecurringSchedule | null;
   availableUsers: AvailableUser[];
+  readOnly?: boolean;
 }
 
 const MONTH_NAMES = [
@@ -39,8 +40,12 @@ export const RecurringScheduleModal: React.FC<RecurringScheduleModalProps> = ({
   onSuccess,
   scheduleToEdit,
   availableUsers,
+  readOnly = false,
 }) => {
   const isEditing = Boolean(scheduleToEdit);
+  const isReadOnly = Boolean(
+    readOnly || (scheduleToEdit && scheduleToEdit.can_manage_schedule === false)
+  );
 
   // Active form section tab: "details" | "schedule" | "reminders" | "period"
   const [activeSection, setActiveSection] = useState<"details" | "schedule" | "reminders" | "period">("details");
@@ -358,6 +363,7 @@ export const RecurringScheduleModal: React.FC<RecurringScheduleModalProps> = ({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isReadOnly) return;
     if (!title.trim()) {
       setErrorMessage("Please enter a title for the recurring task.");
       setActiveSection("details");
@@ -511,7 +517,11 @@ export const RecurringScheduleModal: React.FC<RecurringScheduleModalProps> = ({
             <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
               <span style={{ fontSize: "16px" }}>🔄</span>
               <h3 style={{ margin: 0, fontSize: "16px", fontWeight: 700, color: "#0f172a" }}>
-                {isEditing ? "Edit Recurring Task Schedule" : "Create Recurring Task Schedule"}
+                {isReadOnly
+                  ? "View Recurring Task Schedule (Read-Only)"
+                  : isEditing
+                  ? "Edit Recurring Task Schedule"
+                  : "Create Recurring Task Schedule"}
               </h3>
             </div>
             <p style={{ margin: "2px 0 0 0", fontSize: "12px", color: "#64748b" }}>
@@ -677,6 +687,22 @@ export const RecurringScheduleModal: React.FC<RecurringScheduleModalProps> = ({
 
         {/* Form Body */}
         <form onSubmit={handleSubmit} style={{ overflowY: "auto", padding: "18px 20px", display: "flex", flexDirection: "column", gap: "16px" }}>
+          {isReadOnly && (
+            <div
+              data-testid="recurring-readonly-banner"
+              style={{
+                padding: "10px 14px",
+                borderRadius: "6px",
+                background: "#f8fafc",
+                border: "1px solid #cbd5e1",
+                color: "#475569",
+                fontSize: "12.5px",
+              }}
+            >
+              🔒 Read-only view — only the schedule creator, manager, or administrator can change the assignee or edit recurrence settings.
+            </div>
+          )}
+
           {errorMessage && (
             <div
               style={{
@@ -710,6 +736,7 @@ export const RecurringScheduleModal: React.FC<RecurringScheduleModalProps> = ({
           {/* ================= SECTION 1: TASK DETAILS ================= */}
           {activeSection === "details" && (
             <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+            <fieldset disabled={isReadOnly} style={{ border: "none", padding: 0, margin: 0, display: "flex", flexDirection: "column", gap: "14px" }}>
               <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: "12px" }}>
                 <div>
                   <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#334155", marginBottom: "4px" }}>
@@ -786,8 +813,10 @@ export const RecurringScheduleModal: React.FC<RecurringScheduleModalProps> = ({
                     Assigned Employee *
                   </label>
                   <select
+                    aria-label="Assigned Employee"
                     value={assigneeId}
                     onChange={(e) => setAssigneeId(e.target.value)}
+                    disabled={isReadOnly}
                     required
                     style={{
                       width: "100%",
@@ -795,8 +824,9 @@ export const RecurringScheduleModal: React.FC<RecurringScheduleModalProps> = ({
                       borderRadius: "6px",
                       border: "1px solid #cbd5e1",
                       fontSize: "13px",
-                      background: "#ffffff",
+                      background: isReadOnly ? "#f8fafc" : "#ffffff",
                       boxSizing: "border-box",
+                      cursor: isReadOnly ? "not-allowed" : "pointer",
                     }}
                   >
                     <option value="">Select Employee</option>
@@ -860,6 +890,78 @@ export const RecurringScheduleModal: React.FC<RecurringScheduleModalProps> = ({
                 </div>
               </div>
 
+              {/* Recurring Schedule Assignment History */}
+              {isEditing && scheduleToEdit?.assignment_history && scheduleToEdit.assignment_history.length > 0 && (
+                <div
+                  data-testid="recurring-assignment-history"
+                  style={{
+                    background: "#f8fafc",
+                    border: "1px solid #e2e8f0",
+                    borderRadius: "8px",
+                    padding: "10px 12px",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "6px",
+                  }}
+                >
+                  <div style={{ fontSize: "11.5px", fontWeight: 700, color: "#475569" }}>
+                    🕘 Schedule Assignment History ({scheduleToEdit.assignment_history.length})
+                  </div>
+                  {scheduleToEdit.assignment_history.map((h) => {
+                    const name =
+                      h.user?.full_name ||
+                      availableUsers.find((u) => u.id === h.user_id)?.full_name ||
+                      "User";
+                    const nextName =
+                      h.reassigned_to_user?.full_name ||
+                      (h.reassigned_to_user_id
+                        ? availableUsers.find((u) => u.id === h.reassigned_to_user_id)?.full_name
+                        : null);
+                    const isCurrent = !h.unassigned_at;
+                    return (
+                      <div
+                        key={h.id}
+                        style={{
+                          fontSize: "11.5px",
+                          color: "#334155",
+                          display: "flex",
+                          justifyContent: "space-between",
+                          alignItems: "center",
+                          gap: "8px",
+                          background: "#ffffff",
+                          border: "1px solid #e2e8f0",
+                          borderRadius: "6px",
+                          padding: "5px 8px",
+                        }}
+                      >
+                        <span>
+                          <strong>{name}</strong> assigned {new Date(h.assigned_at).toLocaleDateString()}
+                          {h.unassigned_at && (
+                            <span style={{ color: "#92400e", marginLeft: "6px" }}>
+                              • {nextName ? `reassigned to ${nextName}` : "unassigned"} on{" "}
+                              {new Date(h.unassigned_at).toLocaleDateString()}
+                            </span>
+                          )}
+                        </span>
+                        <span
+                          style={{
+                            fontSize: "10px",
+                            fontWeight: 700,
+                            padding: "1px 6px",
+                            borderRadius: "10px",
+                            background: isCurrent ? "#dcfce7" : "#fef3c7",
+                            color: isCurrent ? "#15803d" : "#92400e",
+                          }}
+                        >
+                          {isCurrent ? "CURRENT" : "PREVIOUS"}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              </fieldset>
               <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "8px" }}>
                 <button
                   type="button"
@@ -884,6 +986,7 @@ export const RecurringScheduleModal: React.FC<RecurringScheduleModalProps> = ({
           {/* ================= SECTION 2: SCHEDULE & CADENCE ================= */}
           {activeSection === "schedule" && (
             <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+            <fieldset disabled={isReadOnly} style={{ border: "none", padding: 0, margin: 0, display: "flex", flexDirection: "column", gap: "14px" }}>
               {/* Frequency Selector */}
               <div>
                 <label style={{ display: "block", fontSize: "12px", fontWeight: 700, color: "#1e293b", marginBottom: "6px" }}>
@@ -1328,6 +1431,7 @@ export const RecurringScheduleModal: React.FC<RecurringScheduleModalProps> = ({
                 </div>
               )}
 
+              </fieldset>
               <div style={{ display: "flex", justifyContent: "space-between", marginTop: "8px" }}>
                 <button
                   type="button"
@@ -1367,6 +1471,7 @@ export const RecurringScheduleModal: React.FC<RecurringScheduleModalProps> = ({
           {/* ================= SECTION 3: REMINDERS & ESCALATION ================= */}
           {activeSection === "reminders" && (
             <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+            <fieldset disabled={isReadOnly} style={{ border: "none", padding: 0, margin: 0, display: "flex", flexDirection: "column", gap: "14px" }}>
               {/* Timeline Configuration Cards */}
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
                 {/* Reminder Start */}
@@ -1551,6 +1656,7 @@ export const RecurringScheduleModal: React.FC<RecurringScheduleModalProps> = ({
                 </div>
               </div>
 
+              </fieldset>
               <div style={{ display: "flex", justifyContent: "space-between", marginTop: "8px" }}>
                 <button
                   type="button"
@@ -1590,6 +1696,7 @@ export const RecurringScheduleModal: React.FC<RecurringScheduleModalProps> = ({
           {/* ================= SECTION 4: ACTIVE PERIOD & DATA SAFETY ================= */}
           {activeSection === "period" && (
             <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+            <fieldset disabled={isReadOnly} style={{ border: "none", padding: 0, margin: 0, display: "flex", flexDirection: "column", gap: "14px" }}>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "12px" }}>
                 <div>
                   <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#334155", marginBottom: "4px" }}>
@@ -1673,6 +1780,7 @@ export const RecurringScheduleModal: React.FC<RecurringScheduleModalProps> = ({
                 </div>
               )}
 
+              </fieldset>
               <div style={{ display: "flex", justifyContent: "flex-start", marginTop: "8px" }}>
                 <button
                   type="button"
@@ -1694,58 +1802,51 @@ export const RecurringScheduleModal: React.FC<RecurringScheduleModalProps> = ({
           )}
 
           {/* Action Buttons */}
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-              borderTop: "1px solid #e2e8f0",
-              paddingTop: "14px",
-              marginTop: "4px",
-            }}
-          >
-            <div style={{ fontSize: "12px", color: "#64748b" }}>
-              All dates respect company Monday–Saturday working calendar.
-            </div>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderTop: "1px solid #e2e8f0", paddingTop: "14px", marginTop: "4px" }}>
+                <div style={{ fontSize: "12px", color: "#64748b" }}>
+                  All dates respect company Monday–Saturday working calendar.
+                </div>
 
-            <div style={{ display: "flex", gap: "10px" }}>
-              <button
-                type="button"
-                onClick={onClose}
-                disabled={submitting}
-                style={{
-                  padding: "8px 16px",
-                  borderRadius: "6px",
-                  border: "1px solid #cbd5e1",
-                  background: "#ffffff",
-                  color: "#475569",
-                  fontSize: "13px",
-                  fontWeight: 600,
-                  cursor: "pointer",
-                }}
-              >
-                Cancel
-              </button>
+                <div style={{ display: "flex", gap: "10px" }}>
+                  <button
+                    type="button"
+                    onClick={onClose}
+                    disabled={submitting}
+                    style={{
+                      padding: "8px 16px",
+                      borderRadius: "6px",
+                      border: "1px solid #cbd5e1",
+                      background: "#ffffff",
+                      color: "#475569",
+                      fontSize: "13px",
+                      fontWeight: 600,
+                      cursor: "pointer",
+                    }}
+                  >
+                    {isReadOnly ? "Close" : "Cancel"}
+                  </button>
 
-              <button
-                type="submit"
-                disabled={submitting}
-                style={{
-                  padding: "8px 22px",
-                  borderRadius: "6px",
-                  border: "none",
-                  background: "#2563eb",
-                  color: "#ffffff",
-                  fontSize: "13px",
-                  fontWeight: 700,
-                  cursor: submitting ? "not-allowed" : "pointer",
-                  boxShadow: "0 1px 2px rgba(0, 0, 0, 0.05)",
-                }}
-              >
-                {submitting ? "Saving..." : isEditing ? "Save Changes" : "Create Schedule"}
-              </button>
-            </div>
-          </div>
+                  {!isReadOnly && (
+                    <button
+                      type="submit"
+                      disabled={submitting}
+                      style={{
+                        padding: "8px 22px",
+                        borderRadius: "6px",
+                        border: "none",
+                        background: "#2563eb",
+                        color: "#ffffff",
+                        fontSize: "13px",
+                        fontWeight: 700,
+                        cursor: submitting ? "not-allowed" : "pointer",
+                        boxShadow: "0 1px 2px rgba(0, 0, 0, 0.05)",
+                      }}
+                    >
+                      {submitting ? "Saving..." : isEditing ? "Save Changes" : "Create Schedule"}
+                    </button>
+                  )}
+                </div>
+              </div>
         </form>
       </div>
     </div>

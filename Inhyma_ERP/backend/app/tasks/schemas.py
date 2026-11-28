@@ -87,6 +87,26 @@ class TaskAssigneeRead(BaseModel):
     user: UserMiniRead | None = None
 
 
+class TaskAssignmentHistoryRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    task_id: uuid.UUID | None = None
+    recurring_schedule_id: uuid.UUID | None = None
+    user_id: uuid.UUID
+    assignment_role: str = "ASSIGNEE"
+    assigned_by: uuid.UUID | None = None
+    assigned_at: datetime
+    unassigned_at: datetime | None = None
+    unassigned_by: uuid.UUID | None = None
+    reassigned_to_user_id: uuid.UUID | None = None
+    source: str = "MANUAL"
+    user: UserMiniRead | None = None
+    assigned_by_user: UserMiniRead | None = None
+    unassigned_by_user: UserMiniRead | None = None
+    reassigned_to_user: UserMiniRead | None = None
+
+
 # --- Subtasks ---
 class TaskSubtaskAssigneeRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -611,6 +631,10 @@ class TaskUpdate(BaseModel):
     approval_notes: str | None = None
     completion_notes: str | None = None
     version: int | None = Field(None, ge=1)
+    # Explicitly trap unauthorized assignee mutation attempts via PATCH /tasks/{id}
+    assignee_id: Any = None
+    assignee_ids: Any = None
+    assignees: Any = None
 
     @model_validator(mode="after")
     def validate_dates(self) -> TaskUpdate:
@@ -662,6 +686,10 @@ class TaskSummaryRead(BaseModel):
     voice_note_count: int = 0
     department_id: uuid.UUID | None = None
     department_name: str | None = None
+    can_change_assignee: bool = False
+    is_previously_assigned: bool = False
+    reassigned_at: datetime | None = None
+    reassigned_by_name: str | None = None
 
     @field_validator("reactions", mode="before")
     @classmethod
@@ -712,6 +740,11 @@ class TaskRead(BaseModel):
     progress_percent: int = 0
     department_id: uuid.UUID | None = None
     department_name: str | None = None
+    can_change_assignee: bool = False
+    is_previously_assigned: bool = False
+    reassigned_at: datetime | None = None
+    reassigned_by_name: str | None = None
+    assignment_history: list[TaskAssignmentHistoryRead] = []
 
     @field_validator("reactions", mode="before")
     @classmethod
@@ -825,6 +858,8 @@ class TaskRecurringScheduleRead(BaseModel):
     assignee: UserMiniRead | None = None
     manager: UserMiniRead | None = None
     creator: UserMiniRead | None = None
+    can_manage_schedule: bool = False
+    assignment_history: list[TaskAssignmentHistoryRead] = []
 
 
 class RecurrencePreviewRequest(BaseModel):

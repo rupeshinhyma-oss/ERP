@@ -164,6 +164,24 @@ export interface TaskAssignee {
   user?: UserMini | null;
 }
 
+export interface TaskAssignmentHistory {
+  id: string;
+  task_id?: string | null;
+  recurring_schedule_id?: string | null;
+  user_id: string;
+  assignment_role: string;
+  assigned_by?: string | null;
+  assigned_at: string;
+  unassigned_at?: string | null;
+  unassigned_by?: string | null;
+  reassigned_to_user_id?: string | null;
+  source: string;
+  user?: UserMini | null;
+  assigned_by_user?: UserMini | null;
+  unassigned_by_user?: UserMini | null;
+  reassigned_to_user?: UserMini | null;
+}
+
 export interface TaskSubtaskAssignee {
   id: string;
   subtask_id: string;
@@ -330,6 +348,10 @@ export interface TaskSummary {
   recurrence_period?: string | null;
   department_id?: string | null;
   department_name?: string | null;
+  can_change_assignee?: boolean;
+  is_previously_assigned?: boolean;
+  reassigned_at?: string | null;
+  reassigned_by_name?: string | null;
 }
 
 export interface TaskDetail {
@@ -373,6 +395,11 @@ export interface TaskDetail {
   recurrence_period?: string | null;
   department_id?: string | null;
   department_name?: string | null;
+  can_change_assignee?: boolean;
+  is_previously_assigned?: boolean;
+  reassigned_at?: string | null;
+  reassigned_by_name?: string | null;
+  assignment_history?: TaskAssignmentHistory[];
 }
 
 export interface TaskEscalateCandidate {
@@ -509,6 +536,8 @@ export interface TaskRecurringSchedule {
   created_by?: string | null;
   created_at: string;
   updated_at: string;
+  can_manage_schedule?: boolean;
+  assignment_history?: TaskAssignmentHistory[];
 }
 
 export interface TaskRecurringScheduleCreateInput {

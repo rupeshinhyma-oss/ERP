@@ -13,6 +13,8 @@ interface RecurringTasksTabProps {
   onSelectTask: (taskId: string) => void;
   availableUsers: AvailableUser[];
   canManageTasks?: boolean;
+  canCreateSchedule?: boolean;
+  currentUserId?: string;
 }
 
 type SubViewKey = "schedules" | "due_upcoming" | "history";
@@ -21,7 +23,25 @@ export const RecurringTasksTab: React.FC<RecurringTasksTabProps> = ({
   onSelectTask,
   availableUsers,
   canManageTasks = true,
+  canCreateSchedule,
+  currentUserId,
 }) => {
+  const canCreateNewSchedule = canCreateSchedule ?? canManageTasks;
+  const canEditSchedule = (s: TaskRecurringSchedule): boolean => {
+    if (typeof s.can_manage_schedule === "boolean") {
+      return s.can_manage_schedule;
+    }
+    if (!canManageTasks) return false;
+    if (
+      currentUserId &&
+      s.created_by &&
+      s.created_by !== currentUserId &&
+      s.assignee_id === currentUserId
+    ) {
+      return false;
+    }
+    return true;
+  };
   const [subView, setSubView] = useState<SubViewKey>("schedules");
 
   // Schedules state
@@ -279,30 +299,32 @@ export const RecurringTasksTab: React.FC<RecurringTasksTabProps> = ({
 
         {/* Global Action Buttons */}
         <div style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap", maxWidth: "100%" }}>
-          <button
-            type="button"
-            onClick={handleTriggerGenerator}
-            disabled={generating}
-            title="Immediately generate due task instances for active schedules"
-            style={{
-              padding: "6px 12px",
-              borderRadius: "6px",
-              border: "1px solid #cbd5e1",
-              background: "#ffffff",
-              color: "#334155",
-              fontSize: "12.5px",
-              fontWeight: 600,
-              cursor: generating ? "not-allowed" : "pointer",
-              display: "inline-flex",
-              alignItems: "center",
-              gap: "6px",
-            }}
-          >
-            <span>🔄</span>
-            {generating ? "Generating..." : "Run Generator Now"}
-          </button>
+          {(canManageTasks || schedules.some(canEditSchedule)) && (
+            <button
+              type="button"
+              onClick={handleTriggerGenerator}
+              disabled={generating}
+              title="Immediately generate due task instances for active schedules"
+              style={{
+                padding: "6px 12px",
+                borderRadius: "6px",
+                border: "1px solid #cbd5e1",
+                background: "#ffffff",
+                color: "#334155",
+                fontSize: "12.5px",
+                fontWeight: 600,
+                cursor: generating ? "not-allowed" : "pointer",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "6px",
+              }}
+            >
+              <span>🔄</span>
+              {generating ? "Generating..." : "Run Generator Now"}
+            </button>
+          )}
 
-          {canManageTasks && (
+          {canCreateNewSchedule && (
             <button
               type="button"
               onClick={() => {
@@ -529,10 +551,13 @@ export const RecurringTasksTab: React.FC<RecurringTasksTabProps> = ({
 
                       {/* Actions */}
                       <td style={{ padding: "8px 8px", textAlign: "right", whiteSpace: "nowrap" }}>
+                        {(() => {
+                          const rowCanEdit = canEditSchedule(s);
+                          return (
                         <div style={{ display: "inline-flex", gap: "3px", flexWrap: "nowrap", justifyContent: "flex-end" }}>
                           <button
                             type="button"
-                            title={canManageTasks ? "Edit schedule" : "View schedule"}
+                            title={rowCanEdit ? "Edit schedule" : "View schedule"}
                             onClick={() => {
                               setEditingSchedule(s);
                               setIsModalOpen(true);
@@ -546,11 +571,11 @@ export const RecurringTasksTab: React.FC<RecurringTasksTabProps> = ({
                               fontSize: "11.5px",
                             }}
                           >
-                            ✏️ {canManageTasks ? "Edit" : "View"}
+                            {rowCanEdit ? "✏️ Edit" : "👁️ View"}
                           </button>
 
                           {s.status === "ARCHIVED" ? (
-                            canManageTasks && (
+                            rowCanEdit && (
                               <button
                                 type="button"
                                 title="Restore schedule"
@@ -573,7 +598,7 @@ export const RecurringTasksTab: React.FC<RecurringTasksTabProps> = ({
                               </button>
                             )
                           ) : (
-                            canManageTasks && (
+                            rowCanEdit && (
                               <>
                                 {s.status === "ACTIVE" ? (
                                   <button
@@ -631,7 +656,7 @@ export const RecurringTasksTab: React.FC<RecurringTasksTabProps> = ({
                             )
                           )}
 
-                          {canManageTasks && (
+                          {rowCanEdit && (
                             <button
                               type="button"
                               title="Delete schedule"
@@ -650,6 +675,8 @@ export const RecurringTasksTab: React.FC<RecurringTasksTabProps> = ({
                             </button>
                           )}
                         </div>
+                          );
+                        })()}
                       </td>
                     </tr>
                   ))
@@ -862,39 +889,71 @@ export const RecurringTasksTab: React.FC<RecurringTasksTabProps> = ({
                     >
                       <td style={{ padding: "10px 14px" }}>
                         <div style={{ fontWeight: 600, color: "#0f172a" }}>{task.title}</div>
-                        {task.recurrence_period && (
-                          <span
-                            style={{
-                              display: "inline-block",
-                              marginTop: "2px",
-                              fontSize: "11px",
-                              fontWeight: 600,
-                              background: "#f0fdf4",
-                              color: "#166534",
-                              padding: "1px 6px",
-                              borderRadius: "4px",
-                            }}
-                          >
-                            Period: {task.recurrence_period}
-                          </span>
-                        )}
+                        <div style={{ display: "flex", gap: "6px", flexWrap: "wrap", marginTop: "2px" }}>
+                          {task.recurrence_period && (
+                            <span
+                              style={{
+                                display: "inline-block",
+                                fontSize: "11px",
+                                fontWeight: 600,
+                                background: "#f0fdf4",
+                                color: "#166534",
+                                padding: "1px 6px",
+                                borderRadius: "4px",
+                              }}
+                            >
+                              Period: {task.recurrence_period}
+                            </span>
+                          )}
+                          {task.is_previously_assigned && (
+                            <span
+                              style={{
+                                display: "inline-block",
+                                fontSize: "11px",
+                                fontWeight: 700,
+                                background: "#fef3c7",
+                                color: "#92400e",
+                                border: "1px solid #fcd34d",
+                                padding: "1px 6px",
+                                borderRadius: "4px",
+                              }}
+                            >
+                              🕘 Previously Assigned
+                            </span>
+                          )}
+                        </div>
                       </td>
                       <td style={{ padding: "10px 14px", fontSize: "12.5px", color: "#334155" }}>
                         {task.due_date || "—"}
                       </td>
                       <td style={{ padding: "10px 14px" }}>
-                        <span
-                          style={{
-                            fontSize: "11px",
-                            padding: "2px 8px",
-                            borderRadius: "12px",
-                            fontWeight: 700,
-                            background: "#dcfce7",
-                            color: "#15803d",
-                          }}
-                        >
-                          ✅ Completed
-                        </span>
+                        {task.status === "DONE" ? (
+                          <span
+                            style={{
+                              fontSize: "11px",
+                              padding: "2px 8px",
+                              borderRadius: "12px",
+                              fontWeight: 700,
+                              background: "#dcfce7",
+                              color: "#15803d",
+                            }}
+                          >
+                            ✅ Completed
+                          </span>
+                        ) : (
+                          <span
+                            style={{
+                              fontSize: "11px",
+                              padding: "2px 8px",
+                              borderRadius: "12px",
+                              fontWeight: 700,
+                              background: "#fef3c7",
+                              color: "#92400e",
+                            }}
+                          >
+                            {task.status.replace(/_/g, " ")}
+                          </span>
+                        )}
                       </td>
                       <td style={{ padding: "10px 14px" }}>
                         <span
@@ -975,6 +1034,7 @@ export const RecurringTasksTab: React.FC<RecurringTasksTabProps> = ({
           }}
           scheduleToEdit={editingSchedule}
           availableUsers={availableUsers}
+          readOnly={Boolean(editingSchedule && !canEditSchedule(editingSchedule))}
         />
       )}
     </div>

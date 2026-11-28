@@ -220,9 +220,9 @@ export const TasksPage: React.FC = () => {
   const [page, setPage] = useState(1);
   const pageSize = 20;
 
-  // Quick Views: 'all' | 'overdue' | 'due_today' | 'due_this_week'
+  // Quick Views: 'all' | 'overdue' | 'due_today' | 'due_this_week' | 'previously_assigned'
   const [quickFilter, setQuickFilter] = useState<
-    "all" | "overdue" | "due_today" | "due_this_week"
+    "all" | "overdue" | "due_today" | "due_this_week" | "previously_assigned"
   >("all");
 
   // Labels, Saved Filters, Selection, Sprints
@@ -454,8 +454,10 @@ export const TasksPage: React.FC = () => {
       setError(null);
 
       // Authoritative backend view mode (preserves scope across Backlog, Kanban, Calendar, Gantt)
-      let viewMode: "all" | "my" | "department" = "my";
-      if (scopeView === "my") {
+      let viewMode: "all" | "my" | "department" | "history" = "my";
+      if (quickFilter === "previously_assigned") {
+        viewMode = "history";
+      } else if (scopeView === "my") {
         viewMode = "my";
       } else if (scopeView === "department") {
         viewMode = "department";
@@ -524,7 +526,8 @@ export const TasksPage: React.FC = () => {
 
       setTasks(filteredItems);
       setTotalCount(
-        quickFilter !== "all" || (activeDepartmentFilter && !matchedDept?.id)
+        (quickFilter !== "all" && quickFilter !== "previously_assigned") ||
+        (activeDepartmentFilter && !matchedDept?.id)
           ? filteredItems.length
           : res.total
       );
@@ -787,7 +790,7 @@ export const TasksPage: React.FC = () => {
   const isCalendarActive = activeTab === "calendar";
 
   const handleQuickViewClick = (
-    filterType: "all" | "overdue" | "due_today" | "due_this_week"
+    filterType: "all" | "overdue" | "due_today" | "due_this_week" | "previously_assigned"
   ) => {
     setQuickFilter(filterType);
     setSelectedSavedFilterId(null);
@@ -832,7 +835,14 @@ export const TasksPage: React.FC = () => {
     canManageTasks ||
     isDeptManager ||
     t.created_by === profile?.id ||
-    (t.assignees || []).some((a) => a.user_id === profile?.id);
+    (t.assignees || []).some(
+      (a) => a.user_id === profile?.id && a.assignment_role !== "WATCHER"
+    );
+
+  const canAssignRowTask = (t: TaskSummary) =>
+    typeof t.can_change_assignee === "boolean"
+      ? t.can_change_assignee
+      : canManageTasks || (canAssignTasks && (t.created_by === profile?.id || isDeptManager));
 
   const renderEmptyState = (viewType: ScopeViewKey) => {
     let title = "No tasks found matching your filters.";
@@ -1087,7 +1097,30 @@ export const TasksPage: React.FC = () => {
                       ↳ Epic: {t.parent_task?.title || t.parent_task_title}
                     </div>
                   )}
-                  <div style={{ fontWeight: 600, color: "#0f172a", fontSize: "14px" }}>{t.title}</div>
+                  <div style={{ display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap" }}>
+                    <span style={{ fontWeight: 600, color: "#0f172a", fontSize: "14px" }}>{t.title}</span>
+                    {t.is_previously_assigned && (
+                      <span
+                        data-testid={`previously-assigned-badge-${t.id}`}
+                        title={
+                          t.reassigned_at
+                            ? `Previously assigned to you • reassigned ${new Date(t.reassigned_at).toLocaleString()}`
+                            : "Previously assigned to you"
+                        }
+                        style={{
+                          fontSize: "10.5px",
+                          fontWeight: 700,
+                          padding: "1px 7px",
+                          borderRadius: "10px",
+                          background: "#fef3c7",
+                          color: "#92400e",
+                          border: "1px solid #fcd34d",
+                        }}
+                      >
+                        🕘 Previously Assigned
+                      </span>
+                    )}
+                  </div>
                   {t.description && (
                     <div
                       style={{
@@ -1301,7 +1334,7 @@ export const TasksPage: React.FC = () => {
                 </td>
                 <td style={{ padding: "12px 14px", textAlign: "right" }} onClick={(e) => e.stopPropagation()}>
                   <div style={{ display: "inline-flex", gap: "5px", alignItems: "center" }}>
-                    {canAssignTasks && (
+                    {canAssignRowTask(t) && (
                       <button
                         type="button"
                         className="btn btn-small"
@@ -1335,7 +1368,7 @@ export const TasksPage: React.FC = () => {
                         ✓
                       </button>
                     )}
-                    {canCreateTasks && (
+                    {canCreateTasks && (!t.is_previously_assigned || canMutateRowTask(t)) && (
                       <button
                         type="button"
                         className="btn btn-small"
@@ -1361,7 +1394,7 @@ export const TasksPage: React.FC = () => {
                     >
                       👁️
                     </button>
-                    {canEscalateTasks && (
+                    {canEscalateTasks && (!t.is_previously_assigned || canMutateRowTask(t)) && (
                       <button
                         type="button"
                         className="btn btn-small"
@@ -1603,6 +1636,24 @@ export const TasksPage: React.FC = () => {
             }}
           >
             📆 Due This Week
+          </button>
+          <button
+            type="button"
+            data-testid="quickview-previously-assigned"
+            onClick={() => handleQuickViewClick("previously_assigned")}
+            style={{
+              padding: "4px 12px",
+              borderRadius: "16px",
+              fontSize: "12px",
+              fontWeight: quickFilter === "previously_assigned" ? 700 : 500,
+              background: quickFilter === "previously_assigned" ? "#fef3c7" : "#f1f5f9",
+              color: quickFilter === "previously_assigned" ? "#92400e" : "#475569",
+              border: quickFilter === "previously_assigned" ? "1px solid #fcd34d" : "1px solid #cbd5e1",
+              cursor: "pointer",
+              transition: "all 0.15s ease",
+            }}
+          >
+            🕘 Previously Assigned
           </button>
 
           {/* User Custom Saved Filters */}
@@ -2741,7 +2792,9 @@ export const TasksPage: React.FC = () => {
               <RecurringTasksTab
                 onSelectTask={(id) => setSelectedTaskId(id)}
                 availableUsers={availableUsers}
-                canManageTasks={hasPermission("task.create") || hasPermission("task.manage") || isSuperAdmin}
+                canManageTasks={canManageTasks || isDeptManager}
+                canCreateSchedule={canCreateTasks}
+                currentUserId={profile?.id}
               />
             </div>
           ) : null}
@@ -2794,6 +2847,12 @@ export const TasksPage: React.FC = () => {
             availableSprints={availableSprints}
             availableLabels={availableLabels}
             availableUsers={availableUsers}
+            canAssign={
+              selectedTaskIds.length > 0 &&
+              tasks
+                .filter((t) => selectedTaskIds.includes(t.id))
+                .every((t) => canAssignRowTask(t))
+            }
             onClearSelection={() => setSelectedTaskIds([])}
             onExecuteBulkAction={handleExecuteBulkAction}
           />
